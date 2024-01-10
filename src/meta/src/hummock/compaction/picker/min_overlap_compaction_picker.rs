@@ -163,6 +163,7 @@ impl CompactionPicker for MinOverlappingPicker {
                 },
             ],
             target_level: self.target_level,
+            vnode_partition_count: levels.vnode_partition_count,
             ..Default::default()
         })
     }
@@ -434,10 +435,7 @@ pub mod tests {
                     generate_table(1, 1, 101, 200, 1),
                     generate_table(2, 1, 222, 300, 1),
                 ],
-
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -449,9 +447,7 @@ pub mod tests {
                     generate_table(7, 1, 501, 800, 1),
                     generate_table(8, 2, 301, 400, 1),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
         let levels = Levels {
@@ -511,9 +507,7 @@ pub mod tests {
                     generate_table(1, 1, 100, 149, 2),
                     generate_table(2, 1, 150, 249, 2),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -522,9 +516,7 @@ pub mod tests {
                     generate_table(4, 1, 50, 199, 1),
                     generate_table(5, 1, 200, 399, 1),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
         let levels = Levels {
@@ -573,8 +565,7 @@ pub mod tests {
                     generate_table(8, 1, 450, 500, 2),
                 ],
                 total_file_size: 800,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -587,8 +578,7 @@ pub mod tests {
                     generate_table(11, 1, 450, 500, 2),
                 ],
                 total_file_size: 250,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 3,
@@ -599,8 +589,7 @@ pub mod tests {
                     generate_table(13, 1, 450, 500, 2),
                 ],
                 total_file_size: 150,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 4,
@@ -611,8 +600,7 @@ pub mod tests {
                     generate_table(16, 1, 450, 500, 2),
                 ],
                 total_file_size: 150,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
 
@@ -677,8 +665,7 @@ pub mod tests {
                     generate_table(8, 1, 450, 500, 2),
                 ],
                 total_file_size: 800,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -691,8 +678,7 @@ pub mod tests {
                     generate_table(11, 1, 450, 500, 2),
                 ],
                 total_file_size: 250,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 3,
@@ -703,8 +689,7 @@ pub mod tests {
                     generate_table(13, 1, 450, 500, 2),
                 ],
                 total_file_size: 150,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 4,
@@ -715,8 +700,7 @@ pub mod tests {
                     generate_table(16, 1, 450, 500, 2),
                 ],
                 total_file_size: 150,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
 
@@ -806,8 +790,7 @@ pub mod tests {
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![generate_table(0, 1, 400, 500, 2)],
                 total_file_size: 100,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -817,8 +800,7 @@ pub mod tests {
                     generate_table(2, 1, 600, 700, 1),
                 ],
                 total_file_size: 200,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 3,
@@ -828,8 +810,7 @@ pub mod tests {
                     generate_table(4, 1, 600, 800, 1),
                 ],
                 total_file_size: 400,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
 
