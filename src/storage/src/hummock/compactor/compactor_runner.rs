@@ -812,8 +812,8 @@ where
             {
                 sst_builder
                     .add_monotonic_delete(MonotonicDeleteEvent {
-                        new_epoch,
                         event_key,
+                        new_epoch,
                     })
                     .await?;
             }
@@ -933,8 +933,8 @@ where
             if !drop {
                 sst_builder
                     .add_monotonic_delete(MonotonicDeleteEvent {
-                        new_epoch,
                         event_key,
+                        new_epoch,
                     })
                     .await?;
             }
@@ -1039,8 +1039,10 @@ mod tests {
         let state_clean_up_filter = StateCleanUpCompactionFilter::new(HashSet::from_iter(
             compact_task.existing_table_ids.clone(),
         ));
-        let mut opts = StorageOpts::default();
-        opts.share_buffer_compaction_worker_threads_number = 1;
+        let opts = StorageOpts {
+            share_buffer_compaction_worker_threads_number: 1,
+            ..Default::default()
+        };
         let context = CompactorContext::new_local_compact_context(
             Arc::new(opts),
             sstable_store.clone(),
