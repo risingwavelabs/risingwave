@@ -65,7 +65,7 @@ use self::plan_node::{
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
-use self::plan_visitor::{has_batch_exchange, CardinalityVisitor};
+use self::plan_visitor::{has_batch_exchange, CardinalityVisitor, StreamKeyChecker};
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
@@ -417,6 +417,18 @@ impl PlanRoot {
 
         let plan = match self.plan.convention() {
             Convention::Logical => {
+                if !ctx
+                    .session_ctx()
+                    .config()
+                    .streaming_allow_jsonb_in_stream_key()
+                    && let Some(err) = StreamKeyChecker.visit(self.plan.clone())
+                {
+                    return Err(ErrorCode::NotSupported(
+                        err,
+                        "Using JSONB columns as part of the join or aggregation keys can severely impair performance. \
+                        If you intend to proceed, force to enable it with: `set rw_streaming_allow_jsonb_in_stream_key to true`".to_string(),
+                    ).into());
+                }
                 let plan = self.gen_optimized_logical_plan_for_stream()?;
 
                 let (plan, out_col_change) = {
