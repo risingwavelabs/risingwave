@@ -23,6 +23,7 @@ struct Parameter {
     pub rename: Option<syn::LitStr>,
     pub alias: Option<syn::Expr>,
     pub default: syn::Expr,
+    pub dummy: Option<()>,
     pub flags: Option<syn::LitStr>,
     pub check_hook: Option<syn::Expr>,
 }
@@ -66,9 +67,12 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             rename,
             alias,
             default,
+            dummy,
             flags,
             check_hook: check_hook_name,
         } = attr;
+
+        let dummy = dummy.is_some();
 
         let entry_name = if let Some(rename) = rename {
             if !(rename.value().is_ascii() && rename.value().to_ascii_lowercase() == rename.value())
@@ -192,6 +196,14 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 .parse()
                 .unwrap();
 
+        let dummy_notice = if dummy {
+            quote! {
+                reporter.report_notice(format!("Parameter {} is a dummy parameter, it has no effect on the system.", #entry_name));
+            }
+        } else {
+            quote! {}
+        };
+
         struct_impl_get.push(quote! {
             #[doc = #get_func_doc]
             pub fn #get_func_name(&self) -> String {
@@ -202,7 +214,6 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             pub fn #get_t_func_name(&self) -> #ty {
                 self.#field_ident.clone()
             }
-
         });
 
         get_match_branches.push(quote! {
@@ -210,7 +221,10 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
         });
 
         set_match_branches.push(quote! {
-            #entry_name => self.#set_func_name(&value, reporter),
+            #entry_name => {
+                #dummy_notice
+                self.#set_func_name(&value, reporter)
+            }
         });
 
         reset_match_branches.push(quote! {

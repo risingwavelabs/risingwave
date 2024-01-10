@@ -192,7 +192,7 @@ pub struct ConfigMap {
 
     /// See <https://www.postgresql.org/docs/current/runtime-config-compatible.html#RUNTIME-CONFIG-COMPATIBLE-VERSION>
     /// Unused in RisingWave, support for compatibility.
-    #[parameter(default = false)]
+    #[parameter(default = false, dummy)]
     synchronize_seqscans: bool,
 
     /// Abort query statement that takes more than the specified amount of time in sec. If
@@ -204,16 +204,16 @@ pub struct ConfigMap {
 
     /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-LOCK-TIMEOUT>
     /// Unused in RisingWave, support for compatibility.
-    #[parameter(default = 0)]
+    #[parameter(default = 0, dummy)]
     lock_timeout: i32,
 
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-ROW-SECURITY>.
     /// Unused in RisingWave, support for compatibility.
-    #[parameter(default = true)]
+    #[parameter(default = true, dummy)]
     row_security: bool,
 
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-STANDARD-CONFORMING-STRINGS>
-    #[parameter(default = "on")]
+    #[parameter(default = "on", dummy)]
     standard_conforming_strings: String,
 
     /// Set streaming rate limit (rows per second) for each parallelism for mv backfilling
@@ -298,11 +298,15 @@ pub struct VariableInfo {
 /// Report status or notice to caller.
 pub trait ConfigReporter {
     fn report_status(&mut self, key: &str, new_val: String);
+
+    fn report_notice(&mut self, msg: impl Into<String>);
 }
 
 // Report nothing.
 impl ConfigReporter for () {
     fn report_status(&mut self, _key: &str, _new_val: String) {}
+
+    fn report_notice(&mut self, _msg: impl Into<String>) {}
 }
 
 #[cfg(test)]

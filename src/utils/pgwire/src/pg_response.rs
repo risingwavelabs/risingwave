@@ -194,6 +194,10 @@ impl<VS> PgResponseBuilder<VS> {
         Self { notices, ..self }
     }
 
+    pub fn notices(self, notices: Vec<String>) -> Self {
+        Self { notices, ..self }
+    }
+
     pub fn status(self, status: ParameterStatus) -> Self {
         Self { status, ..self }
     }
