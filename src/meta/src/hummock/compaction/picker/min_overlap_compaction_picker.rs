@@ -28,6 +28,7 @@ pub struct MinOverlappingPicker {
     level: usize,
     target_level: usize,
     max_select_bytes: u64,
+    vnode_partition_count: u32,
     overlap_strategy: Arc<dyn OverlapStrategy>,
 }
 
@@ -36,6 +37,7 @@ impl MinOverlappingPicker {
         level: usize,
         target_level: usize,
         max_select_bytes: u64,
+        vnode_partition_count: u32,
         overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> MinOverlappingPicker {
         MinOverlappingPicker {
@@ -43,6 +45,7 @@ impl MinOverlappingPicker {
             target_level,
             max_select_bytes,
             overlap_strategy,
+            vnode_partition_count,
         }
     }
 
@@ -163,7 +166,7 @@ impl CompactionPicker for MinOverlappingPicker {
                 },
             ],
             target_level: self.target_level,
-            vnode_partition_count: levels.vnode_partition_count,
+            vnode_partition_count: self.vnode_partition_count,
             ..Default::default()
         })
     }
@@ -425,7 +428,7 @@ pub mod tests {
     #[test]
     fn test_compact_l1() {
         let mut picker =
-            MinOverlappingPicker::new(1, 2, 10000, Arc::new(RangeOverlapStrategy::default()));
+            MinOverlappingPicker::new(1, 2, 10000, 0, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
             Level {
                 level_idx: 1,
@@ -497,7 +500,7 @@ pub mod tests {
     #[test]
     fn test_expand_l1_files() {
         let mut picker =
-            MinOverlappingPicker::new(1, 2, 10000, Arc::new(RangeOverlapStrategy::default()));
+            MinOverlappingPicker::new(1, 2, 10000, 0, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
             Level {
                 level_idx: 1,
@@ -822,7 +825,7 @@ pub mod tests {
         ];
         // no limit
         let picker =
-            MinOverlappingPicker::new(2, 3, 1000, Arc::new(RangeOverlapStrategy::default()));
+            MinOverlappingPicker::new(2, 3, 1000, 0, Arc::new(RangeOverlapStrategy::default()));
         let (select_files, target_files) = picker.pick_tables(
             &levels[1].table_infos,
             &levels[2].table_infos,

@@ -66,7 +66,7 @@ impl CompactionPicker for LevelCompactionPicker {
             level_handlers,
             stats,
         ) {
-            ret.vnode_partition_count = levels.vnode_partition_count;
+            ret.vnode_partition_count = self.config.split_weight_by_vnode;
             return Some(ret);
         }
 
@@ -74,7 +74,7 @@ impl CompactionPicker for LevelCompactionPicker {
         if let Some(ret) = self.pick_multi_level_to_base(
             l0,
             levels.get_level(self.target_level),
-            levels.vnode_partition_count,
+            self.config.split_weight_by_vnode,
             level_handlers,
             stats,
         ) {
