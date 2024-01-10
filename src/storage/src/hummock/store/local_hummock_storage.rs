@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
-use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{is_empty_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 use tokio::sync::mpsc;
 use tracing::{warn, Instrument};
@@ -31,7 +31,7 @@ use crate::error::StorageResult;
 use crate::hummock::event_handler::{HummockEvent, LocalInstanceGuard};
 use crate::hummock::iterator::{
     ConcatIteratorInner, Forward, HummockIteratorUnion, OrderedMergeIteratorInner,
-    UnorderedMergeIteratorInner, UserIterator,
+    SkipWatermarkIterator, UnorderedMergeIteratorInner, UserIterator,
 };
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
@@ -58,7 +58,7 @@ pub struct LocalHummockStorage {
     epoch: Option<u64>,
 
     table_id: TableId,
-    is_consistent_op: bool,
+    op_consistency_level: OpConsistencyLevel,
     table_option: TableOption,
 
     instance_guard: LocalInstanceGuard,
@@ -111,12 +111,16 @@ impl LocalHummockStorage {
             Bound::Included(table_key.clone()),
         );
 
-        let read_snapshot = read_filter_for_local(
+        let (table_key_range, read_snapshot) = read_filter_for_local(
             epoch,
             read_options.table_id,
-            &table_key_range,
-            self.read_version.clone(),
+            table_key_range,
+            &self.read_version,
         )?;
+
+        if is_empty_key_range(&table_key_range) {
+            return Ok(None);
+        }
 
         self.hummock_version_reader
             .get(table_key, epoch, read_options, read_snapshot)
@@ -133,12 +137,14 @@ impl LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
-        let read_snapshot = read_filter_for_local(
+        let (table_key_range, read_snapshot) = read_filter_for_local(
             epoch,
             read_options.table_id,
-            &table_key_range,
-            self.read_version.clone(),
+            table_key_range,
+            &self.read_version,
         )?;
+
+        let table_key_range = table_key_range;
 
         self.hummock_version_reader
             .iter(table_key_range, epoch, read_options, read_snapshot)
@@ -159,11 +165,11 @@ impl LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<StreamTypeOfIter<LocalHummockStorageIterator<'_>>> {
-        let read_snapshot = read_filter_for_local(
+        let (table_key_range, read_snapshot) = read_filter_for_local(
             epoch,
             read_options.table_id,
-            &table_key_range,
-            self.read_version.clone(),
+            table_key_range,
+            &self.read_version,
         )?;
 
         self.hummock_version_reader
@@ -186,11 +192,11 @@ impl LocalHummockStorage {
             return Ok(true);
         }
 
-        let read_snapshot = read_filter_for_local(
+        let (key_range, read_snapshot) = read_filter_for_local(
             HummockEpoch::MAX, // Use MAX epoch to make sure we read from latest
             read_options.table_id,
-            &key_range,
-            self.read_version.clone(),
+            key_range,
+            &self.read_version,
         )?;
 
         self.hummock_version_reader
@@ -294,43 +300,46 @@ impl LocalStateStore for LocalHummockStorage {
                 // a workaround you may call disable the check by initializing the
                 // state store with `is_consistent_op=false`.
                 KeyOp::Insert(value) => {
-                    if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                    if ENABLE_SANITY_CHECK {
                         do_insert_sanity_check(
-                            key.clone(),
-                            value.clone(),
+                            &key,
+                            &value,
                             self,
                             self.epoch(),
                             self.table_id,
                             self.table_option,
+                            &self.op_consistency_level,
                         )
                         .await?;
                     }
                     kv_pairs.push((key, StorageValue::new_put(value)));
                 }
                 KeyOp::Delete(old_value) => {
-                    if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                    if ENABLE_SANITY_CHECK {
                         do_delete_sanity_check(
-                            key.clone(),
-                            old_value,
+                            &key,
+                            &old_value,
                             self,
                             self.epoch(),
                             self.table_id,
                             self.table_option,
+                            &self.op_consistency_level,
                         )
                         .await?;
                     }
                     kv_pairs.push((key, StorageValue::new_delete()));
                 }
                 KeyOp::Update((old_value, new_value)) => {
-                    if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                    if ENABLE_SANITY_CHECK {
                         do_update_sanity_check(
-                            key.clone(),
-                            old_value,
-                            new_value.clone(),
+                            &key,
+                            &old_value,
+                            &new_value,
                             self,
                             self.epoch(),
                             self.table_id,
                             self.table_option,
+                            &self.op_consistency_level,
                         )
                         .await?;
                     }
@@ -388,7 +397,7 @@ impl LocalStateStore for LocalHummockStorage {
         Ok(())
     }
 
-    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
+    fn seal_current_epoch(&mut self, next_epoch: u64, mut opts: SealCurrentEpochOptions) {
         assert!(!self.is_dirty());
         let prev_epoch = self
             .epoch
@@ -401,6 +410,17 @@ impl LocalStateStore for LocalHummockStorage {
             next_epoch,
             prev_epoch
         );
+        if let Some((direction, watermarks)) = &mut opts.table_watermarks {
+            let mut read_version = self.read_version.write();
+            read_version.filter_regress_watermarks(watermarks);
+            if !watermarks.is_empty() {
+                read_version.update(VersionUpdate::NewTableWatermark {
+                    direction: *direction,
+                    epoch: prev_epoch,
+                    vnode_watermarks: watermarks.clone(),
+                });
+            }
+        }
         self.event_sender
             .send(HummockEvent::LocalSealEpoch {
                 instance_id: self.instance_id(),
@@ -513,11 +533,11 @@ impl LocalHummockStorage {
     ) -> Self {
         let stats = hummock_version_reader.stats().clone();
         Self {
-            mem_table: MemTable::new(option.is_consistent_op),
+            mem_table: MemTable::new(option.op_consistency_level.clone()),
             spill_offset: 0,
             epoch: None,
             table_id: option.table_id,
-            is_consistent_op: option.is_consistent_op,
+            op_consistency_level: option.op_consistency_level,
             table_option: option.table_option,
             is_replicated: option.is_replicated,
             instance_guard,
@@ -533,7 +553,6 @@ impl LocalHummockStorage {
     }
 
     /// See `HummockReadVersion::update` for more details.
-
     pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
         self.read_version.clone()
     }
@@ -550,13 +569,15 @@ impl LocalHummockStorage {
 pub type StagingDataIterator = OrderedMergeIteratorInner<
     HummockIteratorUnion<Forward, SharedBufferBatchIterator<Forward>, SstableIterator>,
 >;
-pub type HummockStorageIteratorPayloadInner<'a> = UnorderedMergeIteratorInner<
-    HummockIteratorUnion<
-        Forward,
-        StagingDataIterator,
-        SstableIterator,
-        ConcatIteratorInner<SstableIterator>,
-        MemTableHummockIterator<'a>,
+pub type HummockStorageIteratorPayloadInner<'a> = SkipWatermarkIterator<
+    UnorderedMergeIteratorInner<
+        HummockIteratorUnion<
+            Forward,
+            StagingDataIterator,
+            SstableIterator,
+            ConcatIteratorInner<SstableIterator>,
+            MemTableHummockIterator<'a>,
+        >,
     >,
 >;
 

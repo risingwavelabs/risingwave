@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,10 +25,10 @@ use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::Datum;
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
-use risingwave_common::{bail, bail_not_implemented, catalog};
+use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
 use risingwave_connector::sink::{
-    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
 };
 use risingwave_pb::catalog::{PbSource, Table};
 use risingwave_pb::ddl_service::ReplaceTablePlan;
@@ -105,13 +105,18 @@ pub fn gen_sink_plan(
 
     // Used for debezium's table name
     let sink_from_table_name;
+    // `true` means that sink statement has the form: `CREATE SINK s1 FROM ...`
+    // `false` means that sink statement has the form: `CREATE SINK s1 AS <query>`
+    let direct_sink;
     let query = match stmt.sink_from {
         CreateSink::From(from_name) => {
             sink_from_table_name = from_name.0.last().unwrap().real_value();
+            direct_sink = true;
             Box::new(gen_sink_query_from_name(from_name)?)
         }
         CreateSink::AsQuery(query) => {
             sink_from_table_name = sink_table_name.clone();
+            direct_sink = false;
             query
         }
     };
@@ -190,6 +195,20 @@ pub fn gen_sink_plan(
         plan_root.set_out_names(col_names)?;
     };
 
+    let without_backfill = match with_options.remove(SINK_WITHOUT_BACKFILL) {
+        Some(flag) if flag.eq_ignore_ascii_case("false") => {
+            if direct_sink {
+                true
+            } else {
+                return Err(ErrorCode::BindError(
+                    "`snapshot = false` only support `CREATE SINK FROM MV or TABLE`".to_string(),
+                )
+                .into());
+            }
+        }
+        _ => false,
+    };
+
     let target_table_catalog = stmt
         .into_table_name
         .as_ref()
@@ -206,6 +225,7 @@ pub fn gen_sink_plan(
         db_name.to_owned(),
         sink_from_table_name,
         format_desc,
+        without_backfill,
         target_table,
     )?;
     let sink_desc = sink_plan.sink_desc().clone();
@@ -318,10 +338,6 @@ pub async fn handle_create_sink(
 
     let mut target_table_replace_plan = None;
     if let Some(table_catalog) = target_table_catalog {
-        if !table_catalog.incoming_sinks.is_empty() {
-            bail_not_implemented!(issue = 13818, "create sink into table with incoming sinks");
-        }
-
         check_cycle_for_sink(session.as_ref(), sink.clone(), table_catalog.id())?;
 
         let (mut graph, mut table, source) =
@@ -329,12 +345,11 @@ pub async fn handle_create_sink(
 
         table.incoming_sinks = table_catalog.incoming_sinks.clone();
 
-        // for now we only support one incoming sink
-        assert!(table.incoming_sinks.is_empty());
-
-        for fragment in graph.fragments.values_mut() {
-            if let Some(node) = &mut fragment.node {
-                insert_merger_to_union(node);
+        for _ in 0..(table_catalog.incoming_sinks.len() + 1) {
+            for fragment in graph.fragments.values_mut() {
+                if let Some(node) = &mut fragment.node {
+                    insert_merger_to_union(node);
+                }
             }
         }
 

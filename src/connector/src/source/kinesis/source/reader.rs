@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -322,6 +322,8 @@ mod tests {
 
             scan_startup_mode: None,
             timestamp_offset: Some(123456789098765432),
+
+            unknown_fields: Default::default(),
         };
         let client = KinesisSplitReader::new(
             properties,
@@ -355,6 +357,8 @@ mod tests {
 
             scan_startup_mode: None,
             timestamp_offset: None,
+
+            unknown_fields: Default::default(),
         };
 
         let trim_horizen_reader = KinesisSplitReader::new(

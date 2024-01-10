@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -106,7 +106,6 @@ impl LogicalScan {
         self.core.table_desc.as_ref()
     }
 
-    /// FIXME
     pub fn table_catalog(&self) -> Arc<TableCatalog> {
         self.core.table_catalog.clone()
     }
@@ -245,7 +244,7 @@ impl LogicalScan {
         let scan_without_predicate = generic::Scan::new(
             self.table_name().to_string(),
             self.required_col_idx().to_vec(),
-            self.core.table_catalog.clone(), // FIXME
+            self.core.table_catalog.clone(),
             self.indexes().to_vec(),
             self.ctx(),
             Condition::true_cond(),
@@ -534,7 +533,11 @@ impl ToStream for LogicalScan {
                 )
                 .into())
             } else {
-                Ok(StreamTableScan::new(self.core.clone()).into())
+                Ok(StreamTableScan::new_with_stream_scan_type(
+                    self.core.clone(),
+                    ctx.stream_scan_type(),
+                )
+                .into())
             }
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();

@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -75,7 +75,7 @@ export default function HeapProfiling() {
       try {
         let list: ListHeapProfilingResponse =
           ListHeapProfilingResponse.fromJSON(
-            await api.get(`/api/monitor/list_heap_profile/${computeNodeId}`)
+            await api.get(`/monitor/list_heap_profile/${computeNodeId}`)
           )
         setProfileList(list)
       } catch (e: any) {
@@ -119,7 +119,7 @@ export default function HeapProfiling() {
   }, [selectedProfileList])
 
   async function dumpProfile() {
-    api.get(`/api/monitor/dump_heap_profile/${computeNodeId}`)
+    api.get(`/monitor/dump_heap_profile/${computeNodeId}`)
     getProfileList(computeNodes, computeNodeId)
   }
 
@@ -149,7 +149,7 @@ export default function HeapProfiling() {
     try {
       let analyzeFilePathBase64 = base64url(analyzeFilePath)
       let resObj = await fetch(
-        `/api/monitor/analyze/${computeNodeId}/${analyzeFilePathBase64}`
+        `/monitor/analyze/${computeNodeId}/${analyzeFilePathBase64}`
       ).then(async (res) => ({
         filename: res.headers.get("content-disposition"),
         blob: await res.blob(),

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::stream::BoxStream;
@@ -23,7 +24,6 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
-use rand::seq::SliceRandom;
 use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::{ShutdownToken, TaskId};
 use risingwave_common::array::DataChunk;
@@ -31,7 +31,7 @@ use risingwave_common::bail;
 use risingwave_common::error::RwError;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::tracing::TracingContext;
+use risingwave_common::util::tracing::{InstrumentStream, TracingContext};
 use risingwave_connector::source::SplitMetaData;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
@@ -44,7 +44,6 @@ use risingwave_pb::common::WorkerNode;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
-use tracing_futures::Instrument;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStage, QueryStageRef};
 use crate::catalog::{FragmentId, TableId};
@@ -66,6 +65,7 @@ pub struct LocalQueryExecution {
     snapshot: ReadSnapshot,
     session: Arc<SessionImpl>,
     worker_node_manager: WorkerNodeSelector,
+    timeout: Option<Duration>,
 }
 
 impl LocalQueryExecution {
@@ -75,6 +75,7 @@ impl LocalQueryExecution {
         sql: S,
         snapshot: ReadSnapshot,
         session: Arc<SessionImpl>,
+        timeout: Option<Duration>,
     ) -> Self {
         let sql = sql.into();
         let worker_node_manager = WorkerNodeSelector::new(
@@ -89,6 +90,7 @@ impl LocalQueryExecution {
             snapshot,
             session,
             worker_node_manager,
+            timeout,
         }
     }
 
@@ -149,15 +151,19 @@ impl LocalQueryExecution {
         let db_name = self.session.database().to_string();
         let search_path = self.session.config().search_path();
         let time_zone = self.session.config().timezone();
+        let timeout = self.timeout;
 
+        let sender1 = sender.clone();
         let exec = async move {
             let mut data_stream = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
             while let Some(mut r) = data_stream.next().await {
                 // append a query cancelled error if the query is cancelled.
                 if r.is_err() && shutdown_rx.is_cancelled() {
-                    r = Err(Box::new(SchedulerError::QueryCancelled) as BoxedError);
+                    r = Err(Box::new(SchedulerError::QueryCancelled(
+                        "Cancelled by user".to_string(),
+                    )) as BoxedError);
                 }
-                if sender.send(r).await.is_err() {
+                if sender1.send(r).await.is_err() {
                     tracing::info!("Receiver closed.");
                     return;
                 }
@@ -176,7 +182,29 @@ impl LocalQueryExecution {
         let exec = async move { AUTH_CONTEXT::scope(auth_context, exec).await };
         let exec = async move { TIME_ZONE::scope(time_zone, exec).await };
 
-        compute_runtime.spawn(exec);
+        if let Some(timeout) = timeout {
+            let exec = async move {
+                if let Err(_e) = tokio::time::timeout(timeout, exec).await {
+                    tracing::error!(
+                        "Local query execution timeout after {} seconds",
+                        timeout.as_secs()
+                    );
+                    if sender
+                        .send(Err(Box::new(SchedulerError::QueryCancelled(format!(
+                            "timeout after {} seconds",
+                            timeout.as_secs(),
+                        ))) as BoxedError))
+                        .await
+                        .is_err()
+                    {
+                        tracing::info!("Receiver closed.");
+                    }
+                }
+            };
+            compute_runtime.spawn(exec);
+        } else {
+            compute_runtime.spawn(exec);
+        }
 
         ReceiverStream::new(receiver)
     }
@@ -551,7 +579,10 @@ impl LocalQueryExecution {
                     .worker_node_manager
                     .manager
                     .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
-                candidates.choose(&mut rand::thread_rng()).unwrap().clone()
+                if candidates.is_empty() {
+                    return Err(SchedulerError::EmptyWorkerNodes);
+                }
+                candidates[stage.session_id.0 as usize % candidates.len()].clone()
             };
             Ok(vec![worker_node])
         } else {

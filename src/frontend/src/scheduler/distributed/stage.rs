@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,10 +24,9 @@ use std::time::Duration;
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::stream::Fuse;
-use futures::{stream, StreamExt};
+use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use itertools::Itertools;
-use rand::seq::SliceRandom;
 use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::{ShutdownMsg, ShutdownSender, ShutdownToken, TaskId as TaskIdBatch};
 use risingwave_common::array::DataChunk;
@@ -370,7 +369,12 @@ impl StageRunner {
                 let vnode_ranges = vnode_bitmaps[&parallel_unit_id].clone();
                 let plan_fragment =
                     self.create_plan_fragment(i as u32, Some(PartitionInfo::Table(vnode_ranges)));
-                futures.push(self.schedule_task(task_id, plan_fragment, Some(worker), expr_context.clone()));
+                futures.push(self.schedule_task(
+                    task_id,
+                    plan_fragment,
+                    Some(worker),
+                    expr_context.clone(),
+                ));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
             for (id, split) in source_info.split_info().unwrap().iter().enumerate() {
@@ -383,7 +387,12 @@ impl StageRunner {
                     .create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.clone())));
                 let worker =
                     self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
-                futures.push(self.schedule_task(task_id, plan_fragment, worker,  expr_context.clone()));
+                futures.push(self.schedule_task(
+                    task_id,
+                    plan_fragment,
+                    worker,
+                    expr_context.clone(),
+                ));
             }
         } else {
             for id in 0..self.stage.parallelism.unwrap() {
@@ -394,16 +403,18 @@ impl StageRunner {
                 };
                 let plan_fragment = self.create_plan_fragment(id, None);
                 let worker = self.choose_worker(&plan_fragment, id, self.stage.dml_table_id)?;
-                futures.push(self.schedule_task(task_id, plan_fragment, worker,  expr_context.clone()));
+                futures.push(self.schedule_task(
+                    task_id,
+                    plan_fragment,
+                    worker,
+                    expr_context.clone(),
+                ));
             }
         }
 
         // Await each future and convert them into a set of streams.
-        let mut buffered = stream::iter(futures).buffer_unordered(TASK_SCHEDULING_PARALLELISM);
-        let mut buffered_streams = vec![];
-        while let Some(result) = buffered.next().await {
-            buffered_streams.push(result?);
-        }
+        let buffered = stream::iter(futures).buffer_unordered(TASK_SCHEDULING_PARALLELISM);
+        let buffered_streams = buffered.try_collect::<Vec<_>>().await?;
 
         // Merge different task streams into a single stream.
         let cancelled = pin!(shutdown_rx.cancelled());
@@ -686,51 +697,51 @@ impl StageRunner {
         dml_table_id: Option<TableId>,
     ) -> SchedulerResult<Option<WorkerNode>> {
         let plan_node = plan_fragment.root.as_ref().expect("fail to get plan node");
-        let vnode_mapping = match dml_table_id {
-            Some(table_id) => Some(self.get_table_dml_vnode_mapping(&table_id)?),
-            None => {
-                if let Some(distributed_lookup_join_node) =
-                    Self::find_distributed_lookup_join_node(plan_node)
-                {
-                    let fragment_id = self.get_fragment_id(
-                        &distributed_lookup_join_node
-                            .inner_side_table_desc
-                            .as_ref()
-                            .unwrap()
-                            .table_id
-                            .into(),
-                    )?;
-                    let id2pu_vec = self
-                        .worker_node_manager
-                        .fragment_mapping(fragment_id)?
-                        .iter_unique()
-                        .collect_vec();
 
-                    let pu = id2pu_vec[task_id as usize];
-                    let candidates = self
-                        .worker_node_manager
-                        .manager
-                        .get_workers_by_parallel_unit_ids(&[pu])?;
-                    return Ok(Some(candidates[0].clone()));
-                } else {
-                    None
-                }
+        if let Some(table_id) = dml_table_id {
+            let vnode_mapping = self.get_table_dml_vnode_mapping(&table_id)?;
+            let parallel_unit_ids = vnode_mapping.iter_unique().collect_vec();
+            let candidates = self
+                .worker_node_manager
+                .manager
+                .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+            if candidates.is_empty() {
+                return Err(SchedulerError::EmptyWorkerNodes);
             }
+            return Ok(Some(
+                candidates[self.stage.session_id.0 as usize % candidates.len()].clone(),
+            ));
         };
 
-        let worker_node = match vnode_mapping {
-            Some(mapping) => {
-                let parallel_unit_ids = mapping.iter_unique().collect_vec();
-                let candidates = self
-                    .worker_node_manager
-                    .manager
-                    .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
-                Some(candidates.choose(&mut rand::thread_rng()).unwrap().clone())
-            }
-            None => None,
-        };
+        if let Some(distributed_lookup_join_node) =
+            Self::find_distributed_lookup_join_node(plan_node)
+        {
+            let fragment_id = self.get_fragment_id(
+                &distributed_lookup_join_node
+                    .inner_side_table_desc
+                    .as_ref()
+                    .unwrap()
+                    .table_id
+                    .into(),
+            )?;
+            let id2pu_vec = self
+                .worker_node_manager
+                .fragment_mapping(fragment_id)?
+                .iter_unique()
+                .collect_vec();
 
-        Ok(worker_node)
+            let pu = id2pu_vec[task_id as usize];
+            let candidates = self
+                .worker_node_manager
+                .manager
+                .get_workers_by_parallel_unit_ids(&[pu])?;
+            if candidates.is_empty() {
+                return Err(SchedulerError::EmptyWorkerNodes);
+            }
+            Ok(Some(candidates[0].clone()))
+        } else {
+            Ok(None)
+        }
     }
 
     fn find_distributed_lookup_join_node(

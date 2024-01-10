@@ -24,3 +24,28 @@ CREATE USER 'dbz'@'%' IDENTIFIED BY '123456';
 GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'dbz'@'%';
 
 CREATE TABLE tt3 (v1 int primary key, v2 timestamp);
+
+CREATE TABLE IF NOT EXISTS mysql_all_types(
+    c_boolean boolean,
+    c_bit bit,
+    c_tinyint tinyint,
+    c_smallint smallint,
+    c_mediumint mediumint,
+    c_integer integer,
+    c_bigint bigint,
+    c_decimal decimal,
+    c_float float,
+    c_double double,
+    c_char_255 char(255),
+    c_varchar_10000 varchar(10000),
+    c_binary_255 binary(255),
+    c_varbinary_10000 varbinary(10000),
+    c_date date,
+    c_time time,
+    c_datetime datetime,
+    c_timestamp timestamp,
+    PRIMARY KEY (c_boolean,c_bigint,c_date)
+);
+
+INSERT INTO mysql_all_types VALUES ( False, 0, null, null, -8388608, -2147483647, 9223372036854775806, -10.0, -9999.999999, -10000.0, 'c', 'd', '', '', '1001-01-01', '-838:59:59.000000', '2000-01-01 00:00:00.000000', null);
+INSERT INTO mysql_all_types VALUES ( True, 1, -128, -32767, -8388608, -2147483647, -9223372036854775807, -10.0, -9999.999999, -10000.0, 'a', 'b', '', '', '1001-01-01', '00:00:00', '1998-01-01 00:00:00.000000', '1970-01-01 00:00:01');

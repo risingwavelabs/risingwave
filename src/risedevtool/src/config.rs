@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -166,7 +166,7 @@ impl ConfigExpander {
                     "prometheus" => ServiceConfig::Prometheus(serde_yaml::from_str(&out_str)?),
                     "grafana" => ServiceConfig::Grafana(serde_yaml::from_str(&out_str)?),
                     "tempo" => ServiceConfig::Tempo(serde_yaml::from_str(&out_str)?),
-                    "opendal" => ServiceConfig::OpenDal(serde_yaml::from_str(&out_str)?),
+                    "opendal" => ServiceConfig::Opendal(serde_yaml::from_str(&out_str)?),
                     "aws-s3" => ServiceConfig::AwsS3(serde_yaml::from_str(&out_str)?),
                     "kafka" => ServiceConfig::Kafka(serde_yaml::from_str(&out_str)?),
                     "pubsub" => ServiceConfig::Pubsub(serde_yaml::from_str(&out_str)?),

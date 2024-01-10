@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::hummock::HummockVersionDelta;
+use risingwave_pb::hummock::PbHummockVersionDelta;
 use sea_orm::entity::prelude::*;
 use sea_orm::FromJsonQueryResult;
 use serde::{Deserialize, Serialize};
@@ -36,9 +36,9 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
-crate::derive_from_json_struct!(FullVersionDelta, HummockVersionDelta);
+crate::derive_from_json_struct!(FullVersionDelta, PbHummockVersionDelta);
 
-impl From<Model> for HummockVersionDelta {
+impl From<Model> for PbHummockVersionDelta {
     fn from(value: Model) -> Self {
         let ret = value.full_version_delta.into_inner();
         assert_eq!(value.id, ret.id as i64);

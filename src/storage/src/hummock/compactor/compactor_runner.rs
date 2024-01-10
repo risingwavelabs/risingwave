@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -32,7 +33,7 @@ use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType};
 use tokio::sync::oneshot::Receiver;
 
 use super::task_progress::TaskProgress;
-use super::{CompactionStatistics, TaskConfig};
+use super::{check_compaction_result, CompactionStatistics, TaskConfig};
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
@@ -226,7 +227,7 @@ impl CompactorRunner {
             }
         }
 
-        // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introced
+        // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
         // in https://github.com/risingwavelabs/risingwave/issues/13148
         Ok((
             SkipWatermarkIterator::from_safe_epoch_watermarks(
@@ -394,6 +395,7 @@ pub async fn compact(
         && delete_key_count * 100
             < context.storage_opts.compactor_fast_max_compact_delete_ratio as u64 * total_key_count
         && compact_task.task_type() == TaskType::Dynamic;
+
     if !optimize_by_copy_block {
         match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
             Ok(splits) => {
@@ -412,6 +414,27 @@ pub async fn compact(
     // Number of splits (key ranges) is equal to number of compaction tasks
     let parallelism = compact_task.splits.len();
     assert_ne!(parallelism, 0, "splits cannot be empty");
+    if !context.acquire_task_quota(parallelism as u32) {
+        tracing::warn!(
+            "Not enough core parallelism to serve the task {} task_parallelism {} running_task_parallelism {} max_task_parallelism {}",
+            compact_task.task_id,
+            parallelism,
+            context.running_task_parallelism.load(Ordering::Relaxed),
+            context.max_task_parallelism.load(Ordering::Relaxed),
+        );
+        return compact_done(
+            compact_task,
+            context.clone(),
+            vec![],
+            TaskStatus::NoAvailCpuResourceCanceled,
+        );
+    }
+
+    let _release_quota_guard =
+        scopeguard::guard((parallelism, context.clone()), |(parallelism, context)| {
+            context.release_task_quota(parallelism as u32);
+        });
+
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
     let mut abort_handles = vec![];
@@ -434,7 +457,7 @@ pub async fn compact(
     ) * compact_task.splits.len() as u64;
 
     tracing::info!(
-        "Ready to handle compaction group {} task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} table_ids {:?} parallelism {} task_memory_capacity_with_parallelism {}, enable fast runner: {}",
+        "Ready to handle compaction group {} task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} table_ids {:?} parallelism {} task_memory_capacity_with_parallelism {}, enable fast runner: {} input: {:?}",
             compact_task.compaction_group_id,
             compact_task.task_id,
             compact_task_statistics,
@@ -443,7 +466,8 @@ pub async fn compact(
             compact_task.existing_table_ids,
             parallelism,
             task_memory_capacity_with_parallelism,
-            optimize_by_copy_block
+            optimize_by_copy_block,
+            compact_task_to_string(&compact_task),
     );
 
     // If the task does not have enough memory, it should cancel the task and let the meta
@@ -459,11 +483,24 @@ pub async fn compact(
                 context.memory_limiter.get_memory_usage(),
                 context.memory_limiter.quota()
             );
-        task_status = TaskStatus::NoAvailResourceCanceled;
+        task_status = TaskStatus::NoAvailMemoryResourceCanceled;
         return compact_done(compact_task, context.clone(), output_ssts, task_status);
     }
 
     context.compactor_metrics.compact_task_pending_num.inc();
+    context
+        .compactor_metrics
+        .compact_task_pending_parallelism
+        .add(parallelism as _);
+    let _release_metrics_guard =
+        scopeguard::guard((parallelism, context.clone()), |(parallelism, context)| {
+            context.compactor_metrics.compact_task_pending_num.dec();
+            context
+                .compactor_metrics
+                .compact_task_pending_parallelism
+                .sub(parallelism as _);
+        });
+
     if optimize_by_copy_block {
         let runner = fast_compactor_runner::CompactorRunner::new(
             context.clone(),
@@ -496,7 +533,6 @@ pub async fn compact(
             }
         }
 
-        context.compactor_metrics.compact_task_pending_num.dec();
         // After a compaction is done, mutate the compaction task.
         let (compact_task, table_stats) =
             compact_done(compact_task, context.clone(), output_ssts, task_status);
@@ -506,6 +542,16 @@ pub async fn compact(
             cost_time,
             compact_task_to_string(&compact_task)
         );
+        // TODO: remove this method after we have running risingwave cluster with fast compact algorithm stably for a long time.
+        if context.storage_opts.check_fast_compaction_result
+            && let Err(e) = check_compaction_result(&compact_task, context.clone()).await
+        {
+            tracing::error!(
+                "Failed to check fast compaction task {} because: {:?}",
+                compact_task.task_id,
+                e
+            );
+        }
         return (compact_task, table_stats);
     }
     for (split_index, _) in compact_task.splits.iter().enumerate() {
@@ -601,7 +647,6 @@ pub async fn compact(
         cost_time,
         compact_task_to_string(&compact_task)
     );
-    context.compactor_metrics.compact_task_pending_num.dec();
     for level in &compact_task.input_ssts {
         for table in &level.table_infos {
             context.sstable_store.delete_cache(table.get_object_id());

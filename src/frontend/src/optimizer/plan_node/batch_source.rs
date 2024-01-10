@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -108,7 +108,7 @@ impl ToBatchPb for BatchSource {
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect(),
-            properties: source_catalog.properties.clone().into_iter().collect(),
+            with_properties: source_catalog.with_properties.clone().into_iter().collect(),
             split: vec![],
         })
     }

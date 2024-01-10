@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,10 +21,11 @@ use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
+use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
 use risingwave_pb::hummock::{
     CompactionConfig, CompatibilityVersion, GroupConstruct, GroupDestroy, GroupMetaChange,
-    GroupTableChange, HummockVersion, HummockVersionDelta, Level, LevelType, OverlappingLevel,
-    PbLevelType, PbTableWatermarks, SstableInfo,
+    GroupTableChange, Level, LevelType, OverlappingLevel, PbLevelType, PbTableWatermarks,
+    SstableInfo,
 };
 use tracing::warn;
 
@@ -32,7 +33,8 @@ use super::StateTableId;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::prost_key_range::KeyRangeExt;
-use crate::table_watermark::PbTableWatermarksExt;
+use crate::table_watermark::{TableWatermarks, TableWatermarksIndex, VnodeWatermark};
+use crate::version::{HummockVersion, HummockVersionDelta};
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
 pub struct GroupDeltasSummary {
@@ -125,7 +127,6 @@ pub struct SstDeltaInfo {
 
 pub type BranchedSstInfo = HashMap<CompactionGroupId, /* SST Id */ HummockSstableId>;
 
-#[easy_ext::ext(HummockVersionExt)]
 impl HummockVersion {
     pub fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels {
         self.levels
@@ -194,25 +195,44 @@ impl HummockVersion {
             .unwrap_or(0)
     }
 
+    pub fn build_table_watermarks_index(&self) -> HashMap<TableId, TableWatermarksIndex> {
+        self.table_watermarks
+            .iter()
+            .map(|(table_id, table_watermarks)| {
+                (
+                    *table_id,
+                    table_watermarks.build_index(self.max_committed_epoch),
+                )
+            })
+            .collect()
+    }
+
     pub fn safe_epoch_table_watermarks(
         &self,
         existing_table_ids: &[u32],
     ) -> BTreeMap<u32, PbTableWatermarks> {
         fn extract_single_table_watermark(
-            table_watermarks: &PbTableWatermarks,
+            table_watermarks: &TableWatermarks,
             safe_epoch: u64,
         ) -> Option<PbTableWatermarks> {
-            if let Some(first_epoch_watermark) = table_watermarks.epoch_watermarks.first() {
+            if let Some((first_epoch, first_epoch_watermark)) = table_watermarks.watermarks.first()
+            {
                 assert!(
-                    first_epoch_watermark.epoch >= safe_epoch,
+                    *first_epoch >= safe_epoch,
                     "smallest epoch {} in table watermark should be at least safe epoch {}",
-                    first_epoch_watermark.epoch,
+                    first_epoch,
                     safe_epoch
                 );
-                if first_epoch_watermark.epoch == safe_epoch {
+                if *first_epoch == safe_epoch {
                     Some(PbTableWatermarks {
-                        epoch_watermarks: vec![first_epoch_watermark.clone()],
-                        is_ascending: table_watermarks.is_ascending,
+                        epoch_watermarks: vec![PbEpochNewWatermarks {
+                            watermarks: first_epoch_watermark
+                                .iter()
+                                .map(VnodeWatermark::to_protobuf)
+                                .collect(),
+                            epoch: *first_epoch,
+                        }],
+                        is_ascending: table_watermarks.direction.is_ascending(),
                     })
                 } else {
                     None
@@ -224,12 +244,12 @@ impl HummockVersion {
         self.table_watermarks
             .iter()
             .filter_map(|(table_id, table_watermarks)| {
-                let u32_table_id = *table_id as _;
+                let u32_table_id = table_id.table_id();
                 if !existing_table_ids.contains(&u32_table_id) {
                     None
                 } else {
                     extract_single_table_watermark(table_watermarks, self.safe_epoch)
-                        .map(|table_watermarks| (*table_id, table_watermarks))
+                        .map(|table_watermarks| (table_id.table_id, table_watermarks))
                 }
             })
             .collect()
@@ -247,7 +267,6 @@ pub type SstSplitInfo = (
     HummockSstableId,
 );
 
-#[easy_ext::ext(HummockVersionUpdateExt)]
 impl HummockVersion {
     pub fn count_new_ssts_in_group_split(
         &self,
@@ -576,6 +595,9 @@ impl HummockVersion {
         }
         self.id = version_delta.id;
         self.max_committed_epoch = version_delta.max_committed_epoch;
+        for table_id in &version_delta.removed_table_ids {
+            let _ = self.table_watermarks.remove(table_id);
+        }
         for (table_id, table_watermarks) in &version_delta.new_table_watermarks {
             match self.table_watermarks.entry(*table_id) {
                 Entry::Occupied(mut entry) => {
@@ -1040,6 +1062,7 @@ pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVer
         group_deltas: Default::default(),
         gc_object_ids: vec![],
         new_table_watermarks: HashMap::new(),
+        removed_table_ids: vec![],
     }
 }
 
@@ -1262,13 +1285,12 @@ mod tests {
     use risingwave_pb::hummock::hummock_version::Levels;
     use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
     use risingwave_pb::hummock::{
-        CompactionConfig, GroupConstruct, GroupDelta, GroupDestroy, HummockVersion,
-        HummockVersionDelta, IntraLevelDelta, Level, LevelType, OverlappingLevel, SstableInfo,
+        CompactionConfig, GroupConstruct, GroupDelta, GroupDestroy, IntraLevelDelta, Level,
+        LevelType, OverlappingLevel, SstableInfo,
     };
 
-    use crate::compaction_group::hummock_version_ext::{
-        build_initial_compaction_group_levels, HummockVersionExt, HummockVersionUpdateExt,
-    };
+    use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
+    use crate::version::{HummockVersion, HummockVersionDelta};
 
     #[test]
     fn test_get_sst_object_ids() {

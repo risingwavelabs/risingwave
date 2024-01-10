@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::source::external::{ExternalTableReaderImpl, SchemaTableName};
+use risingwave_connector::source::cdc::external::{ExternalTableReaderImpl, SchemaTableName};
 
 /// This struct represents an external table to be read during backfill
 pub struct ExternalStorageTable {
@@ -102,5 +102,9 @@ impl ExternalStorageTable {
 
     pub fn table_reader(&self) -> &ExternalTableReaderImpl {
         &self.table_reader
+    }
+
+    pub fn qualified_table_name(&self) -> String {
+        format!("{}.{}", self.schema_name, self.table_name)
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -85,6 +85,7 @@ pub struct CreateSourceStatement {
     pub with_properties: WithProperties,
     pub source_schema: CompatibleSourceSchema,
     pub source_watermarks: Vec<SourceWatermark>,
+    pub include_column_options: Vec<(Ident, Option<Ident>)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -325,6 +326,7 @@ impl ParseTo for CreateSourceStatement {
 
         // parse columns
         let (columns, constraints, source_watermarks) = p.parse_columns_with_watermark()?;
+        let include_options = p.parse_include_options()?;
 
         let with_options = p.parse_with_properties()?;
         let option = with_options
@@ -346,6 +348,7 @@ impl ParseTo for CreateSourceStatement {
             with_properties: WithProperties(with_options),
             source_schema,
             source_watermarks,
+            include_column_options: include_options,
         })
     }
 }
@@ -483,6 +486,10 @@ impl fmt::Display for CreateSinkStatement {
         let mut v: Vec<String> = vec![];
         impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
         impl_fmt_display!(sink_name, v, self);
+        if let Some(into_table) = &self.into_table_name {
+            impl_fmt_display!([Keyword::INTO], v);
+            impl_fmt_display!([into_table], v);
+        }
         impl_fmt_display!(sink_from, v, self);
         if let Some(ref emit_mode) = self.emit_mode {
             v.push(format!("EMIT {}", emit_mode));

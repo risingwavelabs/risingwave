@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,7 +46,7 @@ pub fn handle_set(
     value: SetVariableValue,
 ) -> Result<RwPgResponse> {
     // Strip double and single quotes
-    let string_val = set_var_to_param_str(&value);
+    let mut string_val = set_var_to_param_str(&value);
 
     let mut status = ParameterStatus::default();
 
@@ -60,6 +60,18 @@ pub fn handle_set(
                 self.status.application_name = Some(new_val);
             }
         }
+    }
+
+    // special handle for streaming parallelism,
+    if name
+        .real_value()
+        .eq_ignore_ascii_case("streaming_parallelism")
+        && string_val
+            .as_ref()
+            .map(|val| val.eq_ignore_ascii_case("auto"))
+            .unwrap_or(false)
+    {
+        string_val = None;
     }
 
     // Currently store the config variable simply as String -> ConfigEntry(String).

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::propagation::TraceContextPropagator;
@@ -106,5 +108,85 @@ impl TracingContext {
         }
 
         Some(Self::from_w3c(&map))
+    }
+}
+
+/// Extension trait allowing [`futures::Stream`]s to be instrumented with a [`tracing::Span`].
+#[easy_ext::ext(InstrumentStream)]
+impl<T> T
+where
+    T: futures::Stream + Sized,
+{
+    /// Instruments the stream with the given span. Alias for
+    /// [`tracing_futures::Instrument::instrument`].
+    ///
+    /// The span will be entered and exited every time the stream is polled. The span will be
+    /// closed only when the stream is dropped.
+    ///
+    /// If the stream is long-lived, consider [`InstrumentStream::instrument_with`] instead to
+    /// avoid accumulating too many events in the span.
+    pub fn instrument(self, span: tracing::Span) -> tracing_futures::Instrumented<Self> {
+        tracing_futures::Instrument::instrument(self, span)
+    }
+
+    /// Instruments the stream with spans created by the given closure **every time an item is
+    /// yielded**.
+    pub fn instrument_with<S>(self, make_span: S) -> WithInstrumented<Self, S>
+    where
+        S: FnMut() -> tracing::Span,
+    {
+        WithInstrumented::new(self, make_span)
+    }
+}
+
+pin_project_lite::pin_project! {
+    /// A [`futures::Stream`] that has been instrumented with
+    /// [`InstrumentStream::instrument_with`].
+    #[derive(Debug, Clone)]
+    pub struct WithInstrumented<T, S> {
+        #[pin]
+        inner: T,
+        make_span: S,
+        current_span: Option<tracing::Span>,
+    }
+}
+
+impl<T, S> WithInstrumented<T, S> {
+    /// Creates a new [`WithInstrumented`] stream.
+    fn new(inner: T, make_span: S) -> Self {
+        Self {
+            inner,
+            make_span,
+            current_span: None,
+        }
+    }
+
+    /// Returns the inner stream.
+    pub fn into_inner(self) -> T {
+        self.inner
+    }
+}
+
+impl<T, S> futures::Stream for WithInstrumented<T, S>
+where
+    T: futures::Stream + Sized,
+    S: FnMut() -> tracing::Span,
+{
+    type Item = T::Item;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+
+        let poll = {
+            let _entered = this.current_span.get_or_insert_with(this.make_span).enter();
+            this.inner.poll_next(cx)
+        };
+
+        if poll.is_ready() {
+            // Drop the span when a new item is yielded.
+            *this.current_span = None;
+        }
+
+        poll
     }
 }

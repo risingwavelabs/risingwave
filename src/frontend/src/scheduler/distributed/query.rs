@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 // Licensed under the Apache License, Version 2.0 (the "License");
 //
 // you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ use risingwave_rpc_client::ComputeClientPoolRef;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
+use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn, Instrument};
 
 use super::{DistributedQueryMetrics, QueryExecutionInfoRef, QueryResultFetcher, StageEvent};
@@ -47,7 +48,8 @@ use crate::scheduler::{ExecutionContextRef, ReadSnapshot, SchedulerError, Schedu
 pub enum QueryMessage {
     /// Events passed running execution.
     Stage(StageEvent),
-    CancelQuery,
+    /// Cancelled by some reason
+    CancelQuery(String),
 }
 
 enum QueryState {
@@ -87,6 +89,7 @@ struct QueryRunner {
     query_execution_info: QueryExecutionInfoRef,
 
     query_metrics: Arc<DistributedQueryMetrics>,
+    timeout_abort_task_handle: Option<JoinHandle<()>>,
 }
 
 impl QueryExecution {
@@ -112,7 +115,7 @@ impl QueryExecution {
     /// cancel request (from ctrl-c, cli, ui etc).
     #[allow(clippy::too_many_arguments)]
     pub async fn start(
-        &self,
+        self: Arc<Self>,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeSelector,
         pinned_snapshot: ReadSnapshot,
@@ -129,7 +132,7 @@ impl QueryExecution {
         // can control when to release the snapshot.
         let stage_executions = self.gen_stage_executions(
             &pinned_snapshot,
-            context,
+            context.clone(),
             worker_node_manager,
             compute_client_pool.clone(),
             catalog_reader,
@@ -138,6 +141,22 @@ impl QueryExecution {
         match cur_state {
             QueryState::Pending { msg_receiver } => {
                 *state = QueryState::Running;
+
+                // Start a timer to cancel the query
+                let mut timeout_abort_task_handle: Option<JoinHandle<()>> = None;
+                if let Some(timeout) = context.timeout() {
+                    let this = self.clone();
+                    timeout_abort_task_handle = Some(tokio::spawn(async move {
+                        tokio::time::sleep(timeout).await;
+                        warn!(
+                            "Query {:?} timeout after {} seconds, sending cancel message.",
+                            this.query.query_id,
+                            timeout.as_secs(),
+                        );
+                        this.abort(format!("timeout after {} seconds", timeout.as_secs()))
+                            .await;
+                    }));
+                }
 
                 // Create a oneshot channel for QueryResultFetcher to get failed event.
                 let (root_stage_sender, root_stage_receiver) =
@@ -151,6 +170,7 @@ impl QueryExecution {
                     scheduled_stages_count: 0,
                     query_execution_info,
                     query_metrics,
+                    timeout_abort_task_handle,
                 };
 
                 let span = tracing::info_span!(
@@ -184,10 +204,10 @@ impl QueryExecution {
     }
 
     /// Cancel execution of this query.
-    pub async fn abort(self: Arc<Self>) {
+    pub async fn abort(self: Arc<Self>, reason: String) {
         if self
             .shutdown_tx
-            .send(QueryMessage::CancelQuery)
+            .send(QueryMessage::CancelQuery(reason))
             .await
             .is_err()
         {
@@ -236,6 +256,9 @@ impl QueryExecution {
 impl Drop for QueryRunner {
     fn drop(&mut self) {
         self.query_metrics.running_query_num.dec();
+        self.timeout_abort_task_handle
+            .as_ref()
+            .inspect(|h| h.abort());
     }
 }
 
@@ -346,8 +369,8 @@ impl QueryRunner {
                         break;
                     }
                 }
-                QueryMessage::CancelQuery => {
-                    self.clean_all_stages(Some(SchedulerError::QueryCancelled))
+                QueryMessage::CancelQuery(reason) => {
+                    self.clean_all_stages(Some(SchedulerError::QueryCancelled(reason)))
                         .await;
                     // One stage failed, not necessary to execute schedule stages.
                     break;
@@ -493,7 +516,7 @@ pub(crate) mod tests {
 
         assert!(query_execution
             .start(
-                ExecutionContext::new(SessionImpl::mock().into()).into(),
+                ExecutionContext::new(SessionImpl::mock().into(), None).into(),
                 worker_node_selector,
                 ReadSnapshot::FrontendPinned {
                     snapshot: pinned_snapshot,
@@ -568,6 +591,8 @@ pub(crate) mod tests {
             create_type: CreateType::Foreground,
             description: None,
             incoming_sinks: vec![],
+            initialized_at_cluster_version: None,
+            created_at_cluster_version: None,
         };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),

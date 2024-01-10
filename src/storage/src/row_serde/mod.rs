@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::collections::HashMap;
 
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::row::{OwnedRow, Project, RowExt};
@@ -28,7 +30,6 @@ pub fn find_columns_by_ids(
     table_columns: &[ColumnDesc],
     column_ids: &[ColumnId],
 ) -> (Vec<ColumnDesc>, Vec<usize>) {
-    use std::collections::HashMap;
     let mut table_columns = table_columns
         .iter()
         .enumerate()
@@ -84,32 +85,36 @@ mod test {
         check(
             result,
             expect![[r#"
-            (
-                [
-                    ColumnDesc {
-                        data_type: Int64,
-                        column_id: #2,
-                        name: "",
-                        field_descs: [],
-                        type_name: "",
-                        generated_or_default_column: None,
-                        description: None,
-                    },
-                    ColumnDesc {
-                        data_type: Int16,
-                        column_id: #3,
-                        name: "",
-                        field_descs: [],
-                        type_name: "",
-                        generated_or_default_column: None,
-                        description: None,
-                    },
-                ],
-                [
-                    1,
-                    2,
-                ],
-            )"#]],
+                (
+                    [
+                        ColumnDesc {
+                            data_type: Int64,
+                            column_id: #2,
+                            name: "",
+                            field_descs: [],
+                            type_name: "",
+                            generated_or_default_column: None,
+                            description: None,
+                            additional_column_type: Normal,
+                            version: Pr13707,
+                        },
+                        ColumnDesc {
+                            data_type: Int16,
+                            column_id: #3,
+                            name: "",
+                            field_descs: [],
+                            type_name: "",
+                            generated_or_default_column: None,
+                            description: None,
+                            additional_column_type: Normal,
+                            version: Pr13707,
+                        },
+                    ],
+                    [
+                        1,
+                        2,
+                    ],
+                )"#]],
         );
 
         let table_columns = vec![
@@ -132,6 +137,8 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
+                            additional_column_type: Normal,
+                            version: Pr13707,
                         },
                         ColumnDesc {
                             data_type: Varchar,
@@ -141,6 +148,8 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
+                            additional_column_type: Normal,
+                            version: Pr13707,
                         },
                     ],
                     [

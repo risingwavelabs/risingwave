@@ -1,2 +1,7 @@
+# To update toolchain, do the following:
+# 1. update this file
+# 2. update lints/rust-toolchain, lints/Cargo.toml
+# 3. update ci/build-ci-image.sh and ci/docker-compose.yml to build a new CI image
+
 [toolchain]
-channel = "nightly-2023-10-21"
+channel = "nightly-2023-12-26"

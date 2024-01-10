@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde};
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, map_table_key_range, next_key, prefixed_range_with_vnode, TableKeyRange,
+    end_bound_of_prefix, next_key, prefixed_range_with_vnode, TableKeyRange,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::trace;
@@ -426,7 +426,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             _ => CachePolicy::Fill(CachePriority::High),
         };
 
-        let raw_key_ranges = {
+        let table_key_ranges = {
             // Vnodes that are set and should be accessed.
             let vnodes = match vnode_hint {
                 // If `vnode_hint` is set, we can only access this single vnode.
@@ -438,8 +438,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         };
 
         // For each key range, construct an iterator.
-        let iterators: Vec<_> = try_join_all(raw_key_ranges.map(|raw_key_range| {
-            let table_key_range = map_table_key_range(raw_key_range);
+        let iterators: Vec<_> = try_join_all(table_key_ranges.map(|table_key_range| {
             let prefix_hint = prefix_hint.clone();
             let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
             async move {

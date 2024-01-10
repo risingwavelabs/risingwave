@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -424,6 +424,7 @@ impl TestCase {
                     source_watermarks,
                     append_only,
                     cdc_table_info,
+                    include_column_options,
                     ..
                 } => {
                     let source_schema = source_schema.map(|schema| schema.into_v2_with_warning());
@@ -438,6 +439,7 @@ impl TestCase {
                         source_watermarks,
                         append_only,
                         cdc_table_info,
+                        include_column_options,
                     )
                     .await?;
                 }
@@ -587,7 +589,8 @@ impl TestCase {
         let mut logical_plan = match planner.plan(bound) {
             Ok(logical_plan) => {
                 if self.expected_outputs.contains(&TestType::LogicalPlan) {
-                    ret.logical_plan = Some(explain_plan(&logical_plan.clone().into_subplan()));
+                    ret.logical_plan =
+                        Some(explain_plan(&logical_plan.clone().into_unordered_subplan()));
                 }
                 logical_plan
             }
@@ -791,6 +794,7 @@ impl TestCase {
                     "test_db".into(),
                     "test_table".into(),
                     format_desc,
+                    false,
                     None,
                 ) {
                     Ok(sink_plan) => {

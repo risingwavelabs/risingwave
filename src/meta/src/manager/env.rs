@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use risingwave_common::config::{CompactionConfig, DefaultParallelism};
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{ConnectorClient, StreamClientPool, StreamClientPoolRef};
@@ -24,6 +25,7 @@ use sea_orm::EntityTrait;
 use super::{SystemParamsManager, SystemParamsManagerRef};
 use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
 use crate::controller::SqlMetaStore;
+use crate::hummock::sequence::SequenceGenerator;
 use crate::manager::event_log::{start_event_log_manager, EventLogMangerRef};
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
@@ -73,6 +75,8 @@ pub struct MetaSrvEnv {
 
     /// Client to connector node. `None` if endpoint unspecified or unable to connect.
     connector_client: Option<ConnectorClient>,
+
+    pub hummock_seq: Option<Arc<SequenceGenerator>>,
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
@@ -194,6 +198,13 @@ pub struct MetaOpts {
     pub event_log_enabled: bool,
     pub event_log_channel_max_size: u32,
     pub advertise_addr: String,
+
+    /// The number of traces to be cached in-memory by the tracing collector
+    /// embedded in the meta node.
+    pub cached_traces_num: u32,
+    /// The maximum memory usage in bytes for the tracing collector embedded
+    /// in the meta node.
+    pub cached_traces_memory_limit_bytes: usize,
 }
 
 impl MetaOpts {
@@ -241,6 +252,8 @@ impl MetaOpts {
             event_log_enabled: false,
             event_log_channel_max_size: 1,
             advertise_addr: "".to_string(),
+            cached_traces_num: 1,
+            cached_traces_memory_limit_bytes: usize::MAX,
         }
     }
 }
@@ -298,6 +311,9 @@ impl MetaSrvEnv {
             opts.event_log_enabled,
             opts.event_log_channel_max_size,
         ));
+        let hummock_seq = meta_store_sql
+            .clone()
+            .map(|m| Arc::new(SequenceGenerator::new(m.conn)));
 
         Ok(Self {
             id_gen_manager,
@@ -313,6 +329,7 @@ impl MetaSrvEnv {
             cluster_first_launch,
             connector_client,
             opts: opts.into(),
+            hummock_seq,
         })
     }
 
@@ -350,6 +367,13 @@ impl MetaSrvEnv {
 
     pub fn idle_manager(&self) -> &IdleManager {
         self.idle_manager.deref()
+    }
+
+    pub async fn system_params_reader(&self) -> SystemParamsReader {
+        if let Some(system_ctl) = &self.system_params_controller {
+            return system_ctl.get_params().await;
+        }
+        self.system_params_manager.get_params().await
     }
 
     pub fn system_params_manager_ref(&self) -> SystemParamsManagerRef {
@@ -440,6 +464,9 @@ impl MetaSrvEnv {
         };
 
         let event_log_manager = Arc::new(EventLogManger::for_test());
+        let hummock_seq = meta_store_sql
+            .clone()
+            .map(|m| Arc::new(SequenceGenerator::new(m.conn)));
 
         Self {
             id_gen_manager,
@@ -455,6 +482,7 @@ impl MetaSrvEnv {
             cluster_first_launch,
             connector_client: None,
             opts,
+            hummock_seq,
         }
     }
 }

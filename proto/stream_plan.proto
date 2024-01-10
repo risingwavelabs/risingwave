@@ -169,7 +169,7 @@ message StreamSource {
   repeated plan_common.ColumnCatalog columns = 4;
   reserved "pk_column_ids";
   reserved 5;
-  map<string, string> properties = 6;
+  map<string, string> with_properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;
   // Streaming rate limit
@@ -184,7 +184,7 @@ message StreamFsFetch {
   repeated plan_common.ColumnCatalog columns = 4;
   reserved "pk_column_ids";
   reserved 5;
-  map<string, string> properties = 6;
+  map<string, string> with_properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;
   // Streaming rate limit
@@ -429,11 +429,13 @@ message DynamicFilterNode {
   catalog.Table left_table = 3;
   // Right table stores single value from RHS of predicate.
   catalog.Table right_table = 4;
-  // It is true when the right side of the inequality predicate is monotonically:
-  // - decreasing for <, <=, increasing for >, >=
-  // bool is_monotonic = 10;
-  // the output indices of current node
-  // repeated uint32 output_indices = 11;
+  // If the right side's change always make the condition more relaxed.
+  // In other words, make more record in the left side satisfy the condition.
+  // If this is true, we need to store LHS records which do not match the condition in the internal table.
+  // When the condition changes, we will tell downstream to insert the LHS records which now match the condition.
+  // If this is false, we need to store RHS records which match the condition in the internal table.
+  // When the condition changes, we will tell downstream to delete the LHS records which now no longer match the condition.
+  bool condition_always_relax = 5;
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
@@ -574,6 +576,8 @@ message ArrangementInfo {
   repeated plan_common.ColumnDesc column_descs = 2;
   // Used to build storage table by stream lookup join of delta join.
   plan_common.StorageTableDesc table_desc = 4;
+  // Output index columns
+  repeated uint32 output_col_idx = 5;
 }
 
 // Special node for shared state, which will only be produced in fragmenter. ArrangeNode will

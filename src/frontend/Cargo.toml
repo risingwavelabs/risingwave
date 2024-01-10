@@ -29,7 +29,7 @@ ctor = "0.2"
 downcast-rs = "1.2"
 dyn-clone = "1.0.14"
 easy-ext = "1"
-educe = "0.4"
+educe = "0.5"
 either = "1"
 enum-as-inner = "0.6"
 fixedbitset = "0.4.2"
@@ -56,6 +56,7 @@ risingwave_common = { workspace = true }
 risingwave_common_service = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_expr = { workspace = true }
+risingwave_hummock_sdk = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_source = { workspace = true }
@@ -82,7 +83,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-stream = "0.1"
 tonic = { workspace = true }
 tracing = "0.1"
-tracing-futures = { version = "0.2", features = ["futures-03"] }
 uuid = "1"
 
 [target.'cfg(not(madsim))'.dependencies]

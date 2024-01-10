@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::default::Default;
 use std::ops::Bound;
 use std::ops::Bound::*;
@@ -23,7 +24,7 @@ use futures::{pin_mut, FutureExt, Stream, StreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{
@@ -32,15 +33,17 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, once, CompactedRow, Once, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, map_table_key_range, next_key, prefixed_range_with_vnode, range_of_prefix,
-    start_bound_of_excluded_prefix, TableKey,
+    end_bound_of_prefix, prefixed_range_with_vnode, range_of_prefix,
+    start_bound_of_excluded_prefix, TableKey, TableKeyRange,
 };
+use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::error::{ErrorKind, StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
@@ -51,8 +54,8 @@ use risingwave_storage::row_serde::row_serde_util::{
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
-    InitOptions, LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions,
-    SealCurrentEpochOptions, StateStoreIterItemStream,
+    InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, PrefetchOptions,
+    ReadOptions, SealCurrentEpochOptions, StateStoreIterItemStream,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution, KeyedRow};
@@ -147,6 +150,13 @@ pub struct StateTableInner<
     /// We will need to use to build data chunks from state table rows.
     data_types: Vec<DataType>,
 
+    /// "i" here refers to the base state_table's actual schema.
+    /// "o" here refers to the replicated state table's output schema.
+    /// This mapping is used to reconstruct a row being written from replicated state table.
+    /// Such that the schema of this row will match the full schema of the base state table.
+    /// It is only applicable for replication.
+    i2o_mapping: ColIndexMapping,
+
     /// Output indices
     /// Used for:
     /// 1. Computing output_value_indices to ser/de replicated rows.
@@ -202,7 +212,38 @@ where
     }
 }
 
+fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> OpConsistencyLevel {
+    OpConsistencyLevel::ConsistentOldValue(Arc::new(move |first: &Bytes, second: &Bytes| {
+        if first == second {
+            return true;
+        }
+        let first = match row_serde.deserialize(first) {
+            Ok(rows) => rows,
+            Err(e) => {
+                error!(err = %e, value = ?first, "fail to deserialize serialized value");
+                return false;
+            }
+        };
+        let second = match row_serde.deserialize(second) {
+            Ok(rows) => rows,
+            Err(e) => {
+                error!(err = %e, value = ?second, "fail to deserialize serialized value");
+                return false;
+            }
+        };
+        if first != second {
+            error!(first = ?first, second = ?second, "sanity check fail");
+            false
+        } else {
+            true
+        }
+    }))
+}
+
 // initialize
+// FIXME(kwannoel): Enforce that none of the constructors here
+// should be used by replicated state table.
+// Apart from from_table_catalog_inner.
 impl<S, SD, const IS_REPLICATED: bool, W, const USE_WATERMARK_CACHE: bool>
     StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
 where
@@ -234,7 +275,7 @@ where
         store: S,
         vnodes: Option<Arc<Bitmap>>,
         is_consistent_op: bool,
-        output_indices: Vec<usize>,
+        output_column_ids: Vec<ColumnId>,
     ) -> Self {
         let table_id = TableId::new(table_catalog.id);
         let table_columns: Vec<ColumnDesc> = table_catalog
@@ -281,14 +322,6 @@ where
                 .collect()
         };
 
-        let table_option = TableOption::build_table_option(table_catalog.get_properties());
-        let new_local_options = if IS_REPLICATED {
-            NewLocalOptions::new_replicated(table_id, is_consistent_op, table_option)
-        } else {
-            NewLocalOptions::new(table_id, is_consistent_op, table_option)
-        };
-        let local_state_store = store.new_local(new_local_options).await;
-
         let pk_data_types = pk_indices
             .iter()
             .map(|i| table_columns[*i].data_type.clone())
@@ -321,10 +354,29 @@ where
         };
         let prefix_hint_len = table_catalog.read_prefix_len_hint as usize;
 
-        let row_serde = SD::new(
-            Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
-            Arc::from(table_columns.into_boxed_slice()),
-        );
+        let make_row_serde = || {
+            SD::new(
+                Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
+                Arc::from(table_columns.clone().into_boxed_slice()),
+            )
+        };
+
+        let op_consistency_level = if is_consistent_op {
+            let row_serde = make_row_serde();
+            consistent_old_value_op(row_serde)
+        } else {
+            OpConsistencyLevel::Inconsistent
+        };
+
+        let table_option = TableOption::build_table_option(table_catalog.get_properties());
+        let new_local_options = if IS_REPLICATED {
+            NewLocalOptions::new_replicated(table_id, op_consistency_level, table_option)
+        } else {
+            NewLocalOptions::new(table_id, op_consistency_level, table_option)
+        };
+        let local_state_store = store.new_local(new_local_options).await;
+
+        let row_serde = make_row_serde();
 
         // If state table has versioning, that means it supports
         // Schema change. In that case, the row encoding should be column aware as well.
@@ -341,6 +393,34 @@ where
         } else {
             StateTableWatermarkCache::new(0)
         };
+
+        // Get info for replicated state table.
+        let output_column_ids_to_input_idx = output_column_ids
+            .iter()
+            .enumerate()
+            .map(|(pos, id)| (*id, pos))
+            .collect::<HashMap<_, _>>();
+
+        // Compute column descriptions
+        let columns: Vec<ColumnDesc> = table_catalog
+            .columns
+            .iter()
+            .map(|c| c.column_desc.as_ref().unwrap().into())
+            .collect_vec();
+
+        // Compute i2o mapping
+        let mut i2o_mapping = vec![None; columns.len()];
+        let mut output_column_indices = vec![];
+        for (i, column) in columns.iter().enumerate() {
+            if let Some(pos) = output_column_ids_to_input_idx.get(&column.column_id) {
+                i2o_mapping[i] = Some(*pos);
+                output_column_indices.push(i);
+            }
+        }
+        let i2o_mapping = ColIndexMapping::new(i2o_mapping, output_column_indices.len());
+
+        // Compute output indices
+        let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
 
         Self {
             table_id,
@@ -360,6 +440,7 @@ where
             watermark_cache,
             data_types,
             output_indices,
+            i2o_mapping,
         }
     }
 
@@ -485,13 +566,31 @@ where
         value_indices: Option<Vec<usize>>,
         is_consistent_op: bool,
     ) -> Self {
+        let make_row_serde = || {
+            SD::new(
+                Arc::from(
+                    value_indices
+                        .clone()
+                        .unwrap_or_else(|| (0..table_columns.len()).collect_vec())
+                        .into_boxed_slice(),
+                ),
+                Arc::from(table_columns.clone().into_boxed_slice()),
+            )
+        };
+        let op_consistency_level = if is_consistent_op {
+            let row_serde = make_row_serde();
+            consistent_old_value_op(row_serde)
+        } else {
+            OpConsistencyLevel::Inconsistent
+        };
         let local_state_store = store
             .new_local(NewLocalOptions::new(
                 table_id,
-                is_consistent_op,
+                op_consistency_level,
                 TableOption::default(),
             ))
             .await;
+        let row_serde = make_row_serde();
         let data_types: Vec<DataType> = table_columns
             .iter()
             .map(|col| col.data_type.clone())
@@ -511,15 +610,7 @@ where
             table_id,
             local_store: local_state_store,
             pk_serde,
-            row_serde: SD::new(
-                Arc::from(
-                    value_indices
-                        .clone()
-                        .unwrap_or_else(|| (0..table_columns.len()).collect_vec())
-                        .into_boxed_slice(),
-                ),
-                Arc::from(table_columns.into_boxed_slice()),
-            ),
+            row_serde,
             pk_indices,
             dist_key_in_pk_indices,
             prefix_hint_len: 0,
@@ -533,6 +624,7 @@ where
             watermark_cache,
             data_types,
             output_indices: vec![],
+            i2o_mapping: ColIndexMapping::new(vec![], 0),
         }
     }
 
@@ -638,13 +730,7 @@ where
         vnodes: Option<Arc<Bitmap>>,
         output_column_ids: Vec<ColumnId>,
     ) -> Self {
-        let columns = table_catalog
-            .columns
-            .iter()
-            .map(|c| c.column_desc.as_ref().unwrap().into())
-            .collect_vec();
-        let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
-        Self::from_table_catalog_inner(table_catalog, store, vnodes, false, output_indices).await
+        Self::from_table_catalog_inner(table_catalog, store, vnodes, false, output_column_ids).await
     }
 }
 
@@ -872,7 +958,7 @@ where
 
     /// Update a row without giving old value.
     ///
-    /// `is_consistent_op` should be set to false.
+    /// `op_consistency_level` should be set to `Inconsistent`.
     pub fn update_without_old_value(&mut self, new_value: impl Row) {
         let new_pk = (&new_value).project(self.pk_indices());
         let new_key_bytes =
@@ -891,10 +977,19 @@ where
         }
     }
 
+    fn fill_non_output_indices(&self, chunk: StreamChunk) -> StreamChunk {
+        fill_non_output_indices(&self.i2o_mapping, &self.data_types, chunk)
+    }
+
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
     // allow(izip, which use zip instead of zip_eq)
     #[allow(clippy::disallowed_methods)]
     pub fn write_chunk(&mut self, chunk: StreamChunk) {
+        let chunk = if IS_REPLICATED {
+            self.fill_non_output_indices(chunk)
+        } else {
+            chunk
+        };
         let (chunk, op) = chunk.into_parts();
 
         let vnodes = compute_chunk_vnode(
@@ -995,7 +1090,7 @@ where
         if !self.is_dirty() {
             // If the state table is not modified, go fast path.
             self.local_store
-                .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::new());
+                .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::no_watermark());
             return Ok(());
         } else {
             self.seal_current_epoch(new_epoch.curr)
@@ -1064,7 +1159,7 @@ where
         // per epoch.
         self.watermark_buffer_strategy.tick();
         self.local_store
-            .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::new());
+            .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::no_watermark());
     }
 
     /// Write to state store.
@@ -1073,8 +1168,6 @@ where
         watermark.as_ref().inspect(|watermark| {
             trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
         });
-
-        let mut delete_ranges = Vec::new();
 
         let prefix_serializer = if self.pk_indices().is_empty() {
             None
@@ -1111,11 +1204,10 @@ where
             )
         });
 
+        let mut seal_watermark: Option<(WatermarkDirection, VnodeWatermark)> = None;
+
         // Compute Delete Ranges
-        if should_clean_watermark
-            && let Some(watermark_suffix) = watermark_suffix
-            && let Some(first_byte) = watermark_suffix.first()
-        {
+        if should_clean_watermark && let Some(watermark_suffix) = watermark_suffix {
             trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
                 self.vnodes.iter_vnodes().collect_vec()
             }, "delete range");
@@ -1127,36 +1219,21 @@ where
                 .unwrap()
                 .is_ascending()
             {
-                // We either serialize null into `0u8`, data into `(1u8 || scalar)`, or serialize null
-                // into `1u8`, data into `(0u8 || scalar)`. We do not want to delete null
-                // here, so `range_begin_suffix` cannot be `vec![]` when null is represented as `0u8`.
-                let range_begin_suffix = vec![*first_byte];
-                for vnode in self.vnodes.iter_vnodes() {
-                    let mut range_begin = vnode.to_be_bytes().to_vec();
-                    let mut range_end = range_begin.clone();
-                    range_begin.extend(&range_begin_suffix);
-                    range_end.extend(&watermark_suffix);
-                    delete_ranges.push((
-                        Bound::Included(Bytes::from(range_begin)),
-                        Bound::Excluded(Bytes::from(range_end)),
-                    ));
-                }
+                seal_watermark = Some((
+                    WatermarkDirection::Ascending,
+                    VnodeWatermark::new(
+                        self.vnodes.clone(),
+                        Bytes::copy_from_slice(watermark_suffix.as_ref()),
+                    ),
+                ));
             } else {
-                assert_ne!(*first_byte, u8::MAX);
-                let following_bytes = next_key(&watermark_suffix[1..]);
-                if !following_bytes.is_empty() {
-                    for vnode in self.vnodes.iter_vnodes() {
-                        let mut range_begin = vnode.to_be_bytes().to_vec();
-                        let mut range_end = range_begin.clone();
-                        range_begin.push(*first_byte);
-                        range_begin.extend(&following_bytes);
-                        range_end.push(first_byte + 1);
-                        delete_ranges.push((
-                            Bound::Included(Bytes::from(range_begin)),
-                            Bound::Excluded(Bytes::from(range_end)),
-                        ));
-                    }
-                }
+                seal_watermark = Some((
+                    WatermarkDirection::Descending,
+                    VnodeWatermark::new(
+                        self.vnodes.clone(),
+                        Bytes::copy_from_slice(watermark_suffix.as_ref()),
+                    ),
+                ));
             }
         }
         self.prev_cleaned_watermark = watermark;
@@ -1168,13 +1245,18 @@ where
         // 2. Mark the cache as not_synced, so we can still refill it later.
         // 3. When refilling the cache,
         //    we just refill from the largest value of the cache, as the lower bound.
-        if USE_WATERMARK_CACHE && !delete_ranges.is_empty() {
+        if USE_WATERMARK_CACHE && seal_watermark.is_some() {
             self.watermark_cache.clear();
         }
 
-        self.local_store.flush(delete_ranges).await?;
-        self.local_store
-            .seal_current_epoch(next_epoch, SealCurrentEpochOptions::new());
+        self.local_store.flush(vec![]).await?;
+        let seal_opt = match seal_watermark {
+            Some((direction, watermark)) => {
+                SealCurrentEpochOptions::new(vec![watermark], direction)
+            }
+            None => SealCurrentEpochOptions::no_watermark(),
+        };
+        self.local_store.seal_current_epoch(next_epoch, seal_opt);
         Ok(())
     }
 
@@ -1236,7 +1318,7 @@ where
 
     async fn iter_kv(
         &self,
-        key_range: (Bound<Bytes>, Bound<Bytes>),
+        table_key_range: TableKeyRange,
         prefix_hint: Option<Bytes>,
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
@@ -1248,7 +1330,6 @@ where
             cache_policy: CachePolicy::Fill(CachePriority::High),
             ..Default::default()
         };
-        let table_key_range = map_table_key_range(key_range);
 
         Ok(self.local_store.iter(table_key_range, read_options).await?)
     }
@@ -1351,8 +1432,7 @@ where
         // If this assertion fails, then something must be wrong with the operator implementation or
         // the distribution derivation from the optimizer.
         let vnode = self.compute_prefix_vnode(&pk_prefix);
-        let table_key_range =
-            map_table_key_range(prefixed_range_with_vnode(encoded_key_range, vnode));
+        let table_key_range = prefixed_range_with_vnode(encoded_key_range, vnode);
 
         // Construct prefix hint for prefix bloom filter.
         if self.prefix_hint_len != 0 {
@@ -1490,5 +1570,65 @@ fn end_range_to_memcomparable<R: Row>(
             let serialized = serialize_pk_prefix(r);
             Excluded(serialized)
         }
+    }
+}
+
+fn fill_non_output_indices(
+    i2o_mapping: &ColIndexMapping,
+    data_types: &[DataType],
+    chunk: StreamChunk,
+) -> StreamChunk {
+    let cardinality = chunk.cardinality();
+    let (ops, columns, vis) = chunk.into_inner();
+    let mut full_columns = Vec::with_capacity(data_types.len());
+    for (i, data_type) in data_types.iter().enumerate() {
+        if let Some(j) = i2o_mapping.try_map(i) {
+            full_columns.push(columns[j].clone());
+        } else {
+            let mut column_builder = ArrayImplBuilder::with_type(cardinality, data_type.clone());
+            column_builder.append_n_null(cardinality);
+            let column: ArrayRef = column_builder.finish().into();
+            full_columns.push(column)
+        }
+    }
+    let data_chunk = DataChunk::new(full_columns, vis);
+    StreamChunk::from_parts(ops, data_chunk)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fmt::Debug;
+
+    use expect_test::{expect, Expect};
+
+    use super::*;
+
+    fn check(actual: impl Debug, expect: Expect) {
+        let actual = format!("{:#?}", actual);
+        expect.assert_eq(&actual);
+    }
+
+    #[test]
+    fn test_fill_non_output_indices() {
+        let data_types = vec![DataType::Int32, DataType::Int32, DataType::Int32];
+        let replicated_chunk = [OwnedRow::new(vec![
+            Some(222_i32.into()),
+            Some(2_i32.into()),
+        ])];
+        let replicated_chunk = StreamChunk::from_parts(
+            vec![Op::Insert],
+            DataChunk::from_rows(&replicated_chunk, &[DataType::Int32, DataType::Int32]),
+        );
+        let i2o_mapping = ColIndexMapping::new(vec![Some(1), None, Some(0)], 2);
+        let filled_chunk = fill_non_output_indices(&i2o_mapping, &data_types, replicated_chunk);
+        check(
+            filled_chunk,
+            expect![[r#"
+            StreamChunk { cardinality: 1, capacity: 1, data:
+            +---+---+---+-----+
+            | + | 2 |   | 222 |
+            +---+---+---+-----+
+             }"#]],
+        );
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,11 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
-use risingwave_pb::meta::PbTableFragments;
+use risingwave_pb::meta::table_parallelism::{
+    FixedParallelism, Parallelism, PbAutoParallelism, PbCustomParallelism, PbFixedParallelism,
+    PbParallelism,
+};
+use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -36,6 +40,43 @@ use crate::stream::{build_actor_connector_splits, build_actor_split_impls, Split
 
 /// Column family name for table fragments.
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum TableParallelism {
+    Auto,
+    Fixed(usize),
+    Custom,
+}
+
+impl From<PbTableParallelism> for TableParallelism {
+    fn from(value: PbTableParallelism) -> Self {
+        use Parallelism::*;
+        match &value.parallelism {
+            Some(Fixed(FixedParallelism { parallelism: n })) => Self::Fixed(*n as usize),
+            Some(Auto(_)) => Self::Auto,
+            Some(Custom(_)) => Self::Custom,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<TableParallelism> for PbTableParallelism {
+    fn from(value: TableParallelism) -> Self {
+        use TableParallelism::*;
+
+        let parallelism = match value {
+            Auto => PbParallelism::Auto(PbAutoParallelism {}),
+            Fixed(n) => PbParallelism::Fixed(PbFixedParallelism {
+                parallelism: n as u32,
+            }),
+            Custom => PbParallelism::Custom(PbCustomParallelism {}),
+        };
+
+        Self {
+            parallelism: Some(parallelism),
+        }
+    }
+}
 
 /// Fragments of a streaming job.
 ///
@@ -60,6 +101,9 @@ pub struct TableFragments {
 
     /// The streaming context associated with this stream plan and its fragments
     pub ctx: StreamContext,
+
+    /// The parallelism assigned to this table fragments
+    pub assigned_parallelism: TableParallelism,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -109,11 +153,17 @@ impl MetadataModel for TableFragments {
             actor_status: self.actor_status.clone().into_iter().collect(),
             actor_splits: build_actor_connector_splits(&self.actor_splits),
             ctx: Some(self.ctx.to_protobuf()),
+            parallelism: Some(self.assigned_parallelism.into()),
         }
     }
 
     fn from_protobuf(prost: Self::PbType) -> Self {
         let ctx = StreamContext::from_protobuf(prost.get_ctx().unwrap());
+
+        let default_parallelism = PbTableParallelism {
+            parallelism: Some(Parallelism::Custom(PbCustomParallelism {})),
+        };
+
         Self {
             table_id: TableId::new(prost.table_id),
             state: prost.state(),
@@ -121,6 +171,7 @@ impl MetadataModel for TableFragments {
             actor_status: prost.actor_status.into_iter().collect(),
             actor_splits: build_actor_split_impls(&prost.actor_splits),
             ctx,
+            assigned_parallelism: prost.parallelism.unwrap_or(default_parallelism).into(),
         }
     }
 
@@ -137,6 +188,7 @@ impl TableFragments {
             fragments,
             &BTreeMap::new(),
             StreamContext::default(),
+            TableParallelism::Auto,
         )
     }
 
@@ -147,6 +199,7 @@ impl TableFragments {
         fragments: BTreeMap<FragmentId, Fragment>,
         actor_locations: &BTreeMap<ActorId, ParallelUnit>,
         ctx: StreamContext,
+        table_parallelism: TableParallelism,
     ) -> Self {
         let actor_status = actor_locations
             .iter()
@@ -168,6 +221,7 @@ impl TableFragments {
             actor_status,
             actor_splits: HashMap::default(),
             ctx,
+            assigned_parallelism: table_parallelism,
         }
     }
 
@@ -197,6 +251,11 @@ impl TableFragments {
     /// Returns whether the table fragments is in `Created` state.
     pub fn is_created(&self) -> bool {
         self.state == State::Created
+    }
+
+    /// Returns whether the table fragments is in `Initial` state.
+    pub fn is_initial(&self) -> bool {
+        self.state == State::Initial
     }
 
     /// Set the table ID.

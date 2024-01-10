@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,15 +17,19 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_meta_model_migration::WithQuery;
+use risingwave_meta_model_v2::actor::ActorStatus;
+use risingwave_meta_model_v2::fragment::DistributionType;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
-    actor_dispatcher, connection, database, function, index, object, object_dependency, schema,
-    sink, source, table, user, user_privilege, view, worker_property, ActorId, DataTypeArray,
-    DatabaseId, I32Array, ObjectId, PrivilegeId, SchemaId, UserId, WorkerId,
+    actor_dispatcher, connection, database, fragment, function, index, object, object_dependency,
+    schema, sink, source, table, user, user_privilege, view, worker_property, ActorId,
+    DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, PrivilegeId,
+    SchemaId, UserId, WorkerId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
 use risingwave_pb::common::PbParallelUnit;
+use risingwave_pb::meta::PbFragmentParallelUnitMapping;
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
 use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
 use sea_orm::sea_query::{
@@ -120,6 +124,34 @@ pub struct PartialObject {
     pub obj_type: ObjectType,
     pub schema_id: Option<SchemaId>,
     pub database_id: Option<DatabaseId>,
+}
+
+#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[sea_orm(entity = "Fragment")]
+pub struct PartialFragmentStateTables {
+    pub fragment_id: FragmentId,
+    pub job_id: ObjectId,
+    pub state_table_ids: I32Array,
+}
+
+#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[sea_orm(entity = "Actor")]
+pub struct PartialActorLocation {
+    pub actor_id: ActorId,
+    pub fragment_id: FragmentId,
+    pub parallel_unit_id: i32,
+    pub status: ActorStatus,
+}
+
+#[derive(FromQueryResult)]
+pub struct FragmentDesc {
+    pub fragment_id: FragmentId,
+    pub job_id: ObjectId,
+    pub fragment_type_mask: i32,
+    pub distribution_type: DistributionType,
+    pub state_table_ids: I32Array,
+    pub upstream_fragment_id: I32Array,
+    pub parallelism: i64,
 }
 
 /// List all objects that are using the given one in a cascade way. It runs a recursive CTE to find all the dependencies.
@@ -630,5 +662,30 @@ where
         .group_by(|actor_dispatcher| actor_dispatcher.actor_id)
         .into_iter()
         .map(|(actor_id, actor_dispatcher)| (actor_id, actor_dispatcher.collect()))
+        .collect())
+}
+
+/// `get_fragment_parallel_unit_mappings` returns the fragment vnode mappings of the given job.
+pub async fn get_fragment_mappings<C>(
+    db: &C,
+    job_id: ObjectId,
+) -> MetaResult<Vec<PbFragmentParallelUnitMapping>>
+where
+    C: ConnectionTrait,
+{
+    let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
+        .select_only()
+        .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
+        .filter(fragment::Column::JobId.eq(job_id))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    Ok(fragment_mappings
+        .into_iter()
+        .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
+            fragment_id: fragment_id as _,
+            mapping: Some(mapping.into_inner()),
+        })
         .collect())
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use itertools::Itertools;
+use risingwave_common::error::anyhow_error;
 use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts, Session};
 use tokio::time::sleep;
 
@@ -76,8 +76,11 @@ async fn cancel_stream_jobs(session: &mut Session) -> Result<Vec<u32>> {
     tracing::info!("cancelled streaming jobs, {}", result);
     let ids = result
         .split('\n')
-        .map(|s| s.parse::<u32>().unwrap())
-        .collect_vec();
+        .map(|s| {
+            s.parse::<u32>()
+                .map_err(|_e| anyhow_error!("failed to parse {}", s))
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok(ids)
 }
 
@@ -271,6 +274,97 @@ async fn test_ddl_cancel() -> Result<()> {
 
     session.run("DROP MATERIALIZED VIEW mv1").await?;
     session.run("DROP TABLE t").await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_high_barrier_latency_cancel() -> Result<()> {
+    init_logger();
+    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut session = cluster.start_session();
+
+    // 100,000 fact records
+    session.run("CREATE TABLE fact (v1 int)").await?;
+    session
+        .run("INSERT INTO fact select 1 from generate_series(1, 100000)")
+        .await?;
+
+    // Amplification factor of 1000 per record.
+    session.run("CREATE TABLE dimension (v1 int)").await?;
+    session
+        .run("INSERT INTO dimension select 1 from generate_series(1, 1000)")
+        .await?;
+    session.flush().await?;
+
+    // With 10 rate limit, and amplification factor of 1000,
+    // We should expect 10,000 rows / s.
+    // That should be enough to cause barrier latency to spike.
+    session.run("SET STREAMING_RATE_LIMIT=10").await?;
+
+    tracing::info!("seeded base tables");
+
+    // Create high barrier latency scenario
+    // Keep creating mv1, if it's not created.
+    loop {
+        session.run(SET_BACKGROUND_DDL).await?;
+        session.run("CREATE MATERIALIZED VIEW mv1 as select fact.v1 from fact join dimension on fact.v1 = dimension.v1").await?;
+        tracing::info!("created mv in background");
+        sleep(Duration::from_secs(1)).await;
+
+        kill_cn_and_wait_recover(&cluster).await;
+
+        // Check if mv stream job is created in the background
+        match session
+            .run("select * from rw_catalog.rw_ddl_progress;")
+            .await
+        {
+            Ok(s) if s.is_empty() => {
+                // MV was dropped
+                continue;
+            }
+            Err(e) => {
+                if e.to_string().contains("in creating procedure") {
+                    // MV already created and recovered.
+                    break;
+                } else {
+                    return Err(e);
+                }
+            }
+            Ok(s) => {
+                tracing::info!("created mv stream job with status: {}", s);
+                break;
+            }
+        }
+    }
+
+    tracing::info!("restarted cn: trigger stream job recovery");
+
+    // Attempt to cancel
+    let mut session2 = cluster.start_session();
+    let handle = tokio::spawn(async move {
+        let result = cancel_stream_jobs(&mut session2).await;
+        assert!(result.is_err())
+    });
+
+    sleep(Duration::from_secs(2)).await;
+    kill_cn_and_wait_recover(&cluster).await;
+    tracing::info!("restarted cn: cancel should take effect");
+
+    handle.await.unwrap();
+
+    // Create MV with same relation name should succeed,
+    // since the previous job should be cancelled.
+    tracing::info!("recreating mv");
+    session.run("SET BACKGROUND_DDL=false").await?;
+    session
+        .run("CREATE MATERIALIZED VIEW mv1 as values(1)")
+        .await?;
+    tracing::info!("recreated mv");
+
+    session.run(DROP_MV1).await?;
+    session.run("DROP TABLE fact").await?;
+    session.run("DROP TABLE dimension").await?;
 
     Ok(())
 }

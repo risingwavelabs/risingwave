@@ -1,0 +1,108 @@
+statement ok
+create table t (id int, pat varchar, text varchar);
+
+# example data from https://www.postgresql.org/docs/16/functions-matching.html#FUNCTIONS-SIMILARTO-REGEXP
+statement ok
+insert into
+    t
+values
+    (1, 'abc', 'abc'),
+    (2, 'a', 'abc'),
+    (3, '%(b|d)%', 'abc'),
+    (4, '(b|c)%', 'abc'),
+    (5, '%abc-%', '-abc-'),
+    (6, '%abc-%', 'xabcy');
+
+query B
+select (text similar to pat) from t order by id;
+----
+t
+f
+t
+f
+t
+f
+
+query B
+select (text not similar to pat) from t order by id;
+----
+f
+t
+f
+t
+f
+t
+
+query T
+select text from t where text similar to pat order by id;
+----
+abc
+abc
+-abc-
+
+query T
+select text from t where text not similar to pat order by id;
+----
+abc
+abc
+xabcy
+
+query I
+select count(1) from t where text similar to 'ab%';
+----
+4
+
+query I
+select count(1) from t where text not similar to 'ab%';
+----
+2
+
+query B
+select 'foobar' similar to '%#"o_b#"%';
+----
+f
+
+# default escape string
+query B
+select 'foobar' similar to '%#"o_b#"%' escape '\';
+----
+f
+
+# disable escape
+query B
+select 'foo\bar' similar to 'foo\%bar' escape '';
+----
+t
+
+query B
+select 'foo\bar' similar to 'foo\%bar' escape '\';
+----
+f
+
+query B
+select 'foo%bar' similar to 'foo\%bar' escape '\';
+----
+t
+
+query B
+select 'foobar' similar to '%#"o_b#"%' escape '#';
+----
+t
+
+query B
+select 'foobar' not similar to '%#"o_b#"%' escape '#';
+----
+f
+
+query B
+select 'foobar' similar to '%🤡"o_b🤡"%' escape '🤡';
+----
+t
+
+query B
+select 'foobar' not similar to '%👪"o_b👪"%' escape '👪';
+----
+f
+
+statement ok
+drop table t;

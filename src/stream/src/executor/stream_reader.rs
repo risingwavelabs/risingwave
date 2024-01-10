@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -152,6 +152,7 @@ mod tests {
 
     const TEST_TRANSACTION_ID1: TxnId = 0;
     const TEST_TRANSACTION_ID2: TxnId = 1;
+    const TEST_SESSION_ID: u32 = 0;
     const TEST_DML_CHANNEL_INIT_PERMITS: usize = 32768;
 
     #[tokio::test]
@@ -162,8 +163,12 @@ mod tests {
 
         let source_stream = table_dml_handle.stream_reader().into_data_stream_for_test();
 
-        let mut write_handle1 = table_dml_handle.write_handle(TEST_TRANSACTION_ID1).unwrap();
-        let mut write_handle2 = table_dml_handle.write_handle(TEST_TRANSACTION_ID2).unwrap();
+        let mut write_handle1 = table_dml_handle
+            .write_handle(TEST_SESSION_ID, TEST_TRANSACTION_ID1)
+            .unwrap();
+        let mut write_handle2 = table_dml_handle
+            .write_handle(TEST_SESSION_ID, TEST_TRANSACTION_ID2)
+            .unwrap();
 
         let barrier_stream = barrier_to_message_stream(barrier_rx).boxed();
         let stream =

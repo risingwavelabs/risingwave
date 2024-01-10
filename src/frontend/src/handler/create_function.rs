@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,6 +44,7 @@ pub async fn handle_create_function(
     if temporary {
         bail_not_implemented!("CREATE TEMPORARY FUNCTION");
     }
+    // e.g., `language [ python / java / ...etc]`
     let language = match params.language {
         Some(lang) => {
             let lang = lang.real_value().to_lowercase();
@@ -161,6 +162,7 @@ pub async fn handle_create_function(
         return_type: Some(return_type.into()),
         language,
         identifier,
+        body: None,
         link,
         owner: session.user_id(),
     };

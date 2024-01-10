@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -621,8 +621,12 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .unwrap_or_else(|_| Err(ObjectError::internal("read timeout"))),
         };
 
-        if let Err(e) = &res && e.is_object_not_found_error() && path.ends_with("manifest.json") {
-            // Metadata backup's manifest.json not found is expected.
+        if let Err(e) = &res
+            && e.is_object_not_found_error()
+            && !path.ends_with(".data")
+        {
+            // Some not_found_error is expected, e.g. metadata backup's manifest.json.
+            // This is a quick fix that'll only log error in `try_update_failure_metric` in state store usage.
         } else {
             try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         }

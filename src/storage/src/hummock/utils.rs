@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{HashMap, VecDeque};
 use std::fmt::{Debug, Formatter};
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
@@ -22,14 +21,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use parking_lot::Mutex;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
 };
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
-use risingwave_pb::hummock::{HummockVersion, SstableInfo};
+use risingwave_pb::hummock::SstableInfo;
 use tokio::sync::watch::Sender;
 use tokio::sync::Notify;
 
@@ -37,7 +36,7 @@ use super::{HummockError, HummockResult};
 use crate::error::StorageResult;
 use crate::hummock::CachePolicy;
 use crate::mem_table::{KeyOp, MemTableError};
-use crate::store::{ReadOptions, StateStoreRead};
+use crate::store::{OpConsistencyLevel, ReadOptions, StateStoreRead};
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
@@ -374,13 +373,17 @@ pub(crate) const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 
 /// Make sure the key to insert should not exist in storage.
 pub(crate) async fn do_insert_sanity_check(
-    key: TableKey<Bytes>,
-    value: Bytes,
+    key: &TableKey<Bytes>,
+    value: &Bytes,
     inner: &impl StateStoreRead,
     epoch: u64,
     table_id: TableId,
     table_option: TableOption,
+    op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
+    if let OpConsistencyLevel::Inconsistent = op_consistency_level {
+        return Ok(());
+    }
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
         table_id,
@@ -391,9 +394,9 @@ pub(crate) async fn do_insert_sanity_check(
 
     if let Some(stored_value) = stored_value {
         return Err(Box::new(MemTableError::InconsistentOperation {
-            key,
+            key: key.clone(),
             prev: KeyOp::Insert(stored_value),
-            new: KeyOp::Insert(value),
+            new: KeyOp::Insert(value.clone()),
         })
         .into());
     }
@@ -402,13 +405,17 @@ pub(crate) async fn do_insert_sanity_check(
 
 /// Make sure that the key to delete should exist in storage and the value should be matched.
 pub(crate) async fn do_delete_sanity_check(
-    key: TableKey<Bytes>,
-    old_value: Bytes,
+    key: &TableKey<Bytes>,
+    old_value: &Bytes,
     inner: &impl StateStoreRead,
     epoch: u64,
     table_id: TableId,
     table_option: TableOption,
+    op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
+    let OpConsistencyLevel::ConsistentOldValue(old_value_checker) = op_consistency_level else {
+        return Ok(());
+    };
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
         table_id,
@@ -417,17 +424,17 @@ pub(crate) async fn do_delete_sanity_check(
     };
     match inner.get(key.clone(), epoch, read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
-            key,
+            key: key.clone(),
             prev: KeyOp::Delete(Bytes::default()),
-            new: KeyOp::Delete(old_value),
+            new: KeyOp::Delete(old_value.clone()),
         })
         .into()),
         Some(stored_value) => {
-            if stored_value != old_value {
+            if !old_value_checker(&stored_value, old_value) {
                 Err(Box::new(MemTableError::InconsistentOperation {
-                    key,
+                    key: key.clone(),
                     prev: KeyOp::Insert(stored_value),
-                    new: KeyOp::Delete(old_value),
+                    new: KeyOp::Delete(old_value.clone()),
                 })
                 .into())
             } else {
@@ -439,14 +446,18 @@ pub(crate) async fn do_delete_sanity_check(
 
 /// Make sure that the key to update should exist in storage and the value should be matched
 pub(crate) async fn do_update_sanity_check(
-    key: TableKey<Bytes>,
-    old_value: Bytes,
-    new_value: Bytes,
+    key: &TableKey<Bytes>,
+    old_value: &Bytes,
+    new_value: &Bytes,
     inner: &impl StateStoreRead,
     epoch: u64,
     table_id: TableId,
     table_option: TableOption,
+    op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
+    let OpConsistencyLevel::ConsistentOldValue(old_value_checker) = op_consistency_level else {
+        return Ok(());
+    };
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
         table_id,
@@ -456,17 +467,17 @@ pub(crate) async fn do_update_sanity_check(
 
     match inner.get(key.clone(), epoch, read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
-            key,
+            key: key.clone(),
             prev: KeyOp::Delete(Bytes::default()),
-            new: KeyOp::Update((old_value, new_value)),
+            new: KeyOp::Update((old_value.clone(), new_value.clone())),
         })
         .into()),
         Some(stored_value) => {
-            if stored_value != old_value {
+            if !old_value_checker(&stored_value, old_value) {
                 Err(Box::new(MemTableError::InconsistentOperation {
-                    key,
+                    key: key.clone(),
                     prev: KeyOp::Insert(stored_value),
-                    new: KeyOp::Update((old_value, new_value)),
+                    new: KeyOp::Update((old_value.clone(), new_value.clone())),
                 })
                 .into())
             } else {
@@ -593,59 +604,6 @@ pub(crate) async fn wait_for_epoch(
                     return Ok(());
                 }
             }
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct LockTable {
-    locks: Arc<Mutex<HashMap<u64, VecDeque<Arc<Notify>>>>>,
-}
-
-pub struct LockGuard {
-    key: u64,
-    locks: Arc<Mutex<HashMap<u64, VecDeque<Arc<Notify>>>>>,
-}
-
-impl Default for LockTable {
-    fn default() -> Self {
-        Self {
-            locks: Arc::new(Mutex::new(HashMap::default())),
-        }
-    }
-}
-
-impl LockTable {
-    pub async fn lock_for(&self, key: u64) -> LockGuard {
-        let notify = {
-            let mut locks = self.locks.lock();
-            if let Some(que) = locks.get_mut(&key) {
-                let notify = Arc::new(Notify::new());
-                que.push_back(notify.clone());
-                Some(notify)
-            } else {
-                locks.insert(key, VecDeque::default());
-                None
-            }
-        };
-        if let Some(notify) = notify {
-            notify.notified().await;
-        }
-        LockGuard {
-            key,
-            locks: self.locks.clone(),
-        }
-    }
-}
-
-impl Drop for LockGuard {
-    fn drop(&mut self) {
-        let mut locks = self.locks.lock();
-        let que = locks.get_mut(&self.key).unwrap();
-        if let Some(notify) = que.pop_front() {
-            notify.notify_one();
-        } else {
-            locks.remove(&self.key);
         }
     }
 }

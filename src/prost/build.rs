@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -63,6 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".monitor_service.StackTraceResponse",
         ".plan_common.ExternalTableDesc",
         ".hummock.CompactTask",
+        ".catalog.StreamSourceInfo",
     ];
 
     // Build protobuf structs.

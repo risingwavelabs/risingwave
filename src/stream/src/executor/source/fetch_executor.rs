@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
+use std::marker::PhantomData;
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -24,7 +25,10 @@ use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{ScalarRef, ScalarRefImpl};
-use risingwave_connector::source::filesystem::FsSplit;
+use risingwave_connector::source::filesystem::opendal_source::{
+    OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
+};
+use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::{
     BoxSourceWithStateStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
     StreamChunkWithState,
@@ -46,7 +50,7 @@ const SPLIT_BATCH_SIZE: usize = 1000;
 
 type SplitBatch = Option<Vec<SplitImpl>>;
 
-pub struct FsFetchExecutor<S: StateStore> {
+pub struct FsFetchExecutor<S: StateStore, Src: OpendalSource> {
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
 
@@ -61,9 +65,11 @@ pub struct FsFetchExecutor<S: StateStore> {
 
     // config for the connector node
     connector_params: ConnectorParams,
+
+    _marker: PhantomData<Src>,
 }
 
-impl<S: StateStore> FsFetchExecutor<S> {
+impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
@@ -80,6 +86,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
             upstream: Some(upstream),
             source_ctrl_opts,
             connector_params,
+            _marker: PhantomData,
         }
     }
 
@@ -103,13 +110,28 @@ impl<S: StateStore> FsFetchExecutor<S> {
                 )
                 .await?;
             pin_mut!(table_iter);
-
+            let properties = source_desc.source.config.clone();
             while let Some(item) = table_iter.next().await {
                 let row = item?;
                 let split = match row.datum_at(1) {
-                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                        SplitImpl::from(FsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?)
-                    }
+                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => match properties {
+                        risingwave_connector::source::ConnectorProperties::Gcs(_) => {
+                            let split: OpendalFsSplit<OpendalGcs> =
+                                OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
+                            SplitImpl::from(split)
+                        }
+                        risingwave_connector::source::ConnectorProperties::OpendalS3(_) => {
+                            let split: OpendalFsSplit<OpendalS3> =
+                                OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
+                            SplitImpl::from(split)
+                        }
+                        risingwave_connector::source::ConnectorProperties::PosixFs(_) => {
+                            let split: OpendalFsSplit<OpendalPosixFs> =
+                                OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
+                            SplitImpl::from(split)
+                        }
+                        _ => unreachable!(),
+                    },
                     _ => unreachable!(),
                 };
                 batch.push(split);
@@ -119,7 +141,6 @@ impl<S: StateStore> FsFetchExecutor<S> {
                 }
             }
         }
-
         if batch.is_empty() {
             stream.replace_data_stream(stream::pending().boxed());
         } else {
@@ -155,6 +176,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
             self.source_ctrl_opts.clone(),
             self.connector_params.connector_client.clone(),
             self.actor_ctx.error_suppressor.clone(),
+            source_desc.source.config.clone(),
         )
     }
 
@@ -264,7 +286,11 @@ impl<S: StateStore> FsFetchExecutor<S> {
                                         .map(|row| {
                                             let filename = row.datum_at(0).unwrap().into_utf8();
                                             let size = row.datum_at(2).unwrap().into_int64();
-                                            FsSplit::new(filename.to_owned(), 0, size as usize)
+                                            OpendalFsSplit::<Src>::new(
+                                                filename.to_owned(),
+                                                0,
+                                                size as usize,
+                                            )
                                         })
                                         .collect();
                                     state_store_handler.take_snapshot(file_assignment).await?;
@@ -280,14 +306,17 @@ impl<S: StateStore> FsFetchExecutor<S> {
                             split_offset_mapping,
                         }) => {
                             let mapping = split_offset_mapping.unwrap();
-                            for (split_id, offset) in mapping {
+                            debug_assert_eq!(mapping.len(), 1);
+                            if let Some((split_id, offset)) = mapping.into_iter().next() {
                                 let row = state_store_handler
                                     .get(split_id.clone())
                                     .await?
                                     .expect("The fs_split should be in the state table.");
                                 let fs_split = match row.datum_at(1) {
                                     Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                                        FsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?
+                                        OpendalFsSplit::<Src>::restore_from_json(
+                                            jsonb_ref.to_owned_scalar(),
+                                        )?
                                     }
                                     _ => unreachable!(),
                                 };
@@ -311,7 +340,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
     }
 }
 
-impl<S: StateStore> Executor for FsFetchExecutor<S> {
+impl<S: StateStore, Src: OpendalSource> Executor for FsFetchExecutor<S, Src> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }
@@ -329,7 +358,7 @@ impl<S: StateStore> Executor for FsFetchExecutor<S> {
     }
 }
 
-impl<S: StateStore> Debug for FsFetchExecutor<S> {
+impl<S: StateStore, Src: OpendalSource> Debug for FsFetchExecutor<S, Src> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(core) = &self.stream_source_core {
             f.debug_struct("FsFetchExecutor")

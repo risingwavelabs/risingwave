@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,8 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::TryStreamExt;
 use risingwave_common::cache::CachePriority;
-use risingwave_hummock_sdk::key::{map_table_key_range, TableKey};
+use risingwave_common::hash::VirtualNode;
+use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
@@ -29,19 +30,21 @@ use risingwave_storage::store::{
 };
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
-use crate::test_utils::{with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch};
+use crate::test_utils::{
+    gen_key_from_bytes, with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch,
+};
 
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         use std::ops::RangeBounds;
         let range = $range;
-        let bounds: (Bound<Bytes>, Bound<Bytes>) = (
-            range.start_bound().map(|x: &Bytes| x.clone()),
-            range.end_bound().map(|x: &Bytes| x.clone()),
+        let bounds: (Bound<TableKey<Bytes>>, Bound<TableKey<Bytes>>) = (
+            range.start_bound().map(|x: &TableKey<Bytes>| x.clone()),
+            range.end_bound().map(|x: &TableKey<Bytes>| x.clone()),
         );
         let it = $storage
             .iter(
-                map_table_key_range(bounds),
+                bounds,
                 $epoch,
                 ReadOptions {
                     prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
@@ -112,8 +115,14 @@ async fn test_snapshot_inner(
     local
         .ingest_batch(
             vec![
-                (TableKey(Bytes::from("1")), StorageValue::new_put("test")),
-                (TableKey(Bytes::from("2")), StorageValue::new_put("test")),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("1")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("2")),
+                    StorageValue::new_put("test"),
+                ),
             ],
             vec![],
             WriteOptions {
@@ -147,9 +156,18 @@ async fn test_snapshot_inner(
     local
         .ingest_batch(
             vec![
-                (TableKey(Bytes::from("1")), StorageValue::new_delete()),
-                (TableKey(Bytes::from("3")), StorageValue::new_put("test")),
-                (TableKey(Bytes::from("4")), StorageValue::new_put("test")),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("1")),
+                    StorageValue::new_delete(),
+                ),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("3")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("4")),
+                    StorageValue::new_put("test"),
+                ),
             ],
             vec![],
             WriteOptions {
@@ -184,9 +202,18 @@ async fn test_snapshot_inner(
     local
         .ingest_batch(
             vec![
-                (TableKey(Bytes::from("2")), StorageValue::new_delete()),
-                (TableKey(Bytes::from("3")), StorageValue::new_delete()),
-                (TableKey(Bytes::from("4")), StorageValue::new_delete()),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("2")),
+                    StorageValue::new_delete(),
+                ),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("3")),
+                    StorageValue::new_delete(),
+                ),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("4")),
+                    StorageValue::new_delete(),
+                ),
             ],
             vec![],
             WriteOptions {
@@ -234,10 +261,22 @@ async fn test_snapshot_range_scan_inner(
     local
         .ingest_batch(
             vec![
-                (TableKey(Bytes::from("1")), StorageValue::new_put("test")),
-                (TableKey(Bytes::from("2")), StorageValue::new_put("test")),
-                (TableKey(Bytes::from("3")), StorageValue::new_put("test")),
-                (TableKey(Bytes::from("4")), StorageValue::new_put("test")),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("1")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("2")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("3")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("4")),
+                    StorageValue::new_put("test"),
+                ),
             ],
             vec![],
             WriteOptions {
@@ -267,7 +306,7 @@ async fn test_snapshot_range_scan_inner(
     }
     macro_rules! key {
         ($idx:expr) => {
-            Bytes::from(stringify!($idx))
+            gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from(stringify!($idx)))
         };
     }
 

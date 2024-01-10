@@ -1,0 +1,63 @@
+# upsert format must have a pk
+statement error
+CREATE TABLE upsert_students_default_key (
+    "ID" INT,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL
+)
+INCLUDE KEY AS rw_key
+WITH (
+	connector = 'kafka',
+    properties.bootstrap.server = 'message_queue:29092',
+	topic = 'upsert_json')
+FORMAT UPSERT ENCODE JSON
+
+# upsert format pk must be the key column
+statement error
+CREATE TABLE upsert_students_default_key (
+    "ID" INT primary key,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL
+)
+INCLUDE KEY AS rw_key
+WITH (
+	connector = 'kafka',
+    properties.bootstrap.server = 'message_queue:29092',
+	topic = 'upsert_json')
+FORMAT UPSERT ENCODE JSON
+
+statement ok
+CREATE TABLE upsert_students_default_key (
+    "ID" INT,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL,
+)
+INCLUDE KEY AS rw_key
+WITH (
+	connector = 'kafka',
+    properties.bootstrap.server = 'message_queue:29092',
+	topic = 'upsert_json')
+FORMAT PLAIN ENCODE JSON
+
+statement ok
+select * from upsert_students_default_key;
+
+# Wait enough time to ensure SourceExecutor consumes all Kafka data.
+sleep 3s
+
+query I
+select count(rw_key) from upsert_students_default_key
+----
+15
+
+statement ok
+drop table upsert_students_default_key

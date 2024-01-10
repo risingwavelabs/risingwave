@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::{default_key_column_name_version_mapping, ColumnId, TableId};
 use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
+use risingwave_pb::data::data_type::TypeName as PbTypeName;
+use risingwave_pb::plan_common::{
+    AdditionalColumnType, ColumnDescVersion, FormatType, PbEncodeType,
+};
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::panic_store::PanicStateStore;
@@ -40,7 +44,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let (sender, barrier_receiver) = unbounded_channel();
         stream
             .context
-            .lock_barrier_manager()
+            .barrier_manager()
             .register_sender(params.actor_context.id, sender);
         let system_params = params.env.system_params_manager_ref().get_params();
 
@@ -50,11 +54,40 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 let source_name = source.source_name.clone();
                 let source_info = source.get_info()?;
 
+                let mut source_columns = source.columns.clone();
+
+                {
+                    // compatible code: introduced in https://github.com/risingwavelabs/risingwave/pull/13707
+                    // for upsert and (avro | protobuf) overwrite the `_rw_key` column's ColumnDesc.additional_column_type to Key
+                    if source_info.format() == FormatType::Upsert
+                        && (source_info.row_encode() == PbEncodeType::Avro
+                            || source_info.row_encode() == PbEncodeType::Protobuf)
+                    {
+                        let _ = source_columns.iter_mut().map(|c| {
+                            let _ = c.column_desc.as_mut().map(|desc| {
+                                let is_bytea = desc
+                                    .get_column_type()
+                                    .map(|col_type| col_type.type_name == PbTypeName::Bytea as i32)
+                                    .unwrap();
+                                if desc.name == default_key_column_name_version_mapping(
+                                    &desc.version()
+                                )
+                                    && is_bytea
+                                    // the column is from a legacy version
+                                    && desc.version == ColumnDescVersion::Unspecified as i32
+                                {
+                                    desc.additional_column_type = AdditionalColumnType::Key as i32;
+                                }
+                            });
+                        });
+                    }
+                }
+
                 let source_desc_builder = SourceDescBuilder::new(
-                    source.columns.clone(),
+                    source_columns.clone(),
                     params.env.source_metrics(),
                     source.row_id_index.map(|x| x as _),
-                    source.properties.clone(),
+                    source.with_properties.clone(),
                     source_info.clone(),
                     params.env.connector_params(),
                     params.env.config().developer.connector_message_buffer_size,
@@ -74,8 +107,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     chunk_size: params.env.config().developer.chunk_size,
                 };
 
-                let source_column_ids: Vec<_> = source
-                    .columns
+                let source_column_ids: Vec<_> = source_columns
                     .iter()
                     .map(|column| ColumnId::from(column.get_column_desc().unwrap().column_id))
                     .collect();
@@ -94,13 +126,13 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 );
 
                 let connector = source
-                    .properties
+                    .with_properties
                     .get("connector")
                     .map(|c| c.to_ascii_lowercase())
                     .unwrap_or_default();
                 let is_fs_connector = FS_CONNECTORS.contains(&connector.as_str());
                 let is_fs_v2_connector =
-                    ConnectorProperties::is_new_fs_connector_hash_map(&source.properties);
+                    ConnectorProperties::is_new_fs_connector_hash_map(&source.with_properties);
 
                 if is_fs_connector {
                     FsSourceExecutor::new(

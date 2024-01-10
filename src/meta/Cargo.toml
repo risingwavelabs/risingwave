@@ -22,7 +22,9 @@ aws-config = { workspace = true }
 aws-sdk-ec2 = { workspace = true }
 base64-url = { version = "2.0.0" }
 bytes = { version = "1", features = ["serde"] }
+chrono = "0.4"
 clap = { version = "4", features = ["derive", "env"] }
+comfy-table = "7"
 crepe = "0.1"
 easy-ext = "1"
 either = "1"
@@ -34,10 +36,12 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 hyper = "0.14"
 itertools = "0.12"
+maplit = "1.0.2"
 memcomparable = { version = "0.2" }
 mime_guess = "2"
 num-integer = "0.1"
 num-traits = "0.2"
+otlp-embedded = { workspace = true }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 prometheus = "0.13"
 prometheus-http-query = "0.8"
@@ -92,7 +96,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
-maplit = "1.0.2"
+expect-test = "1.4"
 rand = "0.8"
 risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
 risingwave_test_runner = { workspace = true }

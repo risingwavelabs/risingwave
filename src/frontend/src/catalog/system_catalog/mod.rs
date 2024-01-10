@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,6 +29,8 @@ use risingwave_common::catalog::{
 use risingwave_common::error::BoxedError;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
+use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
+use risingwave_pb::meta::table_parallelism::{PbFixedParallelism, PbParallelism};
 use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::catalog_service::CatalogReader;
@@ -209,6 +211,22 @@ fn infer_dummy_view_sql(columns: &[SystemCatalogColumnsDef<'_>]) -> String {
     )
 }
 
+fn extract_parallelism_from_table_state(state: &TableFragmentState) -> String {
+    let parallelism = match state
+        .parallelism
+        .as_ref()
+        .and_then(|parallelism| parallelism.parallelism.as_ref())
+    {
+        None => "unknown".to_string(),
+        Some(PbParallelism::Auto(_)) => "auto".to_string(),
+        Some(PbParallelism::Fixed(PbFixedParallelism { parallelism })) => {
+            format!("fixed({parallelism})")
+        }
+        Some(PbParallelism::Custom(_)) => "custom".to_string(),
+    };
+    parallelism
+}
+
 /// get acl items of `object` in string, ignore public.
 fn get_acl_items(
     object: &Object,
@@ -333,7 +351,6 @@ macro_rules! prepare_sys_catalog {
         paste::paste! {
             $(
                 #[ctor::ctor]
-                #[allow(non_snake_case)]
                 unsafe fn [<register_${index()}>]() {
                     _register((${index()} + 1) as u32, $builtin_catalog);
                 }
@@ -422,6 +439,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_RELATION_INFO), read_relation_info await },
     { BuiltinCatalog::Table(&RW_SYSTEM_TABLES), read_system_table_info },
     { BuiltinCatalog::View(&RW_RELATIONS) },
+    { BuiltinCatalog::View(&RW_STREAMING_PARALLELISM) },
     { BuiltinCatalog::Table(&RW_COLUMNS), read_rw_columns_info },
     { BuiltinCatalog::Table(&RW_TYPES), read_rw_types },
     { BuiltinCatalog::Table(&RW_HUMMOCK_PINNED_VERSIONS), read_hummock_pinned_versions await },

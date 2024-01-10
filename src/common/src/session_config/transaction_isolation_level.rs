@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,10 +39,10 @@ impl FromStr for IsolationLevel {
 impl std::fmt::Display for IsolationLevel {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ReadCommitted => write!(f, "READ_COMMITTED"),
-            Self::ReadUncommitted => write!(f, "READ_UNCOMMITTED"),
-            Self::RepeatableRead => write!(f, "REPEATABLE_READ"),
-            Self::Serializable => write!(f, "SERIALIZABLE"),
+            Self::ReadCommitted => write!(f, "read committed"),
+            Self::ReadUncommitted => write!(f, "read uncommitted"),
+            Self::RepeatableRead => write!(f, "repeatable read"),
+            Self::Serializable => write!(f, "serializable"),
         }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,11 +37,14 @@ pub struct JavaVmWrapper;
 
 impl JavaVmWrapper {
     pub fn get_or_init(&self) -> anyhow::Result<&'static JavaVM> {
-        match JVM_RESULT.get_or_init(|| {
-            Self::inner_new().inspect_err(|e| error!("failed to init jvm: {:?}", e.as_report()))
-        }) {
+        match JVM_RESULT.get_or_init(Self::inner_new) {
             Ok(jvm) => Ok(jvm),
-            Err(e) => Err(anyhow!("jvm not initialized properly: {:?}", e)),
+            Err(e) => {
+                error!(error = %e.as_report(), "jvm not initialized properly");
+                // Note: anyhow!(e) doesn't preserve source
+                // https://github.com/dtolnay/anyhow/issues/341
+                Err(anyhow!(e.to_report_string()).context("jvm not initialized properly"))
+            }
         }
     }
 
@@ -90,6 +93,7 @@ impl JavaVmWrapper {
             )
         };
 
+        // FIXME: passing custom arguments to the embedded jvm when compute node start
         // Build the VM properties
         let args_builder = InitArgsBuilder::new()
             // Pass the JNI API version (default is 8)
@@ -104,7 +108,8 @@ impl JavaVmWrapper {
             // In RisingWave we assume the upstream changelog may contain duplicate events and
             // handle conflicts in the mview operator, thus we don't need to obey the above
             // instructions. So we decrease the wait time here to reclaim jvm thread faster.
-            .option("-Ddebezium.embedded.shutdown.pause.before.interrupt.ms=1");
+            .option("-Ddebezium.embedded.shutdown.pause.before.interrupt.ms=1")
+            .option("-Dcdc.source.wait.streaming.before.exit.seconds=30");
 
         tracing::info!("JVM args: {:?}", args_builder);
         let jvm_args = args_builder.build().context("invalid jvm args")?;

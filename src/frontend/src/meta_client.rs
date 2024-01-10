@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::WorkerNode;
@@ -22,7 +23,7 @@ use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
-    HummockSnapshot, HummockVersion, HummockVersionDelta,
+    HummockSnapshot,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -223,15 +224,12 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0
             .risectl_get_checkpoint_hummock_version()
             .await
-            .map(|v| v.checkpoint_version.unwrap())
+            .map(|v| HummockVersion::from_rpc_protobuf(&v.checkpoint_version.unwrap()))
     }
 
     async fn list_version_deltas(&self) -> Result<Vec<HummockVersionDelta>> {
         // FIXME #8612: there can be lots of version deltas, so better to fetch them by pages and refactor `SysRowSeqScanExecutor` to yield multiple chunks.
-        self.0
-            .list_version_deltas(0, u32::MAX, u64::MAX)
-            .await
-            .map(|v| v.version_deltas)
+        self.0.list_version_deltas(0, u32::MAX, u64::MAX).await
     }
 
     async fn list_branched_objects(&self) -> Result<Vec<BranchedObject>> {

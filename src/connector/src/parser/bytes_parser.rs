@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -74,7 +74,10 @@ mod tests {
 
         for payload in get_payload() {
             let writer = builder.row_writer();
-            parser.parse_inner(payload, writer).await.unwrap();
+            parser
+                .parse_inner(None, Some(payload), writer)
+                .await
+                .unwrap();
         }
 
         let chunk = builder.finish();

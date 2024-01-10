@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -84,6 +84,24 @@ pub struct NotImplemented {
     pub issue: TrackingIssue,
 }
 
+#[derive(Error, Debug, Macro)]
+#[thiserror_ext(macro(path = "crate::error"))]
+pub struct NoFunction {
+    #[message]
+    pub sig: String,
+    pub candidates: Option<String>,
+}
+
+impl Display for NoFunction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "function {} does not exist", self.sig)?;
+        if let Some(candidates) = &self.candidates {
+            write!(f, ", do you mean {}", candidates)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Error, Debug, Box)]
 #[thiserror_ext(newtype(name = RwError, backtrace, report_debug))]
 pub enum ErrorCode {
@@ -107,8 +125,8 @@ pub enum ErrorCode {
     // Tips: Use this only if it's intended to reject the query
     #[error("Not supported: {0}\nHINT: {1}")]
     NotSupported(String, String),
-    #[error("function {0} does not exist")]
-    NoFunction(String),
+    #[error(transparent)]
+    NoFunction(#[from] NoFunction),
     #[error(transparent)]
     IoError(#[from] IoError),
     #[error("Storage error: {0}")]

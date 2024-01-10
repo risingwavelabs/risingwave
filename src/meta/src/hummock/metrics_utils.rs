@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,22 +18,22 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use itertools::{enumerate, Itertools};
-use prost::Message;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    object_size_map, BranchedSstInfo, HummockVersionExt,
+    object_size_map, BranchedSstInfo,
 };
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
 };
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
-    HummockVersionCheckpoint, HummockVersionStats, LevelType,
+    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats, LevelType,
 };
 
 use super::compaction::get_compression_algorithm;
 use super::compaction::selector::DynamicLevelSelectorCore;
+use crate::hummock::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::compaction::CompactStatus;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -47,7 +47,7 @@ pub fn trigger_version_stat(
         .set(current_version.max_committed_epoch as i64);
     metrics
         .version_size
-        .set(current_version.encoded_len() as i64);
+        .set(current_version.estimated_encode_len() as i64);
     metrics.safe_epoch.set(current_version.safe_epoch as i64);
     metrics.current_version_id.set(current_version.id as i64);
     metrics.version_stats.reset();
@@ -390,7 +390,7 @@ pub fn trigger_gc_stat(
     checkpoint: &HummockVersionCheckpoint,
     min_pinned_version_id: HummockVersionId,
 ) {
-    let current_version_object_size_map = object_size_map(checkpoint.version.as_ref().unwrap());
+    let current_version_object_size_map = object_size_map(&checkpoint.version);
     let current_version_object_size = current_version_object_size_map.values().sum::<u64>();
     let current_version_object_count = current_version_object_size_map.len();
     let mut old_version_object_size = 0;

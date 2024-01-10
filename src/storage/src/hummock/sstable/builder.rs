@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -237,6 +237,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         value: HummockValue<&[u8]>,
     ) -> HummockResult<()> {
         self.add(full_key, value).await
+    }
+
+    /// only for test
+    pub fn current_block_size(&self) -> usize {
+        self.block_builder.approximate_len()
     }
 
     /// Add raw data of block to sstable. return false means fallback
@@ -666,7 +671,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             + self.range_tombstone_size
     }
 
-    async fn build_block(&mut self) -> HummockResult<()> {
+    pub async fn build_block(&mut self) -> HummockResult<()> {
         // Skip empty block.
         if self.block_builder.is_empty() {
             return Ok(());
@@ -710,10 +715,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     /// Returns true if we roughly reached capacity
     pub fn reach_capacity(&self) -> bool {
         self.approximate_len() >= self.options.capacity
-    }
-
-    pub fn reach_max_sst_size(&self) -> bool {
-        self.approximate_len() as u64 >= self.options.max_sst_size
     }
 
     fn finalize_last_table_stats(&mut self) {
