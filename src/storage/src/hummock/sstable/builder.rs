@@ -200,9 +200,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         }
         if is_max_epoch(event.new_epoch)
             && self.monotonic_deletes.last().map_or(true, |last| {
-                is_max_epoch(last.new_epoch)
-                    && last.event_key.left_user_key.table_id
-                        == event.event_key.left_user_key.table_id
+                last.event_key.left_user_key.table_id != event.event_key.left_user_key.table_id
+                    || is_max_epoch(last.new_epoch)
             })
         {
             // This range would never delete any key so we can merge it with last range.
