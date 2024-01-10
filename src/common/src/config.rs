@@ -1051,7 +1051,7 @@ pub mod default {
         }
 
         pub fn compaction_task_max_heartbeat_interval_secs() -> u64 {
-            60 // 1min
+            30 // 30s
         }
 
         pub fn compaction_task_max_progress_interval_secs() -> u64 {
