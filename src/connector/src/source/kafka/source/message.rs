@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use rdkafka::message::{BorrowedMessage, OwnedHeaders};
+use itertools::Itertools;
+use rdkafka::message::{BorrowedMessage, Headers, OwnedHeaders};
 use rdkafka::Message;
+use risingwave_common::types::{Datum, ListValue, Scalar, ScalarImpl, StructValue};
 
+use crate::parser::additional_columns::get_kafka_header_item_datatype;
 use crate::source::base::SourceMessage;
 use crate::source::SourceMeta;
 
@@ -23,6 +26,36 @@ pub struct KafkaMeta {
     // timestamp(milliseconds) of message append in mq
     pub timestamp: Option<i64>,
     pub headers: Option<OwnedHeaders>,
+}
+
+impl KafkaMeta {
+    pub fn extract_timestamp(&self) -> Option<Datum> {
+        self.timestamp
+            .map(|ts| {
+                risingwave_common::cast::i64_to_timestamptz(ts)
+                    .unwrap()
+                    .to_scalar_value()
+            })
+            .into()
+    }
+
+    pub fn extract_headers(&self) -> Option<Datum> {
+        self.headers.as_ref().map(|headers| {
+            let header_item: Vec<Datum> = headers
+                .iter()
+                .map(|header| {
+                    Some(ScalarImpl::Struct(StructValue::new(vec![
+                        Some(ScalarImpl::Utf8(header.key.to_string().into())),
+                        header.value.map(|byte| ScalarImpl::Bytea(byte.into())),
+                    ])))
+                })
+                .collect_vec();
+            Some(ScalarImpl::List(ListValue::from_datum_iter(
+                &get_kafka_header_item_datatype(),
+                header_item,
+            )))
+        })
+    }
 }
 
 impl SourceMessage {

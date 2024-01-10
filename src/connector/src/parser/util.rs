@@ -14,16 +14,13 @@
 use std::collections::HashMap;
 
 use bytes::Bytes;
-use itertools::Itertools;
-use rdkafka::message::Headers;
 use reqwest::Url;
 use risingwave_common::error::ErrorCode::{InvalidParameterValue, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{Datum, ListValue, Scalar, ScalarImpl, StructValue};
+use risingwave_common::types::Datum;
 
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::common::AwsAuthProps;
-use crate::parser::additional_columns::get_kafka_header_item_datatype;
 use crate::source::SourceMeta;
 
 /// get kafka topic name
@@ -117,35 +114,14 @@ pub(super) async fn bytes_from_url(url: &Url, config: Option<&AwsAuthProps>) -> 
 
 pub fn extreact_timestamp_from_meta(meta: &SourceMeta) -> Option<Datum> {
     match meta {
-        SourceMeta::Kafka(kafka_meta) => kafka_meta
-            .timestamp
-            .map(|ts| {
-                risingwave_common::cast::i64_to_timestamptz(ts)
-                    .unwrap()
-                    .to_scalar_value()
-            })
-            .into(),
+        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_timestamp(),
         _ => None,
     }
 }
 
 pub fn extract_headers_from_meta(meta: &SourceMeta) -> Option<Datum> {
     match meta {
-        SourceMeta::Kafka(kafka_meta) => kafka_meta.headers.as_ref().map(|header| {
-            let header_item: Vec<Datum> = header
-                .iter()
-                .map(|header| {
-                    Some(ScalarImpl::Struct(StructValue::new(vec![
-                        Some(ScalarImpl::Utf8(header.key.to_string().into())),
-                        header.value.map(|byte| ScalarImpl::Bytea(byte.into())),
-                    ])))
-                })
-                .collect_vec();
-            Some(ScalarImpl::List(ListValue::from_datum_iter(
-                &get_kafka_header_item_datatype(),
-                header_item,
-            )))
-        }),
+        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_headers(),
         _ => None,
     }
 }

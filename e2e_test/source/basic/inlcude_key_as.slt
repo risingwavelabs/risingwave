@@ -86,6 +86,12 @@ WHERE  key_col IS NOT NULL
 ----
 101
 
+# the input data is from scripts/source/prepare_ci_kafka.sh
+# ```
+# for i in {0..100}; do echo "key$i:{\"a\": $i}" | ${KCAT_BIN} -P -b message_queue:29092 -t ${ADDI_COLUMN_TOPIC} -K : -H "header1=v1" -H "header2=v2"; done
+# ```
+# The command generates 101 messages with key `key0` to `key100` and value `{"a": 0}` to `{"a": 100}`, with fixed headers `header1=v1` and `header2=v2`.
+
 query TT
 SELECT (header_col[1]).key AS key, (header_col[1]).value::text AS value
 FROM   additional_columns limit 1;
