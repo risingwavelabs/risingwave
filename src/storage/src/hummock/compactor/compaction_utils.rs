@@ -351,7 +351,11 @@ pub async fn check_compaction_result(
     }
     let iter = UnorderedMergeIteratorInner::for_compactor(table_iters);
     let mut left_iter = UserIterator::new(
-        SkipWatermarkIterator::from_safe_epoch_watermarks(iter, &compact_task.table_watermarks),
+        SkipWatermarkIterator::from_safe_epoch_watermarks(
+            iter,
+            &compact_task.table_watermarks,
+            None,
+        ),
         (Bound::Unbounded, Bound::Unbounded),
         u64::MAX,
         0,
@@ -367,7 +371,11 @@ pub async fn check_compaction_result(
         compact_io_retry_time,
     );
     let mut right_iter = UserIterator::new(
-        SkipWatermarkIterator::from_safe_epoch_watermarks(iter, &compact_task.table_watermarks),
+        SkipWatermarkIterator::from_safe_epoch_watermarks(
+            iter,
+            &compact_task.table_watermarks,
+            None,
+        ),
         (Bound::Unbounded, Bound::Unbounded),
         u64::MAX,
         0,
