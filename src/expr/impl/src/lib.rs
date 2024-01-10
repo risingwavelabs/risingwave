@@ -34,6 +34,7 @@
 #![feature(result_flattening)]
 
 mod aggregate;
+mod external;
 mod scalar;
 mod table_function;
 
