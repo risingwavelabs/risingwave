@@ -826,6 +826,15 @@ impl<T: AsRef<[u8]> + Ord + Eq> PartialOrd for FullKey<T> {
     }
 }
 
+impl<'a, T> From<FullKey<&'a [u8]>> for FullKey<T>
+where
+    T: AsRef<[u8]> + CopyFromSlice,
+{
+    fn from(value: FullKey<&'a [u8]>) -> Self {
+        value.copy_into()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PointRange<T: AsRef<[u8]>> {
     // When comparing `PointRange`, we first compare `left_user_key`, then
@@ -919,6 +928,95 @@ pub fn bound_table_key_range<T: AsRef<[u8]> + EmptySliceRef>(
     };
 
     (start, end)
+}
+
+pub struct FullKeyTracker<T: AsRef<[u8]> + Ord + Eq + CopyFromSlice> {
+    pub latest_full_key: FullKey<T>,
+    last_observed_epoch_with_gap: EpochWithGap,
+}
+
+impl<T: AsRef<[u8]> + Ord + Eq + CopyFromSlice> FullKeyTracker<T> {
+    pub fn new(init_full_key: FullKey<T>) -> Self {
+        let epoch_with_gap = init_full_key.epoch_with_gap;
+        Self {
+            latest_full_key: init_full_key,
+            last_observed_epoch_with_gap: epoch_with_gap,
+        }
+    }
+
+    /// Check and observe a new full key during iteration
+    ///
+    /// # Examples:
+    /// ```
+    /// let table_id = TableId { table_id: 1 };
+    /// let full_key1 = FullKey::new(table_id, TableKey(Bytes::from("c")), 5);
+    /// let a = FullKeyTracker::<Bytes>::new(full_key1);
+    ///
+    /// // Panic on non-decreasing epoch observed for the same user key.
+    /// // let full_key_with_larger_epoch = FullKey::new(table_id, TableKey(Bytes::from("c")), 6);
+    /// // a.observe(full_key_with_larger_epoch.as_ref());
+    ///
+    /// // Panic on non-increasing user key observed.
+    /// // let full_key_with_smaller_user_key = FullKey::new(table_id, TableKey(Bytes::from("b")), 3);
+    /// // a.observe(full_key_with_smaller_user_key.as_ref());
+    ///
+    /// let full_key2 = FullKey::new(table_id, TableKey(Bytes::from("c")), 3);
+    /// assert_eq!(a.observe(full_key.as_ref()), None);
+    ///
+    /// let full_key3 = FullKey::new(table_id, TableKey(Bytes::from("f")), 4);
+    /// assert_eq!(a.observe(full_key.as_ref()), Some(full_key1));
+    /// ```
+    ///
+    /// Return:
+    /// - If the provided `key` is a new user key. return the first full key observed for the previous user key.
+    /// - Otherwise: return None
+    pub fn observe<F>(&mut self, key: FullKey<F>) -> Option<FullKey<T>>
+    where
+        FullKey<F>: Into<FullKey<T>>,
+        F: AsRef<[u8]>,
+    {
+        match self
+            .latest_full_key
+            .user_key
+            .as_ref()
+            .cmp(&key.user_key.as_ref())
+        {
+            Ordering::Less => {
+                // Observe a new user key
+
+                // Reset epochs
+                self.last_observed_epoch_with_gap = key.epoch_with_gap;
+
+                // Take the previous key and set latest key
+                let mut full_key = key.into();
+                std::mem::swap(&mut self.latest_full_key, &mut full_key);
+
+                Some(full_key)
+            }
+            Ordering::Equal => {
+                if key.epoch_with_gap >= self.last_observed_epoch_with_gap {
+                    // Epoch from the same user key should be monotonically decreasing
+                    panic!(
+                        "key {:?} epoch {:?} >= prev epoch {:?}",
+                        key.user_key, key.epoch_with_gap, self.last_observed_epoch_with_gap
+                    );
+                }
+                self.last_observed_epoch_with_gap = key.epoch_with_gap;
+                None
+            }
+            Ordering::Greater => {
+                // User key should be monotonically increasing
+                panic!(
+                    "key {:?} <= prev key {:?}",
+                    key,
+                    FullKey {
+                        user_key: self.latest_full_key.user_key.as_ref(),
+                        epoch_with_gap: self.last_observed_epoch_with_gap
+                    }
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]

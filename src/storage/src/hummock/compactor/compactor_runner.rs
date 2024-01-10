@@ -24,7 +24,7 @@ use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
-use risingwave_hummock_sdk::key::{FullKey, PointRange};
+use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, PointRange};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{can_concat, EpochWithGap, HummockEpoch};
@@ -732,7 +732,7 @@ where
     };
     let max_key = end_key.to_ref();
 
-    let mut last_key = FullKey::default();
+    let mut full_key_tracker = FullKeyTracker::<Vec<u8>>::new(FullKey::default());
     let mut watermark_can_see_last_key = false;
     let mut user_key_last_delete_epoch = HummockEpoch::MAX;
     let mut local_stats = StoreLocalStatistic::default();
@@ -746,9 +746,7 @@ where
         let mut iter_key = iter.key();
         compaction_statistics.iter_total_key_counts += 1;
 
-        let mut is_new_user_key =
-            last_key.is_empty() || iter_key.user_key != last_key.user_key.as_ref();
-
+        let mut is_new_user_key = full_key_tracker.observe(iter.key()).is_some();
         let mut drop = false;
 
         let epoch = iter_key.epoch_with_gap.pure_epoch();
@@ -757,7 +755,6 @@ where
             if !max_key.is_empty() && iter_key >= max_key {
                 break;
             }
-            last_key.set(iter_key);
             watermark_can_see_last_key = false;
             user_key_last_delete_epoch = HummockEpoch::MAX;
             if value.is_delete() {
@@ -768,12 +765,12 @@ where
         }
 
         if last_table_id.map_or(true, |last_table_id| {
-            last_table_id != last_key.user_key.table_id.table_id
+            last_table_id != iter_key.user_key.table_id.table_id
         }) {
             if let Some(last_table_id) = last_table_id.take() {
                 table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
             }
-            last_table_id = Some(last_key.user_key.table_id.table_id);
+            last_table_id = Some(iter_key.user_key.table_id.table_id);
         }
 
         let target_extended_user_key = PointRange::from_user_key(iter_key.user_key, false);
@@ -824,13 +821,13 @@ where
 
             let should_count = match task_config.stats_target_table_ids.as_ref() {
                 Some(target_table_ids) => {
-                    target_table_ids.contains(&last_key.user_key.table_id.table_id)
+                    target_table_ids.contains(&iter_key.user_key.table_id.table_id)
                 }
                 None => true,
             };
             if should_count {
                 last_table_stats.total_key_count -= 1;
-                last_table_stats.total_key_size -= last_key.encoded_len() as i64;
+                last_table_stats.total_key_size -= iter_key.encoded_len() as i64;
                 last_table_stats.total_value_size -= iter.value().encoded_len() as i64;
             }
             iter.next()

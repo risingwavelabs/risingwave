@@ -24,7 +24,7 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, PointRange, TableKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
@@ -355,13 +355,21 @@ pub async fn merge_imms_in_memory(
     }
 
     let mut merged_payload: Vec<SharedBufferVersionedEntry> = Vec::new();
-    let mut pivot = items
+    let first_full_key = items
         .first()
-        .map(|((k, _), _)| k.clone())
+        .map(|((k, _), epoch_with_gap)| {
+            FullKey::new_with_gap_epoch(table_id, k.clone(), *epoch_with_gap)
+        })
         .unwrap_or_default();
+
     let mut monotonic_tombstone_events = vec![];
-    let target_extended_user_key =
-        PointRange::from_user_key(UserKey::new(table_id, TableKey(pivot.as_ref())), false);
+    let target_extended_user_key = PointRange::from_user_key(
+        UserKey::new(
+            table_id,
+            TableKey(first_full_key.user_key.table_key.as_ref()),
+        ),
+        false,
+    );
     while del_iter.is_valid() && del_iter.key().le(&target_extended_user_key) {
         let event_key = del_iter.key().to_vec();
         del_iter.next().await?;
@@ -371,19 +379,16 @@ pub async fn merge_imms_in_memory(
         });
     }
 
-    let mut versions: Vec<(EpochWithGap, HummockValue<Bytes>)> = Vec::new();
+    let mut full_key_tracker = FullKeyTracker::<Bytes>::new(first_full_key);
+    let mut table_key_versions: Vec<(EpochWithGap, HummockValue<Bytes>)> = Vec::new();
+    let mut table_key_last_delete_epoch = HummockEpoch::MAX;
 
-    let mut pivot_last_delete_epoch = HummockEpoch::MAX;
-
-    for ((key, value), epoch) in items {
-        assert!(key >= pivot, "key should be in ascending order");
-        if key != pivot {
-            merged_payload.push((pivot, versions));
-            pivot = key;
-            pivot_last_delete_epoch = HummockEpoch::MAX;
-            versions = vec![];
+    for ((key, value), epoch_with_gap) in items {
+        let full_key = FullKey::new_with_gap_epoch(table_id, key, epoch_with_gap);
+        if let Some(last_full_key) = full_key_tracker.observe(full_key) {
+            // Record range tombstones if any
             let target_extended_user_key =
-                PointRange::from_user_key(UserKey::new(table_id, TableKey(pivot.as_ref())), false);
+                PointRange::from_user_key(last_full_key.user_key.as_ref(), false);
             while del_iter.is_valid() && del_iter.key().le(&target_extended_user_key) {
                 let event_key = del_iter.key().to_vec();
                 del_iter.next().await?;
@@ -392,28 +397,35 @@ pub async fn merge_imms_in_memory(
                     new_epoch: del_iter.earliest_epoch(),
                 });
             }
+
+            // Record kv entries
+            merged_payload.push((last_full_key.user_key.table_key, table_key_versions));
+
+            // Reset state before moving onto the new table key
+            table_key_versions = vec![];
+            table_key_last_delete_epoch = HummockEpoch::MAX;
         }
         let earliest_range_delete_which_can_see_key =
-            del_iter.earliest_delete_since(epoch.pure_epoch());
+            del_iter.earliest_delete_since(epoch_with_gap.pure_epoch());
         if value.is_delete() {
-            pivot_last_delete_epoch = epoch.pure_epoch();
-        } else if earliest_range_delete_which_can_see_key < pivot_last_delete_epoch {
+            table_key_last_delete_epoch = epoch_with_gap.pure_epoch();
+        } else if earliest_range_delete_which_can_see_key < table_key_last_delete_epoch {
             debug_assert!(
-                epoch.pure_epoch() < earliest_range_delete_which_can_see_key
-                    && earliest_range_delete_which_can_see_key < pivot_last_delete_epoch
+                epoch_with_gap.pure_epoch() < earliest_range_delete_which_can_see_key
+                    && earliest_range_delete_which_can_see_key < table_key_last_delete_epoch
             );
-            pivot_last_delete_epoch = earliest_range_delete_which_can_see_key;
+            table_key_last_delete_epoch = earliest_range_delete_which_can_see_key;
             // In each merged immutable memtable, since a union set of delete ranges is constructed
             // and thus original delete ranges are replaced with the union set and not
             // used in read, we lose exact information about whether a key is deleted by
             // a delete range in the merged imm which it belongs to. Therefore we need
             // to construct a corresponding delete key to represent this.
-            versions.push((
+            table_key_versions.push((
                 EpochWithGap::new_from_epoch(earliest_range_delete_which_can_see_key),
                 HummockValue::Delete,
             ));
         }
-        versions.push((epoch, value));
+        table_key_versions.push((epoch_with_gap, value));
     }
     while del_iter.is_valid() {
         let event_key = del_iter.key().to_vec();
@@ -425,8 +437,11 @@ pub async fn merge_imms_in_memory(
     }
 
     // process the last key
-    if !versions.is_empty() {
-        merged_payload.push((pivot, versions));
+    if !table_key_versions.is_empty() {
+        merged_payload.push((
+            full_key_tracker.latest_full_key.user_key.table_key,
+            table_key_versions,
+        ));
     }
 
     drop(del_iter);
