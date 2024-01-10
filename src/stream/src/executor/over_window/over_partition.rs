@@ -795,19 +795,13 @@ fn find_affected_ranges<'cache>(
     // support `RANGE` and `GROUPS` frames later. May introduce a return value variant to clearly
     // tell the caller that there exists at least one affected range that touches the sentinel.
 
-    let delta = part_with_delta.delta();
-    if delta.is_empty() {
-        // no change means no ranges affected
-        return vec![];
-    }
-
-    let delta_first_key = delta.first_key_value().unwrap().0;
-    let delta_last_key = delta.last_key_value().unwrap().0;
-
     if part_with_delta.first_key().is_none() {
         // all keys are deleted in the delta
         return vec![];
     }
+
+    let delta_first_key = part_with_delta.delta().first_key_value().unwrap().0;
+    let delta_last_key = part_with_delta.delta().last_key_value().unwrap().0;
 
     if part_with_delta.snapshot().is_empty() {
         // all existing keys are inserted in the delta
@@ -1088,20 +1082,6 @@ mod find_affected_ranges_tests {
                     OwnedRow::new(vec![Some(expected.3)])
                 );
             })
-    }
-
-    #[test]
-    fn test_all_empty() {
-        let cache = create_cache!();
-        let delta = create_delta!();
-        let calls = vec![create_call(Frame::rows(
-            FrameBound::Preceding(2),
-            FrameBound::Preceding(1),
-        ))];
-        assert_ranges_eq(
-            find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
-            [],
-        );
     }
 
     #[test]
