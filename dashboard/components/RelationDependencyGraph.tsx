@@ -17,6 +17,7 @@
 
 import { theme } from "@chakra-ui/react"
 import * as d3 from "d3"
+import { useRouter } from "next/router"
 import { useCallback, useEffect, useRef } from "react"
 import {
   Enter,
@@ -26,6 +27,7 @@ import {
   flipLayoutRelation,
   generateRelationEdges,
 } from "../lib/layout"
+import { Relation, relationType } from "../pages/api/streaming"
 
 function boundBox(
   relationPosition: RelationPointPosition[],
@@ -44,9 +46,9 @@ function boundBox(
 }
 
 const layerMargin = 50
-const rowMargin = 200
-const nodeRadius = 10
-const layoutMargin = 100
+const rowMargin = 50
+export const nodeRadius = 12
+const layoutMargin = 50
 
 export default function RelationDependencyGraph({
   nodes,
@@ -56,6 +58,7 @@ export default function RelationDependencyGraph({
   selectedId?: string
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
+  const router = useRouter()
 
   const layoutMapCallback = useCallback(() => {
     const layoutMap = flipLayoutRelation(
@@ -109,7 +112,7 @@ export default function RelationDependencyGraph({
         .attr("fill", "none")
         .attr("stroke-width", 1)
         .attr("stroke-width", (d) =>
-          isSelected(d.source) || isSelected(d.target) ? 2 : 1
+          isSelected(d.source) || isSelected(d.target) ? 4 : 2
         )
         .attr("opacity", (d) =>
           isSelected(d.source) || isSelected(d.target) ? 1 : 0.5
@@ -129,6 +132,7 @@ export default function RelationDependencyGraph({
     const applyNode = (g: NodeSelection) => {
       g.attr("transform", ({ x, y }) => `translate(${x},${y})`)
 
+      // Circle
       let circle = g.select<SVGCircleElement>("circle")
       if (circle.empty()) {
         circle = g.append("circle")
@@ -136,14 +140,14 @@ export default function RelationDependencyGraph({
 
       circle
         .attr("r", nodeRadius)
-        .style("cursor", "pointer")
         .attr("fill", ({ id }) =>
           isSelected(id) ? theme.colors.blue["500"] : theme.colors.gray["500"]
         )
 
-      let text = g.select<SVGTextElement>("text")
+      // Relation name
+      let text = g.select<SVGTextElement>(".text")
       if (text.empty()) {
-        text = g.append("text")
+        text = g.append("text").attr("class", "text")
       }
 
       text
@@ -152,9 +156,62 @@ export default function RelationDependencyGraph({
         .attr("font-family", "inherit")
         .attr("text-anchor", "middle")
         .attr("dy", nodeRadius * 2)
-        .attr("fill", "black")
         .attr("font-size", 12)
         .attr("transform", "rotate(-8)")
+
+      // Relation type
+      let typeText = g.select<SVGTextElement>(".type")
+      if (typeText.empty()) {
+        typeText = g.append("text").attr("class", "type")
+      }
+
+      const relationTypeAbbr = (relation: Relation) => {
+        const type = relationType(relation)
+        if (type === "SINK") {
+          return "K"
+        } else {
+          return type.charAt(0)
+        }
+      }
+
+      typeText
+        .attr("fill", "white")
+        .text(({ relation }) => `${relationTypeAbbr(relation)}`)
+        .attr("font-family", "inherit")
+        .attr("text-anchor", "middle")
+        .attr("dy", nodeRadius * 0.5)
+        .attr("font-size", 16)
+        .attr("font-weight", "bold")
+
+      // Relation link
+      // TODO: should we inline a modal?
+      const relationURL = (relation: Relation) => {
+        const type = relationType(relation)
+        let pathName = (() => {
+          switch (type) {
+            case "SOURCE":
+              return "sources"
+            case "TABLE":
+              return "tables"
+            case "MATERIALIZED_VIEW":
+              return "materialized_views"
+            case "INDEX":
+              return "indexes"
+            case "SINK":
+              return "sinks"
+            default:
+              return
+          }
+        })()
+        return pathName && `/${pathName}/?id=${relation.id}`
+      }
+
+      g.style("cursor", "pointer").on("click", (_, { relation }) => {
+        const url = relationURL(relation)
+        if (url) {
+          router.replace(url)
+        }
+      })
 
       return g
     }
