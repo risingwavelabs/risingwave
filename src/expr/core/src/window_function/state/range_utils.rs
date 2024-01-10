@@ -124,6 +124,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_range_except() {
+        fn test(a: Range<usize>, b: Range<usize>, expected: impl IntoIterator<Item = usize>) {
+            let (l, r) = range_except(a, b);
+            let set = l.into_iter().chain(r).collect::<HashSet<_>>();
+            assert_eq!(set, expected.into_iter().collect())
+        }
+
+        test(0..0, 0..0, []);
+        test(0..1, 0..1, []);
+        test(0..1, 0..2, []);
+        test(1..2, 0..2, []);
+        test(0..2, 0..1, [1]);
+        test(0..2, 1..2, [0]);
+        test(0..5, 2..3, [0, 1, 3, 4]);
+        test(2..5, 1..3, [3, 4]);
+        test(2..5, 4..5, [2, 3]);
+    }
+
+    #[test]
     fn test_range_diff() {
         fn test(
             a: Range<usize>,
