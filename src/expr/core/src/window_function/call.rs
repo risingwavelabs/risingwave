@@ -111,6 +111,14 @@ impl Frame {
     }
 }
 
+#[derive(Display, Debug, Clone, Eq, PartialEq, Hash)]
+#[display("{0}")]
+pub enum FrameBounds {
+    Rows(RowsFrameBounds),
+    // Groups(GroupsFrameBounds),
+    // Range(RangeFrameBounds),
+}
+
 impl FrameBounds {
     pub fn validate(&self) -> Result<()> {
         match self {
@@ -133,21 +141,6 @@ impl FrameBounds {
     pub fn is_unbounded(&self) -> bool {
         self.start_is_unbounded() || self.end_is_unbounded()
     }
-}
-
-impl Display for FrameBounds {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Rows(bounds) => bounds.fmt(f),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub enum FrameBounds {
-    Rows(RowsFrameBounds),
-    // Groups(GroupsFrameBounds),
-    // Range(RangeFrameBounds),
 }
 
 #[derive(Display, Debug, Clone, Eq, PartialEq, Hash)]
