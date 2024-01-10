@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{default_key_column_name_version_mapping, ColumnId, TableId};
+use risingwave_common::catalog::{
+    default_key_column_name_version_mapping, ColumnId, TableId, KAFKA_TIMESTAMP_COLUMN_NAME,
+};
 use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 use risingwave_pb::plan_common::{
@@ -81,6 +83,31 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             });
                         });
                     }
+                }
+
+                {
+                    // compatible code: handle legacy column `_rw_kafka_timestamp`
+                    // the column is auto added for all kafka source to empower batch query on source
+                    // solution: rewrite the column `additional_column_type` to Timestamp
+
+                    let _ = source_columns.iter_mut().map(|c| {
+                        let _ = c.column_desc.as_mut().map(|desc| {
+                            let is_timestamp = desc
+                                .get_column_type()
+                                .map(|col_type| {
+                                    col_type.type_name == PbTypeName::Timestamptz as i32
+                                })
+                                .unwrap();
+                            if desc.name == KAFKA_TIMESTAMP_COLUMN_NAME
+                                && is_timestamp
+                                // the column is from a legacy version
+                                && desc.version == ColumnDescVersion::Unspecified as i32
+                            {
+                                desc.additional_column_type =
+                                    AdditionalColumnType::Timestamp as i32;
+                            }
+                        });
+                    });
                 }
 
                 let source_desc_builder = SourceDescBuilder::new(
