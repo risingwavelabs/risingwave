@@ -117,16 +117,16 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Returned result:
     /// - Err: Error happens when updating the state
     /// - Ok(false): Successfully update the state but the inner iterator key-value should not be exposed.
-    ///              Caller should continue to call next().
-    /// - Ok(true): Successfully update the state and the inner iterator key-value should be exposed. 
-    ///             Caller should stop to call next().
+    ///              Caller should continue to call `next()`.
+    /// - Ok(true): Successfully update the state and the inner iterator key-value should be exposed.
+    ///             Caller should stop to call `next()`.
     async fn update_iter_state(&mut self) -> HummockResult<bool> {
         let full_key = self.iterator.key();
         let epoch = full_key.epoch_with_gap.pure_epoch();
 
         // handle multi-version
         if epoch < self.min_epoch || epoch > self.read_epoch {
-            // Caller should continue call self.next().
+            // Caller should continue call `next()`.
             return Ok(false);
         }
 
@@ -139,7 +139,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             // which is a waste of work.
             if self.key_out_of_range() {
                 self.out_of_range = true;
-                // Caller should stop call self.next().
+                // Caller should stop call `next()`.
                 return Ok(true);
             }
 
@@ -153,8 +153,8 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                     } else {
                         self.last_val = Bytes::copy_from_slice(val);
                         self.stats.processed_key_count += 1;
-                        // Caller should stop call self.next().
-                        return Ok(true)
+                        // Caller should stop call `next()`.
+                        return Ok(true);
                     }
                 }
                 // It means that the key is deleted from the storage.
@@ -168,8 +168,8 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             self.stats.skip_multi_version_key_count += 1;
         }
 
-        // Caller should continue call self.next().
-        return Ok(false);
+        // Caller should continue call `next()`.
+        Ok(false)
     }
 
     /// Returns the key with the newest version. Thus no version in it, and only the `user_key` will
