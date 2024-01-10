@@ -286,7 +286,7 @@ impl TableStreamReader {
                     yield txn_msg;
                 }
                 TxnMsg::Data(txn_id, chunk) => {
-                    _ = notifier.send(chunk.cardinality());
+                    let chunk_cardinality = chunk.cardinality();
                     if let Some(rate_limit) = rate_limit {
                         for chunk in chunk.split(rate_limit.get() as usize) {
                             yield TxnMsg::Data(*txn_id, chunk);
@@ -294,6 +294,7 @@ impl TableStreamReader {
                     } else {
                         yield txn_msg;
                     }
+                    _ = notifier.send(chunk_cardinality);
                 }
             }
         }

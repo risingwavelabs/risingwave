@@ -95,7 +95,7 @@ async fn test_dml_rate_limit_barrier_no_timeout() -> Result<()> {
         session.run("CREATE SINK s1 as select t.v1 from t join t2 on t.v1 = t2.v1 with (connector='blackhole')").await?;
 
         // Each record from t1 has a constant amplification of 100.
-        session.run("INSERT INTO t2 SELECT 1 FROM generate_series(1, 2)").await?;
+        session.run("INSERT INTO t2 SELECT 1 FROM generate_series(1, 1000)").await?;
         session.flush().await?;
 
         // 3 CN * 1 = 3 records / s
@@ -108,7 +108,7 @@ async fn test_dml_rate_limit_barrier_no_timeout() -> Result<()> {
             });
         }
         sleep(Duration::from_secs(1)).await;
-        tokio::time::timeout(Duration::from_secs(20), session.run("FLUSH")).await??;
+        session.flush().await?;
         session.run("DROP SINK s1;").await?;
         session.run("DROP TABLE t").await?;
         session.run("DROP TABLE t2").await?;
