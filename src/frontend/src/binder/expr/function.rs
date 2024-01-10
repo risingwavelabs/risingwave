@@ -271,7 +271,7 @@ impl Binder {
                 if self.udf_context.is_empty() {
                     // The actual inline logic for sql udf
                     if let Ok(context) = create_udf_context(&args, &Arc::clone(func)) {
-                        self.udf_context = context;
+                        self.udf_context.update_context(context);
                     } else {
                         return Err(ErrorCode::InvalidInputSyntax(
                             "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
@@ -286,21 +286,15 @@ impl Binder {
                 }
 
                 // Check for potential recursive calling
-                if let Some(&calling_times) = self.udf_recursive_context.get(&function_name) {
-                    if calling_times as u32 >= SQL_UDF_MAX_RECURSIVE_DEPTH {
-                        return Err(ErrorCode::BindError(format!(
-                            "function {} calling stack depth limit exceeded",
-                            &function_name
-                        ))
-                        .into());
-                    } else {
-                        // Update the status for the current called function
-                        self.udf_recursive_context
-                            .entry(function_name)
-                            .and_modify(|c| *c += 1);
-                    }
+                if self.udf_context.global_count() >= SQL_UDF_MAX_RECURSIVE_DEPTH {
+                    return Err(ErrorCode::BindError(format!(
+                        "function {} calling stack depth limit exceeded",
+                        &function_name
+                    ))
+                    .into());
                 } else {
-                    self.udf_recursive_context.insert(function_name, 1);
+                    // Update the status for the global counter
+                    self.udf_context.incr_global_count();
                 }
 
                 if let Ok(expr) = extract_udf_expression(ast) {
@@ -309,7 +303,6 @@ impl Binder {
                     // which makes sure the subsequent binding will not be affected
                     if clean_flag {
                         self.udf_context.clear();
-                        self.udf_recursive_context.clear();
                     }
                     return bind_result;
                 } else {
