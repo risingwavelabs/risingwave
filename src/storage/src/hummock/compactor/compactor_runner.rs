@@ -233,6 +233,7 @@ impl CompactorRunner {
             SkipWatermarkIterator::from_safe_epoch_watermarks(
                 UnorderedMergeIteratorInner::for_compactor(table_iters),
                 &self.compact_task.table_watermarks,
+                Some(task_progress.clone()),
             ),
             CompactionDeleteRangeIterator::new(del_iter),
         ))

@@ -14,6 +14,7 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, VecDeque};
+use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::buffer::Bitmap;
@@ -23,6 +24,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
 use risingwave_pb::hummock::PbTableWatermarks;
 
+use crate::hummock::compactor::TaskProgress;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
@@ -32,20 +34,29 @@ pub struct SkipWatermarkIterator<I> {
     inner: I,
     watermarks: BTreeMap<TableId, ReadTableWatermark>,
     remain_watermarks: VecDeque<(TableId, VirtualNode, WatermarkDirection, Bytes)>,
+
+    // compactor task progress report
+    task_progress: Option<Arc<TaskProgress>>,
 }
 
 impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
-    pub fn new(inner: I, watermarks: BTreeMap<TableId, ReadTableWatermark>) -> Self {
+    pub fn new(
+        inner: I,
+        watermarks: BTreeMap<TableId, ReadTableWatermark>,
+        task_progress: Option<Arc<TaskProgress>>,
+    ) -> Self {
         Self {
             inner,
             remain_watermarks: VecDeque::new(),
             watermarks,
+            task_progress,
         }
     }
 
     pub fn from_safe_epoch_watermarks(
         inner: I,
         safe_epoch_watermarks: &BTreeMap<u32, PbTableWatermarks>,
+        task_progress: Option<Arc<TaskProgress>>,
     ) -> Self {
         let watermarks = safe_epoch_watermarks
             .iter()
@@ -85,7 +96,7 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
                 )
             })
             .collect();
-        Self::new(inner, watermarks)
+        Self::new(inner, watermarks, task_progress)
     }
 
     fn reset_watermark(&mut self) {
@@ -213,7 +224,18 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
     async fn advance_key_and_watermark(&mut self) -> HummockResult<()> {
         // advance key and watermark in an interleave manner until nothing
         // changed after the method is called.
+        let mut progress_key_num = 0;
+        const PROGRESS_KEY_INTERVAL: u64 = 100;
         loop {
+            progress_key_num += 1;
+
+            if let Some(task_progress) = self.task_progress.as_ref()
+                && progress_key_num >= PROGRESS_KEY_INTERVAL
+            {
+                task_progress.inc_progress_key(progress_key_num);
+                progress_key_num = 0;
+            }
+
             if !self.advance_key().await? {
                 break;
             }
@@ -379,6 +401,7 @@ mod tests {
             let iter = SkipWatermarkIterator::new(
                 build_batch(items.clone().into_iter()).into_forward_iter(),
                 BTreeMap::from_iter(once((TABLE_ID, read_watermark.clone()))),
+                None,
             );
             (batch.into_forward_iter(), iter)
         };
