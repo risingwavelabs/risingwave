@@ -25,7 +25,6 @@ protoc --plugin=./node_modules/.bin/protoc-gen-ts_proto \
     --ts_proto_opt=outputEncodeMethods=false \
     --ts_proto_opt=outputClientImpl=false \
     --ts_proto_opt=stringEnums=true \
-    --ts_proto_opt=removeEnumPrefix=true \
     tmp_gen/*.proto
 
 rm -rf tmp_gen
