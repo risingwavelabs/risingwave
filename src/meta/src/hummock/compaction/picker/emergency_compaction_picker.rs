@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::CompactionConfig;
+use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LevelCompactionPicker,
@@ -43,19 +43,30 @@ impl EmergencyCompactionPicker {
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let unused_validator = Arc::new(CompactionTaskValidator::unused());
+        let l0 = levels.l0.as_ref().unwrap();
+        let overlapping_count = l0
+            .sub_levels
+            .iter()
+            .filter(|level| level.level_type == LevelType::Overlapping as i32)
+            .count();
+        let no_overlap_count = l0
+            .sub_levels
+            .iter()
+            .filter(|level| level.level_type == LevelType::Nonoverlapping as i32)
+            .count();
+        if no_overlap_count > overlapping_count {
+            let mut base_level_compaction_picker = LevelCompactionPicker::new_with_validator(
+                self.target_level,
+                self.config.clone(),
+                unused_validator.clone(),
+            );
 
-        let mut base_level_compaction_picker = LevelCompactionPicker::new_with_validator(
-            self.target_level,
-            self.config.clone(),
-            unused_validator.clone(),
-        );
-
-        if let Some(ret) =
-            base_level_compaction_picker.pick_compaction(levels, level_handlers, stats)
-        {
-            return Some(ret);
+            if let Some(ret) =
+                base_level_compaction_picker.pick_compaction(levels, level_handlers, stats)
+            {
+                return Some(ret);
+            }
         }
-
         let mut tier_compaction_picker =
             TierCompactionPicker::new_with_validator(self.config.clone(), unused_validator);
 
