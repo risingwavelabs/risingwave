@@ -5,6 +5,15 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
+# Arguments:
+#   $1: subject name
+#   $2: schema file path
+function register_schema_registry() {
+    curl -X POST http://message_queue:8081/subjects/$1/versions \
+        -H ‘Content-Type: application/vnd.schemaregistry.v1+json’ \
+        --data-binary @<(jq -n --arg schema “$(cat $2)” ‘{schemaType: “PROTOBUF”, schema: $schema}’)
+}
+
 # prepare environment
 export CONNECTOR_LIBS_PATH="./connector-node/libs"
 
@@ -36,7 +45,6 @@ cp src/connector/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc
 cp src/connector/src/test_data/complex-schema.avsc ./avro-complex-schema.avsc
 cp src/connector/src/test_data/complex-schema ./proto-complex-schema
 cp src/connector/src/test_data/complex-schema.json ./json-complex-schema
-cp e2e_test/schema_registry/protobuf/user.pb ./user.pb
 
 
 echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
@@ -117,8 +125,6 @@ RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=i
 cargo make ci-start ci-1cn-1fe
 python3 -m pip install requests protobuf confluent-kafka
 python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test" 20 user
-python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test_with_more_fields" 1 user_with_more_fields
-python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test_with_new_type" 1 user_with_new_type
 echo "make sure google/protobuf/source_context.proto is NOT in schema registry"
 curl --silent 'http://message_queue:8081/subjects'; echo
 # curl --silent --head -X GET 'http://message_queue:8081/subjects/google%2Fprotobuf%2Fsource_context.proto/versions' | grep 404
