@@ -319,12 +319,16 @@ impl LocalBarrierWorker {
     fn notify_failure(&mut self, actor_id: ActorId, err: StreamError) {
         let err = err.into_unexpected_exit(actor_id);
         if let Some(prev_err) = self.failure_actors.insert(actor_id, err.clone()) {
-            warn!(?actor_id, prev_err = %prev_err.as_report(), "actor error overwritten");
+            warn!(
+                actor_id,
+                prev_err = %prev_err.as_report(),
+                "actor error overwritten"
+            );
         }
         for fail_epoch in self.state.epochs_await_on_actor(actor_id) {
             if let Some(result_sender) = self.epoch_result_sender.remove(&fail_epoch) {
                 if result_sender.send(Err(err.clone())).is_err() {
-                    warn!(?fail_epoch, ?actor_id, err = ?err.as_report(), "fail to notify actor failure");
+                    warn!(fail_epoch, actor_id, err = %err.as_report(), "fail to notify actor failure");
                 }
             }
         }

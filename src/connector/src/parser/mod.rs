@@ -33,11 +33,11 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{Datum, Scalar};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::tracing::InstrumentStream;
 use risingwave_pb::catalog::{
     SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
 };
 use risingwave_pb::plan_common::AdditionalColumnType;
-use tracing_futures::Instrument;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
@@ -528,14 +528,17 @@ impl<P: ByteStreamSourceParser> P {
     /// A [`SourceWithStateStream`] which is a stream of parsed messages.
     pub fn into_stream(self, data_stream: BoxSourceStream) -> impl SourceWithStateStream {
         // Enable tracing to provide more information for parsing failures.
-        let source_info = &self.source_ctx().source_info;
-        let span = tracing::info_span!(
-            "source_parser",
-            actor_id = source_info.actor_id,
-            source_id = source_info.source_id.table_id()
-        );
+        let source_info = self.source_ctx().source_info;
 
-        into_chunk_stream(self, data_stream).instrument(span)
+        // The parser stream will be long-lived. We use `instrument_with` here to create
+        // a new span for the polling of each chunk.
+        into_chunk_stream(self, data_stream).instrument_with(move || {
+            tracing::info_span!(
+                "source_parse_chunk",
+                actor_id = source_info.actor_id,
+                source_id = source_info.source_id.table_id()
+            )
+        })
     }
 }
 

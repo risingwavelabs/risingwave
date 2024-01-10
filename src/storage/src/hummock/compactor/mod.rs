@@ -65,7 +65,9 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
-pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, TaskConfig};
+pub use self::compaction_utils::{
+    check_compaction_result, CompactionStatistics, RemoteBuilderFactory, TaskConfig,
+};
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{

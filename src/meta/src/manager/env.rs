@@ -25,6 +25,7 @@ use sea_orm::EntityTrait;
 use super::{SystemParamsManager, SystemParamsManagerRef};
 use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
 use crate::controller::SqlMetaStore;
+use crate::hummock::sequence::SequenceGenerator;
 use crate::manager::event_log::{start_event_log_manager, EventLogMangerRef};
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
@@ -74,6 +75,8 @@ pub struct MetaSrvEnv {
 
     /// Client to connector node. `None` if endpoint unspecified or unable to connect.
     connector_client: Option<ConnectorClient>,
+
+    pub hummock_seq: Option<Arc<SequenceGenerator>>,
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
@@ -308,6 +311,9 @@ impl MetaSrvEnv {
             opts.event_log_enabled,
             opts.event_log_channel_max_size,
         ));
+        let hummock_seq = meta_store_sql
+            .clone()
+            .map(|m| Arc::new(SequenceGenerator::new(m.conn)));
 
         Ok(Self {
             id_gen_manager,
@@ -323,6 +329,7 @@ impl MetaSrvEnv {
             cluster_first_launch,
             connector_client,
             opts: opts.into(),
+            hummock_seq,
         })
     }
 
@@ -457,6 +464,9 @@ impl MetaSrvEnv {
         };
 
         let event_log_manager = Arc::new(EventLogManger::for_test());
+        let hummock_seq = meta_store_sql
+            .clone()
+            .map(|m| Arc::new(SequenceGenerator::new(m.conn)));
 
         Self {
             id_gen_manager,
@@ -472,6 +482,7 @@ impl MetaSrvEnv {
             cluster_first_launch,
             connector_client: None,
             opts,
+            hummock_seq,
         }
     }
 }

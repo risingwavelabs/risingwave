@@ -46,6 +46,14 @@ class Api {
     try {
       const res = await fetch(url)
       const data = await res.json()
+
+      // Throw error if response is not ok.
+      // See `DashboardError::into_response`.
+      if (!res.ok) {
+        throw `${res.status} ${res.statusText}${
+          data.error ? ": " + data.error : ""
+        }`
+      }
       return data
     } catch (e) {
       console.error(e)

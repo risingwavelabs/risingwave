@@ -31,8 +31,9 @@ use tokio::task::JoinHandle;
 
 use crate::backup_restore::meta_snapshot_builder;
 use crate::backup_restore::metrics::BackupManagerMetrics;
+use crate::hummock::sequence::next_meta_backup_id;
 use crate::hummock::{HummockManagerRef, HummockVersionSafePoint};
-use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
+use crate::manager::{LocalNotification, MetaSrvEnv};
 use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
 
@@ -215,11 +216,7 @@ impl BackupManager {
             ))
         }
 
-        let job_id = self
-            .env
-            .id_gen_manager()
-            .generate::<{ IdCategory::Backup }>()
-            .await?;
+        let job_id = next_meta_backup_id(&self.env).await?;
         self.latest_job_info
             .store(Arc::new((job_id, BackupJobStatus::Running, "".into())));
         let hummock_version_safe_point = self.hummock_manager.register_safe_point().await;

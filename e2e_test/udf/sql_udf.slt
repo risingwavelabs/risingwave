@@ -111,29 +111,32 @@ create function add_error(INT, INT) returns int language sql as $$select $1 + $2
 statement ok
 create function add_sub(INT, FLOAT, INT) returns float language sql as $$select -$1 + $2 - $3$$;
 
+# Complex types interleaving
+statement ok
+create function add_sub_types(INT, BIGINT, FLOAT, DECIMAL, REAL) returns real language sql as 'select $1 + $2 - $3 + $4 + $5';
+
 statement ok
 create function add_sub_return(INT, FLOAT, INT) returns float language sql return -$1 + $2 - $3;
 
-# Note: need EXPLICIT type cast in order to call the multiple types interleaving sql udf
 query I
-select add_sub(1::INT, 5.1415926::FLOAT, 1::INT);
+select add_sub(1, 5.1415926, 1);
 ----
 3.1415926
 
-# Without EXPLICIT type cast
-statement error unsupported function: "add_sub"
-select add_sub(1, 3.14, 2);
-
-# Same as above, need EXPLICIT type cast to make the binding works
 query I
-select add_sub_return(1::INT, 5.1415926::FLOAT, 1::INT);
+select add_sub_return(1, 5.1415926, 1);
 ----
 3.1415926
 
 query III
-select add(1, -1), sub(1, 1), add_sub(1::INT, 5.1415926::FLOAT, 1::INT);
+select add(1, -1), sub(1, 1), add_sub(1, 5.1415926, 1);
 ----
 0 0 3.1415926
+
+query I
+select add_sub_types(1, 1919810114514, 3.1415926, 1.123123, 101010.191919);
+----
+1919810215523.1734494
 
 # Create another mock table
 statement ok
@@ -143,14 +146,14 @@ statement ok
 insert into t2 values (1, 3.14, 2), (2, 4.44, 5), (20, 10.30, 02);
 
 query IIIIII
-select c1, c2, c3, add(c1, c3), sub(c1, c3), add_sub(c1::INT, c2::FLOAT, c3::INT) from t2 order by c1 asc;
+select c1, c2, c3, add(c1, c3), sub(c1, c3), add_sub(c1, c2, c3) from t2 order by c1 asc;
 ----
 1 3.14 2 3 -1 0.14000000000000012
 2 4.44 5 7 -3 -2.5599999999999996
 20 10.3 2 22 18 -11.7
 
 query IIIIII
-select c1, c2, c3, add(c1, c3), sub(c1, c3), add_sub_return(c1::INT, c2::FLOAT, c3::INT) from t2 order by c1 asc;
+select c1, c2, c3, add(c1, c3), sub(c1, c3), add_sub_return(c1, c2, c3) from t2 order by c1 asc;
 ----
 1 3.14 2 3 -1 0.14000000000000012
 2 4.44 5 7 -3 -2.5599999999999996
@@ -183,6 +186,9 @@ drop function call_regexp_replace;
 
 statement ok
 drop function add_sub_wrapper;
+
+statement ok
+drop function add_sub_types;
 
 # Drop the mock table
 statement ok
