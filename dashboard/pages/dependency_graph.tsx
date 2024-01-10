@@ -81,10 +81,10 @@ export default function StreamingGraph() {
                 const match = selectedId === r.id
                 return (
                   <Button
+                    key={r.id}
                     colorScheme={match ? "blue" : "gray"}
                     color={match ? "blue.600" : "gray.500"}
                     variant={match ? "outline" : "ghost"}
-                    width="full"
                     py={0}
                     height={8}
                     justifyContent="flex-start"
