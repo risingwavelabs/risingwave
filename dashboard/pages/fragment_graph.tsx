@@ -73,7 +73,7 @@ function buildPlanNodeDependency(
 
   let dispatcherName: string
 
-  if (firstActor.dispatcher) {
+  if (firstActor.dispatcher.length > 0) {
     const firstDispatcherName = _.camelCase(
       firstActor.dispatcher[0].type.replace(/^DISPATCHER_TYPE_/, "")
     )

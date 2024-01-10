@@ -38,10 +38,10 @@ import Head from "next/head"
 
 import Link from "next/link"
 import { parseAsInteger, useQueryState } from "nuqs"
-import { Fragment, useEffect, useState } from "react"
+import { Fragment } from "react"
 import Title from "../components/Title"
-import useErrorToast from "../hook/useErrorToast"
 import extractColumnInfo from "../lib/extractInfo"
+import useFetch from "../pages/api/fetch"
 import { Relation, StreamingJob } from "../pages/api/streaming"
 import {
   Sink as RwSink,
@@ -121,27 +121,17 @@ export function Relations<R extends Relation>(
   getRelations: () => Promise<R[]>,
   extraColumns: Column<R>[]
 ) {
-  const toast = useErrorToast()
-  const [relationList, setRelationList] = useState<R[]>([])
+  const { response: relationList } = useFetch(getRelations)
 
   const [modalId, setModalId] = useQueryState("id", parseAsInteger)
-  const modalData = relationList.find((r) => r.id === modalId)
-  const modalIsOpen = modalData ? true : false
-
-  useEffect(() => {
-    async function doFetch() {
-      try {
-        setRelationList(await getRelations())
-      } catch (e: any) {
-        toast(e)
-      }
-    }
-    doFetch()
-    return () => {}
-  }, [toast, getRelations])
+  const modalData = relationList?.find((r) => r.id === modalId)
 
   const catalogModal = (
-    <Modal isOpen={modalIsOpen} onClose={() => setModalId(null)} size="3xl">
+    <Modal
+      isOpen={modalData !== undefined}
+      onClose={() => setModalId(null)}
+      size="3xl"
+    >
       <ModalOverlay />
       <ModalContent>
         <ModalHeader>
@@ -187,7 +177,7 @@ export function Relations<R extends Relation>(
             </Tr>
           </Thead>
           <Tbody>
-            {relationList.map((r) => (
+            {relationList?.map((r) => (
               <Tr key={r.id}>
                 <Td>
                   <Button
