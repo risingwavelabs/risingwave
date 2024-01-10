@@ -17,9 +17,11 @@ use bytes::Bytes;
 use reqwest::Url;
 use risingwave_common::error::ErrorCode::{InvalidParameterValue, ProtocolError};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::types::Datum;
 
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::common::AwsAuthProps;
+use crate::source::SourceMeta;
 
 /// get kafka topic name
 pub(super) fn get_kafka_topic(props: &HashMap<String, String>) -> Result<&String> {
@@ -107,5 +109,19 @@ pub(super) async fn bytes_from_url(url: &Url, config: Option<&AwsAuthProps>) -> 
         (scheme, _) => Err(RwError::from(InvalidParameterValue(format!(
             "path scheme {scheme} is not supported",
         )))),
+    }
+}
+
+pub fn extreact_timestamp_from_meta(meta: &SourceMeta) -> Option<Datum> {
+    match meta {
+        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_timestamp(),
+        _ => None,
+    }
+}
+
+pub fn extract_headers_from_meta(meta: &SourceMeta) -> Option<Datum> {
+    match meta {
+        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_headers(),
+        _ => None,
     }
 }
