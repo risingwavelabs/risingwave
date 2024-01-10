@@ -270,7 +270,6 @@ impl LocalStreamManager {
             .expect("no rx for local mode")
             .await
             .context("failed to collect barrier")??;
-        complete_receiver.barrier_inflight_timer.observe_duration();
         Ok(result)
     }
 

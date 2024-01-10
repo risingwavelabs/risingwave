@@ -313,7 +313,6 @@ impl CompactorRunner {
             builder_factory,
             context.compactor_metrics.clone(),
             Some(task_progress.clone()),
-            task_config.is_target_l0_or_lbase,
             task_config.table_vnode_partition.clone(),
         );
         assert_eq!(

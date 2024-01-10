@@ -157,6 +157,10 @@ pub struct RwConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
+serde_with::with_prefix!(meta_prefix "meta_");
+serde_with::with_prefix!(streaming_prefix "stream_");
+serde_with::with_prefix!(batch_prefix "batch_");
+
 #[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
 pub enum MetaBackend {
     #[default]
@@ -310,6 +314,9 @@ pub struct MetaConfig {
     /// Keeps the latest N events per channel.
     #[serde(default = "default::meta::event_log_channel_max_size")]
     pub event_log_channel_max_size: u32,
+
+    #[serde(default, with = "meta_prefix")]
+    pub developer: MetaDeveloperConfig,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -374,6 +381,22 @@ impl<'de> Deserialize<'de> for DefaultParallelism {
             })),
         }
     }
+}
+
+/// The subsections `[meta.developer]`.
+///
+/// It is put at [`MetaConfig::developer`].
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct MetaDeveloperConfig {
+    /// The number of traces to be cached in-memory by the tracing collector
+    /// embedded in the meta node.
+    #[serde(default = "default::developer::meta_cached_traces_num")]
+    pub cached_traces_num: u32,
+
+    /// The maximum memory usage in bytes for the tracing collector embedded
+    /// in the meta node.
+    #[serde(default = "default::developer::meta_cached_traces_memory_limit_bytes")]
+    pub cached_traces_memory_limit_bytes: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -597,6 +620,8 @@ pub struct StorageConfig {
     pub compactor_max_sst_size: u64,
     #[serde(default = "default::storage::enable_fast_compaction")]
     pub enable_fast_compaction: bool,
+    #[serde(default = "default::storage::check_fast_compaction_result")]
+    pub check_fast_compaction_result: bool,
     #[serde(default = "default::storage::max_preload_io_retry_times")]
     pub max_preload_io_retry_times: usize,
 
@@ -751,9 +776,6 @@ pub struct HeapProfilingConfig {
     #[serde(default = "default::heap_profiling::dir")]
     pub dir: String,
 }
-
-serde_with::with_prefix!(streaming_prefix "stream_");
-serde_with::with_prefix!(batch_prefix "batch_");
 
 /// The subsections `[streaming.developer]`.
 ///
@@ -1017,7 +1039,7 @@ pub mod default {
         }
 
         pub fn partition_vnode_count() -> u32 {
-            64
+            16
         }
 
         pub fn table_write_throughput_threshold() -> u64 {
@@ -1172,7 +1194,11 @@ pub mod default {
         }
 
         pub fn enable_fast_compaction() -> bool {
-            true
+            false
+        }
+
+        pub fn check_fast_compaction_result() -> bool {
+            false
         }
 
         pub fn max_preload_io_retry_times() -> usize {
@@ -1313,6 +1339,13 @@ pub mod default {
     }
 
     pub mod developer {
+        pub fn meta_cached_traces_num() -> u32 {
+            256
+        }
+
+        pub fn meta_cached_traces_memory_limit_bytes() -> usize {
+            1 << 27 // 128 MiB
+        }
 
         pub fn batch_output_channel_size() -> usize {
             64

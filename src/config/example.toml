@@ -40,7 +40,7 @@ move_table_size_limit = 10737418240
 split_group_size_limit = 68719476736
 cut_table_size_limit = 1073741824
 do_not_config_object_storage_lifecycle = false
-partition_vnode_count = 64
+partition_vnode_count = 16
 table_write_throughput_threshold = 16777216
 min_table_split_write_throughput = 4194304
 compaction_task_max_heartbeat_interval_secs = 30
@@ -65,6 +65,10 @@ max_space_reclaim_bytes = 536870912
 level0_max_compact_file_number = 96
 tombstone_reclaim_ratio = 40
 enable_emergency_picker = true
+
+[meta.developer]
+meta_cached_traces_num = 256
+meta_cached_traces_memory_limit_bytes = 134217728
 
 [batch]
 enable_barrier_read = false
@@ -111,7 +115,8 @@ max_version_pinning_duration_sec = 10800
 compactor_max_sst_key_count = 2097152
 compact_iter_recreate_timeout_ms = 600000
 compactor_max_sst_size = 536870912
-enable_fast_compaction = true
+enable_fast_compaction = false
+check_fast_compaction_result = false
 max_preload_io_retry_times = 3
 compactor_fast_max_compact_delete_ratio = 40
 compactor_fast_max_compact_task_size = 2147483648

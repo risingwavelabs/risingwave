@@ -28,7 +28,7 @@ use risingwave_pb::hummock::{
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::manager::MetaSrvEnv;
-use crate::model::MetadataModel;
+use crate::model::{MetadataModel, MetadataModelError};
 use crate::MetaResult;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
@@ -128,9 +128,20 @@ pub struct CompactorManagerInner {
 
 impl CompactorManagerInner {
     pub async fn with_meta(env: MetaSrvEnv) -> MetaResult<Self> {
+        use risingwave_meta_model_v2::compaction_task;
+        use sea_orm::EntityTrait;
         // Retrieve the existing task assignments from metastore.
-        let task_assignment = CompactTaskAssignment::list(env.meta_store()).await?;
-        let mut manager: CompactorManagerInner = Self {
+        let task_assignment: Vec<CompactTaskAssignment> = match env.sql_meta_store() {
+            None => CompactTaskAssignment::list(env.meta_store()).await?,
+            Some(sql_meta_store) => compaction_task::Entity::find()
+                .all(&sql_meta_store.conn)
+                .await
+                .map_err(MetadataModelError::from)?
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        };
+        let mut manager = Self {
             task_expired_seconds: env.opts.compaction_task_max_progress_interval_secs,
             heartbeat_expired_seconds: env.opts.compaction_task_max_heartbeat_interval_secs,
             task_heartbeats: Default::default(),

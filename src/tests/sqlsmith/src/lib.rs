@@ -37,8 +37,8 @@ use risingwave_sqlparser::parser::Parser;
 use crate::sql_gen::SqlGenerator;
 
 pub mod reducer;
-pub mod runner;
 mod sql_gen;
+pub mod test_runners;
 mod utils;
 pub mod validation;
 pub use validation::is_permissible_error;
