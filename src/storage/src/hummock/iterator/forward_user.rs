@@ -103,55 +103,73 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// - if `Err(_) ` is returned, it means that some error happened.
     pub async fn next(&mut self) -> HummockResult<()> {
         while self.iterator.is_valid() {
-            let full_key = self.iterator.key();
-            let epoch = full_key.epoch_with_gap.pure_epoch();
-
-            // handle multi-version
-            if epoch < self.min_epoch || epoch > self.read_epoch {
-                self.iterator.next().await?;
-                continue;
-            }
-
-            if self.last_key.user_key.as_ref() != full_key.user_key {
-                // It is better to early return here if the user key is already
-                // out of range to avoid unnecessary access on the range tomestones
-                // via `delete_range_iter`.
-                // For example, if we are iterating with key range [0x0a, 0x0c) and the
-                // current key is 0xff, we will access range tombstones in [0x0c, 0xff],
-                // which is a waste of work.
-                if self.key_out_of_range() {
-                    self.out_of_range = true;
-                    return Ok(());
-                }
-
-                self.last_key = full_key.copy_into();
-                // handle delete operation
-                match self.iterator.value() {
-                    HummockValue::Put(val) => {
-                        self.delete_range_iter.next_until(full_key.user_key).await?;
-                        if self.delete_range_iter.current_epoch() >= epoch {
-                            self.stats.skip_delete_key_count += 1;
-                        } else {
-                            self.last_val = Bytes::copy_from_slice(val);
-                            self.stats.processed_key_count += 1;
-                            return Ok(());
-                        }
-                    }
-                    // It means that the key is deleted from the storage.
-                    // Deleted kv and the previous versions (if any) of the key should not be
-                    // returned to user.
-                    HummockValue::Delete => {
-                        self.stats.skip_delete_key_count += 1;
-                    }
-                }
-            } else {
-                self.stats.skip_multi_version_key_count += 1;
-            }
-
             self.iterator.next().await?;
+            if self.update_iter_state().await? {
+                return Ok(());
+            }
         }
 
-        Ok(()) // not valid, EOF
+        // EOF
+        Ok(())
+    }
+
+    /// Update internal state of the iterator
+    /// Returned result:
+    /// - Err: Error happens when updating the state
+    /// - Ok(false): Successfully update the state but the inner iterator key-value should not be exposed.
+    ///              Caller should continue to call next().
+    /// - Ok(true): Successfully update the state and the inner iterator key-value should be exposed. 
+    ///             Caller should stop to call next().
+    async fn update_iter_state(&mut self) -> HummockResult<bool> {
+        let full_key = self.iterator.key();
+        let epoch = full_key.epoch_with_gap.pure_epoch();
+
+        // handle multi-version
+        if epoch < self.min_epoch || epoch > self.read_epoch {
+            // Caller should continue call self.next().
+            return Ok(false);
+        }
+
+        if self.last_key.user_key.as_ref() != full_key.user_key {
+            // It is better to early return here if the user key is already
+            // out of range to avoid unnecessary access on the range tomestones
+            // via `delete_range_iter`.
+            // For example, if we are iterating with key range [0x0a, 0x0c) and the
+            // current key is 0xff, we will access range tombstones in [0x0c, 0xff],
+            // which is a waste of work.
+            if self.key_out_of_range() {
+                self.out_of_range = true;
+                // Caller should stop call self.next().
+                return Ok(true);
+            }
+
+            self.last_key = full_key.copy_into();
+            // handle delete operation
+            match self.iterator.value() {
+                HummockValue::Put(val) => {
+                    self.delete_range_iter.next_until(full_key.user_key).await?;
+                    if self.delete_range_iter.current_epoch() >= epoch {
+                        self.stats.skip_delete_key_count += 1;
+                    } else {
+                        self.last_val = Bytes::copy_from_slice(val);
+                        self.stats.processed_key_count += 1;
+                        // Caller should stop call self.next().
+                        return Ok(true)
+                    }
+                }
+                // It means that the key is deleted from the storage.
+                // Deleted kv and the previous versions (if any) of the key should not be
+                // returned to user.
+                HummockValue::Delete => {
+                    self.stats.skip_delete_key_count += 1;
+                }
+            }
+        } else {
+            self.stats.skip_multi_version_key_count += 1;
+        }
+
+        // Caller should continue call self.next().
+        return Ok(false);
     }
 
     /// Returns the key with the newest version. Thus no version in it, and only the `user_key` will
@@ -211,8 +229,13 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
         // Handle multi-version
         self.last_key = FullKey::default();
-        // Handles range scan when key > end_key
-        self.next().await
+        if self.update_iter_state().await? {
+            // The current iterator entry can be exposed
+            Ok(())
+        } else {
+            // Need to find the next entry to be exposed
+            self.next().await
+        }
     }
 
     /// Resets the iterating position to the first position where the key >= provided key.
@@ -252,9 +275,13 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
         // Handle multi-version
         self.last_key = FullKey::default();
-        // Handle range scan when key > end_key
-
-        self.next().await
+        if self.update_iter_state().await? {
+            // The current iterator entry can be exposed
+            Ok(())
+        } else {
+            // Need to find the next entry to be exposed
+            self.next().await
+        }
     }
 
     /// Indicates whether the iterator can be used.
