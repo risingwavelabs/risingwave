@@ -86,32 +86,34 @@ async fn test_dml_rate_limit_barrier_no_timeout() -> Result<()> {
     let mut session = cluster.start_session();
 
     // Only rate limit the update table
-        session.run("SET STREAMING_RATE_LIMIT=1").await?;
-        session.run("CREATE TABLE t (v1 int)").await?;
+    session.run("SET STREAMING_RATE_LIMIT=1").await?;
+    session.run("CREATE TABLE t (v1 int)").await?;
 
-        session.run("SET STREAMING_RATE_LIMIT=0").await?;
-        session.run("CREATE TABLE t2 (v1 int)").await?;
+    session.run("SET STREAMING_RATE_LIMIT=0").await?;
+    session.run("CREATE TABLE t2 (v1 int)").await?;
 
-        session.run("CREATE SINK s1 as select t.v1 from t join t2 on t.v1 = t2.v1 with (connector='blackhole')").await?;
+    session.run("CREATE SINK s1 as select t.v1 from t join t2 on t.v1 = t2.v1 with (connector='blackhole')").await?;
 
-        // Each record from t1 has a constant amplification of 100.
-        session.run("INSERT INTO t2 SELECT 1 FROM generate_series(1, 1000)").await?;
-        session.flush().await?;
+    // Each record from t1 has a constant amplification of 100.
+    session
+        .run("INSERT INTO t2 SELECT 1 FROM generate_series(1, 1000)")
+        .await?;
+    session.flush().await?;
 
-        // 3 CN * 1 = 3 records / s
-        {
-            let mut session = cluster.start_session();
-            tokio::spawn(async move {
-                let _ = session
-                    .run("INSERT INTO t SELECT 1 FROM generate_series(1, 100000)")
-                    .await;
-            });
-        }
-        sleep(Duration::from_secs(1)).await;
-        session.flush().await?;
-        session.run("DROP SINK s1;").await?;
-        session.run("DROP TABLE t").await?;
-        session.run("DROP TABLE t2").await?;
+    // 3 CN * 1 = 3 records / s
+    {
+        let mut session = cluster.start_session();
+        tokio::spawn(async move {
+            let _ = session
+                .run("INSERT INTO t SELECT 1 FROM generate_series(1, 100000)")
+                .await;
+        });
+    }
+    sleep(Duration::from_secs(1)).await;
+    session.flush().await?;
+    session.run("DROP SINK s1;").await?;
+    session.run("DROP TABLE t").await?;
+    session.run("DROP TABLE t2").await?;
 
     Ok(())
 }
