@@ -38,6 +38,7 @@ In `src/lib.rs`, define your functions using the `function` macro:
 ```rust
 use arrow_udf::function;
 
+// define a scalar function
 #[function("gcd(int, int) -> int")]
 fn gcd(mut x: i32, mut y: i32) -> i32 {
     while y != 0 {
@@ -45,12 +46,17 @@ fn gcd(mut x: i32, mut y: i32) -> i32 {
     }
     x
 }
+
+// define a table function
+#[function("series(int) -> setof int")]
+fn series(n: i32) -> impl Iterator<Item = i32> {
+    0..n
+}
 ```
 
 You can find more usages in the [documentation](https://docs.rs/arrow_udf/0.1.0/arrow_udf/attr.function.html) and more examples in the [tests](https://github.com/risingwavelabs/arrow-udf/blob/main/arrow-udf/tests/tests.rs).
 
-Currently we only support scalar functions with a limited set of data types.
-`timestamptz` and complex array types are not supported yet.
+Currently we only support a limited set of data types. `timestamptz` and complex array types are not supported yet.
 
 ## 3. Build the project
 
@@ -91,6 +97,9 @@ You can use the following shell script to encode the binary and generate the SQL
     ```sql
     CREATE FUNCTION gcd(int, int) RETURNS int
     LANGUAGE wasm USING LINK 's3://bucket/path/to/udf.wasm';
+
+    CREATE FUNCTION series(int) RETURNS TABLE (x int)
+    LANGUAGE wasm USING LINK 's3://bucket/path/to/udf.wasm';
     ```
 
     Or if you run RisingWave locally, you can use the local file system:
@@ -105,4 +114,5 @@ Once the UDFs are created in RisingWave, you can use them in SQL queries just li
 
 ```sql
 SELECT gcd(25, 15);
+SELECT series(5);
 ```
