@@ -589,7 +589,8 @@ impl TestCase {
         let mut logical_plan = match planner.plan(bound) {
             Ok(logical_plan) => {
                 if self.expected_outputs.contains(&TestType::LogicalPlan) {
-                    ret.logical_plan = Some(explain_plan(&logical_plan.clone().into_subplan()));
+                    ret.logical_plan =
+                        Some(explain_plan(&logical_plan.clone().into_unordered_subplan()));
                 }
                 logical_plan
             }
