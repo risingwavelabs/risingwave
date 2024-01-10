@@ -100,7 +100,7 @@ async fn test_dml_rate_limit_barrier_bypass() -> Result<()> {
                     .await;
             });
         }
-        sleep(Duration::from_secs(100)).await;
+        sleep(Duration::from_secs(1000)).await;
         tracing::debug!("{:#?}", session.run("SELECT count(*) from t;").await);
         let result = tokio::time::timeout(Duration::from_secs(10), session.run("FLUSH")).await;
         assert!(result.is_err(), "expected timeout error, got result: {:?}", result);
