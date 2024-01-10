@@ -1228,91 +1228,91 @@ impl FragmentManager {
                 };
                 fragment_mapping_to_notify.push(fragment_mapping);
             }
-        }
 
-        // Second step, update upstream fragments & downstream fragments
-        for (fragment_id, reschedule) in &reschedules {
-            let Reschedule {
-                upstream_fragment_dispatcher_ids,
-                upstream_dispatcher_mapping,
-                downstream_fragment_ids,
-                added_actors,
-                removed_actors,
-                ..
-            } = reschedule;
+            // Second step, update upstream fragments & downstream fragments
+            for (fragment_id, reschedule) in &reschedules {
+                let Reschedule {
+                    upstream_fragment_dispatcher_ids,
+                    upstream_dispatcher_mapping,
+                    downstream_fragment_ids,
+                    added_actors,
+                    removed_actors,
+                    ..
+                } = reschedule;
 
-            let removed_actor_ids: HashSet<_> = removed_actors.iter().cloned().collect();
+                let removed_actor_ids: HashSet<_> = removed_actors.iter().cloned().collect();
 
-            // Update the dispatcher of the upstream fragments.
-            for (upstream_fragment_id, dispatcher_id) in upstream_fragment_dispatcher_ids {
-                let upstream_table_id = fragment_id_to_table_id
-                    .get(upstream_fragment_id)
-                    .expect("upstream fragment must exist");
+                // Update the dispatcher of the upstream fragments.
+                for (upstream_fragment_id, dispatcher_id) in upstream_fragment_dispatcher_ids {
+                    let upstream_table_id = fragment_id_to_table_id
+                        .get(upstream_fragment_id)
+                        .expect("upstream fragment must exist");
 
-                // After introducing arrangement backfill and sink into table, two tables might be connected via operators outside of the NO_SHUFFLE.
-                let mut upstream_table_fragment =
-                    table_fragments.get_mut(*upstream_table_id).unwrap();
+                    // After introducing arrangement backfill and sink into table, two tables might be connected via operators outside of the NO_SHUFFLE.
+                    let mut upstream_table_fragment =
+                        table_fragments.get_mut(*upstream_table_id).unwrap();
 
-                let upstream_fragment = upstream_table_fragment
-                    .fragments
-                    .get_mut(upstream_fragment_id)
-                    .unwrap();
+                    let upstream_fragment = upstream_table_fragment
+                        .fragments
+                        .get_mut(upstream_fragment_id)
+                        .unwrap();
 
-                for upstream_actor in &mut upstream_fragment.actors {
-                    if new_created_actors.contains(&upstream_actor.actor_id) {
-                        continue;
-                    }
+                    for upstream_actor in &mut upstream_fragment.actors {
+                        if new_created_actors.contains(&upstream_actor.actor_id) {
+                            continue;
+                        }
 
-                    for dispatcher in &mut upstream_actor.dispatcher {
-                        if dispatcher.dispatcher_id == *dispatcher_id {
-                            if let DispatcherType::Hash = dispatcher.r#type() {
-                                dispatcher.hash_mapping = upstream_dispatcher_mapping
-                                    .as_ref()
-                                    .map(|m| m.to_protobuf());
+                        for dispatcher in &mut upstream_actor.dispatcher {
+                            if dispatcher.dispatcher_id == *dispatcher_id {
+                                if let DispatcherType::Hash = dispatcher.r#type() {
+                                    dispatcher.hash_mapping = upstream_dispatcher_mapping
+                                        .as_ref()
+                                        .map(|m| m.to_protobuf());
+                                }
+
+                                update_actors(
+                                    dispatcher.downstream_actor_id.as_mut(),
+                                    &removed_actor_ids,
+                                    added_actors,
+                                );
                             }
+                        }
+                    }
+                }
 
-                            update_actors(
-                                dispatcher.downstream_actor_id.as_mut(),
+                // Update the merge executor of the downstream fragment.
+                for downstream_fragment_id in downstream_fragment_ids {
+                    let downstream_table_id = fragment_id_to_table_id
+                        .get(downstream_fragment_id)
+                        .expect("downstream fragment must exist");
+
+                    let mut downstream_table_fragment =
+                        table_fragments.get_mut(*downstream_table_id).unwrap();
+
+                    let downstream_fragment = downstream_table_fragment
+                        .fragments
+                        .get_mut(downstream_fragment_id)
+                        .unwrap();
+
+                    for downstream_actor in &mut downstream_fragment.actors {
+                        if new_created_actors.contains(&downstream_actor.actor_id) {
+                            continue;
+                        }
+
+                        update_actors(
+                            downstream_actor.upstream_actor_id.as_mut(),
+                            &removed_actor_ids,
+                            added_actors,
+                        );
+
+                        if let Some(node) = downstream_actor.nodes.as_mut() {
+                            update_merge_node_upstream(
+                                node,
+                                fragment_id,
                                 &removed_actor_ids,
                                 added_actors,
                             );
                         }
-                    }
-                }
-            }
-
-            // Update the merge executor of the downstream fragment.
-            for downstream_fragment_id in downstream_fragment_ids {
-                let downstream_table_id = fragment_id_to_table_id
-                    .get(downstream_fragment_id)
-                    .expect("downstream fragment must exist");
-
-                let mut downstream_table_fragment =
-                    table_fragments.get_mut(*downstream_table_id).unwrap();
-
-                let downstream_fragment = downstream_table_fragment
-                    .fragments
-                    .get_mut(downstream_fragment_id)
-                    .unwrap();
-
-                for downstream_actor in &mut downstream_fragment.actors {
-                    if new_created_actors.contains(&downstream_actor.actor_id) {
-                        continue;
-                    }
-
-                    update_actors(
-                        downstream_actor.upstream_actor_id.as_mut(),
-                        &removed_actor_ids,
-                        added_actors,
-                    );
-
-                    if let Some(node) = downstream_actor.nodes.as_mut() {
-                        update_merge_node_upstream(
-                            node,
-                            fragment_id,
-                            &removed_actor_ids,
-                            added_actors,
-                        );
                     }
                 }
             }
