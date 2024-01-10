@@ -231,7 +231,7 @@ select id from s9 order by id
 
 # query from a kafka timestamp column with alias
 query IT rowsort
-select * from s10 where some_ts > '1977-01-01 00:00:00+00:00'
+select v1, v2 from s10 where some_ts > '1977-01-01 00:00:00+00:00'
 ----
 1 1
 2 22
