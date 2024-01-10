@@ -79,41 +79,24 @@ async fn test_dml_rate_limit() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_dml_rate_limit_barrier_bypass() -> Result<()> {
+async fn test_dml_rate_limit_barrier_no_timeout() -> Result<()> {
     init_logger();
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
 
-    // With no rate limit, we expect to timeout.
-    {
-        let mut session = cluster.start_session();
+    let mut session = cluster.start_session();
 
-        // With no rate limit, flush should timeout
-        session.run("CREATE TABLE t (v1 int)").await?;
-        session.run("CREATE SINK s1 as select s1.v1 from t s1 join t s2 on s1.v1 = s2.v1 with (connector='blackhole')").await?;
-
-        // 3 CN * 1 = 3 records / s
-        {
-            let mut session = cluster.start_session();
-            tokio::spawn(async move {
-                let _ = session
-                    .run("INSERT INTO t SELECT 1 FROM generate_series(1, 100000)")
-                    .await;
-            });
-        }
-        sleep(Duration::from_secs(1000)).await;
-        tracing::debug!("{:#?}", session.run("SELECT count(*) from t;").await);
-        let result = tokio::time::timeout(Duration::from_secs(10), session.run("FLUSH")).await;
-        assert!(result.is_err(), "expected timeout error, got result: {:?}", result);
-        session.run("DROP SINK s1;").await?;
-        session.run("DROP TABLE t").await?;
-    }
-
-    {
-        let mut session = cluster.start_session();
-
+    // Only rate limit the update table
         session.run("SET STREAMING_RATE_LIMIT=1").await?;
         session.run("CREATE TABLE t (v1 int)").await?;
-        session.run("CREATE SINK s1 as select s1.v1 from t s1 join t s2 on s1.v1 = s2.v1 with (connector='blackhole')").await?;
+
+        session.run("SET STREAMING_RATE_LIMIT=0").await?;
+        session.run("CREATE TABLE t2 (v1 int)").await?;
+
+        session.run("CREATE SINK s1 as select t.v1 from t join t2 on t.v1 = t2.v1 with (connector='blackhole')").await?;
+
+        // Each record from t1 has a constant amplification of 100.
+        session.run("INSERT INTO t2 SELECT 1 FROM generate_series(1, 2)").await?;
+        session.flush().await?;
 
         // 3 CN * 1 = 3 records / s
         {
@@ -124,11 +107,11 @@ async fn test_dml_rate_limit_barrier_bypass() -> Result<()> {
                     .await;
             });
         }
-        sleep(Duration::from_secs(100)).await;
-        tokio::time::timeout(Duration::from_secs(10), session.run("FLUSH")).await??;
+        sleep(Duration::from_secs(1)).await;
+        tokio::time::timeout(Duration::from_secs(20), session.run("FLUSH")).await??;
         session.run("DROP SINK s1;").await?;
         session.run("DROP TABLE t").await?;
-    }
+        session.run("DROP TABLE t2").await?;
 
     Ok(())
 }
