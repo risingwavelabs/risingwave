@@ -892,15 +892,61 @@ impl HummockManager {
         );
         stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
         selector_timer.observe_duration();
-        let mut compact_task = match compact_task {
+        let compact_task = match compact_task {
             None => {
                 return Ok(None);
             }
             Some(task) => task,
         };
 
-        compact_task.watermark = watermark;
-        compact_task.existing_table_ids = member_table_ids.clone();
+        let target_level_id = compact_task.input.target_level;
+
+        let compression_algorithm = match compact_task.compression_algorithm.as_str() {
+            "Lz4" => 1,
+            "Zstd" => 2,
+            _ => 0,
+        };
+        let vnode_partition_count = compact_task.input.vnode_partition_count;
+        use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
+
+        let mut compact_task = CompactTask {
+            input_ssts: compact_task.input.input_levels,
+            splits: vec![risingwave_pb::hummock::KeyRange::inf()],
+            watermark,
+            sorted_output_ssts: vec![],
+            task_id,
+            target_level: target_level_id as u32,
+            // only gc delete keys in last level because there may be older version in more bottom
+            // level.
+            gc_delete_keys: target_level_id
+                == current_version
+                    .get_compaction_group_levels(compaction_group_id)
+                    .levels
+                    .len()
+                    - 1,
+            base_level: compact_task.base_level as u32,
+            task_status: TaskStatus::Pending as i32,
+            compaction_group_id: group_config.group_id,
+            existing_table_ids: member_table_ids.clone(),
+            compression_algorithm,
+            target_file_size: compact_task.target_file_size,
+            table_options: table_id_to_option
+                .into_iter()
+                .filter_map(|(table_id, table_option)| {
+                    if member_table_ids.contains(&table_id) {
+                        return Some((table_id, TableOption::from(&table_option)));
+                    }
+
+                    None
+                })
+                .collect(),
+            current_epoch_time: Epoch::now().0,
+            compaction_filter_mask: group_config.compaction_config.compaction_filter_mask,
+            target_sub_level_id: compact_task.input.target_sub_level_id,
+            task_type: compact_task.compaction_task_type as i32,
+            split_weight_by_vnode: compact_task.input.vnode_partition_count,
+            ..Default::default()
+        };
 
         let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
         let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
@@ -950,21 +996,19 @@ impl HummockManager {
                 compact_task.input_ssts
             );
         } else {
-            compact_task.table_options = table_id_to_option
-                .into_iter()
-                .filter_map(|(table_id, table_option)| {
-                    if compact_task.existing_table_ids.contains(&table_id) {
-                        return Some((table_id, TableOption::from(&table_option)));
-                    }
-
-                    None
-                })
-                .collect();
-            compact_task.current_epoch_time = Epoch::now().0;
-            compact_task.compaction_filter_mask =
-                group_config.compaction_config.compaction_filter_mask;
             table_to_vnode_partition
                 .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
+            if current_version
+                .get_compaction_group_levels(compaction_group_id)
+                .vnode_partition_count
+                > 0
+            {
+                for table_id in &compact_task.existing_table_ids {
+                    table_to_vnode_partition
+                        .entry(*table_id)
+                        .or_insert(vnode_partition_count);
+                }
+            }
 
             compact_task.table_vnode_partition = table_to_vnode_partition;
             compact_task.table_watermarks =
@@ -3214,6 +3258,7 @@ fn gen_version_delta<'a>(
             level_idx: compact_task.target_level,
             inserted_table_infos: compact_task.sorted_output_ssts.clone(),
             l0_sub_level_id: compact_task.target_sub_level_id,
+            vnode_partition_count: compact_task.split_weight_by_vnode,
             ..Default::default()
         })),
     };
