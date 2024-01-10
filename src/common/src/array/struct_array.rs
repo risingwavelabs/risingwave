@@ -25,11 +25,13 @@ use risingwave_pb::data::{PbArray, PbArrayType, StructArrayData};
 use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk};
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::error::BoxedError;
 use crate::estimate_size::EstimateSize;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, StructType, ToDatumRef, ToText,
+    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, StructType, ToDatumRef,
+    ToText,
 };
-use crate::util::iter_util::ZipEqFast;
+use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::util::memcmp_encoding;
 use crate::util::value_encoding::estimate_serialize_datum_size;
 
@@ -333,6 +335,29 @@ impl StructValue {
             .map(|field| memcmp_encoding::deserialize_datum_in_composite(field, deserializer))
             .try_collect()
             .map(Self::new)
+    }
+
+    /// Construct an array from literal string.
+    pub fn from_str(s: &str, data_type: &DataType) -> Result<Self, BoxedError> {
+        // FIXME(runji): this is a trivial implementation which does not support nested struct.
+        let DataType::Struct(ty) = data_type else {
+            return Err(format!("Expect struct type, got {:?}", data_type).into());
+        };
+        if !s.starts_with('(') {
+            return Err("Missing left parenthesis".into());
+        }
+        if !s.ends_with(')') {
+            return Err("Missing right parenthesis".into());
+        }
+        let mut fields = Vec::with_capacity(s.len());
+        for (s, ty) in s[1..s.len() - 1].split(',').zip_eq_debug(ty.types()) {
+            let datum = match s.trim() {
+                "" => None,
+                s => Some(ScalarImpl::from_text(s, ty)?),
+            };
+            fields.push(datum);
+        }
+        Ok(StructValue::new(fields))
     }
 }
 
