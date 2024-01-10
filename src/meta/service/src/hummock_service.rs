@@ -651,6 +651,20 @@ impl HummockManagerService for HummockServiceImpl {
             task_progress,
         }))
     }
+
+    async fn cancel_compact_task(
+        &self,
+        request: Request<CancelCompactTaskRequest>,
+    ) -> Result<Response<CancelCompactTaskResponse>, Status> {
+        let request = request.into_inner();
+        let ret = self
+            .hummock_manager
+            .cancel_compact_task(request.task_id, request.task_status())
+            .await?;
+
+        let response = Response::new(CancelCompactTaskResponse { ret });
+        return Ok(response);
+    }
 }
 
 #[cfg(test)]

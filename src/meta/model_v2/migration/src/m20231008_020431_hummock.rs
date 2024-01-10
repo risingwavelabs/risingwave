@@ -150,7 +150,7 @@ impl MigrationTrait for Migration {
                             .boolean()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(HummockVersionDelta::FullVersionDelta).binary())
+                    .col(ColumnDef::new(HummockVersionDelta::FullVersionDelta).json_binary())
                     .to_owned(),
             )
             .await?;

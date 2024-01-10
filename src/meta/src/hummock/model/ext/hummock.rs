@@ -18,12 +18,15 @@ use risingwave_meta_model_v2::compaction_config::CompactionConfig;
 use risingwave_meta_model_v2::compaction_status::LevelHandlers;
 use risingwave_meta_model_v2::compaction_task::CompactionTask;
 use risingwave_meta_model_v2::hummock_version_delta::FullVersionDelta;
+use risingwave_meta_model_v2::hummock_version_stats::TableStats;
 use risingwave_meta_model_v2::{
     compaction_config, compaction_status, compaction_task, hummock_pinned_snapshot,
-    hummock_pinned_version, hummock_version_delta, CompactionGroupId, CompactionTaskId,
-    HummockVersionId, WorkerId,
+    hummock_pinned_version, hummock_version_delta, hummock_version_stats, CompactionGroupId,
+    CompactionTaskId, HummockVersionId, WorkerId,
 };
-use risingwave_pb::hummock::{CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion};
+use risingwave_pb::hummock::{
+    CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats,
+};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::ActiveValue::Set;
 use sea_orm::EntityTrait;
@@ -176,6 +179,32 @@ impl Transactional<Transaction> for HummockPinnedSnapshot {
 
     async fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         hummock_pinned_snapshot::Entity::delete_by_id(self.context_id as i32)
+            .exec(trx)
+            .await?;
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Transactional<Transaction> for HummockVersionStats {
+    async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
+        let m = hummock_version_stats::ActiveModel {
+            id: Set(self.hummock_version_id as _),
+            stats: Set(TableStats(self.table_stats.clone())),
+        };
+        hummock_version_stats::Entity::insert(m)
+            .on_conflict(
+                OnConflict::column(hummock_version_stats::Column::Id)
+                    .update_columns([hummock_version_stats::Column::Stats])
+                    .to_owned(),
+            )
+            .exec(trx)
+            .await?;
+        Ok(())
+    }
+
+    async fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
+        hummock_version_stats::Entity::delete_by_id(self.hummock_version_id as i64)
             .exec(trx)
             .await?;
         Ok(())

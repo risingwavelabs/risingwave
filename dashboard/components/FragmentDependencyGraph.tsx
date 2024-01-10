@@ -3,11 +3,12 @@ import * as d3 from "d3"
 import { Dag, DagLink, DagNode, zherebko } from "d3-dag"
 import { cloneDeep } from "lodash"
 import { useCallback, useEffect, useRef, useState } from "react"
+import { Position } from "../lib/layout"
 
 const nodeRadius = 5
 const edgeRadius = 12
 
-export default function DependencyGraph({
+export default function FragmentDependencyGraph({
   mvDependency,
   svgWidth,
   selectedId,
@@ -18,7 +19,7 @@ export default function DependencyGraph({
   selectedId: string | undefined
   onSelectedIdChange: (id: string) => void | undefined
 }) {
-  const svgRef = useRef<any>()
+  const svgRef = useRef<SVGSVGElement>(null)
   const [svgHeight, setSvgHeight] = useState("0px")
   const MARGIN_X = 10
   const MARGIN_Y = 2
@@ -47,7 +48,7 @@ export default function DependencyGraph({
     // How to draw edges
     const curveStyle = d3.curveMonotoneY
     const line = d3
-      .line<{ x: number; y: number }>()
+      .line<Position>()
       .curve(curveStyle)
       .x(({ x }) => x + MARGIN_X)
       .y(({ y }) => y)
@@ -85,8 +86,7 @@ export default function DependencyGraph({
       sel
         .attr(
           "transform",
-          ({ x, y }: { x: number; y: number }) =>
-            `translate(${x + MARGIN_X}, ${y})`
+          ({ x, y }: Position) => `translate(${x + MARGIN_X}, ${y})`
         )
         .attr("fill", (d: any) =>
           isSelected(d) ? theme.colors.blue["500"] : theme.colors.gray["500"]

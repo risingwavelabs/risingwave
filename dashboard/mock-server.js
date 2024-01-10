@@ -16,8 +16,11 @@
  */
 
 const express = require("express")
+const cors = require("cors")
 
 const app = express()
+app.use(cors())
+
 app.listen(32333, () => {
   console.log("Server running on port 32333")
 })

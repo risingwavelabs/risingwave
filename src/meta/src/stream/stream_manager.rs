@@ -996,7 +996,7 @@ mod tests {
 
             let (sink_manager, _) = SinkCoordinatorManager::start_worker();
 
-            let barrier_manager = Arc::new(GlobalBarrierManager::new(
+            let barrier_manager = GlobalBarrierManager::new(
                 scheduled_barriers,
                 env.clone(),
                 metadata_manager.clone(),
@@ -1004,7 +1004,7 @@ mod tests {
                 source_manager.clone(),
                 sink_manager,
                 meta_metrics.clone(),
-            ));
+            );
 
             let stream_manager = GlobalStreamManager::new(
                 env.clone(),

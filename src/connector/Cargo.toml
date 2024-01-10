@@ -135,7 +135,6 @@ tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = "0.10.2"
 tracing = "0.1"
-tracing-futures = { version = "0.2", features = ["futures-03"] }
 url = "2"
 urlencoding = "2"
 with_options = { path = "./with_options" }
