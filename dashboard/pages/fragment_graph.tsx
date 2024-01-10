@@ -71,21 +71,27 @@ function buildPlanNodeDependency(
     }
   }
 
-  let dispatcherName = "noDispatcher"
-  if (firstActor.dispatcher.length > 1) {
-    if (
-      firstActor.dispatcher.every(
-        (d) => d.type === firstActor.dispatcher[0].type
-      )
-    ) {
-      dispatcherName = `${_.camelCase(
-        firstActor.dispatcher[0].type
-      )}Dispatchers`
+  let dispatcherName: string
+
+  if (firstActor.dispatcher) {
+    const firstDispatcherName = _.camelCase(
+      firstActor.dispatcher[0].type.replace(/^DISPATCHER_TYPE_/, "")
+    )
+    if (firstActor.dispatcher.length > 1) {
+      if (
+        firstActor.dispatcher.every(
+          (d) => d.type === firstActor.dispatcher[0].type
+        )
+      ) {
+        dispatcherName = `${firstDispatcherName}Dispatchers`
+      } else {
+        dispatcherName = "multipleDispatchers"
+      }
     } else {
-      dispatcherName = "multipleDispatchers"
+      dispatcherName = `${firstDispatcherName}Dispatcher`
     }
-  } else if (firstActor.dispatcher.length === 1) {
-    dispatcherName = `${_.camelCase(firstActor.dispatcher[0].type)}Dispatcher`
+  } else {
+    dispatcherName = "noDispatcher"
   }
 
   const dispatcherNode = fragment.actors.reduce((obj, actor) => {
