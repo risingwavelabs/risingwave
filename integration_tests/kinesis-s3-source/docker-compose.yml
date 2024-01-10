@@ -43,8 +43,8 @@ services:
         export AWS_DEFAULT_REGION="us-east-1"
         aws --endpoint-url=http://localstack:4566 kinesis create-stream --stream-name ad-impression
         aws --endpoint-url=http://localstack:4566 s3api create-bucket --bucket ad-click
-        /datagen --mode ad-ctr --topic ad_impression --qps 10 kinesis --region us-east-1 --name ad-impression --endpoint http://localstack:4566 &
-        /datagen --mode ad-ctr --topic ad_click --qps 10 s3 --region us-east-1 --bucket ad-click --endpoint http://localstack:4566
+        /datagen --mode ad-ctr --topic ad_impression --qps 100 kinesis --region us-east-1 --name ad-impression --endpoint http://localstack:4566 &
+        /datagen --mode ad-ctr --topic ad_click --qps 100 s3 --region us-east-1 --bucket ad-click --endpoint http://localstack:4566
     restart: always
     container_name: datagen
 volumes:

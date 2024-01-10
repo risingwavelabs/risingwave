@@ -7,6 +7,7 @@ set -euo pipefail
 ./.risingwave/bin/kafka/bin/kafka-topics.sh --bootstrap-server message_queue:29092 --topic test-rw-sink-upsert --create > /dev/null 2>&1
 ./.risingwave/bin/kafka/bin/kafka-topics.sh --bootstrap-server message_queue:29092 --topic test-rw-sink-upsert-schema --create > /dev/null 2>&1
 ./.risingwave/bin/kafka/bin/kafka-topics.sh --bootstrap-server message_queue:29092 --topic test-rw-sink-debezium --create > /dev/null 2>&1
+./.risingwave/bin/kafka/bin/kafka-topics.sh --bootstrap-server message_queue:29092 --topic test-rw-sink-without-snapshot --create > /dev/null 2>&1
 
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/create_sink.slt'
 sleep 2
@@ -91,6 +92,15 @@ if [ $? -ne 0 ]; then
   exit 1
 else
   rm e2e_test/sink/kafka/debezium2.tmp.result
+fi
+
+# test without-snapshot kafka sink
+echo "testing without-snapshot kafka sink"
+diff ./e2e_test/sink/kafka/without_snapshot.result \
+<((./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server message_queue:29092 --topic test-rw-sink-without-snapshot --from-beginning --max-messages 3 | sort) 2> /dev/null)
+if [ $? -ne 0 ]; then
+  echo "The output for append-only sink is not as expected."
+  exit 1
 fi
 
 # delete sink data

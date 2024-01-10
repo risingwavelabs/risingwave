@@ -14,11 +14,17 @@
  * limitations under the License.
  *
  */
-import { MetricsSample } from "../../components/metrics"
+import { Metrics, MetricsSample } from "../../components/metrics"
 import api from "./api"
 
+export interface BackPressuresMetrics {
+  outputBufferBlockingDuration: Metrics[]
+}
+
 export async function getActorBackPressures() {
-  const res = await api.get("/metrics/actor/back_pressures")
+  const res: BackPressuresMetrics = await api.get(
+    "/metrics/actor/back_pressures"
+  )
   return res
 }
 

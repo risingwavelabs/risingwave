@@ -264,7 +264,6 @@ pub fn rpc_serve_with_store(
 
                 let election_client_ = election_client.clone();
                 Some(tokio::spawn(async move {
-                    let _ = tracing::span!(tracing::Level::INFO, "follower services").enter();
                     start_service_as_election_follower(
                         svc_shutdown_rx_clone,
                         follower_shutdown_rx,
