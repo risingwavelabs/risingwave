@@ -241,3 +241,68 @@ impl IcebergTransform {
         }))
     }
 }
+
+#[cfg(test)]
+mod test {
+    use risingwave_common::array::{DataChunk, DataChunkTestExt};
+    use risingwave_expr::expr::build_from_pretty;
+
+    #[tokio::test]
+    async fn test_bucket() {
+        let (input, expected) = DataChunk::from_pretty(
+            "i   i
+             34  1373",
+        )
+        .split_column_at(1);
+        let expr = build_from_pretty("(iceberg_transform:int4 0:int4 $0:int 2017:int4)");
+        let res = expr.eval(&input).await.unwrap();
+        assert_eq!(res, *expected.column_at(0));
+    }
+
+    #[tokio::test]
+    async fn test_truncate() {
+        let (input, expected) = DataChunk::from_pretty(
+            "T         T
+            iceberg   ice
+            risingwave ris
+            delta     del",
+        )
+        .split_column_at(1);
+        let expr = build_from_pretty("(iceberg_transform:varchar 1:int4 $0:varchar 3:int4)");
+        let res = expr.eval(&input).await.unwrap();
+        assert_eq!(res, *expected.column_at(0));
+    }
+
+    #[tokio::test]
+    async fn test_year_month_day_hour() {
+        let (input, expected) = DataChunk::from_pretty(
+            "TZ                                  i i i i
+            1970-01-01T00:00:00.000000000+00:00  0 0 0 0
+            1971-02-01T01:00:00.000000000+00:00  1 13 396 9505
+            1972-03-01T02:00:00.000000000+00:00  2 26 790 18962
+            1970-05-01T06:00:00.000000000+00:00  0 4 120 2886
+            1970-06-01T07:00:00.000000000+00:00  0 5 151 3631",
+        )
+        .split_column_at(1);
+
+        // year
+        let expr = build_from_pretty("(iceberg_transform:int4 2:int4 $0:timestamptz)");
+        let res = expr.eval(&input).await.unwrap();
+        assert_eq!(res, *expected.column_at(0));
+
+        // month
+        let expr = build_from_pretty("(iceberg_transform:int4 3:int4 $0:timestamptz)");
+        let res = expr.eval(&input).await.unwrap();
+        assert_eq!(res, *expected.column_at(1));
+
+        // day
+        let expr = build_from_pretty("(iceberg_transform:int4 4:int4 $0:timestamptz)");
+        let res = expr.eval(&input).await.unwrap();
+        assert_eq!(res, *expected.column_at(2));
+
+        // hour
+        let expr = build_from_pretty("(iceberg_transform:int4 5:int4 $0:timestamptz)");
+        let res = expr.eval(&input).await.unwrap();
+        assert_eq!(res, *expected.column_at(3));
+    }
+}
