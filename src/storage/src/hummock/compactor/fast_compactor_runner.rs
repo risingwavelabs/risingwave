@@ -159,9 +159,7 @@ impl BlockStreamIterator {
 
 impl Drop for BlockStreamIterator {
     fn drop(&mut self) {
-        self.task_progress
-            .num_pending_read_io
-            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        self.task_progress.dec_num_pending_read_io();
     }
 }
 
@@ -242,9 +240,7 @@ impl ConcatSstableIterator {
                 .await?;
             let stats_ptr = self.stats.remote_io_time.clone();
             let now = Instant::now();
-            self.task_progress
-                .num_pending_read_io
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.task_progress.inc_num_pending_read_io();
             let block_stream = self
                 .sstable_store
                 .get_stream_for_blocks(sstable.value().id, &sstable.value().meta.block_metas)

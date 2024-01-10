@@ -252,9 +252,7 @@ impl SstableStreamIterator {
 
 impl Drop for SstableStreamIterator {
     fn drop(&mut self) {
-        self.task_progress
-            .num_pending_read_io
-            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        self.task_progress.dec_num_pending_read_io()
     }
 }
 
@@ -396,9 +394,7 @@ impl ConcatSstableIterator {
             if start_index >= end_index {
                 found = false;
             } else {
-                self.task_progress
-                    .num_pending_read_io
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                self.task_progress.inc_num_pending_read_io();
                 let mut sstable_iter = SstableStreamIterator::new(
                     sstable.value().meta.block_metas.clone(),
                     table_info.clone(),

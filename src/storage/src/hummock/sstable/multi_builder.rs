@@ -154,9 +154,7 @@ where
     ) -> HummockResult<bool> {
         if self.current_builder.is_none() {
             if let Some(progress) = &self.task_progress {
-                progress
-                    .num_pending_write_io
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                progress.inc_num_pending_write_io()
             }
             let builder = self.builder_factory.open_builder().await?;
             self.current_builder = Some(builder);
@@ -233,9 +231,7 @@ where
 
         if self.current_builder.is_none() {
             if let Some(progress) = &self.task_progress {
-                progress
-                    .num_pending_write_io
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                progress.inc_num_pending_write_io();
             }
             let mut builder = self.builder_factory.open_builder().await?;
             // If last_range_tombstone_epoch is not MAX, it means that we cut one range-tombstone to
@@ -338,9 +334,7 @@ where
             }
 
             if let Some(progress) = &self.task_progress {
-                progress
-                    .num_pending_write_io
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                progress.inc_num_pending_write_io();
             }
             let builder = self.builder_factory.open_builder().await?;
             self.current_builder = Some(builder);

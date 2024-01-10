@@ -118,8 +118,8 @@ impl Compactor {
 /// - 3. Cancelled: a task is reported as cancelled via `CompactStatus::report_compact_task`. It's
 ///   the final state.
 pub struct CompactorManagerInner {
-    pub task_expiry_seconds: u64,
-    pub heartbeat_expiry_seconds: u64,
+    pub task_expired_seconds: u64,
+    pub heartbeat_expired_seconds: u64,
     task_heartbeats: HashMap<HummockCompactionTaskId, TaskHeartbeat>,
 
     /// The outer lock is a RwLock, so we should still be able to modify each compactor
@@ -131,8 +131,8 @@ impl CompactorManagerInner {
         // Retrieve the existing task assignments from metastore.
         let task_assignment = CompactTaskAssignment::list(env.meta_store()).await?;
         let mut manager: CompactorManagerInner = Self {
-            task_expiry_seconds: env.opts.compaction_task_max_progress_interval_secs,
-            heartbeat_expiry_seconds: env.opts.compaction_task_max_heartbeat_interval_secs,
+            task_expired_seconds: env.opts.compaction_task_max_progress_interval_secs,
+            heartbeat_expired_seconds: env.opts.compaction_task_max_heartbeat_interval_secs,
             task_heartbeats: Default::default(),
             compactor_map: Default::default(),
         };
@@ -146,8 +146,8 @@ impl CompactorManagerInner {
     /// Only used for unit test.
     pub fn for_test() -> Self {
         Self {
-            task_expiry_seconds: 1,
-            heartbeat_expiry_seconds: 1,
+            task_expired_seconds: 1,
+            heartbeat_expired_seconds: 1,
             task_heartbeats: Default::default(),
             compactor_map: Default::default(),
         }
@@ -234,17 +234,17 @@ impl CompactorManagerInner {
     }
 
     pub fn get_heartbeat_expired_tasks(&self) -> Vec<CompactTask> {
-        let heartbeat_expiry_ts: u64 = SystemTime::now()
+        let heartbeat_expired_ts: u64 = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("Clock may have gone backwards")
             .as_secs()
-            - self.heartbeat_expiry_seconds;
-        Self::get_heartbeat_expired_tasks_impl(&self.task_heartbeats, heartbeat_expiry_ts)
+            - self.heartbeat_expired_seconds;
+        Self::get_heartbeat_expired_tasks_impl(&self.task_heartbeats, heartbeat_expired_ts)
     }
 
     fn get_heartbeat_expired_tasks_impl(
         task_heartbeats: &HashMap<HummockCompactionTaskId, TaskHeartbeat>,
-        heartbeat_expiry_ts: u64,
+        heartbeat_expired_ts: u64,
     ) -> Vec<CompactTask> {
         let mut cancellable_tasks = vec![];
         const MAX_TASK_DURATION_SEC: u64 = 2700;
@@ -261,7 +261,7 @@ impl CompactorManagerInner {
             update_at,
         } in task_heartbeats.values()
         {
-            if *update_at < heartbeat_expiry_ts {
+            if *update_at < heartbeat_expired_ts {
                 cancellable_tasks.push(task.clone());
             }
 
@@ -307,7 +307,7 @@ impl CompactorManagerInner {
                 num_pending_read_io: 0,
                 num_pending_write_io: 0,
                 create_time: Instant::now(),
-                expire_at: now + self.task_expiry_seconds,
+                expire_at: now + self.task_expired_seconds,
                 update_at: now,
             },
         );
@@ -334,8 +334,8 @@ impl CompactorManagerInner {
                     || task_ref.num_ssts_uploaded < progress.num_ssts_uploaded
                     || task_ref.num_progress_key < progress.num_progress_key
                 {
-                    // Refresh the expiry of the task as it is showing progress.
-                    task_ref.expire_at = now + self.task_expiry_seconds;
+                    // Refresh the expired of the task as it is showing progress.
+                    task_ref.expire_at = now + self.task_expired_seconds;
                     task_ref.num_ssts_sealed = progress.num_ssts_sealed;
                     task_ref.num_ssts_uploaded = progress.num_ssts_uploaded;
                     task_ref.num_progress_key = progress.num_progress_key;
@@ -495,7 +495,7 @@ mod tests {
             (env, context_id)
         };
 
-        // Restart. Set task_expiry_seconds to 0 only to speed up test.
+        // Restart. Set task_expired_seconds to 0 only to speed up test.
         let compactor_manager = CompactorManager::with_meta(env).await.unwrap();
         // Because task assignment exists.
         // Because compactor gRPC is not established yet.
