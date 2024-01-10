@@ -19,6 +19,7 @@ import { theme } from "@chakra-ui/react"
 import * as d3 from "d3"
 import { useCallback, useEffect, useRef } from "react"
 import {
+  Enter,
   Position,
   RelationPoint,
   RelationPointPosition,
@@ -54,7 +55,7 @@ export default function RelationDependencyGraph({
   nodes: RelationPoint[]
   selectedId?: string
 }) {
-  const svgRef = useRef<any>()
+  const svgRef = useRef<SVGSVGElement>(null)
 
   const layoutMapCallback = useCallback(() => {
     const layoutMap = flipLayoutRelation(
@@ -96,29 +97,30 @@ export default function RelationDependencyGraph({
 
     const edgeSelection = svgSelection
       .select(".edges")
-      .selectAll(".edge")
+      .selectAll<SVGPathElement, null>(".edge")
       .data(links)
+    type EdgeSelection = typeof edgeSelection
 
     const isSelected = (id: string) => id === selectedId
 
-    const applyEdge = (sel: any) =>
+    const applyEdge = (sel: EdgeSelection) =>
       sel
-        .attr("d", ({ points }: any) => line(points))
+        .attr("d", ({ points }) => line(points))
         .attr("fill", "none")
         .attr("stroke-width", 1)
-        .attr("stroke-width", (d: any) =>
+        .attr("stroke-width", (d) =>
           isSelected(d.source) || isSelected(d.target) ? 2 : 1
         )
-        .attr("opacity", (d: any) =>
+        .attr("opacity", (d) =>
           isSelected(d.source) || isSelected(d.target) ? 1 : 0.5
         )
-        .attr("stroke", (d: any) =>
+        .attr("stroke", (d) =>
           isSelected(d.source) || isSelected(d.target)
             ? theme.colors.blue["500"]
             : theme.colors.gray["300"]
         )
 
-    const createEdge = (sel: any) =>
+    const createEdge = (sel: Enter<EdgeSelection>) =>
       sel.append("path").attr("class", "edge").call(applyEdge)
     edgeSelection.exit().remove()
     edgeSelection.enter().call(createEdge)
@@ -157,11 +159,13 @@ export default function RelationDependencyGraph({
       return g
     }
 
-    const createNode = (sel: any) =>
+    const createNode = (sel: Enter<NodeSelection>) =>
       sel.append("g").attr("class", "node").call(applyNode)
 
     const g = svgSelection.select(".boxes")
-    const nodeSelection = g.selectAll(".node").data(layoutMap)
+    const nodeSelection = g
+      .selectAll<SVGGElement, null>(".node")
+      .data(layoutMap)
     type NodeSelection = typeof nodeSelection
 
     nodeSelection.enter().call(createNode)
