@@ -406,7 +406,7 @@ export default function Streaming() {
               <Box flex="1" overflowY="scroll">
                 <FragmentDependencyGraph
                   svgWidth={SIDEBAR_WIDTH}
-                  mvDependency={fragmentDependencyDag}
+                  fragmentDependency={fragmentDependencyDag}
                   onSelectedIdChange={(id) =>
                     setSelectedFragmentId(parseInt(id))
                   }

@@ -17,6 +17,7 @@ import { cloneDeep } from "lodash"
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import {
   Edge,
+  Enter,
   FragmentBox,
   FragmentBoxPosition,
   Position,
@@ -35,10 +36,6 @@ type FragmentLayout = {
   height: number
   actorIds: string[]
 } & Position
-
-type Enter<Type> = Type extends d3.Selection<any, infer B, infer C, infer D>
-  ? d3.Selection<d3.EnterElement, B, C, D>
-  : never
 
 function treeLayoutFlip<Datum>(
   root: d3.HierarchyNode<Datum>,

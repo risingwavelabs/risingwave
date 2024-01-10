@@ -19,6 +19,15 @@ import { cloneDeep, max } from "lodash"
 import { TableFragments_Fragment } from "../proto/gen/meta"
 import { GraphNode } from "./algo"
 
+export type Enter<Type> = Type extends d3.Selection<
+  any,
+  infer B,
+  infer C,
+  infer D
+>
+  ? d3.Selection<d3.EnterElement, B, C, D>
+  : never
+
 interface DagNode {
   node: GraphNode
   temp: boolean
