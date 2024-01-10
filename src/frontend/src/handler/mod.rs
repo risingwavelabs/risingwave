@@ -53,6 +53,7 @@ pub mod create_mv;
 pub mod create_schema;
 pub mod create_sink;
 pub mod create_source;
+pub mod create_sql_function;
 pub mod create_table;
 pub mod create_table_as;
 pub mod create_user;
@@ -205,16 +206,39 @@ pub async fn handle(
             returns,
             params,
         } => {
-            create_function::handle_create_function(
-                handler_args,
-                or_replace,
-                temporary,
-                name,
-                args,
-                returns,
-                params,
-            )
-            .await
+            // For general udf, `language` clause could be ignored
+            // refer: https://github.com/risingwavelabs/risingwave/pull/10608
+            if params.language.is_none()
+                || !params
+                    .language
+                    .as_ref()
+                    .unwrap()
+                    .real_value()
+                    .eq_ignore_ascii_case("sql")
+            {
+                // User defined function with external source (e.g., language [ python / java ])
+                create_function::handle_create_function(
+                    handler_args,
+                    or_replace,
+                    temporary,
+                    name,
+                    args,
+                    returns,
+                    params,
+                )
+                .await
+            } else {
+                create_sql_function::handle_create_sql_function(
+                    handler_args,
+                    or_replace,
+                    temporary,
+                    name,
+                    args,
+                    returns,
+                    params,
+                )
+                .await
+            }
         }
         Statement::CreateTable {
             name,

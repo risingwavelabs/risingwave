@@ -70,6 +70,8 @@ pub mod log;
 pub mod memory;
 pub mod metrics;
 pub mod monitor;
+pub mod opts;
+pub mod range;
 pub mod row;
 pub mod session_config;
 pub mod system_param;
@@ -78,8 +80,6 @@ pub mod test_utils;
 pub mod transaction;
 pub mod types;
 pub mod vnode_mapping;
-
-pub mod range;
 
 pub mod test_prelude {
     pub use super::array::{DataChunkTestExt, StreamChunkTestExt};

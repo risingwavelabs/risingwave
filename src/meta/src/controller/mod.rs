@@ -277,6 +277,7 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             language: value.0.language,
             link: value.0.link,
             identifier: value.0.identifier,
+            body: value.0.body,
             kind: Some(value.0.kind.into()),
         }
     }

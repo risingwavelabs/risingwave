@@ -71,6 +71,7 @@ impl ToBatchPb for BatchDelete {
             table_id: self.core.table_id.table_id(),
             table_version_id: self.core.table_version_id,
             returning: self.core.returning,
+            session_id: self.base.ctx().session_ctx().session_id().0 as u32,
         })
     }
 }
