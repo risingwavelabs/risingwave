@@ -26,11 +26,11 @@ sleep(10)
 
 failed_cases = []
 
-# try:
-#     check_go()
-# except Exception as e:
-#     print(e)
-#     failed_cases.append("go client failed")
+try:
+    check_go()
+except Exception as e:
+    print(e)
+    failed_cases.append("go client failed")
 
 try:
     check_python()
@@ -38,11 +38,11 @@ except Exception as e:
     print(e)
     failed_cases.append("python client failed")
 
-# try:
-#     check_java()
-# except Exception as e:
-#     print(e)
-#     failed_cases.append("java client failed")
+try:
+    check_java()
+except Exception as e:
+    print(e)
+    failed_cases.append("java client failed")
 
 if len(failed_cases) != 0:
     print(f"--- client check failed for case\n{failed_cases}")
