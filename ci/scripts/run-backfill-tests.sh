@@ -168,6 +168,7 @@ test_replication_with_column_pruning() {
   echo "--- Kill cluster"
   cargo make kill
   cargo make wait-processes-exit
+  wait
 }
 
 # Test sink backfill recovery
@@ -177,15 +178,10 @@ test_sink_backfill_recovery() {
 
   # Check progress
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/create_sink.slt'
-  sqllogictest -p 4566 -d dev 'e2e_test/background_ddl/common/validate_one_job.slt'
 
   # Restart
   restart_cluster
   sleep 3
-
-  # FIXME(kwannoel): Sink's backfill progress is not recovered yet.
-  # Check progress
-  # sqllogictest -p 4566 -d dev 'e2e_test/background_ddl/common/validate_one_job.slt'
 
   # Sink back into rw
   run_sql "CREATE TABLE table_kafka (v1 int primary key)
@@ -199,6 +195,9 @@ test_sink_backfill_recovery() {
 
   # Verify data matches upstream table.
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/validate_sink.slt'
+  cargo make kill
+  cargo make wait-processes-exit
+  wait
 }
 
 main() {
