@@ -617,6 +617,7 @@ impl StateStoreImpl {
                     opts.meta_cache_capacity_mb * (1 << 20),
                     opts.high_priority_ratio,
                     opts.prefetch_buffer_capacity_mb * (1 << 20),
+                    opts.max_prefetch_block_number,
                     data_file_cache,
                     meta_file_cache,
                     recent_filter,

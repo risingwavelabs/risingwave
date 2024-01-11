@@ -169,6 +169,7 @@ impl HummockServiceOpts {
             opts.meta_cache_capacity_mb * (1 << 20),
             0,
             opts.block_cache_capacity_mb * (1 << 20),
+            opts.max_prefetch_block_number,
             FileCache::none(),
             FileCache::none(),
             None,
