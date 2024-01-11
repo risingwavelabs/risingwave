@@ -15,15 +15,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::types::DataType;
 use risingwave_connector::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{SourceColumnDesc, SourceColumnType};
 use risingwave_connector::ConnectorParams;
 use risingwave_pb::catalog::PbStreamSourceInfo;
-use risingwave_pb::plan_common::PbColumnCatalog;
+use risingwave_pb::plan_common::{AdditionalColumnType, ColumnCatalog, PbColumnCatalog};
 
 use crate::connector_source::ConnectorSource;
 use crate::fs_connector_source::FsConnectorSource;
@@ -83,10 +84,61 @@ impl SourceDescBuilder {
     }
 
     fn column_catalogs_to_source_column_descs(&self) -> Vec<SourceColumnDesc> {
+        let mut columns_exist = [false; 2];
+        let last_column_id = self
+            .columns
+            .last()
+            .map(|c| c.column_desc.as_ref().unwrap().column_id.into())
+            .unwrap_or(ColumnId::new(0));
+
+        let additional_columns = [
+            ColumnCatalog {
+                column_desc: Some(
+                    ColumnDesc::named_with_additional_column(
+                        "_rw_partition",
+                        last_column_id.next(),
+                        DataType::Varchar,
+                        AdditionalColumnType::Partition,
+                    )
+                    .to_protobuf(),
+                ),
+                is_hidden: true,
+            },
+            ColumnCatalog {
+                column_desc: Some(
+                    ColumnDesc::named_with_additional_column(
+                        "_rw_offset",
+                        last_column_id.next().next(),
+                        DataType::Varchar,
+                        AdditionalColumnType::Offset,
+                    )
+                    .to_protobuf(),
+                ),
+                is_hidden: true,
+            },
+        ];
+
         let mut columns: Vec<_> = self
             .columns
             .iter()
-            .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
+            .chain(additional_columns.iter())
+            .filter_map(|c| {
+                if match c.column_desc.as_ref().unwrap().get_additional_column_type() {
+                    Ok(AdditionalColumnType::Partition) => {
+                        std::mem::replace(&mut columns_exist[0], true)
+                    }
+                    Ok(AdditionalColumnType::Offset) => {
+                        std::mem::replace(&mut columns_exist[1], true)
+                    }
+                    _ => false,
+                } {
+                    None
+                } else {
+                    Some(SourceColumnDesc::from(&ColumnDesc::from(
+                        c.column_desc.as_ref().unwrap(),
+                    )))
+                }
+            })
             .collect();
         if let Some(row_id_index) = self.row_id_index {
             columns[row_id_index].column_type = SourceColumnType::RowId;
