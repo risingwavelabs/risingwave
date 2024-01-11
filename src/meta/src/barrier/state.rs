@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::common::PbWorkerNode;
 use risingwave_pb::meta::PausedReason;
 
-use crate::barrier::TracedEpoch;
+use crate::barrier::info::InflightActorInfo;
+use crate::barrier::{Command, TracedEpoch};
 
 /// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`.
 pub struct BarrierManagerState {
@@ -24,14 +26,22 @@ pub struct BarrierManagerState {
     /// committed snapshot in `HummockManager`.
     in_flight_prev_epoch: TracedEpoch,
 
+    /// Inflight running actors info.
+    pub(crate) inflight_actor_infos: InflightActorInfo,
+
     /// Whether the cluster is paused and the reason.
     paused_reason: Option<PausedReason>,
 }
 
 impl BarrierManagerState {
-    pub fn new(in_flight_prev_epoch: TracedEpoch, paused_reason: Option<PausedReason>) -> Self {
+    pub fn new(
+        in_flight_prev_epoch: TracedEpoch,
+        inflight_actor_infos: InflightActorInfo,
+        paused_reason: Option<PausedReason>,
+    ) -> Self {
         Self {
             in_flight_prev_epoch,
+            inflight_actor_infos,
             paused_reason,
         }
     }
@@ -57,5 +67,28 @@ impl BarrierManagerState {
         let next_epoch = prev_epoch.next();
         self.in_flight_prev_epoch = next_epoch.clone();
         (prev_epoch, next_epoch)
+    }
+
+    pub fn inflight_actor_infos(&self) -> InflightActorInfo {
+        self.inflight_actor_infos.clone()
+    }
+
+    // TODO: optimize it as incremental updates.
+    pub fn resolve_worker_nodes(&mut self, nodes: Vec<PbWorkerNode>) {
+        self.inflight_actor_infos.resolve_worker_nodes(nodes);
+    }
+
+    /// Before resolving the actors to be sent or collected, we should first add the newly
+    /// added actors into checkpoint control, so that these actor can be send and collect.
+    pub fn pre_resolve(&mut self, command: &Command) {
+        self.inflight_actor_infos
+            .pre_apply(&command.actor_changes());
+    }
+
+    /// After resolving the actors to be sent or collected, we should remove the dropped actors
+    /// from checkpoint control.
+    pub fn post_resolve(&mut self, command: &Command) {
+        self.inflight_actor_infos
+            .post_apply(&command.actor_changes());
     }
 }

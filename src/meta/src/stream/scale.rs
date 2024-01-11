@@ -1130,12 +1130,27 @@ impl ScaleController {
             HashMap::with_capacity(reschedules.len());
 
         for (fragment_id, _) in reschedules {
-            let actors_to_create = fragment_actors_to_create
+            let mut actors_to_create: HashMap<_, Vec<_>> = HashMap::new();
+            let fragment_type_mask = ctx
+                .fragment_map
                 .get(&fragment_id)
-                .cloned()
-                .unwrap_or_default()
-                .into_keys()
-                .collect();
+                .unwrap()
+                .fragment_type_mask;
+            let injectable = TableFragments::is_injectable(fragment_type_mask);
+
+            if let Some(actor_pu_maps) = fragment_actors_to_create.get(&fragment_id).cloned() {
+                for (actor_id, parallel_unit_id) in actor_pu_maps {
+                    let worker_id = ctx
+                        .parallel_unit_id_to_worker_id
+                        .get(&parallel_unit_id)
+                        .with_context(|| format!("parallel unit {} not found", parallel_unit_id))?;
+                    actors_to_create
+                        .entry(*worker_id)
+                        .or_default()
+                        .push(actor_id);
+                }
+            }
+
             let actors_to_remove = fragment_actors_to_remove
                 .get(&fragment_id)
                 .cloned()
@@ -1275,6 +1290,7 @@ impl ScaleController {
                     upstream_dispatcher_mapping,
                     downstream_fragment_ids,
                     actor_splits,
+                    injectable,
                 },
             );
         }

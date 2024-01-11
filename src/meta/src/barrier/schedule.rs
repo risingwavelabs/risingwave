@@ -28,6 +28,7 @@ use tokio::sync::{oneshot, watch, RwLock};
 use super::notifier::{BarrierInfo, Notifier};
 use super::{Command, Scheduled};
 use crate::hummock::HummockManagerRef;
+use crate::model::ActorId;
 use crate::rpc::metrics::MetaMetrics;
 use crate::{MetaError, MetaResult};
 
@@ -397,8 +398,8 @@ impl ScheduledBarriers {
 
     /// Try to pre apply drop scheduled command and return the table ids of dropped streaming jobs.
     /// It should only be called in recovery.
-    pub(super) async fn pre_apply_drop_scheduled(&self) -> HashSet<TableId> {
-        let mut to_drop_tables = HashSet::new();
+    pub(super) async fn pre_apply_drop_scheduled(&self) -> HashSet<ActorId> {
+        let mut to_remove_actors = HashSet::new();
         let mut queue = self.inner.queue.write().await;
         assert_matches!(queue.status, QueueStatus::Blocked(_));
 
@@ -407,12 +408,12 @@ impl ScheduledBarriers {
         }) = queue.queue.pop_front()
         {
             match command {
-                Command::DropStreamingJobs(table_ids) => {
-                    to_drop_tables.extend(table_ids);
+                Command::DropStreamingJobs(node_actors) => {
+                    to_remove_actors.extend(node_actors.values().flatten());
                 }
                 Command::CancelStreamingJob(table_fragments) => {
-                    let table_id = table_fragments.table_id();
-                    to_drop_tables.insert(table_id);
+                    let actor_ids = table_fragments.actor_ids();
+                    to_remove_actors.extend(actor_ids);
                 }
                 _ => {
                     unreachable!("only drop streaming jobs should be buffered");
@@ -423,7 +424,7 @@ impl ScheduledBarriers {
                 notify.notify_finished();
             });
         }
-        to_drop_tables
+        to_remove_actors
     }
 
     /// Whether the barrier(checkpoint = true) should be injected.

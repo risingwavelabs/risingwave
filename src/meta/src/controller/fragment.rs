@@ -812,22 +812,20 @@ impl CatalogController {
         Ok(fragment_state_tables)
     }
 
-    /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
+    /// Used in [`crate::barrier::GlobalBarrierManager`], load all running actor that need to be sent or
     /// collected
     pub async fn load_all_actors(
         &self,
         parallel_units_map: &HashMap<u32, PbParallelUnit>,
-        check_state: impl Fn(PbActorState, ObjectId, ActorId) -> bool,
     ) -> MetaResult<ActorInfos> {
         let inner = self.inner.read().await;
-        let actor_info: Vec<(ActorId, ActorStatus, i32, ObjectId, i32)> = Actor::find()
+        let actor_info: Vec<(ActorId, i32, i32)> = Actor::find()
             .select_only()
             .column(actor::Column::ActorId)
-            .column(actor::Column::Status)
             .column(actor::Column::ParallelUnitId)
-            .column(fragment::Column::JobId)
             .column(fragment::Column::FragmentTypeMask)
             .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
+            .filter(actor::Column::Status.eq(ActorStatus::Running))
             .into_tuple()
             .all(&inner.db)
             .await?;
@@ -835,24 +833,21 @@ impl CatalogController {
         let mut actor_maps = HashMap::new();
         let mut barrier_inject_actor_maps = HashMap::new();
 
-        for (actor_id, status, parallel_unit_id, job_id, type_mask) in actor_info {
-            let status = PbActorState::from(status);
+        for (actor_id, parallel_unit_id, type_mask) in actor_info {
             // FIXME: since worker might have gone, it's not safe to unwrap here.
             let worker_id = parallel_units_map
                 .get(&(parallel_unit_id as _))
                 .unwrap()
                 .worker_node_id;
-            if check_state(status, job_id, actor_id) {
-                actor_maps
+            actor_maps
+                .entry(worker_id)
+                .or_insert_with(Vec::new)
+                .push(actor_id as _);
+            if Self::is_injectable(type_mask as _) {
+                barrier_inject_actor_maps
                     .entry(worker_id)
                     .or_insert_with(Vec::new)
                     .push(actor_id as _);
-                if Self::is_injectable(type_mask as _) {
-                    barrier_inject_actor_maps
-                        .entry(worker_id)
-                        .or_insert_with(Vec::new)
-                        .push(actor_id as _);
-                }
             }
         }
 
