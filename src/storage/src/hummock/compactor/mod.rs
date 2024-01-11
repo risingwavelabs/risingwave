@@ -668,7 +668,7 @@ pub fn start_shared_compactor(
                                     shutdown.lock().unwrap().remove(&task_id);
                                     let report_compaction_task_request = ReportCompactionTaskRequest {
                                         event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
-                                            compact_task: Some(compact_task),
+                                            compact_task: Some(compact_task.clone()),
                                             table_stats_change: to_prost_table_stats_map(table_stats),
                                         })),
                                     };
@@ -677,9 +677,24 @@ pub fn start_shared_compactor(
                                         .report_compaction_task(report_compaction_task_request)
                                         .await
                                     {
-                                        Ok(_) => {}
+                                        Ok(_) => {
+                                            // TODO: remove this method after we have running risingwave cluster with fast compact algorithm stably for a long time.
+
+                                            if context.storage_opts.check_fast_compaction_result
+                                                && !compact_task.sorted_output_ssts.is_empty()
+                                                && compact_task.task_status() == TaskStatus::Success
+                                                && let Err(e) = check_compaction_result(&compact_task, context.clone()).await
+                                            {
+                                                tracing::error!(
+                "Failed to check fast compaction task {} because: {:?}",
+                compact_task.task_id,
+                e
+            );
+                                            }
+                                        }
                                         Err(e) => tracing::warn!("Failed to report task {task_id:?} . {e:?}"),
                                     }
+
                                 }
                                 dispatch_compaction_task_request::Task::VacuumTask(vacuum_task) => {
                                     match Vacuum::handle_vacuum_task(

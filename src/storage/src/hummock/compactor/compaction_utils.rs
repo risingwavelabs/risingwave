@@ -316,6 +316,28 @@ pub async fn check_compaction_result(
     compact_task: &CompactTask,
     context: CompactorContext,
 ) -> HummockResult<()> {
+    let has_ttl = compact_task
+        .table_options
+        .iter()
+        .any(|(_, table_option)| table_option.retention_seconds > 0);
+
+    let mut compact_table_ids = compact_task
+        .input_ssts
+        .iter()
+        .flat_map(|level| level.table_infos.iter())
+        .flat_map(|sst| sst.table_ids.clone())
+        .collect_vec();
+    compact_table_ids.sort();
+    compact_table_ids.dedup();
+    let existing_table_ids: HashSet<u32> =
+        HashSet::from_iter(compact_task.existing_table_ids.clone());
+    let need_clean_state_table = compact_table_ids
+        .iter()
+        .any(|table_id| !existing_table_ids.contains(table_id));
+    if has_ttl || need_clean_state_table {
+        return Ok(());
+    }
+
     let mut table_iters = Vec::new();
     let compact_io_retry_time = context.storage_opts.compact_iter_recreate_timeout_ms;
     for level in &compact_task.input_ssts {
