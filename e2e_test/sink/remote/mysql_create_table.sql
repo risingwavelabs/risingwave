@@ -7,7 +7,7 @@ CREATE TABLE t_remote_0 (
     v_decimal decimal,
     v_float float,
     v_double double,
-    v_timestamp timestamp(6)
+    v_timestamp DATETIME(6)
 );
 
 CREATE TABLE t_remote_1 (
@@ -43,7 +43,7 @@ CREATE TABLE t_types (
    boolean_column TINYINT,
    date_column DATE,
    time_column TIME,
-   timestamp_column DATETIME(6),
+   timestamp_column DATETIME,
    interval_column VARCHAR(100),
    jsonb_column JSON,
    array_column LONGTEXT,
