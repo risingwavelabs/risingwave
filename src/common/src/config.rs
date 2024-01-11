@@ -1108,7 +1108,7 @@ pub mod default {
         }
 
         pub fn imm_merge_threshold() -> usize {
-            0 // diable
+            0 // disable
         }
 
         pub fn write_conflict_detection_enabled() -> bool {
