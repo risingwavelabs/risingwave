@@ -84,7 +84,7 @@ CREATE SINK s_postgres_1 FROM mv_remote_1 WITH (
 statement ok
 CREATE SINK s_mysql_0 FROM mv_remote_0 WITH (
     connector='jdbc',
-    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw& connectionTimeZone=UTC',
+    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw&connectionTimeZone=UTC',
     table.name='t_remote_0',
     primary_key='id',
     type='upsert'
@@ -93,7 +93,7 @@ CREATE SINK s_mysql_0 FROM mv_remote_0 WITH (
 statement ok
 CREATE SINK s_mysql_1 FROM mv_remote_1 WITH (
     connector='jdbc',
-    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw& connectionTimeZone=UTC',
+    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw&connectionTimeZone=UTC',
     table.name='t_remote_1',
     primary_key='id',
     type='upsert'
@@ -112,7 +112,7 @@ CREATE SINK s2_postgres FROM rw_typed_data WITH (
 statement ok
 CREATE SINK s2_mysql FROM rw_typed_data WITH (
     connector='jdbc',
-    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw& connectionTimeZone=UTC',
+    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw&connectionTimeZone=UTC',
     table.name='t_types',
     primary_key='id',
     type='upsert'

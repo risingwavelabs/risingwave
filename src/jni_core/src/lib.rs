@@ -720,7 +720,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetTimestamp
             let utc = env
                 .get_static_field(&cls, "UTC", gen_jni_type_sig!(java.time.ZoneOffset))?
                 .l()?;
-            Ok::<_, jni::errors::Error>(env.new_global_ref(utc)?)
+            env.new_global_ref(utc)
         })?;
 
         let sig = gen_jni_sig!(java.time.OffsetDateTime ofInstant(java.time.Instant instant, java.time.ZoneId zone));
