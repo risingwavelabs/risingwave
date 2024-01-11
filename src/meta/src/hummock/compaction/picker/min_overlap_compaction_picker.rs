@@ -44,8 +44,8 @@ impl MinOverlappingPicker {
             level,
             target_level,
             max_select_bytes,
-            overlap_strategy,
             vnode_partition_count,
+            overlap_strategy,
         }
     }
 
