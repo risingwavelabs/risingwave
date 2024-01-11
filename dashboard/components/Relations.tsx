@@ -42,7 +42,11 @@ import { Fragment } from "react"
 import Title from "../components/Title"
 import extractColumnInfo from "../lib/extractInfo"
 import useFetch from "../pages/api/fetch"
-import { Relation, StreamingJob } from "../pages/api/streaming"
+import {
+  Relation,
+  StreamingJob,
+  relationIsStreamingJob,
+} from "../pages/api/streaming"
 import {
   Sink as RwSink,
   Source as RwSource,
@@ -150,7 +154,14 @@ export function Relations<R extends Relation>(
         </ModalBody>
 
         <ModalFooter>
-          <Button colorScheme="blue" mr={3} onClick={() => setModalId(null)}>
+          {modalData && relationIsStreamingJob(modalData) && (
+            <Button colorScheme="blue" mr={3}>
+              <Link href={`/fragment_graph/?id=${modalData.id}`}>
+                View Fragments
+              </Link>
+            </Button>
+          )}
+          <Button mr={3} onClick={() => setModalId(null)}>
             Close
           </Button>
         </ModalFooter>

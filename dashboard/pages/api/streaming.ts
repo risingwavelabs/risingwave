@@ -59,7 +59,8 @@ export function relationType(x: Relation) {
 export type RelationType = ReturnType<typeof relationType>
 
 export function relationIsStreamingJob(x: Relation): x is StreamingJob {
-  return (x as StreamingJob).dependentRelations !== undefined
+  const type = relationType(x)
+  return type !== "UNKNOWN" && type !== "SOURCE" && type !== "INTERNAL"
 }
 
 export async function getStreamingJobs() {
