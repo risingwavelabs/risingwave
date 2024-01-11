@@ -319,8 +319,6 @@ impl StreamTableScan {
             ..Default::default()
         });
 
-        // let mut merge_node: MergeNode = Default::default();
-
         PbStreamNode {
             fields: self.schema().to_prost(),
             input: vec![
