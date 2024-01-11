@@ -69,6 +69,39 @@ ENABLE_RELEASE_PROFILE=false
 EOF
 }
 
+configure_rw_build() {
+echo "--- Setting up cluster config"
+cat <<EOF > risedev-profiles.user.yml
+full-without-monitoring:
+  steps:
+    - use: minio
+    - use: etcd
+    - use: meta-node
+    - use: compute-node
+    - use: frontend
+    - use: compactor
+    - use: zookeeper
+    - use: kafka
+EOF
+
+cat <<EOF > risedev-components.user.env
+RISEDEV_CONFIGURED=true
+
+ENABLE_MINIO=true
+ENABLE_ETCD=true
+ENABLE_KAFKA=true
+
+# Make sure that it builds
+ENABLE_BUILD_RUST=true
+
+# Ensure it will link the all-in-one binary from our release.
+ENABLE_ALL_IN_ONE=true
+
+# Use target/debug for simplicity.
+ENABLE_RELEASE_PROFILE=false
+EOF
+}
+
 setup_old_cluster() {
   echo "--- Build risedev for $OLD_VERSION, it may not be backwards compatible"
   git config --global --add safe.directory /risingwave
@@ -80,7 +113,8 @@ setup_old_cluster() {
   wget $OLD_URL
   if [[ "$?" -ne 0 ]]; then
     set -e
-    echo "Failed to download ${OLD_VERSION} from github releases, build from source later"
+    echo "Failed to download ${OLD_VERSION} from github releases, build from source later during ./risedev d"
+    configure_rw_build
   else
     set -e
     tar -xvf risingwave-v${OLD_VERSION}-x86_64-unknown-linux.tar.gz
@@ -88,6 +122,7 @@ setup_old_cluster() {
 
     echo "--- Start cluster on tag $OLD_VERSION"
     git config --global --add safe.directory /risingwave
+    configure_rw
   fi
 }
 
@@ -104,8 +139,8 @@ main() {
   # Make sure we have all the branches
   git fetch --all
   get_rw_versions
+
   setup_old_cluster
-  configure_rw
   seed_old_cluster "$OLD_VERSION"
 
   setup_new_cluster
