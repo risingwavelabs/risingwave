@@ -82,6 +82,21 @@ impl<R: Row> Hash for Project<'_, R> {
     }
 }
 
+impl<R: Row> std::fmt::Display for Project<'_, R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        for (i, datum) in self.iter().enumerate() {
+            if i != self.indices.len() - 1 {
+                write!(f, "{:?}, ", datum)?;
+            } else {
+                write!(f, "{:?}", datum)?;
+            }
+        }
+
+        write!(f, "]")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
