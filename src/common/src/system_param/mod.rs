@@ -20,6 +20,7 @@
 //! - Add a new entry to `for_all_undeprecated_params` in this file.
 //! - Add a new method to [`reader::SystemParamsReader`].
 
+pub mod common;
 pub mod local_manager;
 pub mod reader;
 

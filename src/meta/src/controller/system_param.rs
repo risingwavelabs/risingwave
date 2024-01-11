@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use risingwave_common::system_param::common::CommonHandler;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::{
     check_missing_params, derive_missing_fields, set_system_param,
@@ -44,6 +45,8 @@ pub struct SystemParamsController {
     notification_manager: NotificationManagerRef,
     // Cached parameters.
     params: RwLock<PbSystemParams>,
+
+    common_handler: CommonHandler,
 }
 
 /// Derive system params from db models.
@@ -146,7 +149,8 @@ impl SystemParamsController {
         let ctl = Self {
             db,
             notification_manager,
-            params: RwLock::new(params),
+            params: RwLock::new(params.clone()),
+            common_handler: CommonHandler::new(params.into()),
         };
         // flush to db.
         ctl.flush_params().await?;
@@ -195,6 +199,9 @@ impl SystemParamsController {
             Set(set_system_param(&mut params, name, value).map_err(MetaError::system_params)?);
         param.update(&self.db).await?;
         *params_guard = params.clone();
+
+        // Run common handler.
+        self.common_handler.handle_change(params.clone().into());
 
         // Sync params to other managers on the meta node only once, since it's infallible.
         self.notification_manager

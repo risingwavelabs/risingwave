@@ -19,6 +19,7 @@ use arc_swap::ArcSwap;
 use risingwave_pb::meta::SystemParams;
 use tokio::sync::watch::{channel, Receiver, Sender};
 
+use super::common::CommonHandler;
 use super::reader::SystemParamsReader;
 use super::system_params_for_test;
 
@@ -40,9 +41,22 @@ pub struct LocalSystemParamsManager {
 }
 
 impl LocalSystemParamsManager {
-    pub fn new(params: SystemParamsReader) -> Self {
-        let params = Arc::new(ArcSwap::from_pointee(params));
+    pub fn new(initial_params: SystemParamsReader) -> Self {
+        let params = Arc::new(ArcSwap::from_pointee(initial_params.clone()));
         let (tx, _) = channel(params.clone());
+
+        tokio::spawn({
+            let mut rx = tx.subscribe();
+            async move {
+                let handler = CommonHandler::new(initial_params);
+
+                while let Ok(_) = rx.changed().await {
+                    let new_params = (**rx.borrow_and_update().load()).clone();
+                    handler.handle_change(new_params);
+                }
+            }
+        });
+
         Self { params, tx }
     }
 
