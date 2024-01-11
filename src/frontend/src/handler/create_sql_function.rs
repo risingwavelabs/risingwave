@@ -168,9 +168,9 @@ pub async fn handle_create_sql_function(
         arg_types: arg_types.into_iter().map(|t| t.into()).collect(),
         return_type: Some(return_type.into()),
         language,
-        identifier: "".to_string(),
+        identifier: None,
         body: Some(body),
-        link: "".to_string(),
+        link: None,
         owner: session.user_id(),
     };
 

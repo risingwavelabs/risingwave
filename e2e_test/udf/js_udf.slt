@@ -1,0 +1,37 @@
+statement ok
+create function int_42() returns int language javascript as $$
+    export function int_42() {
+        return 42;
+    }
+$$;
+
+statement ok
+create function gcd(int, int) returns int language javascript as $$
+    export function gcd(a, b) {
+        if(a == null || b == null) {
+            return null;
+        }
+        while (b != 0) {
+            let t = b;
+            b = a % b;
+            a = t;
+        }
+        return a;
+    }
+$$;
+
+query I
+select int_42();
+----
+42
+
+query I
+select gcd(25, 15);
+----
+5
+
+statement ok
+drop function int_42;
+
+statement ok
+drop function gcd(int,int);

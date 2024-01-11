@@ -29,9 +29,9 @@ pub struct FunctionCatalog {
     pub arg_types: Vec<DataType>,
     pub return_type: DataType,
     pub language: String,
-    pub identifier: String,
+    pub identifier: Option<String>,
     pub body: Option<String>,
-    pub link: String,
+    pub link: Option<String>,
 }
 
 #[derive(Clone, Display, PartialEq, Eq, Hash, Debug)]

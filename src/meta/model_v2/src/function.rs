@@ -39,8 +39,8 @@ pub struct Model {
     pub arg_types: DataTypeArray,
     pub return_type: DataType,
     pub language: String,
-    pub link: String,
-    pub identifier: String,
+    pub link: Option<String>,
+    pub identifier: Option<String>,
     pub body: Option<String>,
     pub kind: FunctionKind,
 }

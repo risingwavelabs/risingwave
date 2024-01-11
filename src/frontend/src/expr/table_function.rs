@@ -77,6 +77,7 @@ impl TableFunction {
                     language: c.language.clone(),
                     link: c.link.clone(),
                     identifier: c.identifier.clone(),
+                    body: c.body.clone(),
                 }),
         }
     }

@@ -177,20 +177,18 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
             .try_collect::<_, Fields, _>()?,
     ));
 
+    let link = udtf.get_link()?;
     let client = match udtf.language.as_str() {
         "wasm" => {
             // Use `block_in_place` as an escape hatch to run async code here in sync context.
             // Calling `block_on` directly will panic.
             UdfImpl::Wasm(tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(
-                    crate::expr::expr_udf::get_or_create_wasm_runtime(&udtf.link),
-                )
+                tokio::runtime::Handle::current()
+                    .block_on(crate::expr::expr_udf::get_or_create_wasm_runtime(link))
             })?)
         }
         // connect to UDF service
-        _ => UdfImpl::External(crate::expr::expr_udf::get_or_create_flight_client(
-            &udtf.link,
-        )?),
+        _ => UdfImpl::External(crate::expr::expr_udf::get_or_create_flight_client(link)?),
     };
 
     Ok(UserDefinedTableFunction {
@@ -198,7 +196,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
         return_type: prost.return_type.as_ref().expect("no return type").into(),
         arg_schema,
         client,
-        identifier: udtf.identifier.clone(),
+        identifier: udtf.get_identifier()?.clone(),
         chunk_size,
     }
     .boxed())

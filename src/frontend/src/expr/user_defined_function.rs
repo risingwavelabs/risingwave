@@ -54,10 +54,9 @@ impl UserDefinedFunction {
             arg_types,
             return_type,
             language: udf.get_language().clone(),
-            identifier: udf.get_identifier().clone(),
-            // TODO: Ensure if we need `body` here
-            body: None,
-            link: udf.get_link().clone(),
+            identifier: udf.identifier.clone(),
+            body: udf.body.clone(),
+            link: udf.link.clone(),
         };
 
         Ok(Self {
@@ -90,6 +89,7 @@ impl Expr for UserDefinedFunction {
                 language: self.catalog.language.clone(),
                 identifier: self.catalog.identifier.clone(),
                 link: self.catalog.link.clone(),
+                body: self.catalog.body.clone(),
             })),
         }
     }
