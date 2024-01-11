@@ -14,6 +14,8 @@
 
 package com.risingwave.java.binding;
 
+import java.time.ZoneOffset;
+
 public class Utils {
     public static void validateRow(BaseRow row) {
         // The validation of row data are according to the data generation rule
@@ -48,7 +50,7 @@ public class Utils {
                             ((Short) rowIndex).toString().repeat((rowIndex % 10) + 1)));
         }
 
-        if (row.getTimestamp(7).getSecond() != rowIndex) {
+        if (row.getTimestamp(7).toInstant(ZoneOffset.UTC).toEpochMilli() != rowIndex * 1000) {
             throw new RuntimeException(
                     String.format("invalid Timestamp value: %s %s", row.getTimestamp(7), rowIndex));
         }
