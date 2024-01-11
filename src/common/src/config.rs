@@ -556,6 +556,10 @@ pub struct StorageConfig {
     #[serde(default)]
     pub prefetch_buffer_capacity_mb: Option<usize>,
 
+    /// max prefetch block number
+    #[serde(default = "default::storage::max_prefetch_block_number")]
+    pub max_prefetch_block_number: usize,
+
     #[serde(default = "default::storage::disable_remote_compactor")]
     pub disable_remote_compactor: bool,
 
@@ -1205,6 +1209,10 @@ pub mod default {
 
         pub fn compactor_fast_max_compact_task_size() -> u64 {
             2 * 1024 * 1024 * 1024 // 2g
+        }
+
+        pub fn max_prefetch_block_number() -> usize {
+            16
         }
     }
 
