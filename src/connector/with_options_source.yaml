@@ -469,15 +469,6 @@ PosixFsProperties:
     comments: The regex pattern to match files under root directory.
     required: false
     default: Default::default
-PosixFsProperties:
-  fields:
-  - name: posix_fs.root
-    field_type: String
-    required: true
-  - name: match_pattern
-    field_type: String
-    required: false
-    default: Default::default
 PubsubProperties:
   fields:
   - name: pubsub.split_count
