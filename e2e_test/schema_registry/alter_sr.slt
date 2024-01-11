@@ -54,7 +54,7 @@ sleep 10s
 query I
 SELECT COUNT(*) FROM mv_user;
 ----
-20
+25
 
 statement error
 SELECT SUM(age) FROM mv_user;
