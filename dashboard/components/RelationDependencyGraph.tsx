@@ -191,7 +191,7 @@ export default function RelationDependencyGraph({
         .attr("font-size", 16)
         .attr("font-weight", "bold")
 
-      // Relation link
+      // Relation modal
       g.style("cursor", "pointer").on("click", (_, { relation, id }) => {
         setSelectedId(id)
         setModalId(relation.id)
