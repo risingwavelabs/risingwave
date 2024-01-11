@@ -15,16 +15,17 @@
 use std::collections::HashMap;
 
 use anyhow::anyhow;
+use itertools::Itertools;
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::DistributionType;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
-    actor_dispatcher, connection, database, fragment, function, index, object, object_dependency,
-    schema, sink, source, table, user, user_privilege, view, worker_property, ActorId,
-    DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, PrivilegeId,
-    SchemaId, UserId, WorkerId,
+    actor, actor_dispatcher, connection, database, fragment, function, index, object,
+    object_dependency, schema, sink, source, table, user, user_privilege, view, worker_property,
+    ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId,
+    PrivilegeId, SchemaId, UserId, WorkerId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
 use risingwave_pb::common::PbParallelUnit;
@@ -689,4 +690,23 @@ where
             mapping: Some(mapping.into_inner()),
         })
         .collect())
+}
+
+/// `get_fragment_actor_ids` returns the fragment actor ids of the given fragments.
+pub async fn get_fragment_actor_ids<C>(
+    db: &C,
+    fragment_ids: Vec<FragmentId>,
+) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>>
+where
+    C: ConnectionTrait,
+{
+    let fragment_actors: Vec<(FragmentId, ActorId)> = Actor::find()
+        .select_only()
+        .columns([actor::Column::FragmentId, actor::Column::ActorId])
+        .filter(actor::Column::FragmentId.is_in(fragment_ids))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    Ok(fragment_actors.into_iter().into_group_map())
 }
