@@ -15,8 +15,8 @@
 use bytes::Bytes;
 use pgwire::types::{Format, FormatIterator};
 use risingwave_common::bail;
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{Datum, FromSqlError, ScalarImpl};
+use risingwave_common::error::{BoxedError, ErrorCode, Result};
+use risingwave_common::types::{Datum, ScalarImpl};
 
 use super::statement::RewriteExprsRecursive;
 use super::BoundStatement;
@@ -27,7 +27,7 @@ pub(crate) struct ParamRewriter {
     pub(crate) params: Vec<Option<Bytes>>,
     pub(crate) parsed_params: Vec<Datum>,
     pub(crate) param_formats: Vec<Format>,
-    pub(crate) error: Option<FromSqlError>,
+    pub(crate) error: Option<BoxedError>,
 }
 
 impl ParamRewriter {
@@ -71,9 +71,20 @@ impl ExprRewriter for ParamRewriter {
         // But we store it in 0-based vector. So we need to minus 1.
         let parameter_index = (parameter.index - 1) as usize;
 
+        fn cstr_to_str(b: &[u8]) -> std::result::Result<&str, BoxedError> {
+            let without_null = if b.last() == Some(&0) {
+                &b[..b.len() - 1]
+            } else {
+                b
+            };
+            Ok(std::str::from_utf8(without_null)?)
+        }
+
         let datum: Datum = if let Some(val_bytes) = self.params[parameter_index].clone() {
             let res = match self.param_formats[parameter_index] {
-                Format::Text => ScalarImpl::from_text(&val_bytes, &data_type),
+                Format::Text => {
+                    cstr_to_str(&val_bytes).and_then(|str| ScalarImpl::from_text(str, &data_type))
+                }
                 Format::Binary => ScalarImpl::from_binary(&val_bytes, &data_type),
             };
             match res {

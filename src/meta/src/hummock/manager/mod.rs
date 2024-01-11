@@ -1058,11 +1058,7 @@ impl HummockManager {
         } else {
             table_to_vnode_partition
                 .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
-            if current_version
-                .get_compaction_group_levels(compaction_group_id)
-                .vnode_partition_count
-                > 0
-            {
+            if group_config.compaction_config.split_weight_by_vnode > 0 {
                 for table_id in &compact_task.existing_table_ids {
                     table_to_vnode_partition
                         .entry(*table_id)

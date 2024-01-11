@@ -288,9 +288,7 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
                 let ty = self.parse_type();
                 let value = match value.as_str() {
                     "null" | "NULL" => None,
-                    _ => Some(
-                        ScalarImpl::from_text(value.as_bytes(), &ty).expect_str("value", &value),
-                    ),
+                    _ => Some(ScalarImpl::from_text(&value, &ty).expect_str("value", &value)),
                 };
                 LiteralExpression::new(ty, value).boxed()
             }

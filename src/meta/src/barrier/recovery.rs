@@ -113,10 +113,7 @@ impl GlobalBarrierManagerContext {
                     state_table_ids,
                     source_ids,
                     ..
-                } = mgr
-                    .catalog_controller
-                    .clean_foreground_creating_jobs()
-                    .await?;
+                } = mgr.catalog_controller.clean_dirty_creating_jobs().await?;
 
                 // unregister compaction group for cleaned state tables.
                 self.hummock_manager
