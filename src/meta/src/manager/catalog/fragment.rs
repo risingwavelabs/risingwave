@@ -1306,7 +1306,7 @@ impl FragmentManager {
                         if let Some(node) = downstream_actor.nodes.as_mut() {
                             update_merge_node_upstream(
                                 node,
-                                &fragment_id,
+                                fragment_id,
                                 &removed_actor_ids,
                                 &added_actor_ids,
                             );
