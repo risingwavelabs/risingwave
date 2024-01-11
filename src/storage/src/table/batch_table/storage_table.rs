@@ -37,6 +37,7 @@ use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, next_key, prefixed_range_with_vnode, TableKeyRange,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::plan_common::StorageTableDesc;
 use tracing::trace;
 
 use crate::error::{StorageError, StorageResult};
@@ -127,44 +128,85 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
     /// from those supplied to associated executors.
     /// These `output_column_ids` may have `pk` appended, since they will be needed to scan from
     /// storage. The associated executors may not have these `pk` fields.
-    #[allow(clippy::too_many_arguments)]
     pub fn new_partial(
         store: S,
-        table_id: TableId,
-        table_columns: Vec<ColumnDesc>,
         output_column_ids: Vec<ColumnId>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-        distribution: Distribution,
-        table_options: TableOption,
-        value_indices: Vec<usize>,
-        read_prefix_len_hint: usize,
-        versioned: bool,
+        vnodes: Option<Arc<Bitmap>>,
+        table_desc: &StorageTableDesc,
     ) -> Self {
+        let table_id = TableId {
+            table_id: table_desc.table_id,
+        };
+        let column_descs = table_desc
+            .columns
+            .iter()
+            .map(ColumnDesc::from)
+            .collect_vec();
+        let order_types: Vec<OrderType> = table_desc
+            .pk
+            .iter()
+            .map(|order| OrderType::from_protobuf(order.get_order_type().unwrap()))
+            .collect();
+
+        let pk_indices = table_desc
+            .pk
+            .iter()
+            .map(|k| k.column_index as usize)
+            .collect_vec();
+
+        let table_option = TableOption {
+            retention_seconds: if table_desc.retention_seconds > 0 {
+                Some(table_desc.retention_seconds)
+            } else {
+                None
+            },
+        };
+        let value_indices = table_desc
+            .get_value_indices()
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
+        let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
+        let versioned = table_desc.versioned;
+        let distribution = match vnodes {
+            None => Distribution::fallback(),
+            Some(vnodes) => {
+                let dist_key_in_pk_indices = table_desc
+                    .dist_key_in_pk_indices
+                    .iter()
+                    .map(|&k| k as usize)
+                    .collect_vec();
+                Distribution {
+                    dist_key_in_pk_indices,
+                    vnodes,
+                }
+            }
+        };
+
         Self::new_inner(
             store,
             table_id,
-            table_columns,
+            column_descs,
             output_column_ids,
             order_types,
             pk_indices,
             distribution,
-            table_options,
+            table_option,
             value_indices,
-            read_prefix_len_hint,
+            prefix_hint_len,
             versioned,
         )
     }
 
-    pub fn for_test(
+    pub fn for_test_with_partial_columns(
         store: S,
         table_id: TableId,
         columns: Vec<ColumnDesc>,
+        output_column_ids: Vec<ColumnId>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         value_indices: Vec<usize>,
     ) -> Self {
-        let output_column_ids = columns.iter().map(|c| c.column_id).collect();
         Self::new_inner(
             store,
             table_id,
@@ -177,6 +219,26 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             value_indices,
             0,
             false,
+        )
+    }
+
+    pub fn for_test(
+        store: S,
+        table_id: TableId,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        value_indices: Vec<usize>,
+    ) -> Self {
+        let output_column_ids = columns.iter().map(|c| c.column_id).collect();
+        Self::for_test_with_partial_columns(
+            store,
+            table_id,
+            columns,
+            output_column_ids,
+            order_types,
+            pk_indices,
+            value_indices,
         )
     }
 
