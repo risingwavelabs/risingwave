@@ -64,9 +64,7 @@ ENABLE_BUILD_RUST=false
 # Ensure it will link the all-in-one binary from our release.
 ENABLE_ALL_IN_ONE=true
 
-# Even if CI is release profile, we won't ever
-# build the binaries from scratch.
-# So we just use target/debug for simplicity.
+# Use target/debug for simplicity.
 ENABLE_RELEASE_PROFILE=false
 EOF
 }
@@ -76,13 +74,20 @@ setup_old_cluster() {
   git config --global --add safe.directory /risingwave
   git checkout "v${OLD_VERSION}"
   cargo build -p risedev
+  echo "--- Get RisingWave binary for $OLD_VERSION"
   OLD_URL=https://github.com/risingwavelabs/risingwave/releases/download/v${OLD_VERSION}/risingwave-v${OLD_VERSION}-x86_64-unknown-linux.tar.gz
+  set +e
   wget $OLD_URL
-  tar -xvf risingwave-v${OLD_VERSION}-x86_64-unknown-linux.tar.gz
-  mv risingwave target/debug/risingwave
+  set -e
+  if [[ "$?" -ne 0 ]]; then
+    echo "Failed to download ${OLD_VERSION} from github releases, build from source later"
+  else
+    tar -xvf risingwave-v${OLD_VERSION}-x86_64-unknown-linux.tar.gz
+    mv risingwave target/debug/risingwave
 
-  echo "--- Start cluster on tag $OLD_VERSION"
-  git config --global --add safe.directory /risingwave
+    echo "--- Start cluster on tag $OLD_VERSION"
+    git config --global --add safe.directory /risingwave
+  fi
 }
 
 setup_new_cluster() {
