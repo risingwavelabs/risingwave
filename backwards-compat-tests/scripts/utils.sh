@@ -186,9 +186,8 @@ get_rw_versions() {
 # Setup table and materialized view.
 # Run updates and deletes on the table.
 # Get the results.
-# TODO: Run nexmark, tpch queries
-# TODO(kwannoel): use sqllogictest.
 seed_old_cluster() {
+  echo "--- Start cluster on old_version: $OLD_VERSION"
   # Caller should make sure the test env has these.
   # They are called here because the current tests
   # may not be backwards compatible, so we need to call
