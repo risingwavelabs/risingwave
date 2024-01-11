@@ -170,6 +170,8 @@ metrics_level = "Disabled"
             meta_nodes: 1,
             compactor_nodes: 1,
             compute_node_cores: 2,
+            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL=false".into()]
+                .into(),
             ..Default::default()
         }
     }
