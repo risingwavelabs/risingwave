@@ -35,6 +35,8 @@ mod order_by;
 mod subquery;
 mod value;
 
+const CASE_WHEN_ARMS_OPTIMIZE_LIMIT: usize = 0;
+
 impl Binder {
     /// Bind an expression with `bind_expr_inner`, attach the original expression
     /// to the error message.
@@ -478,7 +480,30 @@ impl Binder {
             .map(|expr| self.bind_expr_inner(*expr))
             .transpose()?;
 
+        // We will see if the currently binding case-when expression
+        // can be optimized to a constant lookup expression on-the-fly
+        let mut optimize_flag = if conditions.len() >= CASE_WHEN_ARMS_OPTIMIZE_LIMIT { true } else { false };
+
+        let mut constant_lookup_inputs = Vec::new();
+
         for (condition, result) in zip_eq_fast(conditions, results_expr) {
+            // See if the current condition could be optimized
+            if optimize_flag {
+                if let Expr::Value(_) = condition.clone() {
+                    let Ok(input) = self.bind_expr_inner(condition.clone()) else {
+                        return Err(ErrorCode::BindError(
+                            "failed to bind case when expression".to_string()
+                        )
+                        .into())
+                    };
+                    constant_lookup_inputs.push(input);
+                } else {
+                    // If at least one condition is not in the simple form,
+                    // we can NOT do the subsequent optimization then
+                    optimize_flag = false;
+                }
+            }
+
             let condition = match operand {
                 Some(ref t) => Expr::BinaryOp {
                     left: t.clone(),
@@ -487,21 +512,38 @@ impl Binder {
                 },
                 None => condition,
             };
+
             inputs.push(
                 self.bind_expr_inner(condition)
                     .and_then(|expr| expr.enforce_bool_clause("CASE WHEN"))?,
             );
-            inputs.push(result);
+
+            inputs.push(result.clone());
+            if optimize_flag {
+                constant_lookup_inputs.push(result);
+            }
         }
+
+        // The fallback arm for case-when expression
         if let Some(expr) = else_result_expr {
-            inputs.push(expr);
+            inputs.push(expr.clone());
+            constant_lookup_inputs.push(expr);
         }
+
         if inputs.iter().any(ExprImpl::has_table_function) {
             return Err(
                 ErrorCode::BindError("table functions are not allowed in CASE".into()).into(),
             );
         }
-        Ok(FunctionCall::new(ExprType::Case, inputs)?.into())
+        
+        if optimize_flag {
+            println!("[bind_case] tada!");
+            Ok(FunctionCall::new(ExprType::ConstantLookup, constant_lookup_inputs)?.into())
+        } else {
+            println!("[bind_case] data!");
+            println!("[bind_case] inputs: {:#?}", inputs);
+            Ok(FunctionCall::new(ExprType::Case, inputs)?.into())
+        }
     }
 
     pub(super) fn bind_is_operator(&mut self, func_type: ExprType, expr: Expr) -> Result<ExprImpl> {

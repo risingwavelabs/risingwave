@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::bail;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl};
 use risingwave_expr::expr::{BoxedExpression, Expression};
 use risingwave_expr::{build_function, Result};
 
@@ -55,6 +56,7 @@ impl Expression for CaseExpression {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        println!("[eval] input: {:#?}", input);
         let mut input = input.clone();
         let input_len = input.capacity();
         let mut selection = vec![None; input_len];
@@ -93,9 +95,14 @@ impl Expression for CaseExpression {
     }
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        println!("[normal] Current input: {:#?}", input.clone().into_inner().len());
+        // println!("[eval_row] input len: {:#?}", input());
         for WhenClause { when, then } in &self.when_clauses {
             if when.eval_row(input).await?.map_or(false, |w| w.into_bool()) {
-                return then.eval_row(input).await;
+                // return then.eval_row(input).await;
+                let res = then.eval_row(input).await;
+                println!("rsssss: {:#?}",res);
+                return res;
             }
         }
         if let Some(ref else_expr) = self.else_clause {
@@ -104,6 +111,87 @@ impl Expression for CaseExpression {
             Ok(None)
         }
     }
+}
+
+/// With large scale of simple form match arms in case-when expression,
+/// we could optimize the `CaseExpression` to `ConstantLookupExpression`,
+/// which could significantly facilitate the evaluation of case-when.
+#[derive(Debug)]
+struct ConstantLookupExpression {
+    return_type: DataType,
+    arms: HashMap<ScalarImpl, BoxedExpression>,
+    fallback: Option<BoxedExpression>,
+}
+
+impl ConstantLookupExpression {
+    fn new(
+        return_type: DataType,
+        arms: HashMap<ScalarImpl, BoxedExpression>,
+        fallback: Option<BoxedExpression>,
+    ) -> Self {
+        Self {
+            return_type,
+            arms,
+            fallback,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Expression for ConstantLookupExpression {
+    fn return_type(&self) -> DataType {
+        self.return_type.clone()
+    }
+
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let columns = input.column_at(0);
+        println!("[ConstantLookupExpression] columns: {:#?}", columns);
+        todo!()
+    }
+
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        println!("[ConstantLookupExpression] input: {:#?}", input);
+        // if let Some(then) = self.arms.get(input.clone().into_inner()[0].as_ref().unwrap()) {
+            // return then.eval_row(input).await;
+        // } else {
+            return self.fallback.as_ref().unwrap().eval_row(input).await;
+        // }
+    }
+}
+
+#[build_function("constant_lookup(...) -> any", type_infer = "panic")]
+fn build_constant_lookup_expr(
+    return_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    if children.is_empty() {
+        bail!("children expression must not be empty for constant lookup expression");
+    }
+
+    let mut arms = HashMap::new();
+
+    let mut iter = children.into_iter().array_chunks();
+    for [when, then] in iter.by_ref() {
+        let Ok(Some(s)) = when.eval_const() else {
+            bail!("expect when expression to be const");
+        };
+        arms.insert(s, then);
+    }
+
+    let fallback = if let Some(else_clause) = iter.into_remainder().unwrap().next() {
+        if else_clause.return_type() != return_type {
+            bail!("Type mismatched between else and case.");
+        }
+        Some(else_clause)
+    } else {
+        None
+    };
+
+    Ok(Box::new(ConstantLookupExpression::new(
+        return_type,
+        arms,
+        fallback,
+    )))
 }
 
 #[build_function("case(...) -> any", type_infer = "panic")]
@@ -132,6 +220,7 @@ fn build_case_expr(
     } else {
         None
     };
+
     Ok(Box::new(CaseExpression::new(
         return_type,
         when_clauses,

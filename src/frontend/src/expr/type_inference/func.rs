@@ -312,7 +312,7 @@ fn infer_type_for_special(
     inputs: &mut [ExprImpl],
 ) -> Result<Option<DataType>> {
     match func_type {
-        ExprType::Case => {
+        ExprType::Case | ExprType::ConstantLookup => {
             let len = inputs.len();
             align_types(inputs.iter_mut().enumerate().filter_map(|(i, e)| {
                 // `Case` organize `inputs` as (cond, res) pairs with a possible `else` res at
