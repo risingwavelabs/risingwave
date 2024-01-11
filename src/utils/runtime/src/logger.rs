@@ -28,7 +28,7 @@ use tracing_subscriber::fmt::time::OffsetTime;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::{filter, EnvFilter};
+use tracing_subscriber::{filter, reload, EnvFilter};
 
 pub struct LoggerSettings {
     /// The name of the service. Used to identify the service in distributed tracing.
@@ -436,9 +436,30 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                 .unwrap()
         };
 
+        // Disable all events and spans by default.
+        let (reload_filter, reload_handle) = reload::Layer::new(filter::Targets::new());
+
+        let toggle_otel_layer = move |enabled: bool| {
+            let result = reload_handle.modify(|f| {
+                *f = if enabled {
+                    default_filter.clone()
+                } else {
+                    filter::Targets::new()
+                }
+            });
+            if let Err(e) = result {
+                tracing::error!(
+                    error = %e.as_report(),
+                    "failed to {} opentelemetry tracing",
+                    if enabled { "enable" } else { "disable" },
+                );
+            }
+        };
+        risingwave_common::util::tracing::set_toggle_otel_layer_fn(toggle_otel_layer);
+
         let layer = tracing_opentelemetry::layer()
             .with_tracer(otel_tracer)
-            .with_filter(default_filter);
+            .with_filter(reload_filter);
 
         layers.push(layer.boxed());
     }
