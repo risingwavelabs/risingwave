@@ -46,7 +46,7 @@ impl DdlController {
         let job_id = streaming_job.id();
 
         match &mut streaming_job {
-            StreamingJob::Table(Some(src), table, job_type) => {
+            StreamingJob::Table(src, table, job_type) => {
                 // If we're creating a table with connector, we should additionally fill its ID first.
                 fill_table_stream_graph_info(src, table, *job_type, &mut fragment_graph);
             }
