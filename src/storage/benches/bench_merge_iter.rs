@@ -127,7 +127,6 @@ fn criterion_benchmark(c: &mut Criterion) {
     let merge_iter = RefCell::new(SkipWatermarkIterator::new(
         UnorderedMergeIteratorInner::new(gen_interleave_shared_buffer_batch_iter(10000, 100)),
         BTreeMap::new(),
-        None,
     ));
     c.bench_with_input(
         BenchmarkId::new("bench-merge-iter-skip-empty-watermark", "unordered"),

@@ -203,7 +203,6 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         Arc::new(CompactorMetrics::unused()),
         iter,
         DummyCompactionFilter,
-        None,
     )
     .await
     .unwrap();
@@ -239,7 +238,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                 ConcatIterator::new(level1.clone(), sstable_store.clone(), read_options.clone()),
                 ConcatIterator::new(level2.clone(), sstable_store.clone(), read_options.clone()),
             ];
-            let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters);
+            let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters, None);
             async move { compact(iter, sstable_store1).await }
         });
     });
@@ -263,7 +262,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     0,
                 ),
             ];
-            let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters);
+            let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters, None);
             let sstable_store1 = sstable_store.clone();
             async move { compact(iter, sstable_store1).await }
         });

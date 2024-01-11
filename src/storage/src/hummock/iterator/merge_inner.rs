@@ -16,16 +16,20 @@ use std::collections::binary_heap::PeekMut;
 use std::collections::{BinaryHeap, LinkedList};
 use std::future::Future;
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::EpochWithGap;
 
+use crate::hummock::compactor::TaskProgress;
 use crate::hummock::iterator::{DirectionEnum, Forward, HummockIterator, HummockIteratorDirection};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
+
+const PROGRESS_KEY_INTERVAL: u64 = 100;
 
 pub trait NodeExtraOrderInfo: Eq + Ord + Send + Sync {}
 
@@ -104,6 +108,11 @@ pub struct MergeIteratorInner<I: HummockIterator, NE: NodeExtraOrderInfo> {
     heap: BinaryHeap<Node<I, NE>>,
 
     last_table_key: Vec<u8>,
+
+    // compactor task progress report
+    task_progress: Option<Arc<TaskProgress>>,
+
+    progress_key_num: u64,
 }
 
 /// An order aware merge iterator.
@@ -112,14 +121,20 @@ pub type OrderedMergeIteratorInner<I: HummockIterator> = MergeIteratorInner<I, O
 
 impl<I: HummockIterator> OrderedMergeIteratorInner<I> {
     pub fn new(iterators: impl IntoIterator<Item = I>) -> Self {
-        Self::create(iterators)
+        Self::create(iterators, None)
     }
 
-    pub fn for_compactor(iterators: impl IntoIterator<Item = I>) -> Self {
-        Self::create(iterators)
+    pub fn for_compactor(
+        iterators: impl IntoIterator<Item = I>, // compactor task progress report
+        task_progress: Option<Arc<TaskProgress>>,
+    ) -> Self {
+        Self::create(iterators, task_progress)
     }
 
-    fn create(iterators: impl IntoIterator<Item = I>) -> Self {
+    fn create(
+        iterators: impl IntoIterator<Item = I>, // compactor task progress report
+        task_progress: Option<Arc<TaskProgress>>,
+    ) -> Self {
         Self {
             unused_iters: iterators
                 .into_iter()
@@ -131,6 +146,8 @@ impl<I: HummockIterator> OrderedMergeIteratorInner<I> {
                 .collect(),
             heap: BinaryHeap::new(),
             last_table_key: Vec::new(),
+            task_progress,
+            progress_key_num: 0,
         }
     }
 }
@@ -165,14 +182,20 @@ pub type UnorderedMergeIteratorInner<I: HummockIterator> =
 
 impl<I: HummockIterator> UnorderedMergeIteratorInner<I> {
     pub fn new(iterators: impl IntoIterator<Item = I>) -> Self {
-        Self::create(iterators)
+        Self::create(iterators, None)
     }
 
-    pub fn for_compactor(iterators: impl IntoIterator<Item = I>) -> Self {
-        Self::create(iterators)
+    pub fn for_compactor(
+        iterators: impl IntoIterator<Item = I>,
+        task_progress: Option<Arc<TaskProgress>>,
+    ) -> Self {
+        Self::create(iterators, task_progress)
     }
 
-    fn create(iterators: impl IntoIterator<Item = I>) -> Self {
+    fn create(
+        iterators: impl IntoIterator<Item = I>,
+        task_progress: Option<Arc<TaskProgress>>,
+    ) -> Self {
         Self {
             unused_iters: iterators
                 .into_iter()
@@ -183,6 +206,8 @@ impl<I: HummockIterator> UnorderedMergeIteratorInner<I> {
                 .collect(),
             heap: BinaryHeap::new(),
             last_table_key: Vec::new(),
+            task_progress,
+            progress_key_num: 0,
         }
     }
 }
@@ -322,6 +347,14 @@ impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
                 node.used();
                 break;
             }
+
+            self.progress_key_num += 1;
+
+            if let Some(task_progress) = self.task_progress.as_ref()
+                && self.progress_key_num % PROGRESS_KEY_INTERVAL == 0
+            {
+                task_progress.inc_progress_key(PROGRESS_KEY_INTERVAL);
+            }
         }
 
         Ok(())
@@ -355,6 +388,14 @@ impl<I: HummockIterator> MergeIteratorNext for UnorderedMergeIteratorInner<I> {
         } else {
             // This will update the heap top.
             node.used();
+        }
+
+        self.progress_key_num += 1;
+
+        if let Some(task_progress) = self.task_progress.as_ref()
+            && self.progress_key_num % PROGRESS_KEY_INTERVAL == 0
+        {
+            task_progress.inc_progress_key(PROGRESS_KEY_INTERVAL);
         }
 
         Ok(())

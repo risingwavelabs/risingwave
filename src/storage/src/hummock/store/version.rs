@@ -1058,7 +1058,7 @@ impl HummockVersionReader {
             .map(|watermark| (read_options.table_id, watermark))
             .collect();
 
-        let skip_watermark_iter = SkipWatermarkIterator::new(merge_iter, watermark, None);
+        let skip_watermark_iter = SkipWatermarkIterator::new(merge_iter, watermark);
 
         let user_key_range = (
             user_key_range.0.map(|key| key.cloned()),

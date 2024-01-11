@@ -274,7 +274,6 @@ impl Compactor {
             self.context.compactor_metrics.clone(),
             iter,
             compaction_filter,
-            task_progress,
         )
         .verbose_instrument_await("compact_and_build_sst")
         .await?;
