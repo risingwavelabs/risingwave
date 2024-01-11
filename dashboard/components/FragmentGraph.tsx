@@ -24,6 +24,7 @@ import {
   layout,
 } from "../lib/layout"
 import { PlanNodeDatum } from "../pages/fragment_graph"
+import { StreamNode } from "../proto/gen/stream_plan"
 
 const ReactJson = loadable(() => import("react-json-view"))
 
@@ -318,6 +319,14 @@ export default function FragmentGraph({
             .attr("fill", "black")
             .attr("font-size", 12)
             .attr("transform", "rotate(-8)")
+
+          // Node tooltip
+          let title = g.select<SVGTitleElement>("title")
+          if (title.empty()) {
+            title = g.append<SVGTitleElement>("title")
+          }
+
+          title.text((d) => (d.data.node as StreamNode).identity ?? d.data.name)
 
           return g
         }
