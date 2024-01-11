@@ -245,6 +245,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         vec![],
         Some(row_id_index),
         false,
+        0,
     ));
 
     let value_indices = (0..column_descs.len()).collect_vec();
@@ -366,6 +367,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         1024,
         "DeleteExecutor".to_string(),
         false,
+        0,
     ));
 
     curr_epoch += 1;

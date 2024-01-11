@@ -72,7 +72,13 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .iter()
             .map(ColumnDesc::from)
             .collect_vec();
-        let column_ids = column_descs.iter().map(|x| x.column_id).collect_vec();
+
+        let column_ids = lookup
+            .get_arrangement_table_info()?
+            .get_output_col_idx()
+            .iter()
+            .map(|&idx| column_descs[idx as usize].column_id)
+            .collect_vec();
 
         // Use indices based on full table instead of streaming executor output.
         let pk_indices = table_desc

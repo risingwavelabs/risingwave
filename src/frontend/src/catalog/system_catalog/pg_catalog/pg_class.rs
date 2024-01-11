@@ -25,6 +25,8 @@ pub static PG_CLASS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLo
         (DataType::Varchar, "relname"),
         (DataType::Int32, "relnamespace"),
         (DataType::Int32, "relowner"),
+        (DataType::Varchar, "relpersistence"), /* p = permanent table, u = unlogged table, t =
+                                                * temporary table */
         (DataType::Varchar, "relkind"), /* r = ordinary table, i = index, S = sequence, t =
                                          * TOAST table, v = view, m = materialized view, c =
                                          * composite type, f = foreign table, p = partitioned
@@ -38,11 +40,12 @@ pub static PG_CLASS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLo
 /// The catalog `pg_class` catalogs tables and most everything else that has columns or is otherwise
 /// similar to a table. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
 /// todo: should we add internal tables as well?
-pub static PG_CLASS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+pub static PG_CLASS: LazyLock<BuiltinView> = LazyLock::new(|| {
+    BuiltinView {
     name: "pg_class",
     schema: PG_CATALOG_SCHEMA_NAME,
     columns: &PG_CLASS_COLUMNS,
-    sql: "SELECT id AS oid, name AS relname, schema_id AS relnamespace, owner AS relowner, \
+    sql: "SELECT id AS oid, name AS relname, schema_id AS relnamespace, owner AS relowner, 'p' as relpersistence, \
         CASE \
             WHEN relation_type = 'table' THEN 'r' \
             WHEN relation_type = 'system table' THEN 'r' \
@@ -56,4 +59,5 @@ pub static PG_CLASS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
         FROM rw_catalog.rw_relations\
     "
     .to_string(),
+}
 });

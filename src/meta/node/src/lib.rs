@@ -24,6 +24,7 @@ use clap::Parser;
 pub use error::{MetaError, MetaResult};
 use redact::Secret;
 use risingwave_common::config::OverrideConfig;
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
@@ -43,8 +44,9 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_VPC_SECURITY_GROUP_ID")]
     security_group_id: Option<String>,
 
+    // TODO: use `SocketAddr`
     #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:5690")]
-    listen_addr: String,
+    pub listen_addr: String,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
@@ -162,6 +164,18 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_HEAP_PROFILING_DIR")]
     #[override_opts(path = server.heap_profiling.dir)]
     pub heap_profiling_dir: Option<String>,
+}
+
+impl risingwave_common::opts::Opts for MetaNodeOpts {
+    fn name() -> &'static str {
+        "meta"
+    }
+
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        format!("http://{}", self.listen_addr)
+            .parse()
+            .expect("invalid listen address")
+    }
 }
 
 use std::future::Future;
@@ -302,6 +316,11 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 event_log_enabled: config.meta.event_log_enabled,
                 event_log_channel_max_size: config.meta.event_log_channel_max_size,
                 advertise_addr: opts.advertise_addr,
+                cached_traces_num: config.meta.developer.cached_traces_num,
+                cached_traces_memory_limit_bytes: config
+                    .meta
+                    .developer
+                    .cached_traces_memory_limit_bytes,
             },
             config.system.into_init_system_params(),
         )

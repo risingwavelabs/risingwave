@@ -137,6 +137,10 @@ pub struct ConfigMap {
     #[parameter(default = false)]
     streaming_enable_arrangement_backfill: bool,
 
+    /// Allow `jsonb` in stream key
+    #[parameter(default = false, rename = "rw_streaming_allow_jsonb_in_stream_key")]
+    streaming_allow_jsonb_in_stream_key: bool,
+
     /// Enable join ordering for streaming and batch queries. Defaults to true.
     #[parameter(default = true, rename = "rw_enable_join_ordering")]
     enable_join_ordering: bool,

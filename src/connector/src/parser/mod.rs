@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
-use anyhow::anyhow;
 use auto_enums::auto_enum;
 pub use avro::AvroParserConfig;
 pub use canal::*;
@@ -31,13 +30,13 @@ use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::log::LogSuppresser;
-use risingwave_common::types::{Datum, Scalar};
+use risingwave_common::types::{Datum, Scalar, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::tracing::InstrumentStream;
 use risingwave_pb::catalog::{
     SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
 };
 use risingwave_pb::plan_common::AdditionalColumnType;
-use tracing_futures::Instrument;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
@@ -50,7 +49,7 @@ use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
 use crate::common::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
-use crate::parser::unified::AccessError;
+use crate::parser::util::{extract_headers_from_meta, extreact_timestamp_from_meta};
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
@@ -158,7 +157,7 @@ pub struct SourceStreamChunkRowWriter<'a> {
 /// The meta data of the original message for a row writer.
 ///
 /// Extracted from the `SourceMessage`.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct MessageMeta<'a> {
     meta: &'a SourceMeta,
     split_id: &'a str,
@@ -342,19 +341,46 @@ impl SourceStreamChunkRowWriter<'_> {
                             .unwrap(), // handled all match cases in internal match, unwrap is safe
                     ));
                 }
-                (
-                    _,
-                    &AdditionalColumnType::Timestamp
-                    | &AdditionalColumnType::Partition
-                    | &AdditionalColumnType::Filename
-                    | &AdditionalColumnType::Offset
-                    | &AdditionalColumnType::Header,
-                    // AdditionalColumnType::Unspecified and AdditionalColumnType::Normal is means it comes from message payload
-                    // AdditionalColumnType::Key is processed in normal process, together with Unspecified ones
-                ) => Err(AccessError::Other(anyhow!(
-                    "Column type {:?} not implemented yet",
-                    &desc.additional_column_type
-                ))),
+                (_, &AdditionalColumnType::Timestamp) => {
+                    return Ok(A::output_for(
+                        self.row_meta
+                            .as_ref()
+                            .and_then(|ele| extreact_timestamp_from_meta(ele.meta))
+                            .unwrap_or(None),
+                    ))
+                }
+                (_, &AdditionalColumnType::Partition) => {
+                    // the meta info does not involve spec connector
+                    return Ok(A::output_for(
+                        self.row_meta
+                            .as_ref()
+                            .map(|ele| ScalarImpl::Utf8(ele.split_id.to_string().into())),
+                    ));
+                }
+                (_, &AdditionalColumnType::Offset) => {
+                    // the meta info does not involve spec connector
+                    return Ok(A::output_for(
+                        self.row_meta
+                            .as_ref()
+                            .map(|ele| ScalarImpl::Utf8(ele.offset.to_string().into())),
+                    ));
+                }
+                (_, &AdditionalColumnType::Header) => {
+                    return Ok(A::output_for(
+                        self.row_meta
+                            .as_ref()
+                            .and_then(|ele| extract_headers_from_meta(ele.meta))
+                            .unwrap_or(None),
+                    ))
+                }
+                (_, &AdditionalColumnType::Filename) => {
+                    // Filename is used as partition in FS connectors
+                    return Ok(A::output_for(
+                        self.row_meta
+                            .as_ref()
+                            .map(|ele| ScalarImpl::Utf8(ele.split_id.to_string().into())),
+                    ));
+                }
                 (_, _) => {
                     // For normal columns, call the user provided closure.
                     match f(desc) {
@@ -528,14 +554,17 @@ impl<P: ByteStreamSourceParser> P {
     /// A [`SourceWithStateStream`] which is a stream of parsed messages.
     pub fn into_stream(self, data_stream: BoxSourceStream) -> impl SourceWithStateStream {
         // Enable tracing to provide more information for parsing failures.
-        let source_info = &self.source_ctx().source_info;
-        let span = tracing::info_span!(
-            "source_parser",
-            actor_id = source_info.actor_id,
-            source_id = source_info.source_id.table_id()
-        );
+        let source_info = self.source_ctx().source_info;
 
-        into_chunk_stream(self, data_stream).instrument(span)
+        // The parser stream will be long-lived. We use `instrument_with` here to create
+        // a new span for the polling of each chunk.
+        into_chunk_stream(self, data_stream).instrument_with(move || {
+            tracing::info_span!(
+                "source_parse_chunk",
+                actor_id = source_info.actor_id,
+                source_id = source_info.source_id.table_id()
+            )
+        })
     }
 }
 
@@ -665,6 +694,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                             if let Some(Transaction { id: current_id, .. }) = &current_transaction {
                                 tracing::warn!(current_id, id, "already in transaction");
                             }
+                            tracing::debug!("begin upstream transaction: id={}", id);
                             current_transaction = Some(Transaction { id, len: 0 });
                         }
                         TransactionControl::Commit { id } => {
@@ -672,6 +702,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                             if current_id != Some(&id) {
                                 tracing::warn!(?current_id, id, "transaction id mismatch");
                             }
+                            tracing::debug!("commit upstream transaction: id={}", id);
                             current_transaction = None;
                         }
                     }
@@ -692,6 +723,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
         // If we are not in a transaction, we should yield the chunk now.
         if current_transaction.is_none() {
             yield_asap = false;
+
             yield StreamChunkWithState {
                 chunk: builder.take(0),
                 split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),

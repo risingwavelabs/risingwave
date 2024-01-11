@@ -146,6 +146,7 @@ impl SourceExecutor {
             self.metrics,
             self.source_ctrl_opts.clone(),
             None,
+            ConnectorProperties::default(),
         ));
         let stream = self
             .connector_source
