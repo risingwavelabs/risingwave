@@ -348,7 +348,18 @@ impl PlanRoot {
 
     /// Generate optimized stream plan
     fn gen_optimized_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
-        self.gen_optimized_stream_plan_inner(emit_on_window_close, StreamScanType::Backfill)
+        let stream_scan_type = if self
+            .plan
+            .ctx()
+            .session_ctx()
+            .config()
+            .streaming_enable_arrangement_backfill()
+        {
+            StreamScanType::ArrangementBackfill
+        } else {
+            StreamScanType::Backfill
+        };
+        self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)
     }
 
     fn gen_optimized_stream_plan_inner(
@@ -778,6 +789,14 @@ impl PlanRoot {
     ) -> Result<StreamSink> {
         let stream_scan_type = if without_backfill {
             StreamScanType::UpstreamOnly
+        } else if self
+            .plan
+            .ctx()
+            .session_ctx()
+            .config()
+            .streaming_enable_arrangement_backfill()
+        {
+            StreamScanType::ArrangementBackfill
         } else {
             StreamScanType::Backfill
         };
