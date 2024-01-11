@@ -36,26 +36,83 @@ pub mod hummock {
 }
 
 pub mod log_store {
-    use crate::types::DataType;
+    use crate::hash::VirtualNode;
+    use crate::types::{DataType, ScalarImpl};
+    use crate::util::sort_util::OrderType;
+
+    pub type SeqIdType = i32;
+    pub type RowOpCodeType = i16;
 
     pub const EPOCH_COLUMN_NAME: &str = "kv_log_store_epoch";
     pub const SEQ_ID_COLUMN_NAME: &str = "kv_log_store_seq_id";
     pub const ROW_OP_COLUMN_NAME: &str = "kv_log_store_row_op";
 
-    /// `epoch`, `seq_id`, `row_op`
-    pub const KV_LOG_STORE_PREDEFINED_COLUMNS: [(&str, DataType); 3] = [
-        (EPOCH_COLUMN_NAME, EPOCH_COLUMN_TYPE),
-        (SEQ_ID_COLUMN_NAME, SEQ_ID_COLUMN_TYPE),
-        (ROW_OP_COLUMN_NAME, ROW_OP_COLUMN_TYPE),
-    ];
-    /// `epoch`, `seq_id`
-    pub const PK_TYPES: [DataType; 2] = [EPOCH_COLUMN_TYPE, SEQ_ID_COLUMN_TYPE];
+    /// Predefined column includes log store pk columns + `row_op`
+    pub const KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS: [(&str, DataType); 1] =
+        [(ROW_OP_COLUMN_NAME, ROW_OP_COLUMN_TYPE)];
 
     pub const EPOCH_COLUMN_TYPE: DataType = DataType::Int64;
     pub const SEQ_ID_COLUMN_TYPE: DataType = DataType::Int32;
     pub const ROW_OP_COLUMN_TYPE: DataType = DataType::Int16;
 
-    pub const EPOCH_COLUMN_INDEX: usize = 0;
-    pub const SEQ_ID_COLUMN_INDEX: usize = 1;
-    pub const ROW_OP_COLUMN_INDEX: usize = 2;
+    pub trait KvLogStorePk: Clone + Send + Sync + Unpin + 'static {
+        const LEN: usize;
+        const EPOCH_COLUMN_INDEX: usize;
+        const ROW_OP_COLUMN_INDEX: usize;
+        const SEQ_ID_COLUMN_INDEX: usize;
+
+        fn pk_types() -> [DataType; Self::LEN];
+        fn pk_names() -> [&'static str; Self::LEN];
+        fn pk_ordering() -> [OrderType; Self::LEN];
+        fn pk(
+            vnode: VirtualNode,
+            encoded_epoch: i64,
+            seq_id: Option<SeqIdType>,
+        ) -> [Option<ScalarImpl>; Self::LEN];
+    }
+
+    pub mod v1 {
+        use super::*;
+
+        const EPOCH_COLUMN_INDEX: usize = 0;
+        const SEQ_ID_COLUMN_INDEX: usize = 1;
+        const ROW_OP_COLUMN_INDEX: usize = 2;
+
+        /// `epoch`, `seq_id`
+        const PK_TYPES: [DataType; 2] = [EPOCH_COLUMN_TYPE, SEQ_ID_COLUMN_TYPE];
+        const PK_COLUMN_NAMES: [&str; 2] = [EPOCH_COLUMN_NAME, SEQ_ID_COLUMN_NAME];
+
+        #[derive(Clone)]
+        pub struct KvLogStoreV1Pk;
+
+        impl KvLogStorePk for KvLogStoreV1Pk {
+            const EPOCH_COLUMN_INDEX: usize = EPOCH_COLUMN_INDEX;
+            const LEN: usize = PK_TYPES.len();
+            const ROW_OP_COLUMN_INDEX: usize = ROW_OP_COLUMN_INDEX;
+            const SEQ_ID_COLUMN_INDEX: usize = SEQ_ID_COLUMN_INDEX;
+
+            fn pk_types() -> [DataType; Self::LEN] {
+                PK_TYPES
+            }
+
+            fn pk_names() -> [&'static str; Self::LEN] {
+                PK_COLUMN_NAMES
+            }
+
+            fn pk_ordering() -> [OrderType; Self::LEN] {
+                [OrderType::ascending(), OrderType::ascending_nulls_last()]
+            }
+
+            fn pk(
+                _vnode: VirtualNode,
+                encoded_epoch: i64,
+                seq_id: Option<SeqIdType>,
+            ) -> [Option<ScalarImpl>; Self::LEN] {
+                [
+                    Some(ScalarImpl::Int64(encoded_epoch)),
+                    seq_id.map(ScalarImpl::Int32),
+                ]
+            }
+        }
+    }
 }

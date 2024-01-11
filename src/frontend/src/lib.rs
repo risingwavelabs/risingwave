@@ -34,6 +34,8 @@
 #![feature(error_generic_member_access)]
 #![feature(round_ties_even)]
 #![recursion_limit = "256"]
+#![expect(incomplete_features)]
+#![feature(generic_const_exprs)]
 
 #[cfg(test)]
 risingwave_expr_impl::enable!();

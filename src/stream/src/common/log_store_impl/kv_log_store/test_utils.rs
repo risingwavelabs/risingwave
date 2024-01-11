@@ -17,7 +17,10 @@ use rand::RngCore;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::constants::log_store::KV_LOG_STORE_PREDEFINED_COLUMNS;
+use risingwave_common::constants::log_store::v1::KvLogStoreV1Pk;
+use risingwave_common::constants::log_store::{
+    KvLogStorePk, KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS,
+};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl, ScalarRef};
@@ -29,6 +32,8 @@ use crate::common::table::test_utils::gen_prost_table_with_dist_key;
 
 pub(crate) const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
 pub(crate) const TEST_DATA_SIZE: usize = 10;
+
+pub(crate) type TestKvLogStorePk = KvLogStoreV1Pk;
 
 pub(crate) fn gen_test_data(base: i64) -> (Vec<Op>, Vec<OwnedRow>) {
     gen_sized_test_data(base, TEST_DATA_SIZE)
@@ -160,7 +165,7 @@ pub(crate) fn gen_test_log_store_table() -> PbTable {
         order_types,
         pk_index,
         read_prefix_len_hint,
-        vec![TEST_SCHEMA_DIST_KEY_INDEX + KV_LOG_STORE_PREDEFINED_COLUMNS.len()], // id field
+        vec![KvLogStoreV1Pk::LEN + KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS.len()], // id field
     )
 }
 

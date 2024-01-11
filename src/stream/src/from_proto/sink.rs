@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::constants::log_store::v1::KvLogStoreV1Pk;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkType};
 use risingwave_connector::sink::{
@@ -149,7 +150,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     connector,
                 );
                 // TODO: support setting max row count in config
-                let factory = KvLogStoreFactory::new(
+                let factory = KvLogStoreFactory::<_, KvLogStoreV1Pk>::new(
                     state_store,
                     node.table.as_ref().unwrap().clone(),
                     params.vnode_bitmap.clone().map(Arc::new),

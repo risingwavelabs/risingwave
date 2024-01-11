@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
 use std::mem::replace;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -26,8 +27,8 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::constants::log_store::{
-    EPOCH_COLUMN_INDEX, EPOCH_COLUMN_TYPE, KV_LOG_STORE_PREDEFINED_COLUMNS, PK_TYPES,
-    ROW_OP_COLUMN_INDEX, SEQ_ID_COLUMN_INDEX,
+    KvLogStorePk, RowOpCodeType, SeqIdType, EPOCH_COLUMN_TYPE,
+    KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS,
 };
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::VirtualNode;
@@ -50,7 +51,7 @@ use risingwave_storage::store::StateStoreReadIterStream;
 use risingwave_storage::table::{compute_vnode, Distribution};
 
 use crate::common::log_store_impl::kv_log_store::{
-    KvLogStoreReadMetrics, ReaderTruncationOffsetType, RowOpCodeType, SeqIdType,
+    KvLogStoreReadMetrics, ReaderTruncationOffsetType,
 };
 
 const INSERT_OP_CODE: RowOpCodeType = 1;
@@ -93,7 +94,7 @@ enum LogStoreRowOp {
 }
 
 #[derive(Clone)]
-pub(crate) struct LogStoreRowSerde {
+pub(crate) struct LogStoreRowSerde<PK: KvLogStorePk> {
     /// Used for serializing and deserializing the primary key.
     pk_serde: OrderedRowSerde,
 
@@ -117,19 +118,30 @@ pub(crate) struct LogStoreRowSerde {
 
     /// The schema of payload
     payload_schema: Vec<DataType>,
+
+    _phantom: PhantomData<PK>,
 }
 
-impl LogStoreRowSerde {
+impl<PK: KvLogStorePk> LogStoreRowSerde<PK>
+where
+    [(); PK::LEN]: Sized,
+{
     pub(crate) fn new(table_catalog: &Table, vnodes: Option<Arc<Bitmap>>) -> Self {
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns
             .iter()
             .map(|col| col.column_desc.as_ref().unwrap().into())
             .collect();
+        let predefined_column_len: usize =
+            PK::LEN + KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS.len();
         let dist_key_indices: Vec<usize> = table_catalog
             .distribution_key
             .iter()
-            .map(|dist_index| *dist_index as usize)
+            .map(|dist_index| {
+                let index = *dist_index as usize;
+                assert!(index >= predefined_column_len);
+                index
+            })
             .collect();
 
         let input_value_indices = table_catalog
@@ -143,13 +155,21 @@ impl LogStoreRowSerde {
             .map(|idx| table_columns[*idx].data_type.clone())
             .collect_vec();
 
+        let pk_types = PK::pk_types();
+
         // There are 3 predefined columns for kv log store:
-        assert!(data_types.len() > KV_LOG_STORE_PREDEFINED_COLUMNS.len());
-        for i in 0..KV_LOG_STORE_PREDEFINED_COLUMNS.len() {
-            assert_eq!(data_types[i], KV_LOG_STORE_PREDEFINED_COLUMNS[i].1);
+        assert!(data_types.len() > PK::LEN + KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS.len());
+        for i in 0..PK::LEN {
+            assert_eq!(data_types[i], pk_types[i]);
+        }
+        for i in PK::LEN..predefined_column_len {
+            assert_eq!(
+                data_types[i],
+                KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS[i].1
+            );
         }
 
-        let payload_schema = data_types[KV_LOG_STORE_PREDEFINED_COLUMNS.len()..].to_vec();
+        let payload_schema = data_types[predefined_column_len..].to_vec();
 
         let row_serde = BasicSerde::new(input_value_indices.into(), table_columns.into());
 
@@ -161,10 +181,8 @@ impl LogStoreRowSerde {
 
         // epoch and seq_id. The seq_id of barrier is set null, and therefore the second order type
         // is nulls last
-        let pk_serde = OrderedRowSerde::new(
-            Vec::from(PK_TYPES),
-            vec![OrderType::ascending(), OrderType::ascending_nulls_last()],
-        );
+        let pk_serde =
+            OrderedRowSerde::new(Vec::from(PK::pk_types()), Vec::from(PK::pk_ordering()));
 
         let epoch_serde =
             OrderedRowSerde::new(vec![EPOCH_COLUMN_TYPE], vec![OrderType::ascending()]);
@@ -176,6 +194,7 @@ impl LogStoreRowSerde {
             dist_key_indices,
             vnodes,
             payload_schema,
+            _phantom: PhantomData,
         }
     }
 
@@ -196,7 +215,10 @@ impl LogStoreRowSerde {
     }
 }
 
-impl LogStoreRowSerde {
+impl<PK: KvLogStorePk> LogStoreRowSerde<PK>
+where
+    [(); PK::LEN]: Sized,
+{
     pub(crate) fn serialize_data_row(
         &self,
         epoch: u64,
@@ -204,21 +226,28 @@ impl LogStoreRowSerde {
         op: Op,
         row: impl Row,
     ) -> (VirtualNode, TableKey<Bytes>, Bytes) {
-        let pk = [
-            Some(ScalarImpl::Int64(Self::encode_epoch(epoch))),
-            Some(ScalarImpl::Int32(seq_id)),
-        ];
+        let encoded_epoch = Self::encode_epoch(epoch);
+        let pk = PK::pk(VirtualNode::ZERO, encoded_epoch, Some(seq_id));
         let op_code = match op {
             Op::Insert => INSERT_OP_CODE,
             Op::Delete => DELETE_OP_CODE,
             Op::UpdateDelete => UPDATE_DELETE_OP_CODE,
             Op::UpdateInsert => UPDATE_INSERT_OP_CODE,
         };
+        let extended_row_for_vnode = pk
+            .clone()
+            .chain([Some(ScalarImpl::Int16(op_code))])
+            .chain(&row);
+        let vnode = compute_vnode(
+            &extended_row_for_vnode,
+            &self.dist_key_indices,
+            &self.vnodes,
+        );
+        let pk = PK::pk(vnode, encoded_epoch, Some(seq_id));
         let extended_row = pk
             .clone()
             .chain([Some(ScalarImpl::Int16(op_code))])
-            .chain(row);
-        let vnode = compute_vnode(&extended_row, &self.dist_key_indices, &self.vnodes);
+            .chain(&row);
         let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serde, vnode);
         let value_bytes = self.row_serde.serialize(extended_row).into();
         (vnode, key_bytes, value_bytes)
@@ -230,7 +259,7 @@ impl LogStoreRowSerde {
         vnode: VirtualNode,
         is_checkpoint: bool,
     ) -> (TableKey<Bytes>, Bytes) {
-        let pk = [Some(ScalarImpl::Int64(Self::encode_epoch(epoch))), None];
+        let pk = PK::pk(vnode, Self::encode_epoch(epoch), None);
 
         let op_code = if is_checkpoint {
             CHECKPOINT_BARRIER_OP_CODE
@@ -247,7 +276,7 @@ impl LogStoreRowSerde {
         (key_bytes, value_bytes)
     }
 
-    pub(crate) fn serialize_epoch(&self, epoch: u64) -> Bytes {
+    pub(crate) fn serialize_pk_epoch_prefix(&self, epoch: u64) -> Bytes {
         serialize_pk(
             [Some(ScalarImpl::Int64(Self::encode_epoch(epoch)))],
             &self.epoch_serde,
@@ -261,10 +290,7 @@ impl LogStoreRowSerde {
         seq_id: Option<SeqIdType>,
     ) -> TableKey<Bytes> {
         serialize_pk_with_vnode(
-            [
-                Some(ScalarImpl::Int64(Self::encode_epoch(epoch))),
-                seq_id.map(ScalarImpl::Int32),
-            ],
+            PK::pk(vnode, Self::encode_epoch(epoch), seq_id),
             &self.pk_serde,
             vnode,
         )
@@ -276,22 +302,32 @@ impl LogStoreRowSerde {
     ) -> Bytes {
         let (epoch, seq_id) = offset;
         Bytes::from(next_key(&serialize_pk(
-            [
-                Some(ScalarImpl::Int64(Self::encode_epoch(epoch))),
-                seq_id.map(ScalarImpl::Int32),
-            ],
+            PK::pk(VirtualNode::MAX, Self::encode_epoch(epoch), seq_id),
             &self.pk_serde,
         )))
     }
 }
 
-impl LogStoreRowSerde {
+impl<PK: KvLogStorePk> LogStoreRowSerde<PK>
+where
+    [(); PK::LEN]: Sized,
+{
     fn deserialize(&self, value_bytes: Bytes) -> LogStoreResult<(u64, LogStoreRowOp)> {
         let row_data = self.row_serde.deserialize(&value_bytes)?;
 
-        let payload_row = OwnedRow::new(row_data[KV_LOG_STORE_PREDEFINED_COLUMNS.len()..].to_vec());
-        let epoch = Self::decode_epoch(*row_data[EPOCH_COLUMN_INDEX].as_ref().unwrap().as_int64());
-        let row_op_code = *row_data[ROW_OP_COLUMN_INDEX].as_ref().unwrap().as_int16();
+        let payload_row = OwnedRow::new(
+            row_data[PK::LEN + KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS.len()..].to_vec(),
+        );
+        let epoch = Self::decode_epoch(
+            *row_data[PK::EPOCH_COLUMN_INDEX]
+                .as_ref()
+                .unwrap()
+                .as_int64(),
+        );
+        let row_op_code = *row_data[PK::ROW_OP_COLUMN_INDEX]
+            .as_ref()
+            .unwrap()
+            .as_int16();
 
         let op = match row_op_code {
             INSERT_OP_CODE => LogStoreRowOp::Row {
@@ -311,13 +347,13 @@ impl LogStoreRowSerde {
                 row: payload_row,
             },
             BARRIER_OP_CODE => {
-                assert!(row_data[SEQ_ID_COLUMN_INDEX].is_none());
+                assert!(row_data[PK::SEQ_ID_COLUMN_INDEX].is_none());
                 LogStoreRowOp::Barrier {
                     is_checkpoint: false,
                 }
             }
             CHECKPOINT_BARRIER_OP_CODE => {
-                assert!(row_data[SEQ_ID_COLUMN_INDEX].is_none());
+                assert!(row_data[PK::SEQ_ID_COLUMN_INDEX].is_none());
                 LogStoreRowOp::Barrier {
                     is_checkpoint: true,
                 }
@@ -406,28 +442,34 @@ pub(crate) enum KvLogStoreItem {
     Barrier { is_checkpoint: bool },
 }
 
-type BoxPeekableLogStoreItemStream<S> = Pin<Box<Peekable<LogStoreItemStream<S>>>>;
+type BoxPeekableLogStoreItemStream<S, PK> = Pin<Box<Peekable<LogStoreItemStream<S, PK>>>>;
 
-struct LogStoreRowOpStream<S: StateStoreReadIterStream> {
-    serde: LogStoreRowSerde,
+struct LogStoreRowOpStream<S: StateStoreReadIterStream, PK: KvLogStorePk>
+where
+    [(); PK::LEN]: Sized,
+{
+    serde: LogStoreRowSerde<PK>,
 
     /// Streams that have not reached a barrier
-    row_streams: FuturesUnordered<StreamFuture<BoxPeekableLogStoreItemStream<S>>>,
+    row_streams: FuturesUnordered<StreamFuture<BoxPeekableLogStoreItemStream<S, PK>>>,
 
     /// Streams that have reached a barrier
-    barrier_streams: Vec<BoxPeekableLogStoreItemStream<S>>,
+    barrier_streams: Vec<BoxPeekableLogStoreItemStream<S, PK>>,
 
-    not_started_streams: Vec<(u64, BoxPeekableLogStoreItemStream<S>)>,
+    not_started_streams: Vec<(u64, BoxPeekableLogStoreItemStream<S, PK>)>,
 
     stream_state: StreamState,
 
     metrics: KvLogStoreReadMetrics,
 }
 
-impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
+impl<S: StateStoreReadIterStream, PK: KvLogStorePk> LogStoreRowOpStream<S, PK>
+where
+    [(); PK::LEN]: Sized,
+{
     pub(crate) fn new(
         streams: Vec<S>,
-        serde: LogStoreRowSerde,
+        serde: LogStoreRowSerde<PK>,
         metrics: KvLogStoreReadMetrics,
     ) -> Self {
         assert!(!streams.is_empty());
@@ -509,23 +551,31 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
     }
 }
 
-pub(crate) type LogStoreItemMergeStream<S> =
+pub(crate) type LogStoreItemMergeStream<S, PK: KvLogStorePk> =
     impl Stream<Item = LogStoreResult<(u64, KvLogStoreItem)>>;
-pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIterStream>(
+pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIterStream, PK: KvLogStorePk>(
     streams: Vec<S>,
-    serde: LogStoreRowSerde,
+    serde: LogStoreRowSerde<PK>,
     chunk_size: usize,
     metrics: KvLogStoreReadMetrics,
-) -> LogStoreItemMergeStream<S> {
+) -> LogStoreItemMergeStream<S, PK>
+where
+    [(); PK::LEN]: Sized,
+{
     LogStoreRowOpStream::new(streams, serde, metrics).into_log_store_item_stream(chunk_size)
 }
 
-type LogStoreItemStream<S: StateStoreReadIterStream> =
-    impl Stream<Item = LogStoreResult<(u64, LogStoreRowOp, usize)>> + Send;
-fn deserialize_stream<S: StateStoreReadIterStream>(
+type LogStoreItemStream<S: StateStoreReadIterStream, PK: KvLogStorePk>
+where
+    [(); PK::LEN]: Sized,
+= impl Stream<Item = LogStoreResult<(u64, LogStoreRowOp, usize)>> + Send;
+fn deserialize_stream<S: StateStoreReadIterStream, PK: KvLogStorePk>(
     stream: S,
-    serde: LogStoreRowSerde,
-) -> LogStoreItemStream<S> {
+    serde: LogStoreRowSerde<PK>,
+) -> LogStoreItemStream<S, PK>
+where
+    [(); PK::LEN]: Sized,
+{
     stream.map(
         move |result: Result<_, StorageError>| -> LogStoreResult<(u64, LogStoreRowOp, usize)> {
             match result {
@@ -541,7 +591,10 @@ fn deserialize_stream<S: StateStoreReadIterStream>(
     )
 }
 
-impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
+impl<S: StateStoreReadIterStream, PK: KvLogStorePk> LogStoreRowOpStream<S, PK>
+where
+    [(); PK::LEN]: Sized,
+{
     // Return Ok(false) means all streams have reach the end.
     async fn init(&mut self) -> LogStoreResult<bool> {
         match &self.stream_state {
@@ -752,7 +805,7 @@ mod tests {
         LogStoreRowSerde,
     };
     use crate::common::log_store_impl::kv_log_store::test_utils::{
-        check_rows_eq, gen_test_data, gen_test_log_store_table, TEST_TABLE_ID,
+        check_rows_eq, gen_test_data, gen_test_log_store_table, TestKvLogStorePk, TEST_TABLE_ID,
     };
     use crate::common::log_store_impl::kv_log_store::{KvLogStoreReadMetrics, SeqIdType};
 
@@ -764,7 +817,8 @@ mod tests {
     fn test_serde() {
         let table = gen_test_log_store_table();
 
-        let serde = LogStoreRowSerde::new(&table, Some(Arc::new(Bitmap::ones(VirtualNode::COUNT))));
+        let serde: LogStoreRowSerde<TestKvLogStorePk> =
+            LogStoreRowSerde::new(&table, Some(Arc::new(Bitmap::ones(VirtualNode::COUNT))));
 
         let (ops, rows) = gen_test_data(0);
 
@@ -875,14 +929,14 @@ mod tests {
         assert!(epochs.is_sorted());
         let encoded_epochs = epochs
             .iter()
-            .map(|epoch| LogStoreRowSerde::encode_epoch(*epoch))
+            .map(|epoch| LogStoreRowSerde::<TestKvLogStorePk>::encode_epoch(*epoch))
             .collect_vec();
         assert!(encoded_epochs.is_sorted());
         assert_eq!(
             epochs,
             encoded_epochs
                 .into_iter()
-                .map(LogStoreRowSerde::decode_epoch)
+                .map(LogStoreRowSerde::<TestKvLogStorePk>::decode_epoch)
                 .collect_vec()
         );
     }
@@ -890,7 +944,8 @@ mod tests {
     #[tokio::test]
     async fn test_deserialize_stream_chunk() {
         let table = gen_test_log_store_table();
-        let serde = LogStoreRowSerde::new(&table, Some(Arc::new(Bitmap::ones(VirtualNode::COUNT))));
+        let serde: LogStoreRowSerde<TestKvLogStorePk> =
+            LogStoreRowSerde::new(&table, Some(Arc::new(Bitmap::ones(VirtualNode::COUNT))));
         let (ops, rows) = gen_test_data(0);
 
         let mut seq_id = 1;
@@ -922,7 +977,7 @@ mod tests {
     }
 
     fn gen_row_stream(
-        serde: LogStoreRowSerde,
+        serde: LogStoreRowSerde<TestKvLogStorePk>,
         ops: Vec<Op>,
         rows: Vec<OwnedRow>,
         epoch: u64,
@@ -949,7 +1004,7 @@ mod tests {
     }
 
     fn gen_single_test_stream(
-        serde: LogStoreRowSerde,
+        serde: LogStoreRowSerde<TestKvLogStorePk>,
         seq_id: &mut SeqIdType,
         base: i64,
     ) -> (
@@ -988,10 +1043,10 @@ mod tests {
 
     #[allow(clippy::type_complexity)]
     fn gen_multi_test_stream(
-        serde: LogStoreRowSerde,
+        serde: LogStoreRowSerde<TestKvLogStorePk>,
         size: usize,
     ) -> (
-        LogStoreRowOpStream<impl StateStoreReadIterStream>,
+        LogStoreRowOpStream<impl StateStoreReadIterStream, TestKvLogStorePk>,
         Vec<Option<Sender<()>>>,
         Vec<Option<Sender<()>>>,
         Vec<Vec<Op>>,
@@ -1028,7 +1083,8 @@ mod tests {
     async fn test_row_stream_basic() {
         let table = gen_test_log_store_table();
 
-        let serde = LogStoreRowSerde::new(&table, Some(Arc::new(Bitmap::ones(VirtualNode::COUNT))));
+        let serde: LogStoreRowSerde<TestKvLogStorePk> =
+            LogStoreRowSerde::new(&table, Some(Arc::new(Bitmap::ones(VirtualNode::COUNT))));
 
         const MERGE_SIZE: usize = 10;
 
@@ -1120,7 +1176,8 @@ mod tests {
     async fn test_log_store_stream_basic() {
         let table = gen_test_log_store_table();
 
-        let serde = LogStoreRowSerde::new(&table, Some(Arc::new(Bitmap::ones(VirtualNode::COUNT))));
+        let serde: LogStoreRowSerde<TestKvLogStorePk> =
+            LogStoreRowSerde::new(&table, Some(Arc::new(Bitmap::ones(VirtualNode::COUNT))));
 
         let mut seq_id = 1;
         let (stream, tx1, tx2, ops, rows) = gen_single_test_stream(serde.clone(), &mut seq_id, 0);
@@ -1224,7 +1281,8 @@ mod tests {
     async fn test_empty_stream() {
         let table = gen_test_log_store_table();
 
-        let serde = LogStoreRowSerde::new(&table, Some(Arc::new(Bitmap::ones(VirtualNode::COUNT))));
+        let serde: LogStoreRowSerde<TestKvLogStorePk> =
+            LogStoreRowSerde::new(&table, Some(Arc::new(Bitmap::ones(VirtualNode::COUNT))));
 
         const CHUNK_SIZE: usize = 3;
 
