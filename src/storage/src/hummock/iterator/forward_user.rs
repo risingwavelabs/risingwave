@@ -42,7 +42,7 @@ enum IteratorState {
     /// Iterator is pointed to a key that should not be exposed. next() should be called.
     Next,
 
-    /// Iterator is no longer valid. Reaons:
+    /// Iterator is no longer valid. Reasons:
     /// - Iterator is pointed to a out-of-range key.
     /// - Iteraror meets EOF.
     /// - The internal iterator is not valid.
