@@ -296,7 +296,6 @@ where
 
     /// Add kv pair to sstable.
     pub async fn add_monotonic_delete(&mut self, event: MonotonicDeleteEvent) -> HummockResult<()> {
-        println!("add event key: {:?}, ", event);
         if let Some(builder) = self.current_builder.as_mut()
             && builder.reach_capacity()
             && !is_max_epoch(event.new_epoch)
@@ -312,7 +311,6 @@ where
 
         if self.current_builder.is_none() {
             if is_max_epoch(event.new_epoch) {
-                println!("skip event key: {:?}, ", event);
                 return Ok(());
             }
 

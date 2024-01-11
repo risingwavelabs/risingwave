@@ -886,12 +886,10 @@ where
             // delete key to represent this.
             iter_key.epoch_with_gap =
                 EpochWithGap::new_from_epoch(earliest_range_delete_which_can_see_iter_key);
-            if !compaction_filter.should_delete(iter_key) {
-                sst_builder
-                    .add_full_key(iter_key, HummockValue::Delete, is_new_user_key)
-                    .verbose_instrument_await("add_full_key_delete")
-                    .await?;
-            }
+            sst_builder
+                .add_full_key(iter_key, HummockValue::Delete, is_new_user_key)
+                .verbose_instrument_await("add_full_key_delete")
+                .await?;
             last_table_stats.total_key_count += 1;
             last_table_stats.total_key_size += iter_key.encoded_len() as i64;
             last_table_stats.total_value_size += 1;
@@ -971,6 +969,7 @@ mod tests {
     use std::collections::{HashSet, VecDeque};
 
     use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::key::{TableKey, UserKey};
     use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
     use risingwave_pb::hummock::{InputLevel, PbKeyRange};
 
@@ -989,41 +988,53 @@ mod tests {
     async fn test_delete_range_aggregator_with_filter() {
         let sstable_store = mock_sstable_store();
         let kv_pairs = vec![];
-        let range_tombstones = vec![
-            DeleteRangeTombstone::new_for_test(
-                TableId::new(1),
-                b"abc".to_vec(),
-                b"cde".to_vec(),
-                1,
-            ),
-            DeleteRangeTombstone::new_for_test(
-                TableId::new(2),
-                b"abc".to_vec(),
-                b"def".to_vec(),
-                1,
-            ),
-        ];
+
         let mut sstable_info_1 = gen_test_sstable_impl::<Bytes, Xor16FilterBuilder>(
             default_builder_opt_for_test(),
             1,
             kv_pairs.clone().into_iter(),
-            range_tombstones.clone(),
+            vec![
+                DeleteRangeTombstone::new_for_test(
+                    TableId::new(1),
+                    b"abc".to_vec(),
+                    b"ccc".to_vec(),
+                    2,
+                ),
+                DeleteRangeTombstone::new_for_test(
+                    TableId::new(1),
+                    b"ddd".to_vec(),
+                    b"eee".to_vec(),
+                    2,
+                ),
+            ],
             sstable_store.clone(),
             CachePolicy::NotFill,
         )
         .await;
         sstable_info_1.table_ids = vec![1];
-
+        let tombstone = DeleteRangeTombstone::new_for_test(
+            TableId::new(2),
+            b"abc".to_vec(),
+            b"def".to_vec(),
+            1,
+        );
         let mut sstable_info_2 = gen_test_sstable_impl::<Bytes, Xor16FilterBuilder>(
             default_builder_opt_for_test(),
             2,
-            kv_pairs.into_iter(),
-            range_tombstones.clone(),
+            vec![(
+                FullKey::from_user_key(
+                    UserKey::new(TableId::new(1), TableKey(Bytes::copy_from_slice(b"bbb"))),
+                    1,
+                ),
+                HummockValue::put(Bytes::copy_from_slice(b"value")),
+            )]
+            .into_iter(),
+            vec![tombstone.clone()],
             sstable_store.clone(),
             CachePolicy::NotFill,
         )
         .await;
-        sstable_info_2.table_ids = vec![2];
+        sstable_info_2.table_ids = vec![1, 2];
 
         let compact_task = CompactTask {
             input_ssts: vec![InputLevel {
@@ -1075,7 +1086,7 @@ mod tests {
                 .unwrap();
             ret.append(&mut sst.value().meta.monotonic_tombstone_events.clone());
         }
-        let expected_result = create_monotonic_events(vec![range_tombstones[1].clone()]);
+        let expected_result = create_monotonic_events(vec![tombstone]);
 
         assert_eq!(
             ret, expected_result,
