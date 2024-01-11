@@ -84,7 +84,7 @@ CREATE SINK s_postgres_1 FROM mv_remote_1 WITH (
 statement ok
 CREATE SINK s_mysql_0 FROM mv_remote_0 WITH (
     connector='jdbc',
-    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw',
+    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw& connectionTimeZone=UTC',
     table.name='t_remote_0',
     primary_key='id',
     type='upsert'
@@ -93,7 +93,7 @@ CREATE SINK s_mysql_0 FROM mv_remote_0 WITH (
 statement ok
 CREATE SINK s_mysql_1 FROM mv_remote_1 WITH (
     connector='jdbc',
-    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw',
+    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw& connectionTimeZone=UTC',
     table.name='t_remote_1',
     primary_key='id',
     type='upsert'
@@ -112,7 +112,7 @@ CREATE SINK s2_postgres FROM rw_typed_data WITH (
 statement ok
 CREATE SINK s2_mysql FROM rw_typed_data WITH (
     connector='jdbc',
-    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw',
+    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw& connectionTimeZone=UTC',
     table.name='t_types',
     primary_key='id',
     type='upsert'
@@ -177,9 +177,9 @@ INSERT INTO tt1 VALUES
 
 statement ok
 INSERT INTO t_remote_0 VALUES
-    (1, 'Alice', 28208, 281620391, 4986480304337356659, 28162.0391, 2.03, 28162.0391, '2023-03-20 10:18:30'),
+    (1, 'Alice', 28208, 281620391, 4986480304337356659, 28162.0391, 2.03, 28162.0391, '1000-01-01 00:00:00'),
     (2, 'Bob', 10580, 2131030003, 3074255027698877876, 21310.30003, 10.3, 21310.30003, '2023-03-20 10:18:31'),
-    (3, 'Carl', 18300, 1702307129, 7878292368468104216, 17023.07129, 23.07, 17023.07129, '2023-03-20 10:18:32');
+    (3, 'Carl', 18300, 1702307129, 7878292368468104216, 17023.07129, 23.07, 17023.07129, '9999-12-31 23:49:59.499999');
 
 statement ok
 INSERT INTO t_remote_0 VALUES
@@ -189,9 +189,9 @@ INSERT INTO t_remote_0 VALUES
 
 statement ok
 INSERT INTO t_remote_1 VALUES
-    (1, 'Varchar value 1', 'Text value 1', 123, 456, 789, 12.34, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '2023-05-22 12:34:56', '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', '{"key": "value"}', E'\\xDEADBEEF'),
+    (1, 'Varchar value 1', 'Text value 1', 123, 456, 789, 12.34, 56.78, 90.12, TRUE, '1550-12-31', '00:00:00.123456', '2023-05-22 12:34:56', '1970-01-01 00:00:01Z', '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', '{"key": "value"}', E'\\xDEADBEEF'),
     (2, 'Varchar value 2', 'Text value 2', 234, 567, 890, 23.45, 67.89, 01.23, FALSE, '2023-05-23', '23:45:01', '2023-05-23 23:45:01', '2023-05-23 23:45:01', '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', '{"key": "value2"}', E'\\xFEEDBEEF'),
-    (3, 'Varchar value 3', 'Text value 3', 345, 678, 901, 34.56, 78.90, 12.34, TRUE, '2023-05-24', '12:34:56', '2023-05-24 12:34:56', '2023-05-24 12:34:56', '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', '{"key": "value3"}', E'\\xCAFEBABE');
+    (3, 'Varchar value 3', 'Text value 3', 345, 678, 901, 34.56, 78.90, 12.34, TRUE, '9999-12-31', '12:34:56', '2023-05-24 12:34:56', '2023-05-24 12:34:56.123456Z', '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', '{"key": "value3"}', E'\\xCAFEBABE');
 
 statement ok
 INSERT INTO t_remote_1 VALUES

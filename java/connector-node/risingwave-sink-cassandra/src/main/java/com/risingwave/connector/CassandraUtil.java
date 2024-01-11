@@ -24,9 +24,7 @@ import com.risingwave.proto.Data.DataType;
 import com.risingwave.proto.Data.DataType.TypeName;
 import io.grpc.Status;
 import java.nio.ByteBuffer;
-import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -52,6 +50,10 @@ public class CassandraUtil {
             case DECIMAL:
                 return com.datastax.oss.protocol.internal.ProtocolConstants.DataType.DECIMAL;
             case TIMESTAMP:
+                throw Status.INVALID_ARGUMENT
+                        .withDescription(
+                                "cassandra does not have a type corresponding to naive timestamp")
+                        .asRuntimeException();
             case TIMESTAMPTZ:
                 return com.datastax.oss.protocol.internal.ProtocolConstants.DataType.TIMESTAMP;
             case DATE:
@@ -143,7 +145,10 @@ public class CassandraUtil {
             case TIME:
                 return value;
             case TIMESTAMP:
-                return ((LocalDateTime) value).toInstant(ZoneOffset.UTC);
+                throw Status.INVALID_ARGUMENT
+                        .withDescription(
+                                "cassandra does not have a type corresponding to naive timestamp")
+                        .asRuntimeException();
             case TIMESTAMPTZ:
                 return ((OffsetDateTime) value).toInstant();
             case INTERVAL:

@@ -265,7 +265,7 @@ public class JDBCSinkTest {
     @Test
     public void testPostgres() throws SQLException {
         PostgreSQLContainer pg =
-                new PostgreSQLContainer<>("postgres:latest")
+                new PostgreSQLContainer<>("postgres:15-alpine")
                         .withDatabaseName("test")
                         .withUsername("postgres")
                         .withPassword("password")
@@ -282,7 +282,7 @@ public class JDBCSinkTest {
     @Test
     public void testMySQL() throws SQLException {
         MySQLContainer mysql =
-                new MySQLContainer<>("mysql:latest")
+                new MySQLContainer<>("mysql:8")
                         .withDatabaseName("test")
                         .withUsername("postgres")
                         .withPassword("password")

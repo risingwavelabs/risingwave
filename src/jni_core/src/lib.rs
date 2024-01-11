@@ -240,6 +240,8 @@ struct JavaClassMethodCache {
     timestamptz_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
     date_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
     time_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
+    instant_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
+    utc: OnceLock<GlobalRef>,
 }
 
 // TODO: may only return a RowRef
@@ -676,16 +678,52 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetTimestamp
             .as_ref()
             .datum_at(idx as usize)
             .unwrap()
-            .into_timestamptz()
-            .to_datetime_utc();
+            .into_timestamptz();
 
-        let utc = {
-            let cls = env.find_class(gen_class_name!(java.time.ZoneOffset))?;
-            env.get_static_field(&cls, "UTC", gen_jni_type_sig!(java.time.ZoneOffset))?
-                .l()?
+        let instant_sig =
+            gen_jni_sig!(java.time.Instant ofEpochSecond(long epochSecond, long nanoAdjustment));
+
+        let (instant_class_ref, instant_constructor) = pointer
+            .as_ref()
+            .class_cache
+            .instant_ctor
+            .get_or_try_init(|| {
+                let cls = env.find_class(gen_class_name!(java.time.Instant))?;
+                let init_method = env.get_static_method_id(&cls, "ofEpochSecond", instant_sig)?;
+                Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
+            })?;
+        let instant_obj = unsafe {
+            let JValueOwned::Object(instant_obj) = env.call_static_method_unchecked(
+                <&JClass<'_>>::from(instant_class_ref.as_obj()),
+                *instant_constructor,
+                ReturnType::Object,
+                &[
+                    jvalue {
+                        j: value.timestamp(),
+                    },
+                    jvalue {
+                        j: value.timestamp_subsec_nanos() as i64,
+                    },
+                ],
+            )?
+            else {
+                return Err(BindingError::from(jni::errors::Error::MethodNotFound {
+                    name: "ofEpochSecond".to_string(),
+                    sig: instant_sig.into(),
+                }));
+            };
+            instant_obj
         };
 
-        let sig = gen_jni_sig!(java.time.OffsetDateTime of(int year, int month, int dayOfMonth, int hour, int minute, int second, int nanoOfSecond, java.time.ZoneOffset offset));
+        let utc_ref = pointer.as_ref().class_cache.utc.get_or_try_init(|| {
+            let cls = env.find_class(gen_class_name!(java.time.ZoneOffset))?;
+            let utc = env
+                .get_static_field(&cls, "UTC", gen_jni_type_sig!(java.time.ZoneOffset))?
+                .l()?;
+            Ok::<_, jni::errors::Error>(env.new_global_ref(utc)?)
+        })?;
+
+        let sig = gen_jni_sig!(java.time.OffsetDateTime ofInstant(java.time.Instant instant, java.time.ZoneId zone));
 
         let (timestamptz_class_ref, constructor) = pointer
             .as_ref()
@@ -693,7 +731,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetTimestamp
             .timestamptz_ctor
             .get_or_try_init(|| {
                 let cls = env.find_class(gen_class_name!(java.time.OffsetDateTime))?;
-                let init_method = env.get_static_method_id(&cls, "of", sig)?;
+                let init_method = env.get_static_method_id(&cls, "ofInstant", sig)?;
                 Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
             })?;
         unsafe {
@@ -702,31 +740,17 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetTimestamp
                 *constructor,
                 ReturnType::Object,
                 &[
-                    jvalue { i: value.year() },
                     jvalue {
-                        i: value.month() as i32,
+                        l: instant_obj.as_raw(),
                     },
                     jvalue {
-                        i: value.day() as i32,
+                        l: utc_ref.as_obj().as_raw(),
                     },
-                    jvalue {
-                        i: value.hour() as i32,
-                    },
-                    jvalue {
-                        i: value.minute() as i32,
-                    },
-                    jvalue {
-                        i: value.second() as i32,
-                    },
-                    jvalue {
-                        i: value.nanosecond() as i32,
-                    },
-                    jvalue { l: *utc },
                 ],
             )?
             else {
                 return Err(BindingError::from(jni::errors::Error::MethodNotFound {
-                    name: "of".to_string(),
+                    name: "ofInstant".to_string(),
                     sig: sig.into(),
                 }));
             };
