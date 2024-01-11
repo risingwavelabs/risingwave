@@ -120,7 +120,8 @@ impl DynamicLevelSelectorCore {
                 Box::new(MinOverlappingPicker::new(
                     picker_info.select_level,
                     picker_info.target_level,
-                    self.config.max_bytes_for_level_base,
+                    self.config.max_bytes_for_level_base / 2,
+                    self.config.split_weight_by_vnode,
                     overlap_strategy,
                 ))
             }
@@ -245,7 +246,7 @@ impl DynamicLevelSelectorCore {
                 .sub_levels
                 .iter()
                 .filter(|level| {
-                    level.vnode_partition_count == levels.vnode_partition_count
+                    level.vnode_partition_count == self.config.split_weight_by_vnode
                         && level.level_type() == LevelType::Nonoverlapping
                 })
                 .map(|level| level.total_file_size)

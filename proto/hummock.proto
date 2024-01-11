@@ -144,7 +144,6 @@ message HummockVersion {
     uint64 group_id = 3;
     uint64 parent_group_id = 4;
     repeated uint32 member_table_ids = 5;
-    uint32 vnode_partition_count = 6;
   }
   uint64 id = 1;
   // Levels of each compaction group
