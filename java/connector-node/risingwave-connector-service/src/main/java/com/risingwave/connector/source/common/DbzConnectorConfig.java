@@ -34,6 +34,9 @@ public class DbzConnectorConfig {
     public static final String WAIT_FOR_CONNECTOR_EXIT_BEFORE_INTERRUPT_MS =
             "debezium.embedded.shutdown.pause.before.interrupt.ms";
 
+    public static final String WAIT_FOR_STREAMING_START_BEFORE_EXIT_SECS =
+            "cdc.source.wait.streaming.before.exit.seconds";
+
     /* Common configs */
     public static final String HOST = "hostname";
     public static final String PORT = "port";
@@ -186,6 +189,12 @@ public class DbzConnectorConfig {
 
             dbzProps.putAll(postgresProps);
 
+            if (isMultiTableShared) {
+                // remove table filtering for the shared Postgres source, since we
+                // allow user to ingest tables in different schemas
+                LOG.info("Disable table filtering for the shared Postgres source");
+                dbzProps.remove("table.include.list");
+            }
         } else if (source == SourceTypeE.CITUS) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
 
@@ -217,20 +226,10 @@ public class DbzConnectorConfig {
             dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
         }
 
-        if (isMultiTableShared) {
-            adjustConfigForSharedCdcStream(dbzProps);
-        }
-
         this.sourceId = sourceId;
         this.sourceType = source;
         this.resolvedDbzProps = dbzProps;
         this.isBackfillSource = isCdcBackfill;
-    }
-
-    private void adjustConfigForSharedCdcStream(Properties dbzProps) {
-        // disable table filtering for the shared cdc stream
-        LOG.info("Disable table filtering for the shared cdc stream");
-        dbzProps.remove("table.include.list");
     }
 
     private Properties initiateDbConfig(String fileName, StringSubstitutor substitutor) {

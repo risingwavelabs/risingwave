@@ -429,13 +429,9 @@ impl GlobalBarrierManagerContext {
                         if mce != INVALID_EPOCH {
                             command_ctx.wait_epoch_commit(mce).await?;
                         }
-                    }
-
-                    let (barrier_complete_tx, mut barrier_complete_rx) =
-                        tokio::sync::mpsc::unbounded_channel();
-                    self.inject_barrier(command_ctx.clone(), &barrier_complete_tx)
-                        .await;
-                    let res = match barrier_complete_rx.recv().await.unwrap().result {
+                    };
+                    let await_barrier_complete = self.inject_barrier(command_ctx.clone()).await;
+                    let res = match await_barrier_complete.await.result {
                         Ok(response) => {
                             if let Err(err) = command_ctx.post_collect().await {
                                 warn!(err = ?err, "post_collect failed");

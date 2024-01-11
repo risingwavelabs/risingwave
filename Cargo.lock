@@ -1252,9 +1252,9 @@ dependencies = [
 
 [[package]]
 name = "aws-smithy-types"
-version = "1.0.1"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2fc32035dc0636a8583cf0c6dd7f1e6d5404103b836d26228b8730907a88d9f"
+checksum = "2aba8136605d14ac88f57dc3a693a9f8a4eab4a3f52bc03ff13746f0cd704e97"
 dependencies = [
  "base64-simd",
  "bytes",
@@ -1272,6 +1272,16 @@ dependencies = [
  "time",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "aws-smithy-types-convert"
+version = "0.60.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2916d0db08f25d26d2d27d3a0d339075caead06c2a41f09870a121e2f87a4893"
+dependencies = [
+ "aws-smithy-types",
+ "chrono",
 ]
 
 [[package]]
@@ -5481,9 +5491,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-rdkafka"
-version = "0.3.0+0.34.0"
+version = "0.3.1+0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00f9ab2d0545a55e4f209fc72c180a7e7b45a4e7baee7b4994c4628a877c5525"
+checksum = "79bf1f687bdd0146a72d6132478032d770ebe1dbe42e1f46799c4dcbd9b31cbc"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -8280,6 +8290,7 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+ "tracing-futures",
  "tracing-opentelemetry",
  "tracing-subscriber",
  "twox-hash",
@@ -8446,6 +8457,7 @@ dependencies = [
  "aws-smithy-http",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
+ "aws-smithy-types-convert",
  "aws-types",
  "base64 0.21.4",
  "byteorder",
@@ -8520,7 +8532,6 @@ dependencies = [
  "tokio-util",
  "tonic 0.10.2",
  "tracing",
- "tracing-futures",
  "tracing-subscriber",
  "tracing-test",
  "url",
@@ -8746,7 +8757,6 @@ dependencies = [
  "thiserror-ext",
  "tokio-stream",
  "tracing",
- "tracing-futures",
  "uuid",
  "workspace-hack",
 ]
@@ -9383,7 +9393,6 @@ dependencies = [
  "thiserror-ext",
  "tokio-retry",
  "tracing",
- "tracing-futures",
  "uuid",
  "workspace-hack",
  "xorf",
@@ -11151,9 +11160,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext"
-version = "0.0.10"
+version = "0.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "778409884b05cc4a1b90b9c3a0f395a01c430355fe299d084152bdf50f3fa807"
+checksum = "54a6a1db013d9f7175962ec64a0fb90760832062e29f6664f1aefee91d072a50"
 dependencies = [
  "thiserror",
  "thiserror-ext-derive",
@@ -11161,9 +11170,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext-derive"
-version = "0.0.10"
+version = "0.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03162af1a5f99722388354158f3c5af20915d52a5d0d9bc4871d0fd7553e308f"
+checksum = "98c358cfea7a4a0f4554d4df6533f9b652d44c0108e99db3685f28f30b0954aa"
 dependencies = [
  "either",
  "proc-macro2",

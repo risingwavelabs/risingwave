@@ -39,8 +39,6 @@ export default function useErrorToast() {
         duration: 5000,
         isClosable: true,
       })
-
-      console.error(e)
     },
     [toast]
   )

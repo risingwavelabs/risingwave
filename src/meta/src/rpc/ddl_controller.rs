@@ -1049,6 +1049,11 @@ impl DdlController {
             }
         }
 
+        // update downstream actors' upstream_actor_id and upstream_fragment_id
+        for actor in &mut union_fragment.actors {
+            actor.upstream_actor_id.extend(sink_actor_ids.clone());
+        }
+
         union_fragment
             .upstream_fragment_ids
             .push(upstream_fragment_id);

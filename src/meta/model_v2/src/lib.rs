@@ -81,7 +81,7 @@ pub type ActorId = i32;
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum JobStatus {
-    #[sea_orm(string_value = "Initial")]
+    #[sea_orm(string_value = "INITIAL")]
     Initial,
     #[sea_orm(string_value = "CREATING")]
     Creating,

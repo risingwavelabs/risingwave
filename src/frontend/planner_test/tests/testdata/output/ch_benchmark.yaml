@@ -34,16 +34,16 @@
               └─StreamTableScan { table: order_line, columns: [order_line.ol_number, order_line.ol_quantity, order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_delivery_d], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [ol_number, sum_qty, sum_amount, avg_qty, avg_amount, count_order], stream_key: [ol_number], pk_columns: [ol_number], pk_conflict: NoCheck } { materialized table: 4294967294 }
+    StreamMaterialize { columns: [ol_number, sum_qty, sum_amount, avg_qty, avg_amount, count_order], stream_key: [ol_number], pk_columns: [ol_number], pk_conflict: NoCheck } { tables: [ Materialize: 4294967294 ] }
     └── StreamProject { exprs: [order_line.ol_number, sum(order_line.ol_quantity), sum(order_line.ol_amount), (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal) as $expr1, (sum(order_line.ol_amount) / count(order_line.ol_amount)::Decimal) as $expr2, count] }
-        └── StreamHashAgg { group_key: [order_line.ol_number], aggs: [sum(order_line.ol_quantity), sum(order_line.ol_amount), count(order_line.ol_quantity), count(order_line.ol_amount), count] } { intermediate state table: 0, state tables: [], distinct tables: [] }
+        └── StreamHashAgg { group_key: [order_line.ol_number], aggs: [sum(order_line.ol_quantity), sum(order_line.ol_amount), count(order_line.ol_quantity), count(order_line.ol_amount), count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
     StreamProject { exprs: [order_line.ol_number, order_line.ol_quantity, order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id] }
     └── StreamFilter { predicate: (order_line.ol_delivery_d > '2007-01-02 00:00:00':Timestamp) }
         └── StreamTableScan { table: order_line, columns: [order_line.ol_number, order_line.ol_quantity, order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_delivery_d], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
-            ├── state table: 1
+            ├── tables: [ StreamScan: 1 ]
             ├── Upstream
             └── BatchPlanNode
 
@@ -181,99 +181,99 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [s_suppkey, s_name, n_name, i_id, i_name, s_address, s_phone, s_comment, stock.s_i_id(hidden), stock.s_w_id(hidden), min(stock.s_quantity)(hidden), $expr2(hidden), region.r_regionkey(hidden), supplier.s_nationkey(hidden)], stream_key: [stock.s_i_id, stock.s_w_id, min(stock.s_quantity), region.r_regionkey, supplier.s_nationkey, $expr2], pk_columns: [n_name, s_name, i_id, stock.s_i_id, stock.s_w_id, min(stock.s_quantity), region.r_regionkey, supplier.s_nationkey, $expr2], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamExchange Hash([8, 9, 10, 11, 12, 13]) from 1
 
     Fragment 1
-    StreamHashJoin { type: Inner, predicate: $expr2 = supplier.s_suppkey, output: [supplier.s_suppkey, supplier.s_name, nation.n_name, item.i_id, item.i_name, supplier.s_address, supplier.s_phone, supplier.s_comment, stock.s_i_id, stock.s_w_id, min(stock.s_quantity), $expr2, region.r_regionkey, supplier.s_nationkey] } { left table: 0, right table: 2, left degree table: 1, right degree table: 3 }
+    StreamHashJoin { type: Inner, predicate: $expr2 = supplier.s_suppkey, output: [supplier.s_suppkey, supplier.s_name, nation.n_name, item.i_id, item.i_name, supplier.s_address, supplier.s_phone, supplier.s_comment, stock.s_i_id, stock.s_w_id, min(stock.s_quantity), $expr2, region.r_regionkey, supplier.s_nationkey] } { tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ] }
     ├── StreamExchange Hash([2]) from 2
     └── StreamExchange Hash([0]) from 12
 
     Fragment 2
     StreamProject { exprs: [item.i_id, item.i_name, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr2, stock.s_i_id, stock.s_w_id, min(stock.s_quantity)] }
-    └── StreamHashJoin { type: Inner, predicate: stock.s_i_id = item.i_id AND min(stock.s_quantity) = stock.s_quantity AND stock.s_i_id = stock.s_i_id, output: [item.i_id, item.i_name, stock.s_i_id, stock.s_w_id, stock.s_i_id, min(stock.s_quantity)] } { left table: 4, right table: 6, left degree table: 5, right degree table: 7 }
+    └── StreamHashJoin { type: Inner, predicate: stock.s_i_id = item.i_id AND min(stock.s_quantity) = stock.s_quantity AND stock.s_i_id = stock.s_i_id, output: [item.i_id, item.i_name, stock.s_i_id, stock.s_w_id, stock.s_i_id, min(stock.s_quantity)] } { tables: [ HashJoinLeft: 4, HashJoinDegreeLeft: 5, HashJoinRight: 6, HashJoinDegreeRight: 7 ] }
         ├── StreamProject { exprs: [stock.s_i_id, min(stock.s_quantity)] }
-        │   └── StreamHashAgg { group_key: [stock.s_i_id], aggs: [min(stock.s_quantity), count] } { intermediate state table: 9, state tables: [ 8 ], distinct tables: [] }
+        │   └── StreamHashAgg { group_key: [stock.s_i_id], aggs: [min(stock.s_quantity), count] } { tables: [ HashAggState: 9, HashAggCall0: 8 ] }
         │       └── StreamExchange Hash([0]) from 3
-        └── StreamHashJoin { type: Inner, predicate: item.i_id = stock.s_i_id, output: all } { left table: 26, right table: 28, left degree table: 27, right degree table: 29 }
+        └── StreamHashJoin { type: Inner, predicate: item.i_id = stock.s_i_id, output: all } { tables: [ HashJoinLeft: 26, HashJoinDegreeLeft: 27, HashJoinRight: 28, HashJoinDegreeRight: 29 ] }
             ├── StreamExchange Hash([0]) from 10
             └── StreamExchange Hash([0]) from 11
 
     Fragment 3
-    StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = $expr1, output: [stock.s_i_id, stock.s_quantity, region.r_regionkey, supplier.s_suppkey, supplier.s_nationkey, stock.s_w_id] } { left table: 10, right table: 12, left degree table: 11, right degree table: 13 }
+    StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = $expr1, output: [stock.s_i_id, stock.s_quantity, region.r_regionkey, supplier.s_suppkey, supplier.s_nationkey, stock.s_w_id] } { tables: [ HashJoinLeft: 10, HashJoinDegreeLeft: 11, HashJoinRight: 12, HashJoinDegreeRight: 13 ] }
     ├── StreamExchange Hash([0]) from 4
     └── StreamExchange Hash([2]) from 9
 
     Fragment 4
-    StreamHashJoin { type: Inner, predicate: region.r_regionkey = nation.n_regionkey, output: [supplier.s_suppkey, region.r_regionkey, supplier.s_nationkey] } { left table: 14, right table: 16, left degree table: 15, right degree table: 17 }
+    StreamHashJoin { type: Inner, predicate: region.r_regionkey = nation.n_regionkey, output: [supplier.s_suppkey, region.r_regionkey, supplier.s_nationkey] } { tables: [ HashJoinLeft: 14, HashJoinDegreeLeft: 15, HashJoinRight: 16, HashJoinDegreeRight: 17 ] }
     ├── StreamExchange Hash([0]) from 5
     └── StreamExchange Hash([1]) from 6
 
     Fragment 5
     StreamProject { exprs: [region.r_regionkey] }
     └── StreamFilter { predicate: Like(region.r_name, 'EUROP%':Varchar) }
-        └── StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) } { state table: 18 }
+        └── StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) } { tables: [ StreamScan: 18 ] }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 6
-    StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [supplier.s_suppkey, nation.n_regionkey, supplier.s_nationkey, nation.n_nationkey] } { left table: 19, right table: 21, left degree table: 20, right degree table: 22 }
+    StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [supplier.s_suppkey, nation.n_regionkey, supplier.s_nationkey, nation.n_nationkey] } { tables: [ HashJoinLeft: 19, HashJoinDegreeLeft: 20, HashJoinRight: 21, HashJoinDegreeRight: 22 ] }
     ├── StreamExchange Hash([1]) from 7
     └── StreamExchange Hash([0]) from 8
 
     Fragment 7
-    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 23 }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { tables: [ StreamScan: 23 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 8
-    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 24 }
+    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { tables: [ StreamScan: 24 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 9
     StreamProject { exprs: [stock.s_i_id, stock.s_quantity, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr1, stock.s_w_id] }
     └── StreamFilter { predicate: (stock.s_i_id = stock.s_i_id) }
-        └── StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { state table: 25 }
+        └── StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { tables: [ StreamScan: 25 ] }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 10
     StreamProject { exprs: [item.i_id, item.i_name] }
     └── StreamFilter { predicate: Like(item.i_data, '%b':Varchar) }
-        └── StreamTableScan { table: item, columns: [item.i_id, item.i_name, item.i_data], pk: [item.i_id], dist: UpstreamHashShard(item.i_id) } { state table: 30 }
+        └── StreamTableScan { table: item, columns: [item.i_id, item.i_name, item.i_data], pk: [item.i_id], dist: UpstreamHashShard(item.i_id) } { tables: [ StreamScan: 30 ] }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 11
-    StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { state table: 31 }
+    StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { tables: [ StreamScan: 31 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 12
-    StreamHashJoin { type: Inner, predicate: region.r_regionkey = nation.n_regionkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_comment, nation.n_name, region.r_regionkey, supplier.s_nationkey] } { left table: 32, right table: 34, left degree table: 33, right degree table: 35 }
+    StreamHashJoin { type: Inner, predicate: region.r_regionkey = nation.n_regionkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_comment, nation.n_name, region.r_regionkey, supplier.s_nationkey] } { tables: [ HashJoinLeft: 32, HashJoinDegreeLeft: 33, HashJoinRight: 34, HashJoinDegreeRight: 35 ] }
     ├── StreamExchange Hash([0]) from 13
     └── StreamExchange Hash([6]) from 14
 
     Fragment 13
     StreamProject { exprs: [region.r_regionkey] }
     └── StreamFilter { predicate: Like(region.r_name, 'EUROP%':Varchar) }
-        └── StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) } { state table: 36 }
+        └── StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) } { tables: [ StreamScan: 36 ] }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 14
-    StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_comment, nation.n_name, nation.n_regionkey, supplier.s_nationkey, nation.n_nationkey] } { left table: 37, right table: 39, left degree table: 38, right degree table: 40 }
+    StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_comment, nation.n_name, nation.n_regionkey, supplier.s_nationkey, nation.n_nationkey] } { tables: [ HashJoinLeft: 37, HashJoinDegreeLeft: 38, HashJoinRight: 39, HashJoinDegreeRight: 40 ] }
     ├── StreamExchange Hash([3]) from 15
     └── StreamExchange Hash([0]) from 16
 
     Fragment 15
-    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_comment], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 41 }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_comment], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { tables: [ StreamScan: 41 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 16
-    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 42 }
+    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { tables: [ StreamScan: 42 ] }
     ├── Upstream
     └── BatchPlanNode
 
@@ -436,52 +436,46 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [ol_o_id, ol_w_id, ol_d_id, revenue, o_entry_d], stream_key: [o_entry_d, ol_o_id, ol_d_id, ol_w_id], pk_columns: [revenue, o_entry_d, ol_o_id, ol_d_id, ol_w_id], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [order_line.ol_o_id, order_line.ol_w_id, order_line.ol_d_id, sum(order_line.ol_amount), orders.o_entry_d] }
-        └── StreamHashAgg { group_key: [orders.o_entry_d, order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id], aggs: [sum(order_line.ol_amount), count] }
-            ├── intermediate state table: 0
-            ├── state tables: []
-            ├── distinct tables: []
+        └── StreamHashAgg { group_key: [orders.o_entry_d, order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id], aggs: [sum(order_line.ol_amount), count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0, 1, 2, 3]) from 1
 
     Fragment 1
     StreamHashJoin { type: Inner, predicate: customer.c_id = orders.o_c_id AND customer.c_w_id = orders.o_w_id AND customer.c_d_id = orders.o_d_id AND new_order.no_w_id = orders.o_w_id AND new_order.no_d_id = orders.o_d_id AND new_order.no_o_id = orders.o_id AND customer.c_d_id = order_line.ol_d_id AND customer.c_w_id = order_line.ol_w_id AND new_order.no_o_id = order_line.ol_o_id AND new_order.no_d_id = order_line.ol_d_id AND new_order.no_w_id = order_line.ol_w_id, output: [orders.o_entry_d, order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount, customer.c_w_id, customer.c_d_id, customer.c_id, new_order.no_o_id, new_order.no_w_id, new_order.no_d_id, orders.o_w_id, orders.o_d_id, orders.o_id, order_line.ol_number] }
-    ├── left table: 1
-    ├── right table: 3
-    ├── left degree table: 2
-    ├── right degree table: 4
+    ├── tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ]
     ├── StreamExchange Hash([3, 4, 5]) from 2
-    └── StreamHashJoin { type: Inner, predicate: orders.o_w_id = order_line.ol_w_id AND orders.o_d_id = order_line.ol_d_id AND orders.o_id = order_line.ol_o_id, output: all } { left table: 11, right table: 13, left degree table: 12, right degree table: 14 }
+    └── StreamHashJoin { type: Inner, predicate: orders.o_w_id = order_line.ol_w_id AND orders.o_d_id = order_line.ol_d_id AND orders.o_id = order_line.ol_o_id, output: all } { tables: [ HashJoinLeft: 11, HashJoinDegreeLeft: 12, HashJoinRight: 13, HashJoinDegreeRight: 14 ] }
         ├── StreamExchange Hash([0, 1, 2]) from 5
         └── StreamExchange Hash([0, 1, 2]) from 6
 
     Fragment 2
-    StreamHashJoin { type: Inner, predicate: customer.c_d_id = new_order.no_d_id AND customer.c_w_id = new_order.no_w_id, output: all } { left table: 5, right table: 7, left degree table: 6, right degree table: 8 }
+    StreamHashJoin { type: Inner, predicate: customer.c_d_id = new_order.no_d_id AND customer.c_w_id = new_order.no_w_id, output: all } { tables: [ HashJoinLeft: 5, HashJoinDegreeLeft: 6, HashJoinRight: 7, HashJoinDegreeRight: 8 ] }
     ├── StreamExchange Hash([1, 2]) from 3
     └── StreamExchange Hash([1, 2]) from 4
 
     Fragment 3
     StreamProject { exprs: [customer.c_id, customer.c_d_id, customer.c_w_id] }
     └── StreamFilter { predicate: (customer.c_w_id = customer.c_w_id) AND (customer.c_d_id = customer.c_d_id) AND Like(customer.c_state, 'a%':Varchar) }
-        └── StreamTableScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state], pk: [customer.c_w_id, customer.c_d_id, customer.c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) } { state table: 9 }
+        └── StreamTableScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state], pk: [customer.c_w_id, customer.c_d_id, customer.c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) } { tables: [ StreamScan: 9 ] }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 4
     StreamFilter { predicate: (new_order.no_w_id = new_order.no_w_id) AND (new_order.no_d_id = new_order.no_d_id) AND (new_order.no_o_id = new_order.no_o_id) }
-    └── StreamTableScan { table: new_order, columns: [new_order.no_o_id, new_order.no_d_id, new_order.no_w_id], pk: [new_order.no_w_id, new_order.no_d_id, new_order.no_o_id], dist: UpstreamHashShard(new_order.no_w_id, new_order.no_d_id, new_order.no_o_id) } { state table: 10 }
+    └── StreamTableScan { table: new_order, columns: [new_order.no_o_id, new_order.no_d_id, new_order.no_w_id], pk: [new_order.no_w_id, new_order.no_d_id, new_order.no_o_id], dist: UpstreamHashShard(new_order.no_w_id, new_order.no_d_id, new_order.no_o_id) } { tables: [ StreamScan: 10 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 5
     StreamFilter { predicate: (orders.o_d_id = orders.o_d_id) AND (orders.o_w_id = orders.o_w_id) AND (orders.o_entry_d > '2007-01-02 00:00:00':Timestamp) }
-    └── StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { state table: 15 }
+    └── StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { tables: [ StreamScan: 15 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 6
     StreamFilter { predicate: (order_line.ol_d_id = order_line.ol_d_id) AND (order_line.ol_w_id = order_line.ol_w_id) }
-    └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) } { state table: 16 }
+    └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) } { tables: [ StreamScan: 16 ] }
         ├── Upstream
         └── BatchPlanNode
 
@@ -567,32 +561,26 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [o_ol_cnt, order_count], stream_key: [o_ol_cnt], pk_columns: [o_ol_cnt], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
-    └── StreamHashAgg { group_key: [orders.o_ol_cnt], aggs: [count] }
-        ├── intermediate state table: 0
-        ├── state tables: []
-        ├── distinct tables: []
+    ├── tables: [ Materialize: 4294967294 ]
+    └── StreamHashAgg { group_key: [orders.o_ol_cnt], aggs: [count] } { tables: [ HashAggState: 0 ] }
         └── StreamExchange Hash([0]) from 1
 
     Fragment 1
     StreamHashJoin { type: LeftSemi, predicate: orders.o_id = order_line.ol_o_id AND orders.o_w_id = order_line.ol_w_id AND orders.o_d_id = order_line.ol_d_id AND (order_line.ol_delivery_d >= orders.o_entry_d), output: [orders.o_ol_cnt, orders.o_w_id, orders.o_d_id, orders.o_id] }
-    ├── left table: 1
-    ├── right table: 3
-    ├── left degree table: 2
-    ├── right degree table: 4
+    ├── tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ]
     ├── StreamExchange Hash([0, 2, 1]) from 2
     └── StreamExchange Hash([0, 1, 2]) from 3
 
     Fragment 2
     StreamFilter { predicate: (orders.o_entry_d >= '2007-01-02 00:00:00':Timestamp) AND (orders.o_entry_d < '2032-01-02 00:00:00':Timestamp) }
-    └── StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_ol_cnt], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { state table: 5 }
+    └── StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_ol_cnt], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { tables: [ StreamScan: 5 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 3
     StreamProject { exprs: [order_line.ol_o_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_delivery_d, order_line.ol_number] }
     └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_delivery_d, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
-        ├── state table: 6
+        ├── tables: [ StreamScan: 6 ]
         ├── Upstream
         └── BatchPlanNode
 
@@ -713,90 +701,82 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [n_name, revenue], stream_key: [n_name], pk_columns: [n_name], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [nation.n_name, sum(order_line.ol_amount)] }
         └── StreamHashAgg { group_key: [nation.n_name], aggs: [sum(order_line.ol_amount), count] }
-            ├── intermediate state table: 0
-            ├── state tables: []
-            ├── distinct tables: []
+            ├── tables: [ HashAggState: 0 ]
             └── StreamExchange Hash([1]) from 1
 
     Fragment 1
     StreamHashJoin { type: Inner, predicate: $expr1 = supplier.s_suppkey AND $expr2 = supplier.s_nationkey, output: [order_line.ol_amount, nation.n_name, customer.c_w_id, customer.c_d_id, customer.c_id, orders.o_id, order_line.ol_number, order_line.ol_i_id, orders.o_w_id, orders.o_d_id, $expr1, $expr2, region.r_regionkey, supplier.s_suppkey, supplier.s_nationkey] }
-    ├── left table: 1
-    ├── right table: 3
-    ├── left degree table: 2
-    ├── right degree table: 4
+    ├── tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ]
     ├── StreamExchange Hash([1, 2]) from 2
     └── StreamExchange Hash([0, 1]) from 9
 
     Fragment 2
     StreamProject { exprs: [order_line.ol_amount, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr1, (Ascii(Substr(customer.c_state, 1:Int32, 1:Int32)) - 65:Int32)::Int64 as $expr2, customer.c_w_id, customer.c_d_id, customer.c_id, orders.o_id, order_line.ol_number, order_line.ol_i_id, orders.o_w_id, orders.o_d_id] }
     └── StreamHashJoin { type: Inner, predicate: orders.o_id = order_line.ol_o_id AND orders.o_w_id = order_line.ol_w_id AND orders.o_d_id = order_line.ol_d_id AND customer.c_d_id = order_line.ol_d_id AND customer.c_w_id = order_line.ol_w_id AND orders.o_w_id = stock.s_w_id, output: [customer.c_state, order_line.ol_amount, stock.s_i_id, stock.s_w_id, customer.c_w_id, customer.c_d_id, customer.c_id, orders.o_id, orders.o_w_id, orders.o_d_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, order_line.ol_i_id] }
-        ├── left table: 5
-        ├── right table: 7
-        ├── left degree table: 6
-        ├── right degree table: 8
+        ├── tables: [ HashJoinLeft: 5, HashJoinDegreeLeft: 6, HashJoinRight: 7, HashJoinDegreeRight: 8 ]
         ├── StreamExchange Hash([3, 0, 1, 5]) from 3
         └── StreamExchange Hash([0, 1, 2, 5]) from 6
 
     Fragment 3
-    StreamHashJoin { type: Inner, predicate: customer.c_id = orders.o_c_id AND customer.c_w_id = orders.o_w_id AND customer.c_d_id = orders.o_d_id, output: [customer.c_d_id, customer.c_w_id, customer.c_state, orders.o_id, orders.o_d_id, orders.o_w_id, customer.c_id] } { left table: 9, right table: 11, left degree table: 10, right degree table: 12 }
+    StreamHashJoin { type: Inner, predicate: customer.c_id = orders.o_c_id AND customer.c_w_id = orders.o_w_id AND customer.c_d_id = orders.o_d_id, output: [customer.c_d_id, customer.c_w_id, customer.c_state, orders.o_id, orders.o_d_id, orders.o_w_id, customer.c_id] } { tables: [ HashJoinLeft: 9, HashJoinDegreeLeft: 10, HashJoinRight: 11, HashJoinDegreeRight: 12 ] }
     ├── StreamExchange Hash([1, 2, 0]) from 4
     └── StreamExchange Hash([1, 2, 3]) from 5
 
     Fragment 4
-    StreamTableScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state], pk: [customer.c_w_id, customer.c_d_id, customer.c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) } { state table: 13 }
+    StreamTableScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state], pk: [customer.c_w_id, customer.c_d_id, customer.c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) } { tables: [ StreamScan: 13 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 5
     StreamProject { exprs: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id] }
     └── StreamFilter { predicate: (orders.o_entry_d >= '2007-01-02 00:00:00':Timestamp) }
-        └── StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { state table: 14 }
+        └── StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { tables: [ StreamScan: 14 ] }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 6
-    StreamHashJoin { type: Inner, predicate: order_line.ol_w_id = stock.s_w_id AND order_line.ol_i_id = stock.s_i_id, output: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount, stock.s_i_id, stock.s_w_id, order_line.ol_number, order_line.ol_i_id] } { left table: 15, right table: 17, left degree table: 16, right degree table: 18 }
+    StreamHashJoin { type: Inner, predicate: order_line.ol_w_id = stock.s_w_id AND order_line.ol_i_id = stock.s_i_id, output: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount, stock.s_i_id, stock.s_w_id, order_line.ol_number, order_line.ol_i_id] } { tables: [ HashJoinLeft: 15, HashJoinDegreeLeft: 16, HashJoinRight: 17, HashJoinDegreeRight: 18 ] }
     ├── StreamExchange Hash([2, 3]) from 7
     └── StreamExchange Hash([1, 0]) from 8
 
     Fragment 7
     StreamFilter { predicate: (order_line.ol_d_id = order_line.ol_d_id) }
-    └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_amount, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) } { state table: 19 }
+    └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_amount, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) } { tables: [ StreamScan: 19 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 8
-    StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { state table: 20 }
+    StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { tables: [ StreamScan: 20 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 9
-    StreamHashJoin { type: Inner, predicate: region.r_regionkey = nation.n_regionkey, output: [supplier.s_suppkey, supplier.s_nationkey, nation.n_name, region.r_regionkey] } { left table: 21, right table: 23, left degree table: 22, right degree table: 24 }
+    StreamHashJoin { type: Inner, predicate: region.r_regionkey = nation.n_regionkey, output: [supplier.s_suppkey, supplier.s_nationkey, nation.n_name, region.r_regionkey] } { tables: [ HashJoinLeft: 21, HashJoinDegreeLeft: 22, HashJoinRight: 23, HashJoinDegreeRight: 24 ] }
     ├── StreamExchange Hash([0]) from 10
     └── StreamExchange Hash([3]) from 11
 
     Fragment 10
     StreamProject { exprs: [region.r_regionkey] }
     └── StreamFilter { predicate: (region.r_name = 'EUROPE':Varchar) }
-        └── StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) } { state table: 25 }
+        └── StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) } { tables: [ StreamScan: 25 ] }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 11
-    StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [supplier.s_suppkey, supplier.s_nationkey, nation.n_name, nation.n_regionkey, nation.n_nationkey] } { left table: 26, right table: 28, left degree table: 27, right degree table: 29 }
+    StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [supplier.s_suppkey, supplier.s_nationkey, nation.n_name, nation.n_regionkey, nation.n_nationkey] } { tables: [ HashJoinLeft: 26, HashJoinDegreeLeft: 27, HashJoinRight: 28, HashJoinDegreeRight: 29 ] }
     ├── StreamExchange Hash([1]) from 12
     └── StreamExchange Hash([0]) from 13
 
     Fragment 12
-    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 30 }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { tables: [ StreamScan: 30 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 13
-    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 31 }
+    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { tables: [ StreamScan: 31 ] }
     ├── Upstream
     └── BatchPlanNode
 
@@ -898,12 +878,10 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [revenue], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [sum(sum(order_line.ol_amount))] }
         └── StreamSimpleAgg { aggs: [sum(sum(order_line.ol_amount)), count] }
-            ├── intermediate state table: 0
-            ├── state tables: []
-            ├── distinct tables: []
+            ├── tables: [ SimpleAggState: 0 ]
             └── StreamExchange Single from 1
 
     Fragment 1
@@ -911,7 +889,7 @@
     └── StreamProject { exprs: [order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
         └── StreamFilter { predicate: (order_line.ol_delivery_d >= '1997-01-01 00:00:00':Timestamp) AND (order_line.ol_delivery_d < '2030-01-01 00:00:00':Timestamp) AND (order_line.ol_quantity >= 1:Int32) AND (order_line.ol_quantity <= 100000:Int32) }
             └── StreamTableScan { table: order_line, columns: [order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, order_line.ol_delivery_d, order_line.ol_quantity], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
-                ├── state table: 1
+                ├── tables: [ StreamScan: 1 ]
                 ├── Upstream
                 └── BatchPlanNode
 
@@ -1029,87 +1007,81 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [supp_nation, cust_nation, l_year, revenue, supplier.s_nationkey(hidden)], stream_key: [supplier.s_nationkey, cust_nation, l_year], pk_columns: [supplier.s_nationkey, cust_nation, l_year], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [supplier.s_nationkey, $expr3, $expr4, sum(order_line.ol_amount), supplier.s_nationkey] }
-        └── StreamHashAgg { group_key: [supplier.s_nationkey, $expr3, $expr4], aggs: [sum(order_line.ol_amount), count] } { intermediate state table: 0, state tables: [], distinct tables: [] }
+        └── StreamHashAgg { group_key: [supplier.s_nationkey, $expr3, $expr4], aggs: [sum(order_line.ol_amount), count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0, 1, 2]) from 1
 
     Fragment 1
     StreamProject { exprs: [supplier.s_nationkey, Substr(customer.c_state, 1:Int32, 1:Int32) as $expr3, Extract('YEAR':Varchar, orders.o_entry_d) as $expr4, order_line.ol_amount, stock.s_w_id, stock.s_i_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, orders.o_c_id, $expr1, $expr2] }
     └── StreamFilter { predicate: (((nation.n_name = 'JAPAN':Varchar) AND (nation.n_name = 'CHINA':Varchar)) OR ((nation.n_name = 'CHINA':Varchar) AND (nation.n_name = 'JAPAN':Varchar))) }
-        └── StreamHashJoin { type: Inner, predicate: $expr2 = supplier.s_suppkey, output: all } { left table: 1, right table: 3, left degree table: 2, right degree table: 4 }
+        └── StreamHashJoin { type: Inner, predicate: $expr2 = supplier.s_suppkey, output: all } { tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ] }
             ├── StreamExchange Hash([4]) from 2
             └── StreamExchange Hash([0]) from 11
 
     Fragment 2
     StreamProject { exprs: [order_line.ol_amount, orders.o_entry_d, customer.c_state, nation.n_name, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr2, stock.s_w_id, stock.s_i_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, orders.o_c_id, $expr1] }
     └── StreamHashJoin { type: Inner, predicate: $expr1 = nation.n_nationkey, output: [stock.s_i_id, stock.s_w_id, order_line.ol_amount, orders.o_entry_d, customer.c_state, nation.n_name, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, orders.o_c_id, $expr1, nation.n_nationkey] }
-        ├── left table: 5
-        ├── right table: 7
-        ├── left degree table: 6
-        ├── right degree table: 8
+        ├── tables: [ HashJoinLeft: 5, HashJoinDegreeLeft: 6, HashJoinRight: 7, HashJoinDegreeRight: 8 ]
         ├── StreamExchange Hash([5]) from 3
         └── StreamExchange Hash([0]) from 10
 
     Fragment 3
     StreamProject { exprs: [stock.s_i_id, stock.s_w_id, order_line.ol_amount, orders.o_entry_d, customer.c_state, (Ascii(Substr(customer.c_state, 1:Int32, 1:Int32)) - 65:Int32)::Int64 as $expr1, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, orders.o_c_id] }
     └── StreamHashJoin { type: Inner, predicate: order_line.ol_w_id = orders.o_w_id AND order_line.ol_d_id = orders.o_d_id AND order_line.ol_o_id = orders.o_id AND order_line.ol_d_id = customer.c_d_id AND order_line.ol_w_id = customer.c_w_id, output: [stock.s_i_id, stock.s_w_id, order_line.ol_amount, orders.o_entry_d, customer.c_state, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, orders.o_w_id, orders.o_d_id, orders.o_id, orders.o_c_id] }
-        ├── left table: 9
-        ├── right table: 11
-        ├── left degree table: 10
-        ├── right degree table: 12
+        ├── tables: [ HashJoinLeft: 9, HashJoinDegreeLeft: 10, HashJoinRight: 11, HashJoinDegreeRight: 12 ]
         ├── StreamExchange Hash([2, 3, 4, 3, 4]) from 4
         └── StreamExchange Hash([0, 1, 2, 4, 5]) from 7
 
     Fragment 4
-    StreamHashJoin { type: Inner, predicate: stock.s_w_id = order_line.ol_supply_w_id AND stock.s_i_id = order_line.ol_i_id, output: [stock.s_i_id, stock.s_w_id, order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount, order_line.ol_number] } { left table: 13, right table: 15, left degree table: 14, right degree table: 16 }
+    StreamHashJoin { type: Inner, predicate: stock.s_w_id = order_line.ol_supply_w_id AND stock.s_i_id = order_line.ol_i_id, output: [stock.s_i_id, stock.s_w_id, order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount, order_line.ol_number] } { tables: [ HashJoinLeft: 13, HashJoinDegreeLeft: 14, HashJoinRight: 15, HashJoinDegreeRight: 16 ] }
     ├── StreamExchange Hash([0, 1]) from 5
     └── StreamExchange Hash([3, 4]) from 6
 
     Fragment 5
-    StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { state table: 17 }
+    StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { tables: [ StreamScan: 17 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 6
     StreamProject { exprs: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, order_line.ol_number] }
     └── StreamFilter { predicate: (order_line.ol_w_id = order_line.ol_w_id) AND (order_line.ol_d_id = order_line.ol_d_id) AND (order_line.ol_delivery_d >= '2007-01-02 00:00:00':Timestamp) AND (order_line.ol_delivery_d <= '2032-01-02 00:00:00':Timestamp) }
-        └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, order_line.ol_number, order_line.ol_delivery_d], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) } { state table: 18 }
+        └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, order_line.ol_number, order_line.ol_delivery_d], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) } { tables: [ StreamScan: 18 ] }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 7
-    StreamHashJoin { type: Inner, predicate: orders.o_c_id = customer.c_id AND orders.o_w_id = customer.c_w_id AND orders.o_d_id = customer.c_d_id, output: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, customer.c_d_id, customer.c_w_id, customer.c_state, orders.o_c_id, customer.c_id] } { left table: 19, right table: 21, left degree table: 20, right degree table: 22 }
+    StreamHashJoin { type: Inner, predicate: orders.o_c_id = customer.c_id AND orders.o_w_id = customer.c_w_id AND orders.o_d_id = customer.c_d_id, output: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, customer.c_d_id, customer.c_w_id, customer.c_state, orders.o_c_id, customer.c_id] } { tables: [ HashJoinLeft: 19, HashJoinDegreeLeft: 20, HashJoinRight: 21, HashJoinDegreeRight: 22 ] }
     ├── StreamExchange Hash([1, 2, 3]) from 8
     └── StreamExchange Hash([1, 2, 0]) from 9
 
     Fragment 8
-    StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { state table: 23 }
+    StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { tables: [ StreamScan: 23 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 9
-    StreamTableScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state], pk: [customer.c_w_id, customer.c_d_id, customer.c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) } { state table: 24 }
+    StreamTableScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state], pk: [customer.c_w_id, customer.c_d_id, customer.c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) } { tables: [ StreamScan: 24 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 10
-    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 25 }
+    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { tables: [ StreamScan: 25 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 11
-    StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [supplier.s_suppkey, supplier.s_nationkey, nation.n_name, nation.n_nationkey] } { left table: 26, right table: 28, left degree table: 27, right degree table: 29 }
+    StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [supplier.s_suppkey, supplier.s_nationkey, nation.n_name, nation.n_nationkey] } { tables: [ HashJoinLeft: 26, HashJoinDegreeLeft: 27, HashJoinRight: 28, HashJoinDegreeRight: 29 ] }
     ├── StreamExchange Hash([1]) from 12
     └── StreamExchange Hash([0]) from 13
 
     Fragment 12
-    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 30 }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { tables: [ StreamScan: 30 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 13
-    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 31 }
+    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { tables: [ StreamScan: 31 ] }
     ├── Upstream
     └── BatchPlanNode
 
@@ -1310,117 +1282,106 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [l_year, mkt_share], stream_key: [l_year], pk_columns: [l_year], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [$expr3, (sum($expr4) / sum(order_line.ol_amount)) as $expr5] }
         └── StreamHashAgg { group_key: [$expr3], aggs: [sum($expr4), sum(order_line.ol_amount), count] }
-            ├── intermediate state table: 0
-            ├── state tables: []
-            ├── distinct tables: []
+            ├── tables: [ HashAggState: 0 ]
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
     StreamProject { exprs: [Extract('YEAR':Varchar, orders.o_entry_d) as $expr3, Case((nation.n_name = 'INDIA':Varchar), order_line.ol_amount, 0:Decimal) as $expr4, order_line.ol_amount, orders.o_w_id, orders.o_d_id, orders.o_id, orders.o_c_id, item.i_id, stock.s_w_id, order_line.ol_number, stock.s_i_id, customer.c_d_id, customer.c_w_id, supplier.s_nationkey, $expr1, nation.n_regionkey, $expr2] }
     └── StreamHashJoin { type: Inner, predicate: $expr2 = nation.n_nationkey, output: [order_line.ol_amount, orders.o_entry_d, nation.n_name, orders.o_w_id, orders.o_d_id, orders.o_id, orders.o_c_id, item.i_id, stock.s_w_id, order_line.ol_number, stock.s_i_id, customer.c_d_id, customer.c_w_id, supplier.s_nationkey, $expr1, $expr2, nation.n_nationkey, nation.n_regionkey] }
-        ├── left table: 1
-        ├── right table: 3
-        ├── left degree table: 2
-        ├── right degree table: 4
+        ├── tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ]
         ├── StreamExchange Hash([3]) from 2
         └── StreamExchange Hash([0]) from 15
 
     Fragment 2
     StreamProject { exprs: [orders.o_entry_d, order_line.ol_amount, nation.n_name, (Ascii(Substr(customer.c_state, 1:Int32, 1:Int32)) - 65:Int32)::Int64 as $expr2, orders.o_w_id, orders.o_d_id, orders.o_id, orders.o_c_id, item.i_id, stock.s_w_id, order_line.ol_number, stock.s_i_id, customer.c_d_id, customer.c_w_id, supplier.s_nationkey, $expr1] }
     └── StreamHashJoin { type: Inner, predicate: $expr1 = supplier.s_suppkey, output: [orders.o_entry_d, customer.c_state, order_line.ol_amount, nation.n_name, orders.o_w_id, orders.o_d_id, orders.o_id, orders.o_c_id, item.i_id, stock.s_w_id, order_line.ol_number, stock.s_i_id, customer.c_d_id, customer.c_w_id, $expr1, supplier.s_suppkey, supplier.s_nationkey] }
-        ├── left table: 5
-        ├── right table: 7
-        ├── left degree table: 6
-        ├── right degree table: 8
+        ├── tables: [ HashJoinLeft: 5, HashJoinDegreeLeft: 6, HashJoinRight: 7, HashJoinDegreeRight: 8 ]
         ├── StreamExchange Hash([3]) from 3
         └── StreamExchange Hash([0]) from 12
 
     Fragment 3
     StreamProject { exprs: [orders.o_entry_d, customer.c_state, order_line.ol_amount, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr1, orders.o_w_id, orders.o_d_id, orders.o_id, orders.o_c_id, item.i_id, stock.s_w_id, order_line.ol_number, stock.s_i_id, customer.c_d_id, customer.c_w_id] }
     └── StreamHashJoin { type: Inner, predicate: orders.o_w_id = order_line.ol_w_id AND orders.o_d_id = order_line.ol_d_id AND orders.o_id = order_line.ol_o_id AND customer.c_d_id = order_line.ol_d_id AND customer.c_w_id = order_line.ol_w_id, output: [orders.o_entry_d, customer.c_state, stock.s_i_id, stock.s_w_id, order_line.ol_amount, orders.o_w_id, orders.o_d_id, orders.o_id, orders.o_c_id, customer.c_d_id, customer.c_w_id, item.i_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
-        ├── left table: 9
-        ├── right table: 11
-        ├── left degree table: 10
-        ├── right degree table: 12
+        ├── tables: [ HashJoinLeft: 9, HashJoinDegreeLeft: 10, HashJoinRight: 11, HashJoinDegreeRight: 12 ]
         ├── StreamExchange Hash([0, 4, 5]) from 4
         └── StreamExchange Hash([2, 3, 4]) from 7
 
     Fragment 4
-    StreamHashJoin { type: Inner, predicate: orders.o_c_id = customer.c_id AND orders.o_w_id = customer.c_w_id AND orders.o_d_id = customer.c_d_id, output: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, customer.c_d_id, customer.c_w_id, customer.c_state, orders.o_c_id, customer.c_id] } { left table: 13, right table: 15, left degree table: 14, right degree table: 16 }
+    StreamHashJoin { type: Inner, predicate: orders.o_c_id = customer.c_id AND orders.o_w_id = customer.c_w_id AND orders.o_d_id = customer.c_d_id, output: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, customer.c_d_id, customer.c_w_id, customer.c_state, orders.o_c_id, customer.c_id] } { tables: [ HashJoinLeft: 13, HashJoinDegreeLeft: 14, HashJoinRight: 15, HashJoinDegreeRight: 16 ] }
     ├── StreamExchange Hash([1, 2, 3]) from 5
     └── StreamExchange Hash([1, 2, 0]) from 6
 
     Fragment 5
     StreamFilter { predicate: (orders.o_entry_d >= '2007-01-02 00:00:00':Timestamp) AND (orders.o_entry_d <= '2032-01-02 00:00:00':Timestamp) }
-    └── StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { state table: 17 }
+    └── StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { tables: [ StreamScan: 17 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 6
-    StreamTableScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state], pk: [customer.c_w_id, customer.c_d_id, customer.c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) } { state table: 18 }
+    StreamTableScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state], pk: [customer.c_w_id, customer.c_d_id, customer.c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) } { tables: [ StreamScan: 18 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 7
-    StreamHashJoin { type: Inner, predicate: stock.s_i_id = order_line.ol_i_id AND stock.s_w_id = order_line.ol_supply_w_id AND item.i_id = order_line.ol_i_id, output: [stock.s_i_id, stock.s_w_id, order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount, item.i_id, order_line.ol_number] } { left table: 19, right table: 21, left degree table: 20, right degree table: 22 }
+    StreamHashJoin { type: Inner, predicate: stock.s_i_id = order_line.ol_i_id AND stock.s_w_id = order_line.ol_supply_w_id AND item.i_id = order_line.ol_i_id, output: [stock.s_i_id, stock.s_w_id, order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount, item.i_id, order_line.ol_number] } { tables: [ HashJoinLeft: 19, HashJoinDegreeLeft: 20, HashJoinRight: 21, HashJoinDegreeRight: 22 ] }
     ├── StreamExchange Hash([0, 2]) from 8
     └── StreamExchange Hash([3, 4]) from 11
 
     Fragment 8
-    StreamHashJoin { type: Inner, predicate: item.i_id = stock.s_i_id, output: all } { left table: 23, right table: 25, left degree table: 24, right degree table: 26 }
+    StreamHashJoin { type: Inner, predicate: item.i_id = stock.s_i_id, output: all } { tables: [ HashJoinLeft: 23, HashJoinDegreeLeft: 24, HashJoinRight: 25, HashJoinDegreeRight: 26 ] }
     ├── StreamExchange Hash([0]) from 9
     └── StreamExchange Hash([0]) from 10
 
     Fragment 9
     StreamFilter { predicate: (item.i_id < 1000:Int32) }
-    └── StreamTableScan { table: item, columns: [item.i_id], pk: [item.i_id], dist: UpstreamHashShard(item.i_id) } { state table: 27 }
+    └── StreamTableScan { table: item, columns: [item.i_id], pk: [item.i_id], dist: UpstreamHashShard(item.i_id) } { tables: [ StreamScan: 27 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 10
     StreamFilter { predicate: (stock.s_i_id < 1000:Int32) }
-    └── StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { state table: 28 }
+    └── StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { tables: [ StreamScan: 28 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 11
     StreamFilter { predicate: (order_line.ol_w_id = order_line.ol_w_id) AND (order_line.ol_d_id = order_line.ol_d_id) AND (order_line.ol_i_id = order_line.ol_i_id) AND (order_line.ol_i_id < 1000:Int32) }
-    └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) } { state table: 29 }
+    └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) } { tables: [ StreamScan: 29 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 12
-    StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [supplier.s_suppkey, nation.n_name, supplier.s_nationkey, nation.n_nationkey] } { left table: 30, right table: 32, left degree table: 31, right degree table: 33 }
+    StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [supplier.s_suppkey, nation.n_name, supplier.s_nationkey, nation.n_nationkey] } { tables: [ HashJoinLeft: 30, HashJoinDegreeLeft: 31, HashJoinRight: 32, HashJoinDegreeRight: 33 ] }
     ├── StreamExchange Hash([1]) from 13
     └── StreamExchange Hash([0]) from 14
 
     Fragment 13
-    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 34 }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { tables: [ StreamScan: 34 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 14
-    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 35 }
+    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { tables: [ StreamScan: 35 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 15
-    StreamHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: all } { left table: 36, right table: 38, left degree table: 37, right degree table: 39 }
+    StreamHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: all } { tables: [ HashJoinLeft: 36, HashJoinDegreeLeft: 37, HashJoinRight: 38, HashJoinDegreeRight: 39 ] }
     ├── StreamExchange Hash([1]) from 16
     └── StreamExchange Hash([0]) from 17
 
     Fragment 16
-    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 40 }
+    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { tables: [ StreamScan: 40 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 17
     StreamProject { exprs: [region.r_regionkey] }
     └── StreamFilter { predicate: (region.r_name = 'ASIA':Varchar) }
-        └── StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) } { state table: 41 }
+        └── StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) } { tables: [ StreamScan: 41 ] }
             ├── Upstream
             └── BatchPlanNode
 
@@ -1606,84 +1567,72 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [n_name, l_year, sum_profit], stream_key: [n_name, l_year], pk_columns: [n_name, l_year], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [nation.n_name, $expr2, sum(order_line.ol_amount)] }
-        └── StreamHashAgg { group_key: [nation.n_name, $expr2], aggs: [sum(order_line.ol_amount), count] }
-            ├── intermediate state table: 0
-            ├── state tables: []
-            ├── distinct tables: []
+        └── StreamHashAgg { group_key: [nation.n_name, $expr2], aggs: [sum(order_line.ol_amount), count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0, 1]) from 1
 
     Fragment 1
     StreamProject { exprs: [nation.n_name, Extract('YEAR':Varchar, orders.o_entry_d) as $expr2, order_line.ol_amount, item.i_id, stock.s_w_id, orders.o_w_id, orders.o_d_id, orders.o_id, order_line.ol_number, stock.s_i_id, supplier.s_nationkey, $expr1] }
     └── StreamHashJoin { type: Inner, predicate: $expr1 = supplier.s_suppkey, output: [order_line.ol_amount, orders.o_entry_d, nation.n_name, item.i_id, stock.s_w_id, orders.o_w_id, orders.o_d_id, orders.o_id, order_line.ol_number, stock.s_i_id, $expr1, supplier.s_suppkey, supplier.s_nationkey] }
-        ├── left table: 1
-        ├── right table: 3
-        ├── left degree table: 2
-        ├── right degree table: 4
+        ├── tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ]
         ├── StreamExchange Hash([2]) from 2
         └── StreamExchange Hash([0]) from 9
 
     Fragment 2
     StreamProject { exprs: [orders.o_entry_d, order_line.ol_amount, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr1, item.i_id, stock.s_w_id, orders.o_w_id, orders.o_d_id, orders.o_id, order_line.ol_number, stock.s_i_id] }
     └── StreamHashJoin { type: Inner, predicate: stock.s_i_id = order_line.ol_i_id AND stock.s_w_id = order_line.ol_supply_w_id AND item.i_id = order_line.ol_i_id, output: [stock.s_i_id, stock.s_w_id, orders.o_entry_d, order_line.ol_amount, item.i_id, orders.o_w_id, orders.o_d_id, orders.o_id, order_line.ol_number] }
-        ├── left table: 5
-        ├── right table: 7
-        ├── left degree table: 6
-        ├── right degree table: 8
+        ├── tables: [ HashJoinLeft: 5, HashJoinDegreeLeft: 6, HashJoinRight: 7, HashJoinDegreeRight: 8 ]
         ├── StreamExchange Hash([0, 2]) from 3
         └── StreamExchange Hash([1, 2]) from 6
 
     Fragment 3
-    StreamHashJoin { type: Inner, predicate: item.i_id = stock.s_i_id, output: all } { left table: 9, right table: 11, left degree table: 10, right degree table: 12 }
+    StreamHashJoin { type: Inner, predicate: item.i_id = stock.s_i_id, output: all } { tables: [ HashJoinLeft: 9, HashJoinDegreeLeft: 10, HashJoinRight: 11, HashJoinDegreeRight: 12 ] }
     ├── StreamExchange Hash([0]) from 4
     └── StreamExchange Hash([0]) from 5
 
     Fragment 4
     StreamProject { exprs: [item.i_id] }
     └── StreamFilter { predicate: Like(item.i_data, '%BB':Varchar) }
-        └── StreamTableScan { table: item, columns: [item.i_id, item.i_data], pk: [item.i_id], dist: UpstreamHashShard(item.i_id) } { state table: 13 }
+        └── StreamTableScan { table: item, columns: [item.i_id, item.i_data], pk: [item.i_id], dist: UpstreamHashShard(item.i_id) } { tables: [ StreamScan: 13 ] }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 5
-    StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { state table: 14 }
+    StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { tables: [ StreamScan: 14 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 6
     StreamHashJoin { type: Inner, predicate: orders.o_w_id = order_line.ol_w_id AND orders.o_d_id = order_line.ol_d_id AND orders.o_id = order_line.ol_o_id, output: [orders.o_entry_d, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, orders.o_w_id, orders.o_d_id, orders.o_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
-    ├── left table: 15
-    ├── right table: 17
-    ├── left degree table: 16
-    ├── right degree table: 18
+    ├── tables: [ HashJoinLeft: 15, HashJoinDegreeLeft: 16, HashJoinRight: 17, HashJoinDegreeRight: 18 ]
     ├── StreamExchange Hash([0, 1, 2]) from 7
     └── StreamExchange Hash([0, 1, 2]) from 8
 
     Fragment 7
-    StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { state table: 19 }
+    StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { tables: [ StreamScan: 19 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 8
     StreamFilter { predicate: (order_line.ol_i_id = order_line.ol_i_id) }
     └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
-        ├── state table: 20
+        ├── tables: [ StreamScan: 20 ]
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 9
-    StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [supplier.s_suppkey, nation.n_name, supplier.s_nationkey, nation.n_nationkey] } { left table: 21, right table: 23, left degree table: 22, right degree table: 24 }
+    StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [supplier.s_suppkey, nation.n_name, supplier.s_nationkey, nation.n_nationkey] } { tables: [ HashJoinLeft: 21, HashJoinDegreeLeft: 22, HashJoinRight: 23, HashJoinDegreeRight: 24 ] }
     ├── StreamExchange Hash([1]) from 10
     └── StreamExchange Hash([0]) from 11
 
     Fragment 10
-    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 25 }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { tables: [ StreamScan: 25 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 11
-    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 26 }
+    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { tables: [ StreamScan: 26 ] }
     ├── Upstream
     └── BatchPlanNode
 
@@ -1819,20 +1768,14 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [c_id, c_last, revenue, c_city, c_phone, n_name], stream_key: [c_id, c_last, c_city, c_phone, n_name], pk_columns: [revenue, c_id, c_last, c_city, c_phone, n_name], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [customer.c_id, customer.c_last, sum(order_line.ol_amount), customer.c_city, customer.c_phone, nation.n_name] }
-        └── StreamHashAgg { group_key: [customer.c_id, customer.c_last, customer.c_city, customer.c_phone, nation.n_name], aggs: [sum(order_line.ol_amount), count] }
-            ├── intermediate state table: 0
-            ├── state tables: []
-            ├── distinct tables: []
+        └── StreamHashAgg { group_key: [customer.c_id, customer.c_last, customer.c_city, customer.c_phone, nation.n_name], aggs: [sum(order_line.ol_amount), count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0, 1, 2, 3, 5]) from 1
 
     Fragment 1
     StreamHashJoin { type: Inner, predicate: $expr1 = nation.n_nationkey, output: [customer.c_id, customer.c_last, customer.c_city, customer.c_phone, order_line.ol_amount, nation.n_name, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, $expr1, nation.n_nationkey] }
-    ├── left table: 1
-    ├── right table: 3
-    ├── left degree table: 2
-    ├── right degree table: 4
+    ├── tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ]
     ├── StreamExchange Hash([5]) from 2
     └── StreamExchange Hash([0]) from 7
 
@@ -1840,42 +1783,36 @@
     StreamProject { exprs: [order_line.ol_amount, customer.c_id, customer.c_last, customer.c_city, customer.c_phone, (Ascii(Substr(customer.c_state, 1:Int32, 1:Int32)) - 65:Int32)::Int64 as $expr1, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
     └── StreamFilter { predicate: (orders.o_entry_d <= order_line.ol_delivery_d) }
         └── StreamHashJoin { type: Inner, predicate: order_line.ol_w_id = orders.o_w_id AND order_line.ol_d_id = orders.o_d_id AND order_line.ol_o_id = orders.o_id AND order_line.ol_d_id = customer.c_d_id AND order_line.ol_w_id = customer.c_w_id, output: all }
-            ├── left table: 5
-            ├── right table: 7
-            ├── left degree table: 6
-            ├── right degree table: 8
+            ├── tables: [ HashJoinLeft: 5, HashJoinDegreeLeft: 6, HashJoinRight: 7, HashJoinDegreeRight: 8 ]
             ├── StreamExchange Hash([1, 2, 0, 1, 2]) from 3
             └── StreamExchange Hash([1, 2, 7, 8, 9]) from 4
 
     Fragment 3
     StreamFilter { predicate: (order_line.ol_w_id = order_line.ol_w_id) AND (order_line.ol_d_id = order_line.ol_d_id) }
     └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_delivery_d, order_line.ol_amount, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
-        ├── state table: 9
+        ├── tables: [ StreamScan: 9 ]
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 4
     StreamHashJoin { type: Inner, predicate: customer.c_id = orders.o_c_id AND customer.c_w_id = orders.o_w_id AND customer.c_d_id = orders.o_d_id, output: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_last, customer.c_city, customer.c_state, customer.c_phone, orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d] }
-    ├── left table: 10
-    ├── right table: 12
-    ├── left degree table: 11
-    ├── right degree table: 13
+    ├── tables: [ HashJoinLeft: 10, HashJoinDegreeLeft: 11, HashJoinRight: 12, HashJoinDegreeRight: 13 ]
     ├── StreamExchange Hash([1, 2, 0]) from 5
     └── StreamExchange Hash([1, 2, 3]) from 6
 
     Fragment 5
-    StreamTableScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_last, customer.c_city, customer.c_state, customer.c_phone], pk: [customer.c_w_id, customer.c_d_id, customer.c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) } { state table: 14 }
+    StreamTableScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_last, customer.c_city, customer.c_state, customer.c_phone], pk: [customer.c_w_id, customer.c_d_id, customer.c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) } { tables: [ StreamScan: 14 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 6
     StreamFilter { predicate: (orders.o_entry_d >= '2007-01-02 00:00:00':Timestamp) }
-    └── StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { state table: 15 }
+    └── StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { tables: [ StreamScan: 15 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 7
-    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 16 }
+    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { tables: [ StreamScan: 16 ] }
     ├── Upstream
     └── BatchPlanNode
 
@@ -2031,16 +1968,13 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [s_i_id, ordercount], stream_key: [s_i_id], pk_columns: [ordercount, s_i_id], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [stock.s_i_id, sum(stock.s_order_cnt)] }
         └── StreamDynamicFilter { predicate: ($expr2 > $expr3), output: [stock.s_i_id, sum(stock.s_order_cnt), $expr2] }
-            ├── left table: 0
-            ├── right table: 1
+            ├── tables: [ DynamicFilterLeft: 0, DynamicFilterRight: 1 ]
             ├── StreamProject { exprs: [stock.s_i_id, sum(stock.s_order_cnt), sum(stock.s_order_cnt)::Decimal as $expr2] }
             │   └── StreamHashAgg { group_key: [stock.s_i_id], aggs: [sum(stock.s_order_cnt), count] }
-            │       ├── intermediate state table: 2
-            │       ├── state tables: []
-            │       ├── distinct tables: []
+            │       ├── tables: [ HashAggState: 2 ]
             │       └── StreamExchange Hash([0]) from 1
             └── StreamExchange Broadcast from 7
 
@@ -2050,25 +1984,19 @@
 
     Fragment 2
     StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = $expr1, output: [stock.s_i_id, stock.s_order_cnt, supplier.s_suppkey, supplier.s_nationkey, stock.s_w_id] }
-    ├── left table: 3
-    ├── right table: 5
-    ├── left degree table: 4
-    ├── right degree table: 6
+    ├── tables: [ HashJoinLeft: 3, HashJoinDegreeLeft: 4, HashJoinRight: 5, HashJoinDegreeRight: 6 ]
     ├── StreamExchange Hash([0]) from 3
     └── StreamExchange Hash([2]) from 6
 
     Fragment 3
     StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: all }
-    ├── left table: 7
-    ├── right table: 9
-    ├── left degree table: 8
-    ├── right degree table: 10
+    ├── tables: [ HashJoinLeft: 7, HashJoinDegreeLeft: 8, HashJoinRight: 9, HashJoinDegreeRight: 10 ]
     ├── StreamExchange Hash([1]) from 4
     └── StreamExchange Hash([0]) from 5
 
     Fragment 4
     StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
-    ├── state table: 11
+    ├── tables: [ StreamScan: 11 ]
     ├── Upstream
     └── BatchPlanNode
 
@@ -2076,20 +2004,20 @@
     StreamProject { exprs: [nation.n_nationkey] }
     └── StreamFilter { predicate: (nation.n_name = 'CHINA':Varchar) }
         └── StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
-            ├── state table: 12
+            ├── tables: [ StreamScan: 12 ]
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 6
     StreamProject { exprs: [stock.s_i_id, stock.s_order_cnt, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr1, stock.s_w_id] }
     └── StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_order_cnt], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) }
-        ├── state table: 13
+        ├── tables: [ StreamScan: 13 ]
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 7
     StreamProject { exprs: [(sum(sum(stock.s_order_cnt))::Decimal * 0.005:Decimal) as $expr3] }
-    └── StreamSimpleAgg { aggs: [sum(sum(stock.s_order_cnt)), count] } { intermediate state table: 14, state tables: [], distinct tables: [] }
+    └── StreamSimpleAgg { aggs: [sum(sum(stock.s_order_cnt)), count] } { tables: [ SimpleAggState: 14 ] }
         └── StreamExchange Single from 8
 
     Fragment 8
@@ -2222,30 +2150,27 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [o_ol_cnt, high_line_count, low_line_count], stream_key: [o_ol_cnt], pk_columns: [o_ol_cnt], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [orders.o_ol_cnt, sum($expr1), sum($expr2)] }
-        └── StreamHashAgg { group_key: [orders.o_ol_cnt], aggs: [sum($expr1), sum($expr2), count] }
-            ├── intermediate state table: 0
-            ├── state tables: []
-            ├── distinct tables: []
+        └── StreamHashAgg { group_key: [orders.o_ol_cnt], aggs: [sum($expr1), sum($expr2), count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
     StreamProject { exprs: [orders.o_ol_cnt, Case(((orders.o_carrier_id = 1:Int32) OR (orders.o_carrier_id = 2:Int32)), 1:Int32, 0:Int32) as $expr1, Case(((orders.o_carrier_id <> 1:Int32) AND (orders.o_carrier_id <> 2:Int32)), 1:Int32, 0:Int32) as $expr2, orders.o_w_id, orders.o_d_id, orders.o_id, order_line.ol_number] }
     └── StreamFilter { predicate: (orders.o_entry_d <= order_line.ol_delivery_d) }
-        └── StreamHashJoin { type: Inner, predicate: orders.o_w_id = order_line.ol_w_id AND orders.o_d_id = order_line.ol_d_id AND orders.o_id = order_line.ol_o_id, output: all } { left table: 1, right table: 3, left degree table: 2, right degree table: 4 }
+        └── StreamHashJoin { type: Inner, predicate: orders.o_w_id = order_line.ol_w_id AND orders.o_d_id = order_line.ol_d_id AND orders.o_id = order_line.ol_o_id, output: all } { tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ] }
             ├── StreamExchange Hash([0, 1, 2]) from 2
             └── StreamExchange Hash([0, 1, 2]) from 3
 
     Fragment 2
-    StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { state table: 5 }
+    StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { tables: [ StreamScan: 5 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
     StreamFilter { predicate: (order_line.ol_delivery_d < '2030-01-01 00:00:00':Timestamp) }
     └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_delivery_d, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
-        ├── state table: 6
+        ├── tables: [ StreamScan: 6 ]
         ├── Upstream
         └── BatchPlanNode
 
@@ -2316,32 +2241,24 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [c_count, custdist], stream_key: [c_count], pk_columns: [custdist, c_count], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
-    └── StreamHashAgg { group_key: [count(orders.o_id)], aggs: [count] }
-        ├── intermediate state table: 0
-        ├── state tables: []
-        ├── distinct tables: []
+    ├── tables: [ Materialize: 4294967294 ]
+    └── StreamHashAgg { group_key: [count(orders.o_id)], aggs: [count] } { tables: [ HashAggState: 0 ] }
         └── StreamExchange Hash([1]) from 1
 
     Fragment 1
     StreamProject { exprs: [customer.c_id, count(orders.o_id)] }
-    └── StreamHashAgg { group_key: [customer.c_id], aggs: [count(orders.o_id), count] }
-        ├── intermediate state table: 1
-        ├── state tables: []
-        ├── distinct tables: []
+    └── StreamHashAgg { group_key: [customer.c_id], aggs: [count(orders.o_id), count] } { tables: [ HashAggState: 1 ] }
         └── StreamExchange Hash([0]) from 2
 
     Fragment 2
     StreamHashJoin { type: LeftOuter, predicate: customer.c_w_id = orders.o_w_id AND customer.c_d_id = orders.o_d_id AND customer.c_id = orders.o_c_id, output: [customer.c_id, orders.o_id, customer.c_w_id, customer.c_d_id, orders.o_w_id, orders.o_d_id] }
-    ├── left table: 2
-    ├── right table: 4
-    ├── left degree table: 3
-    ├── right degree table: 5
+    ├── tables: [ HashJoinLeft: 2, HashJoinDegreeLeft: 3, HashJoinRight: 4, HashJoinDegreeRight: 5 ]
     ├── StreamExchange Hash([1, 2, 0]) from 3
     └── StreamExchange Hash([1, 2, 3]) from 4
 
     Fragment 3
-    StreamTableScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id], pk: [customer.c_w_id, customer.c_d_id, customer.c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) } { state table: 6 }
+    StreamTableScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id], pk: [customer.c_w_id, customer.c_d_id, customer.c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) }
+    ├── tables: [ StreamScan: 6 ]
     ├── Upstream
     └── BatchPlanNode
 
@@ -2349,7 +2266,7 @@
     StreamProject { exprs: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id] }
     └── StreamFilter { predicate: (orders.o_carrier_id > 8:Int32) }
         └── StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_carrier_id], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) }
-            ├── state table: 7
+            ├── tables: [ StreamScan: 7 ]
             ├── Upstream
             └── BatchPlanNode
 
@@ -2418,22 +2335,17 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [promo_revenue], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [((100.00:Decimal * sum(sum($expr1))) / (1:Decimal + sum(sum(order_line.ol_amount)))) as $expr2] }
         └── StreamSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(order_line.ol_amount)), count] }
-            ├── intermediate state table: 0
-            ├── state tables: []
-            ├── distinct tables: []
+            ├── tables: [ SimpleAggState: 0 ]
             └── StreamExchange Single from 1
 
     Fragment 1
     StreamStatelessSimpleAgg { aggs: [sum($expr1), sum(order_line.ol_amount)] }
     └── StreamProject { exprs: [Case(Like(item.i_data, 'PR%':Varchar), order_line.ol_amount, 0:Decimal) as $expr1, order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, order_line.ol_i_id] }
         └── StreamHashJoin { type: Inner, predicate: order_line.ol_i_id = item.i_id, output: [order_line.ol_amount, item.i_data, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, order_line.ol_i_id, item.i_id] }
-            ├── left table: 1
-            ├── right table: 3
-            ├── left degree table: 2
-            ├── right degree table: 4
+            ├── tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ]
             ├── StreamExchange Hash([0]) from 2
             └── StreamExchange Hash([0]) from 3
 
@@ -2441,12 +2353,12 @@
     StreamProject { exprs: [order_line.ol_i_id, order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
     └── StreamFilter { predicate: (order_line.ol_delivery_d >= '2007-01-02 00:00:00':Timestamp) AND (order_line.ol_delivery_d < '2030-01-02 00:00:00':Timestamp) }
         └── StreamTableScan { table: order_line, columns: [order_line.ol_i_id, order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, order_line.ol_delivery_d], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
-            ├── state table: 5
+            ├── tables: [ StreamScan: 5 ]
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 3
-    StreamTableScan { table: item, columns: [item.i_id, item.i_data], pk: [item.i_id], dist: UpstreamHashShard(item.i_id) } { state table: 6 }
+    StreamTableScan { table: item, columns: [item.i_id, item.i_data], pk: [item.i_id], dist: UpstreamHashShard(item.i_id) } { tables: [ StreamScan: 6 ] }
     ├── Upstream
     └── BatchPlanNode
 
@@ -2510,47 +2422,41 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, revenue1.supplier_no(hidden)], stream_key: [s_suppkey, revenue1.supplier_no, total_revenue], pk_columns: [s_suppkey, revenue1.supplier_no, total_revenue], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamExchange Hash([0, 4, 5]) from 1
 
     Fragment 1
     StreamHashJoin { type: Inner, predicate: revenue1.total_revenue = max(max(revenue1.total_revenue)), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, revenue1.total_revenue, revenue1.supplier_no] }
-    ├── left table: 0
-    ├── right table: 2
-    ├── left degree table: 1
-    ├── right degree table: 3
+    ├── tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ]
     ├── StreamExchange Hash([4]) from 2
     └── StreamExchange Hash([0]) from 5
 
     Fragment 2
     StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = $expr1, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, revenue1.total_revenue, revenue1.supplier_no] }
-    ├── left table: 4
-    ├── right table: 6
-    ├── left degree table: 5
-    ├── right degree table: 7
+    ├── tables: [ HashJoinLeft: 4, HashJoinDegreeLeft: 5, HashJoinRight: 6, HashJoinDegreeRight: 7 ]
     ├── StreamExchange Hash([0]) from 3
     └── StreamExchange Hash([1]) from 4
 
     Fragment 3
-    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 8 }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { tables: [ StreamScan: 8 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 4
     StreamProject { exprs: [revenue1.total_revenue, revenue1.supplier_no::Int64 as $expr1, revenue1.supplier_no] }
-    └── StreamTableScan { table: revenue1, columns: [revenue1.supplier_no, revenue1.total_revenue], pk: [revenue1.supplier_no], dist: UpstreamHashShard(revenue1.supplier_no) } { state table: 9 }
+    └── StreamTableScan { table: revenue1, columns: [revenue1.supplier_no, revenue1.total_revenue], pk: [revenue1.supplier_no], dist: UpstreamHashShard(revenue1.supplier_no) } { tables: [ StreamScan: 9 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 5
     StreamProject { exprs: [max(max(revenue1.total_revenue))] }
-    └── StreamSimpleAgg { aggs: [max(max(revenue1.total_revenue)), count] } { intermediate state table: 11, state tables: [ 10 ], distinct tables: [] }
+    └── StreamSimpleAgg { aggs: [max(max(revenue1.total_revenue)), count] } { tables: [ SimpleAggState: 11, SimpleAggCall0: 10 ] }
         └── StreamExchange Single from 6
 
     Fragment 6
-    StreamHashAgg { group_key: [$expr2], aggs: [max(revenue1.total_revenue), count] } { intermediate state table: 13, state tables: [ 12 ], distinct tables: [] }
+    StreamHashAgg { group_key: [$expr2], aggs: [max(revenue1.total_revenue), count] } { tables: [ HashAggState: 13, HashAggCall0: 12 ] }
     └── StreamProject { exprs: [revenue1.total_revenue, revenue1.supplier_no, Vnode(revenue1.supplier_no) as $expr2] }
-        └── StreamTableScan { table: revenue1, columns: [revenue1.total_revenue, revenue1.supplier_no], pk: [revenue1.supplier_no], dist: UpstreamHashShard(revenue1.supplier_no) } { state table: 14 }
+        └── StreamTableScan { table: revenue1, columns: [revenue1.total_revenue, revenue1.supplier_no], pk: [revenue1.supplier_no], dist: UpstreamHashShard(revenue1.supplier_no) } { tables: [ StreamScan: 14 ] }
             ├── Upstream
             └── BatchPlanNode
 
@@ -2653,45 +2559,40 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [i_name, brand, i_price, supplier_cnt], stream_key: [i_name, brand, i_price], pk_columns: [supplier_cnt, i_name, brand, i_price], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [item.i_name, $expr2, item.i_price, count(distinct $expr3)] }
-        └── StreamHashAgg { group_key: [item.i_name, $expr2, item.i_price], aggs: [count(distinct $expr3), count] }
-            ├── intermediate state table: 0
-            ├── state tables: []
-            ├── distinct tables: [ (distinct key: $expr3, table id: 1) ]
+        └── StreamHashAgg { group_key: [item.i_name, $expr2, item.i_price], aggs: [count(distinct $expr3), count] } { tables: [ HashAggState: 0, HashAggDedupForCol3: 1 ] }
             └── StreamExchange Hash([0, 1, 2]) from 1
 
     Fragment 1
     StreamProject { exprs: [item.i_name, Substr(item.i_data, 1:Int32, 3:Int32) as $expr2, item.i_price, ((stock.s_w_id * stock.s_i_id) % 10000:Int32) as $expr3, stock.s_w_id, stock.s_i_id, $expr1] }
-    └── StreamHashJoin { type: LeftAnti, predicate: $expr1 = supplier.s_suppkey, output: all } { left table: 2, right table: 4, left degree table: 3, right degree table: 5 }
+    └── StreamHashJoin { type: LeftAnti, predicate: $expr1 = supplier.s_suppkey, output: all } { tables: [ HashJoinLeft: 2, HashJoinDegreeLeft: 3, HashJoinRight: 4, HashJoinDegreeRight: 5 ] }
         ├── StreamExchange Hash([5]) from 2
         └── StreamExchange Hash([0]) from 5
 
     Fragment 2
     StreamProject { exprs: [stock.s_i_id, stock.s_w_id, item.i_name, item.i_price, item.i_data, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr1] }
     └── StreamHashJoin { type: Inner, predicate: stock.s_i_id = item.i_id, output: [stock.s_i_id, stock.s_w_id, item.i_name, item.i_price, item.i_data, item.i_id] }
-        ├── left table: 6
-        ├── right table: 8
-        ├── left degree table: 7
-        ├── right degree table: 9
+        ├── tables: [ HashJoinLeft: 6, HashJoinDegreeLeft: 7, HashJoinRight: 8, HashJoinDegreeRight: 9 ]
         ├── StreamExchange Hash([0]) from 3
         └── StreamExchange Hash([0]) from 4
 
     Fragment 3
-    StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { state table: 10 }
+    StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { tables: [ StreamScan: 10 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 4
     StreamFilter { predicate: Not(Like(item.i_data, 'zz%':Varchar)) }
-    └── StreamTableScan { table: item, columns: [item.i_id, item.i_name, item.i_price, item.i_data], pk: [item.i_id], dist: UpstreamHashShard(item.i_id) } { state table: 11 }
+    └── StreamTableScan { table: item, columns: [item.i_id, item.i_name, item.i_price, item.i_data], pk: [item.i_id], dist: UpstreamHashShard(item.i_id) } { tables: [ StreamScan: 11 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 5
     StreamProject { exprs: [supplier.s_suppkey] }
     └── StreamFilter { predicate: Like(supplier.s_comment, '%bad%':Varchar) }
-        └── StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 12 }
+        └── StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
+            ├── tables: [ StreamScan: 12 ]
             ├── Upstream
             └── BatchPlanNode
 
@@ -2832,46 +2733,42 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [avg_yearly], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [(sum(sum(order_line.ol_amount)) / 2.0:Decimal) as $expr3] }
         └── StreamSimpleAgg { aggs: [sum(sum(order_line.ol_amount)), count] }
-            ├── intermediate state table: 0
-            ├── state tables: []
-            ├── distinct tables: []
+            ├── tables: [ SimpleAggState: 0 ]
             └── StreamExchange Single from 1
 
     Fragment 1
     StreamStatelessSimpleAgg { aggs: [sum(order_line.ol_amount)] }
     └── StreamProject { exprs: [order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, order_line.ol_i_id, item.i_id] }
         └── StreamFilter { predicate: ($expr1 < $expr2) }
-            └── StreamHashJoin { type: Inner, predicate: order_line.ol_i_id = item.i_id, output: all } { left table: 1, right table: 3, left degree table: 2, right degree table: 4 }
+            └── StreamHashJoin { type: Inner, predicate: order_line.ol_i_id = item.i_id, output: all } { tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ] }
                 ├── StreamExchange Hash([0]) from 2
                 └── StreamProject { exprs: [item.i_id, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal) as $expr2] }
-                    └── StreamHashAgg { group_key: [item.i_id], aggs: [sum(order_line.ol_quantity), count(order_line.ol_quantity), count] } { intermediate state table: 6, state tables: [], distinct tables: [] }
+                    └── StreamHashAgg { group_key: [item.i_id], aggs: [sum(order_line.ol_quantity), count(order_line.ol_quantity), count] } { tables: [ HashAggState: 6 ] }
                         └── StreamHashJoin { type: Inner, predicate: item.i_id = order_line.ol_i_id, output: [item.i_id, order_line.ol_quantity, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
-                            ├── left table: 7
-                            ├── right table: 9
-                            ├── left degree table: 8
-                            ├── right degree table: 10
+                            ├── tables: [ HashJoinLeft: 7, HashJoinDegreeLeft: 8, HashJoinRight: 9, HashJoinDegreeRight: 10 ]
                             ├── StreamExchange Hash([0]) from 3
                             └── StreamExchange Hash([0]) from 4
 
     Fragment 2
     StreamProject { exprs: [order_line.ol_i_id, order_line.ol_amount, order_line.ol_quantity::Decimal as $expr1, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
     └── StreamTableScan { table: order_line, columns: [order_line.ol_i_id, order_line.ol_quantity, order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
-        ├── state table: 5
+        ├── tables: [ StreamScan: 5 ]
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 3
     StreamProject { exprs: [item.i_id] }
     └── StreamFilter { predicate: Like(item.i_data, '%b':Varchar) }
-        └── StreamTableScan { table: item, columns: [item.i_id, item.i_data], pk: [item.i_id], dist: UpstreamHashShard(item.i_id) } { state table: 11 }
+        └── StreamTableScan { table: item, columns: [item.i_id, item.i_data], pk: [item.i_id], dist: UpstreamHashShard(item.i_id) } { tables: [ StreamScan: 11 ] }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 4
-    StreamTableScan { table: order_line, columns: [order_line.ol_i_id, order_line.ol_quantity, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) } { state table: 12 }
+    StreamTableScan { table: order_line, columns: [order_line.ol_i_id, order_line.ol_quantity, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
+    ├── tables: [ StreamScan: 12 ]
     ├── Upstream
     └── BatchPlanNode
 
@@ -2962,36 +2859,33 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [c_last, o_id, o_entry_d, o_ol_cnt, sum, sum(order_line.ol_amount)(hidden), orders.o_id(hidden), orders.o_d_id(hidden), orders.o_w_id(hidden)], stream_key: [o_id, c_last, orders.o_id, orders.o_d_id, orders.o_w_id, o_entry_d, o_ol_cnt], pk_columns: [sum(order_line.ol_amount), o_entry_d, o_id, c_last, orders.o_id, orders.o_d_id, orders.o_w_id, o_ol_cnt], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [customer.c_last, customer.c_id, orders.o_entry_d, orders.o_ol_cnt, sum(order_line.ol_amount), sum(order_line.ol_amount), orders.o_id, orders.o_d_id, orders.o_w_id] }
         └── StreamFilter { predicate: (sum(order_line.ol_amount) > 200:Decimal) }
             └── StreamProject { exprs: [customer.c_id, customer.c_last, orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_ol_cnt, sum(order_line.ol_amount)] }
-                └── StreamHashAgg { group_key: [customer.c_id, customer.c_last, orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_ol_cnt], aggs: [sum(order_line.ol_amount), count] } { intermediate state table: 0, state tables: [], distinct tables: [] }
+                └── StreamHashAgg { group_key: [customer.c_id, customer.c_last, orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_ol_cnt], aggs: [sum(order_line.ol_amount), count] } { tables: [ HashAggState: 0 ] }
                     └── StreamHashJoin { type: Inner, predicate: orders.o_w_id = order_line.ol_w_id AND orders.o_d_id = order_line.ol_d_id AND orders.o_id = order_line.ol_o_id, output: [customer.c_id, customer.c_last, orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_ol_cnt, order_line.ol_amount, customer.c_w_id, customer.c_d_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
-                        ├── left table: 1
-                        ├── right table: 3
-                        ├── left degree table: 2
-                        ├── right degree table: 4
+                        ├── tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ]
                         ├── StreamExchange Hash([2, 3, 4]) from 1
                         └── StreamExchange Hash([0, 1, 2]) from 4
 
     Fragment 1
-    StreamHashJoin { type: Inner, predicate: customer.c_id = orders.o_c_id AND customer.c_w_id = orders.o_w_id AND customer.c_d_id = orders.o_d_id, output: [customer.c_id, customer.c_last, orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_ol_cnt, customer.c_w_id, customer.c_d_id] } { left table: 5, right table: 7, left degree table: 6, right degree table: 8 }
+    StreamHashJoin { type: Inner, predicate: customer.c_id = orders.o_c_id AND customer.c_w_id = orders.o_w_id AND customer.c_d_id = orders.o_d_id, output: [customer.c_id, customer.c_last, orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_ol_cnt, customer.c_w_id, customer.c_d_id] } { tables: [ HashJoinLeft: 5, HashJoinDegreeLeft: 6, HashJoinRight: 7, HashJoinDegreeRight: 8 ] }
     ├── StreamExchange Hash([1, 2, 0]) from 2
     └── StreamExchange Hash([1, 2, 3]) from 3
 
     Fragment 2
-    StreamTableScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_last], pk: [customer.c_w_id, customer.c_d_id, customer.c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) } { state table: 9 }
+    StreamTableScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_last], pk: [customer.c_w_id, customer.c_d_id, customer.c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) } { tables: [ StreamScan: 9 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_ol_cnt], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { state table: 10 }
+    StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_ol_cnt], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { tables: [ StreamScan: 10 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 4
-    StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) } { state table: 11 }
+    StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) } { tables: [ StreamScan: 11 ] }
     ├── Upstream
     └── BatchPlanNode
 
@@ -3067,19 +2961,17 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [revenue], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [sum(sum(order_line.ol_amount))] }
         └── StreamSimpleAgg { aggs: [sum(sum(order_line.ol_amount)), count] }
-            ├── intermediate state table: 0
-            ├── state tables: []
-            ├── distinct tables: []
+            ├── tables: [ SimpleAggState: 0 ]
             └── StreamExchange Single from 1
 
     Fragment 1
     StreamStatelessSimpleAgg { aggs: [sum(order_line.ol_amount)] }
     └── StreamProject { exprs: [order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, order_line.ol_i_id, item.i_id] }
         └── StreamFilter { predicate: (((Like(item.i_data, '%a':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 3:Int32)) OR (Like(item.i_data, '%b':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 4:Int32))) OR (Like(item.i_data, '%c':Varchar) AND In(order_line.ol_w_id, 1:Int32, 5:Int32, 3:Int32))) }
-            └── StreamHashJoin { type: Inner, predicate: order_line.ol_i_id = item.i_id, output: all } { left table: 1, right table: 3, left degree table: 2, right degree table: 4 }
+            └── StreamHashJoin { type: Inner, predicate: order_line.ol_i_id = item.i_id, output: all } { tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ] }
                 ├── StreamExchange Hash([1]) from 2
                 └── StreamExchange Hash([0]) from 3
 
@@ -3087,14 +2979,14 @@
     StreamProject { exprs: [order_line.ol_w_id, order_line.ol_i_id, order_line.ol_amount, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
     └── StreamFilter { predicate: (order_line.ol_quantity >= 1:Int32) AND (order_line.ol_quantity <= 10:Int32) }
         └── StreamTableScan { table: order_line, columns: [order_line.ol_w_id, order_line.ol_i_id, order_line.ol_amount, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, order_line.ol_quantity], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
-            ├── state table: 5
+            ├── tables: [ StreamScan: 5 ]
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 3
     StreamProject { exprs: [item.i_id, item.i_data] }
     └── StreamFilter { predicate: (item.i_price >= 1:Decimal) AND (item.i_price <= 400000:Decimal) }
-        └── StreamTableScan { table: item, columns: [item.i_id, item.i_data, item.i_price], pk: [item.i_id], dist: UpstreamHashShard(item.i_id) } { state table: 6 }
+        └── StreamTableScan { table: item, columns: [item.i_id, item.i_data, item.i_price], pk: [item.i_id], dist: UpstreamHashShard(item.i_id) } { tables: [ StreamScan: 6 ] }
             ├── Upstream
             └── BatchPlanNode
 
@@ -3203,28 +3095,29 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [s_name, s_address, supplier.s_suppkey(hidden), supplier.s_nationkey(hidden)], stream_key: [supplier.s_suppkey, supplier.s_nationkey], pk_columns: [s_name, supplier.s_suppkey, supplier.s_nationkey], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamExchange Hash([2, 3]) from 1
 
     Fragment 1
-    StreamHashJoin { type: LeftSemi, predicate: supplier.s_suppkey = $expr1, output: [supplier.s_name, supplier.s_address, supplier.s_suppkey, supplier.s_nationkey] } { left table: 0, right table: 2, left degree table: 1, right degree table: 3 }
+    StreamHashJoin { type: LeftSemi, predicate: supplier.s_suppkey = $expr1, output: [supplier.s_name, supplier.s_address, supplier.s_suppkey, supplier.s_nationkey] }
+    ├── tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ]
     ├── StreamExchange Hash([0]) from 2
     └── StreamExchange Hash([0]) from 5
 
     Fragment 2
-    StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: all } { left table: 4, right table: 6, left degree table: 5, right degree table: 7 }
+    StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: all } { tables: [ HashJoinLeft: 4, HashJoinDegreeLeft: 5, HashJoinRight: 6, HashJoinDegreeRight: 7 ] }
     ├── StreamExchange Hash([3]) from 3
     └── StreamExchange Hash([0]) from 4
 
     Fragment 3
-    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 8 }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { tables: [ StreamScan: 8 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 4
     StreamProject { exprs: [nation.n_nationkey] }
     └── StreamFilter { predicate: (nation.n_name = 'CHINA':Varchar) }
-        └── StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 9 }
+        └── StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { tables: [ StreamScan: 9 ] }
             ├── Upstream
             └── BatchPlanNode
 
@@ -3232,19 +3125,16 @@
     StreamProject { exprs: [((stock.s_i_id * stock.s_w_id) % 10000:Int32)::Int64 as $expr1, stock.s_i_id, stock.s_w_id, stock.s_quantity] }
     └── StreamFilter { predicate: ((2:Int32 * stock.s_quantity) > sum(order_line.ol_quantity)) }
         └── StreamProject { exprs: [stock.s_i_id, stock.s_w_id, stock.s_quantity, sum(order_line.ol_quantity)] }
-            └── StreamHashAgg { group_key: [stock.s_i_id, stock.s_w_id, stock.s_quantity], aggs: [sum(order_line.ol_quantity), count] } { intermediate state table: 10, state tables: [], distinct tables: [] }
-                └── StreamHashJoin { type: LeftSemi, predicate: stock.s_i_id = item.i_id, output: all } { left table: 11, right table: 13, left degree table: 12, right degree table: 14 }
+            └── StreamHashAgg { group_key: [stock.s_i_id, stock.s_w_id, stock.s_quantity], aggs: [sum(order_line.ol_quantity), count] } { tables: [ HashAggState: 10 ] }
+                └── StreamHashJoin { type: LeftSemi, predicate: stock.s_i_id = item.i_id, output: all } { tables: [ HashJoinLeft: 11, HashJoinDegreeLeft: 12, HashJoinRight: 13, HashJoinDegreeRight: 14 ] }
                     ├── StreamHashJoin { type: Inner, predicate: stock.s_i_id = order_line.ol_i_id, output: [stock.s_i_id, stock.s_w_id, stock.s_quantity, order_line.ol_quantity, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
-                    │   ├── left table: 15
-                    │   ├── right table: 17
-                    │   ├── left degree table: 16
-                    │   ├── right degree table: 18
+                    │   ├── tables: [ HashJoinLeft: 15, HashJoinDegreeLeft: 16, HashJoinRight: 17, HashJoinDegreeRight: 18 ]
                     │   ├── StreamExchange Hash([0]) from 6
                     │   └── StreamExchange Hash([0]) from 7
                     └── StreamExchange Hash([0]) from 8
 
     Fragment 6
-    StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { state table: 19 }
+    StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { tables: [ StreamScan: 19 ] }
     ├── Upstream
     └── BatchPlanNode
 
@@ -3252,14 +3142,14 @@
     StreamProject { exprs: [order_line.ol_i_id, order_line.ol_quantity, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
     └── StreamFilter { predicate: (order_line.ol_delivery_d > '2010-05-23 12:00:00':Timestamp) }
         └── StreamTableScan { table: order_line, columns: [order_line.ol_i_id, order_line.ol_quantity, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, order_line.ol_delivery_d], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
-            ├── state table: 20
+            ├── tables: [ StreamScan: 20 ]
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 8
     StreamProject { exprs: [item.i_id] }
     └── StreamFilter { predicate: Like(item.i_data, 'co%':Varchar) }
-        └── StreamTableScan { table: item, columns: [item.i_id, item.i_data], pk: [item.i_id], dist: UpstreamHashShard(item.i_id) } { state table: 21 }
+        └── StreamTableScan { table: item, columns: [item.i_id, item.i_data], pk: [item.i_id], dist: UpstreamHashShard(item.i_id) } { tables: [ StreamScan: 21 ] }
             ├── Upstream
             └── BatchPlanNode
 
@@ -3401,76 +3291,71 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [numwait, s_name], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
-    └── StreamHashAgg { group_key: [supplier.s_name], aggs: [count] }
-        ├── intermediate state table: 0
-        ├── state tables: []
-        ├── distinct tables: []
+    ├── tables: [ Materialize: 4294967294 ]
+    └── StreamHashAgg { group_key: [supplier.s_name], aggs: [count] } { tables: [ HashAggState: 0 ] }
         └── StreamExchange Hash([0]) from 1
 
     Fragment 1
     StreamHashJoin { type: LeftAnti, predicate: order_line.ol_o_id = order_line.ol_o_id AND order_line.ol_w_id = order_line.ol_w_id AND order_line.ol_d_id = order_line.ol_d_id AND (order_line.ol_delivery_d > order_line.ol_delivery_d), output: [supplier.s_name, stock.s_w_id, stock.s_i_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, supplier.s_nationkey, $expr1, order_line.ol_w_id] }
-    ├── left table: 1
-    ├── right table: 3
-    ├── left degree table: 2
-    ├── right degree table: 4
+    ├── tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ]
     ├── StreamExchange Hash([1, 3, 2]) from 2
     └── StreamExchange Hash([0, 1, 2]) from 11
 
     Fragment 2
-    StreamHashJoin { type: Inner, predicate: $expr1 = supplier.s_suppkey, output: [supplier.s_name, order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_delivery_d, stock.s_w_id, stock.s_i_id, order_line.ol_number, $expr1, supplier.s_suppkey, supplier.s_nationkey] } { left table: 5, right table: 7, left degree table: 6, right degree table: 8 }
+    StreamHashJoin { type: Inner, predicate: $expr1 = supplier.s_suppkey, output: [supplier.s_name, order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_delivery_d, stock.s_w_id, stock.s_i_id, order_line.ol_number, $expr1, supplier.s_suppkey, supplier.s_nationkey] } { tables: [ HashJoinLeft: 5, HashJoinDegreeLeft: 6, HashJoinRight: 7, HashJoinDegreeRight: 8 ] }
     ├── StreamExchange Hash([4]) from 3
     └── StreamExchange Hash([0]) from 8
 
     Fragment 3
     StreamProject { exprs: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_delivery_d, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr1, stock.s_w_id, stock.s_i_id, order_line.ol_number] }
-    └── StreamHashJoin { type: Inner, predicate: stock.s_w_id = order_line.ol_w_id AND stock.s_i_id = order_line.ol_i_id AND stock.s_w_id = orders.o_w_id, output: [stock.s_i_id, stock.s_w_id, order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_delivery_d, order_line.ol_number] } { left table: 9, right table: 11, left degree table: 10, right degree table: 12 }
+    └── StreamHashJoin { type: Inner, predicate: stock.s_w_id = order_line.ol_w_id AND stock.s_i_id = order_line.ol_i_id AND stock.s_w_id = orders.o_w_id, output: [stock.s_i_id, stock.s_w_id, order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_delivery_d, order_line.ol_number] } { tables: [ HashJoinLeft: 9, HashJoinDegreeLeft: 10, HashJoinRight: 11, HashJoinDegreeRight: 12 ] }
         ├── StreamExchange Hash([1, 0, 1]) from 4
         └── StreamExchange Hash([2, 3, 5]) from 5
 
     Fragment 4
     StreamFilter { predicate: (stock.s_w_id = stock.s_w_id) }
-    └── StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { state table: 13 }
+    └── StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { tables: [ StreamScan: 13 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 5
     StreamProject { exprs: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_delivery_d, orders.o_w_id, order_line.ol_number, orders.o_d_id, orders.o_id] }
     └── StreamFilter { predicate: (order_line.ol_delivery_d > orders.o_entry_d) }
-        └── StreamHashJoin { type: Inner, predicate: order_line.ol_o_id = orders.o_id AND order_line.ol_w_id = orders.o_w_id AND order_line.ol_d_id = orders.o_d_id, output: all } { left table: 14, right table: 16, left degree table: 15, right degree table: 17 }
+        └── StreamHashJoin { type: Inner, predicate: order_line.ol_o_id = orders.o_id AND order_line.ol_w_id = orders.o_w_id AND order_line.ol_d_id = orders.o_d_id, output: all } { tables: [ HashJoinLeft: 14, HashJoinDegreeLeft: 15, HashJoinRight: 16, HashJoinDegreeRight: 17 ] }
             ├── StreamExchange Hash([0, 1, 2]) from 6
             └── StreamExchange Hash([0, 1, 2]) from 7
 
     Fragment 6
-    StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_delivery_d, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) } { state table: 18 }
+    StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_delivery_d, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
+    ├── tables: [ StreamScan: 18 ]
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 7
-    StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { state table: 19 }
+    StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d], pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { tables: [ StreamScan: 19 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 8
-    StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: all } { left table: 20, right table: 22, left degree table: 21, right degree table: 23 }
+    StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: all } { tables: [ HashJoinLeft: 20, HashJoinDegreeLeft: 21, HashJoinRight: 22, HashJoinDegreeRight: 23 ] }
     ├── StreamExchange Hash([2]) from 9
     └── StreamExchange Hash([0]) from 10
 
     Fragment 9
-    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 24 }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { tables: [ StreamScan: 24 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 10
     StreamProject { exprs: [nation.n_nationkey] }
     └── StreamFilter { predicate: (nation.n_name = 'CHINA':Varchar) }
-        └── StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 25 }
+        └── StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { tables: [ StreamScan: 25 ] }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 11
     StreamProject { exprs: [order_line.ol_o_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_delivery_d, order_line.ol_number] }
-    └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_delivery_d, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) } { state table: 26 }
+    └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_delivery_d, order_line.ol_number], pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) } { tables: [ StreamScan: 26 ] }
         ├── Upstream
         └── BatchPlanNode
 

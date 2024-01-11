@@ -49,6 +49,7 @@ message Level {
   uint64 total_file_size = 4;
   uint64 sub_level_id = 5;
   uint64 uncompressed_file_size = 6;
+  uint32 vnode_partition_count = 7;
 }
 
 message InputLevel {
@@ -62,6 +63,7 @@ message IntraLevelDelta {
   uint64 l0_sub_level_id = 2;
   repeated uint64 removed_table_ids = 3;
   repeated SstableInfo inserted_table_infos = 4;
+  uint32 vnode_partition_count = 5;
 }
 
 enum CompatibilityVersion {
@@ -342,7 +344,7 @@ message CompactTask {
   bool split_by_state_table = 21 [deprecated = true];
   // Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
   // Deprecated. use table_vnode_partition instead;
-  uint32 split_weight_by_vnode = 22 [deprecated = true];
+  uint32 split_weight_by_vnode = 22;
   map<uint32, uint32> table_vnode_partition = 23;
   // The table watermark of any table id. In compaction we only use the table watermarks on safe epoch,
   // so we only need to include the table watermarks on safe epoch to reduce the size of metadata.

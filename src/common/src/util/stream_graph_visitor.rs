@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_fragment_graph::StreamFragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -65,9 +66,10 @@ where
 }
 
 /// Visit the tables of a [`StreamNode`].
-fn visit_stream_node_tables_inner<F>(
+pub fn visit_stream_node_tables_inner<F>(
     stream_node: &mut StreamNode,
     internal_tables_only: bool,
+    visit_child_recursively: bool,
     mut f: F,
 ) where
     F: FnMut(&mut Table, &str),
@@ -97,7 +99,7 @@ fn visit_stream_node_tables_inner<F>(
         };
     }
 
-    visit_stream_node(stream_node, |body| {
+    let mut visit_body = |body: &mut NodeBody| {
         match body {
             // Join
             NodeBody::HashJoin(node) => {
@@ -129,7 +131,11 @@ fn visit_stream_node_tables_inner<F>(
                         }
                     }
                 }
-                for (distinct_col, dedup_table) in &mut node.distinct_dedup_tables {
+                for (distinct_col, dedup_table) in node
+                    .distinct_dedup_tables
+                    .iter_mut()
+                    .sorted_by_key(|(i, _)| *i)
+                {
                     f(dedup_table, &format!("HashAggDedupForCol{}", distinct_col));
                 }
             }
@@ -144,7 +150,11 @@ fn visit_stream_node_tables_inner<F>(
                         }
                     }
                 }
-                for (distinct_col, dedup_table) in &mut node.distinct_dedup_tables {
+                for (distinct_col, dedup_table) in node
+                    .distinct_dedup_tables
+                    .iter_mut()
+                    .sorted_by_key(|(i, _)| *i)
+                {
                     f(
                         dedup_table,
                         &format!("SimpleAggDedupForCol{}", distinct_col),
@@ -235,14 +245,19 @@ fn visit_stream_node_tables_inner<F>(
             }
             _ => {}
         }
-    })
+    };
+    if visit_child_recursively {
+        visit_stream_node(stream_node, visit_body)
+    } else {
+        visit_body(stream_node.node_body.as_mut().unwrap())
+    }
 }
 
 pub fn visit_stream_node_internal_tables<F>(stream_node: &mut StreamNode, f: F)
 where
     F: FnMut(&mut Table, &str),
 {
-    visit_stream_node_tables_inner(stream_node, true, f)
+    visit_stream_node_tables_inner(stream_node, true, true, f)
 }
 
 #[allow(dead_code)]
@@ -250,7 +265,7 @@ pub fn visit_stream_node_tables<F>(stream_node: &mut StreamNode, f: F)
 where
     F: FnMut(&mut Table, &str),
 {
-    visit_stream_node_tables_inner(stream_node, false, f)
+    visit_stream_node_tables_inner(stream_node, false, true, f)
 }
 
 /// Visit the internal tables of a [`StreamFragment`].
