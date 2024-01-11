@@ -533,7 +533,11 @@ impl ToStream for LogicalScan {
                 )
                 .into())
             } else {
-                Ok(StreamTableScan::new(self.core.clone()).into())
+                Ok(StreamTableScan::new_with_stream_scan_type(
+                    self.core.clone(),
+                    ctx.stream_scan_type(),
+                )
+                .into())
             }
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();

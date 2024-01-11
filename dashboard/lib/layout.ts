@@ -275,6 +275,7 @@ export interface FragmentBox {
   width: number
   height: number
   parentIds: string[]
+  externalParentIds: string[]
   fragment?: TableFragments_Fragment
 }
 
@@ -414,14 +415,11 @@ export function layoutPoint(
   nodeRadius: number
 ): FragmentPointPosition[] {
   const fragmentBoxes: Array<FragmentBox> = []
-  for (let { id, name, order, parentIds, ...others } of fragments) {
+  for (let { ...others } of fragments) {
     fragmentBoxes.push({
-      id,
-      name,
-      parentIds,
       width: nodeRadius * 2,
       height: nodeRadius * 2,
-      order,
+      externalParentIds: [], // we don't care about external parent for point layout
       ...others,
     })
   }
@@ -496,6 +494,27 @@ export function generateBoxEdges(layoutMap: FragmentBoxPosition[]): Edge[] {
         ],
         source: fragment.id,
         target: parentId,
+      })
+    }
+
+    // Simply draw a horizontal line here.
+    // Typically, external parent is only applicable to `StreamScan` fragment,
+    // and there'll be only one external parent due to `UpstreamShard` distribution
+    // and plan node sharing. So there's no overlapping issue.
+    for (const externalParentId of fragment.externalParentIds) {
+      links.push({
+        points: [
+          {
+            x: fragment.x,
+            y: fragment.y + fragment.height / 2,
+          },
+          {
+            x: fragment.x + 100,
+            y: fragment.y + fragment.height / 2,
+          },
+        ],
+        source: fragment.id,
+        target: externalParentId,
       })
     }
   }

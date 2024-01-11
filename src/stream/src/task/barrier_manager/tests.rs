@@ -39,8 +39,10 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
         .collect_vec();
 
     // Send a barrier to all actors
-    let epoch = 114514;
-    let barrier = Barrier::new_test_barrier(epoch);
+    let curr_epoch = 114514;
+    let barrier = Barrier::new_test_barrier(curr_epoch);
+    let epoch = barrier.epoch.prev;
+
     manager
         .send_barrier(barrier.clone(), actor_ids.clone(), actor_ids)
         .await
@@ -51,7 +53,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
         .iter_mut()
         .map(|(actor_id, rx)| {
             let barrier = rx.try_recv().unwrap();
-            assert_eq!(barrier.epoch.curr, epoch);
+            assert_eq!(barrier.epoch.prev, epoch);
             (*actor_id, barrier)
         })
         .collect_vec();
@@ -99,8 +101,9 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
         .collect_vec();
 
     // Prepare the barrier
-    let epoch = 114514;
-    let barrier = Barrier::new_test_barrier(epoch);
+    let curr_epoch = 114514;
+    let barrier = Barrier::new_test_barrier(curr_epoch);
+    let epoch = barrier.epoch.prev;
 
     // Collect a barrier before sending
     manager.collect(extra_actor_id, &barrier);
@@ -117,7 +120,7 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
         .iter_mut()
         .map(|(actor_id, rx)| {
             let barrier = rx.try_recv().unwrap();
-            assert_eq!(barrier.epoch.curr, epoch);
+            assert_eq!(barrier.epoch.prev, epoch);
             (*actor_id, barrier)
         })
         .collect_vec();

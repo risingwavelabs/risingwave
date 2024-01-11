@@ -768,8 +768,7 @@ impl ListValue {
                     }
                 };
                 Ok(Some(
-                    ScalarImpl::from_literal(&s, self.data_type)
-                        .map_err(|e| e.to_report_string())?,
+                    ScalarImpl::from_text(&s, self.data_type).map_err(|e| e.to_report_string())?,
                 ))
             }
 
@@ -797,7 +796,7 @@ impl ListValue {
                         _ => {}
                     }
                 };
-                ScalarImpl::from_literal(&s, self.data_type).map_err(|e| e.to_report_string())
+                ScalarImpl::from_text(&s, self.data_type).map_err(|e| e.to_report_string())
             }
 
             /// Unescape a string.
