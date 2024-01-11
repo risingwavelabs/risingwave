@@ -38,7 +38,7 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
 
-use crate::manager::{MetaSrvEnv, StreamingJob};
+use crate::manager::{DdlType, MetaSrvEnv, StreamingJob};
 use crate::model::FragmentId;
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
@@ -261,6 +261,10 @@ impl StreamFragmentEdge {
 
 /// In-memory representation of a **Fragment** Graph, built from the [`StreamFragmentGraphProto`]
 /// from the frontend.
+///
+/// This only includes nodes and edges of the current job itself. It will be converted to [`CompleteStreamFragmentGraph`] later,
+/// that contains the additional information of pre-existing
+/// fragments, which are connected to the graph's top-most or bottom-most fragments.
 #[derive(Default)]
 pub struct StreamFragmentGraph {
     /// stores all the fragments in the graph.
@@ -484,8 +488,8 @@ pub(super) enum EitherFragment {
     Existing(Fragment),
 }
 
-/// A wrapper of [`StreamFragmentGraph`] that contains the additional information of existing
-/// fragments, which is connected to the graph's top-most or bottom-most fragments.
+/// A wrapper of [`StreamFragmentGraph`] that contains the additional information of pre-existing
+/// fragments, which are connected to the graph's top-most or bottom-most fragments.
 ///
 /// For example,
 /// - if we're going to build a mview on an existing mview, the upstream fragment containing the
@@ -530,12 +534,12 @@ impl CompleteStreamFragmentGraph {
         }
     }
 
-    /// Create a new [`CompleteStreamFragmentGraph`] for MV on MV or Table on CDC Source, with the upstream existing
+    /// Create a new [`CompleteStreamFragmentGraph`] for MV on MV and CDC/Source Table with the upstream existing
     /// `Materialize` or `Source` fragments.
     pub fn with_upstreams(
         graph: StreamFragmentGraph,
         upstream_root_fragments: HashMap<TableId, Fragment>,
-        table_job_type: Option<TableJobType>,
+        ddl_type: DdlType,
     ) -> MetaResult<Self> {
         Self::build_helper(
             graph,
@@ -543,7 +547,7 @@ impl CompleteStreamFragmentGraph {
                 upstream_root_fragments,
             }),
             None,
-            table_job_type,
+            ddl_type,
         )
     }
 
@@ -553,6 +557,7 @@ impl CompleteStreamFragmentGraph {
         graph: StreamFragmentGraph,
         original_table_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
+        ddl_type: DdlType,
     ) -> MetaResult<Self> {
         Self::build_helper(
             graph,
@@ -561,15 +566,16 @@ impl CompleteStreamFragmentGraph {
                 original_table_fragment_id,
                 downstream_fragments,
             }),
-            None,
+            ddl_type,
         )
     }
 
+    /// The core logic of building a [`CompleteStreamFragmentGraph`], i.e., adding extra upstream/downstream fragments.
     fn build_helper(
         mut graph: StreamFragmentGraph,
         upstream_ctx: Option<FragmentGraphUpstreamContext>,
         downstream_ctx: Option<FragmentGraphDownstreamContext>,
-        table_job_type: Option<TableJobType>,
+        ddl_type: DdlType,
     ) -> MetaResult<Self> {
         let mut extra_downstreams = HashMap::new();
         let mut extra_upstreams = HashMap::new();
@@ -579,12 +585,10 @@ impl CompleteStreamFragmentGraph {
             upstream_root_fragments,
         }) = upstream_ctx
         {
-            // Build the extra edges between the upstream `Materialize` and the downstream `StreamScan`
-            // of the new materialized view.
             for (&id, fragment) in &mut graph.fragments {
                 for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
-                    let (up_fragment_id, edge) = match table_job_type.as_ref() {
-                        Some(TableJobType::SharedCdcSource) => {
+                    let (up_fragment_id, edge) = match ddl_type {
+                        DdlType::Table(TableJobType::SharedCdcSource) => {
                             let source_fragment = upstream_root_fragments
                                 .get(&upstream_table_id)
                                 .context("upstream source fragment not found")?;
@@ -620,8 +624,11 @@ impl CompleteStreamFragmentGraph {
 
                             (source_job_id, edge)
                         }
-                        _ => {
-                            // handle other kinds of streaming graph, normally MV on MV
+                        DdlType::MaterializedView | DdlType::Sink | DdlType::Index => {
+                            // handle MV on MV
+
+                            // Build the extra edges between the upstream `Materialize` and the downstream `StreamScan`
+                            // of the new materialized view.
                             let mview_fragment = upstream_root_fragments
                                 .get(&upstream_table_id)
                                 .context("upstream materialized view fragment not found")?;
@@ -667,6 +674,9 @@ impl CompleteStreamFragmentGraph {
                             };
 
                             (mview_id, edge)
+                        }
+                        DdlType::Source | DdlType::Table(_) => {
+                            bail!("the streaming job shouldn't have an upstream fragment, ddl_type: {:?}", ddl_type)
                         }
                     };
 
