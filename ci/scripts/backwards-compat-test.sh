@@ -79,15 +79,16 @@ setup_old_cluster() {
   set +e
   wget $OLD_URL
   if [[ "$?" -ne 0 ]]; then
+    set -e
     echo "Failed to download ${OLD_VERSION} from github releases, build from source later"
   else
+    set -e
     tar -xvf risingwave-v${OLD_VERSION}-x86_64-unknown-linux.tar.gz
     mv risingwave target/debug/risingwave
 
     echo "--- Start cluster on tag $OLD_VERSION"
     git config --global --add safe.directory /risingwave
   fi
-  set -e
 }
 
 setup_new_cluster() {
