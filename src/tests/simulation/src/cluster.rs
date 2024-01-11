@@ -128,7 +128,8 @@ impl Configuration {
             meta_nodes: 3,
             compactor_nodes: 2,
             compute_node_cores: 2,
-            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL=false".into()].into(),
+            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL=false".into()]
+                .into(),
             ..Default::default()
         }
     }
