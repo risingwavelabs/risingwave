@@ -16,16 +16,15 @@
 #![feature(stmt_expr_attributes)]
 #![feature(let_chains)]
 
-use core::pin::Pin;
 use core::str::FromStr;
 use core::sync::atomic::{AtomicU64, Ordering};
 use std::collections::HashMap;
 
 use clap::Parser;
 use futures::prelude::future::Either;
-use futures::prelude::stream::PollNext;
+use futures::prelude::stream::{PollNext, BoxStream};
 use futures::stream::select_with_strategy;
-use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
+use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnId;
@@ -42,7 +41,7 @@ use risingwave_connector::sink::log_store::{
 };
 use risingwave_connector::sink::mock_coordination_client::MockMetaClient;
 use risingwave_connector::sink::{
-    build_sink, LogSinker, MetaClientForSink, Sink, SinkError, SinkParam, SinkWriterParam,
+    build_sink, LogSinker, SinkMetaClient, Sink, SinkError, SinkParam, SinkWriterParam,
     SINK_TYPE_APPEND_ONLY, SINK_TYPE_UPSERT,
 };
 use risingwave_connector::source::datagen::{
@@ -51,9 +50,10 @@ use risingwave_connector::source::datagen::{
 use risingwave_connector::source::{Column, DataType, SplitEnumerator, SplitReader};
 use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_stream::executor::test_utils::prelude::ColumnDesc;
-use risingwave_stream::executor::{Barrier, Message, StreamExecutorError};
+use risingwave_stream::executor::{Barrier, Message, StreamExecutorError, MessageStreamItem};
 use serde::{Deserialize, Deserializer};
 use tokio::sync::RwLock;
+use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::time::{sleep, Instant};
 
 const CHECKPOINT_INTERVAL: u64 = 1000;
@@ -62,20 +62,25 @@ const BENCH_TIME: u64 = 20;
 const BENCH_TEST: &str = "bench_test";
 
 pub struct MockRangeLogReader {
-    up_stream: Pin<Box<dyn Stream<Item = Result<Message, StreamExecutorError>> + Send>>,
+    upstreams: BoxStream<'static, MessageStreamItem>,
     current_epoch: u64,
     chunk_id: usize,
-    throughput_metric: std::sync::Arc<RwLock<ThroughputMetric>>,
+    throughput_metric: ThroughputMetric,
+    stop_rx: Receiver<()>,
+    result_tx: Option<Sender<Vec<String>>>,
 }
 
 impl LogReader for MockRangeLogReader {
     async fn init(&mut self) -> LogStoreResult<()> {
-        self.throughput_metric.write().await.add_metric(0);
+        self.throughput_metric.add_metric(0);
         Ok(())
     }
 
     async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
-        match self.up_stream.next().await.unwrap().unwrap() {
+        if let Ok(()) = self.stop_rx.try_recv(){
+            self.result_tx.take().unwrap().send(self.throughput_metric.get_throughput()).unwrap();
+        }
+        match self.upstreams.next().await.unwrap().unwrap() {
             Message::Barrier(barrier) => {
                 let prev_epoch = self.current_epoch;
                 self.current_epoch = barrier.epoch.curr;
@@ -88,8 +93,6 @@ impl LogReader for MockRangeLogReader {
             }
             Message::Chunk(chunk) => {
                 self.throughput_metric
-                    .write()
-                    .await
                     .add_metric(chunk.capacity());
                 self.chunk_id += 1;
                 Ok((
@@ -116,13 +119,17 @@ impl LogReader for MockRangeLogReader {
 impl MockRangeLogReader {
     fn new(
         mock_source: MockDatagenSource,
-        throughput_metric: std::sync::Arc<RwLock<ThroughputMetric>>,
+        throughput_metric: ThroughputMetric,
+        stop_rx: Receiver<()>,
+        result_tx: Sender<Vec<String>>,
     ) -> MockRangeLogReader {
         MockRangeLogReader {
-            up_stream: mock_source.into_stream().boxed(),
+            upstreams: mock_source.into_stream().boxed(),
             current_epoch: 0,
             chunk_id: 0,
             throughput_metric,
+            stop_rx,
+            result_tx: Some(result_tx),
         }
     }
 }
@@ -279,7 +286,7 @@ where
     <S as risingwave_connector::sink::Sink>::Coordinator: 'static,
 {
     if let Ok(coordinator) = sink.new_coordinator().await {
-        sink_writer_param.meta_client = Some(MetaClientForSink::MockMetaClient(
+        sink_writer_param.meta_client = Some(SinkMetaClient::MockMetaClient(
             MockMetaClient::new(Box::new(coordinator)),
         ));
         sink_writer_param.vnode_bitmap = Some(Bitmap::ones(1));
@@ -393,6 +400,14 @@ fn mock_from_legacy_type(
     }
 }
 
+fn print_throughput_result(throughput_result: Vec<String>){
+    if throughput_result.is_empty() {
+        println!("Throughput Sink: Don't get Throughput, please check");
+    } else {
+        println!("Throughput Sink: {:?}", throughput_result);
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let cfg = Config::parse();
@@ -403,10 +418,14 @@ async fn main() {
         cfg.split_num,
     )
     .await;
-    let throughput_metric = std::sync::Arc::new(RwLock::new(ThroughputMetric::new()));
+    let (data_size_tx,data_size_rx) = tokio::sync::oneshot::channel::<Vec<String>>();
+    let (stop_tx,stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let throughput_metric = ThroughputMetric::new();
+
     let mut mock_range_log_reader =
-        MockRangeLogReader::new(mock_datagen_source, throughput_metric.clone());
+        MockRangeLogReader::new(mock_datagen_source, throughput_metric,stop_rx,data_size_tx);
     if cfg.sink.eq(&BENCH_TEST.to_string()) {
+        println!("Start Sink Bench!, Wait {:?}s", BENCH_TIME);
         tokio::spawn(async move {
             mock_range_log_reader.init().await.unwrap();
             loop {
@@ -414,10 +433,9 @@ async fn main() {
             }
         });
         sleep(tokio::time::Duration::from_secs(BENCH_TIME)).await;
-        println!(
-            "Throughput Test: {:?}",
-            throughput_metric.read().await.get_throughput()
-        );
+        println!("Bench Over!");
+        stop_tx.send(()).unwrap();
+        print_throughput_result(data_size_rx.await.unwrap())
     } else {
         let properties = read_sink_option_from_yml(&cfg.option_path)
             .get(&cfg.sink)
@@ -453,11 +471,7 @@ async fn main() {
         });
         sleep(tokio::time::Duration::from_secs(BENCH_TIME)).await;
         println!("Bench Over!");
-        let throughput_result = throughput_metric.read().await.get_throughput();
-        if throughput_result.is_empty() {
-            println!("Throughput Sink: Don't get Throughput, please check");
-        } else {
-            println!("Throughput Sink: {:?}", throughput_result);
-        }
+        stop_tx.send(()).unwrap();
+        print_throughput_result(data_size_rx.await.unwrap());
     }
 }

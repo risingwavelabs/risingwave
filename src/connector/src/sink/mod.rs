@@ -266,25 +266,25 @@ pub struct SinkWriterParam {
     pub connector_params: ConnectorParams,
     pub executor_id: u64,
     pub vnode_bitmap: Option<Bitmap>,
-    pub meta_client: Option<MetaClientForSink>,
+    pub meta_client: Option<SinkMetaClient>,
     pub sink_metrics: SinkMetrics,
 }
 
 #[derive(Clone)]
-pub enum MetaClientForSink {
+pub enum SinkMetaClient {
     MetaClient(MetaClient),
     MockMetaClient(MockMetaClient),
 }
 
-impl MetaClientForSink {
+impl SinkMetaClient {
     pub async fn sink_coordinate_client(&self) -> SinkCoordinationRpcClientEnum {
         match self {
-            MetaClientForSink::MetaClient(meta_client) => {
+            SinkMetaClient::MetaClient(meta_client) => {
                 SinkCoordinationRpcClientEnum::SinkCoordinationRpcClient(
                     meta_client.sink_coordinate_client().await,
                 )
             }
-            MetaClientForSink::MockMetaClient(mock_meta_client) => {
+            SinkMetaClient::MockMetaClient(mock_meta_client) => {
                 SinkCoordinationRpcClientEnum::MockSinkCoordinationRpcClient(
                     mock_meta_client.sink_coordinate_client(),
                 )
