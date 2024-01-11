@@ -17,7 +17,6 @@
 
 import { theme } from "@chakra-ui/react"
 import * as d3 from "d3"
-import { useRouter } from "next/router"
 import { useCallback, useEffect, useRef } from "react"
 import {
   Enter,
@@ -27,7 +26,12 @@ import {
   flipLayoutRelation,
   generateRelationEdges,
 } from "../lib/layout"
-import { Relation, relationType } from "../pages/api/streaming"
+import {
+  Relation,
+  relationIsStreamingJob,
+  relationType,
+} from "../pages/api/streaming"
+import { CatalogModal, useCatalogModal } from "./Relations"
 
 function boundBox(
   relationPosition: RelationPointPosition[],
@@ -53,12 +57,15 @@ const layoutMargin = 50
 export default function RelationDependencyGraph({
   nodes,
   selectedId,
+  setSelectedId,
 }: {
   nodes: RelationPoint[]
-  selectedId?: string
+  selectedId: string | undefined
+  setSelectedId: (id: string) => void
 }) {
+  const [modalData, setModalId] = useCatalogModal(nodes.map((n) => n.relation))
+
   const svgRef = useRef<SVGSVGElement>(null)
-  const router = useRouter()
 
   const layoutMapCallback = useCallback(() => {
     const layoutMap = flipLayoutRelation(
@@ -138,11 +145,12 @@ export default function RelationDependencyGraph({
         circle = g.append("circle")
       }
 
-      circle
-        .attr("r", nodeRadius)
-        .attr("fill", ({ id }) =>
-          isSelected(id) ? theme.colors.blue["500"] : theme.colors.gray["500"]
-        )
+      circle.attr("r", nodeRadius).attr("fill", ({ id, relation }) => {
+        const weight = relationIsStreamingJob(relation) ? "500" : "400"
+        return isSelected(id)
+          ? theme.colors.blue[weight]
+          : theme.colors.gray[weight]
+      })
 
       // Relation name
       let text = g.select<SVGTextElement>(".text")
@@ -184,33 +192,9 @@ export default function RelationDependencyGraph({
         .attr("font-weight", "bold")
 
       // Relation link
-      // TODO: should we inline a modal?
-      const relationURL = (relation: Relation) => {
-        const type = relationType(relation)
-        let pathName = (() => {
-          switch (type) {
-            case "SOURCE":
-              return "sources"
-            case "TABLE":
-              return "tables"
-            case "MATERIALIZED_VIEW":
-              return "materialized_views"
-            case "INDEX":
-              return "indexes"
-            case "SINK":
-              return "sinks"
-            default:
-              return
-          }
-        })()
-        return pathName && `/${pathName}/?id=${relation.id}`
-      }
-
-      g.style("cursor", "pointer").on("click", (_, { relation }) => {
-        const url = relationURL(relation)
-        if (url) {
-          router.replace(url)
-        }
+      g.style("cursor", "pointer").on("click", (_, { relation, id }) => {
+        setSelectedId(id)
+        setModalId(relation.id)
       })
 
       return g
@@ -228,7 +212,7 @@ export default function RelationDependencyGraph({
     nodeSelection.enter().call(createNode)
     nodeSelection.call(applyNode)
     nodeSelection.exit().remove()
-  }, [layoutMap, links, selectedId])
+  }, [layoutMap, links, selectedId, setModalId, setSelectedId])
 
   return (
     <>
@@ -236,6 +220,7 @@ export default function RelationDependencyGraph({
         <g className="edges" />
         <g className="boxes" />
       </svg>
+      <CatalogModal modalData={modalData} onClose={() => setModalId(null)} />
     </>
   )
 }

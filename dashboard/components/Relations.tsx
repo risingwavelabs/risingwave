@@ -36,6 +36,7 @@ import {
 import loadable from "@loadable/component"
 import Head from "next/head"
 
+import _ from "lodash"
 import Link from "next/link"
 import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment } from "react"
@@ -46,6 +47,7 @@ import {
   Relation,
   StreamingJob,
   relationIsStreamingJob,
+  relationType,
 } from "../pages/api/streaming"
 import {
   Sink as RwSink,
@@ -121,7 +123,7 @@ export const connectorColumnSink: Column<RwSink> = {
 export const streamingJobColumns = [dependentsColumn, fragmentsColumn]
 
 export function useCatalogModal(relationList: Relation[] | undefined) {
-  const [modalId, setModalId] = useQueryState("id", parseAsInteger)
+  const [modalId, setModalId] = useQueryState("modalId", parseAsInteger)
   const modalData = relationList?.find((r) => r.id === modalId)
 
   return [modalData, setModalId] as const
@@ -139,7 +141,8 @@ export function CatalogModal({
       <ModalOverlay />
       <ModalContent>
         <ModalHeader>
-          Catalog of {modalData?.id} - {modalData?.name}
+          Catalog of {modalData && _.lowerCase(relationType(modalData))}{" "}
+          {modalData?.id} - {modalData?.name}
         </ModalHeader>
         <ModalCloseButton />
         <ModalBody>

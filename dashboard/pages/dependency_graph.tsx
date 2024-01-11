@@ -109,11 +109,12 @@ export default function StreamingGraph() {
           overflowX="scroll"
           overflowY="scroll"
         >
-          <Text fontWeight="semibold">Graph</Text>
+          <Text fontWeight="semibold">Dependency Graph</Text>
           {relationDependency && (
             <RelationDependencyGraph
               nodes={relationDependency}
               selectedId={selectedId?.toString()}
+              setSelectedId={(id) => setSelectedId(parseInt(id))}
             />
           )}
         </Box>
