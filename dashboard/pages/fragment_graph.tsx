@@ -31,16 +31,17 @@ import * as d3 from "d3"
 import { dagStratify } from "d3-dag"
 import _ from "lodash"
 import Head from "next/head"
-import { useRouter } from "next/router"
-import { Fragment, useCallback, useEffect, useState } from "react"
+import { parseAsInteger, useQueryState } from "nuqs"
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import FragmentDependencyGraph from "../components/FragmentDependencyGraph"
 import FragmentGraph from "../components/FragmentGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
-import { Dispatcher, StreamNode } from "../proto/gen/stream_plan"
+import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 import useFetch from "./api/fetch"
+import { getActorBackPressures, p50, p90, p95, p99 } from "./api/metric"
 import { getFragments, getStreamingJobs } from "./api/streaming"
 
 interface DispatcherNode {
@@ -70,21 +71,27 @@ function buildPlanNodeDependency(
     }
   }
 
-  let dispatcherName = "noDispatcher"
-  if (firstActor.dispatcher.length > 1) {
-    if (
-      firstActor.dispatcher.every(
-        (d) => d.type === firstActor.dispatcher[0].type
-      )
-    ) {
-      dispatcherName = `${_.camelCase(
-        firstActor.dispatcher[0].type
-      )}Dispatchers`
+  let dispatcherName: string
+
+  if (firstActor.dispatcher.length > 0) {
+    const firstDispatcherName = _.camelCase(
+      firstActor.dispatcher[0].type.replace(/^DISPATCHER_TYPE_/, "")
+    )
+    if (firstActor.dispatcher.length > 1) {
+      if (
+        firstActor.dispatcher.every(
+          (d) => d.type === firstActor.dispatcher[0].type
+        )
+      ) {
+        dispatcherName = `${firstDispatcherName}Dispatchers`
+      } else {
+        dispatcherName = "multipleDispatchers"
+      }
     } else {
-      dispatcherName = "multipleDispatchers"
+      dispatcherName = `${firstDispatcherName}Dispatcher`
     }
-  } else if (firstActor.dispatcher.length === 1) {
-    dispatcherName = `${_.camelCase(firstActor.dispatcher[0].type)}Dispatcher`
+  } else {
+    dispatcherName = "noDispatcher"
   }
 
   const dispatcherNode = fragment.actors.reduce((obj, actor) => {
@@ -101,6 +108,22 @@ function buildPlanNodeDependency(
   })
 }
 
+function findMergeNodes(root: StreamNode): MergeNode[] {
+  let mergeNodes = new Set<MergeNode>()
+
+  const findMergeNodesRecursive = (node: StreamNode) => {
+    if (node.nodeBody?.$case === "merge") {
+      mergeNodes.add(node.nodeBody.merge)
+    }
+    for (const child of node.input || []) {
+      findMergeNodesRecursive(child)
+    }
+  }
+
+  findMergeNodesRecursive(root)
+  return Array.from(mergeNodes)
+}
+
 function buildFragmentDependencyAsEdges(
   fragments: TableFragments
 ): FragmentBox[] {
@@ -115,11 +138,17 @@ function buildFragmentDependencyAsEdges(
   for (const id in fragments.fragments) {
     const fragment = fragments.fragments[id]
     const parentIds = new Set<number>()
+    const externalParentIds = new Set<number>()
+
     for (const actor of fragment.actors) {
       for (const upstreamActorId of actor.upstreamActorId) {
         const upstreamFragmentId = actorToFragmentMapping.get(upstreamActorId)
         if (upstreamFragmentId) {
           parentIds.add(upstreamFragmentId)
+        } else {
+          for (const m of findMergeNodes(actor.nodes!)) {
+            externalParentIds.add(m.upstreamFragmentId)
+          }
         }
       }
     }
@@ -127,29 +156,39 @@ function buildFragmentDependencyAsEdges(
       id: fragment.fragmentId.toString(),
       name: `Fragment ${fragment.fragmentId}`,
       parentIds: Array.from(parentIds).map((x) => x.toString()),
+      externalParentIds: Array.from(externalParentIds).map((x) => x.toString()),
       width: 0,
       height: 0,
       order: fragment.fragmentId,
       fragment,
-    } as FragmentBox)
+    })
   }
   return nodes
 }
 
 const SIDEBAR_WIDTH = 200
 
+type BackPressureAlgo = "p50" | "p90" | "p95" | "p99"
+const backPressureAlgos: BackPressureAlgo[] = ["p50", "p90", "p95", "p99"]
+
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
   const { response: fragmentList } = useFetch(getFragments)
 
+  const [relationId, setRelationId] = useQueryState("id", parseAsInteger)
+  const [backPressureAlgo, setBackPressureAlgo] = useQueryState("backPressure")
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
-  const router = useRouter()
+
+  const { response: actorBackPressures } = useFetch(
+    getActorBackPressures,
+    5000,
+    backPressureAlgo !== null
+  )
 
   const fragmentDependencyCallback = useCallback(() => {
     if (fragmentList) {
-      if (router.query.id) {
-        const id = parseInt(router.query.id as string)
-        const fragments = fragmentList.find((x) => x.tableId === id)
+      if (relationId) {
+        const fragments = fragmentList.find((x) => x.tableId === relationId)
         if (fragments) {
           const fragmentDep = buildFragmentDependencyAsEdges(fragments)
           return {
@@ -161,23 +200,18 @@ export default function Streaming() {
       }
     }
     return undefined
-  }, [fragmentList, router.query.id])
-
-  const setRelationId = useCallback(
-    (id: number) => router.replace(`?id=${id}`, undefined, { shallow: true }),
-    [router]
-  )
+  }, [fragmentList, relationId])
 
   useEffect(() => {
     if (relationList) {
-      if (!router.query.id) {
+      if (!relationId) {
         if (relationList.length > 0) {
           setRelationId(relationList[0].id)
         }
       }
     }
     return () => {}
-  }, [router, router.query.id, relationList, setRelationId])
+  }, [relationId, relationList, setRelationId])
 
   const fragmentDependency = fragmentDependencyCallback()?.fragmentDep
   const fragmentDependencyDag = fragmentDependencyCallback()?.fragmentDepDag
@@ -201,18 +235,6 @@ export default function Streaming() {
   }, [fragments?.fragments])
 
   const planNodeDependencies = planNodeDependenciesCallback()
-
-  const relationInfoCallback = useCallback(() => {
-    const id = router.query.id
-    if (id) {
-      if (relationList) {
-        return relationList.find((x) => x.id == parseInt(id as string))
-      }
-    }
-    return undefined
-  }, [relationList, router.query.id])
-
-  const relationInfo = relationInfoCallback()
 
   const [searchActorId, setSearchActorId] = useState<string>("")
   const [searchFragId, setSearchFragId] = useState<string>("")
@@ -256,6 +278,40 @@ export default function Streaming() {
     toast(new Error(`Actor ${searchActorIdInt} not found`))
   }
 
+  const backPressures = useMemo(() => {
+    if (actorBackPressures && backPressureAlgo) {
+      let map = new Map()
+
+      for (const m of actorBackPressures.outputBufferBlockingDuration) {
+        console.log(backPressureAlgo)
+        let algoFunc
+        switch (backPressureAlgo) {
+          case "p50":
+            algoFunc = p50
+            break
+          case "p90":
+            algoFunc = p90
+            break
+          case "p95":
+            algoFunc = p95
+            break
+          case "p99":
+            algoFunc = p99
+            break
+          default:
+            return
+        }
+
+        const value = algoFunc(m.sample) * 100
+        map.set(
+          `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
+          value
+        )
+      }
+      return map
+    }
+  }, [actorBackPressures, backPressureAlgo])
+
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
       <Title>Fragment Graph</Title>
@@ -292,7 +348,7 @@ export default function Streaming() {
                 ))}
             </datalist>
             <Select
-              value={router.query.id}
+              value={relationId ?? undefined}
               onChange={(event) => setRelationId(parseInt(event.target.value))}
             >
               {relationList &&
@@ -324,6 +380,26 @@ export default function Streaming() {
               </HStack>
             </VStack>
           </FormControl>
+          <FormControl>
+            <FormLabel>Back Pressure</FormLabel>
+            <Select
+              value={backPressureAlgo ?? undefined}
+              onChange={(event) =>
+                setBackPressureAlgo(
+                  event.target.value === "disabled"
+                    ? null
+                    : (event.target.value as BackPressureAlgo)
+                )
+              }
+            >
+              <option value="disabled">Disabled</option>
+              {backPressureAlgos.map((algo) => (
+                <option value={algo} key={algo}>
+                  {algo}
+                </option>
+              ))}
+            </Select>
+          </FormControl>
           <Flex height="full" width="full" flexDirection="column">
             <Text fontWeight="semibold">Fragments</Text>
             {fragmentDependencyDag && (
@@ -353,6 +429,7 @@ export default function Streaming() {
               selectedFragmentId={selectedFragmentId?.toString()}
               fragmentDependency={fragmentDependency}
               planNodeDependencies={planNodeDependencies}
+              backPressures={backPressures}
             />
           )}
         </Box>

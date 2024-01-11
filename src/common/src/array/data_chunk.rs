@@ -761,7 +761,7 @@ impl DataChunkTestExt for DataChunk {
                 let datum = match val_str {
                     "." => None,
                     "(empty)" => Some("".into()),
-                    _ => Some(ScalarImpl::from_text(val_str.as_bytes(), ty).unwrap()),
+                    _ => Some(ScalarImpl::from_text(val_str, ty).unwrap()),
                 };
                 builder.append(datum);
             }

@@ -42,7 +42,7 @@ impl Planner {
             Relation::BaseTable(t) => self.plan_base_table(&t),
             Relation::SystemTable(st) => self.plan_sys_table(*st),
             // TODO: order is ignored in the subquery
-            Relation::Subquery(q) => Ok(self.plan_query(q.query)?.into_subplan()),
+            Relation::Subquery(q) => Ok(self.plan_query(q.query)?.into_unordered_subplan()),
             Relation::Join(join) => self.plan_join(*join),
             Relation::Apply(join) => self.plan_apply(*join),
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),

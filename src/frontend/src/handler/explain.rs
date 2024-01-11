@@ -111,7 +111,15 @@ async fn do_handle_explain(
                         emit_mode,
                     )
                     .map(|x| x.0),
-
+                    Statement::CreateView {
+                        materialized: false,
+                        ..
+                    } => {
+                        return Err(ErrorCode::NotSupported(
+                            "EXPLAIN CREATE VIEW".into(),
+                            "A created VIEW is just an alias. Instead, use EXPLAIN on the queries which reference the view.".into()
+                        ).into());
+                    }
                     Statement::CreateSink { stmt } => {
                         gen_sink_plan(&session, context.clone(), stmt).map(|plan| plan.sink_plan)
                     }

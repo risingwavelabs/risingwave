@@ -122,7 +122,7 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
         }
 
         running.set(true);
-        LOG.info("engine#{} started", engine.getId());
+        LOG.info("engine#{} start ok: {}", engine.getId(), startOk);
         return startOk;
     }
 

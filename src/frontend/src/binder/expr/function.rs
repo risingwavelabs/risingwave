@@ -24,7 +24,7 @@ use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHE
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
-use risingwave_common::{bail_not_implemented, current_cluster_version, not_implemented};
+use risingwave_common::{bail_not_implemented, current_cluster_version, no_function};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
@@ -1369,27 +1369,22 @@ impl Binder {
 
         match HANDLES.get(function_name) {
             Some(handle) => handle(self, inputs),
-            None => Err({
+            None => {
                 let allowed_distance = if function_name.len() > 3 { 2 } else { 1 };
 
                 let candidates = FUNCTIONS_BKTREE
                     .find(function_name, allowed_distance)
-                    .map(|(_idx, c)| c);
+                    .map(|(_idx, c)| c)
+                    .join(" or ");
 
-                let mut candidates = candidates.peekable();
-
-                let err_msg = if candidates.peek().is_none() {
-                    format!("unsupported function: \"{}\"", function_name)
-                } else {
-                    format!(
-                        "unsupported function \"{}\", do you mean \"{}\"?",
-                        function_name,
-                        candidates.join(" or ")
-                    )
-                };
-
-                not_implemented!(issue = 112, "{}", err_msg).into()
-            }),
+                Err(no_function!(
+                    candidates = (!candidates.is_empty()).then_some(candidates),
+                    "{}({})",
+                    function_name,
+                    inputs.iter().map(|e| e.return_type()).join(", ")
+                )
+                .into())
+            }
         }
     }
 

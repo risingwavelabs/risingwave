@@ -21,20 +21,20 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), $src(hidden)], stream_key: [t1._row_id, $src], pk_columns: [t1._row_id, $src], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamUnion { all: true }
         ├── StreamExchange Hash([3, 4]) from 1
         └── StreamExchange Hash([3, 4]) from 2
 
     Fragment 1
     StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, 0:Int32] }
-    └── StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) } { state table: 0 }
+    └── StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) } { tables: [ StreamScan: 0 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 2
     StreamProject { exprs: [t2.a, t2.b, t2.c, t2._row_id, 1:Int32] }
-    └── StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) } { state table: 1 }
+    └── StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) } { tables: [ StreamScan: 1 ] }
         ├── Upstream
         └── BatchPlanNode
 
@@ -94,12 +94,9 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [t1.a, t1.b, t1.c] }
-        └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
-            ├── intermediate state table: 0
-            ├── state tables: []
-            ├── distinct tables: []
+        └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0, 1, 2]) from 1
 
     Fragment 1
@@ -110,14 +107,14 @@
     Fragment 2
     StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, 0:Int32] }
     └── StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-        ├── state table: 1
+        ├── tables: [ StreamScan: 1 ]
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 3
     StreamProject { exprs: [t2.a, t2.b, t2.c, t2._row_id, 1:Int32] }
     └── StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
-        ├── state table: 2
+        ├── tables: [ StreamScan: 2 ]
         ├── Upstream
         └── BatchPlanNode
 
@@ -184,12 +181,9 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [t1.a, t1.b, t1.c] }
-        └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
-            ├── intermediate state table: 0
-            ├── state tables: []
-            ├── distinct tables: []
+        └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0, 1, 2]) from 1
 
     Fragment 1
@@ -200,14 +194,14 @@
     Fragment 2
     StreamProject { exprs: [t1.a, t1.b, t1.c, 0:Int32] }
     └── StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) }
-        ├── state table: 1
+        ├── tables: [ StreamScan: 1 ]
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 3
     StreamProject { exprs: [t2.a, t2.b, t2.c, 1:Int32] }
     └── StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) }
-        ├── state table: 2
+        ├── tables: [ StreamScan: 2 ]
         ├── Upstream
         └── BatchPlanNode
 
@@ -350,7 +344,7 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), $src(hidden)], stream_key: [t1._row_id, $src], pk_columns: [t1._row_id, $src], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamUnion { all: true }
         ├── StreamExchange Hash([3, 4]) from 1
         ├── StreamExchange Hash([3, 4]) from 2
@@ -360,31 +354,31 @@
 
     Fragment 1
     StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, 0:Int32] }
-    └── StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) } { state table: 0 }
+    └── StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) } { tables: [ StreamScan: 0 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 2
     StreamProject { exprs: [t2.a, t2.b, t2.c, t2._row_id, 1:Int32] }
-    └── StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) } { state table: 1 }
+    └── StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) } { tables: [ StreamScan: 1 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 3
     StreamProject { exprs: [t3.a, t3.b, t3.c, t3._row_id, 2:Int32] }
-    └── StreamTableScan { table: t3, columns: [t3.a, t3.b, t3.c, t3._row_id], pk: [t3._row_id], dist: UpstreamHashShard(t3._row_id) } { state table: 2 }
+    └── StreamTableScan { table: t3, columns: [t3.a, t3.b, t3.c, t3._row_id], pk: [t3._row_id], dist: UpstreamHashShard(t3._row_id) } { tables: [ StreamScan: 2 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 4
     StreamProject { exprs: [t4.a, t4.b, t4.c, t4._row_id, 3:Int32] }
-    └── StreamTableScan { table: t4, columns: [t4.a, t4.b, t4.c, t4._row_id], pk: [t4._row_id], dist: UpstreamHashShard(t4._row_id) } { state table: 3 }
+    └── StreamTableScan { table: t4, columns: [t4.a, t4.b, t4.c, t4._row_id], pk: [t4._row_id], dist: UpstreamHashShard(t4._row_id) } { tables: [ StreamScan: 3 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 5
     StreamProject { exprs: [t5.a, t5.b, t5.c, t5._row_id, 4:Int32] }
-    └── StreamTableScan { table: t5, columns: [t5.a, t5.b, t5.c, t5._row_id], pk: [t5._row_id], dist: UpstreamHashShard(t5._row_id) } { state table: 4 }
+    └── StreamTableScan { table: t5, columns: [t5.a, t5.b, t5.c, t5._row_id], pk: [t5._row_id], dist: UpstreamHashShard(t5._row_id) } { tables: [ StreamScan: 4 ] }
         ├── Upstream
         └── BatchPlanNode
 
@@ -446,7 +440,7 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c, t1.a(hidden), null:Int64(hidden), null:Decimal(hidden), null:Serial(hidden), $src(hidden)], stream_key: [t1.a, null:Decimal, null:Int64, null:Serial, $src], pk_columns: [t1.a, null:Decimal, null:Int64, null:Serial, $src], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamUnion { all: true }
         ├── StreamExchange Hash([3, 5, 4, 6, 7]) from 1
         ├── StreamExchange Hash([3, 5, 4, 6, 7]) from 2
@@ -456,31 +450,31 @@
 
     Fragment 1
     StreamProject { exprs: [t1.a, t1.b, t1.c, t1.a, null:Int64, null:Decimal, null:Serial, 0:Int32] }
-    └── StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) } { state table: 0 }
+    └── StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) } { tables: [ StreamScan: 0 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 2
     StreamProject { exprs: [t2.a, t2.b, t2.c, null:Int32, null:Int64, t2.b, null:Serial, 1:Int32] }
-    └── StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.b], dist: UpstreamHashShard(t2.b) } { state table: 1 }
+    └── StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.b], dist: UpstreamHashShard(t2.b) } { tables: [ StreamScan: 1 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 3
     StreamProject { exprs: [t3.a, t3.b, t3.c, null:Int32, t3.c, null:Decimal, null:Serial, 2:Int32] }
-    └── StreamTableScan { table: t3, columns: [t3.a, t3.b, t3.c], pk: [t3.c], dist: UpstreamHashShard(t3.c) } { state table: 2 }
+    └── StreamTableScan { table: t3, columns: [t3.a, t3.b, t3.c], pk: [t3.c], dist: UpstreamHashShard(t3.c) } { tables: [ StreamScan: 2 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 4
     StreamProject { exprs: [t4.a, t4.b, t4.c, null:Int32, null:Int64, null:Decimal, t4._row_id, 3:Int32] }
-    └── StreamTableScan { table: t4, columns: [t4.a, t4.b, t4.c, t4._row_id], pk: [t4._row_id], dist: UpstreamHashShard(t4._row_id) } { state table: 3 }
+    └── StreamTableScan { table: t4, columns: [t4.a, t4.b, t4.c, t4._row_id], pk: [t4._row_id], dist: UpstreamHashShard(t4._row_id) } { tables: [ StreamScan: 3 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 5
     StreamProject { exprs: [t5.a, t5.b, t5.c, t5.a, null:Int64, t5.b, null:Serial, 4:Int32] }
-    └── StreamTableScan { table: t5, columns: [t5.a, t5.b, t5.c], pk: [t5.a, t5.b], dist: UpstreamHashShard(t5.a, t5.b) } { state table: 4 }
+    └── StreamTableScan { table: t5, columns: [t5.a, t5.b, t5.c], pk: [t5.a, t5.b], dist: UpstreamHashShard(t5.a, t5.b) } { tables: [ StreamScan: 4 ] }
         ├── Upstream
         └── BatchPlanNode
 
@@ -507,7 +501,7 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c, t1.a(hidden), null:Decimal(hidden), null:Serial(hidden), $src(hidden)], stream_key: [t1.a, null:Decimal, null:Serial, $src], pk_columns: [t1.a, null:Decimal, null:Serial, $src], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamUnion { all: true }
         ├── StreamExchange Hash([3, 4, 5, 6]) from 1
         ├── StreamExchange Hash([3, 4, 5, 6]) from 2
@@ -517,31 +511,31 @@
 
     Fragment 1
     StreamProject { exprs: [t1.a, t1.b, t1.c, t1.a, null:Decimal, null:Serial, 0:Int32] }
-    └── StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) } { state table: 0 }
+    └── StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) } { tables: [ StreamScan: 0 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 2
     StreamProject { exprs: [t2.a, t2.b, t2.c, null:Int32, t2.b, null:Serial, 1:Int32] }
-    └── StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.b], dist: UpstreamHashShard(t2.b) } { state table: 1 }
+    └── StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.b], dist: UpstreamHashShard(t2.b) } { tables: [ StreamScan: 1 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 3
     StreamProject { exprs: [t3.a, t3.b, t3.c, null:Int32, null:Decimal, t3._row_id, 2:Int32] }
-    └── StreamTableScan { table: t3, columns: [t3.a, t3.b, t3.c, t3._row_id], pk: [t3._row_id], dist: UpstreamHashShard(t3._row_id) } { state table: 2 }
+    └── StreamTableScan { table: t3, columns: [t3.a, t3.b, t3.c, t3._row_id], pk: [t3._row_id], dist: UpstreamHashShard(t3._row_id) } { tables: [ StreamScan: 2 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 4
     StreamProject { exprs: [t4.a, t4.b, t4.c, null:Int32, null:Decimal, t4._row_id, 3:Int32] }
-    └── StreamTableScan { table: t4, columns: [t4.a, t4.b, t4.c, t4._row_id], pk: [t4._row_id], dist: UpstreamHashShard(t4._row_id) } { state table: 3 }
+    └── StreamTableScan { table: t4, columns: [t4.a, t4.b, t4.c, t4._row_id], pk: [t4._row_id], dist: UpstreamHashShard(t4._row_id) } { tables: [ StreamScan: 3 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 5
     StreamProject { exprs: [t5.a, t5.b, t5.c, t5.a, t5.b, null:Serial, 4:Int32] }
-    └── StreamTableScan { table: t5, columns: [t5.a, t5.b, t5.c], pk: [t5.a, t5.b], dist: UpstreamHashShard(t5.a, t5.b) } { state table: 4 }
+    └── StreamTableScan { table: t5, columns: [t5.a, t5.b, t5.c], pk: [t5.a, t5.b], dist: UpstreamHashShard(t5.a, t5.b) } { tables: [ StreamScan: 4 ] }
         ├── Upstream
         └── BatchPlanNode
 
@@ -568,7 +562,7 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c, $src(hidden)], stream_key: [a, b, $src], pk_columns: [a, b, $src], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamUnion { all: true }
         ├── StreamExchange Hash([0, 1, 3]) from 1
         ├── StreamExchange Hash([0, 1, 3]) from 2
@@ -578,33 +572,36 @@
 
     Fragment 1
     StreamProject { exprs: [t1.a, t1.b, t1.c, 0:Int32] }
-    └── StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) } { state table: 0 }
+    └── StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) }
+        ├── tables: [ StreamScan: 0 ]
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 2
     StreamProject { exprs: [t2.a, t2.b, t2.c, 1:Int32] }
-    └── StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.b], dist: UpstreamHashShard(t2.b) } { state table: 1 }
+    └── StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.b], dist: UpstreamHashShard(t2.b) }
+        ├── tables: [ StreamScan: 1 ]
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 3
     StreamProject { exprs: [t3.a, t3.b, t3.c, 2:Int32] }
-    └── StreamTableScan { table: t3, columns: [t3.a, t3.b, t3.c], pk: [t3.b], dist: UpstreamHashShard(t3.b) } { state table: 2 }
+    └── StreamTableScan { table: t3, columns: [t3.a, t3.b, t3.c], pk: [t3.b], dist: UpstreamHashShard(t3.b) }
+        ├── tables: [ StreamScan: 2 ]
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 4
     StreamProject { exprs: [t4.a, t4.b, t4.c, 3:Int32] }
     └── StreamTableScan { table: t4, columns: [t4.a, t4.b, t4.c], pk: [t4.b, t4.a], dist: UpstreamHashShard(t4.b, t4.a) }
-        ├── state table: 3
+        ├── tables: [ StreamScan: 3 ]
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 5
     StreamProject { exprs: [t5.a, t5.b, t5.c, 4:Int32] }
     └── StreamTableScan { table: t5, columns: [t5.a, t5.b, t5.c], pk: [t5.a, t5.b], dist: UpstreamHashShard(t5.a, t5.b) }
-        ├── state table: 4
+        ├── tables: [ StreamScan: 4 ]
         ├── Upstream
         └── BatchPlanNode
 

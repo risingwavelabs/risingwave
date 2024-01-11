@@ -24,9 +24,9 @@ use smallvec::SmallVec;
 use super::{WindowFuncCall, WindowFuncKind};
 use crate::{ExprError, Result};
 
-mod buffer;
-
 mod aggregate;
+mod buffer;
+mod range_utils;
 mod rank;
 
 /// Unique and ordered identifier for a row in internal states.
