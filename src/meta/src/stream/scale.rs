@@ -138,7 +138,7 @@ impl RescheduleContext {
         self.actor_status
             .get(actor_id)
             .and_then(|actor_status| actor_status.parallel_unit.as_ref())
-            .ok_or_else(|| anyhow!("could not found ParallelUnit for {}", actor_id).into())
+            .ok_or_else(|| anyhow!("could not found parallel unit for actor {}", actor_id).into())
     }
 
     fn parallel_unit_id_to_worker(
@@ -1048,7 +1048,6 @@ impl ScaleController {
                         if new_created_actors.contains_key(downstream_actor_id) {
                             continue;
                         }
-
                         let downstream_worker_id = ctx
                             .actor_id_to_parallel_unit(downstream_actor_id)?
                             .worker_node_id;

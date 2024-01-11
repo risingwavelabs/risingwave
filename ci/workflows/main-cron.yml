@@ -17,7 +17,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 25
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "build other components"
@@ -91,6 +91,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (parallel) (release)"
+    key: "e2e-test-release-parallel"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-release"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -115,6 +116,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (parallel, in-memory) (release)"
+    key: "e2e-test-release-parallel-memory"
     command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-release"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -133,6 +135,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end source test (release)"
+    key: "e2e-test-release-source"
     command: "ci/scripts/e2e-source-test.sh -p ci-release"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -151,6 +154,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end sink test (release)"
+    key: "e2e-test-release-sink"
     command: "ci/scripts/e2e-sink-test.sh -p ci-release"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -191,6 +195,7 @@ steps:
   # The timeout should be strictly more than timeout in `pull-request.yml`.
   # This ensures our `main-cron` workflow will be stable.
   - label: "unit test"
+    key: "unit-test"
     command: "ci/scripts/unit-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -210,6 +215,7 @@ steps:
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
+    key: "unit-test-deterministic"
     command: "MADSIM_TEST_NUM=100 timeout 15m ci/scripts/deterministic-unit-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -224,6 +230,7 @@ steps:
     retry: *auto-retry
 
   - label: "integration test (deterministic simulation) - scale"
+    key: "integration-test-deterministic-scale"
     command: "TEST_NUM=60 ci/scripts/deterministic-it-test.sh scale::"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -240,6 +247,7 @@ steps:
     retry: *auto-retry
 
   - label: "integration test (deterministic simulation) - recovery"
+    key: "integration-test-deterministic-recovery"
     command: "TEST_NUM=60 ci/scripts/deterministic-it-test.sh recovery::"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -256,6 +264,7 @@ steps:
     retry: *auto-retry
 
   - label: "integration test (deterministic simulation) - others"
+    key: "integration-test-deterministic-others"
     command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh backfill_tests:: storage:: sink::"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -272,6 +281,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
+    key: "e2e-test-deterministic"
     command: "TEST_NUM=64 timeout 55m ci/scripts/deterministic-e2e-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -293,6 +303,7 @@ steps:
     retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
+    key: "recovery-test-deterministic"
     command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 timeout 55m ci/scripts/deterministic-recovery-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -310,6 +321,7 @@ steps:
 
   # Ddl statements will randomly run with background_ddl.
   - label: "background_ddl recovery test (deterministic simulation)"
+    key: "background-ddl-recovery-test-deterministic"
     command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.8 timeout 55m ci/scripts/deterministic-recovery-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -326,7 +338,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end iceberg sink test (release)"
-    key: "e2e-iceberg-sink-tests"
+    key: "e2e-iceberg-sink-test"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-release"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -346,6 +358,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end iceberg sink v2 test (release)"
+    key: "e2e-iceberg-sink-v2-test"
     command: "ci/scripts/e2e-iceberg-sink-v2-test.sh -p ci-release"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -384,7 +397,8 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "S3 source check on AWS (json parser)"
+  - label: "S3 source check on AWS"
+    key: "s3-source-check-aws"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s run.py"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -406,6 +420,7 @@ steps:
     retry: *auto-retry
 
   - label: "S3 source check on AWS (json parser)"
+    key: "s3-source-check-aws-json-parser"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s json_file.py"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -427,6 +442,7 @@ steps:
     retry: *auto-retry
 
   - label: "S3 source check on AWS (csv parser)"
+    key: "s3-source-check-aws-csv-parser"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s run_csv.py"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -448,6 +464,7 @@ steps:
     retry: *auto-retry
 
   - label: "S3_v2 source check on AWS (json parser)"
+    key: "s3-v2-source-check-aws-json-parser"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s 'fs_source_v2.py json'"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -469,6 +486,7 @@ steps:
     retry: *auto-retry
 
   - label: "S3_v2 source check on AWS (csv parser)"
+    key: "s3-v2-source-check-aws-csv-parser"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s 'fs_source_v2.py csv_without_header'"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -577,12 +595,12 @@ steps:
     retry: *auto-retry
 
   - label: "micro benchmark"
+    key: "run-micro-benchmarks"
     command: "ci/scripts/run-micro-benchmarks.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-micro-benchmarks"
       || build.env("CI_STEPS") =~ /(^|,)micro-benchmarks?(,|$$)/
-    key: "run-micro-benchmarks"
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
@@ -592,6 +610,7 @@ steps:
     retry: *auto-retry
 
   - label: "upload micro-benchmark"
+    key: "upload-micro-benchmarks"
     if: |
       build.branch == "main"
       || !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -684,6 +703,7 @@ steps:
     retry: *auto-retry
 
   - label: "e2e standalone binary test"
+    key: "e2e-standalone-binary-tests"
     command: "ci/scripts/e2e-test.sh -p ci-release -m standalone"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -703,6 +723,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test for opendal (parallel)"
+    key: "e2e-test-opendal-parallel"
     command: "ci/scripts/e2e-test-parallel-for-opendal.sh -p ci-release"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null

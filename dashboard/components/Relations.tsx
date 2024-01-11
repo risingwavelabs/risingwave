@@ -32,16 +32,16 @@ import {
   Th,
   Thead,
   Tr,
-  useDisclosure,
 } from "@chakra-ui/react"
 import loadable from "@loadable/component"
 import Head from "next/head"
 
 import Link from "next/link"
-import { Fragment, useEffect, useState } from "react"
+import { parseAsInteger, useQueryState } from "nuqs"
+import { Fragment } from "react"
 import Title from "../components/Title"
-import useErrorToast from "../hook/useErrorToast"
 import extractColumnInfo from "../lib/extractInfo"
+import useFetch from "../pages/api/fetch"
 import { Relation, StreamingJob } from "../pages/api/streaming"
 import {
   Sink as RwSink,
@@ -61,7 +61,7 @@ export const dependentsColumn: Column<Relation> = {
   name: "Depends",
   width: 1,
   content: (r) => (
-    <Link href={`/streaming_graph/?id=${r.id}`}>
+    <Link href={`/dependency_graph/?id=${r.id}`}>
       <Button
         size="sm"
         aria-label="view dependents"
@@ -78,7 +78,7 @@ export const fragmentsColumn: Column<StreamingJob> = {
   name: "Fragments",
   width: 1,
   content: (r) => (
-    <Link href={`/streaming_plan/?id=${r.id}`}>
+    <Link href={`/fragment_graph/?id=${r.id}`}>
       <Button
         size="sm"
         aria-label="view fragments"
@@ -121,42 +121,27 @@ export function Relations<R extends Relation>(
   getRelations: () => Promise<R[]>,
   extraColumns: Column<R>[]
 ) {
-  const toast = useErrorToast()
-  const [relationList, setRelationList] = useState<R[]>([])
+  const { response: relationList } = useFetch(getRelations)
 
-  useEffect(() => {
-    async function doFetch() {
-      try {
-        setRelationList(await getRelations())
-      } catch (e: any) {
-        toast(e)
-      }
-    }
-    doFetch()
-    return () => {}
-  }, [toast, getRelations])
-
-  const { isOpen, onOpen, onClose } = useDisclosure()
-  const [currentRelation, setCurrentRelation] = useState<R>()
-  const openRelationCatalog = (relation: R) => {
-    if (relation) {
-      setCurrentRelation(relation)
-      onOpen()
-    }
-  }
+  const [modalId, setModalId] = useQueryState("id", parseAsInteger)
+  const modalData = relationList?.find((r) => r.id === modalId)
 
   const catalogModal = (
-    <Modal isOpen={isOpen} onClose={onClose} size="3xl">
+    <Modal
+      isOpen={modalData !== undefined}
+      onClose={() => setModalId(null)}
+      size="3xl"
+    >
       <ModalOverlay />
       <ModalContent>
         <ModalHeader>
-          Catalog of {currentRelation?.id} - {currentRelation?.name}
+          Catalog of {modalData?.id} - {modalData?.name}
         </ModalHeader>
         <ModalCloseButton />
         <ModalBody>
-          {isOpen && currentRelation && (
+          {modalData && (
             <ReactJson
-              src={currentRelation}
+              src={modalData}
               collapsed={1}
               name={null}
               displayDataTypes={false}
@@ -165,7 +150,7 @@ export function Relations<R extends Relation>(
         </ModalBody>
 
         <ModalFooter>
-          <Button colorScheme="blue" mr={3} onClick={onClose}>
+          <Button colorScheme="blue" mr={3} onClick={() => setModalId(null)}>
             Close
           </Button>
         </ModalFooter>
@@ -192,7 +177,7 @@ export function Relations<R extends Relation>(
             </Tr>
           </Thead>
           <Tbody>
-            {relationList.map((r) => (
+            {relationList?.map((r) => (
               <Tr key={r.id}>
                 <Td>
                   <Button
@@ -200,7 +185,7 @@ export function Relations<R extends Relation>(
                     aria-label="view catalog"
                     colorScheme="blue"
                     variant="link"
-                    onClick={() => openRelationCatalog(r)}
+                    onClick={() => setModalId(r.id)}
                   >
                     {r.id}
                   </Button>

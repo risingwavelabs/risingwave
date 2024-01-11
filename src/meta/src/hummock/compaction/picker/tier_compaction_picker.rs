@@ -155,7 +155,12 @@ impl CompactionPicker for TierCompactionPicker {
             return None;
         }
 
-        self.pick_overlapping_level(l0, &level_handlers[0], levels.vnode_partition_count, stats)
+        self.pick_overlapping_level(
+            l0,
+            &level_handlers[0],
+            self.config.split_weight_by_vnode,
+            stats,
+        )
     }
 }
 

@@ -636,7 +636,9 @@ impl DdlController {
         affected_table_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<NotificationVersion> {
         let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unimplemented!("support create streaming job in v2");
+            return self
+                .create_streaming_job_v2(stream_job, fragment_graph)
+                .await;
         };
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         stream_job.set_id(id);
@@ -1045,6 +1047,11 @@ impl DdlController {
                     true
                 });
             }
+        }
+
+        // update downstream actors' upstream_actor_id and upstream_fragment_id
+        for actor in &mut union_fragment.actors {
+            actor.upstream_actor_id.extend(sink_actor_ids.clone());
         }
 
         union_fragment
