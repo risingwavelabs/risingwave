@@ -120,22 +120,22 @@ export const connectorColumnSink: Column<RwSink> = {
 
 export const streamingJobColumns = [dependentsColumn, fragmentsColumn]
 
-export function Relations<R extends Relation>(
-  title: string,
-  getRelations: () => Promise<R[]>,
-  extraColumns: Column<R>[]
-) {
-  const { response: relationList } = useFetch(getRelations)
-
+export function useCatalogModal(relationList: Relation[] | undefined) {
   const [modalId, setModalId] = useQueryState("id", parseAsInteger)
   const modalData = relationList?.find((r) => r.id === modalId)
 
-  const catalogModal = (
-    <Modal
-      isOpen={modalData !== undefined}
-      onClose={() => setModalId(null)}
-      size="3xl"
-    >
+  return [modalData, setModalId] as const
+}
+
+export function CatalogModal({
+  modalData,
+  onClose,
+}: {
+  modalData: Relation | undefined
+  onClose: () => void
+}) {
+  return (
+    <Modal isOpen={modalData !== undefined} onClose={onClose} size="3xl">
       <ModalOverlay />
       <ModalContent>
         <ModalHeader>
@@ -161,12 +161,25 @@ export function Relations<R extends Relation>(
               </Link>
             </Button>
           )}
-          <Button mr={3} onClick={() => setModalId(null)}>
+          <Button mr={3} onClick={onClose}>
             Close
           </Button>
         </ModalFooter>
       </ModalContent>
     </Modal>
+  )
+}
+
+export function Relations<R extends Relation>(
+  title: string,
+  getRelations: () => Promise<R[]>,
+  extraColumns: Column<R>[]
+) {
+  const { response: relationList } = useFetch(getRelations)
+  const [modalData, setModalId] = useCatalogModal(relationList)
+
+  const modal = (
+    <CatalogModal modalData={modalData} onClose={() => setModalId(null)} />
   )
 
   const table = (
@@ -225,7 +238,7 @@ export function Relations<R extends Relation>(
       <Head>
         <title>{title}</title>
       </Head>
-      {catalogModal}
+      {modal}
       {table}
     </Fragment>
   )
