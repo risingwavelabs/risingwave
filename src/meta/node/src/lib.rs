@@ -214,12 +214,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             },
             MetaBackend::Mem => MetaStoreBackend::Mem,
         };
-        // let sql_backend = opts
-        //     .sql_endpoint
-        //     .map(|endpoint| MetaStoreSqlBackend { endpoint });
-        let sql_backend = Some(MetaStoreSqlBackend {
-            endpoint: "postgres://postgres:@localhost:5432/postgres".to_string(),
-        });
+        let sql_backend = opts
+            .sql_endpoint
+            .map(|endpoint| MetaStoreSqlBackend { endpoint });
 
         validate_config(&config);
 
