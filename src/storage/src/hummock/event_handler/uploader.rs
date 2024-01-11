@@ -1271,7 +1271,8 @@ mod tests {
         Fut: UploadOutputFuture,
         F: UploadFn<Fut>,
     {
-        let config = StorageOpts::default();
+        let mut config = StorageOpts::default();
+        config.imm_merge_threshold = 4;
         let compaction_executor = Arc::new(CompactionExecutor::new(None));
         HummockUploader::new(
             Arc::new(HummockStateStoreMetrics::unused()),
