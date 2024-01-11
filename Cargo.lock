@@ -1252,9 +1252,9 @@ dependencies = [
 
 [[package]]
 name = "aws-smithy-types"
-version = "1.0.1"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2fc32035dc0636a8583cf0c6dd7f1e6d5404103b836d26228b8730907a88d9f"
+checksum = "2aba8136605d14ac88f57dc3a693a9f8a4eab4a3f52bc03ff13746f0cd704e97"
 dependencies = [
  "base64-simd",
  "bytes",
@@ -1272,6 +1272,16 @@ dependencies = [
  "time",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "aws-smithy-types-convert"
+version = "0.60.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2916d0db08f25d26d2d27d3a0d339075caead06c2a41f09870a121e2f87a4893"
+dependencies = [
+ "aws-smithy-types",
+ "chrono",
 ]
 
 [[package]]
@@ -5481,9 +5491,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-rdkafka"
-version = "0.3.0+0.34.0"
+version = "0.3.1+0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00f9ab2d0545a55e4f209fc72c180a7e7b45a4e7baee7b4994c4628a877c5525"
+checksum = "79bf1f687bdd0146a72d6132478032d770ebe1dbe42e1f46799c4dcbd9b31cbc"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -8447,6 +8457,7 @@ dependencies = [
  "aws-smithy-http",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
+ "aws-smithy-types-convert",
  "aws-types",
  "base64 0.21.4",
  "byteorder",
