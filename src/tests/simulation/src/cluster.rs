@@ -87,6 +87,9 @@ pub struct Configuration {
 
     /// Path to etcd data file.
     pub etcd_data_path: Option<PathBuf>,
+
+    /// Queries to run per session.
+    pub per_session_queries: Vec<String>,
 }
 
 impl Configuration {
@@ -111,6 +114,7 @@ impl Configuration {
             compute_node_cores: 2,
             etcd_timeout_rate: 0.0,
             etcd_data_path: None,
+            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL=false".into()],
         }
     }
 
@@ -152,6 +156,7 @@ metrics_level = "Disabled"
             compute_node_cores: 2,
             etcd_timeout_rate: 0.0,
             etcd_data_path: None,
+            per_session_queries: vec![],
         }
     }
 
@@ -176,6 +181,7 @@ metrics_level = "Disabled"
             compute_node_cores: 4,
             etcd_timeout_rate: 0.0,
             etcd_data_path: None,
+            per_session_queries: vec![],
         }
     }
 
@@ -199,6 +205,7 @@ metrics_level = "Disabled"
             compute_node_cores: 1,
             etcd_timeout_rate: 0.0,
             etcd_data_path: None,
+            per_session_queries: vec![],
         }
     }
 
@@ -227,6 +234,7 @@ metrics_level = "Disabled"
             compute_node_cores: 2,
             etcd_timeout_rate: 0.0,
             etcd_data_path: None,
+            per_session_queries: vec![],
         }
     }
 }
@@ -469,6 +477,9 @@ impl Cluster {
 
         self.client.spawn(async move {
             let mut client = RisingWave::connect("frontend".into(), "dev".into()).await?;
+            for sql in &self.config.per_session_queries {
+                client.run(sql).await?;
+            }
 
             while let Some((sql, tx)) = query_rx.next().await {
                 let result = client
