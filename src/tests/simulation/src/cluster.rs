@@ -89,7 +89,23 @@ pub struct Configuration {
     pub etcd_data_path: Option<PathBuf>,
 
     /// Queries to run per session.
-    pub per_session_queries: Vec<String>,
+    pub per_session_queries: Arc<Vec<String>>,
+}
+
+impl Default for Configuration {
+    fn default() -> Self {
+        Configuration {
+            config_path: ConfigPath::Regular("".into()),
+            frontend_nodes: 1,
+            compute_nodes: 1,
+            meta_nodes: 1,
+            compactor_nodes: 1,
+            compute_node_cores: 1,
+            etcd_timeout_rate: 0.0,
+            etcd_data_path: None,
+            per_session_queries: vec![].into(),
+        }
+    }
 }
 
 impl Configuration {
@@ -112,9 +128,8 @@ impl Configuration {
             meta_nodes: 3,
             compactor_nodes: 2,
             compute_node_cores: 2,
-            etcd_timeout_rate: 0.0,
-            etcd_data_path: None,
-            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL=false".into()],
+            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL=false".into()].into(),
+            ..Default::default()
         }
     }
 
@@ -154,9 +169,7 @@ metrics_level = "Disabled"
             meta_nodes: 1,
             compactor_nodes: 1,
             compute_node_cores: 2,
-            etcd_timeout_rate: 0.0,
-            etcd_data_path: None,
-            per_session_queries: vec![],
+            ..Default::default()
         }
     }
 
@@ -179,9 +192,7 @@ metrics_level = "Disabled"
             meta_nodes: 1,
             compactor_nodes: 1,
             compute_node_cores: 4,
-            etcd_timeout_rate: 0.0,
-            etcd_data_path: None,
-            per_session_queries: vec![],
+            ..Default::default()
         }
     }
 
@@ -203,9 +214,7 @@ metrics_level = "Disabled"
             meta_nodes: 1,
             compactor_nodes: 1,
             compute_node_cores: 1,
-            etcd_timeout_rate: 0.0,
-            etcd_data_path: None,
-            per_session_queries: vec![],
+            ..Default::default()
         }
     }
 
@@ -232,9 +241,7 @@ metrics_level = "Disabled"
             meta_nodes: 3,
             compactor_nodes: 2,
             compute_node_cores: 2,
-            etcd_timeout_rate: 0.0,
-            etcd_data_path: None,
-            per_session_queries: vec![],
+            ..Default::default()
         }
     }
 }
@@ -470,16 +477,24 @@ impl Cluster {
         })
     }
 
+    #[cfg_or_panic(madsim)]
+    fn per_session_queries(&self) -> Arc<Vec<String>> {
+        self.config.per_session_queries.clone()
+    }
+
     /// Start a SQL session on the client node.
     #[cfg_or_panic(madsim)]
     pub fn start_session(&mut self) -> Session {
         let (query_tx, mut query_rx) = mpsc::channel::<SessionRequest>(0);
+        let per_session_queries = self.per_session_queries();
 
         self.client.spawn(async move {
             let mut client = RisingWave::connect("frontend".into(), "dev".into()).await?;
-            for sql in &self.config.per_session_queries {
+
+            for sql in per_session_queries.as_ref() {
                 client.run(sql).await?;
             }
+            drop(per_session_queries);
 
             while let Some((sql, tx)) = query_rx.next().await {
                 let result = client
