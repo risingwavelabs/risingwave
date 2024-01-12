@@ -180,7 +180,7 @@ impl MetadataManager {
     /// - For MV, it should have one `MView` fragment.
     /// - For table, it should have one `MView` fragment and one or two `Source` fragments. `MView` should be the root.
     /// - For source, it should have one `Source` fragment.
-    /// 
+    ///
     /// In other words, it's the `MView` fragment if it exists, otherwise it's the `Source` fragment.
     ///
     /// ## What do we expect to get for different creating streaming job
