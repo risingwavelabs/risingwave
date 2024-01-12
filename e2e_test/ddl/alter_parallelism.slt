@@ -156,3 +156,6 @@ drop view mview_parallelism;
 
 statement ok
 drop view sink_parallelism;
+
+statement ok
+drop view fragment_parallelism;
