@@ -158,7 +158,7 @@ async fn compact_shared_buffer(
         compact_data_size += data_size;
         size_and_start_user_keys.push((data_size, imm.start_user_key()));
     }
-    size_and_start_user_keys.sort();
+    size_and_start_user_keys.sort_by(|a, b| a.1.cmp(&b.1));
     let mut splits = Vec::with_capacity(size_and_start_user_keys.len());
     splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
     let mut key_split_append = |key_before_last: &Bytes| {
