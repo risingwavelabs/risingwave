@@ -361,6 +361,7 @@ mod tests {
             (MAX_CONCURRENT_CREATING_STREAMING_JOBS_KEY, "1"),
             (PAUSE_ON_NEXT_BOOTSTRAP_KEY, "false"),
             (WASM_STORAGE_URL_KEY, "a"),
+            (ENABLE_TRACING_KEY, "true"),
             ("a_deprecated_param", "foo"),
         ];
 
