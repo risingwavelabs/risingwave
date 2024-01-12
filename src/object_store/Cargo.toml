@@ -26,6 +26,7 @@ hyper = { version = "0.14", features = ["tcp", "client"] }
 hyper-rustls = { version = "0.24.2", features = ["webpki-roots"] }
 hyper-tls = "0.5.0"
 itertools = "0.12"
+madsim = "0.2.22"
 opendal = "0.44"
 prometheus = { version = "0.13", features = ["process"] }
 risingwave_common = { workspace = true }
@@ -36,7 +37,6 @@ thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["fs"] }
 tokio-retry = "0.3"
 tracing = "0.1"
-madsim = "0.2.22"
 # This crate is excluded from hakari (see hakari.toml) after hdfs is introduced...## [target.'cfg(not(madsim))'.dependencies]
 # workspace-hack = { path = "../workspace-hack" }
 #

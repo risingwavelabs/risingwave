@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(madsim)]
 pub mod sim;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
