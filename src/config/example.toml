@@ -99,7 +99,7 @@ stream_hash_agg_max_dirty_groups_heap_size = 67108864
 share_buffers_sync_parallelism = 1
 share_buffer_compaction_worker_threads_number = 4
 shared_buffer_flush_ratio = 0.800000011920929
-imm_merge_threshold = 4
+imm_merge_threshold = 0
 write_conflict_detection_enabled = true
 max_prefetch_block_number = 16
 disable_remote_compactor = false
@@ -120,7 +120,7 @@ check_fast_compaction_result = false
 max_preload_io_retry_times = 3
 compactor_fast_max_compact_delete_ratio = 40
 compactor_fast_max_compact_task_size = 2147483648
-mem_table_spill_threshold = 4194304
+mem_table_spill_threshold = 0
 
 [storage.data_file_cache]
 dir = ""

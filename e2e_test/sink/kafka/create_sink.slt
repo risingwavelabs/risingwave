@@ -1,4 +1,7 @@
 statement ok
+set rw_implicit_flush=true;
+
+statement ok
 create table t_kafka (
     id integer primary key,
     v_varchar varchar,
