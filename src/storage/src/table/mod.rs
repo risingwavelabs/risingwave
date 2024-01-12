@@ -71,14 +71,18 @@ impl Distribution {
         FALLBACK_VNODES.clone()
     }
 
-    /// Distribution that accesses all vnodes, mainly used for tests.
-    pub fn all_vnodes(dist_key_in_pk_indices: Vec<usize>) -> Self {
+    pub fn all_vnodes() -> Arc<Bitmap> {
         /// A bitmap that all vnodes are set.
         static ALL_VNODES: LazyLock<Arc<Bitmap>> =
             LazyLock::new(|| Bitmap::ones(VirtualNode::COUNT).into());
+        ALL_VNODES.clone()
+    }
+
+    /// Distribution that accesses all vnodes, mainly used for tests.
+    pub fn all(dist_key_in_pk_indices: Vec<usize>) -> Self {
         Self {
             dist_key_in_pk_indices,
-            vnodes: ALL_VNODES.clone(),
+            vnodes: Self::all_vnodes(),
         }
     }
 }
@@ -231,6 +235,10 @@ impl<T: AsRef<[u8]>> KeyedRow<T> {
 
     pub fn key(&self) -> &[u8] {
         self.vnode_prefixed_key.key_part()
+    }
+
+    pub fn row(&self) -> &OwnedRow {
+        &self.row
     }
 
     pub fn into_parts(self) -> (TableKey<T>, OwnedRow) {

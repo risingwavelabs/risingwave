@@ -831,7 +831,6 @@ pub fn build_initial_compaction_group_levels(
         group_id,
         parent_group_id: StaticCompactionGroupId::NewCompactionGroup as _,
         member_table_ids: vec![],
-        vnode_partition_count: compaction_config.split_weight_by_vnode,
     }
 }
 

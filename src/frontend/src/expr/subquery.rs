@@ -49,7 +49,7 @@ impl Subquery {
     }
 
     pub fn is_correlated(&self, depth: Depth) -> bool {
-        self.query.is_correlated(depth + 1)
+        self.query.is_correlated(depth)
     }
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
@@ -59,7 +59,7 @@ impl Subquery {
     ) -> Vec<usize> {
         let mut correlated_indices = self
             .query
-            .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id);
+            .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id);
         correlated_indices.sort();
         correlated_indices.dedup();
         correlated_indices

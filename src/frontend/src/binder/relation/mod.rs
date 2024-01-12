@@ -105,7 +105,7 @@ impl Relation {
         match self {
             Relation::Subquery(subquery) => subquery
                 .query
-                .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
+                .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
             Relation::Join(join) | Relation::Apply(join) => {
                 let mut correlated_indices = vec![];
                 correlated_indices.extend(
