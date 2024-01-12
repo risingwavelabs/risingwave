@@ -18,6 +18,7 @@ use bytes::{BufMut, BytesMut};
 pub use error::SimError;
 use futures::Stream;
 mod rpc_server;
+pub use rpc_server::SimServer;
 mod service;
 
 use std::net::SocketAddr;
@@ -34,28 +35,18 @@ use super::{
     ObjectMetadataIter, ObjectRangeBounds, ObjectResult, ObjectStore, StreamingUploader,
 };
 
-type PartId = i32;
-
-const MIN_PART_ID: PartId = 1;
-
-const STREAM_PART_SIZE: usize = 16 * 1024 * 1024;
-
 pub struct SimStreamingUploader {
     client: Client,
-    part_size: usize,
     key: String,
     buf: BytesMut,
-    not_uploaded_len: usize,
 }
 
 impl SimStreamingUploader {
-    fn new(client: Client, key: String, part_size: usize) -> Self {
+    fn new(client: Client, key: String) -> Self {
         Self {
             client,
             key,
-            part_size,
             buf: Default::default(),
-            not_uploaded_len: 0,
         }
     }
 }
@@ -71,7 +62,6 @@ impl StreamingUploader for SimStreamingUploader {
 
     async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
         if self.buf.is_empty() {
-            debug_assert_eq!(self.not_uploaded_len, 0);
             Err(ObjectError::internal("upload empty object"))
         } else {
             let resp = self
@@ -121,7 +111,6 @@ impl Stream for SimDataIterator {
 
 pub struct SimObjectStore {
     client: Client,
-    part_size: usize,
 }
 
 #[async_trait::async_trait]
@@ -151,7 +140,6 @@ impl ObjectStore for SimObjectStore {
         Ok(Box::new(SimStreamingUploader::new(
             self.client.clone(),
             path.to_string(),
-            self.part_size,
         )))
     }
 
@@ -248,9 +236,13 @@ impl ObjectStore for SimObjectStore {
 
 impl SimObjectStore {
     pub fn new(addr: &str) -> Self {
+        let addr = addr.strip_prefix("sim://").unwrap();
+        let (addr, _bucket) = addr.split_once('/').unwrap();
         Self {
-            client: Client::new(addr.parse::<SocketAddr>().expect("parse SockAddr failed")),
-            part_size: STREAM_PART_SIZE,
+            client: Client::new(
+                addr.parse::<SocketAddr>()
+                    .expect(&format!("parse SockAddr failed: {}", addr)),
+            ),
         }
     }
 }

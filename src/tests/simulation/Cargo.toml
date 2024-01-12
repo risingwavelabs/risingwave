@@ -32,6 +32,7 @@ prometheus = { version = "0.13" }
 rand = "0.8"
 rand_chacha = { version = "0.3.1" }
 rdkafka = { workspace = true }
+risingwave_object_store = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }
 risingwave_compute = { workspace = true }
