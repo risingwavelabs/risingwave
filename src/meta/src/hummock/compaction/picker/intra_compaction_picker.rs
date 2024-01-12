@@ -57,7 +57,7 @@ impl CompactionPicker for IntraCompactionPicker {
             return None;
         }
 
-        let vnode_partition_count = levels.vnode_partition_count;
+        let vnode_partition_count = self.config.split_weight_by_vnode;
 
         if let Some(ret) =
             self.pick_whole_level(l0, &level_handlers[0], vnode_partition_count, stats)

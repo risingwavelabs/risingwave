@@ -1050,3 +1050,27 @@
                   │     └─BatchValues { rows: [] }
                   └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
                     └─BatchScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
+- name: correlated array subquery (issue 14423)
+  sql: |
+    CREATE TABLE array_types ( x BIGINT[] );
+    SELECT array(
+      ((((((
+        select t0.x
+      ))))))
+    )
+    FROM array_types AS t0;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: LeftOuter, predicate: array_types.x IS NOT DISTINCT FROM array_types.x, output: [array_agg(array_types.x)] }
+      ├─BatchExchange { order: [], dist: HashShard(array_types.x) }
+      │ └─BatchScan { table: array_types, columns: [array_types.x], distribution: SomeShard }
+      └─BatchHashAgg { group_key: [array_types.x], aggs: [array_agg(array_types.x)] }
+        └─BatchHashJoin { type: LeftOuter, predicate: array_types.x IS NOT DISTINCT FROM array_types.x, output: [array_types.x, array_types.x] }
+          ├─BatchHashAgg { group_key: [array_types.x], aggs: [] }
+          │ └─BatchExchange { order: [], dist: HashShard(array_types.x) }
+          │   └─BatchScan { table: array_types, columns: [array_types.x], distribution: SomeShard }
+          └─BatchExchange { order: [], dist: HashShard(array_types.x) }
+            └─BatchProject { exprs: [array_types.x, array_types.x] }
+              └─BatchHashAgg { group_key: [array_types.x], aggs: [] }
+                └─BatchExchange { order: [], dist: HashShard(array_types.x) }
+                  └─BatchScan { table: array_types, columns: [array_types.x], distribution: SomeShard }

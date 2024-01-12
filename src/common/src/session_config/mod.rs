@@ -93,7 +93,7 @@ pub struct ConfigMap {
     #[parameter(default = true, rename = "rw_batch_enable_sort_agg")]
     batch_enable_sort_agg: bool,
 
-    /// The max gap allowed to transform small range scan scan into multi point lookup.
+    /// The max gap allowed to transform small range scan into multi point lookup.
     #[parameter(default = 8)]
     max_split_range_gap: i32,
 
@@ -136,6 +136,10 @@ pub struct ConfigMap {
     /// Enable arrangement backfill for streaming queries. Defaults to false.
     #[parameter(default = false)]
     streaming_enable_arrangement_backfill: bool,
+
+    /// Allow `jsonb` in stream key
+    #[parameter(default = false, rename = "rw_streaming_allow_jsonb_in_stream_key")]
+    streaming_allow_jsonb_in_stream_key: bool,
 
     /// Enable join ordering for streaming and batch queries. Defaults to true.
     #[parameter(default = true, rename = "rw_enable_join_ordering")]

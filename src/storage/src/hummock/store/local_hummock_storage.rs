@@ -359,7 +359,9 @@ impl LocalStateStore for LocalHummockStorage {
     }
 
     async fn try_flush(&mut self) -> StorageResult<()> {
-        if self.mem_table.kv_size.size() > self.mem_table_spill_threshold {
+        if self.mem_table_spill_threshold != 0
+            && self.mem_table.kv_size.size() > self.mem_table_spill_threshold
+        {
             if self.spill_offset < MAX_SPILL_TIMES {
                 let table_id_label = self.table_id.table_id().to_string();
                 self.flush(vec![]).await?;
