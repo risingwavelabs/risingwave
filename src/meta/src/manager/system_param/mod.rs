@@ -98,6 +98,8 @@ impl SystemParamsManager {
 
         mem_txn.commit();
 
+        // TODO: check if the parameter is actually changed.
+
         // Run common handler.
         self.common_handler.handle_change(params.clone().into());
 

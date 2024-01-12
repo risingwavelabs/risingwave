@@ -200,6 +200,8 @@ impl SystemParamsController {
         param.update(&self.db).await?;
         *params_guard = params.clone();
 
+        // TODO: check if the parameter is actually changed.
+
         // Run common handler.
         self.common_handler.handle_change(params.clone().into());
 

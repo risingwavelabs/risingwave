@@ -80,6 +80,10 @@ impl SystemParamsReader {
         self.prost.pause_on_next_bootstrap.unwrap_or(false)
     }
 
+    pub fn enable_tracing(&self) -> bool {
+        self.prost.enable_tracing.unwrap_or(true)
+    }
+
     pub fn to_kv(&self) -> Vec<(String, String)> {
         system_params_to_kv(&self.prost).unwrap()
     }

@@ -387,7 +387,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     // Tracing layer
     #[cfg(not(madsim))]
     if let Some(endpoint) = settings.tracing_endpoint {
-        println!("tracing enabled, exported to `{endpoint}`");
+        println!("opentelemetry tracing will be exported to `{endpoint}` if enabled");
 
         use opentelemetry::{sdk, KeyValue};
         use opentelemetry_otlp::WithExportConfig;
@@ -439,7 +439,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         // Disable all events and spans by default.
         let (reload_filter, reload_handle) = reload::Layer::new(filter::Targets::new());
 
-        let toggle_otel_layer = move |enabled: bool| {
+        risingwave_common::util::tracing::set_toggle_otel_layer_fn(move |enabled: bool| {
             let result = reload_handle.modify(|f| {
                 *f = if enabled {
                     default_filter.clone()
@@ -447,15 +447,20 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                     filter::Targets::new()
                 }
             });
-            if let Err(e) = result {
-                tracing::error!(
-                    error = %e.as_report(),
+
+            match result {
+                Ok(_) => tracing::info!(
+                    "opentelemetry tracing {}",
+                    if enabled { "enabled" } else { "disabled" },
+                ),
+
+                Err(error) => tracing::error!(
+                    error = %error.as_report(),
                     "failed to {} opentelemetry tracing",
                     if enabled { "enable" } else { "disable" },
-                );
+                ),
             }
-        };
-        risingwave_common::util::tracing::set_toggle_otel_layer_fn(toggle_otel_layer);
+        });
 
         let layer = tracing_opentelemetry::layer()
             .with_tracer(otel_tracer)

@@ -24,17 +24,8 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 static TOGGLE_OTEL_LAYER: OnceLock<Box<dyn Fn(bool) + Sync + Send>> = OnceLock::new();
 
 pub fn set_toggle_otel_layer_fn(f: impl Fn(bool) + Sync + Send + 'static) {
-    let last_enabled = std::sync::Mutex::new(None);
-    let cached_f = move |enabled: bool| {
-        let mut last_enabled = last_enabled.lock().unwrap();
-        if *last_enabled != Some(enabled) {
-            *last_enabled = Some(enabled);
-            f(enabled);
-        }
-    };
-
     TOGGLE_OTEL_LAYER
-        .set(Box::new(cached_f))
+        .set(Box::new(f))
         .ok()
         .expect("toggle otel layer fn set twice");
 }
