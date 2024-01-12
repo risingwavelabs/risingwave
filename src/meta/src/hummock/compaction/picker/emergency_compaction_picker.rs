@@ -71,7 +71,7 @@ impl EmergencyCompactionPicker {
                 && partitioned_count > no_overlap_count
                 && partitioned_count > overlapping_count)
         {
-            let base_level_compaction_picker = LevelCompactionPicker::new_with_validator(
+            let mut base_level_compaction_picker = LevelCompactionPicker::new_with_validator(
                 self.target_level,
                 self.config.clone(),
                 unused_validator.clone(),
@@ -87,7 +87,7 @@ impl EmergencyCompactionPicker {
             && no_overlap_count > partitioned_count
             && no_overlap_count > overlapping_count
         {
-            let mut intral_level_compaction_picker =
+            let intral_level_compaction_picker =
                 WholeLevelCompactionPicker::new(self.config.clone(), unused_validator.clone());
 
             if let Some(ret) = intral_level_compaction_picker.pick_whole_level(
