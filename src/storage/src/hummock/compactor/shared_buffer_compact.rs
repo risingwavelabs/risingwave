@@ -313,6 +313,9 @@ async fn compact_shared_buffer(
             let mut forward_iters = Vec::with_capacity(payload.len());
             let mut del_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
             for imm in &payload {
+                if !existing_table_ids.contains(imm.table_id) {
+                    continue;
+                }
                 forward_iters.push(imm.clone().into_forward_iter());
                 del_iter.add_batch_iter(imm.delete_range_iter());
             }
