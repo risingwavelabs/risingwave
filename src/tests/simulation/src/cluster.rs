@@ -94,8 +94,24 @@ pub struct Configuration {
 
 impl Default for Configuration {
     fn default() -> Self {
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+
+            let config_data = format!(
+                r#"
+[server]
+telemetry_enabled = false
+metrics_level = "Disabled"
+"#
+            );
+            file.write_all(config_data.as_bytes())
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
         Configuration {
-            config_path: ConfigPath::Regular("".into()),
+            config_path: ConfigPath::Temp(config_path.into()),
             frontend_nodes: 1,
             compute_nodes: 1,
             meta_nodes: 1,
