@@ -136,8 +136,6 @@ pub(crate) fn get_event_data_types(
         fields.insert(row_id_index, DataType::Serial);
     }
 
-    fields.extend([DataType::Varchar, DataType::Varchar]);
-
     fields
 }
 

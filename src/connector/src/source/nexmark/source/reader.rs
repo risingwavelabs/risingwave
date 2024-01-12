@@ -25,7 +25,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::error::RwError;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::types::{ScalarImpl, DataType};
 use tokio::time::Instant;
 
 use crate::parser::ParserConfig;
@@ -138,7 +138,9 @@ impl NexmarkSplitReader {
         let start_time = Instant::now();
         let start_offset = self.generator.global_offset();
         let start_ts = self.generator.timestamp();
-        let event_dtypes = get_event_data_types(self.event_type, self.row_id_index);
+        let mut event_dtypes_with_offset = get_event_data_types(self.event_type, self.row_id_index);
+        event_dtypes_with_offset.extend([DataType::Varchar, DataType::Varchar]);
+
         loop {
             let mut rows = vec![];
             while (rows.len() as u64) < self.max_chunk_size {
@@ -176,8 +178,8 @@ impl NexmarkSplitReader {
                 )
                 .await;
             }
-            let stream_chunk = StreamChunk::from_rows(&rows, &event_dtypes);
-            yield stream_chunk;
+
+            yield StreamChunk::from_rows(&rows, &event_dtypes_with_offset);
         }
 
         tracing::debug!(?self.event_type, "nexmark generator finished");
