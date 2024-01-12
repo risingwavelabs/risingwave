@@ -95,7 +95,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                     .metrics
                     .partition_input_count
                     .with_label_values(&[&actor_id, &source_id, &split_id])
-                    .inc_by(msg.chunk.cardinality() as u64);
+                    .inc_by(msg.cardinality() as u64);
                 yield msg;
             }
         }
