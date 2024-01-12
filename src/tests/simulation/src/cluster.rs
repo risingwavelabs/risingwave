@@ -32,6 +32,7 @@ use itertools::Itertools;
 use madsim::runtime::{Handle, NodeHandle};
 use rand::seq::IteratorRandom;
 use rand::Rng;
+#[cfg(madsim)]
 use risingwave_object_store::object::sim::SimServer as ObjectStoreSimServer;
 use risingwave_pb::common::WorkerNode;
 use sqllogictest::AsyncDB;
@@ -343,6 +344,7 @@ impl Cluster {
             .build();
 
         // object_store_sim
+        #[cfg(madsim)]
         handle
             .create_node()
             .name("object_store_sim")
