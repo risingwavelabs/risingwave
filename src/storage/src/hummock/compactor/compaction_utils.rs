@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::constants::hummock::CompactionFilterFlag;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
@@ -37,13 +38,14 @@ use crate::hummock::compactor::{
     TtlCompactionFilter,
 };
 use crate::hummock::iterator::{
-    ForwardMergeRangeIterator, SkipWatermarkIterator, UnorderedMergeIteratorInner, UserIterator,
+    Forward, ForwardMergeRangeIterator, HummockIterator, SkipWatermarkIterator,
+    UnorderedMergeIteratorInner, UserIterator,
 };
 use crate::hummock::multi_builder::TableBuilderFactory;
 use crate::hummock::sstable::DEFAULT_ENTRY_SIZE;
 use crate::hummock::{
     CachePolicy, FilterBuilder, GetObjectId, HummockResult, MemoryLimiter, SstableBuilder,
-    SstableBuilderOptions, SstableWriterFactory, SstableWriterOptions,
+    SstableBuilderOptions, SstableDeleteRangeIterator, SstableWriterFactory, SstableWriterOptions,
 };
 use crate::monitor::StoreLocalStatistic;
 
@@ -339,6 +341,7 @@ pub async fn check_compaction_result(
     }
 
     let mut table_iters = Vec::new();
+    let mut del_iter = ForwardMergeRangeIterator::default();
     let compact_io_retry_time = context.storage_opts.compact_iter_recreate_timeout_ms;
     for level in &compact_task.input_ssts {
         if level.table_infos.is_empty() {
@@ -348,6 +351,7 @@ pub async fn check_compaction_result(
         // Do not need to filter the table because manager has done it.
         if level.level_type == LevelType::Nonoverlapping as i32 {
             debug_assert!(can_concat(&level.table_infos));
+            del_iter.add_concat_iter(level.table_infos.clone(), context.sstable_store.clone());
 
             table_iters.push(ConcatSstableIterator::new(
                 compact_task.existing_table_ids.clone(),
@@ -358,8 +362,13 @@ pub async fn check_compaction_result(
                 compact_io_retry_time,
             ));
         } else {
+            let mut stats = StoreLocalStatistic::default();
             for table_info in &level.table_infos {
-                assert_eq!(table_info.range_tombstone_count, 0);
+                let table = context
+                    .sstable_store
+                    .sstable(table_info, &mut stats)
+                    .await?;
+                del_iter.add_sst_iter(SstableDeleteRangeIterator::new(table));
                 table_iters.push(ConcatSstableIterator::new(
                     compact_task.existing_table_ids.clone(),
                     vec![table_info.clone()],
@@ -372,13 +381,18 @@ pub async fn check_compaction_result(
         }
     }
     let iter = UnorderedMergeIteratorInner::for_compactor(table_iters);
-    let mut left_iter = UserIterator::new(
+    let left_iter = UserIterator::new(
         SkipWatermarkIterator::from_safe_epoch_watermarks(iter, &compact_task.table_watermarks),
         (Bound::Unbounded, Bound::Unbounded),
         u64::MAX,
         0,
         None,
-        ForwardMergeRangeIterator::default(),
+        del_iter,
+    );
+    let mut del_iter = ForwardMergeRangeIterator::default();
+    del_iter.add_concat_iter(
+        compact_task.sorted_output_ssts.clone(),
+        context.sstable_store.clone(),
     );
     let iter = ConcatSstableIterator::new(
         compact_task.existing_table_ids.clone(),
@@ -388,14 +402,52 @@ pub async fn check_compaction_result(
         Arc::new(TaskProgress::default()),
         compact_io_retry_time,
     );
-    let mut right_iter = UserIterator::new(
+    let right_iter = UserIterator::new(
         SkipWatermarkIterator::from_safe_epoch_watermarks(iter, &compact_task.table_watermarks),
         (Bound::Unbounded, Bound::Unbounded),
         u64::MAX,
         0,
         None,
-        ForwardMergeRangeIterator::default(),
+        del_iter,
     );
+
+    check_result(left_iter, right_iter).await
+}
+
+pub async fn check_flush_result<I: HummockIterator<Direction = Forward>>(
+    left_iter: UserIterator<I>,
+    existing_table_ids: Vec<StateTableId>,
+    sort_ssts: Vec<SstableInfo>,
+    context: CompactorContext,
+) -> HummockResult<()> {
+    let mut del_iter = ForwardMergeRangeIterator::default();
+    del_iter.add_concat_iter(sort_ssts.clone(), context.sstable_store.clone());
+    let iter = ConcatSstableIterator::new(
+        existing_table_ids.clone(),
+        sort_ssts.clone(),
+        KeyRange::inf(),
+        context.sstable_store.clone(),
+        Arc::new(TaskProgress::default()),
+        0,
+    );
+    let right_iter = UserIterator::new(
+        iter,
+        (Bound::Unbounded, Bound::Unbounded),
+        u64::MAX,
+        0,
+        None,
+        del_iter,
+    );
+    check_result(left_iter, right_iter).await
+}
+
+async fn check_result<
+    I1: HummockIterator<Direction = Forward>,
+    I2: HummockIterator<Direction = Forward>,
+>(
+    mut left_iter: UserIterator<I1>,
+    mut right_iter: UserIterator<I2>,
+) -> HummockResult<()> {
     left_iter.rewind().await?;
     right_iter.rewind().await?;
     while left_iter.is_valid() && right_iter.is_valid() {

@@ -33,11 +33,11 @@ use tracing::error;
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::CompactorContext;
-use crate::hummock::compactor::{CompactOutput, Compactor};
+use crate::hummock::compactor::{check_flush_result, CompactOutput, Compactor};
 use crate::hummock::event_handler::uploader::UploadTaskPayload;
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::iterator::{
-    Forward, ForwardMergeRangeIterator, HummockIterator, OrderedMergeIteratorInner,
+    Forward, ForwardMergeRangeIterator, HummockIterator, OrderedMergeIteratorInner, UserIterator,
 };
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchInner, SharedBufferVersionedEntry,
@@ -297,14 +297,43 @@ async fn compact_shared_buffer(
 
     if compact_success {
         let mut level0 = Vec::with_capacity(parallelism);
+        let mut sst_infos = vec![];
         for (_, ssts, _) in output_ssts {
             for sst_info in &ssts {
                 context
                     .compactor_metrics
                     .write_build_l0_bytes
                     .inc_by(sst_info.file_size());
+                sst_infos.push(sst_info.sst_info.clone());
             }
             level0.extend(ssts);
+        }
+        if context.storage_opts.check_fast_compaction_result {
+            let compaction_executor = context.compaction_executor.clone();
+            let mut forward_iters = Vec::with_capacity(payload.len());
+            let mut del_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
+            for imm in &payload {
+                forward_iters.push(imm.clone().into_forward_iter());
+                del_iter.add_batch_iter(imm.delete_range_iter());
+            }
+            let iter = OrderedMergeIteratorInner::new(forward_iters);
+            let left_iter = UserIterator::new(
+                iter,
+                (Bound::Unbounded, Bound::Unbounded),
+                u64::MAX,
+                0,
+                None,
+                del_iter,
+            );
+            compaction_executor.spawn(async move {
+                check_flush_result(
+                    left_iter,
+                    Vec::from_iter(existing_table_ids.iter().cloned()),
+                    sst_infos,
+                    context,
+                )
+                .await
+            });
         }
         Ok(level0)
     } else {
