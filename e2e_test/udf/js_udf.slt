@@ -20,6 +20,13 @@ create function gcd(int, int) returns int language javascript as $$
     }
 $$;
 
+statement ok
+create function to_string(boolean, smallint, int, bigint, real, float, varchar) returns varchar language javascript as $$
+    export function to_string(a, b, c, d, e, f, g) {
+        return a.toString() + b.toString() + c.toString() + d.toString() + e.toString() + f.toString() + g.toString();
+    }
+$$;
+
 query I
 select int_42();
 ----
@@ -30,8 +37,16 @@ select gcd(25, 15);
 ----
 5
 
+query T
+select to_string(false, 1::smallint, 2, 3, 4.5, 6.7, 'abc');
+----
+false1234.56.7abc
+
 statement ok
 drop function int_42;
 
 statement ok
-drop function gcd(int,int);
+drop function gcd;
+
+statement ok
+drop function to_string;
