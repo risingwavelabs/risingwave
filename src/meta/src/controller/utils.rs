@@ -22,10 +22,10 @@ use risingwave_meta_model_v2::fragment::DistributionType;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
-    actor_dispatcher, connection, database, fragment, function, index, object, object_dependency,
-    schema, sink, source, table, user, user_privilege, view, worker_property, ActorId,
-    DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, PrivilegeId,
-    SchemaId, UserId, WorkerId,
+    actor, actor_dispatcher, connection, database, fragment, function, index, object,
+    object_dependency, schema, sink, source, table, user, user_privilege, view, worker_property,
+    ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId,
+    PrivilegeId, SchemaId, UserId, WorkerId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
 use risingwave_pb::common::PbParallelUnit;
@@ -657,12 +657,14 @@ where
         .all(db)
         .await?;
 
-    Ok(actor_dispatchers
-        .into_iter()
-        .group_by(|actor_dispatcher| actor_dispatcher.actor_id)
-        .into_iter()
-        .map(|(actor_id, actor_dispatcher)| (actor_id, actor_dispatcher.collect()))
-        .collect())
+    let mut actor_dispatchers_map = HashMap::new();
+    for actor_dispatcher in actor_dispatchers {
+        actor_dispatchers_map
+            .entry(actor_dispatcher.actor_id)
+            .or_insert_with(Vec::new)
+            .push(actor_dispatcher);
+    }
+    Ok(actor_dispatchers_map)
 }
 
 /// `get_fragment_parallel_unit_mappings` returns the fragment vnode mappings of the given job.
@@ -688,4 +690,23 @@ where
             mapping: Some(mapping.into_inner()),
         })
         .collect())
+}
+
+/// `get_fragment_actor_ids` returns the fragment actor ids of the given fragments.
+pub async fn get_fragment_actor_ids<C>(
+    db: &C,
+    fragment_ids: Vec<FragmentId>,
+) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>>
+where
+    C: ConnectionTrait,
+{
+    let fragment_actors: Vec<(FragmentId, ActorId)> = Actor::find()
+        .select_only()
+        .columns([actor::Column::FragmentId, actor::Column::ActorId])
+        .filter(actor::Column::FragmentId.is_in(fragment_ids))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    Ok(fragment_actors.into_iter().into_group_map())
 }
