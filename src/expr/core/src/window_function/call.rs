@@ -15,10 +15,12 @@
 use std::fmt::Display;
 
 use enum_as_inner::EnumAsInner;
+use parse_display::Display;
 use risingwave_common::bail;
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::window_frame::{PbBound, PbExclusion};
 use risingwave_pb::expr::{PbWindowFrame, PbWindowFunction};
+use FrameBound::{CurrentRow, Following, Preceding, UnboundedFollowing, UnboundedPreceding};
 
 use super::WindowFuncKind;
 use crate::aggregate::AggArgs;
@@ -109,6 +111,14 @@ impl Frame {
     }
 }
 
+#[derive(Display, Debug, Clone, Eq, PartialEq, Hash)]
+#[display("{0}")]
+pub enum FrameBounds {
+    Rows(RowsFrameBounds),
+    // Groups(GroupsFrameBounds),
+    // Range(RangeFrameBounds),
+}
+
 impl FrameBounds {
     pub fn validate(&self) -> Result<()> {
         match self {
@@ -133,32 +143,11 @@ impl FrameBounds {
     }
 }
 
-impl Display for FrameBounds {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Rows(bounds) => bounds.fmt(f),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub enum FrameBounds {
-    Rows(RowsFrameBounds),
-    // Groups(GroupsFrameBounds),
-    // Range(RangeFrameBounds),
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Display, Debug, Clone, Eq, PartialEq, Hash)]
+#[display("ROWS BETWEEN {start} AND {end}")]
 pub struct RowsFrameBounds {
     pub start: FrameBound<usize>,
     pub end: FrameBound<usize>,
-}
-
-impl Display for RowsFrameBounds {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ROWS BETWEEN {} AND {}", self.start, self.end)?;
-        Ok(())
-    }
 }
 
 impl RowsFrameBounds {
@@ -167,18 +156,20 @@ impl RowsFrameBounds {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, EnumAsInner)]
+#[derive(Display, Debug, Clone, Eq, PartialEq, Hash, EnumAsInner)]
+#[display(style = "TITLE CASE")]
 pub enum FrameBound<T> {
     UnboundedPreceding,
+    #[display("{0} PRECEDING")]
     Preceding(T),
     CurrentRow,
+    #[display("{0} FOLLOWING")]
     Following(T),
     UnboundedFollowing,
 }
 
 impl<T> FrameBound<T> {
     fn validate_bounds(start: &Self, end: &Self) -> Result<()> {
-        use FrameBound::*;
         match (start, end) {
             (_, UnboundedPreceding) => bail!("frame end cannot be UNBOUNDED PRECEDING"),
             (UnboundedFollowing, _) => bail!("frame start cannot be UNBOUNDED FOLLOWING"),
@@ -232,27 +223,14 @@ impl FrameBound<usize> {
     }
 }
 
-impl Display for FrameBound<usize> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FrameBound::UnboundedPreceding => write!(f, "UNBOUNDED PRECEDING")?,
-            FrameBound::Preceding(n) => write!(f, "{} PRECEDING", n)?,
-            FrameBound::CurrentRow => write!(f, "CURRENT ROW")?,
-            FrameBound::Following(n) => write!(f, "{} FOLLOWING", n)?,
-            FrameBound::UnboundedFollowing => write!(f, "UNBOUNDED FOLLOWING")?,
-        }
-        Ok(())
-    }
-}
-
 impl FrameBound<usize> {
     /// Convert the bound to sized offset from current row. `None` if the bound is unbounded.
     pub fn to_offset(&self) -> Option<isize> {
         match self {
-            FrameBound::UnboundedPreceding | FrameBound::UnboundedFollowing => None,
-            FrameBound::CurrentRow => Some(0),
-            FrameBound::Preceding(n) => Some(-(*n as isize)),
-            FrameBound::Following(n) => Some(*n as isize),
+            UnboundedPreceding | UnboundedFollowing => None,
+            CurrentRow => Some(0),
+            Preceding(n) => Some(-(*n as isize)),
+            Following(n) => Some(*n as isize),
         }
     }
 
@@ -267,23 +245,14 @@ impl FrameBound<usize> {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default, EnumAsInner)]
+#[derive(Display, Debug, Copy, Clone, Eq, PartialEq, Hash, Default, EnumAsInner)]
+#[display("EXCLUDE {}", style = "TITLE CASE")]
 pub enum FrameExclusion {
     CurrentRow,
     // Group,
     // Ties,
     #[default]
     NoOthers,
-}
-
-impl Display for FrameExclusion {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FrameExclusion::CurrentRow => write!(f, "EXCLUDE CURRENT ROW")?,
-            FrameExclusion::NoOthers => write!(f, "EXCLUDE NO OTHERS")?,
-        }
-        Ok(())
-    }
 }
 
 impl FrameExclusion {
