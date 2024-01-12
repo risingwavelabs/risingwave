@@ -98,13 +98,12 @@ impl Default for Configuration {
             let mut file =
                 tempfile::NamedTempFile::new().expect("failed to create temp config file");
 
-            let config_data = format!(
-                r#"
+            let config_data = r#"
 [server]
 telemetry_enabled = false
 metrics_level = "Disabled"
 "#
-            );
+            .to_string();
             file.write_all(config_data.as_bytes())
                 .expect("failed to write config file");
             file.into_temp_path()

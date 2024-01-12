@@ -199,7 +199,9 @@ async fn test_backfill_backpressure() -> Result<()> {
     session.run("CREATE TABLE dim (v1 int);").await?;
     // Ingest
     // Amplification of 1000 records
-    session.run("INSERT INTO dim SELECT 1 FROM generate_series(1, 200);").await?;
+    session
+        .run("INSERT INTO dim SELECT 1 FROM generate_series(1, 200);")
+        .await?;
     // Create fact table
     session.run("CREATE TABLE fact (v1 int);").await?;
     // Create sink
@@ -210,9 +212,13 @@ async fn test_backfill_backpressure() -> Result<()> {
 
     // Ingest
     tokio::spawn(async move {
-        session.run("INSERT INTO fact SELECT 1 FROM generate_series(1, 100000);").await.unwrap();
-    }).await?;
-    let mut  session = cluster.start_session();
+        session
+            .run("INSERT INTO fact SELECT 1 FROM generate_series(1, 100000);")
+            .await
+            .unwrap();
+    })
+    .await?;
+    let mut session = cluster.start_session();
     session.run("FLUSH").await?;
     // Run flush to check if barrier can go through. It should be able to.
     // There will be some latency for the initial barrier.

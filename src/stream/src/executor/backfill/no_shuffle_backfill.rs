@@ -17,14 +17,13 @@ use std::sync::Arc;
 
 use either::Either;
 use futures::stream::select_with_strategy;
-use futures::{pin_mut, stream, StreamExt};
+use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::Datum;
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -35,8 +34,8 @@ use risingwave_storage::StateStore;
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
-    compute_bounds, construct_initial_finished_state, create_builder, get_new_pos, iter_chunks,
-    mapping_chunk, mapping_message, mark_chunk, owned_row_iter, METADATA_STATE_LEN,
+    compute_bounds, construct_initial_finished_state, create_builder, get_new_pos, mapping_chunk,
+    mapping_message, mark_chunk, owned_row_iter, METADATA_STATE_LEN,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -239,7 +238,6 @@ where
                         snapshot_read_epoch,
                         current_pos.clone(),
                         true,
-                        &mut builder
                     )
                     .map(Either::Right),);
 
@@ -299,20 +297,27 @@ where
 
                                         break 'backfill_loop;
                                     }
-                                    Some(chunk) => {
-                                        // Raise the current position.
-                                        // As snapshot read streams are ordered by pk, so we can
-                                        // just use the last row to update `current_pos`.
-                                        current_pos =
-                                            Some(get_new_pos(&chunk, &pk_in_output_indices));
+                                    Some(record) => {
+                                        // Buffer the snapshot read row.
+                                        if let Some(data_chunk) = builder.append_one_row(record) {
+                                            let ops = vec![Op::Insert; data_chunk.capacity()];
+                                            let chunk = StreamChunk::from_parts(ops, data_chunk);
+                                            // Raise the current position.
+                                            // As snapshot read streams are ordered by pk, so we can
+                                            // just use the last row to update `current_pos`.
+                                            current_pos =
+                                                Some(get_new_pos(&chunk, &pk_in_output_indices));
 
-                                        let chunk_cardinality = chunk.cardinality() as u64;
-                                        cur_barrier_snapshot_processed_rows += chunk_cardinality;
-                                        total_snapshot_processed_rows += chunk_cardinality;
-                                        yield Message::Chunk(mapping_chunk(
-                                            chunk,
-                                            &self.output_indices,
-                                        ));
+                                            let chunk_cardinality = chunk.cardinality() as u64;
+                                            cur_barrier_snapshot_processed_rows +=
+                                                chunk_cardinality;
+                                            total_snapshot_processed_rows += chunk_cardinality;
+
+                                            yield Message::Chunk(mapping_chunk(
+                                                chunk,
+                                                &self.output_indices,
+                                            ));
+                                        }
                                     }
                                 }
                             }
@@ -337,7 +342,16 @@ where
                                     snapshot_read_complete = true;
                                     break;
                                 }
-                                Some(chunk) => {
+                                Some(row) => {
+                                    let chunk = match builder.append_one_row(row) {
+                                        Some(chunk) => chunk,
+                                        None => builder.consume_all().expect(
+                                            "we just appended one row, should have data chunk",
+                                        ),
+                                    };
+                                    assert_eq!(chunk.cardinality(), 1);
+                                    let ops = vec![Op::Insert; 1];
+                                    let chunk = StreamChunk::from_parts(ops, chunk);
                                     // Raise the current position.
                                     // As snapshot read streams are ordered by pk, so we can
                                     // just use the last row to update `current_pos`.
@@ -614,13 +628,12 @@ where
     /// remaining data in `builder` must be flushed manually.
     /// Otherwise when we scan a new snapshot, it is possible the rows in the `builder` would be
     /// present, Then when we flush we contain duplicate rows.
-    #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-    async fn snapshot_read<'a>(
-        upstream_table: &'a StorageTable<S>,
+    #[try_stream(ok = Option<OwnedRow>, error = StreamExecutorError)]
+    async fn snapshot_read(
+        upstream_table: &StorageTable<S>,
         epoch: u64,
         current_pos: Option<OwnedRow>,
         ordered: bool,
-        builder: &'a mut DataChunkBuilder,
     ) {
         let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
         let range_bounds = match range_bounds {
@@ -644,11 +657,10 @@ where
             )
             .await?;
         let row_iter = owned_row_iter(iter);
-        pin_mut!(row_iter);
 
         #[for_await]
-        for chunk in iter_chunks(row_iter, builder) {
-            yield Some(chunk?);
+        for row in row_iter {
+            yield Some(row?);
         }
         yield None;
     }
