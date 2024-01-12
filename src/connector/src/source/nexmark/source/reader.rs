@@ -18,13 +18,14 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use maplit::hashmap;
 use nexmark::config::NexmarkConfig;
 use nexmark::event::EventType;
 use nexmark::EventGenerator;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::error::RwError;
 use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::ScalarImpl;
 use tokio::time::Instant;
 
 use crate::parser::ParserConfig;
@@ -114,18 +115,17 @@ impl SplitReader for NexmarkSplitReader {
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;
         spawn_data_generation_stream(
-            self.into_native_stream().inspect_ok(
-                move |chunk_with_states: &StreamChunk| {
+            self.into_native_stream()
+                .inspect_ok(move |chunk_with_states: &StreamChunk| {
                     metrics
                         .partition_input_count
                         .with_label_values(&[&actor_id, &source_id, &split_id])
-                        .inc_by(chunk_with_states.chunk.cardinality() as u64);
+                        .inc_by(chunk_with_states.cardinality() as u64);
                     metrics
                         .partition_input_bytes
                         .with_label_values(&[&actor_id, &source_id, &split_id])
-                        .inc_by(chunk_with_states.chunk.estimated_size() as u64);
-                },
-            ),
+                        .inc_by(chunk_with_states.estimated_size() as u64);
+                }),
             BUFFER_SIZE,
         )
         .boxed()
@@ -146,11 +146,17 @@ impl NexmarkSplitReader {
                     break;
                 }
                 let event = self.generator.next().unwrap();
-                let row = match self.event_type {
+                let fields = match self.event_type {
                     Some(_) => event_to_row(event, self.row_id_index),
                     None => combined_event_to_row(new_combined_event(event), self.row_id_index),
                 };
-                rows.push((Op::Insert, row));
+                fields.extend([
+                    Some(ScalarImpl::Utf8(self.split_id.as_ref().into())),
+                    Some(ScalarImpl::Utf8(
+                        self.generator.offset().to_string().into_boxed_str(),
+                    )),
+                ]);
+                rows.push((Op::Insert, OwnedRow::new(fields)));
             }
             if rows.is_empty() {
                 break;
@@ -170,12 +176,8 @@ impl NexmarkSplitReader {
                 )
                 .await;
             }
-            let mapping = hashmap! {self.split_id.clone() => self.generator.offset().to_string()};
             let stream_chunk = StreamChunk::from_rows(&rows, &event_dtypes);
-            yield StreamChunk {
-                chunk: stream_chunk,
-                split_offset_mapping: Some(mapping),
-            };
+            yield stream_chunk;
         }
 
         tracing::debug!(?self.event_type, "nexmark generator finished");

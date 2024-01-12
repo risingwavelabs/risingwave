@@ -424,10 +424,8 @@ impl<S: StateStore> SourceExecutor<S> {
         // Merge the chunks from source and the barriers into a single stream. We prioritize
         // barriers over source data chunks here.
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
-        let mut stream = StreamReaderWithPause::<true, StreamChunk>::new(
-            barrier_stream,
-            source_chunk_reader,
-        );
+        let mut stream =
+            StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_chunk_reader);
 
         // If the first barrier requires us to pause on startup, pause the stream.
         if barrier.is_pause_on_startup() {

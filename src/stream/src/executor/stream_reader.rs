@@ -171,8 +171,7 @@ mod tests {
             .unwrap();
 
         let barrier_stream = barrier_to_message_stream(barrier_rx).boxed();
-        let stream =
-            StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_stream);
+        let stream = StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_stream);
         pin_mut!(stream);
 
         macro_rules! next {

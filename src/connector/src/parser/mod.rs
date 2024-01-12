@@ -53,8 +53,9 @@ use crate::parser::util::{extract_headers_from_meta, extreact_timestamp_from_met
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
-    extract_source_struct, BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
-    SourceContextRef, SourceEncode, SourceFormat, SourceMeta, ChunkedSourceStream, SplitId,
+    extract_source_struct, BoxSourceStream, ChunkedSourceStream, SourceColumnDesc,
+    SourceColumnType, SourceContext, SourceContextRef, SourceEncode, SourceFormat, SourceMeta,
+    SplitId,
 };
 
 pub mod additional_columns;

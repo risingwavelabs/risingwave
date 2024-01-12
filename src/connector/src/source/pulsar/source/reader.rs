@@ -38,7 +38,7 @@ use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
     into_chunk_stream, BoxChunkedSourceStream, Column, CommonSplitReader, SourceContextRef,
-    SourceMessage, SplitId, SplitMetaData, SplitReader
+    SourceMessage, SplitId, SplitMetaData, SplitReader,
 };
 
 pub enum PulsarSplitReader {

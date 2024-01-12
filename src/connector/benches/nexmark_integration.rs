@@ -25,7 +25,7 @@ use risingwave_connector::parser::{
     ByteStreamSourceParser, JsonParser, SourceParserIntoStreamExt, SpecificParserConfig,
 };
 use risingwave_connector::source::{
-    BoxSourceStream, BoxChunkedSourceStream, SourceColumnDesc, SourceMessage, SourceMeta,
+    BoxChunkedSourceStream, BoxSourceStream, SourceColumnDesc, SourceMessage, SourceMeta,
     StreamChunk,
 };
 use tracing::Level;
@@ -91,8 +91,7 @@ fn make_parser() -> impl ByteStreamSourceParser {
 }
 
 fn make_stream_iter() -> impl Iterator<Item = StreamChunk> {
-    let mut stream: BoxChunkedSourceStream =
-        make_parser().into_stream(make_data_stream()).boxed();
+    let mut stream: BoxChunkedSourceStream = make_parser().into_stream(make_data_stream()).boxed();
 
     std::iter::from_fn(move || {
         stream

@@ -24,8 +24,8 @@ use with_options::WithOptions;
 
 use crate::parser::ParserConfig;
 use crate::source::{
-    BoxChunkedSourceStream, Column, SourceContextRef, SourceEnumeratorContextRef,
-    SourceProperties, SplitEnumerator, SplitId, SplitMetaData, SplitReader, TryFromHashmap,
+    BoxChunkedSourceStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
+    SplitEnumerator, SplitId, SplitMetaData, SplitReader, TryFromHashmap,
 };
 
 pub type BoxListSplits = Box<

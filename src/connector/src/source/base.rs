@@ -343,8 +343,7 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
 
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
 
-pub trait ChunkedSourceStream =
-    Stream<Item = Result<StreamChunk, RwError>> + Send + 'static;
+pub trait ChunkedSourceStream = Stream<Item = Result<StreamChunk, RwError>> + Send + 'static;
 pub type BoxChunkedSourceStream = BoxStream<'static, Result<StreamChunk, RwError>>;
 pub type BoxTryStream<M> = BoxStream<'static, Result<M, RwError>>;
 

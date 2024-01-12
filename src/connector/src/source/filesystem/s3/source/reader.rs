@@ -39,9 +39,7 @@ use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::nd_streaming;
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::s3::S3Properties;
-use crate::source::{
-    BoxChunkedSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta,
-};
+use crate::source::{BoxChunkedSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta};
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
@@ -235,7 +233,7 @@ impl S3FileReader {
                     .metrics
                     .partition_input_count
                     .with_label_values(&[&actor_id, &source_id, &split_id])
-                    .inc_by(msg.chunk.cardinality() as u64);
+                    .inc_by(msg.cardinality() as u64);
                 yield msg;
             }
         }

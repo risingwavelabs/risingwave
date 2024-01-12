@@ -30,8 +30,7 @@ use risingwave_connector::source::filesystem::opendal_source::{
 };
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::{
-    BoxChunkedSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
-    StreamChunk,
+    BoxChunkedSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData, StreamChunk,
 };
 use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::SourceDesc;
@@ -199,10 +198,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         state_store_handler.init_epoch(barrier.epoch);
 
         let mut splits_on_fetch: usize = 0;
-        let mut stream = StreamReaderWithPause::<true, StreamChunk>::new(
-            upstream,
-            stream::pending().boxed(),
-        );
+        let mut stream =
+            StreamReaderWithPause::<true, StreamChunk>::new(upstream, stream::pending().boxed());
 
         if barrier.is_pause_on_startup() {
             stream.pause_stream();
