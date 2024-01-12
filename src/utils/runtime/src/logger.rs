@@ -18,7 +18,6 @@ use std::path::PathBuf;
 use either::Either;
 use risingwave_common::metrics::MetricsLayer;
 use risingwave_common::util::deployment::Deployment;
-use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_common::util::query_log::*;
 use risingwave_common::util::tracing::layer::set_toggle_otel_layer_fn;
 use thiserror_ext::AsReport;
@@ -61,15 +60,12 @@ impl LoggerSettings {
     ///
     /// If env var `RW_TRACING_ENDPOINT` is not set, the meta address will be used
     /// as the default tracing endpoint, which means that the embedded tracing
-    /// collector will be used. This can be disabled by setting env var
-    /// `RW_DISABLE_EMBEDDED_TRACING` to `true`.
+    /// collector will be used.
     pub fn from_opts<O: risingwave_common::opts::Opts>(opts: &O) -> Self {
         let mut settings = Self::new(O::name());
         if settings.tracing_endpoint.is_none() // no explicit endpoint
-            && !env_var_is_true("RW_DISABLE_EMBEDDED_TRACING") // not disabled by env var
-            && let Some(addr) = opts.meta_addr().exactly_one() // meta address is valid
-            && !Deployment::current().is_ci()
-        // not in CI
+            && let Some(addr) = opts.meta_addr().exactly_one()
+        // meta address is valid
         {
             // Use embedded collector in the meta service.
             // TODO: when there's multiple meta nodes for high availability, we may send
@@ -444,6 +440,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         };
 
         // Disable by filtering out all events or spans by default.
+        //
         // It'll be enabled with `toggle_otel_layer` based on the system parameter `enable_tracing` later.
         let (reload_filter, reload_handle) = reload::Layer::new(disabled_filter());
 
