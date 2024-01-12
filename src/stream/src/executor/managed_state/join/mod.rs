@@ -470,9 +470,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                 entry_state
                     .insert(
                         pk,
-                        JoinRow::new(row.into_owned_row(), degree_i64.into_int64() as u64).encode(),
+                        JoinRow::new(row.row(), degree_i64.into_int64() as u64).encode(),
                     )
-                    .expect("duplicated pk");
+                    .with_context(|| self.state.error_context(row.row()))?;
             }
         } else {
             let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
@@ -491,8 +491,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                     .project(&self.state.pk_indices)
                     .memcmp_serialize(&self.pk_serializer);
                 entry_state
-                    .insert(pk, JoinRow::new(row.into_owned_row(), 0).encode())
-                    .expect("duplicated pk");
+                    .insert(pk, JoinRow::new(row.row(), 0).encode())
+                    .with_context(|| self.state.error_context(row.row()))?;
             }
         };
 
