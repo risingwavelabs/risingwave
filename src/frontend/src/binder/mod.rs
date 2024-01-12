@@ -415,6 +415,10 @@ impl Binder {
     pub fn set_clause(&mut self, clause: Option<Clause>) {
         self.context.clause = clause;
     }
+
+    pub fn get_udf_context(&mut self) -> &mut UdfContext {
+        &mut self.udf_context
+    }
 }
 
 /// The column name stored in [`BindContext`] for a column without an alias.
