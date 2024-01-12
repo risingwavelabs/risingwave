@@ -143,7 +143,7 @@ mod tests {
     use futures::{pin_mut, FutureExt};
     use risingwave_common::array::StreamChunk;
     use risingwave_common::transaction::transaction_id::TxnId;
-    use risingwave_connector::source::StreamChunkWithState;
+    use risingwave_connector::source::StreamChunk;
     use risingwave_source::TableDmlHandle;
     use tokio::sync::mpsc;
 
@@ -172,7 +172,7 @@ mod tests {
 
         let barrier_stream = barrier_to_message_stream(barrier_rx).boxed();
         let stream =
-            StreamReaderWithPause::<true, StreamChunkWithState>::new(barrier_stream, source_stream);
+            StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_stream);
         pin_mut!(stream);
 
         macro_rules! next {
@@ -192,7 +192,7 @@ mod tests {
             .write_chunk(StreamChunk::default())
             .await
             .unwrap();
-        // We don't call end() here, since we test `StreamChunkWithState` instead of `TxnMsg`.
+        // We don't call end() here, since we test `StreamChunk` instead of `TxnMsg`.
 
         assert_matches!(next!().unwrap(), Either::Right(_));
         // Write a barrier, and we should receive it.
@@ -210,7 +210,7 @@ mod tests {
             .write_chunk(StreamChunk::default())
             .await
             .unwrap();
-        // We don't call end() here, since we test `StreamChunkWithState` instead of `TxnMsg`.
+        // We don't call end() here, since we test `StreamChunk` instead of `TxnMsg`.
 
         // We should receive the barrier.
         assert_matches!(next!().unwrap(), Either::Left(_));

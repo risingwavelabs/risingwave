@@ -30,8 +30,8 @@ use risingwave_connector::source::filesystem::opendal_source::{
 };
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::{
-    BoxSourceWithStateStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
-    StreamChunkWithState,
+    BoxChunkedSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
+    StreamChunk,
 };
 use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::SourceDesc;
@@ -96,7 +96,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         column_ids: Vec<ColumnId>,
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
     ) -> StreamExecutorResult<()> {
         let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
         'vnodes: for vnode in state_store_handler.state_store.vnodes().iter_vnodes() {
@@ -159,7 +159,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
         batch: SplitBatch,
-    ) -> StreamExecutorResult<BoxSourceWithStateStream> {
+    ) -> StreamExecutorResult<BoxChunkedSourceStream> {
         source_desc
             .source
             .stream_reader(batch, column_ids, Arc::new(source_ctx))
@@ -199,7 +199,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         state_store_handler.init_epoch(barrier.epoch);
 
         let mut splits_on_fetch: usize = 0;
-        let mut stream = StreamReaderWithPause::<true, StreamChunkWithState>::new(
+        let mut stream = StreamReaderWithPause::<true, StreamChunk>::new(
             upstream,
             stream::pending().boxed(),
         );
@@ -301,7 +301,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                         }
                         // StreamChunk from FsSourceReader, and the reader reads only one file.
                         // If the file read out, replace with a new file reader.
-                        Either::Right(StreamChunkWithState {
+                        Either::Right(StreamChunk {
                             chunk,
                             split_offset_mapping,
                         }) => {

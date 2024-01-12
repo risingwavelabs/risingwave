@@ -343,29 +343,10 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
 
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
 
-pub trait SourceWithStateStream =
-    Stream<Item = Result<StreamChunkWithState, RwError>> + Send + 'static;
-pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithState, RwError>>;
+pub trait ChunkedSourceStream =
+    Stream<Item = Result<StreamChunk, RwError>> + Send + 'static;
+pub type BoxChunkedSourceStream = BoxStream<'static, Result<StreamChunk, RwError>>;
 pub type BoxTryStream<M> = BoxStream<'static, Result<M, RwError>>;
-
-/// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
-/// current design, one connector source can have multiple split reader. The keys are unique
-/// `split_id` and values are the latest offset for each split.
-#[derive(Clone, Debug, PartialEq)]
-pub struct StreamChunkWithState {
-    pub chunk: StreamChunk,
-    pub split_offset_mapping: Option<HashMap<SplitId, String>>,
-}
-
-/// The `split_offset_mapping` field is unused for the table source, so we implement `From` for it.
-impl From<StreamChunk> for StreamChunkWithState {
-    fn from(chunk: StreamChunk) -> Self {
-        Self {
-            chunk,
-            split_offset_mapping: None,
-        }
-    }
-}
 
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
 /// responsible for parsing, it is used to read messages from the outside and transform them into a
@@ -383,7 +364,7 @@ pub trait SplitReader: Sized + Send {
         columns: Option<Vec<Column>>,
     ) -> Result<Self>;
 
-    fn into_stream(self) -> BoxSourceWithStateStream;
+    fn into_stream(self) -> BoxChunkedSourceStream;
 }
 
 for_all_sources!(impl_connector_properties);

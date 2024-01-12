@@ -31,7 +31,7 @@ use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::cdc::{CdcProperties, CdcSourceType, CdcSourceTypeTrait, DebeziumCdcSplit};
 use crate::source::{
-    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, SourceContextRef,
+    into_chunk_stream, BoxChunkedSourceStream, Column, CommonSplitReader, SourceContextRef,
     SplitId, SplitMetaData, SplitReader,
 };
 
@@ -186,7 +186,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         }
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkedSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self, parser_config, source_context)

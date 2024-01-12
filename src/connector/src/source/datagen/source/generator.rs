@@ -24,7 +24,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
-use crate::source::{SourceMessage, SourceMeta, SplitId, StreamChunkWithState};
+use crate::source::{SourceMessage, SourceMeta, SplitId};
 
 pub enum FieldDesc {
     // field is invisible, generate None
@@ -158,7 +158,7 @@ impl DatagenEventGenerator {
         }
     }
 
-    #[try_stream(ok = StreamChunkWithState, error = RwError)]
+    #[try_stream(ok = StreamChunk, error = RwError)]
     pub async fn into_native_stream(mut self) {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         const MAX_ROWS_PER_YIELD: u64 = 1024;
@@ -207,7 +207,7 @@ impl DatagenEventGenerator {
                     let mapping = hashmap! {
                         self.split_id.clone() => (self.offset - 1).to_string()
                     };
-                    yield StreamChunkWithState {
+                    yield StreamChunk {
                         chunk,
                         split_offset_mapping: Some(mapping),
                     };

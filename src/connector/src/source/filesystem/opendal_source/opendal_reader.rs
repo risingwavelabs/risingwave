@@ -17,6 +17,7 @@ use async_trait::async_trait;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use opendal::Operator;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::error::RwError;
 use tokio::io::BufReader;
 use tokio_util::io::{ReaderStream, StreamReader};
@@ -27,8 +28,8 @@ use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
-    SplitReader, StreamChunkWithState,
+    BoxChunkedSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
+    SplitReader,
 };
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
@@ -62,13 +63,13 @@ impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
         Ok(opendal_reader)
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkedSourceStream {
         self.into_chunk_stream()
     }
 }
 
 impl<Src: OpendalSource> OpendalReader<Src> {
-    #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
+    #[try_stream(boxed, ok = StreamChunk, error = RwError)]
     async fn into_chunk_stream(self) {
         for split in self.splits {
             let actor_id = self.source_ctx.source_info.actor_id.to_string();

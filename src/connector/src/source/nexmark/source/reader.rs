@@ -34,8 +34,7 @@ use crate::source::nexmark::source::combined_event::{
 };
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitMetaData, SplitReader,
-    StreamChunkWithState,
+    BoxChunkedSourceStream, Column, SourceContextRef, SplitId, SplitMetaData, SplitReader,
 };
 
 #[derive(Debug)]
@@ -106,7 +105,7 @@ impl SplitReader for NexmarkSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkedSourceStream {
         let actor_id = self.source_ctx.source_info.actor_id.to_string();
         let source_id = self.source_ctx.source_info.source_id.to_string();
         let split_id = self.split_id.clone();
@@ -116,7 +115,7 @@ impl SplitReader for NexmarkSplitReader {
         const BUFFER_SIZE: usize = 4;
         spawn_data_generation_stream(
             self.into_native_stream().inspect_ok(
-                move |chunk_with_states: &StreamChunkWithState| {
+                move |chunk_with_states: &StreamChunk| {
                     metrics
                         .partition_input_count
                         .with_label_values(&[&actor_id, &source_id, &split_id])
@@ -134,7 +133,7 @@ impl SplitReader for NexmarkSplitReader {
 }
 
 impl NexmarkSplitReader {
-    #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
+    #[try_stream(boxed, ok = StreamChunk, error = RwError)]
     async fn into_native_stream(mut self) {
         let start_time = Instant::now();
         let start_offset = self.generator.global_offset();
@@ -173,7 +172,7 @@ impl NexmarkSplitReader {
             }
             let mapping = hashmap! {self.split_id.clone() => self.generator.offset().to_string()};
             let stream_chunk = StreamChunk::from_rows(&rows, &event_dtypes);
-            yield StreamChunkWithState {
+            yield StreamChunk {
                 chunk: stream_chunk,
                 split_offset_mapping: Some(mapping),
             };

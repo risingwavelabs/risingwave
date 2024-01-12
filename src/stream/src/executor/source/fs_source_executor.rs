@@ -24,8 +24,8 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::{
-    BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
-    SplitMetaData, StreamChunkWithState,
+    BoxChunkedSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
+    SplitMetaData, StreamChunk,
 };
 use risingwave_source::source_desc::{FsSourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
@@ -90,7 +90,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         &mut self,
         source_desc: &FsSourceDesc,
         state: ConnectorState,
-    ) -> StreamExecutorResult<BoxSourceWithStateStream> {
+    ) -> StreamExecutorResult<BoxChunkedSourceStream> {
         let column_ids = source_desc
             .columns
             .iter()
@@ -116,7 +116,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     async fn apply_split_change<const BIASED: bool>(
         &mut self,
         source_desc: &FsSourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
         if let Some(target_splits) = mapping.get(&self.actor_ctx.id).cloned() {
@@ -182,7 +182,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     async fn replace_stream_reader_with_target_state<const BIASED: bool>(
         &mut self,
         source_desc: &FsSourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
         tracing::info!(
@@ -340,7 +340,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         // Merge the chunks from source and the barriers into a single stream. We prioritize
         // barriers over source data chunks here.
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
-        let mut stream = StreamReaderWithPause::<true, StreamChunkWithState>::new(
+        let mut stream = StreamReaderWithPause::<true, StreamChunk>::new(
             barrier_stream,
             source_chunk_reader,
         );
@@ -408,7 +408,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     }
                 },
 
-                Either::Right(StreamChunkWithState {
+                Either::Right(StreamChunk {
                     chunk,
                     split_offset_mapping,
                 }) => {
