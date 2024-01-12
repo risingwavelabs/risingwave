@@ -301,6 +301,7 @@ impl Cluster {
             .build();
 
         // s3
+        // TODO(wff): switch to ObjectStore trait sim
         handle
             .create_node()
             .name("s3")

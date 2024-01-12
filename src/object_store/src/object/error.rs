@@ -24,6 +24,8 @@ use risingwave_common::error::BoxedError;
 use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
 
+use super::sim::SimError;
+
 #[derive(Error, Debug, thiserror_ext::Box, thiserror_ext::Construct)]
 #[thiserror_ext(newtype(name = ObjectError, backtrace, report_debug))]
 pub enum ObjectErrorInner {
@@ -103,6 +105,20 @@ impl From<RecvError> for ObjectError {
 
 impl From<ByteStreamError> for ObjectError {
     fn from(e: ByteStreamError) -> Self {
+        ObjectErrorInner::Internal(e.to_string()).into()
+    }
+}
+
+#[cfg(madsim)]
+impl From<SimError> for ObjectError {
+    fn from(e: SimError) -> Self {
+        ObjectErrorInner::Internal(e.to_string()).into()
+    }
+}
+
+#[cfg(madsim)]
+impl From<std::io::Error> for ObjectError {
+    fn from(e: std::io::Error) -> Self {
         ObjectErrorInner::Internal(e.to_string()).into()
     }
 }

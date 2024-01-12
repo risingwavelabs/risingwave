@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod sim;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,6 +38,8 @@ pub mod object_metrics;
 
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
+
+use self::sim::SimObjectStore;
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
 pub type ObjectStreamingUploader = MonitoredStreamingUploader;
@@ -138,6 +141,8 @@ pub enum ObjectStoreImpl {
     InMem(MonitoredObjectStore<InMemObjectStore>),
     Opendal(MonitoredObjectStore<OpendalObjectStore>),
     S3(MonitoredObjectStore<S3ObjectStore>),
+    #[cfg(madsim)]
+    Sim(MonitoredObjectStore<SimObjectStore>),
 }
 
 macro_rules! dispatch_async {
@@ -164,7 +169,12 @@ macro_rules! object_store_impl_method_body {
                 ObjectStoreImpl::S3(s3) => {
                     $dispatch_macro!(s3, $method_name, path $(, $args)*)
                 },
+                #[cfg(madsim)]
+                ObjectStoreImpl::Sim(in_mem) => {
+                    $dispatch_macro!(in_mem, $method_name, path $(, $args)*)
+                },
             }
+
         }
     };
 }
@@ -178,6 +188,7 @@ macro_rules! object_store_impl_method_body_slice {
     ($object_store:expr, $method_name:ident, $dispatch_macro:ident, $paths:expr $(, $args:expr)*) => {
         {
             let paths_rem = partition_object_store_paths($paths);
+
             match $object_store {
                 ObjectStoreImpl::InMem(in_mem) => {
                     $dispatch_macro!(in_mem, $method_name, &paths_rem $(, $args)*)
@@ -187,6 +198,10 @@ macro_rules! object_store_impl_method_body_slice {
                 },
                 ObjectStoreImpl::S3(s3) => {
                     $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*)
+                },
+                #[cfg(madsim)]
+                ObjectStoreImpl::Sim(in_mem) => {
+                    $dispatch_macro!(in_mem, $method_name, &paths_rem $(, $args)*)
                 },
             }
         }
@@ -246,6 +261,8 @@ impl ObjectStoreImpl {
             ObjectStoreImpl::InMem(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::Opendal(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::S3(store) => store.inner.get_object_prefix(obj_id),
+            #[cfg(madsim)]
+            ObjectStoreImpl::Sim(store) => store.inner.get_object_prefix(obj_id),
         }
     }
 
@@ -256,6 +273,8 @@ impl ObjectStoreImpl {
                 store.inner.op.info().native_capability().write_can_multi
             }
             ObjectStoreImpl::S3(_) => true,
+            #[cfg(madsim)]
+            ObjectStoreImpl::Sim(_) => true,
         }
     }
 
@@ -264,6 +283,8 @@ impl ObjectStoreImpl {
             ObjectStoreImpl::InMem(store) => store.recv_buffer_size(),
             ObjectStoreImpl::Opendal(store) => store.recv_buffer_size(),
             ObjectStoreImpl::S3(store) => store.recv_buffer_size(),
+            #[cfg(madsim)]
+            ObjectStoreImpl::Sim(store) => store.recv_buffer_size(),
         }
     }
 }
@@ -890,6 +911,11 @@ pub async fn build_remote_object_store(
             }
             ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored(metrics))
         }
+        #[cfg(madsim)]
+        sim if sim.starts_with("sim://") => {
+            ObjectStoreImpl::Sim(SimObjectStore::new(url).monitored(metrics))
+        }
+
         other => {
             unimplemented!(
                 "{} remote object store only supports s3, minio, gcs, oss, cos, azure blob, hdfs, disk, memory, and memory-shared.",

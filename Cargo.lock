@@ -9058,6 +9058,7 @@ dependencies = [
  "hyper-rustls",
  "hyper-tls",
  "itertools 0.12.0",
+ "madsim",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
  "opendal",
