@@ -1112,7 +1112,7 @@ pub mod default {
         }
 
         pub fn imm_merge_threshold() -> usize {
-            4
+            0 // disable
         }
 
         pub fn write_conflict_detection_enabled() -> bool {
@@ -1200,7 +1200,7 @@ pub mod default {
             3
         }
         pub fn mem_table_spill_threshold() -> usize {
-            4 << 20
+            0 // disable
         }
 
         pub fn compactor_fast_max_compact_delete_ratio() -> u32 {
