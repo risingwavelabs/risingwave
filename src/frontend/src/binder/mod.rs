@@ -120,7 +120,7 @@ pub struct Binder {
     udf_context: UdfContext,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct UdfContext {
     /// The mapping from `sql udf parameters` to `ast expressions`
     /// Note: The expressions are constructed during runtime, correspond to the actual users' input
