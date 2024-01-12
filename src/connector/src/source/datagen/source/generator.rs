@@ -15,12 +15,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use futures_async_stream::try_stream;
-use maplit::hashmap;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::error::RwError;
 use risingwave_common::field_generator::FieldGeneratorImpl;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
@@ -163,6 +162,7 @@ impl DatagenEventGenerator {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         const MAX_ROWS_PER_YIELD: u64 = 1024;
         let mut reach_end = false;
+        let dtypes_with_offset: Vec<_> = self.data_types.into_iter().chain([DataType::Varchar, DataType::Varchar]).collect();
         loop {
             // generate `partition_rows_per_second` rows per second
             interval.tick().await;
@@ -197,20 +197,20 @@ impl DatagenEventGenerator {
                         row.push(datum);
                     }
 
-                    rows.push((Op::Insert, OwnedRow::new(row)));
                     self.offset += 1;
+                    row.extend([
+                        Some(ScalarImpl::Utf8(self.split_id.as_ref().into())),
+                        Some(ScalarImpl::Utf8(
+                            self.offset.to_string().into_boxed_str(),
+                        )),
+                    ]);
+
+                    rows.push((Op::Insert, OwnedRow::new(row)));
                     rows_generated_this_second += 1;
                 }
 
                 if !rows.is_empty() {
-                    let chunk = StreamChunk::from_rows(&rows, &self.data_types);
-                    let mapping = hashmap! {
-                        self.split_id.clone() => (self.offset - 1).to_string()
-                    };
-                    yield StreamChunk {
-                        chunk,
-                        split_offset_mapping: Some(mapping),
-                    };
+                    yield StreamChunk::from_rows(&rows, &dtypes_with_offset);
                 }
 
                 if reach_end {

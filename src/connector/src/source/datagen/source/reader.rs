@@ -154,11 +154,11 @@ impl SplitReader for DatagenSplitReader {
                 spawn_data_generation_stream(
                     self.generator
                         .into_native_stream()
-                        .inspect_ok(move |chunk_with_states| {
+                        .inspect_ok(move |stream_chunk| {
                             metrics
                                 .partition_input_count
                                 .with_label_values(&[&actor_id, &source_id, &split_id])
-                                .inc_by(chunk_with_states.chunk.cardinality() as u64);
+                                .inc_by(stream_chunk.cardinality() as u64);
                         }),
                     BUFFER_SIZE,
                 )
@@ -397,7 +397,7 @@ mod tests {
         .into_stream();
 
         let stream_chunk = reader.next().await.unwrap().unwrap();
-        let (op, row) = stream_chunk.chunk.rows().next().unwrap();
+        let (op, row) = stream_chunk.rows().next().unwrap();
         assert_eq!(op, Op::Insert);
         assert_eq!(row.datum_at(0), Some(ScalarImpl::Int32(533)).to_datum_ref(),);
         assert_eq!(
