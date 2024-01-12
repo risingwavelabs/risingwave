@@ -22,7 +22,7 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{Array, DataChunk, PrimitiveArray};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
@@ -298,6 +298,8 @@ pub fn get_vnode_from_row(row: impl Row, index: usize, vnodes: &Bitmap) -> Virtu
 
 impl TableDistribution {
     /// Get vnode values with `indices` on the given `chunk`.
+    ///
+    /// Vnode of invisible rows will be included. Only the vnode of visible row check if it's accessible
     pub fn compute_chunk_vnode(&self, chunk: &DataChunk, pk_indices: &[usize]) -> Vec<VirtualNode> {
         match self {
             TableDistribution::Singleton => {
@@ -327,10 +329,23 @@ impl TableDistribution {
             TableDistribution::VnodeColumnIndex {
                 vnode_col_idx_in_pk,
                 vnodes,
-            } => chunk
-                .rows()
-                .map(|row| get_vnode_from_row(row, pk_indices[*vnode_col_idx_in_pk], vnodes))
-                .collect(),
+            } => {
+                let array: &PrimitiveArray<i16> =
+                    chunk.columns()[pk_indices[*vnode_col_idx_in_pk]].as_int16();
+                array
+                    .raw_iter()
+                    .zip_eq_fast(array.null_bitmap().iter())
+                    .zip_eq_fast(chunk.visibility().iter())
+                    .map(|((vnode, exist), vis)| {
+                        let vnode = VirtualNode::from_scalar(vnode);
+                        if vis {
+                            assert!(exist);
+                            check_vnode_is_set(vnode, vnodes);
+                        }
+                        vnode
+                    })
+                    .collect_vec()
+            }
         }
     }
 }
