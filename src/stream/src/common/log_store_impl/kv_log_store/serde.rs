@@ -47,7 +47,7 @@ use risingwave_storage::error::StorageError;
 use risingwave_storage::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::StateStoreReadIterStream;
-use risingwave_storage::table::{compute_vnode, Distribution};
+use risingwave_storage::table::{compute_vnode, TableDistribution, SINGLETON_VNODE};
 
 use crate::common::log_store_impl::kv_log_store::{
     KvLogStoreReadMetrics, ReaderTruncationOffsetType, RowOpCodeType, SeqIdType,
@@ -113,7 +113,7 @@ pub(crate) struct LogStoreRowSerde {
     /// Only the rows whose vnode of the primary key is in this set will be visible to the
     /// executor. The table will also check whether the written rows
     /// conform to this partition.
-    vnodes: Arc<Bitmap>,
+    vnodes: Option<Arc<Bitmap>>,
 
     /// The schema of payload
     payload_schema: Vec<DataType>,
@@ -153,12 +153,6 @@ impl LogStoreRowSerde {
 
         let row_serde = BasicSerde::new(input_value_indices.into(), table_columns.into());
 
-        let vnodes = match vnodes {
-            Some(vnodes) => vnodes,
-
-            None => Distribution::fallback_vnodes(),
-        };
-
         // epoch and seq_id. The seq_id of barrier is set null, and therefore the second order type
         // is nulls last
         let pk_serde = OrderedRowSerde::new(
@@ -179,12 +173,23 @@ impl LogStoreRowSerde {
         }
     }
 
-    pub(crate) fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) {
-        self.vnodes = vnodes;
+    pub(crate) fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
+        match &mut self.vnodes {
+            Some(vnodes) => {
+                *vnodes = new_vnodes;
+            }
+            None => {
+                if new_vnodes != TableDistribution::singleton_vnode_bitmap() {
+                    warn!(?new_vnodes, "call update vnode on singletone log store");
+                }
+            }
+        }
     }
 
     pub(crate) fn vnodes(&self) -> &Arc<Bitmap> {
-        &self.vnodes
+        self.vnodes
+            .as_ref()
+            .unwrap_or_else(|| TableDistribution::singleton_vnode_bitmap_ref())
     }
 
     pub(crate) fn encode_epoch(epoch: u64) -> i64 {
@@ -197,6 +202,13 @@ impl LogStoreRowSerde {
 }
 
 impl LogStoreRowSerde {
+    fn compute_vnode(&self, row: impl Row) -> VirtualNode {
+        match &self.vnodes {
+            None => SINGLETON_VNODE,
+            Some(vnodes) => compute_vnode(row, &self.dist_key_indices, vnodes),
+        }
+    }
+
     pub(crate) fn serialize_data_row(
         &self,
         epoch: u64,
@@ -218,7 +230,7 @@ impl LogStoreRowSerde {
             .clone()
             .chain([Some(ScalarImpl::Int16(op_code))])
             .chain(row);
-        let vnode = compute_vnode(&extended_row, &self.dist_key_indices, &self.vnodes);
+        let vnode = self.compute_vnode(&extended_row);
         let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serde, vnode);
         let value_bytes = self.row_serde.serialize(extended_row).into();
         (vnode, key_bytes, value_bytes)

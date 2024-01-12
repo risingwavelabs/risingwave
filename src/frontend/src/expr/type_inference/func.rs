@@ -16,6 +16,7 @@ use itertools::Itertools as _;
 use num_integer::Integer as _;
 use risingwave_common::bail_no_function;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::AggKind;
@@ -578,7 +579,7 @@ fn infer_type_for_special(
         }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);
-            Ok(Some(DataType::Int16))
+            Ok(Some(VirtualNode::vnode_data_type()))
         }
         ExprType::Greatest | ExprType::Least => {
             ensure_arity!("greatest/least", 1 <= | inputs |);
