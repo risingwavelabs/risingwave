@@ -23,9 +23,6 @@ mod visibility_mode;
 use chrono_tz::Tz;
 pub use over_window::OverWindowCachePolicy;
 pub use query_mode::QueryMode;
-use risingwave_common::{
-    SERVER_ENCODING, PG_VERSION, SERVER_VERSION_NUM, STANDARD_CONFORMING_STRINGS,
-};
 use risingwave_common_proc_macro::SessionConfig;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 use thiserror::Error;
@@ -34,6 +31,7 @@ use self::non_zero64::ConfigNonZeroU64;
 use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 pub use crate::session_config::visibility_mode::VisibilityMode;
+use crate::{PG_VERSION, SERVER_ENCODING, SERVER_VERSION_NUM, STANDARD_CONFORMING_STRINGS};
 
 pub const SESSION_CONFIG_LIST_SEP: &str = ", ";
 
@@ -190,7 +188,7 @@ pub struct ConfigMap {
     client_min_messages: String,
 
     /// see <https://www.postgresql.org/docs/15/runtime-config-client.html#GUC-CLIENT-ENCODING>
-    #[parameter(default = SERVER_ENCODING , check_hook = check_client_encoding)]
+    #[parameter(default = SERVER_ENCODING, check_hook = check_client_encoding)]
     client_encoding: String,
 
     /// Enable decoupling sink and internal streaming graph or not
