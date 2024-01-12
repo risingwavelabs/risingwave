@@ -40,6 +40,7 @@ pub mod object_metrics;
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
 
+#[cfg(madsim)]
 use self::sim::SimObjectStore;
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
