@@ -21,7 +21,6 @@ pub mod source;
 pub mod split;
 
 pub use enumerator::*;
-use serde_with::{serde_as, DisplayFromStr};
 pub use source::*;
 pub use split::*;
 use with_options::WithOptions;
@@ -30,13 +29,8 @@ use crate::source::SourceProperties;
 
 pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
 
-#[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PubsubProperties {
-    #[serde_as(as = "DisplayFromStr")]
-    #[serde(rename = "pubsub.split_count")]
-    pub split_count: u32,
-
     /// pubsub subscription to consume messages from
     /// The subscription should be configured with the `retain-on-ack` property to enable
     /// message recovery within risingwave.
@@ -127,7 +121,6 @@ mod tests {
         let default_properties = PubsubProperties {
             credentials: None,
             emulator_host: None,
-            split_count: 1,
             start_offset: None,
             start_snapshot: None,
             subscription: String::from("test-subscription"),
