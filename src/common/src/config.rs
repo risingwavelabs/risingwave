@@ -899,6 +899,10 @@ pub struct SystemConfig {
     /// Whether to pause all data sources on next bootstrap.
     #[serde(default = "default::system::pause_on_next_bootstrap")]
     pub pause_on_next_bootstrap: Option<bool>,
+
+    /// Whether to enable distributed tracing.
+    #[serde(default = "default::system::enable_tracing")]
+    pub enable_tracing: Option<bool>,
 }
 
 /// The subsections `[storage.object_store]`.

@@ -56,7 +56,7 @@ macro_rules! for_all_params {
             { backup_storage_directory, String, Some("backup".to_string()), true },
             { max_concurrent_creating_streaming_jobs, u32, Some(1_u32), true },
             { pause_on_next_bootstrap, bool, Some(false), true },
-            { enable_tracing, bool, Some(true), true },
+            { enable_tracing, bool, Some(false), true },
         }
     };
 }
