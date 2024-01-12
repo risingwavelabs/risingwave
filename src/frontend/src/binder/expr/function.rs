@@ -294,13 +294,6 @@ impl Binder {
                     .into());
                 }
             } else {
-                // Note that `language` may be empty for external udf
-                if !func.language.is_empty() {
-                    debug_assert!(
-                        func.language == "python" || func.language == "java",
-                        "only `python` and `java` are currently supported for general udf"
-                    );
-                }
                 match &func.kind {
                     Scalar { .. } => {
                         return Ok(UserDefinedFunction::new(func.clone(), inputs).into())
