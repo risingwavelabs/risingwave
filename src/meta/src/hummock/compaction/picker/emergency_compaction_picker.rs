@@ -21,6 +21,7 @@ use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LevelCompactionPicker,
     LocalPickerStatistic, TierCompactionPicker,
 };
+use crate::hummock::compaction::picker::intra_compaction_picker::WholeLevelCompactionPicker;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct EmergencyCompactionPicker {
@@ -52,10 +53,25 @@ impl EmergencyCompactionPicker {
         let no_overlap_count = l0
             .sub_levels
             .iter()
-            .filter(|level| level.level_type == LevelType::Nonoverlapping as i32)
+            .filter(|level| {
+                level.level_type == LevelType::Nonoverlapping as i32
+                    && level.vnode_partition_count == 0
+            })
             .count();
-        if no_overlap_count > overlapping_count {
-            let mut base_level_compaction_picker = LevelCompactionPicker::new_with_validator(
+        let partitioned_count = l0
+            .sub_levels
+            .iter()
+            .filter(|level| {
+                level.level_type == LevelType::Nonoverlapping as i32
+                    && level.vnode_partition_count > 0
+            })
+            .count();
+        if (self.config.split_weight_by_vnode == 0 && no_overlap_count > overlapping_count)
+            || (self.config.split_weight_by_vnode > 0
+                && partitioned_count > no_overlap_count
+                && partitioned_count > overlapping_count)
+        {
+            let base_level_compaction_picker = LevelCompactionPicker::new_with_validator(
                 self.target_level,
                 self.config.clone(),
                 unused_validator.clone(),
@@ -64,6 +80,22 @@ impl EmergencyCompactionPicker {
             if let Some(ret) =
                 base_level_compaction_picker.pick_compaction(levels, level_handlers, stats)
             {
+                return Some(ret);
+            }
+        }
+        if self.config.split_weight_by_vnode > 0
+            && no_overlap_count > partitioned_count
+            && no_overlap_count > overlapping_count
+        {
+            let mut intral_level_compaction_picker =
+                WholeLevelCompactionPicker::new(self.config.clone(), unused_validator.clone());
+
+            if let Some(ret) = intral_level_compaction_picker.pick_whole_level(
+                levels.l0.as_ref().unwrap(),
+                &level_handlers[0],
+                self.config.split_weight_by_vnode,
+                stats,
+            ) {
                 return Some(ret);
             }
         }
