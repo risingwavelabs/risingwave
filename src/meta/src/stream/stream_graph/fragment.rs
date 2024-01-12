@@ -35,7 +35,7 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, FragmentTypeFlag, StreamActor,
-    StreamFragmentGraph as StreamFragmentGraphProto,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanType,
 };
 
 use crate::manager::{MetaSrvEnv, StreamingJob};
@@ -193,6 +193,28 @@ impl BuildingFragment {
         );
 
         table_columns
+    }
+
+    pub fn has_arrangement_backfill(&self) -> bool {
+        fn has_arrangement_backfill_node(stream_node: &StreamNode) -> bool {
+            let is_backfill = if let Some(node) = &stream_node.node_body
+                && let Some(node) = node.as_stream_scan()
+            {
+                node.stream_scan_type == StreamScanType::ArrangementBackfill as i32
+            } else {
+                false
+            };
+            is_backfill
+                || stream_node
+                    .get_input()
+                    .iter()
+                    .any(has_arrangement_backfill_node)
+        }
+        let stream_node = match self.inner.node.as_ref() {
+            Some(node) => node,
+            _ => return false,
+        };
+        has_arrangement_backfill_node(stream_node)
     }
 }
 
@@ -590,6 +612,7 @@ impl CompleteStreamFragmentGraph {
             // Build the extra edges between the upstream `Materialize` and the downstream `StreamScan`
             // of the new materialized view.
             for (&id, fragment) in &mut graph.fragments {
+                let uses_arrangement_backfill = fragment.has_arrangement_backfill();
                 for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
                     let (up_fragment_id, edge) = match table_job_type.as_ref() {
                         Some(TableJobType::SharedCdcSource) => {
@@ -636,7 +659,7 @@ impl CompleteStreamFragmentGraph {
                             let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
 
                             // Resolve the required output columns from the upstream materialized view.
-                            let output_indices = {
+                            let (dist_key_indices, output_indices) = {
                                 let nodes = mview_fragment.actors[0].get_nodes().unwrap();
                                 let mview_node =
                                     nodes.get_node_body().unwrap().as_materialize().unwrap();
@@ -647,8 +670,16 @@ impl CompleteStreamFragmentGraph {
                                     .iter()
                                     .map(|c| c.column_desc.as_ref().unwrap().column_id)
                                     .collect_vec();
+                                let dist_key_indices: Vec<_> = mview_node
+                                    .table
+                                    .as_ref()
+                                    .unwrap()
+                                    .distribution_key
+                                    .iter()
+                                    .map(|i| *i as u32)
+                                    .collect();
 
-                                output_columns
+                                let output_indices = output_columns
                                     .iter()
                                     .map(|c| {
                                         all_column_ids
@@ -657,21 +688,38 @@ impl CompleteStreamFragmentGraph {
                                             .map(|i| i as u32)
                                     })
                                     .collect::<Option<Vec<_>>>()
-                                    .context("column not found in the upstream materialized view")?
+                                    .context(
+                                        "column not found in the upstream materialized view",
+                                    )?;
+                                (dist_key_indices, output_indices)
+                            };
+                            let dispatch_strategy = if uses_arrangement_backfill {
+                                if !dist_key_indices.is_empty() {
+                                    DispatchStrategy {
+                                        r#type: DispatcherType::Hash as _,
+                                        dist_key_indices,
+                                        output_indices,
+                                    }
+                                } else {
+                                    DispatchStrategy {
+                                        r#type: DispatcherType::Simple as _,
+                                        dist_key_indices: vec![], // empty for Simple
+                                        output_indices,
+                                    }
+                                }
+                            } else {
+                                DispatchStrategy {
+                                    r#type: DispatcherType::NoShuffle as _,
+                                    dist_key_indices: vec![], // not used for `NoShuffle`
+                                    output_indices,
+                                }
                             };
                             let edge = StreamFragmentEdge {
                                 id: EdgeId::UpstreamExternal {
                                     upstream_table_id,
                                     downstream_fragment_id: id,
                                 },
-                                // We always use `NoShuffle` for the exchange between the upstream
-                                // `Materialize` and the downstream `StreamScan` of the
-                                // new materialized view.
-                                dispatch_strategy: DispatchStrategy {
-                                    r#type: DispatcherType::NoShuffle as _,
-                                    dist_key_indices: vec![], // not used for `NoShuffle`
-                                    output_indices,
-                                },
+                                dispatch_strategy,
                             };
 
                             (mview_id, edge)
