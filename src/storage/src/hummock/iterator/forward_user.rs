@@ -219,8 +219,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             }
         };
 
-        self.next().await?;
-        Ok(())
+        self.next().await
     }
 
     /// Resets the iterating position to the first position where the key >= provided key.
@@ -259,8 +258,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
         self.delete_range_iter.seek(full_key.user_key).await?;
 
-        self.next().await?;
-        Ok(())
+        self.next().await
     }
 
     /// Indicates whether the iterator can be used.
