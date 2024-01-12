@@ -162,7 +162,11 @@ impl DatagenEventGenerator {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         const MAX_ROWS_PER_YIELD: u64 = 1024;
         let mut reach_end = false;
-        let dtypes_with_offset: Vec<_> = self.data_types.into_iter().chain([DataType::Varchar, DataType::Varchar]).collect();
+        let dtypes_with_offset: Vec<_> = self
+            .data_types
+            .into_iter()
+            .chain([DataType::Varchar, DataType::Varchar])
+            .collect();
         loop {
             // generate `partition_rows_per_second` rows per second
             interval.tick().await;
@@ -200,9 +204,7 @@ impl DatagenEventGenerator {
                     self.offset += 1;
                     row.extend([
                         Some(ScalarImpl::Utf8(self.split_id.as_ref().into())),
-                        Some(ScalarImpl::Utf8(
-                            self.offset.to_string().into_boxed_str(),
-                        )),
+                        Some(ScalarImpl::Utf8(self.offset.to_string().into_boxed_str())),
                     ]);
 
                     rows.push((Op::Insert, OwnedRow::new(row)));

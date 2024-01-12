@@ -25,7 +25,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::error::RwError;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{ScalarImpl, DataType};
+use risingwave_common::types::{DataType, ScalarImpl};
 use tokio::time::Instant;
 
 use crate::parser::ParserConfig;
