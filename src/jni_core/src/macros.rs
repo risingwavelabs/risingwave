@@ -503,6 +503,8 @@ macro_rules! for_all_plain_native_methods {
 
                 public static native boolean sendCdcSourceMsgToChannel(long channelPtr, byte[] msg);
 
+                public static native boolean sendCdcSourceErrorToChannel(long channelPtr, String errorMsg);
+
                 public static native com.risingwave.java.binding.JniSinkWriterStreamRequest
                     recvSinkWriterRequestFromChannel(long channelPtr);
 
