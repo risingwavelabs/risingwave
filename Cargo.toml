@@ -59,7 +59,7 @@ members = [
   "src/utils/workspace-config",
   "src/workspace-hack",
 ]
-exclude = ["lints"]
+exclude = ["e2e_test/udf/wasm", "lints"]
 resolver = "2"
 
 [workspace.package]
@@ -132,6 +132,7 @@ arrow-flight = "49"
 arrow-select = "49"
 arrow-ord = "49"
 arrow-row = "49"
+arrow-udf-wasm = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "f9a9e0d" }
 arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
 arrow-buffer-deltalake = { package = "arrow-buffer", version = "48.0.1" }
 arrow-cast-deltalake = { package = "arrow-cast", version = "48.0.1" }
