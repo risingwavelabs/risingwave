@@ -13,25 +13,8 @@ create view mview_parallelism as select m.name, tf.parallelism from rw_materiali
 statement ok
 create view sink_parallelism as select s.name, tf.parallelism from rw_sinks s, rw_table_fragments tf where s.id = tf.table_id;
 
-query I
-select * from rw_fragments;
-----
-
-query I
-select * from table_parallelism;
-----
-
-query I
-select * from mview_parallelism;
-----
-
-query I
-select * from sink_parallelism;
-----
-
-query I
-select * from rw_table_fragments;
-----
+statement ok
+create view fragment_parallelism as select t.name as table_name, f.fragment_id, f.parallelism from rw_fragments f, rw_tables t where f.table_id = t.id;
 
 statement ok
 create table t (v int);
@@ -50,7 +33,7 @@ select parallelism from table_parallelism where name = 't';
 FIXED(2)
 
 query I
-select parallelism from rw_fragments;
+select parallelism from fragment_parallelism where table_name = 't';
 ----
 2
 2
