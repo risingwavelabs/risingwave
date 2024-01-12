@@ -51,7 +51,7 @@ impl LocalSystemParamsManager {
             async move {
                 let handler = CommonHandler::new(initial_params);
 
-                while let Ok(_) = rx.changed().await {
+                while rx.changed().await.is_ok() {
                     let new_params = (**rx.borrow_and_update().load()).clone();
                     handler.handle_change(new_params);
                 }
