@@ -285,7 +285,10 @@ impl<S: StateStore> TableInner<S> {
         let pk = row.project(&self.pk_indices);
         let jk = row.project(&self.join_key_indices);
         format!(
-            "join key: {jk}, pk: {pk}, row: {row:?}, state_table_id: {}",
+            "join key: {}, pk: {}, row: {}, state_table_id: {}",
+            jk.display(),
+            pk.display(),
+            row.display(),
             self.table.table_id()
         )
     }
