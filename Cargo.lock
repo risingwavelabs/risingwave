@@ -5051,7 +5051,7 @@ dependencies = [
 [[package]]
 name = "icelake"
 version = "0.0.10"
-source = "git+https://github.com/icelake-io/icelake?rev=cc27aa20d34b1d252bd7b8aaadee64c34140e687#cc27aa20d34b1d252bd7b8aaadee64c34140e687"
+source = "git+https://github.com/icelake-io/icelake?rev=b4f4ca3c6d29092bd331925ead0bcceaa38bdd57#b4f4ca3c6d29092bd331925ead0bcceaa38bdd57"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
@@ -9113,6 +9113,7 @@ version = "1.5.0-alpha"
 dependencies = [
  "aho-corasick",
  "anyhow",
+ "arrow-schema 49.0.0",
  "async-trait",
  "auto_enums",
  "chrono",

@@ -19,7 +19,10 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use icelake::types::{create_transform_function, BoxedTransformFunction, Transform};
+use arrow_schema::DataType as ArrowDataType;
+use icelake::types::{
+    create_transform_function, Any as IcelakeDataType, BoxedTransformFunction, Transform,
+};
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::ensure;
 use risingwave_common::row::OwnedRow;
@@ -66,7 +69,7 @@ impl risingwave_expr::expr::Expression for IcebergTransform {
     }
 }
 
-#[build_function("iceberg_transform(varchar, any) -> any")]
+#[build_function("iceberg_transform(varchar, any) -> any", type_infer = "panic")]
 fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
     let transform_type = {
         let datum = children[0].eval_const()?.unwrap();
@@ -77,19 +80,48 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
         })?
     };
 
-    // Check type
-    match &transform_type {
-        Transform::Bucket(_) => IcebergTransform::check_bucket(&return_type, &children)?,
-        Transform::Truncate(_) => IcebergTransform::check_truncate(&return_type, &children)?,
-        Transform::Year | Transform::Month | Transform::Day | Transform::Hour => {
-            IcebergTransform::check_time(&return_type, &children)?
+    // For Identity and Void transform, we will use `InputRef` and const null in frontend,
+    // so it should not reach here.
+    assert!(!matches!(
+        transform_type,
+        Transform::Identity | Transform::Void
+    ));
+
+    // Check type:
+    // 1. input type can be transform successfully
+    // 2. return type is the same as the result type
+    let input_type = IcelakeDataType::try_from(ArrowDataType::try_from(children[1].return_type())?)
+        .map_err(|err| ExprError::InvalidParam {
+            name: "input type in iceberg_transform",
+            reason: format!("Failed to convert input type to icelake type, got error: {err}",)
+                .into(),
+        })?;
+    let expect_res_type = transform_type.result_type(&input_type).map_err(
+        |err| ExprError::InvalidParam {
+            name: "input type in iceberg_transform",
+            reason: format!(
+                "Failed to get result type for transform type {:?} and input type {:?}, got error: {}",
+                transform_type, input_type, err
+            )
+            .into()
+        })?;
+    let actual_res_type = IcelakeDataType::try_from(ArrowDataType::try_from(return_type.clone())?)
+        .map_err(|err| ExprError::InvalidParam {
+            name: "return type in iceberg_transform",
+            reason: format!("Failed to convert return type to icelake type, got error: {err}",)
+                .into(),
+        })?;
+    ensure!(
+        expect_res_type == actual_res_type,
+        ExprError::InvalidParam {
+            name: "return type in iceberg_transform",
+            reason: format!(
+                "Expect return type {:?} but got {:?}",
+                expect_res_type, actual_res_type
+            )
+            .into()
         }
-        Transform::Identity | Transform::Void => {
-            return Err(ExprError::Internal(anyhow!(
-                "identity or void type should not be used in iceberg_transform"
-            )))
-        }
-    }
+    );
 
     Ok(Box::new(IcebergTransform {
         child: children.remove(1),
@@ -97,43 +129,6 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
             .map_err(|err| ExprError::Internal(err.into()))?,
         return_type,
     }))
-}
-
-impl IcebergTransform {
-    fn check_bucket(return_type: &DataType, children: &Vec<BoxedExpression>) -> Result<()> {
-        ensure!(matches!(
-            children[1].return_type(),
-            DataType::Int32
-                | DataType::Int64
-                | DataType::Decimal
-                | DataType::Date
-                | DataType::Time
-                | DataType::Timestamp
-                | DataType::Timestamptz
-                | DataType::Varchar
-                | DataType::Bytea
-        ));
-        ensure!(*return_type == DataType::Int32);
-        Ok(())
-    }
-
-    fn check_truncate(return_type: &DataType, children: &Vec<BoxedExpression>) -> Result<()> {
-        ensure!(matches!(
-            children[1].return_type(),
-            DataType::Int32 | DataType::Int64 | DataType::Decimal | DataType::Varchar
-        ));
-        ensure!(*return_type == children[1].return_type());
-        Ok(())
-    }
-
-    fn check_time(return_type: &DataType, children: &Vec<BoxedExpression>) -> Result<()> {
-        ensure!(matches!(
-            children[1].return_type(),
-            DataType::Date | DataType::Timestamp | DataType::Timestamptz
-        ));
-        ensure!(*return_type == DataType::Int32);
-        Ok(())
-    }
 }
 
 #[cfg(test)]

@@ -18,6 +18,7 @@ normal = ["workspace-hack", "ctor"]
 [dependencies]
 aho-corasick = "1"
 anyhow = "1"
+arrow-schema = { workspace = true }
 async-trait = "0.1"
 auto_enums = "0.8"
 chrono = { version = "0.4", default-features = false, features = [
