@@ -75,6 +75,8 @@ mod recovery;
 mod schedule;
 mod trace;
 
+use thiserror_ext::AsReport;
+
 pub use self::command::{Command, Reschedule};
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
@@ -965,7 +967,7 @@ impl GlobalBarrierManager {
             // back to frontend
             fail_point!("inject_barrier_err_success");
             let fail_node = checkpoint_control.barrier_failed();
-            tracing::warn!("Failed to complete epoch {}: {}", prev_epoch, err);
+            tracing::warn!(prev_epoch, error = %err.as_report(), "failed to complete epoch");
             self.failure_recovery(err, fail_node, state, checkpoint_control)
                 .await;
             return;
@@ -1232,9 +1234,6 @@ fn merge_compute_node_rpc_error(
     errors: impl IntoIterator<Item = (WorkerId, RpcError)>,
 ) -> MetaError {
     use std::fmt::Write;
-
-    use thiserror_ext::AsReport;
-
     let concat: String = errors
         .into_iter()
         .fold(format!("{message}:"), |mut s, (w, e)| {

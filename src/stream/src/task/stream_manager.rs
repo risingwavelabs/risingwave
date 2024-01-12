@@ -910,13 +910,7 @@ pub fn try_find_root_cause(
             _ => 3000,
         }
     };
-    let cmp_stream_error = |a: &StreamError, b: &StreamError| -> core::cmp::Ordering {
-        stream_error_score(a).cmp(&stream_error_score(b))
-    };
-    actor_errors
-        .into_iter()
-        .sorted_by(cmp_stream_error)
-        .next_back()
+    actor_errors.into_iter().max_by_key(stream_error_score)
 }
 
 #[cfg(test)]
