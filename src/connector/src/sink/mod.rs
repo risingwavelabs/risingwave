@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,13 +13,14 @@
 // limitations under the License.
 
 pub mod big_query;
-pub mod blackhole;
 pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
+pub mod deltalake;
 pub mod doris;
 pub mod doris_starrocks_connector;
+pub mod elasticsearch;
 pub mod encoder;
 pub mod formatter;
 pub mod iceberg;
@@ -32,12 +33,15 @@ pub mod redis;
 pub mod remote;
 pub mod starrocks;
 pub mod test_sink;
+pub mod trivial;
 pub mod utils;
 pub mod writer;
 
 use std::collections::HashMap;
+use std::future::Future;
 
 use ::clickhouse::error::Error as ClickHouseError;
+use ::deltalake::DeltaTableError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -57,7 +61,7 @@ pub use tracing;
 use self::catalog::{SinkFormatDesc, SinkType};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
-use crate::sink::log_store::LogReader;
+use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
 use crate::ConnectorParams;
 
@@ -69,20 +73,21 @@ macro_rules! for_all_sinks {
                 { Redis, $crate::sink::redis::RedisSink },
                 { Kafka, $crate::sink::kafka::KafkaSink },
                 { Pulsar, $crate::sink::pulsar::PulsarSink },
-                { BlackHole, $crate::sink::blackhole::BlackHoleSink },
+                { BlackHole, $crate::sink::trivial::BlackHoleSink },
                 { Kinesis, $crate::sink::kinesis::KinesisSink },
                 { ClickHouse, $crate::sink::clickhouse::ClickHouseSink },
                 { Iceberg, $crate::sink::iceberg::IcebergSink },
                 { Nats, $crate::sink::nats::NatsSink },
-                { RemoteIceberg, $crate::sink::iceberg::RemoteIcebergSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
-                { DeltaLake, $crate::sink::remote::DeltaLakeSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
+                { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
+                { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
-                { Test, $crate::sink::test_sink::TestSink }
+                { Test, $crate::sink::test_sink::TestSink },
+                { Table, $crate::sink::trivial::TableSink }
             }
             $(,$arg)*
         }
@@ -128,6 +133,7 @@ macro_rules! match_sink_name_str {
 
 pub const CONNECTOR_TYPE_KEY: &str = "connector";
 pub const SINK_TYPE_OPTION: &str = "type";
+pub const SINK_WITHOUT_BACKFILL: &str = "snapshot";
 pub const SINK_TYPE_APPEND_ONLY: &str = "append-only";
 pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
@@ -228,8 +234,11 @@ pub struct SinkMetrics {
     pub log_store_latest_read_epoch: LabelGuardedIntGauge<3>,
     pub log_store_read_rows: LabelGuardedIntCounter<3>,
 
-    pub iceberg_file_appender_write_qps: LabelGuardedIntCounter<2>,
-    pub iceberg_file_appender_write_latency: LabelGuardedHistogram<2>,
+    pub iceberg_write_qps: LabelGuardedIntCounter<2>,
+    pub iceberg_write_latency: LabelGuardedHistogram<2>,
+    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<2>,
+    pub iceberg_position_delete_cache_num: LabelGuardedIntGauge<2>,
+    pub iceberg_partition_num: LabelGuardedIntGauge<2>,
 }
 
 impl SinkMetrics {
@@ -242,8 +251,11 @@ impl SinkMetrics {
             log_store_latest_read_epoch: LabelGuardedIntGauge::test_int_gauge(),
             log_store_write_rows: LabelGuardedIntCounter::test_int_counter(),
             log_store_read_rows: LabelGuardedIntCounter::test_int_counter(),
-            iceberg_file_appender_write_qps: LabelGuardedIntCounter::test_int_counter(),
-            iceberg_file_appender_write_latency: LabelGuardedHistogram::test_histogram(),
+            iceberg_write_qps: LabelGuardedIntCounter::test_int_counter(),
+            iceberg_write_latency: LabelGuardedHistogram::test_histogram(),
+            iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge::test_int_gauge(),
+            iceberg_position_delete_cache_num: LabelGuardedIntGauge::test_int_gauge(),
+            iceberg_partition_num: LabelGuardedIntGauge::test_int_gauge(),
         }
     }
 }
@@ -286,9 +298,40 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     }
 }
 
+pub trait SinkLogReader: Send + Sized + 'static {
+    /// Emit the next item.
+    ///
+    /// The implementation should ensure that the future is cancellation safe.
+    fn next_item(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + '_;
+
+    /// Mark that all items emitted so far have been consumed and it is safe to truncate the log
+    /// from the current offset.
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+}
+
+impl<R: LogReader> SinkLogReader for R {
+    fn next_item(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + '_ {
+        <Self as LogReader>::next_item(self)
+    }
+
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        <Self as LogReader>::truncate(self, offset)
+    }
+}
+
 #[async_trait]
 pub trait LogSinker: 'static {
-    async fn consume_log_and_sink(self, log_reader: impl LogReader) -> Result<()>;
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()>;
 }
 
 #[async_trait]
@@ -328,6 +371,7 @@ impl SinkImpl {
             .properties
             .get(CONNECTOR_TYPE_KEY)
             .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)))?;
+
         match_sink_name_str!(
             sink_type.to_lowercase().as_str(),
             SinkType,
@@ -339,6 +383,10 @@ impl SinkImpl {
                 )))
             }
         )
+    }
+
+    pub fn is_sink_into_table(&self) -> bool {
+        matches!(self, SinkImpl::Table(_))
     }
 }
 
@@ -426,6 +474,12 @@ pub enum SinkError {
     ),
     #[error("Doris error: {0}")]
     Doris(String),
+    #[error("DeltaLake error: {0}")]
+    DeltaLake(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
     #[error("Pulsar error: {0}")]
@@ -463,6 +517,12 @@ impl From<RpcError> for SinkError {
 impl From<ClickHouseError> for SinkError {
     fn from(value: ClickHouseError) -> Self {
         SinkError::ClickHouse(format!("{}", value))
+    }
+}
+
+impl From<DeltaTableError> for SinkError {
+    fn from(value: DeltaTableError) -> Self {
+        SinkError::DeltaLake(anyhow_error!("{}", value))
     }
 }
 

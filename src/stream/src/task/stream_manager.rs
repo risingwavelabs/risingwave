@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,14 +30,15 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::config::{MetricLevel, StreamingConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
-use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_storage::monitor::HummockTraceFutureExt;
+use risingwave_storage::store::SyncResult;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use thiserror_ext::AsReport;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
@@ -100,7 +101,6 @@ pub struct LocalStreamManager {
     // Maintain a copy of the core to reduce async locks
     state_store: StateStoreImpl,
     context: Arc<SharedContext>,
-    streaming_metrics: Arc<StreamingMetrics>,
 
     total_mem_val: Arc<TrAdder<i64>>,
 }
@@ -173,7 +173,6 @@ impl LocalStreamManager {
         Self {
             state_store: core.state_store.clone(),
             context: core.context.clone(),
-            streaming_metrics: core.streaming_metrics.clone(),
             total_mem_val: core.total_mem_val.clone(),
             core: Mutex::new(core),
         }
@@ -237,40 +236,33 @@ impl LocalStreamManager {
     /// Broadcast a barrier to all senders. Save a receiver in barrier manager
     pub async fn send_barrier(
         &self,
-        barrier: &Barrier,
+        barrier: Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
     ) -> StreamResult<()> {
-        let timer = self
-            .streaming_metrics
-            .barrier_inflight_latency
-            .start_timer();
         if barrier.kind == BarrierKind::Initial {
             let core = self.core.lock().await;
             core.get_watermark_epoch()
                 .store(barrier.epoch.curr, std::sync::atomic::Ordering::SeqCst);
         }
-        let mut barrier_manager = self.context.lock_barrier_manager();
-        barrier_manager.send_barrier(
-            barrier,
-            actor_ids_to_send,
-            actor_ids_to_collect,
-            Some(timer),
-        )?;
+        let barrier_manager = self.context.barrier_manager();
+        barrier_manager
+            .send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)
+            .await?;
         Ok(())
     }
 
     /// Reset the state of the barrier manager.
     pub fn reset_barrier_manager(&self) {
-        self.context.lock_barrier_manager().reset();
+        self.context.barrier_manager().reset();
     }
 
     /// Use `epoch` to find collect rx. And wait for all actor to be collected before
     /// returning.
     pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<CollectResult> {
         let complete_receiver = {
-            let mut barrier_manager = self.context.lock_barrier_manager();
-            barrier_manager.remove_collect_rx(epoch)?
+            let barrier_manager = self.context.barrier_manager();
+            barrier_manager.remove_collect_rx(epoch).await?
         };
         // Wait for all actors finishing this barrier.
         let result = complete_receiver
@@ -278,14 +270,10 @@ impl LocalStreamManager {
             .expect("no rx for local mode")
             .await
             .context("failed to collect barrier")??;
-        complete_receiver
-            .barrier_inflight_timer
-            .expect("no timer for test")
-            .observe_duration();
         Ok(result)
     }
 
-    pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<Vec<LocalSstableInfo>> {
+    pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<SyncResult> {
         let timer = self
             .core
             .lock()
@@ -294,15 +282,14 @@ impl LocalStreamManager {
             .barrier_sync_latency
             .start_timer();
         let res = dispatch_state_store!(self.state_store.clone(), store, {
-            match store.sync(epoch).await {
-                Ok(sync_result) => Ok(sync_result.uncommitted_ssts),
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
-                        epoch, e);
-                    Err(e.into())
-                }
-            }
+            store.sync(epoch).await.map_err(|e| {
+                tracing::error!(
+                    epoch,
+                    error = %e.as_report(),
+                    "Failed to sync state store",
+                );
+                e.into()
+            })
         });
         timer.observe_duration();
         res
@@ -312,23 +299,6 @@ impl LocalStreamManager {
         dispatch_state_store!(self.state_store.clone(), store, {
             store.clear_shared_buffer().await.unwrap();
         });
-    }
-
-    /// Broadcast a barrier to all senders. Returns immediately, and caller won't be notified when
-    /// this barrier is finished.
-    #[cfg(test)]
-    pub fn send_barrier_for_test(&self, barrier: &Barrier) -> StreamResult<()> {
-        use std::iter::empty;
-
-        let mut barrier_manager = self.context.lock_barrier_manager();
-        assert!(barrier_manager.is_local_mode());
-        let timer = self
-            .streaming_metrics
-            .barrier_inflight_latency
-            .start_timer();
-        barrier_manager.send_barrier(barrier, empty(), empty(), Some(timer))?;
-        barrier_manager.remove_collect_rx(barrier.epoch.prev)?;
-        Ok(())
     }
 
     /// Drop the resources of the given actors.
@@ -407,7 +377,12 @@ impl LocalStreamManagerCore {
         config: StreamingConfig,
         await_tree_config: Option<await_tree::Config>,
     ) -> Self {
-        let context = SharedContext::new(addr, state_store.clone(), &config);
+        let context = SharedContext::new(
+            addr,
+            state_store.clone(),
+            &config,
+            streaming_metrics.clone(),
+        );
         Self::new_inner(
             state_store,
             context,
@@ -430,7 +405,7 @@ impl LocalStreamManagerCore {
                 builder.worker_threads(worker_threads_num);
             }
             builder
-                .thread_name("risingwave-streaming-actor")
+                .thread_name("rw-streaming")
                 .enable_all()
                 .build()
                 .unwrap()
@@ -488,9 +463,6 @@ impl LocalStreamManagerCore {
     }
 
     /// Create a chain(tree) of nodes, with given `store`.
-    // This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
-    // TODO: remove `allow` here after the issued is closed.
-    #[expect(clippy::needless_pass_by_ref_mut)]
     #[allow(clippy::too_many_arguments)]
     #[async_recursion]
     async fn create_nodes_inner(
@@ -664,12 +636,8 @@ impl LocalStreamManagerCore {
                 self.streaming_metrics.clone(),
                 self.config.unique_user_stream_errors,
             );
-            let vnode_bitmap = actor
-                .vnode_bitmap
-                .as_ref()
-                .map(|b| b.try_into())
-                .transpose()
-                .context("failed to decode vnode bitmap")?;
+            let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
+            let expr_context = actor.expr_context.clone().unwrap();
 
             let (executor, subtasks) = self
                 .create_nodes(
@@ -691,6 +659,7 @@ impl LocalStreamManagerCore {
                 self.context.clone(),
                 self.streaming_metrics.clone(),
                 actor_context.clone(),
+                expr_context,
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();
@@ -700,8 +669,9 @@ impl LocalStreamManagerCore {
                 let actor = async move {
                     if let Err(err) = actor.run().await {
                         // TODO: check error type and panic if it's unexpected.
-                        tracing::error!(actor=%actor_id, error=%err, "actor exit");
-                        context.lock_barrier_manager().notify_failure(actor_id, err);
+                        // Intentionally use `?` on the report to also include the backtrace.
+                        tracing::error!(actor_id, error = ?err.as_report(), "actor exit with error");
+                        context.barrier_manager().notify_failure(actor_id, err);
                     }
                 };
                 let traced = match &mut self.await_tree_reg {

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::default::Default;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::{Index, RangeBounds};
 use std::sync::Arc;
@@ -33,9 +34,10 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde};
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, map_table_key_range, next_key, prefixed_range, TableKeyRange,
+    end_bound_of_prefix, next_key, prefixed_range_with_vnode, TableKeyRange,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::plan_common::StorageTableDesc;
 use tracing::trace;
 
 use crate::error::{StorageError, StorageResult};
@@ -117,34 +119,106 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for StorageTableInner<S, 
 // init
 impl<S: StateStore> StorageTableInner<S, EitherSerde> {
     /// Create a  [`StorageTableInner`] given a complete set of `columns` and a partial
-    /// set of `column_ids`. The output will only contains columns with the given ids in the same
-    /// order.
-    #[allow(clippy::too_many_arguments)]
+    /// set of `output_column_ids`.
+    /// When reading from the storage table,
+    /// the chunks or rows will only contain columns with the given ids (`output_column_ids`).
+    /// They will in the same order as the given `output_column_ids`.
+    ///
+    /// NOTE(kwannoel): The `output_column_ids` here may be slightly different
+    /// from those supplied to associated executors.
+    /// These `output_column_ids` may have `pk` appended, since they will be needed to scan from
+    /// storage. The associated executors may not have these `pk` fields.
     pub fn new_partial(
         store: S,
+        output_column_ids: Vec<ColumnId>,
+        vnodes: Option<Arc<Bitmap>>,
+        table_desc: &StorageTableDesc,
+    ) -> Self {
+        let table_id = TableId {
+            table_id: table_desc.table_id,
+        };
+        let column_descs = table_desc
+            .columns
+            .iter()
+            .map(ColumnDesc::from)
+            .collect_vec();
+        let order_types: Vec<OrderType> = table_desc
+            .pk
+            .iter()
+            .map(|order| OrderType::from_protobuf(order.get_order_type().unwrap()))
+            .collect();
+
+        let pk_indices = table_desc
+            .pk
+            .iter()
+            .map(|k| k.column_index as usize)
+            .collect_vec();
+
+        let table_option = TableOption {
+            retention_seconds: if table_desc.retention_seconds > 0 {
+                Some(table_desc.retention_seconds)
+            } else {
+                None
+            },
+        };
+        let value_indices = table_desc
+            .get_value_indices()
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
+        let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
+        let versioned = table_desc.versioned;
+        let distribution = match vnodes {
+            None => Distribution::fallback(),
+            Some(vnodes) => {
+                let dist_key_in_pk_indices = table_desc
+                    .dist_key_in_pk_indices
+                    .iter()
+                    .map(|&k| k as usize)
+                    .collect_vec();
+                Distribution {
+                    dist_key_in_pk_indices,
+                    vnodes,
+                }
+            }
+        };
+
+        Self::new_inner(
+            store,
+            table_id,
+            column_descs,
+            output_column_ids,
+            order_types,
+            pk_indices,
+            distribution,
+            table_option,
+            value_indices,
+            prefix_hint_len,
+            versioned,
+        )
+    }
+
+    pub fn for_test_with_partial_columns(
+        store: S,
         table_id: TableId,
-        table_columns: Vec<ColumnDesc>,
-        column_ids: Vec<ColumnId>,
+        columns: Vec<ColumnDesc>,
+        output_column_ids: Vec<ColumnId>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
-        distribution: Distribution,
-        table_options: TableOption,
         value_indices: Vec<usize>,
-        read_prefix_len_hint: usize,
-        versioned: bool,
     ) -> Self {
         Self::new_inner(
             store,
             table_id,
-            table_columns,
-            column_ids,
+            columns,
+            output_column_ids,
             order_types,
             pk_indices,
-            distribution,
-            table_options,
+            Distribution::fallback(),
+            Default::default(),
             value_indices,
-            read_prefix_len_hint,
-            versioned,
+            0,
+            false,
         )
     }
 
@@ -156,19 +230,15 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
         pk_indices: Vec<usize>,
         value_indices: Vec<usize>,
     ) -> Self {
-        let column_ids = columns.iter().map(|c| c.column_id).collect();
-        Self::new_inner(
+        let output_column_ids = columns.iter().map(|c| c.column_id).collect();
+        Self::for_test_with_partial_columns(
             store,
             table_id,
             columns,
-            column_ids,
+            output_column_ids,
             order_types,
             pk_indices,
-            Distribution::fallback(),
-            Default::default(),
             value_indices,
-            0,
-            false,
         )
     }
 
@@ -177,7 +247,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
         store: S,
         table_id: TableId,
         table_columns: Vec<ColumnDesc>,
-        column_ids: Vec<ColumnId>,
+        output_column_ids: Vec<ColumnId>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         Distribution {
@@ -191,7 +261,8 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
     ) -> Self {
         assert_eq!(order_types.len(), pk_indices.len());
 
-        let (output_columns, output_indices) = find_columns_by_ids(&table_columns, &column_ids);
+        let (output_columns, output_indices) =
+            find_columns_by_ids(&table_columns, &output_column_ids);
         let mut value_output_indices = vec![];
         let mut key_output_indices = vec![];
 
@@ -417,7 +488,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             _ => CachePolicy::Fill(CachePriority::High),
         };
 
-        let raw_key_ranges = {
+        let table_key_ranges = {
             // Vnodes that are set and should be accessed.
             let vnodes = match vnode_hint {
                 // If `vnode_hint` is set, we can only access this single vnode.
@@ -425,12 +496,11 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                 // Otherwise, we need to access all vnodes of this table.
                 None => Either::Right(self.vnodes.iter_vnodes()),
             };
-            vnodes.map(|vnode| prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes()))
+            vnodes.map(|vnode| prefixed_range_with_vnode(encoded_key_range.clone(), vnode))
         };
 
         // For each key range, construct an iterator.
-        let iterators: Vec<_> = try_join_all(raw_key_ranges.map(|raw_key_range| {
-            let table_key_range = map_table_key_range(raw_key_range);
+        let iterators: Vec<_> = try_join_all(table_key_ranges.map(|table_key_range| {
             let prefix_hint = prefix_hint.clone();
             let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
             async move {

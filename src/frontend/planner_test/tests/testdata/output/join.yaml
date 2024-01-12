@@ -672,31 +672,31 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [p1, p2, p3, t._row_id(hidden), t._row_id#1(hidden), t.src(hidden), t._row_id#2(hidden)], stream_key: [t._row_id, t._row_id#1, p2, t._row_id#2, t.src, p1], pk_columns: [t._row_id, t._row_id#1, p2, t._row_id#2, t.src, p1], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamExchange Hash([0, 1, 3, 4, 5, 6]) from 1
 
     Fragment 1
-    StreamHashJoin { type: Inner, predicate: t.src = t.dst AND t.src = t.dst, output: [t.src, t.dst, t.dst, t._row_id, t._row_id, t.src, t._row_id] } { left table: 0, right table: 2, left degree table: 1, right degree table: 3 }
+    StreamHashJoin { type: Inner, predicate: t.src = t.dst AND t.src = t.dst, output: [t.src, t.dst, t.dst, t._row_id, t._row_id, t.src, t._row_id] } { tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ] }
     ├── StreamExchange Hash([0]) from 2
     └── StreamExchange Hash([0]) from 5
 
     Fragment 2
-    StreamHashJoin { type: Inner, predicate: t.dst = t.src, output: [t.src, t.dst, t.src, t.dst, t._row_id, t._row_id] } { left table: 4, right table: 6, left degree table: 5, right degree table: 7 }
+    StreamHashJoin { type: Inner, predicate: t.dst = t.src, output: [t.src, t.dst, t.src, t.dst, t._row_id, t._row_id] } { tables: [ HashJoinLeft: 4, HashJoinDegreeLeft: 5, HashJoinRight: 6, HashJoinDegreeRight: 7 ] }
     ├── StreamExchange Hash([1]) from 3
     └── StreamExchange Hash([0]) from 4
 
     Fragment 3
-    StreamTableScan { table: t, columns: [t.src, t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { state table: 8 }
+    StreamTableScan { table: t, columns: [t.src, t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { tables: [ StreamScan: 8 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 4
-    StreamTableScan { table: t, columns: [t.src, t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { state table: 9 }
+    StreamTableScan { table: t, columns: [t.src, t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { tables: [ StreamScan: 9 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 5
-    StreamTableScan { table: t, columns: [t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { state table: 10 }
+    StreamTableScan { table: t, columns: [t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { tables: [ StreamScan: 10 ] }
     ├── Upstream
     └── BatchPlanNode
 

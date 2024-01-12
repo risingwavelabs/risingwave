@@ -1,4 +1,4 @@
-# Copyright 2023 RisingWave Labs
+# Copyright 2024 RisingWave Labs
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import time
 from typing import Iterator, List, Optional, Tuple, Any
 from decimal import Decimal
 
-sys.path.append("src/udf/python")  # noqa
+sys.path.append("src/expr/udf/python")  # noqa
 
 from risingwave.udf import udf, udtf, UdfServer
 
@@ -84,6 +84,16 @@ def hex_to_dec(hex: Optional[str]) -> Optional[Decimal]:
     return dec
 
 
+@udf(input_types=["FLOAT8"], result_type="DECIMAL")
+def float_to_decimal(f: float) -> Decimal:
+    return Decimal(f)
+
+
+@udf(input_types=["DECIMAL", "DECIMAL"], result_type="DECIMAL")
+def decimal_add(a: Decimal, b: Decimal) -> Decimal:
+    return a + b
+
+
 @udf(input_types=["VARCHAR[]", "INT"], result_type="VARCHAR")
 def array_access(list: List[str], idx: int) -> Optional[str]:
     if idx == 0 or idx > len(list):
@@ -117,7 +127,9 @@ def jsonb_array_struct_identity(v: Tuple[List[Any], int]) -> Tuple[List[Any], in
 
 ALL_TYPES = "BOOLEAN,SMALLINT,INT,BIGINT,FLOAT4,FLOAT8,DECIMAL,DATE,TIME,TIMESTAMP,INTERVAL,VARCHAR,BYTEA,JSONB".split(
     ","
-)
+) + [
+    "STRUCT<INT,INT>"
+]
 
 
 @udf(
@@ -139,6 +151,7 @@ def return_all(
     varchar,
     bytea,
     jsonb,
+    struct,
 ):
     return (
         bool,
@@ -155,6 +168,7 @@ def return_all(
         varchar,
         bytea,
         jsonb,
+        struct,
     )
 
 
@@ -177,6 +191,7 @@ def return_all_arrays(
     varchar,
     bytea,
     jsonb,
+    struct,
 ):
     return (
         bool,
@@ -193,6 +208,7 @@ def return_all_arrays(
         varchar,
         bytea,
         jsonb,
+        struct,
     )
 
 
@@ -206,6 +222,8 @@ if __name__ == "__main__":
     server.add_function(split)
     server.add_function(extract_tcp_info)
     server.add_function(hex_to_dec)
+    server.add_function(float_to_decimal)
+    server.add_function(decimal_add)
     server.add_function(array_access)
     server.add_function(jsonb_access)
     server.add_function(jsonb_concat)

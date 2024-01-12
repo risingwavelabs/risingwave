@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -294,6 +294,10 @@ impl DatabaseManager {
         self.tables.get(&table_id)
     }
 
+    pub fn get_sink(&self, sink_id: SinkId) -> Option<&Sink> {
+        self.sinks.get(&sink_id)
+    }
+
     pub fn get_all_table_options(&self) -> HashMap<TableId, TableOption> {
         self.tables
             .iter()
@@ -323,6 +327,14 @@ impl DatabaseManager {
 
     pub fn list_sources(&self) -> Vec<Source> {
         self.sources.values().cloned().collect_vec()
+    }
+
+    pub fn list_sinks(&self) -> Vec<Sink> {
+        self.sinks.values().cloned().collect_vec()
+    }
+
+    pub fn list_views(&self) -> Vec<View> {
+        self.views.values().cloned().collect_vec()
     }
 
     pub fn list_source_ids(&self, schema_id: SchemaId) -> Vec<SourceId> {
@@ -417,8 +429,7 @@ impl DatabaseManager {
     }
 
     pub fn has_in_progress_creation(&self, relation: &RelationKey) -> bool {
-        self.in_progress_creation_tracker
-            .contains(&relation.clone())
+        self.in_progress_creation_tracker.contains(relation)
     }
 
     /// For all types of DDL
@@ -461,11 +472,6 @@ impl DatabaseManager {
 
     pub fn all_creating_streaming_jobs(&self) -> impl Iterator<Item = TableId> + '_ {
         self.in_progress_creation_streaming_job.keys().cloned()
-    }
-
-    pub fn clear_creating_stream_jobs(&mut self) {
-        self.in_progress_creation_tracker.clear();
-        self.in_progress_creation_streaming_job.clear();
     }
 
     pub fn mark_creating_tables(&mut self, tables: &[Table]) {

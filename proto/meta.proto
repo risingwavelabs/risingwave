@@ -97,7 +97,8 @@ message TableFragments {
   map<uint32, ActorStatus> actor_status = 4;
   map<uint32, source.ConnectorSplits> actor_splits = 5;
 
-  stream_plan.StreamEnvironment env = 6;
+  stream_plan.StreamContext ctx = 6;
+  TableParallelism parallelism = 7;
 }
 
 /// Parallel unit mapping with fragment id, used for notification.
@@ -196,7 +197,7 @@ message ListTableFragmentsResponse {
   }
   message TableFragmentInfo {
     repeated FragmentInfo fragments = 1;
-    stream_plan.StreamEnvironment env = 2;
+    stream_plan.StreamContext ctx = 2;
   }
   map<uint32, TableFragmentInfo> table_fragments = 1;
 }
@@ -207,6 +208,7 @@ message ListTableFragmentStatesResponse {
   message TableFragmentState {
     uint32 table_id = 1;
     TableFragments.State state = 2;
+    TableParallelism parallelism = 3;
   }
   repeated TableFragmentState states = 1;
 }
@@ -286,11 +288,12 @@ message AddWorkerNodeResponse {
   reserved 3;
   reserved "system_params";
   common.Status status = 1;
-  common.WorkerNode node = 2;
+  optional uint32 node_id = 2;
 }
 
 message ActivateWorkerNodeRequest {
   common.HostAddress host = 1;
+  uint32 node_id = 2;
 }
 
 message ActivateWorkerNodeResponse {
@@ -461,6 +464,22 @@ message RescheduleResponse {
   uint64 revision = 2;
 }
 
+message TableParallelism {
+  message FixedParallelism {
+    uint32 parallelism = 1;
+  }
+
+  message AutoParallelism {}
+
+  message CustomParallelism {}
+
+  oneof parallelism {
+    FixedParallelism fixed = 1;
+    AutoParallelism auto = 2;
+    CustomParallelism custom = 3;
+  }
+}
+
 message GetReschedulePlanRequest {
   uint64 revision = 1;
 
@@ -532,6 +551,7 @@ message SystemParams {
   optional uint32 parallel_compact_size_mb = 11;
   optional uint32 max_concurrent_creating_streaming_jobs = 12;
   optional bool pause_on_next_bootstrap = 13;
+  optional string wasm_storage_url = 14;
 }
 
 message GetSystemParamsRequest {}
@@ -584,6 +604,29 @@ message EventLog {
     string definition = 3;
     string error = 4;
   }
+  message EventBarrierComplete {
+    uint64 prev_epoch = 1;
+    uint64 cur_epoch = 2;
+    double duration_sec = 3;
+    string command = 4;
+    string barrier_kind = 5;
+  }
+  message EventInjectBarrierFail {
+    uint64 prev_epoch = 1;
+    uint64 cur_epoch = 2;
+    string error = 3;
+  }
+  message EventCollectBarrierFail {
+    uint64 prev_epoch = 1;
+    uint64 cur_epoch = 2;
+    string error = 3;
+  }
+  message EventWorkerNodePanic {
+    uint32 worker_id = 1;
+    common.WorkerType worker_type = 2;
+    common.HostAddress host_addr = 3;
+    string panic_info = 4;
+  }
   // Event logs identifier, which should be populated by event log service.
   optional string unique_id = 1;
   // Processing time, which should be populated by event log service.
@@ -592,6 +635,10 @@ message EventLog {
     EventCreateStreamJobFail create_stream_job_fail = 3;
     EventDirtyStreamJobClear dirty_stream_job_clear = 4;
     EventMetaNodeStart meta_node_start = 5;
+    EventBarrierComplete barrier_complete = 6;
+    EventInjectBarrierFail inject_barrier_fail = 7;
+    EventCollectBarrierFail collect_barrier_fail = 8;
+    EventLog.EventWorkerNodePanic worker_node_panic = 9;
   }
 }
 
@@ -601,6 +648,16 @@ message ListEventLogResponse {
   repeated EventLog event_logs = 1;
 }
 
+message AddEventLogRequest {
+  // A subset of EventLog.event that can be added by non meta node.
+  oneof event {
+    EventLog.EventWorkerNodePanic worker_node_panic = 1;
+  }
+}
+
+message AddEventLogResponse {}
+
 service EventLogService {
   rpc ListEventLog(ListEventLogRequest) returns (ListEventLogResponse);
+  rpc AddEventLog(AddEventLogRequest) returns (AddEventLogResponse);
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +15,12 @@
 #![feature(lint_reasons)]
 #![feature(let_chains)]
 
-use context::DefineContextAttr;
+use std::vec;
+
+use context::{generate_captured_function, CaptureContextAttr, DefineContextAttr};
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use syn::{Error, ItemFn, Result};
-
-use crate::context::{generate_captured_function, CaptureContextAttr};
 
 mod context;
 mod gen;
@@ -503,8 +503,10 @@ struct FunctionAttr {
     generic: Option<String>,
     /// Whether the function is volatile.
     volatile: bool,
-    /// Whether the function is deprecated.
+    /// If true, the function is unavailable on the frontend.
     deprecated: bool,
+    /// If true, the function is not implemented on the backend, but its signature is defined.
+    rewritten: bool,
 }
 
 /// Attributes from function signature `fn(..)`

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,11 +22,10 @@ use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    generate_internal_table_name_with_type, TableId, CDC_SOURCE_COLUMN_NUM, TABLE_NAME_COLUMN_NAME,
+    generate_internal_table_name_with_type, TableId, CDC_SOURCE_COLUMN_NUM,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
-use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -36,10 +35,10 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, FragmentTypeFlag, StreamActor,
-    StreamFragmentGraph as StreamFragmentGraphProto,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanType,
 };
 
-use crate::manager::{IdGeneratorManagerRef, StreamingJob};
+use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::model::FragmentId;
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
@@ -175,9 +174,9 @@ impl BuildingFragment {
                     stream_scan.table_id.into(),
                     stream_scan.upstream_column_ids.clone(),
                 ),
-                NodeBody::StreamCdcScan(stream_cdc_scan) => (
-                    stream_cdc_scan.table_id.into(),
-                    stream_cdc_scan.upstream_column_ids.clone(),
+                NodeBody::CdcFilter(cdc_filter) => (
+                    cdc_filter.upstream_source_id.into(),
+                    cdc_filter.upstream_column_ids.clone(),
                 ),
                 _ => return,
             };
@@ -186,9 +185,36 @@ impl BuildingFragment {
                 .expect("currently there should be no two same upstream tables in a fragment");
         });
 
-        assert_eq!(table_columns.len(), fragment.upstream_table_ids.len());
+        assert_eq!(
+            table_columns.len(),
+            fragment.upstream_table_ids.len(),
+            "fragment type: {}",
+            fragment.fragment_type_mask
+        );
 
         table_columns
+    }
+
+    pub fn has_arrangement_backfill(&self) -> bool {
+        fn has_arrangement_backfill_node(stream_node: &StreamNode) -> bool {
+            let is_backfill = if let Some(node) = &stream_node.node_body
+                && let Some(node) = node.as_stream_scan()
+            {
+                node.stream_scan_type == StreamScanType::ArrangementBackfill as i32
+            } else {
+                false
+            };
+            is_backfill
+                || stream_node
+                    .get_input()
+                    .iter()
+                    .any(has_arrangement_backfill_node)
+        }
+        let stream_node = match self.inner.node.as_ref() {
+            Some(node) => node,
+            _ => return false,
+        };
+        has_arrangement_backfill_node(stream_node)
     }
 }
 
@@ -280,13 +306,23 @@ impl StreamFragmentGraph {
     /// Create a new [`StreamFragmentGraph`] from the given [`StreamFragmentGraphProto`], with all
     /// global IDs correctly filled.
     pub async fn new(
+        env: &MetaSrvEnv,
         proto: StreamFragmentGraphProto,
-        id_gen: IdGeneratorManagerRef,
         job: &StreamingJob,
     ) -> MetaResult<Self> {
-        let fragment_id_gen =
-            GlobalFragmentIdGen::new(&id_gen, proto.fragments.len() as u64).await?;
-        let table_id_gen = GlobalTableIdGen::new(&id_gen, proto.table_ids_cnt as u64).await?;
+        let (fragment_id_gen, table_id_gen) = if let Some(sql_id_gen) = env.sql_id_gen_manager_ref()
+        {
+            (
+                GlobalFragmentIdGen::new_v2(&sql_id_gen, proto.fragments.len() as u64),
+                GlobalTableIdGen::new_v2(&sql_id_gen, proto.table_ids_cnt as u64),
+            )
+        } else {
+            (
+                GlobalFragmentIdGen::new(env.id_gen_manager(), proto.fragments.len() as u64)
+                    .await?,
+                GlobalTableIdGen::new(env.id_gen_manager(), proto.table_ids_cnt as u64).await?,
+            )
+        };
 
         // Create nodes.
         let fragments: HashMap<_, _> = proto
@@ -363,6 +399,18 @@ impl StreamFragmentGraph {
             }
         }
         tables
+    }
+
+    pub fn refill_internal_table_ids(&mut self, table_id_map: HashMap<u32, u32>) {
+        for fragment in self.fragments.values_mut() {
+            stream_graph_visitor::visit_internal_tables(
+                &mut fragment.inner,
+                |table, _table_type_name| {
+                    let target = table_id_map.get(&table.id).cloned().unwrap();
+                    table.id = target;
+                },
+            );
+        }
     }
 
     /// Set internal tables' `table_id`s according to a list of internal tables
@@ -564,54 +612,40 @@ impl CompleteStreamFragmentGraph {
             // Build the extra edges between the upstream `Materialize` and the downstream `StreamScan`
             // of the new materialized view.
             for (&id, fragment) in &mut graph.fragments {
+                let uses_arrangement_backfill = fragment.has_arrangement_backfill();
                 for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
                     let (up_fragment_id, edge) = match table_job_type.as_ref() {
                         Some(TableJobType::SharedCdcSource) => {
-                            // extract the upstream full_table_name from the source fragment
-                            let mut full_table_name = None;
-                            visit_fragment(&mut fragment.inner, |node_body| {
-                                if let NodeBody::StreamCdcScan(stream_scan) = node_body {
-                                    full_table_name = stream_scan
-                                        .cdc_table_desc
-                                        .as_ref()
-                                        .map(|desc| desc.table_name.clone());
-                                }
-                            });
-
-                            let source_fragment =
-                                upstream_root_fragments
-                                    .get(&upstream_table_id)
-                                    .context("upstream materialized view fragment not found")?;
+                            let source_fragment = upstream_root_fragments
+                                .get(&upstream_table_id)
+                                .context("upstream source fragment not found")?;
                             let source_job_id = GlobalFragmentId::new(source_fragment.fragment_id);
-                            // extract `_rw_table_name` column index
-                            let rw_table_name_index = {
-                                let node = source_fragment.actors[0].get_nodes().unwrap();
 
-                                // may remove the expect to extend other scenarios, currently only target the CDC scenario
-                                node.fields
-                                    .iter()
-                                    .position(|f| f.name.as_str() == TABLE_NAME_COLUMN_NAME)
-                                    .expect("table name column not found")
-                            };
+                            // we traverse all fragments in the graph, and we should find out the
+                            // CdcFilter fragment and add an edge between upstream source fragment and it.
+                            assert_ne!(
+                                (fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32),
+                                0
+                            );
 
-                            assert!(full_table_name.is_some());
                             tracing::debug!(
-                                ?full_table_name,
                                 ?source_job_id,
-                                ?rw_table_name_index,
                                 ?output_columns,
-                                "StreamScan with upstream source fragment"
+                                identity = ?fragment.inner.get_node().unwrap().get_identity(),
+                                current_frag_id=?id,
+                                "CdcFilter with upstream source fragment"
                             );
                             let edge = StreamFragmentEdge {
                                 id: EdgeId::UpstreamExternal {
                                     upstream_table_id,
                                     downstream_fragment_id: id,
                                 },
+                                // We always use `NoShuffle` for the exchange between the upstream
+                                // `Source` and the downstream `StreamScan` of the new cdc table.
                                 dispatch_strategy: DispatchStrategy {
-                                    r#type: DispatcherType::CdcTablename as _, /* there may have multiple downstream table jobs, so we use `Hash` here */
-                                    dist_key_indices: vec![rw_table_name_index as _], /* index to `_rw_table_name` column */
-                                    output_indices: (0..CDC_SOURCE_COLUMN_NUM as _).collect_vec(), /* require all columns from the cdc source */
-                                    downstream_table_name: full_table_name,
+                                    r#type: DispatcherType::NoShuffle as _,
+                                    dist_key_indices: vec![], // not used for `NoShuffle`
+                                    output_indices: (0..CDC_SOURCE_COLUMN_NUM as _).collect(),
                                 },
                             };
 
@@ -625,7 +659,7 @@ impl CompleteStreamFragmentGraph {
                             let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
 
                             // Resolve the required output columns from the upstream materialized view.
-                            let output_indices = {
+                            let (dist_key_indices, output_indices) = {
                                 let nodes = mview_fragment.actors[0].get_nodes().unwrap();
                                 let mview_node =
                                     nodes.get_node_body().unwrap().as_materialize().unwrap();
@@ -636,8 +670,16 @@ impl CompleteStreamFragmentGraph {
                                     .iter()
                                     .map(|c| c.column_desc.as_ref().unwrap().column_id)
                                     .collect_vec();
+                                let dist_key_indices: Vec<_> = mview_node
+                                    .table
+                                    .as_ref()
+                                    .unwrap()
+                                    .distribution_key
+                                    .iter()
+                                    .map(|i| *i as u32)
+                                    .collect();
 
-                                output_columns
+                                let output_indices = output_columns
                                     .iter()
                                     .map(|c| {
                                         all_column_ids
@@ -646,22 +688,38 @@ impl CompleteStreamFragmentGraph {
                                             .map(|i| i as u32)
                                     })
                                     .collect::<Option<Vec<_>>>()
-                                    .context("column not found in the upstream materialized view")?
+                                    .context(
+                                        "column not found in the upstream materialized view",
+                                    )?;
+                                (dist_key_indices, output_indices)
+                            };
+                            let dispatch_strategy = if uses_arrangement_backfill {
+                                if !dist_key_indices.is_empty() {
+                                    DispatchStrategy {
+                                        r#type: DispatcherType::Hash as _,
+                                        dist_key_indices,
+                                        output_indices,
+                                    }
+                                } else {
+                                    DispatchStrategy {
+                                        r#type: DispatcherType::Simple as _,
+                                        dist_key_indices: vec![], // empty for Simple
+                                        output_indices,
+                                    }
+                                }
+                            } else {
+                                DispatchStrategy {
+                                    r#type: DispatcherType::NoShuffle as _,
+                                    dist_key_indices: vec![], // not used for `NoShuffle`
+                                    output_indices,
+                                }
                             };
                             let edge = StreamFragmentEdge {
                                 id: EdgeId::UpstreamExternal {
                                     upstream_table_id,
                                     downstream_fragment_id: id,
                                 },
-                                // We always use `NoShuffle` for the exchange between the upstream
-                                // `Materialize` and the downstream `StreamScan` of the
-                                // new materialized view.
-                                dispatch_strategy: DispatchStrategy {
-                                    r#type: DispatcherType::NoShuffle as _,
-                                    dist_key_indices: vec![], // not used for `NoShuffle`
-                                    output_indices,
-                                    downstream_table_name: None,
-                                },
+                                dispatch_strategy,
                             };
 
                             (mview_id, edge)

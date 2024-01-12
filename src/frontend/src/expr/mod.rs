@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use futures::FutureExt;
 use paste::paste;
 use risingwave_common::array::ListValue;
 use risingwave_common::error::{ErrorCode, Result as RwResult};
-use risingwave_common::types::{DataType, Datum, Scalar};
+use risingwave_common::types::{DataType, Datum, JsonbVal, Scalar};
 use risingwave_expr::aggregate::AggKind;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -58,16 +58,16 @@ pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use function_call_with_lambda::FunctionCallWithLambda;
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
-pub use now::{InlineNowProcTime, Now};
+pub use now::{InlineNowProcTime, Now, NowProcTimeFinder};
 pub use parameter::Parameter;
 pub use pure::*;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
-pub use session_timezone::SessionTimezone;
+pub use session_timezone::{SessionTimezone, TimestamptzExprFinder};
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};
 pub use type_inference::{
-    align_types, cast_map_array, cast_ok, cast_sigs, infer_some_all, infer_type, least_restrictive,
-    CastContext, CastSig, FuncSign,
+    align_types, cast_map_array, cast_ok, cast_sigs, infer_some_all, infer_type, infer_type_name,
+    infer_type_with_sigmap, least_restrictive, CastContext, CastSig, FuncSign,
 };
 pub use user_defined_function::UserDefinedFunction;
 pub use utils::*;
@@ -163,6 +163,12 @@ impl ExprImpl {
     #[inline(always)]
     pub fn literal_null(element_type: DataType) -> Self {
         Literal::new(None, element_type).into()
+    }
+
+    /// A literal jsonb value.
+    #[inline(always)]
+    pub fn literal_jsonb(v: JsonbVal) -> Self {
+        Literal::new(Some(v.into()), DataType::Jsonb).into()
     }
 
     /// A literal list value.
@@ -312,7 +318,7 @@ impl ExprImpl {
     ///
     /// TODO: This is a naive implementation. We should avoid proto ser/de.
     /// Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/3479>
-    async fn eval_row(&self, input: &OwnedRow) -> RwResult<Datum> {
+    pub async fn eval_row(&self, input: &OwnedRow) -> RwResult<Datum> {
         let backend_expr = build_from_prost(&self.to_expr_proto())?;
         Ok(backend_expr.eval_row(input).await?)
     }
@@ -712,6 +718,16 @@ impl ExprImpl {
                         && op1.count_nows() > 0
                         && op1.is_now_offset()
                     {
+                        Some((op2, Self::reverse_comparison(ty), op1))
+                    } else {
+                        None
+                    }
+                }
+                ty @ ExprType::Equal => {
+                    let (_, op1, op2) = function_call.clone().decompose_as_binary();
+                    if op1.count_nows() == 0 && op1.has_input_ref() && op2.count_nows() > 0 {
+                        Some((op1, ty, op2))
+                    } else if op2.count_nows() == 0 && op2.has_input_ref() && op1.count_nows() > 0 {
                         Some((op2, Self::reverse_comparison(ty), op1))
                     } else {
                         None

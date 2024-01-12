@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::path::Path;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -25,12 +24,12 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Datum, Decimal, JsonbVal, ScalarImpl, F32, F64};
-use risingwave_pb::plan_common::ColumnDesc;
+use risingwave_pb::plan_common::{AdditionalColumnType, ColumnDesc, ColumnDescVersion};
 
 use super::schema_resolver::*;
-use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::parser::unified::protobuf::ProtobufAccess;
 use crate::parser::unified::AccessImpl;
+use crate::parser::util::bytes_from_url;
 use crate::parser::{AccessBuilder, EncodingProperties};
 use crate::schema::schema_registry::{
     extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
@@ -112,33 +111,7 @@ impl ProtobufParserConfig {
             compile_file_descriptor_from_schema_registry(schema_value.as_str(), &client).await?
         } else {
             let url = url.first().unwrap();
-            match url.scheme() {
-                // TODO(Tao): support local file only when it's compiled in debug mode.
-                "file" => {
-                    let path = url.to_file_path().map_err(|_| {
-                        RwError::from(InternalError(format!("illegal path: {}", location)))
-                    })?;
-
-                    if path.is_dir() {
-                        return Err(RwError::from(ProtocolError(
-                            "schema file location must not be a directory".to_string(),
-                        )));
-                    }
-                    Self::local_read_to_bytes(&path)
-                }
-                "s3" => {
-                    load_file_descriptor_from_s3(
-                        url,
-                        protobuf_config.aws_auth_props.as_ref().unwrap(),
-                    )
-                    .await
-                }
-                "https" | "http" => load_file_descriptor_from_http(url).await,
-                scheme => Err(RwError::from(ProtocolError(format!(
-                    "path scheme {} is not supported",
-                    scheme
-                )))),
-            }?
+            bytes_from_url(url, protobuf_config.aws_auth_props.as_ref()).await?
         };
 
         let pool = DescriptorPool::decode(schema_bytes.as_slice()).map_err(|e| {
@@ -159,17 +132,6 @@ impl ProtobufParserConfig {
             message_descriptor,
             confluent_wire_type: protobuf_config.use_schema_registry,
             descriptor_pool: Arc::new(pool),
-        })
-    }
-
-    /// read binary schema from a local file
-    fn local_read_to_bytes(path: &Path) -> Result<Vec<u8>> {
-        std::fs::read(path).map_err(|e| {
-            RwError::from(InternalError(format!(
-                "failed to read file {}: {}",
-                path.display(),
-                e
-            )))
         })
     }
 
@@ -213,6 +175,8 @@ impl ProtobufParserConfig {
                 type_name: m.full_name().to_string(),
                 generated_or_default_column: None,
                 description: None,
+                additional_column_type: AdditionalColumnType::Normal as i32,
+                version: ColumnDescVersion::Pr13707 as i32,
             })
         } else {
             *index += 1;
@@ -220,6 +184,8 @@ impl ProtobufParserConfig {
                 column_id: *index,
                 name: field_descriptor.name().to_string(),
                 column_type: Some(field_type.to_protobuf()),
+                additional_column_type: AdditionalColumnType::Normal as i32,
+                version: ColumnDescVersion::Pr13707 as i32,
                 ..Default::default()
             })
         }
@@ -487,11 +453,12 @@ pub fn from_protobuf_value(
             }
         }
         Value::List(values) => {
-            let rw_values = values
-                .iter()
-                .map(|value| from_protobuf_value(field_desc, value, descriptor_pool))
-                .collect::<Result<Vec<_>>>()?;
-            ScalarImpl::List(ListValue::new(rw_values))
+            let data_type = protobuf_type_mapping(field_desc, &mut vec![])?;
+            let mut builder = data_type.as_list().create_array_builder(values.len());
+            for value in values {
+                builder.append(from_protobuf_value(field_desc, value, descriptor_pool)?);
+            }
+            ScalarImpl::List(ListValue::new(builder.finish()))
         }
         Value::Bytes(value) => ScalarImpl::Bytea(value.to_vec().into_boxed_slice()),
         _ => {
@@ -580,7 +547,7 @@ mod test {
     use std::path::PathBuf;
 
     use prost::Message;
-    use risingwave_common::types::{DataType, StructType};
+    use risingwave_common::types::{DataType, ListValue, StructType};
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::data::data_type::PbTypeName;
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
@@ -857,12 +824,7 @@ mod test {
         pb_eq(
             a,
             "repeated_int_field",
-            S::List(ListValue::new(
-                m.repeated_int_field
-                    .iter()
-                    .map(|&x| Some(x.into()))
-                    .collect(),
-            )),
+            S::List(ListValue::from_iter(m.repeated_int_field.clone())),
         );
         pb_eq(
             a,

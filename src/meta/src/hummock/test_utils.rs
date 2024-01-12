@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,15 +18,14 @@ use std::time::Duration;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 #[cfg(test)]
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::{
-    CompactionConfig, HummockSnapshot, HummockVersion, KeyRange, SstableInfo,
-};
+use risingwave_pb::hummock::{CompactionConfig, HummockSnapshot, KeyRange, SstableInfo};
 use risingwave_pb::meta::add_worker_node_request::Property;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -249,9 +248,8 @@ pub async fn unregister_table_ids_from_compaction_group(
     table_ids: &[u32],
 ) {
     hummock_manager_ref
-        .unregister_table_ids(table_ids)
-        .await
-        .unwrap();
+        .unregister_table_ids_fail_fast(table_ids)
+        .await;
 }
 
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.

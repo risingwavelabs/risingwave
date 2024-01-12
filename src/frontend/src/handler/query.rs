@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -188,7 +188,7 @@ fn gen_batch_query_plan(
         }
         (true, false) => QueryMode::Distributed,
         (false, true) => QueryMode::Local,
-        (false, false) => match session.config().get_query_mode() {
+        (false, false) => match session.config().query_mode() {
             QueryMode::Auto => determine_query_mode(batch_plan.clone()),
             QueryMode::Local => QueryMode::Local,
             QueryMode::Distributed => QueryMode::Distributed,
@@ -285,7 +285,7 @@ fn gen_batch_plan_fragmenter(
     let plan_fragmenter = BatchPlanFragmenter::new(
         worker_node_manager_reader,
         session.env().catalog_reader().clone(),
-        session.config().get_batch_parallelism(),
+        session.config().batch_parallelism().0,
         plan,
     )?;
 
@@ -311,6 +311,7 @@ async fn execute(
         ..
     } = plan_fragmenter_result;
 
+    let mut can_timeout_cancel = true;
     // Acquire the write guard for DML statements.
     match stmt_type {
         StatementType::INSERT
@@ -320,6 +321,7 @@ async fn execute(
         | StatementType::UPDATE
         | StatementType::UPDATE_RETURNING => {
             session.txn_write_guard()?;
+            can_timeout_cancel = false;
         }
         _ => {}
     }
@@ -341,7 +343,7 @@ async fn execute(
     let mut row_stream = match query_mode {
         QueryMode::Auto => unreachable!(),
         QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-            local_execute(session.clone(), query).await?,
+            local_execute(session.clone(), query, can_timeout_cancel).await?,
             column_types,
             formats,
             session.clone(),
@@ -349,7 +351,7 @@ async fn execute(
         // Local mode do not support cancel tasks.
         QueryMode::Distributed => {
             PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
-                distribute_execute(session.clone(), query).await?,
+                distribute_execute(session.clone(), query, can_timeout_cancel).await?,
                 column_types,
                 formats,
                 session.clone(),
@@ -401,7 +403,7 @@ async fn execute(
     // it sent. This is achieved by the `callback` in `PgResponse`.
     let callback = async move {
         // Implicitly flush the writes.
-        if session.config().get_implicit_flush() && stmt_type.is_dml() {
+        if session.config().implicit_flush() && stmt_type.is_dml() {
             do_flush(&session).await?;
         }
 
@@ -451,8 +453,17 @@ async fn execute(
 async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
+    can_timeout_cancel: bool,
 ) -> Result<DistributedQueryStream> {
-    let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
+    let timeout = if cfg!(madsim) {
+        None
+    } else if can_timeout_cancel {
+        Some(session.statement_timeout())
+    } else {
+        None
+    };
+    let execution_context: ExecutionContextRef =
+        ExecutionContext::new(session.clone(), timeout).into();
     let query_manager = session.env().query_manager().clone();
 
     query_manager
@@ -462,14 +473,26 @@ async fn distribute_execute(
 }
 
 #[expect(clippy::unused_async)]
-async fn local_execute(session: Arc<SessionImpl>, query: Query) -> Result<LocalQueryStream> {
+async fn local_execute(
+    session: Arc<SessionImpl>,
+    query: Query,
+    can_timeout_cancel: bool,
+) -> Result<LocalQueryStream> {
+    let timeout = if cfg!(madsim) {
+        None
+    } else if can_timeout_cancel {
+        Some(session.statement_timeout())
+    } else {
+        None
+    };
     let front_env = session.env();
 
     // TODO: if there's no table scan, we don't need to acquire snapshot.
     let snapshot = session.pinned_snapshot();
 
     // TODO: Passing sql here
-    let execution = LocalQueryExecution::new(query, front_env.clone(), "", snapshot, session);
+    let execution =
+        LocalQueryExecution::new(query, front_env.clone(), "", snapshot, session, timeout);
 
     Ok(execution.stream_rows())
 }

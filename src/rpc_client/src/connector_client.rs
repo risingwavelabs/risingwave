@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ use risingwave_pb::connector_service::sink_coordinator_stream_request::{
 };
 use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::Payload;
 use risingwave_pb::connector_service::sink_writer_stream_request::{
-    Barrier, BeginEpoch, Request as SinkRequest, StartSink, WriteBatch,
+    Barrier, Request as SinkRequest, StartSink, WriteBatch,
 };
 use risingwave_pb::connector_service::sink_writer_stream_response::CommitResponse;
 use risingwave_pb::connector_service::*;
@@ -44,20 +44,13 @@ pub struct ConnectorClient {
     endpoint: String,
 }
 
-pub type SinkWriterRequestSender = BidiStreamSender<SinkWriterStreamRequest>;
+pub type SinkWriterRequestSender<REQ = SinkWriterStreamRequest> = BidiStreamSender<REQ>;
 pub type SinkWriterResponseReceiver = BidiStreamReceiver<SinkWriterStreamResponse>;
 
-pub type SinkWriterStreamHandle =
-    BidiStreamHandle<SinkWriterStreamRequest, SinkWriterStreamResponse>;
+pub type SinkWriterStreamHandle<REQ = SinkWriterStreamRequest> =
+    BidiStreamHandle<REQ, SinkWriterStreamResponse>;
 
-impl SinkWriterRequestSender {
-    pub async fn start_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.send_request(SinkWriterStreamRequest {
-            request: Some(SinkRequest::BeginEpoch(BeginEpoch { epoch })),
-        })
-        .await
-    }
-
+impl<REQ: From<SinkWriterStreamRequest>> SinkWriterRequestSender<REQ> {
     pub async fn write_batch(&mut self, epoch: u64, batch_id: u64, payload: Payload) -> Result<()> {
         self.send_request(SinkWriterStreamRequest {
             request: Some(SinkRequest::WriteBatch(WriteBatch {
@@ -94,11 +87,7 @@ impl SinkWriterResponseReceiver {
     }
 }
 
-impl SinkWriterStreamHandle {
-    pub async fn start_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.request_sender.start_epoch(epoch).await
-    }
-
+impl<REQ: From<SinkWriterStreamRequest>> SinkWriterStreamHandle<REQ> {
     pub async fn write_batch(&mut self, epoch: u64, batch_id: u64, payload: Payload) -> Result<()> {
         self.request_sender
             .write_batch(epoch, batch_id, payload)
@@ -217,6 +206,7 @@ impl ConnectorClient {
         start_offset: Option<String>,
         properties: HashMap<String, String>,
         snapshot_done: bool,
+        common_param: SourceCommonParam,
     ) -> Result<Streaming<GetEventStreamResponse>> {
         Ok(self
             .rpc_client
@@ -227,6 +217,7 @@ impl ConnectorClient {
                 start_offset: start_offset.unwrap_or_default(),
                 properties,
                 snapshot_done,
+                common_param: Some(common_param),
             })
             .await
             .inspect_err(|err| {
@@ -246,6 +237,7 @@ impl ConnectorClient {
         source_type: SourceType,
         properties: HashMap<String, String>,
         table_schema: Option<TableSchema>,
+        common_param: SourceCommonParam,
     ) -> Result<()> {
         let response = self
             .rpc_client
@@ -255,6 +247,7 @@ impl ConnectorClient {
                 source_type: source_type as _,
                 properties,
                 table_schema,
+                common_param: Some(common_param),
             })
             .await
             .inspect_err(|err| {
@@ -272,14 +265,16 @@ impl ConnectorClient {
 
     pub async fn start_sink_writer_stream(
         &self,
-        sink_param: SinkParam,
+        payload_schema: Option<TableSchema>,
+        sink_proto: PbSinkParam,
         sink_payload_format: SinkPayloadFormat,
     ) -> Result<SinkWriterStreamHandle> {
         let mut rpc_client = self.rpc_client.clone();
         let (handle, first_rsp) = SinkWriterStreamHandle::initialize(
             SinkWriterStreamRequest {
                 request: Some(SinkRequest::Start(StartSink {
-                    sink_param: Some(sink_param),
+                    payload_schema,
+                    sink_param: Some(sink_proto),
                     format: sink_payload_format as i32,
                 })),
             },

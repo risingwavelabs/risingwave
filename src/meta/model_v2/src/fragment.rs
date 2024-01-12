@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -63,6 +63,8 @@ impl From<PbFragmentDistributionType> for DistributionType {
 pub enum Relation {
     #[sea_orm(has_many = "super::actor::Entity")]
     Actor,
+    #[sea_orm(has_many = "super::actor_dispatcher::Entity")]
+    ActorDispatcher,
     #[sea_orm(
         belongs_to = "super::object::Entity",
         from = "Column::JobId",
@@ -76,6 +78,12 @@ pub enum Relation {
 impl Related<super::actor::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Actor.def()
+    }
+}
+
+impl Related<super::actor_dispatcher::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::ActorDispatcher.def()
     }
 }
 

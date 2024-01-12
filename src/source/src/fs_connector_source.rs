@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,11 +17,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use futures::stream::pending;
 use futures::StreamExt;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::ConnectorError;
-use risingwave_common::error::{internal_error, Result};
+use risingwave_common::error::Result;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use risingwave_connector::source::{
@@ -49,8 +50,8 @@ impl FsConnectorSource {
         let mut source_props: HashMap<String, String> = HashMap::from_iter(properties.clone());
         connector_node_addr
             .map(|addr| source_props.insert("connector_node_addr".to_string(), addr));
-        let config =
-            ConnectorProperties::extract(source_props).map_err(|e| ConnectorError(e.into()))?;
+        let config = ConnectorProperties::extract(source_props, false)
+            .map_err(|e| ConnectorError(e.into()))?;
 
         Ok(Self {
             config,
@@ -68,10 +69,7 @@ impl FsConnectorSource {
                     .iter()
                     .find(|c| c.column_id == *id)
                     .ok_or_else(|| {
-                        internal_error(format!(
-                            "Failed to find column id: {} in source: {:?}",
-                            id, self
-                        ))
+                        anyhow!("Failed to find column id: {} in source: {:?}", id, self).into()
                     })
                     .map(|col| col.clone())
             })

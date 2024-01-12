@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,9 @@ use std::sync::{Arc, LazyLock};
 
 use prometheus::core::{AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
-    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, Registry,
+    exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, HistogramVec,
+    Registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
@@ -65,6 +67,8 @@ pub struct SourceMetrics {
     pub rdkafka_native_metric: Arc<RdKafkaStats>,
 
     pub connector_source_rows_received: GenericCounterVec<AtomicU64>,
+
+    pub direct_cdc_event_lag_latency: HistogramVec,
 }
 
 pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
@@ -102,6 +106,14 @@ impl SourceMetrics {
         )
         .unwrap();
 
+        let opts = histogram_opts!(
+            "source_cdc_event_lag_duration_milliseconds",
+            "source_cdc_lag_latency",
+            exponential_buckets(1.0, 2.0, 21).unwrap(), // max 1048s
+        );
+        let direct_cdc_event_lag_latency =
+            register_histogram_vec_with_registry!(opts, &["table_name"], registry).unwrap();
+
         let rdkafka_native_metric = Arc::new(RdKafkaStats::new(registry.clone()));
         SourceMetrics {
             partition_input_count,
@@ -109,6 +121,7 @@ impl SourceMetrics {
             latest_message_id,
             rdkafka_native_metric,
             connector_source_rows_received,
+            direct_cdc_event_lag_latency,
         }
     }
 }

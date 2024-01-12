@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -66,7 +66,7 @@ impl Format {
         match format_code {
             0 => Ok(Format::Text),
             1 => Ok(Format::Binary),
-            _ => Err(PsqlError::Internal(
+            _ => Err(PsqlError::Uncategorized(
                 format!("Unknown format code: {}", format_code).into(),
             )),
         }

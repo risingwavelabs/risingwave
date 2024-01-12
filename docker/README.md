@@ -45,12 +45,20 @@ To start a RisingWave playground, run
 docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/risingwavelabs/risingwave:latest playground
 ```
 
-### minio
-To start a RisingWave cluster with minio backend, run
+### standalone minio
+To start a RisingWave standalone mode with minio backend, run
 
 ```
 # Start all components
 docker-compose up
+```
+
+### distributed cluster minio
+To start a RisingWave cluster with minio backend, run
+
+```
+# Start all components
+docker-compose -f docker-compose-distributed.yml up
 ```
 
 It will start a minio, a meta node, a compute node, a frontend, a compactor, a prometheus and a redpanda instance.
@@ -95,7 +103,7 @@ To clean all data, run:
 docker-compose down -v
 ```
 
-> **Note**
+> [!NOTE]
 >
 > For RisingWave kernel hackers, we always recommend using [risedev](../src/risedevtool/README.md) to start the full cluster, instead of using docker images.
 > See [CONTRIBUTING](../CONTRIBUTING.md) for more information.
@@ -105,3 +113,13 @@ docker-compose down -v
 ```bash
 ./risedev compose
 ```
+
+## Common Issues
+
+Error message:
+```
+Error { code: "XMinioStorageFull", message: "Storage backend has reached its minimum free drive threshold. Please delete a few objects to proceed."
+```
+
+Solution:
+This usually happens on MacOS with Docker Desktop. The Docker Deskup runs in the macOS Hypervisor. All the data, including logs, images, volumes, and so on, is stored in this hypervisor and the hypervisor has a default disk capacity limit. So when this message emerges, simply cleaning up the unused container or image can help mitigate. You can also increase capacity limit by clicking the Docker Desktop icon in the menu bar, then clicking Preferences > Resources > `Increase Disk image size`.

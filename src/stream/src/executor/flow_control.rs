@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use std::fmt::{Debug, Formatter};
 use std::num::NonZeroU32;
 
 use governor::clock::MonotonicClock;
-use governor::{InsufficientCapacity, Quota, RateLimiter};
+use governor::{Quota, RateLimiter};
 use risingwave_common::catalog::Schema;
 
 use super::*;
@@ -79,15 +79,23 @@ impl FlowControlExecutor {
                         continue;
                     };
                     if let Some(rate_limiter) = &rate_limiter {
-                        let result = rate_limiter.until_n_ready(n).await;
-                        if let Err(InsufficientCapacity(_max_cells)) = result {
-                            tracing::error!(
-                                "Rate Limit {:?} smaller than chunk cardinality {chunk_cardinality}",
-                                self.rate_limit,
-                            );
+                        let limit = NonZeroU32::new(self.rate_limit.unwrap()).unwrap();
+                        if n <= limit {
+                            // `InsufficientCapacity` should never happen because we have done the check
+                            rate_limiter.until_n_ready(n).await.unwrap();
+                            yield Message::Chunk(chunk);
+                        } else {
+                            // Cut the chunk into smaller chunks
+                            for chunk in chunk.split(limit.get() as usize) {
+                                let n = NonZeroU32::new(chunk.cardinality() as u32).unwrap();
+                                // Ditto.
+                                rate_limiter.until_n_ready(n).await.unwrap();
+                                yield Message::Chunk(chunk);
+                            }
                         }
+                    } else {
+                        yield Message::Chunk(chunk);
                     }
-                    yield Message::Chunk(chunk);
                 }
                 Message::Barrier(barrier) => {
                     if let Some(mutation) = barrier.mutation.as_ref() {

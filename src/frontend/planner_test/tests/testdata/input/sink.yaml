@@ -20,6 +20,28 @@
       type='upsert');
   expected_outputs:
     - explain_output
+- id: create_upsert_jdbc_sink_with_downstream_pk1
+  sql: |
+    create table t1 (v1 int, v2 double precision, v3 varchar, v4 bigint, v5 decimal, primary key (v3,v4));
+    explain (distsql, verbose) create sink s1_mysql as select v1, v2, v3, v5 from t1 WITH (
+      connector='jdbc',
+      primary_key='v1,v2',
+      jdbc.url='jdbc:mysql://127.0.0.1:8306/mydb?user=root',
+      table.name='t1sink',
+      type='upsert');
+  expected_outputs:
+    - explain_output
+- id: create_upsert_jdbc_sink_with_downstream_pk2
+  sql: |
+    create table t1 (v1 int, v2 double precision, v3 varchar, v4 bigint, v5 decimal, primary key (v1,v2));
+    explain (distsql, verbose) create sink s1_mysql as select v1, v2, v3, v5 from t1 WITH (
+      connector='jdbc',
+      primary_key='v3, v5',
+      jdbc.url='jdbc:mysql://127.0.0.1:8306/mydb?user=root',
+      table.name='t1sink',
+      type='upsert');
+  expected_outputs:
+    - explain_output
 - id: create_appendonly_jdbc_sink
   sql: |
     create table t1 (v1 int, v2 double precision, v3 varchar, v4 bigint, v5 decimal, primary key (v1,v2));
@@ -51,5 +73,11 @@
       type='upsert',
       primary_key='v2,v1'
     );
+  expected_outputs:
+    - explain_output
+- id: create_emit_on_close_sink
+  sql: |
+    create table t2 (a int, b int, watermark for b as b - 4) append only;
+    explain create sink sk1 from t2 emit on window close with (connector='blackhole');
   expected_outputs:
     - explain_output

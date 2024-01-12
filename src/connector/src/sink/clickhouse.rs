@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -277,12 +277,12 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Time => Err(SinkError::ClickHouse(
                 "clickhouse can not support Time".to_string(),
             )),
-            risingwave_common::types::DataType::Timestamp => {
+            risingwave_common::types::DataType::Timestamp => Err(SinkError::ClickHouse(
+                "clickhouse does not have a type corresponding to naive timestamp".to_string(),
+            )),
+            risingwave_common::types::DataType::Timestamptz => {
                 Ok(ck_column.r#type.contains("DateTime64"))
             }
-            risingwave_common::types::DataType::Timestamptz => Err(SinkError::ClickHouse(
-                "clickhouse can not support Timestamptz".to_string(),
-            )),
             risingwave_common::types::DataType::Interval => Err(SinkError::ClickHouse(
                 "clickhouse can not support Interval".to_string(),
             )),
@@ -422,6 +422,7 @@ impl ClickHouseSinkWriter {
     /// `column_correct_vec`
     fn build_column_correct_vec(ck_column: &SystemColumn) -> Result<ClickHouseSchemaFeature> {
         let can_null = ck_column.r#type.contains("Nullable");
+        // `DateTime64` without precision is already displayed as `DateTime(3)` in `system.columns`.
         let accuracy_time = if ck_column.r#type.contains("DateTime64(") {
             ck_column
                 .r#type
@@ -429,6 +430,9 @@ impl ClickHouseSinkWriter {
                 .last()
                 .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
                 .split(')')
+                .next()
+                .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
+                .split(',')
                 .next()
                 .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
                 .parse::<u8>()
@@ -696,15 +700,24 @@ impl ClickHouseFieldWithNull {
                     "clickhouse can not support Time".to_string(),
                 ))
             }
-            ScalarRefImpl::Timestamp(v) => {
-                let time = v.get_timestamp_nanos()
-                    / 10_i32.pow((9 - clickhouse_schema_feature.accuracy_time).into()) as i64;
-                ClickHouseField::Int64(time)
-            }
-            ScalarRefImpl::Timestamptz(_) => {
+            ScalarRefImpl::Timestamp(_) => {
                 return Err(SinkError::ClickHouse(
-                    "clickhouse can not support Timestamptz".to_string(),
+                    "clickhouse does not have a type corresponding to naive timestamp".to_string(),
                 ))
+            }
+            ScalarRefImpl::Timestamptz(v) => {
+                let micros = v.timestamp_micros();
+                let ticks = match clickhouse_schema_feature.accuracy_time <= 6 {
+                    true => {
+                        micros / 10_i64.pow((6 - clickhouse_schema_feature.accuracy_time).into())
+                    }
+                    false => micros
+                        .checked_mul(
+                            10_i64.pow((clickhouse_schema_feature.accuracy_time - 6).into()),
+                        )
+                        .ok_or_else(|| SinkError::ClickHouse("DateTime64 overflow".to_string()))?,
+                };
+                ClickHouseField::Int64(ticks)
             }
             ScalarRefImpl::Jsonb(_) => {
                 return Err(SinkError::ClickHouse(

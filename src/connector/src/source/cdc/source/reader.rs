@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,9 @@ use prost::Message;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_jni_core::{call_static_method, JniReceiverType, JniSenderType};
-use risingwave_pb::connector_service::{GetEventStreamRequest, GetEventStreamResponse};
+use risingwave_pb::connector_service::{
+    GetEventStreamRequest, GetEventStreamResponse, SourceCommonParam,
+};
 use tokio::sync::mpsc;
 
 use crate::parser::ParserConfig;
@@ -67,8 +69,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         let split = splits.into_iter().next().unwrap();
         let split_id = split.id();
 
-        // rewrite the hostname and port for the split
-        let mut properties = conn_props.props.clone();
+        let mut properties = conn_props.properties.clone();
 
         // For citus, we need to rewrite the `table.name` to capture sharding tables
         if matches!(T::source_type(), CdcSourceType::Citus)
@@ -90,9 +91,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         let source_type = conn_props.get_source_type_pb();
         let (mut tx, mut rx) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
 
-        let jvm = JVM
-            .get_or_init()
-            .map_err(|e| anyhow!("jvm not initialized properly: {:?}", e))?;
+        let jvm = JVM.get_or_init()?;
 
         let get_event_stream_request = GetEventStreamRequest {
             source_id,
@@ -100,6 +99,9 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
             start_offset: split.start_offset().clone().unwrap_or_default(),
             properties,
             snapshot_done: split.snapshot_done(),
+            common_param: Some(SourceCommonParam {
+                is_multi_table_shared: conn_props.is_multi_table_shared,
+            }),
         };
 
         std::thread::spawn(move || {
@@ -139,11 +141,15 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
             }
         });
 
+        // wait for the handshake message
         if let Some(res) = rx.recv().await {
             let resp: GetEventStreamResponse = res?;
             let inited = match resp.control {
                 Some(info) => info.handshake_ok,
-                None => false,
+                None => {
+                    tracing::error!(?source_id, "handshake message not received. {:?}", resp);
+                    false
+                }
             };
             if !inited {
                 return Err(anyhow!("failed to start cdc connector"));
@@ -197,7 +203,7 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
 
         while let Some(result) = rx.recv().await {
             let GetEventStreamResponse { events, .. } = result?;
-            tracing::trace!("receive events {:?}", events.len());
+            tracing::trace!("receive {} cdc events ", events.len());
             metrics
                 .connector_source_rows_received
                 .with_label_values(&[source_type.as_str_name(), &source_id])

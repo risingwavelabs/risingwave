@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,10 @@
 use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnId, TableId};
-use risingwave_connector::source::SourceCtrlOpts;
+use risingwave_connector::source::filesystem::opendal_source::{
+    OpendalGcs, OpendalPosixFs, OpendalS3,
+};
+use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
 use risingwave_pb::stream_plan::StreamFsFetchNode;
 use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::StateStore;
@@ -46,18 +49,17 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         let source_id = TableId::new(source.source_id);
         let source_name = source.source_name.clone();
         let source_info = source.get_info()?;
-
+        let properties = ConnectorProperties::extract(source.with_properties.clone(), false)?;
         let source_desc_builder = SourceDescBuilder::new(
             source.columns.clone(),
             params.env.source_metrics(),
             source.row_id_index.map(|x| x as _),
-            source.properties.clone(),
+            source.with_properties.clone(),
             source_info.clone(),
             params.env.connector_params(),
             params.env.config().developer.connector_message_buffer_size,
             params.info.pk_indices.clone(),
         );
-
         let source_ctrl_opts = SourceCtrlOpts {
             chunk_size: params.env.config().developer.chunk_size,
         };
@@ -87,16 +89,42 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             state_table_handler,
         );
 
-        let executor = FsFetchExecutor::new(
-            params.actor_context.clone(),
-            params.info,
-            stream_source_core,
-            upstream,
-            source_ctrl_opts,
-            params.env.connector_params(),
-        )
-        .boxed();
-
+        let executor = match properties {
+            risingwave_connector::source::ConnectorProperties::Gcs(_) => {
+                FsFetchExecutor::<_, OpendalGcs>::new(
+                    params.actor_context.clone(),
+                    params.info,
+                    stream_source_core,
+                    upstream,
+                    source_ctrl_opts,
+                    params.env.connector_params(),
+                )
+                .boxed()
+            }
+            risingwave_connector::source::ConnectorProperties::OpendalS3(_) => {
+                FsFetchExecutor::<_, OpendalS3>::new(
+                    params.actor_context.clone(),
+                    params.info,
+                    stream_source_core,
+                    upstream,
+                    source_ctrl_opts,
+                    params.env.connector_params(),
+                )
+                .boxed()
+            }
+            risingwave_connector::source::ConnectorProperties::PosixFs(_) => {
+                FsFetchExecutor::<_, OpendalPosixFs>::new(
+                    params.actor_context.clone(),
+                    params.info,
+                    stream_source_core,
+                    upstream,
+                    source_ctrl_opts,
+                    params.env.connector_params(),
+                )
+                .boxed()
+            }
+            _ => unreachable!(),
+        };
         let rate_limit = source.rate_limit.map(|x| x as _);
         Ok(FlowControlExecutor::new(executor, params.actor_context, rate_limit).boxed())
     }

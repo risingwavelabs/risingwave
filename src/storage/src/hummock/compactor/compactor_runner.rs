@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,26 +13,27 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
-use risingwave_common::util::epoch::MAX_EPOCH;
+use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
 use risingwave_hummock_sdk::key::{FullKey, PointRange};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::{can_concat, EpochWithGap};
+use risingwave_hummock_sdk::{can_concat, EpochWithGap, HummockEpoch};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType};
 use tokio::sync::oneshot::Receiver;
 
 use super::task_progress::TaskProgress;
-use super::{CompactionStatistics, TaskConfig};
+use super::{check_compaction_result, CompactionStatistics, TaskConfig};
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
@@ -43,7 +44,8 @@ use crate::hummock::compactor::{
     fast_compactor_runner, CompactOutput, CompactionFilter, Compactor, CompactorContext,
 };
 use crate::hummock::iterator::{
-    Forward, ForwardMergeRangeIterator, HummockIterator, UnorderedMergeIteratorInner,
+    Forward, ForwardMergeRangeIterator, HummockIterator, SkipWatermarkIterator,
+    UnorderedMergeIteratorInner,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::value::HummockValue;
@@ -53,7 +55,6 @@ use crate::hummock::{
     SstableDeleteRangeIterator, SstableStoreRef,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
-
 pub struct CompactorRunner {
     compact_task: CompactTask,
     compactor: Compactor,
@@ -104,9 +105,8 @@ impl CompactorRunner {
                 task_type: task.task_type(),
                 is_target_l0_or_lbase: task.target_level == 0
                     || task.target_level == task.base_level,
-                split_by_table: task.split_by_state_table,
-                split_weight_by_vnode: task.split_weight_by_vnode,
                 use_block_based_filter,
+                table_vnode_partition: task.table_vnode_partition.clone(),
             },
             object_id_getter,
         );
@@ -157,7 +157,7 @@ impl CompactorRunner {
             .context
             .storage_opts
             .compact_iter_recreate_timeout_ms;
-        let mut del_iter = ForwardMergeRangeIterator::new(MAX_EPOCH);
+        let mut del_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
 
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
@@ -226,8 +226,14 @@ impl CompactorRunner {
                 }
             }
         }
+
+        // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
+        // in https://github.com/risingwavelabs/risingwave/issues/13148
         Ok((
-            UnorderedMergeIteratorInner::for_compactor(table_iters),
+            SkipWatermarkIterator::from_safe_epoch_watermarks(
+                UnorderedMergeIteratorInner::for_compactor(table_iters),
+                &self.compact_task.table_watermarks,
+            ),
             CompactionDeleteRangeIterator::new(del_iter),
         ))
     }
@@ -369,6 +375,15 @@ pub async fn compact(
     let all_ssts_are_blocked_filter = sstable_infos
         .iter()
         .all(|table_info| table_info.bloom_filter_kind() == BloomFilterType::Blocked);
+
+    let delete_key_count = sstable_infos
+        .iter()
+        .map(|table_info| table_info.stale_key_count + table_info.range_tombstone_count)
+        .sum::<u64>();
+    let total_key_count = sstable_infos
+        .iter()
+        .map(|table_info| table_info.total_key_count)
+        .sum::<u64>();
     let optimize_by_copy_block = context.storage_opts.enable_fast_compaction
         && all_ssts_are_blocked_filter
         && !has_tombstone
@@ -376,7 +391,11 @@ pub async fn compact(
         && single_table
         && compact_task.target_level > 0
         && compact_task.input_ssts.len() == 2
+        && compaction_size < context.storage_opts.compactor_fast_max_compact_task_size
+        && delete_key_count * 100
+            < context.storage_opts.compactor_fast_max_compact_delete_ratio as u64 * total_key_count
         && compact_task.task_type() == TaskType::Dynamic;
+
     if !optimize_by_copy_block {
         match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
             Ok(splits) => {
@@ -395,6 +414,27 @@ pub async fn compact(
     // Number of splits (key ranges) is equal to number of compaction tasks
     let parallelism = compact_task.splits.len();
     assert_ne!(parallelism, 0, "splits cannot be empty");
+    if !context.acquire_task_quota(parallelism as u32) {
+        tracing::warn!(
+            "Not enough core parallelism to serve the task {} task_parallelism {} running_task_parallelism {} max_task_parallelism {}",
+            compact_task.task_id,
+            parallelism,
+            context.running_task_parallelism.load(Ordering::Relaxed),
+            context.max_task_parallelism.load(Ordering::Relaxed),
+        );
+        return compact_done(
+            compact_task,
+            context.clone(),
+            vec![],
+            TaskStatus::NoAvailCpuResourceCanceled,
+        );
+    }
+
+    let _release_quota_guard =
+        scopeguard::guard((parallelism, context.clone()), |(parallelism, context)| {
+            context.release_task_quota(parallelism as u32);
+        });
+
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
     let mut abort_handles = vec![];
@@ -408,6 +448,8 @@ pub async fn compact(
         (context.storage_opts.block_size_kb as u64) * (1 << 10),
         context
             .storage_opts
+            .object_store_config
+            .s3
             .object_store_recv_buffer_size
             .unwrap_or(6 * 1024 * 1024) as u64,
         capacity as u64,
@@ -415,7 +457,7 @@ pub async fn compact(
     ) * compact_task.splits.len() as u64;
 
     tracing::info!(
-        "Ready to handle compaction group {} task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} table_ids {:?} parallelism {} task_memory_capacity_with_parallelism {}, enable fast runner: {}",
+        "Ready to handle compaction group {} task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} table_ids {:?} parallelism {} task_memory_capacity_with_parallelism {}, enable fast runner: {} input: {:?}",
             compact_task.compaction_group_id,
             compact_task.task_id,
             compact_task_statistics,
@@ -424,7 +466,8 @@ pub async fn compact(
             compact_task.existing_table_ids,
             parallelism,
             task_memory_capacity_with_parallelism,
-            optimize_by_copy_block
+            optimize_by_copy_block,
+            compact_task_to_string(&compact_task),
     );
 
     // If the task does not have enough memory, it should cancel the task and let the meta
@@ -440,11 +483,24 @@ pub async fn compact(
                 context.memory_limiter.get_memory_usage(),
                 context.memory_limiter.quota()
             );
-        task_status = TaskStatus::NoAvailResourceCanceled;
+        task_status = TaskStatus::NoAvailMemoryResourceCanceled;
         return compact_done(compact_task, context.clone(), output_ssts, task_status);
     }
 
     context.compactor_metrics.compact_task_pending_num.inc();
+    context
+        .compactor_metrics
+        .compact_task_pending_parallelism
+        .add(parallelism as _);
+    let _release_metrics_guard =
+        scopeguard::guard((parallelism, context.clone()), |(parallelism, context)| {
+            context.compactor_metrics.compact_task_pending_num.dec();
+            context
+                .compactor_metrics
+                .compact_task_pending_parallelism
+                .sub(parallelism as _);
+        });
+
     if optimize_by_copy_block {
         let runner = fast_compactor_runner::CompactorRunner::new(
             context.clone(),
@@ -477,7 +533,6 @@ pub async fn compact(
             }
         }
 
-        context.compactor_metrics.compact_task_pending_num.dec();
         // After a compaction is done, mutate the compaction task.
         let (compact_task, table_stats) =
             compact_done(compact_task, context.clone(), output_ssts, task_status);
@@ -487,6 +542,16 @@ pub async fn compact(
             cost_time,
             compact_task_to_string(&compact_task)
         );
+        // TODO: remove this method after we have running risingwave cluster with fast compact algorithm stably for a long time.
+        if context.storage_opts.check_fast_compaction_result
+            && let Err(e) = check_compaction_result(&compact_task, context.clone()).await
+        {
+            tracing::error!(
+                "Failed to check fast compaction task {} because: {:?}",
+                compact_task.task_id,
+                e
+            );
+        }
         return (compact_task, table_stats);
     }
     for (split_index, _) in compact_task.splits.iter().enumerate() {
@@ -582,7 +647,6 @@ pub async fn compact(
         cost_time,
         compact_task_to_string(&compact_task)
     );
-    context.compactor_metrics.compact_task_pending_num.dec();
     for level in &compact_task.input_ssts {
         for table in &level.table_infos {
             context.sstable_store.delete_cache(table.get_object_id());
@@ -655,7 +719,7 @@ where
         del_iter.seek(full_key.user_key).await?;
         if !task_config.gc_delete_keys
             && del_iter.is_valid()
-            && del_iter.earliest_epoch() != MAX_EPOCH
+            && !is_max_epoch(del_iter.earliest_epoch())
         {
             sst_builder
                 .add_monotonic_delete(MonotonicDeleteEvent {
@@ -678,7 +742,7 @@ where
 
     let mut last_key = FullKey::default();
     let mut watermark_can_see_last_key = false;
-    let mut user_key_last_delete_epoch = MAX_EPOCH;
+    let mut user_key_last_delete_epoch = HummockEpoch::MAX;
     let mut local_stats = StoreLocalStatistic::default();
 
     // Keep table stats changes due to dropping KV.
@@ -714,7 +778,7 @@ where
             }
             last_key.set(iter_key);
             watermark_can_see_last_key = false;
-            user_key_last_delete_epoch = MAX_EPOCH;
+            user_key_last_delete_epoch = HummockEpoch::MAX;
             if value.is_delete() {
                 local_stats.skip_delete_key_count += 1;
             }
@@ -841,7 +905,7 @@ where
                 sst_builder
                     .add_monotonic_delete(MonotonicDeleteEvent {
                         event_key: extended_largest_user_key,
-                        new_epoch: MAX_EPOCH,
+                        new_epoch: HummockEpoch::MAX,
                     })
                     .await?;
                 break;
@@ -962,7 +1026,7 @@ mod tests {
             .cloned()
             .collect_vec();
 
-        let mut iter = ForwardMergeRangeIterator::new(MAX_EPOCH);
+        let mut iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
         iter.add_concat_iter(sstable_infos, sstable_store);
 
         let ret = CompactionDeleteRangeIterator::new(iter)

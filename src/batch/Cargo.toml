@@ -52,6 +52,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-metrics = "0.3.0"
 tokio-stream = "0.1"
+tokio-util = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
 

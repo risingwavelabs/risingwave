@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::ffi::CStr;
 use std::io::{Error, ErrorKind, IoSlice, Result, Write};
 
-use byteorder::{BigEndian, ByteOrder};
+use byteorder::{BigEndian, ByteOrder, NetworkEndian};
 /// Part of code learned from <https://github.com/zenithdb/zenith/blob/main/zenith_utils/src/pq_proto.rs>.
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -43,6 +43,8 @@ pub enum FeMessage {
     CancelQuery(FeCancelMessage),
     Terminate,
     Flush,
+    // special msg to detect health check, which represents the client immediately closes the connection cleanly without sending any data.
+    HealthCheck,
 }
 
 #[derive(Debug)]
@@ -293,7 +295,31 @@ impl FeMessage {
 impl FeStartupMessage {
     /// Read startup message from the stream.
     pub async fn read(stream: &mut (impl AsyncRead + Unpin)) -> Result<FeMessage> {
-        let len = stream.read_i32().await?;
+        let mut buffer1 = vec![0; 1];
+        let result = stream.read_exact(&mut buffer1).await;
+        let filled1 = match result {
+            Ok(n) => n,
+            Err(err) => {
+                // Detect whether it is a health check.
+                if err.kind() == ErrorKind::UnexpectedEof {
+                    return Ok(FeMessage::HealthCheck);
+                } else {
+                    return Err(err);
+                }
+            }
+        };
+        assert_eq!(filled1, 1);
+
+        let mut buffer2 = vec![0; 3];
+        let filled2 = stream.read_exact(&mut buffer2).await?;
+        assert_eq!(filled2, 3);
+
+        let mut buffer3 = BytesMut::with_capacity(4);
+        buffer3.put_slice(&buffer1);
+        buffer3.put_slice(&buffer2);
+
+        let len = NetworkEndian::read_i32(&buffer3);
+
         let protocol_num = stream.read_i32().await?;
         let payload_len = (len - 8) as usize;
         if payload_len >= isize::MAX as usize {

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_meta::stream::{ScaleController, ScaleControllerRef};
+use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::model::TableParallelism;
+use risingwave_meta::stream::{ScaleController, ScaleControllerRef, TableRevision};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
@@ -25,45 +28,47 @@ use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
-use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::model::MetadataModel;
 use crate::stream::{
     GlobalStreamManagerRef, ParallelUnitReschedule, RescheduleOptions, SourceManagerRef,
 };
 
 pub struct ScaleServiceImpl {
-    fragment_manager: FragmentManagerRef,
-    cluster_manager: ClusterManagerRef,
+    metadata_manager: MetadataManager,
     source_manager: SourceManagerRef,
-    catalog_manager: CatalogManagerRef,
     stream_manager: GlobalStreamManagerRef,
     barrier_manager: BarrierManagerRef,
-    scale_controller: ScaleControllerRef,
+    scale_controller: Option<ScaleControllerRef>,
 }
 
 impl ScaleServiceImpl {
     pub fn new(
-        fragment_manager: FragmentManagerRef,
-        cluster_manager: ClusterManagerRef,
+        metadata_manager: MetadataManager,
         source_manager: SourceManagerRef,
-        catalog_manager: CatalogManagerRef,
         stream_manager: GlobalStreamManagerRef,
         barrier_manager: BarrierManagerRef,
     ) -> Self {
-        let scale_controller = Arc::new(ScaleController::new(
-            fragment_manager.clone(),
-            cluster_manager.clone(),
-            source_manager.clone(),
-            stream_manager.env.clone(),
-        ));
+        let scale_controller = match &metadata_manager {
+            MetadataManager::V1(_) => Some(Arc::new(ScaleController::new(
+                &metadata_manager,
+                source_manager.clone(),
+                stream_manager.env.clone(),
+            ))),
+            MetadataManager::V2(_) => None,
+        };
         Self {
-            fragment_manager,
-            cluster_manager,
+            metadata_manager,
             source_manager,
-            catalog_manager,
             stream_manager,
             barrier_manager,
             scale_controller,
+        }
+    }
+
+    async fn get_revision(&self) -> TableRevision {
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.fragment_manager.get_revision().await,
+            MetadataManager::V2(_) => unimplemented!("support table revision in v2"),
         }
     }
 }
@@ -77,23 +82,32 @@ impl ScaleService for ScaleServiceImpl {
     ) -> Result<Response<GetClusterInfoResponse>, Status> {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
 
-        let table_fragments = self
-            .fragment_manager
-            .get_fragment_read_guard()
-            .await
-            .table_fragments()
-            .values()
-            .map(|tf| tf.to_protobuf())
-            .collect();
+        let table_fragments = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr
+                .fragment_manager
+                .get_fragment_read_guard()
+                .await
+                .table_fragments()
+                .values()
+                .map(|tf| tf.to_protobuf())
+                .collect(),
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .table_fragments()
+                .await?
+                .values()
+                .cloned()
+                .collect(),
+        };
 
         let worker_nodes = self
-            .cluster_manager
+            .metadata_manager
             .list_worker_node(Some(WorkerType::ComputeNode), None)
-            .await;
+            .await?;
 
         let actor_splits = self
             .source_manager
-            .get_actor_splits()
+            .list_assignments()
             .await
             .into_iter()
             .map(|(actor_id, splits)| {
@@ -106,11 +120,10 @@ impl ScaleService for ScaleServiceImpl {
             })
             .collect();
 
-        let sources = self.catalog_manager.list_sources().await;
-
+        let sources = self.metadata_manager.list_sources().await?;
         let source_infos = sources.into_iter().map(|s| (s.id, s)).collect();
 
-        let revision = self.fragment_manager.get_revision().await.inner();
+        let revision = self.get_revision().await.inner();
 
         Ok(Response::new(GetClusterInfoResponse {
             worker_nodes,
@@ -126,11 +139,11 @@ impl ScaleService for ScaleServiceImpl {
         &self,
         request: Request<RescheduleRequest>,
     ) -> Result<Response<RescheduleResponse>, Status> {
-        if !self.barrier_manager.is_running().await {
-            return Err(Status::unavailable(
-                "Rescheduling is unavailable for now. Likely the cluster is starting or recovering.",
-            ));
-        }
+        self.barrier_manager.check_status_running().await?;
+
+        let MetadataManager::V1(mgr) = &self.metadata_manager else {
+            unimplemented!("only available in v1");
+        };
 
         let RescheduleRequest {
             reschedules,
@@ -140,7 +153,7 @@ impl ScaleService for ScaleServiceImpl {
 
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.write().await;
 
-        let current_revision = self.fragment_manager.get_revision().await;
+        let current_revision = self.get_revision().await;
 
         if revision != current_revision.inner() {
             return Ok(Response::new(RescheduleResponse {
@@ -148,6 +161,22 @@ impl ScaleService for ScaleServiceImpl {
                 revision: current_revision.inner(),
             }));
         }
+
+        let table_parallelisms = {
+            let guard = mgr.fragment_manager.get_fragment_read_guard().await;
+
+            let mut table_parallelisms = HashMap::new();
+            for (table_id, table) in guard.table_fragments() {
+                if table
+                    .fragment_ids()
+                    .any(|fragment_id| reschedules.contains_key(&fragment_id))
+                {
+                    table_parallelisms.insert(*table_id, TableParallelism::Custom);
+                }
+            }
+
+            table_parallelisms
+        };
 
         self.stream_manager
             .reschedule_actors(
@@ -174,10 +203,11 @@ impl ScaleService for ScaleServiceImpl {
                 RescheduleOptions {
                     resolve_no_shuffle_upstream,
                 },
+                Some(table_parallelisms),
             )
             .await?;
 
-        let next_revision = self.fragment_manager.get_revision().await;
+        let next_revision = self.get_revision().await;
 
         Ok(Response::new(RescheduleResponse {
             success: true,
@@ -190,17 +220,13 @@ impl ScaleService for ScaleServiceImpl {
         &self,
         request: Request<GetReschedulePlanRequest>,
     ) -> Result<Response<GetReschedulePlanResponse>, Status> {
-        let req = request.into_inner();
+        self.barrier_manager.check_status_running().await?;
 
-        if !self.barrier_manager.is_running().await {
-            return Err(Status::unavailable(
-                "Rescheduling is unavailable for now. Likely the cluster is starting or recovering.",
-            ));
-        }
+        let req = request.into_inner();
 
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
 
-        let current_revision = self.fragment_manager.get_revision().await;
+        let current_revision = self.get_revision().await;
 
         if req.revision != current_revision.inner() {
             return Ok(Response::new(GetReschedulePlanResponse {
@@ -214,9 +240,14 @@ impl ScaleService for ScaleServiceImpl {
             .policy
             .ok_or_else(|| Status::invalid_argument("policy is required"))?;
 
-        let plan = self.scale_controller.get_reschedule_plan(policy).await?;
+        let Some(scale_controller) = &self.scale_controller else {
+            return Err(Status::unimplemented(
+                "reschedule plan is not supported in v2",
+            ));
+        };
+        let plan = scale_controller.get_reschedule_plan(policy).await?;
 
-        let next_revision = self.fragment_manager.get_revision().await;
+        let next_revision = self.get_revision().await;
 
         // generate reschedule plan will not change the revision
         assert_eq!(current_revision, next_revision);

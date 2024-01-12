@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::iter::once;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::anyhow;
+use assert_matches::assert_matches;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::PausedReason;
@@ -52,6 +53,7 @@ struct Inner {
     metrics: Arc<MetaMetrics>,
 }
 
+#[derive(Debug)]
 enum QueueStatus {
     /// The queue is ready to accept new command.
     Ready,
@@ -85,8 +87,18 @@ impl ScheduledQueue {
     }
 
     fn push_back(&mut self, scheduled: Scheduled) -> MetaResult<()> {
-        if let QueueStatus::Blocked(reason) = &self.status {
-            return Err(MetaError::unavailable(reason.clone()));
+        // We don't allow any command to be scheduled when the queue is blocked, except for dropping streaming jobs.
+        // Because we allow dropping streaming jobs when the cluster is under recovery, so we have to buffer the drop
+        // command and execute it when the cluster is ready to clean up it.
+        // TODO: this is just a workaround to allow dropping streaming jobs when the cluster is under recovery,
+        // we need to refine it when catalog and streaming metadata can be handled in a transactional way.
+        if let QueueStatus::Blocked(reason) = &self.status
+            && !matches!(
+                scheduled.command,
+                Command::DropStreamingJobs(_) | Command::CancelStreamingJob(_)
+            )
+        {
+            return Err(MetaError::unavailable(reason));
         }
         self.queue.push_back(scheduled);
         Ok(())
@@ -383,11 +395,43 @@ impl ScheduledBarriers {
         queue.mark_ready();
     }
 
+    /// Try to pre apply drop scheduled command and return the table ids of dropped streaming jobs.
+    /// It should only be called in recovery.
+    pub(super) async fn pre_apply_drop_scheduled(&self) -> HashSet<TableId> {
+        let mut to_drop_tables = HashSet::new();
+        let mut queue = self.inner.queue.write().await;
+        assert_matches!(queue.status, QueueStatus::Blocked(_));
+
+        while let Some(Scheduled {
+            notifiers, command, ..
+        }) = queue.queue.pop_front()
+        {
+            match command {
+                Command::DropStreamingJobs(table_ids) => {
+                    to_drop_tables.extend(table_ids);
+                }
+                Command::CancelStreamingJob(table_fragments) => {
+                    let table_id = table_fragments.table_id();
+                    to_drop_tables.insert(table_id);
+                }
+                _ => {
+                    unreachable!("only drop streaming jobs should be buffered");
+                }
+            }
+            notifiers.into_iter().for_each(|mut notify| {
+                notify.notify_collected();
+                notify.notify_finished();
+            });
+        }
+        to_drop_tables
+    }
+
     /// Whether the barrier(checkpoint = true) should be injected.
     fn try_get_checkpoint(&self) -> bool {
         self.inner
             .num_uncheckpointed_barrier
             .load(Ordering::Relaxed)
+            + 1
             >= self.inner.checkpoint_frequency.load(Ordering::Relaxed)
             || self.inner.force_checkpoint.load(Ordering::Relaxed)
     }

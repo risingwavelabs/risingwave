@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ use risingwave_pb::hummock::{
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::manager::MetaSrvEnv;
-use crate::model::MetadataModel;
+use crate::model::{MetadataModel, MetadataModelError};
 use crate::MetaResult;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
@@ -125,8 +125,19 @@ pub struct CompactorManagerInner {
 
 impl CompactorManagerInner {
     pub async fn with_meta(env: MetaSrvEnv) -> MetaResult<Self> {
+        use risingwave_meta_model_v2::compaction_task;
+        use sea_orm::EntityTrait;
         // Retrieve the existing task assignments from metastore.
-        let task_assignment = CompactTaskAssignment::list(env.meta_store()).await?;
+        let task_assignment: Vec<CompactTaskAssignment> = match env.sql_meta_store() {
+            None => CompactTaskAssignment::list(env.meta_store()).await?,
+            Some(sql_meta_store) => compaction_task::Entity::find()
+                .all(&sql_meta_store.conn)
+                .await
+                .map_err(MetadataModelError::from)?
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        };
         let mut manager = Self {
             task_expiry_seconds: env.opts.compaction_task_max_heartbeat_interval_secs,
             task_heartbeats: Default::default(),
@@ -359,6 +370,7 @@ impl CompactorManagerInner {
                 num_progress_key: hb.num_progress_key,
                 num_pending_read_io: hb.num_pending_read_io,
                 num_pending_write_io: hb.num_pending_write_io,
+                compaction_group_id: Some(hb.task.compaction_group_id),
             })
             .collect()
     }

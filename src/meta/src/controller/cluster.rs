@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
-use risingwave_common::hash::ParallelUnitId;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
@@ -47,7 +46,9 @@ use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
-use crate::manager::{LocalNotification, MetaSrvEnv, WorkerKey, META_NODE_ID};
+use crate::manager::{
+    LocalNotification, MetaSrvEnv, StreamingClusterInfo, WorkerKey, META_NODE_ID,
+};
 use crate::{MetaError, MetaResult};
 
 pub type ClusterControllerRef = Arc<ClusterController>;
@@ -118,11 +119,11 @@ impl ClusterController {
 
     /// Used in `NotificationService::subscribe`.
     /// Need to pay attention to the order of acquiring locks to prevent deadlock problems.
-    pub async fn get_inner_guard(&self) -> RwLockReadGuard<'_, ClusterControllerInner> {
+    pub async fn get_inner_read_guard(&self) -> RwLockReadGuard<'_, ClusterControllerInner> {
         self.inner.read().await
     }
 
-    pub async fn count_worker_by_type(&self) -> MetaResult<HashMap<WorkerType, i32>> {
+    pub async fn count_worker_by_type(&self) -> MetaResult<HashMap<WorkerType, i64>> {
         self.inner.read().await.count_worker_by_type().await
     }
 
@@ -208,7 +209,7 @@ impl ClusterController {
         &self,
         worker_id: WorkerId,
         info: Vec<heartbeat_request::extra_info::Info>,
-    ) {
+    ) -> MetaResult<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", worker_id = worker_id, "receive heartbeat");
         self.inner
             .write()
@@ -217,7 +218,7 @@ impl ClusterController {
     }
 
     pub fn start_heartbeat_checker(
-        cluster_controller: ClusterController,
+        cluster_controller: ClusterControllerRef,
         check_interval: Duration,
     ) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -260,6 +261,7 @@ impl ClusterController {
                     .column(worker::Column::WorkerType)
                     .column(worker::Column::Host)
                     .column(worker::Column::Port)
+                    .filter(worker::Column::WorkerId.is_in(worker_to_delete.clone()))
                     .into_tuple::<(WorkerType, String, i32)>()
                     .all(&inner.db)
                     .await
@@ -376,9 +378,9 @@ pub struct WorkerExtraInfo {
     expire_at: Option<u64>,
     started_at: Option<u64>,
     // Monotonic increasing id since meta node bootstrap.
-    info_version_id: u64,
+    pub(crate) info_version_id: u64,
     // GC watermark.
-    hummock_gc_watermark: Option<HummockSstableObjectId>,
+    pub(crate) hummock_gc_watermark: Option<HummockSstableObjectId>,
     resource: Option<PbResource>,
 }
 
@@ -411,6 +413,19 @@ impl WorkerExtraInfo {
     }
 }
 
+// TODO: remove this when we deprecate model v1.
+impl From<crate::model::Worker> for WorkerExtraInfo {
+    fn from(worker: crate::model::Worker) -> Self {
+        Self {
+            expire_at: Some(worker.expire_at),
+            started_at: worker.started_at,
+            info_version_id: worker.info_version_id,
+            hummock_gc_watermark: worker.hummock_gc_watermark,
+            resource: worker.resource,
+        }
+    }
+}
+
 fn timestamp_now_sec() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -437,19 +452,6 @@ fn meta_node_info(host: &str, started_at: Option<u64>) -> PbWorkerNode {
         }),
         started_at,
     }
-}
-
-/// The cluster info used for scheduling a streaming job.
-#[derive(Debug, Clone)]
-pub struct StreamingClusterInfo {
-    /// All **active** compute nodes in the cluster.
-    pub worker_nodes: HashMap<u32, PbWorkerNode>,
-
-    /// All parallel units of the **active** compute nodes in the cluster.
-    pub parallel_units: HashMap<ParallelUnitId, ParallelUnit>,
-
-    /// All unschedulable parallel units of compute nodes in the cluster.
-    pub unschedulable_parallel_units: HashMap<ParallelUnitId, ParallelUnit>,
 }
 
 pub struct ClusterControllerInner {
@@ -492,8 +494,8 @@ impl ClusterControllerInner {
         })
     }
 
-    pub async fn count_worker_by_type(&self) -> MetaResult<HashMap<WorkerType, i32>> {
-        let workers: Vec<(WorkerType, i32)> = Worker::find()
+    pub async fn count_worker_by_type(&self) -> MetaResult<HashMap<WorkerType, i64>> {
+        let workers: Vec<(WorkerType, i64)> = Worker::find()
             .select_only()
             .column(worker::Column::WorkerType)
             .column_as(worker::Column::WorkerId.count(), "count")
@@ -519,8 +521,8 @@ impl ClusterControllerInner {
             Ok(())
         } else {
             Err(MetaError::invalid_worker(
-                worker_id as _,
-                "worker not found".into(),
+                worker_id as u32,
+                "worker not found",
             ))
         }
     }
@@ -536,8 +538,8 @@ impl ClusterControllerInner {
             Ok(())
         } else {
             Err(MetaError::invalid_worker(
-                worker_id as _,
-                "worker not found".into(),
+                worker_id as u32,
+                "worker not found",
             ))
         }
     }
@@ -546,14 +548,12 @@ impl ClusterControllerInner {
         self.worker_extra_info
             .get(&worker_id)
             .cloned()
-            .ok_or_else(|| MetaError::invalid_worker(worker_id as _, "worker not found".into()))
+            .ok_or_else(|| MetaError::invalid_worker(worker_id as u32, "worker not found"))
     }
 
     fn apply_transaction_id(&self, r#type: PbWorkerType) -> MetaResult<Option<TransactionId>> {
         match (self.available_transactional_ids.front(), r#type) {
-            (None, _) => Err(MetaError::unavailable(
-                "no available reusable machine id".to_string(),
-            )),
+            (None, _) => Err(MetaError::unavailable("no available reusable machine id")),
             // We only assign transactional id to compute node and frontend.
             (Some(id), PbWorkerType::ComputeNode | PbWorkerType::Frontend) => Ok(Some(*id)),
             _ => Ok(None),
@@ -660,8 +660,8 @@ impl ClusterControllerInner {
                     add_property.worker_node_parallelism as _,
                 ))),
                 is_streaming: Set(add_property.is_streaming),
-                is_serving: Set(add_property.is_streaming),
-                is_unschedulable: Set(add_property.is_streaming),
+                is_serving: Set(add_property.is_serving),
+                is_unschedulable: Set(add_property.is_unschedulable),
             };
             WorkerProperty::insert(property).exec(&txn).await?;
         }
@@ -746,10 +746,16 @@ impl ClusterControllerInner {
         worker_id: WorkerId,
         ttl: Duration,
         info: Vec<heartbeat_request::extra_info::Info>,
-    ) {
+    ) -> MetaResult<()> {
         if let Some(worker_info) = self.worker_extra_info.get_mut(&worker_id) {
             worker_info.update_ttl(ttl);
             worker_info.update_hummock_info(info);
+            Ok(())
+        } else {
+            Err(MetaError::invalid_worker(
+                worker_id as u32,
+                "worker not found",
+            ))
         }
     }
 
@@ -877,6 +883,9 @@ impl ClusterControllerInner {
             .find_also_related(WorkerProperty)
             .one(&self.db)
             .await?;
+        if worker.is_none() {
+            return Ok(None);
+        }
         let extra_info = self.get_extra_info_checked(worker_id)?;
         Ok(worker.map(|(w, p)| WorkerInfo(w, p, extra_info).into()))
     }

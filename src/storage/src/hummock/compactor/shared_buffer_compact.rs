@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -23,11 +23,10 @@ use itertools::Itertools;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, LocalSstableInfo};
+use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
 use tracing::error;
 
@@ -230,18 +229,26 @@ async fn compact_shared_buffer(
     let mut compaction_futures = vec![];
     let use_block_based_filter = BlockedXor16FilterBuilder::is_kv_count_too_large(total_key_count);
 
+    let table_vnode_partition = if existing_table_ids.len() == 1 {
+        let table_id = existing_table_ids.iter().next().unwrap();
+        vec![(*table_id, split_weight_by_vnode as u32)]
+            .into_iter()
+            .collect()
+    } else {
+        BTreeMap::default()
+    };
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
             split_index,
             key_range,
             context.clone(),
             sub_compaction_sstable_size as usize,
-            split_weight_by_vnode as u32,
+            table_vnode_partition.clone(),
             use_block_based_filter,
             Box::new(sstable_object_id_manager.clone()),
         );
         let mut forward_iters = Vec::with_capacity(payload.len());
-        let mut del_iter = ForwardMergeRangeIterator::new(MAX_EPOCH);
+        let mut del_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
         for imm in &payload {
             forward_iters.push(imm.clone().into_forward_iter());
             del_iter.add_batch_iter(imm.delete_range_iter());
@@ -322,7 +329,7 @@ pub async fn merge_imms_in_memory(
     let mut largest_table_key = Bound::Included(Bytes::new());
 
     let mut imm_iters = Vec::with_capacity(imms.len());
-    let mut del_iter = ForwardMergeRangeIterator::new(MAX_EPOCH);
+    let mut del_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
     for imm in imms {
         assert!(
             imm.kv_count() > 0 || imm.has_range_tombstone(),
@@ -394,14 +401,14 @@ pub async fn merge_imms_in_memory(
 
     let mut versions: Vec<(EpochWithGap, HummockValue<Bytes>)> = Vec::new();
 
-    let mut pivot_last_delete_epoch = MAX_EPOCH;
+    let mut pivot_last_delete_epoch = HummockEpoch::MAX;
 
     for ((key, value), epoch) in items {
         assert!(key >= pivot, "key should be in ascending order");
         if key != pivot {
             merged_payload.push((pivot, versions));
             pivot = key;
-            pivot_last_delete_epoch = MAX_EPOCH;
+            pivot_last_delete_epoch = HummockEpoch::MAX;
             versions = vec![];
             let target_extended_user_key =
                 PointRange::from_user_key(UserKey::new(table_id, TableKey(pivot.as_ref())), false);
@@ -480,7 +487,7 @@ impl SharedBufferCompactRunner {
         key_range: KeyRange,
         context: CompactorContext,
         sub_compaction_sstable_size: usize,
-        split_weight_by_vnode: u32,
+        table_vnode_partition: BTreeMap<u32, u32>,
         use_block_based_filter: bool,
         object_id_getter: Box<dyn GetObjectId>,
     ) -> Self {
@@ -497,8 +504,7 @@ impl SharedBufferCompactRunner {
                 stats_target_table_ids: None,
                 task_type: compact_task::TaskType::SharedBuffer,
                 is_target_l0_or_lbase: true,
-                split_by_table: false,
-                split_weight_by_vnode,
+                table_vnode_partition,
                 use_block_based_filter,
             },
             object_id_getter,

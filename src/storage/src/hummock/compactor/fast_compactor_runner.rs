@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,28 +25,29 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::table_stats::TableStats;
-use risingwave_hummock_sdk::{can_concat, EpochWithGap, LocalSstableInfo};
+use risingwave_hummock_sdk::{can_concat, compact_task_to_string, EpochWithGap, LocalSstableInfo};
 use risingwave_pb::hummock::{CompactTask, SstableInfo};
 
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
+use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::compactor::{
     CompactionStatistics, Compactor, CompactorContext, RemoteBuilderFactory, TaskConfig,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
-use crate::hummock::sstable_store::{BlockStream, SstableStoreRef};
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     Block, BlockBuilder, BlockHolder, BlockIterator, BlockMeta, BlockedXor16FilterBuilder,
     CachePolicy, CompressionAlgorithm, GetObjectId, HummockResult, SstableBuilderOptions,
-    StreamingSstableWriterFactory, TableHolder,
+    TableHolder, UnifiedSstableWriterFactory,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
 /// Iterates over the KV-pairs of an SST while downloading it.
 pub struct BlockStreamIterator {
     /// The downloading stream.
-    block_stream: BlockStream,
+    block_stream: BlockDataStream,
 
     next_block_index: usize,
 
@@ -69,11 +70,11 @@ impl BlockStreamIterator {
     // BlockStream follows a different approach. After new(), we do not seek, instead next()
     // returns the first value.
 
-    /// Initialises a new [`BlockStreamIterator`] which iterates over the given [`BlockStream`].
+    /// Initialises a new [`BlockStreamIterator`] which iterates over the given [`BlockDataStream`].
     /// The iterator reads at most `max_block_count` from the stream.
     pub fn new(
         sstable: TableHolder,
-        block_stream: BlockStream,
+        block_stream: BlockDataStream,
         task_progress: Arc<TaskProgress>,
     ) -> Self {
         Self {
@@ -87,10 +88,11 @@ impl BlockStreamIterator {
 
     /// Wrapper function for `self.block_stream.next()` which allows us to measure the time needed.
     async fn download_next_block(&mut self) -> HummockResult<Option<(Bytes, Vec<u8>, BlockMeta)>> {
-        let (data, meta) = match self.block_stream.next().await? {
+        let (data, _) = match self.block_stream.next_block_impl().await? {
             None => return Ok(None),
             Some(ret) => ret,
         };
+        let meta = self.sstable.value().meta.block_metas[self.next_block_index].clone();
         let filter_block = self
             .sstable
             .value()
@@ -212,19 +214,6 @@ impl ConcatSstableIterator {
         self.sstable_iter.as_mut().unwrap()
     }
 
-    pub fn estimate_key_count(&self, uncompressed_block_size: u64) -> (u64, u64) {
-        let total_size = self.sstables[self.cur_idx].uncompressed_file_size;
-        if total_size == 0 {
-            return (0, 0);
-        }
-        // use ratio to avoid multiply overflow
-        let ratio = uncompressed_block_size * 10000 / total_size;
-        (
-            self.sstables[self.cur_idx].stale_key_count * ratio / 10000,
-            self.sstables[self.cur_idx].total_key_count * ratio / 10000,
-        )
-    }
-
     pub async fn init_block_iter(&mut self) -> HummockResult<()> {
         if let Some(sstable) = self.sstable_iter.as_mut() {
             if sstable.iter.is_some() {
@@ -258,7 +247,7 @@ impl ConcatSstableIterator {
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let block_stream = self
                 .sstable_store
-                .get_stream_by_position(sstable.value().id, 0, &sstable.value().meta.block_metas)
+                .get_stream_for_blocks(sstable.value().id, &sstable.value().meta.block_metas)
                 .verbose_instrument_await("stream_iter_get_stream")
                 .await?;
 
@@ -279,7 +268,7 @@ pub struct CompactorRunner {
     right: Box<ConcatSstableIterator>,
     task_id: u64,
     executor: CompactTaskExecutor<
-        RemoteBuilderFactory<StreamingSstableWriterFactory, BlockedXor16FilterBuilder>,
+        RemoteBuilderFactory<UnifiedSstableWriterFactory, BlockedXor16FilterBuilder>,
     >,
     compression_algorithm: CompressionAlgorithm,
     metrics: Arc<CompactorMetrics>,
@@ -309,11 +298,11 @@ impl CompactorRunner {
             stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
             task_type: task.task_type(),
             is_target_l0_or_lbase: task.target_level == 0 || task.target_level == task.base_level,
-            split_by_table: task.split_by_state_table,
-            split_weight_by_vnode: task.split_weight_by_vnode,
+            table_vnode_partition: task.table_vnode_partition.clone(),
             use_block_based_filter: true,
         };
-        let factory = StreamingSstableWriterFactory::new(context.sstable_store.clone());
+        let factory = UnifiedSstableWriterFactory::new(context.sstable_store.clone());
+
         let builder_factory = RemoteBuilderFactory::<_, BlockedXor16FilterBuilder> {
             object_id_getter,
             limiter: context.memory_limiter.clone(),
@@ -328,11 +317,16 @@ impl CompactorRunner {
             builder_factory,
             context.compactor_metrics.clone(),
             Some(task_progress.clone()),
-            task_config.is_target_l0_or_lbase,
-            task_config.split_by_table,
-            task_config.split_weight_by_vnode,
+            task_config.table_vnode_partition.clone(),
         );
-        assert_eq!(task.input_ssts.len(), 2);
+        assert_eq!(
+            task.input_ssts.len(),
+            2,
+            "TaskId {} target_level {:?} task {:?}",
+            task.task_id,
+            task.target_level,
+            compact_task_to_string(&task)
+        );
         let left = Box::new(ConcatSstableIterator::new(
             task.input_ssts[0].table_infos.clone(),
             context.sstable_store.clone(),
@@ -370,10 +364,14 @@ impl CompactorRunner {
             } else {
                 (&mut self.right, &mut self.left)
             };
-            assert!(ret != Ordering::Equal);
+            assert!(
+                ret != Ordering::Equal,
+                "sst range overlap equal_key {:?}",
+                self.left.current_sstable().key()
+            );
             if first.current_sstable().iter.is_none() {
                 let right_key = second.current_sstable().key();
-                while first.current_sstable().is_valid() {
+                while first.current_sstable().is_valid() && !self.executor.builder.need_flush() {
                     let full_key = FullKey::decode(first.current_sstable().next_block_largest());
                     // the full key may be either Excluded key or Included key, so we do not allow
                     // they equals.
@@ -452,7 +450,11 @@ impl CompactorRunner {
             let target_key = FullKey::decode(&sstable_iter.sstable.value().meta.largest_key);
             if let Some(iter) = sstable_iter.iter.as_mut() {
                 self.executor.run(iter, target_key).await?;
-                assert!(!iter.is_valid());
+                assert!(
+                    !iter.is_valid(),
+                    "iter should not be valid key {:?}",
+                    iter.key()
+                );
             }
             sstable_iter.iter.take();
         }
@@ -463,19 +465,31 @@ impl CompactorRunner {
                 let smallest_key = FullKey::decode(sstable_iter.next_block_smallest()).to_vec();
                 let (block, filter_data, block_meta) =
                     sstable_iter.download_next_block().await?.unwrap();
-                let largest_key = sstable_iter.current_block_largest();
-                let block_len = block.len() as u64;
-                let block_key_count = block_meta.total_key_count;
-                if self
-                    .executor
-                    .builder
-                    .add_raw_block(block, filter_data, smallest_key, largest_key, block_meta)
-                    .await?
-                {
-                    skip_raw_block_count += 1;
-                    skip_raw_block_size += block_len;
+                // If the last key is tombstone and it was deleted, the first key of this block must be deleted. So we can not move this block directly.
+                let need_deleted = self.executor.last_key.user_key.eq(&smallest_key.user_key)
+                    && self.executor.last_key_is_delete;
+                if self.executor.builder.need_flush() || need_deleted {
+                    let largest_key = sstable_iter.sstable.value().meta.largest_key.clone();
+                    let target_key = FullKey::decode(&largest_key);
+                    sstable_iter.init_block_iter(block, block_meta.uncompressed_size as usize)?;
+                    let mut iter = sstable_iter.iter.take().unwrap();
+                    self.executor.run(&mut iter, target_key).await?;
+                } else {
+                    let largest_key = sstable_iter.current_block_largest();
+                    let block_len = block.len() as u64;
+                    let block_key_count = block_meta.total_key_count;
+                    if self
+                        .executor
+                        .builder
+                        .add_raw_block(block, filter_data, smallest_key, largest_key, block_meta)
+                        .await?
+                    {
+                        skip_raw_block_count += 1;
+                        skip_raw_block_size += block_len;
+                    }
+                    self.executor.may_report_process_key(block_key_count);
+                    self.executor.clear();
                 }
-                self.executor.may_report_process_key(block_key_count);
             }
             rest_data.next_sstable().await?;
         }

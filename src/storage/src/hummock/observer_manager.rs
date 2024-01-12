@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeHummock};
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_trace::TraceSpan;
 use risingwave_pb::catalog::Table;
-use risingwave_pb::hummock::version_update_payload;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
@@ -26,7 +26,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManagerRef};
 use crate::hummock::backup_reader::BackupReaderRef;
-use crate::hummock::event_handler::HummockEvent;
+use crate::hummock::event_handler::{HummockEvent, HummockVersionUpdate};
 use crate::hummock::write_limiter::WriteLimiterRef;
 
 pub struct HummockObserverNode {
@@ -72,7 +72,13 @@ impl ObserverState for HummockObserverNode {
                 let _ = self
                     .version_update_sender
                     .send(HummockEvent::VersionUpdate(
-                        version_update_payload::Payload::VersionDeltas(hummock_version_deltas),
+                        HummockVersionUpdate::VersionDeltas(
+                            hummock_version_deltas
+                                .version_deltas
+                                .iter()
+                                .map(HummockVersionDelta::from_rpc_protobuf)
+                                .collect(),
+                        ),
                     ))
                     .inspect_err(|e| {
                         tracing::error!("unable to send version delta: {:?}", e);
@@ -118,11 +124,11 @@ impl ObserverState for HummockObserverNode {
         let _ = self
             .version_update_sender
             .send(HummockEvent::VersionUpdate(
-                version_update_payload::Payload::PinnedVersion(
-                    snapshot
+                HummockVersionUpdate::PinnedVersion(HummockVersion::from_rpc_protobuf(
+                    &snapshot
                         .hummock_version
                         .expect("should get hummock version"),
-                ),
+                )),
             ))
             .inspect_err(|e| {
                 tracing::error!("unable to send full version: {:?}", e);

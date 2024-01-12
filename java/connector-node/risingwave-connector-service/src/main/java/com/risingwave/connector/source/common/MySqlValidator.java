@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -104,10 +104,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     @Override
     public void validateTable() {
         try {
-            // validate table schema only when not running in cdc streaming mode
-            if (Utils.getCdcSourceMode(userProps) == CdcSourceMode.SINGLE_MODE) {
-                validateTableSchema();
-            }
+            validateTableSchema();
         } catch (SQLException e) {
             throw ValidatorUtils.internalError(e.getMessage());
         }
@@ -115,14 +112,17 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
     private void validateTableSchema() throws SQLException {
         // check whether table exist
+        var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
+        var tableName = userProps.get(DbzConnectorConfig.TABLE_NAME);
         try (var stmt = jdbcConnection.prepareStatement(ValidatorUtils.getSql("mysql.table"))) {
-            stmt.setString(1, userProps.get(DbzConnectorConfig.DB_NAME));
-            stmt.setString(2, userProps.get(DbzConnectorConfig.TABLE_NAME));
+            stmt.setString(1, dbName);
+            stmt.setString(2, tableName);
             var res = stmt.executeQuery();
             while (res.next()) {
                 var ret = res.getInt(1);
                 if (ret == 0) {
-                    throw ValidatorUtils.invalidArgument("MySQL table doesn't exist");
+                    throw ValidatorUtils.invalidArgument(
+                            String.format("MySQL table '%s' doesn't exist", tableName));
                 }
             }
         }
@@ -130,8 +130,8 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         // check whether PK constraint match source table definition
         try (var stmt =
                 jdbcConnection.prepareStatement(ValidatorUtils.getSql("mysql.table_schema"))) {
-            stmt.setString(1, userProps.get(DbzConnectorConfig.DB_NAME));
-            stmt.setString(2, userProps.get(DbzConnectorConfig.TABLE_NAME));
+            stmt.setString(1, dbName);
+            stmt.setString(2, tableName);
 
             // Field name in lower case -> data type
             var schema = new HashMap<String, String>();

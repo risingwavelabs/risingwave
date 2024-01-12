@@ -20,7 +20,9 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::ast::{display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName};
+use crate::ast::{
+    display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName, SetVariableValue,
+};
 use crate::tokenizer::Token;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -28,6 +30,7 @@ use crate::tokenizer::Token;
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterDatabaseOperation {
     ChangeOwner { new_owner_name: Ident },
+    RenameDatabase { database_name: ObjectName },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -35,6 +38,7 @@ pub enum AlterDatabaseOperation {
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSchemaOperation {
     ChangeOwner { new_owner_name: Ident },
+    RenameSchema { schema_name: ObjectName },
 }
 
 /// An `ALTER TABLE` (`Statement::AlterTable`) operation
@@ -80,31 +84,59 @@ pub enum AlterTableOperation {
     ChangeOwner { new_owner_name: Ident },
     /// `SET SCHEMA <schema_name>`
     SetSchema { new_schema_name: ObjectName },
+    /// `SET PARALLELISM TO <parallelism>`
+    SetParallelism { parallelism: SetVariableValue },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterIndexOperation {
-    RenameIndex { index_name: ObjectName },
+    RenameIndex {
+        index_name: ObjectName,
+    },
+    /// `SET PARALLELISM TO <parallelism>`
+    SetParallelism {
+        parallelism: SetVariableValue,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterViewOperation {
-    RenameView { view_name: ObjectName },
-    ChangeOwner { new_owner_name: Ident },
-    SetSchema { new_schema_name: ObjectName },
+    RenameView {
+        view_name: ObjectName,
+    },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
+    SetSchema {
+        new_schema_name: ObjectName,
+    },
+    /// `SET PARALLELISM TO <parallelism>`
+    SetParallelism {
+        parallelism: SetVariableValue,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSinkOperation {
-    RenameSink { sink_name: ObjectName },
-    ChangeOwner { new_owner_name: Ident },
-    SetSchema { new_schema_name: ObjectName },
+    RenameSink {
+        sink_name: ObjectName,
+    },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
+    SetSchema {
+        new_schema_name: ObjectName,
+    },
+    /// `SET PARALLELISM TO <parallelism>`
+    SetParallelism {
+        parallelism: SetVariableValue,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -137,6 +169,9 @@ impl fmt::Display for AlterDatabaseOperation {
             AlterDatabaseOperation::ChangeOwner { new_owner_name } => {
                 write!(f, "OWNER TO {}", new_owner_name)
             }
+            AlterDatabaseOperation::RenameDatabase { database_name } => {
+                write!(f, "RENAME TO {}", database_name)
+            }
         }
     }
 }
@@ -146,6 +181,9 @@ impl fmt::Display for AlterSchemaOperation {
         match self {
             AlterSchemaOperation::ChangeOwner { new_owner_name } => {
                 write!(f, "OWNER TO {}", new_owner_name)
+            }
+            AlterSchemaOperation::RenameSchema { schema_name } => {
+                write!(f, "RENAME TO {}", schema_name)
             }
         }
     }
@@ -206,6 +244,9 @@ impl fmt::Display for AlterTableOperation {
             AlterTableOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
             }
+            AlterTableOperation::SetParallelism { parallelism } => {
+                write!(f, "SET PARALLELISM TO {}", parallelism)
+            }
         }
     }
 }
@@ -215,6 +256,9 @@ impl fmt::Display for AlterIndexOperation {
         match self {
             AlterIndexOperation::RenameIndex { index_name } => {
                 write!(f, "RENAME TO {index_name}")
+            }
+            AlterIndexOperation::SetParallelism { parallelism } => {
+                write!(f, "SET PARALLELISM TO {}", parallelism)
             }
         }
     }
@@ -232,6 +276,9 @@ impl fmt::Display for AlterViewOperation {
             AlterViewOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
             }
+            AlterViewOperation::SetParallelism { parallelism } => {
+                write!(f, "SET PARALLELISM TO {}", parallelism)
+            }
         }
     }
 }
@@ -247,6 +294,9 @@ impl fmt::Display for AlterSinkOperation {
             }
             AlterSinkOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+            AlterSinkOperation::SetParallelism { parallelism } => {
+                write!(f, "SET PARALLELISM TO {}", parallelism)
             }
         }
     }

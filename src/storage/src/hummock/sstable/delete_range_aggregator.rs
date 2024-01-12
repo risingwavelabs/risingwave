@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,8 @@
 use std::cmp::Ordering;
 use std::future::Future;
 
-use risingwave_common::util::epoch::MAX_EPOCH;
+#[cfg(test)]
+use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_hummock_sdk::key::{PointRange, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 
@@ -75,7 +76,7 @@ impl CompactionDeleteRangeIterator {
         let extended_smallest_user_key = PointRange::from_user_key(smallest_user_key, false);
         let extended_largest_user_key = PointRange::from_user_key(largest_user_key, false);
         let mut monotonic_events = vec![];
-        if iter.earliest_epoch() < MAX_EPOCH {
+        if !is_max_epoch(iter.earliest_epoch()) {
             monotonic_events.push(MonotonicDeleteEvent {
                 event_key: extended_smallest_user_key.to_vec(),
                 new_epoch: iter.earliest_epoch(),
@@ -87,7 +88,7 @@ impl CompactionDeleteRangeIterator {
                 if !monotonic_events.is_empty() {
                     monotonic_events.push(MonotonicDeleteEvent {
                         event_key: extended_largest_user_key.to_vec(),
-                        new_epoch: MAX_EPOCH,
+                        new_epoch: HummockEpoch::MAX,
                     });
                 }
                 break;
@@ -107,8 +108,8 @@ impl CompactionDeleteRangeIterator {
                 && a.new_epoch == b.new_epoch
         });
         if !monotonic_events.is_empty() {
-            assert_ne!(monotonic_events.first().unwrap().new_epoch, MAX_EPOCH);
-            assert_eq!(monotonic_events.last().unwrap().new_epoch, MAX_EPOCH);
+            assert!(!is_max_epoch(monotonic_events.first().unwrap().new_epoch));
+            assert!(is_max_epoch(monotonic_events.last().unwrap().new_epoch));
         }
         Ok(monotonic_events)
     }
@@ -198,7 +199,7 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
         if self.next_idx > 0 {
             self.table.value().meta.monotonic_tombstone_events[self.next_idx - 1].new_epoch
         } else {
-            MAX_EPOCH
+            HummockEpoch::MAX
         }
     }
 
@@ -245,7 +246,7 @@ pub fn get_min_delete_range_epoch_from_sstable(
         |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(&query_extended_user_key),
     );
     if idx == 0 {
-        MAX_EPOCH
+        HummockEpoch::MAX
     } else {
         table.meta.monotonic_tombstone_events[idx - 1].new_epoch
     }
@@ -257,6 +258,7 @@ mod tests {
 
     use bytes::Bytes;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::is_max_epoch;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
@@ -328,7 +330,7 @@ mod tests {
             iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 13)
                 .await
                 .unwrap(),
-            MAX_EPOCH,
+            HummockEpoch::MAX,
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 11)
@@ -359,20 +361,20 @@ mod tests {
             iter.earliest_delete_which_can_see_key(test_user_key(b"bbbddd").as_ref(), 8)
                 .await
                 .unwrap(),
-            MAX_EPOCH,
+            HummockEpoch::MAX,
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key(test_user_key(b"bbbeee").as_ref(), 8)
                 .await
                 .unwrap(),
-            MAX_EPOCH,
+            HummockEpoch::MAX,
         );
 
         assert_eq!(
             iter.earliest_delete_which_can_see_key(test_user_key(b"bbbeef").as_ref(), 10)
                 .await
                 .unwrap(),
-            MAX_EPOCH,
+            HummockEpoch::MAX,
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key(test_user_key(b"eeeeee").as_ref(), 8)
@@ -390,7 +392,7 @@ mod tests {
             iter.earliest_delete_which_can_see_key(test_user_key(b"hhhhhh").as_ref(), 6)
                 .await
                 .unwrap(),
-            MAX_EPOCH,
+            HummockEpoch::MAX,
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key(test_user_key(b"iiiiii").as_ref(), 6)
@@ -510,6 +512,6 @@ mod tests {
             sstable.value(),
             iterator_test_user_key_of(8).as_ref(),
         );
-        assert_eq!(ret, MAX_EPOCH);
+        assert!(is_max_epoch(ret));
     }
 }

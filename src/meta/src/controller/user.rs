@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,7 +54,7 @@ impl CatalogController {
         version
     }
 
-    async fn create_user(&self, pb_user: PbUserInfo) -> MetaResult<NotificationVersion> {
+    pub async fn create_user(&self, pb_user: PbUserInfo) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         check_user_name_duplicate(&pb_user.name, &txn).await?;
@@ -94,7 +94,7 @@ impl CatalogController {
         Ok(version)
     }
 
-    async fn update_user(
+    pub async fn update_user(
         &self,
         update_user: PbUserInfo,
         update_fields: &[PbUpdateField],
@@ -158,7 +158,7 @@ impl CatalogController {
         Ok(user)
     }
 
-    async fn drop_user(&self, user_id: UserId) -> MetaResult<NotificationVersion> {
+    pub async fn drop_user(&self, user_id: UserId) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let user = User::find_by_id(user_id)
@@ -271,13 +271,16 @@ impl CatalogController {
         }
 
         // insert privileges
-        let user_privileges = user_ids.iter().flat_map(|user_id| {
-            privileges.iter().map(|p| {
-                let mut p = p.clone();
-                p.user_id = Set(*user_id);
-                p
+        let user_privileges = user_ids
+            .iter()
+            .flat_map(|user_id| {
+                privileges.iter().map(|p| {
+                    let mut p = p.clone();
+                    p.user_id = Set(*user_id);
+                    p
+                })
             })
-        });
+            .collect_vec();
         for privilege in user_privileges {
             let mut on_conflict = OnConflict::columns([
                 user_privilege::Column::UserId,

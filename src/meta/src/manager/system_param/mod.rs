@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -58,7 +58,7 @@ impl SystemParamsManager {
         } else if let Some(persisted) = SystemParams::get(&meta_store).await? {
             merge_params(persisted, init_params)
         } else {
-            return Err(MetaError::system_param(
+            return Err(MetaError::system_params(
                 "cluster is not newly created but no system parameters can be found",
             ));
         };
@@ -86,7 +86,7 @@ impl SystemParamsManager {
         let params = params_guard.deref_mut();
         let mut mem_txn = VarTransaction::new(params);
 
-        set_system_param(mem_txn.deref_mut(), name, value).map_err(MetaError::system_param)?;
+        set_system_param(mem_txn.deref_mut(), name, value).map_err(MetaError::system_params)?;
 
         let mut store_txn = Transaction::default();
         mem_txn.apply_to_txn(&mut store_txn).await?;

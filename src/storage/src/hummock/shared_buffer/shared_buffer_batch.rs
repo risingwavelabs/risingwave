@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, TableKeyRange, UserKey};
 use risingwave_hummock_sdk::EpochWithGap;
 
@@ -169,7 +168,7 @@ impl SharedBufferBatchInner {
             });
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
                 event_key: end_point_range,
-                new_epoch: MAX_EPOCH,
+                new_epoch: HummockEpoch::MAX,
             });
         }
 
@@ -328,7 +327,7 @@ impl SharedBufferBatchInner {
             },
         );
         if idx == 0 {
-            MAX_EPOCH
+            HummockEpoch::MAX
         } else {
             self.monotonic_tombstone_events[idx - 1].new_epoch
         }
@@ -857,7 +856,7 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
         if self.next_idx > 0 {
             self.inner.monotonic_tombstone_events[self.next_idx - 1].new_epoch
         } else {
-            MAX_EPOCH
+            HummockEpoch::MAX
         }
     }
 
@@ -897,7 +896,6 @@ mod tests {
     use std::ops::Bound::{Excluded, Included};
 
     use risingwave_common::must_match;
-    use risingwave_common::util::epoch::MAX_EPOCH;
     use risingwave_hummock_sdk::key::map_table_key_range;
 
     use super::*;
@@ -1192,7 +1190,7 @@ mod tests {
                 .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"aaa"),))
         );
         assert_eq!(
-            MAX_EPOCH,
+            HummockEpoch::MAX,
             shared_buffer_batch
                 .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"bbb"),))
         );
@@ -1202,7 +1200,7 @@ mod tests {
                 .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"ddd"),))
         );
         assert_eq!(
-            MAX_EPOCH,
+            HummockEpoch::MAX,
             shared_buffer_batch
                 .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"eee"),))
         );

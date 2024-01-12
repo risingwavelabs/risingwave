@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,43 +22,43 @@ pub type PsqlResult<T> = std::result::Result<T, PsqlError>;
 /// Error type used in pgwire crates.
 #[derive(Error, Debug)]
 pub enum PsqlError {
-    #[error("Startup Error when connect to session: {0}")]
+    #[error("Failed to start a new session: {0}")]
     StartupError(#[source] BoxedError),
 
     #[error("Invalid password")]
     PasswordError,
 
-    #[error("QueryError: {0}")]
-    QueryError(#[source] BoxedError),
+    #[error("Failed to run the query: {0}")]
+    SimpleQueryError(#[source] BoxedError),
 
-    #[error("ParseError: {0}")]
-    ParseError(#[source] BoxedError),
+    #[error("Failed to prepare the statement: {0}")]
+    ExtendedPrepareError(#[source] BoxedError),
 
-    #[error("ExecuteError: {0}")]
-    ExecuteError(#[source] BoxedError),
+    #[error("Failed to execute the statement: {0}")]
+    ExtendedExecuteError(#[source] BoxedError),
 
     #[error(transparent)]
     IoError(#[from] IoError),
 
-    /// Include error for describe, bind.
+    /// Uncategorized error for describe, bind.
     #[error(transparent)]
-    Internal(BoxedError),
+    Uncategorized(BoxedError),
 
-    #[error("Panicked when processing: {0}
+    #[error("Panicked when handling the request: {0}
 This is a bug. We would appreciate a bug report at:
   https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Fbug&template=bug_report.yml")]
     Panic(String),
 
-    #[error("Unable to set up an ssl connection")]
+    #[error("Unable to setup an SSL connection")]
     SslError(#[from] openssl::ssl::Error),
 }
 
 impl PsqlError {
     pub fn no_statement() -> Self {
-        PsqlError::Internal("No statement found".into())
+        PsqlError::Uncategorized("No statement found".into())
     }
 
     pub fn no_portal() -> Self {
-        PsqlError::Internal("No portal found".into())
+        PsqlError::Uncategorized("No portal found".into())
     }
 }

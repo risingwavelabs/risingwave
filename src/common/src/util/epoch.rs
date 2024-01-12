@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -116,8 +116,22 @@ impl Epoch {
 
 pub const EPOCH_AVAILABLE_BITS: u64 = 16;
 pub const MAX_SPILL_TIMES: u16 = ((1 << EPOCH_AVAILABLE_BITS) - 1) as u16;
-pub const EPOCH_MASK: u64 = (1 << EPOCH_AVAILABLE_BITS) - 1;
-pub const MAX_EPOCH: u64 = u64::MAX & !EPOCH_MASK;
+// Low EPOCH_AVAILABLE_BITS bits set to 1
+pub const EPOCH_SPILL_TIME_MASK: u64 = (1 << EPOCH_AVAILABLE_BITS) - 1;
+// High (64-EPOCH_AVAILABLE_BITS) bits set to 1
+const EPOCH_MASK: u64 = !EPOCH_SPILL_TIME_MASK;
+pub const MAX_EPOCH: u64 = u64::MAX & EPOCH_MASK;
+
+pub fn is_max_epoch(epoch: u64) -> bool {
+    // Since we have write `MAX_EPOCH` as max epoch to sstable in some previous version,
+    // it means that there may be two value in our system which represent infinite. We must check
+    // both of them for compatibility. See bug description in https://github.com/risingwavelabs/risingwave/issues/13717
+    epoch >= MAX_EPOCH
+}
+pub fn is_compatibility_max_epoch(epoch: u64) -> bool {
+    // See bug description in https://github.com/risingwavelabs/risingwave/issues/13717
+    epoch == MAX_EPOCH
+}
 impl From<u64> for Epoch {
     fn from(epoch: u64) -> Self {
         Self(epoch)
@@ -139,6 +153,12 @@ impl EpochPair {
     pub fn inc(&mut self) {
         self.curr += 1;
         self.prev += 1;
+    }
+
+    pub fn inc_for_test(&mut self, inc_by: u64) {
+        self.prev = self.curr;
+
+        self.curr += inc_by;
     }
 
     pub fn new_test_epoch(curr: u64) -> Self {

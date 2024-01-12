@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,11 @@ import io.delta.standalone.OptimisticTransaction;
 import io.delta.standalone.actions.AddFile;
 import io.delta.standalone.exceptions.DeltaConcurrentModificationException;
 import java.io.IOException;
+import java.sql.Timestamp;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
+import org.apache.avro.Conversions;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
@@ -64,8 +68,11 @@ public class DeltaLakeSink extends SinkWriterBase {
                             String.format("%s-%d.parquet", this.uuid, this.dataFileNum));
             try {
                 HadoopOutputFile outputFile = HadoopOutputFile.fromPath(this.parquetPath, conf);
+                GenericData decimalSupport = new GenericData();
+                decimalSupport.addLogicalTypeConversion(new Conversions.DecimalConversion());
                 this.parquetWriter =
                         AvroParquetWriter.<GenericRecord>builder(outputFile)
+                                .withDataModel(decimalSupport)
                                 .withSchema(this.sinkSchema)
                                 .withConf(this.conf)
                                 .withCompressionCodec(this.codecName)
@@ -80,7 +87,18 @@ public class DeltaLakeSink extends SinkWriterBase {
                 case INSERT:
                     GenericRecord record = new GenericData.Record(this.sinkSchema);
                     for (int i = 0; i < this.sinkSchema.getFields().size(); i++) {
-                        record.put(i, row.get(i));
+                        Object values;
+                        if (row.get(i) instanceof Timestamp) {
+                            values = ((Timestamp) row.get(i)).getTime();
+                        } else if (row.get(i) instanceof java.sql.Date) {
+                            values =
+                                    ChronoUnit.DAYS.between(
+                                            LocalDate.ofEpochDay(0),
+                                            ((java.sql.Date) row.get(i)).toLocalDate());
+                        } else {
+                            values = row.get(i);
+                        }
+                        record.put(i, values);
                     }
                     try {
                         this.parquetWriter.write(record);

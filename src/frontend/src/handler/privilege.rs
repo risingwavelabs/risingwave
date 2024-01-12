@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -157,7 +157,7 @@ impl SessionImpl {
     }
 
     /// Returns `true` if the user of the current session is a super user.
-    fn is_super_user(&self) -> bool {
+    pub fn is_super_user(&self) -> bool {
         let reader = self.env().user_info_reader().read_guard();
 
         if let Some(info) = reader.get_user_by_name(self.user_name()) {

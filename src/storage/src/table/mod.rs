@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -71,14 +71,18 @@ impl Distribution {
         FALLBACK_VNODES.clone()
     }
 
-    /// Distribution that accesses all vnodes, mainly used for tests.
-    pub fn all_vnodes(dist_key_in_pk_indices: Vec<usize>) -> Self {
+    pub fn all_vnodes() -> Arc<Bitmap> {
         /// A bitmap that all vnodes are set.
         static ALL_VNODES: LazyLock<Arc<Bitmap>> =
             LazyLock::new(|| Bitmap::ones(VirtualNode::COUNT).into());
+        ALL_VNODES.clone()
+    }
+
+    /// Distribution that accesses all vnodes, mainly used for tests.
+    pub fn all(dist_key_in_pk_indices: Vec<usize>) -> Self {
         Self {
             dist_key_in_pk_indices,
-            vnodes: ALL_VNODES.clone(),
+            vnodes: Self::all_vnodes(),
         }
     }
 }
@@ -128,12 +132,13 @@ where
 }
 
 /// Collects data chunks from stream of rows.
-pub async fn collect_data_chunk_with_builder<E, S>(
+pub async fn collect_data_chunk_with_builder<E, S, R>(
     stream: &mut S,
     builder: &mut DataChunkBuilder,
 ) -> Result<Option<DataChunk>, E>
 where
-    S: Stream<Item = Result<OwnedRow, E>> + Unpin,
+    R: Row,
+    S: Stream<Item = Result<R, E>> + Unpin,
 {
     // TODO(kwannoel): If necessary, we can optimize it in the future.
     // This can be done by moving the check if builder is full from `append_one_row` to here,
@@ -206,6 +211,7 @@ fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
     );
 }
 
+#[derive(Debug)]
 pub struct KeyedRow<T: AsRef<[u8]>> {
     vnode_prefixed_key: TableKey<T>,
     row: OwnedRow,
@@ -229,6 +235,10 @@ impl<T: AsRef<[u8]>> KeyedRow<T> {
 
     pub fn key(&self) -> &[u8] {
         self.vnode_prefixed_key.key_part()
+    }
+
+    pub fn into_parts(self) -> (TableKey<T>, OwnedRow) {
+        (self.vnode_prefixed_key, self.row)
     }
 }
 

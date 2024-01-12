@@ -54,6 +54,8 @@ download_and_prepare_rw "$profile" common
 echo "--- Download artifacts"
 download-and-decompress-artifact e2e_test_generated ./
 download-and-decompress-artifact risingwave_e2e_extended_mode_test-"$profile" target/debug/
+mkdir -p e2e_test/udf/wasm/target/wasm32-wasi/release/
+buildkite-agent artifact download udf.wasm e2e_test/udf/wasm/target/wasm32-wasi/release/
 buildkite-agent artifact download risingwave-udf-example.jar ./
 mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/risingwave_e2e_extended_mode_test
 
@@ -88,12 +90,17 @@ pkill python3
 
 sqllogictest -p 4566 -d dev './e2e_test/udf/alter_function.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/graceful_shutdown_python.slt'
+# FIXME: flaky test
+# sqllogictest -p 4566 -d dev './e2e_test/udf/retry_python.slt'
 
 echo "--- e2e, $mode, java udf"
 java -jar risingwave-udf-example.jar &
 sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/udf/udf.slt'
 pkill java
+
+echo "--- e2e, $mode, wasm udf"
+sqllogictest -p 4566 -d dev './e2e_test/udf/wasm_udf.slt'
 
 echo "--- Kill cluster"
 cluster_stop
@@ -109,7 +116,8 @@ cluster_stop
 echo "--- e2e, $mode, error ui"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cluster_start
-sqllogictest -p 4566 -d dev './e2e_test/error_ui/**/*.slt'
+sqllogictest -p 4566 -d dev './e2e_test/error_ui/simple/**/*.slt'
+sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/error_ui/extended/**/*.slt'
 
 echo "--- Kill cluster"
 cluster_stop

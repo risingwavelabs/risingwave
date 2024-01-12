@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,11 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
+use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 
 use super::{cast_ok, infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
 use crate::expr::{ExprDisplay, ExprType, ExprVisitor, ImpureAnalyzer};
@@ -102,7 +103,7 @@ impl FunctionCall {
     // number of arguments are checked
     // [elsewhere](crate::expr::type_inference::build_type_derive_map).
     pub fn new(func_type: ExprType, mut inputs: Vec<ExprImpl>) -> RwResult<Self> {
-        let return_type = infer_type(func_type, &mut inputs)?;
+        let return_type = infer_type(func_type.into(), &mut inputs)?;
         Ok(Self::new_unchecked(func_type, inputs, return_type))
     }
 
@@ -134,7 +135,7 @@ impl FunctionCall {
             let datum = literal
                 .get_data()
                 .as_ref()
-                .map(|scalar| ScalarImpl::from_literal(scalar.as_utf8(), &target))
+                .map(|scalar| ScalarImpl::from_text(scalar.as_utf8(), &target))
                 .transpose();
             if let Ok(datum) = datum {
                 *child = Literal::new(datum, target).into();
@@ -428,12 +429,6 @@ pub struct CastError(String);
 
 impl From<CastError> for ErrorCode {
     fn from(value: CastError) -> Self {
-        ErrorCode::BindError(value.to_string())
-    }
-}
-
-impl From<CastError> for RwError {
-    fn from(value: CastError) -> Self {
-        ErrorCode::from(value).into()
+        ErrorCode::BindError(value.to_report_string())
     }
 }

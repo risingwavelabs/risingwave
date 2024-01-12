@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use risingwave_pb::data::{PbOp, PbStreamChunk};
 
+use super::stream_chunk_builder::StreamChunkBuilder;
 use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt, RowRef};
 use crate::array::DataChunk;
 use crate::buffer::{Bitmap, BitmapBuilder};
@@ -32,7 +33,7 @@ use crate::estimate_size::EstimateSize;
 use crate::field_generator::VarcharProperty;
 use crate::row::Row;
 use crate::types::{DataType, DefaultOrdered, ToText};
-use crate::util::iter_util::ZipEqDebug;
+
 /// `Op` represents three operations in `StreamChunk`.
 ///
 /// `UpdateDelete` and `UpdateInsert` are semantically equivalent to `Delete` and `Insert`
@@ -125,26 +126,24 @@ impl StreamChunk {
     }
 
     /// Build a `StreamChunk` from rows.
-    // TODO: introducing something like `StreamChunkBuilder` maybe better.
+    ///
+    /// Panics if the `rows` is empty.
+    ///
+    /// Should prefer using [`StreamChunkBuilder`] instead to avoid unnecessary
+    /// allocation of rows.
     pub fn from_rows(rows: &[(Op, impl Row)], data_types: &[DataType]) -> Self {
-        let mut array_builders = data_types
-            .iter()
-            .map(|data_type| data_type.create_array_builder(rows.len()))
-            .collect::<Vec<_>>();
-        let mut ops = vec![];
+        // `append_row` will cause the builder to finish immediately once capacity is met.
+        // Hence, we allocate an extra row here, to avoid the builder finishing prematurely.
+        // This just makes the code cleaner, since we can loop through all rows, and consume it finally.
+        // TODO: introduce `new_unlimited` to decouple memory reservation from builder capacity.
+        let mut builder = StreamChunkBuilder::new(rows.len() + 1, data_types.to_vec());
 
         for (op, row) in rows {
-            ops.push(*op);
-            for (datum, builder) in row.iter().zip_eq_debug(array_builders.iter_mut()) {
-                builder.append(datum);
-            }
+            let none = builder.append_row(*op, row);
+            debug_assert!(none.is_none());
         }
 
-        let new_columns = array_builders
-            .into_iter()
-            .map(|builder| builder.finish().into())
-            .collect::<Vec<_>>();
-        StreamChunk::new(ops, new_columns)
+        builder.take().expect("chunk should not be empty")
     }
 
     /// Get the reference of the underlying data chunk.
@@ -172,6 +171,30 @@ impl StreamChunk {
             new_ops.push(ops[idx]);
         }
         StreamChunk::new(new_ops, columns)
+    }
+
+    /// Split the `StreamChunk` into multiple chunks with the given size at most.
+    ///
+    /// When the total cardinality of all the chunks is not evenly divided by the `size`,
+    /// the last new chunk will be the remainder.
+    ///
+    /// For consecutive `UpdateDelete` and `UpdateInsert`, they will be kept in one chunk.
+    /// As a result, some chunks may have `size + 1` rows.
+    pub fn split(&self, size: usize) -> Vec<Self> {
+        let mut builder = StreamChunkBuilder::new(size, self.data_types());
+        let mut outputs = Vec::new();
+
+        // TODO: directly append the chunk.
+        for (op, row) in self.rows() {
+            if let Some(chunk) = builder.append_row(op, row) {
+                outputs.push(chunk);
+            }
+        }
+        if let Some(output) = builder.take() {
+            outputs.push(output);
+        }
+
+        outputs
     }
 
     pub fn into_parts(self) -> (DataChunk, Arc<[Op]>) {
@@ -323,7 +346,7 @@ impl fmt::Debug for StreamChunk {
         if f.alternate() {
             write!(
                 f,
-                "StreamChunk {{ cardinality: {}, capacity: {}, data: \n{}\n }}",
+                "StreamChunk {{ cardinality: {}, capacity: {}, data:\n{}\n }}",
                 self.cardinality(),
                 self.capacity(),
                 self.to_pretty()
@@ -497,38 +520,10 @@ impl StreamChunkMut {
         }
     }
 }
+
 /// Test utilities for [`StreamChunk`].
-pub trait StreamChunkTestExt: Sized {
-    fn from_pretty(s: &str) -> Self;
-
-    /// Validate the `StreamChunk` layout.
-    fn valid(&self) -> bool;
-
-    /// Concatenate multiple `StreamChunk` into one.
-    fn concat(chunks: Vec<Self>) -> Self;
-
-    /// Sort rows.
-    fn sort_rows(self) -> Self;
-
-    /// Generate stream chunks
-    fn gen_stream_chunks(
-        num_of_chunks: usize,
-        chunk_size: usize,
-        data_types: &[DataType],
-        varchar_properties: &VarcharProperty,
-    ) -> Vec<Self>;
-
-    fn gen_stream_chunks_inner(
-        num_of_chunks: usize,
-        chunk_size: usize,
-        data_types: &[DataType],
-        varchar_properties: &VarcharProperty,
-        visibility_percent: f64, // % of rows that are visible
-        inserts_percent: f64,
-    ) -> Vec<Self>;
-}
-
-impl StreamChunkTestExt for StreamChunk {
+#[easy_ext::ext(StreamChunkTestExt)]
+impl StreamChunk {
     /// Parse a chunk from string.
     ///
     /// See also [`DataChunkTestExt::from_pretty`].
@@ -567,9 +562,9 @@ impl StreamChunkTestExt for StreamChunk {
     /// //    TZ: Timestamptz
     /// //   SRL: Serial
     /// //   x[]: array of x
-    /// // {i,f}: struct
+    /// // <i,f>: struct
     /// ```
-    fn from_pretty(s: &str) -> Self {
+    pub fn from_pretty(s: &str) -> Self {
         let mut chunk_str = String::new();
         let mut ops = vec![];
 
@@ -610,34 +605,39 @@ impl StreamChunkTestExt for StreamChunk {
         }
     }
 
-    fn valid(&self) -> bool {
+    /// Validate the `StreamChunk` layout.
+    pub fn valid(&self) -> bool {
         let len = self.ops.len();
         let data = &self.data;
         data.visibility().len() == len && data.columns().iter().all(|col| col.len() == len)
     }
 
-    fn concat(chunks: Vec<StreamChunk>) -> StreamChunk {
-        assert!(!chunks.is_empty());
-        let mut ops = vec![];
-        let mut data_chunks = vec![];
-        let mut capacity = 0;
+    /// Concatenate multiple `StreamChunk` into one.
+    ///
+    /// Panics if `chunks` is empty.
+    pub fn concat(chunks: Vec<StreamChunk>) -> StreamChunk {
+        let data_types = chunks[0].data_types();
+        let size = chunks.iter().map(|c| c.cardinality()).sum::<usize>();
+
+        // `append_row` will cause the builder to finish immediately once capacity is met.
+        // Hence, we allocate an extra row here, to avoid the builder finishing prematurely.
+        // This just makes the code cleaner, since we can loop through all rows, and consume it finally.
+        // TODO: introduce `new_unlimited` to decouple memory reservation from builder capacity.
+        let mut builder = StreamChunkBuilder::new(size + 1, data_types);
+
         for chunk in chunks {
-            capacity += chunk.capacity();
-            ops.extend(chunk.ops.iter());
-            data_chunks.push(chunk.data);
+            // TODO: directly append chunks.
+            for (op, row) in chunk.rows() {
+                let none = builder.append_row(op, row);
+                debug_assert!(none.is_none());
+            }
         }
-        let data = DataChunk::rechunk(&data_chunks, capacity)
-            .unwrap()
-            .into_iter()
-            .next()
-            .unwrap();
-        StreamChunk {
-            ops: ops.into(),
-            data,
-        }
+
+        builder.take().expect("chunk should not be empty")
     }
 
-    fn sort_rows(self) -> Self {
+    /// Sort rows.
+    pub fn sort_rows(self) -> Self {
         if self.capacity() == 0 {
             return self;
         }
@@ -656,7 +656,7 @@ impl StreamChunkTestExt for StreamChunk {
     /// Generate `num_of_chunks` data chunks with type `data_types`,
     /// where each data chunk has cardinality of `chunk_size`.
     /// TODO(kwannoel): Generate different types of op, different vis.
-    fn gen_stream_chunks(
+    pub fn gen_stream_chunks(
         num_of_chunks: usize,
         chunk_size: usize,
         data_types: &[DataType],
@@ -672,7 +672,7 @@ impl StreamChunkTestExt for StreamChunk {
         )
     }
 
-    fn gen_stream_chunks_inner(
+    pub fn gen_stream_chunks_inner(
         num_of_chunks: usize,
         chunk_size: usize,
         data_types: &[DataType],
@@ -731,6 +731,64 @@ mod tests {
 | U- | 3 | 7 |
 | U+ | 4 |   |
 +----+---+---+"
+        );
+    }
+
+    #[test]
+    fn test_split_1() {
+        let chunk = StreamChunk::from_pretty(
+            "  I I
+             + 1 6
+             - 2 .
+            U- 3 7
+            U+ 4 .",
+        );
+        let results = chunk.split(2);
+        assert_eq!(2, results.len());
+        assert_eq!(
+            results[0].to_pretty().to_string(),
+            "\
++---+---+---+
+| + | 1 | 6 |
+| - | 2 |   |
++---+---+---+"
+        );
+        assert_eq!(
+            results[1].to_pretty().to_string(),
+            "\
++----+---+---+
+| U- | 3 | 7 |
+| U+ | 4 |   |
++----+---+---+"
+        );
+    }
+
+    #[test]
+    fn test_split_2() {
+        let chunk = StreamChunk::from_pretty(
+            "  I I
+             + 1 6
+            U- 3 7
+            U+ 4 .
+             - 2 .",
+        );
+        let results = chunk.split(2);
+        assert_eq!(2, results.len());
+        assert_eq!(
+            results[0].to_pretty().to_string(),
+            "\
++----+---+---+
+|  + | 1 | 6 |
+| U- | 3 | 7 |
+| U+ | 4 |   |
++----+---+---+"
+        );
+        assert_eq!(
+            results[1].to_pretty().to_string(),
+            "\
++---+---+---+
+| - | 2 |   |
++---+---+---+"
         );
     }
 }

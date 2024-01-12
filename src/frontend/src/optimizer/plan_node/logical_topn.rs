@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
 
@@ -71,11 +72,7 @@ impl LogicalTopN {
         group_key: Vec<usize>,
     ) -> Result<PlanRef> {
         if with_ties && offset > 0 {
-            return Err(ErrorCode::NotImplemented(
-                "WITH TIES is not supported with OFFSET".to_string(),
-                None.into(),
-            )
-            .into());
+            bail_not_implemented!("WITH TIES is not supported with OFFSET");
         }
         Ok(Self::new(input, limit, offset, with_ties, order, group_key).into())
     }
@@ -121,10 +118,7 @@ impl LogicalTopN {
             Distribution::Single | Distribution::SomeShard => {
                 self.gen_single_stream_top_n_plan(stream_input)
             }
-            Distribution::Broadcast => Err(RwError::from(ErrorCode::NotImplemented(
-                "topN does not support Broadcast".to_string(),
-                None.into(),
-            ))),
+            Distribution::Broadcast => bail_not_implemented!("topN does not support Broadcast"),
             Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => {
                 self.gen_vnode_two_phase_stream_top_n_plan(stream_input, &dists)
             }

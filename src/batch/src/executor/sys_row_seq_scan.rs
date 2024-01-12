@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -107,7 +107,11 @@ impl Executor for SysRowSeqScanExecutor {
 impl SysRowSeqScanExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_executor(self: Box<Self>) {
-        let rows = self.sys_catalog_reader.read_table(&self.table_id).await?;
+        let rows = self
+            .sys_catalog_reader
+            .read_table(&self.table_id)
+            .await
+            .map_err(BatchError::SystemTable)?;
         let filtered_rows = rows
             .iter()
             .map(|row| {

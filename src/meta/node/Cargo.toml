@@ -20,7 +20,8 @@ either = "1"
 etcd-client = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.12"
-prometheus-http-query = "0.7"
+otlp-embedded = { workspace = true }
+prometheus-http-query = "0.8"
 redact = "0.1.5"
 regex = "1"
 risingwave_common = { workspace = true }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,9 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::Result;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{childless_record, Distill};
@@ -328,11 +329,7 @@ impl LogicalSysScan {
         } else {
             let (scan_ranges, predicate) = self.predicate().clone().split_to_scan_ranges(
                 self.core.table_desc.clone(),
-                self.base
-                    .ctx()
-                    .session_ctx()
-                    .config()
-                    .get_max_split_range_gap(),
+                self.base.ctx().session_ctx().config().max_split_range_gap() as u64,
             )?;
             let mut scan = self.clone();
             scan.core.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
@@ -371,19 +368,13 @@ impl ToBatch for LogicalSysScan {
 
 impl ToStream for LogicalSysScan {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        Err(RwError::from(ErrorCode::NotImplemented(
-            "streaming on system table is not allowed".to_string(),
-            None.into(),
-        )))
+        bail_not_implemented!("streaming on system table");
     }
 
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        Err(RwError::from(ErrorCode::NotImplemented(
-            "streaming on system table is not allowed".to_string(),
-            None.into(),
-        )))
+        bail_not_implemented!("streaming on system table");
     }
 }

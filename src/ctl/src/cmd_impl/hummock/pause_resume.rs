@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::util::epoch::MAX_EPOCH;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
+use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::CtlContext;
 
@@ -51,24 +51,26 @@ pub async fn resume_version_checkpoint(context: &CtlContext) -> anyhow::Result<(
 /// added/removed for what reason (row deletion/compaction/etc.).
 pub async fn replay_version(context: &CtlContext) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
-    let mut base_version = meta_client
-        .risectl_get_checkpoint_hummock_version()
-        .await?
-        .checkpoint_version
-        .unwrap();
+    let mut base_version = HummockVersion::from_rpc_protobuf(
+        &meta_client
+            .risectl_get_checkpoint_hummock_version()
+            .await?
+            .checkpoint_version
+            .unwrap(),
+    );
     println!("replay starts");
     println!("base version {}", base_version.id);
     let delta_fetch_size = 100;
     let mut current_delta_id = base_version.id + 1;
     loop {
         let deltas = meta_client
-            .list_version_deltas(current_delta_id, delta_fetch_size, MAX_EPOCH)
+            .list_version_deltas(current_delta_id, delta_fetch_size, HummockEpoch::MAX)
             .await
             .unwrap();
-        if deltas.version_deltas.is_empty() {
+        if deltas.is_empty() {
             break;
         }
-        for delta in deltas.version_deltas {
+        for delta in deltas {
             if delta.prev_id != base_version.id {
                 eprintln!("missing delta log for version {}", base_version.id);
                 break;

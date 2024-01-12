@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,11 +22,11 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::plan_common::ColumnDesc;
 
-use super::schema_resolver::*;
+use super::schema_resolver::ConfluentSchemaResolver;
 use super::util::avro_schema_to_column_descs;
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::AccessImpl;
-use crate::parser::util::{read_schema_from_http, read_schema_from_local, read_schema_from_s3};
+use crate::parser::util::bytes_from_url;
 use crate::parser::{AccessBuilder, EncodingProperties, EncodingType};
 use crate::schema::schema_registry::{
     extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
@@ -60,12 +60,9 @@ impl AvroAccessBuilder {
         } = config;
         Ok(Self {
             schema: match encoding_type {
-                EncodingType::Key => key_schema.map_or(
-                    Err(RwError::from(ProtocolError(
-                        "Avro with empty key schema".to_string(),
-                    ))),
-                    Ok,
-                )?,
+                EncodingType::Key => key_schema.ok_or(RwError::from(ProtocolError(
+                    "Avro with empty key schema".to_string(),
+                )))?,
                 EncodingType::Value => schema,
             },
             schema_resolver,
@@ -159,18 +156,8 @@ impl AvroParserConfig {
                 )));
             }
             let url = url.first().unwrap();
-            let schema_content = match url.scheme() {
-                "file" => read_schema_from_local(url.path()),
-                "s3" => {
-                    read_schema_from_s3(url, avro_config.aws_auth_props.as_ref().unwrap()).await
-                }
-                "https" | "http" => read_schema_from_http(url).await,
-                scheme => Err(RwError::from(ProtocolError(format!(
-                    "path scheme {} is not supported",
-                    scheme
-                )))),
-            }?;
-            let schema = Schema::parse_str(&schema_content).map_err(|e| {
+            let schema_content = bytes_from_url(url, avro_config.aws_auth_props.as_ref()).await?;
+            let schema = Schema::parse_reader(&mut schema_content.as_slice()).map_err(|e| {
                 RwError::from(InternalError(format!("Avro schema parse error {}", e)))
             })?;
             Ok(Self {
@@ -208,25 +195,19 @@ mod test {
     use apache_avro::{Codec, Days, Duration, Millis, Months, Reader, Schema, Writer};
     use itertools::Itertools;
     use risingwave_common::array::Op;
-    use risingwave_common::catalog::{ColumnId, DEFAULT_KEY_COLUMN_NAME};
+    use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Date, Interval, ScalarImpl, Timestamptz};
-    use risingwave_common::{error, try_match_expand};
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
     use url::Url;
 
-    use super::{
-        read_schema_from_http, read_schema_from_local, read_schema_from_s3, AvroAccessBuilder,
-        AvroParserConfig,
-    };
+    use super::*;
     use crate::common::AwsAuthProps;
-    use crate::parser::bytes_parser::BytesAccessBuilder;
     use crate::parser::plain_parser::PlainParser;
     use crate::parser::unified::avro::unix_epoch_days;
     use crate::parser::{
-        AccessBuilderImpl, BytesProperties, EncodingProperties, EncodingType,
-        SourceStreamChunkBuilder, SpecificParserConfig,
+        AccessBuilderImpl, EncodingType, SourceStreamChunkBuilder, SpecificParserConfig,
     };
     use crate::source::SourceColumnDesc;
 
@@ -247,32 +228,25 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_read_schema_from_local() {
-        let schema_path = test_data_path("complex-schema.avsc");
-        let content_rs = read_schema_from_local(schema_path);
-        assert!(content_rs.is_ok());
-    }
-
-    #[tokio::test]
     #[ignore]
     async fn test_load_schema_from_s3() {
         let schema_location = "s3://mingchao-schemas/complex-schema.avsc".to_string();
         let url = Url::parse(&schema_location).unwrap();
         let aws_auth_config: AwsAuthProps =
             serde_json::from_str(r#"region":"ap-southeast-1"#).unwrap();
-        let schema_content = read_schema_from_s3(&url, &aws_auth_config).await;
+        let schema_content = bytes_from_url(&url, Some(&aws_auth_config)).await;
         assert!(schema_content.is_ok());
-        let schema = Schema::parse_str(&schema_content.unwrap());
+        let schema = Schema::parse_reader(&mut schema_content.unwrap().as_slice());
         assert!(schema.is_ok());
         println!("schema = {:?}", schema.unwrap());
     }
 
     #[tokio::test]
     async fn test_load_schema_from_local() {
-        let schema_location = test_data_path("complex-schema.avsc");
-        let schema_content = read_schema_from_local(schema_location);
+        let schema_location = Url::from_file_path(test_data_path("complex-schema.avsc")).unwrap();
+        let schema_content = bytes_from_url(&schema_location, None).await;
         assert!(schema_content.is_ok());
-        let schema = Schema::parse_str(&schema_content.unwrap());
+        let schema = Schema::parse_reader(&mut schema_content.unwrap().as_slice());
         assert!(schema.is_ok());
         println!("schema = {:?}", schema.unwrap());
     }
@@ -283,14 +257,14 @@ mod test {
         let schema_location =
             "https://mingchao-schemas.s3.ap-southeast-1.amazonaws.com/complex-schema.avsc";
         let url = Url::parse(schema_location).unwrap();
-        let schema_content = read_schema_from_http(&url).await;
+        let schema_content = bytes_from_url(&url, None).await;
         assert!(schema_content.is_ok());
-        let schema = Schema::parse_str(&schema_content.unwrap());
+        let schema = Schema::parse_reader(&mut schema_content.unwrap().as_slice());
         assert!(schema.is_ok());
         println!("schema = {:?}", schema.unwrap());
     }
 
-    async fn new_avro_conf_from_local(file_name: &str) -> error::Result<AvroParserConfig> {
+    async fn new_avro_conf_from_local(file_name: &str) -> Result<AvroParserConfig> {
         let schema_path = "file://".to_owned() + &test_data_path(file_name);
         let info = StreamSourceInfo {
             row_schema_location: schema_path.clone(),
@@ -303,21 +277,18 @@ mod test {
         AvroParserConfig::new(parser_config.encoding_config).await
     }
 
-    async fn new_avro_parser_from_local(file_name: &str) -> error::Result<PlainParser> {
+    async fn new_avro_parser_from_local(file_name: &str) -> Result<PlainParser> {
         let conf = new_avro_conf_from_local(file_name).await?;
 
         Ok(PlainParser {
-            key_builder: AccessBuilderImpl::Bytes(BytesAccessBuilder::new(
-                EncodingProperties::Bytes(BytesProperties {
-                    column_name: Some(DEFAULT_KEY_COLUMN_NAME.into()),
-                }),
-            )?),
+            key_builder: None,
             payload_builder: AccessBuilderImpl::Avro(AvroAccessBuilder::new(
                 conf,
                 EncodingType::Value,
             )?),
             rw_columns: Vec::default(),
             source_ctx: Default::default(),
+            transaction_meta_builder: None,
         })
     }
 
@@ -335,75 +306,71 @@ mod test {
         let flush = writer.flush().unwrap();
         assert!(flush > 0);
         let input_data = writer.into_inner().unwrap();
-        // _rw_key test cases
-        let key_testcases = vec![Some(br#"r"#.to_vec()), Some(vec![]), None];
         let columns = build_rw_columns();
-        for key_data in key_testcases {
-            let mut builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 1);
-            {
-                let writer = builder.row_writer();
-                parser
-                    .parse_inner(key_data, Some(input_data.clone()), writer)
-                    .await
-                    .unwrap();
-            }
-            let chunk = builder.finish();
-            let (op, row) = chunk.rows().next().unwrap();
-            assert_eq!(op, Op::Insert);
-            let row = row.into_owned_row();
-            for (i, field) in record.fields.iter().enumerate() {
-                let value = field.clone().1;
-                match value {
-                    Value::String(str) | Value::Union(_, box Value::String(str)) => {
-                        assert_eq!(row[i], Some(ScalarImpl::Utf8(str.into_boxed_str())));
-                    }
-                    Value::Boolean(bool_val) => {
-                        assert_eq!(row[i], Some(ScalarImpl::Bool(bool_val)));
-                    }
-                    Value::Int(int_val) => {
-                        assert_eq!(row[i], Some(ScalarImpl::Int32(int_val)));
-                    }
-                    Value::Long(i64_val) => {
-                        assert_eq!(row[i], Some(ScalarImpl::Int64(i64_val)));
-                    }
-                    Value::Float(f32_val) => {
-                        assert_eq!(row[i], Some(ScalarImpl::Float32(f32_val.into())));
-                    }
-                    Value::Double(f64_val) => {
-                        assert_eq!(row[i], Some(ScalarImpl::Float64(f64_val.into())));
-                    }
-                    Value::Date(days) => {
-                        assert_eq!(
-                            row[i],
-                            Some(ScalarImpl::Date(
-                                Date::with_days(days + unix_epoch_days()).unwrap(),
-                            ))
-                        );
-                    }
-                    Value::TimestampMillis(millis) => {
-                        assert_eq!(
-                            row[i],
-                            Some(Timestamptz::from_millis(millis).unwrap().into())
-                        );
-                    }
-                    Value::TimestampMicros(micros) => {
-                        assert_eq!(row[i], Some(Timestamptz::from_micros(micros).into()));
-                    }
-                    Value::Bytes(bytes) => {
-                        assert_eq!(row[i], Some(ScalarImpl::Bytea(bytes.into_boxed_slice())));
-                    }
-                    Value::Duration(duration) => {
-                        let months = u32::from(duration.months()) as i32;
-                        let days = u32::from(duration.days()) as i32;
-                        let usecs = (u32::from(duration.millis()) as i64) * 1000; // never overflows
-                        assert_eq!(
-                            row[i],
-                            Some(Interval::from_month_day_usec(months, days, usecs).into())
-                        );
-                    }
-                    _ => {
-                        unreachable!()
-                    }
+        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 1);
+        {
+            let writer = builder.row_writer();
+            parser
+                .parse_inner(None, Some(input_data), writer)
+                .await
+                .unwrap();
+        }
+        let chunk = builder.finish();
+        let (op, row) = chunk.rows().next().unwrap();
+        assert_eq!(op, Op::Insert);
+        let row = row.into_owned_row();
+        for (i, field) in record.fields.iter().enumerate() {
+            let value = field.clone().1;
+            match value {
+                Value::String(str) | Value::Union(_, box Value::String(str)) => {
+                    assert_eq!(row[i], Some(ScalarImpl::Utf8(str.into_boxed_str())));
+                }
+                Value::Boolean(bool_val) => {
+                    assert_eq!(row[i], Some(ScalarImpl::Bool(bool_val)));
+                }
+                Value::Int(int_val) => {
+                    assert_eq!(row[i], Some(ScalarImpl::Int32(int_val)));
+                }
+                Value::Long(i64_val) => {
+                    assert_eq!(row[i], Some(ScalarImpl::Int64(i64_val)));
+                }
+                Value::Float(f32_val) => {
+                    assert_eq!(row[i], Some(ScalarImpl::Float32(f32_val.into())));
+                }
+                Value::Double(f64_val) => {
+                    assert_eq!(row[i], Some(ScalarImpl::Float64(f64_val.into())));
+                }
+                Value::Date(days) => {
+                    assert_eq!(
+                        row[i],
+                        Some(ScalarImpl::Date(
+                            Date::with_days(days + unix_epoch_days()).unwrap(),
+                        ))
+                    );
+                }
+                Value::TimestampMillis(millis) => {
+                    assert_eq!(
+                        row[i],
+                        Some(Timestamptz::from_millis(millis).unwrap().into())
+                    );
+                }
+                Value::TimestampMicros(micros) => {
+                    assert_eq!(row[i], Some(Timestamptz::from_micros(micros).into()));
+                }
+                Value::Bytes(bytes) => {
+                    assert_eq!(row[i], Some(ScalarImpl::Bytea(bytes.into_boxed_slice())));
+                }
+                Value::Duration(duration) => {
+                    let months = u32::from(duration.months()) as i32;
+                    let days = u32::from(duration.days()) as i32;
+                    let usecs = (u32::from(duration.millis()) as i64) * 1000; // never overflows
+                    assert_eq!(
+                        row[i],
+                        Some(Interval::from_month_day_usec(months, days, usecs).into())
+                    );
+                }
+                _ => {
+                    unreachable!()
                 }
             }
         }

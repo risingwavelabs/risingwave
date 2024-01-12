@@ -17,8 +17,7 @@
     Failed to bind expression: must_be_unimplemented_func(1)
 
     Caused by:
-      Feature is not yet implemented: unsupported function: "must_be_unimplemented_func"
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+      function must_be_unimplemented_func(integer) does not exist
 - sql: |
     values(cast(1 as bigint));
   batch_plan: 'BatchValues { rows: [[1:Int64]] }'
@@ -49,6 +48,12 @@
     SELECT null < null;
   logical_plan: |-
     LogicalProject { exprs: [(null:Varchar < null:Varchar) as $expr1] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: hex bitwise-or bin
+  sql: |
+    SELECT 0x25 | 0b110;
+  logical_plan: |-
+    LogicalProject { exprs: [(37:Int32 | 6:Int32) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: bind is distinct from
   sql: |
@@ -143,8 +148,7 @@
     Failed to bind expression: round(true)
 
     Caused by:
-      Feature is not yet implemented: Round[Boolean]
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+      function round(boolean) does not exist
 - sql: |
     -- Single quoted literal can be treated as number without error.
     values(round('123'));
@@ -164,8 +168,7 @@
     Failed to bind expression: 1 NOT LIKE 1.23
 
     Caused by:
-      Feature is not yet implemented: Like[Int32, Decimal]
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+      function like(integer, numeric) does not exist
 - sql: |
     select length(trim(trailing '1' from '12'))+length(trim(leading '2' from '23'))+length(trim(both '3' from '34'));
   batch_plan: 'BatchValues { rows: [[4:Int32]] }'
@@ -217,8 +220,7 @@
     Failed to bind expression: (CASE v1 WHEN 1 THEN 1 WHEN true THEN 2 ELSE 0.0 END)
 
     Caused by:
-      Feature is not yet implemented: Equal[Int32, Boolean]
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+      function equal(integer, boolean) does not exist
 - sql: |
     create table t (v1 int);
     select nullif(v1, 1) as expr from t;
@@ -245,8 +247,7 @@
     Failed to bind expression: nullif(v1, true)
 
     Caused by:
-      Feature is not yet implemented: Equal[Int32, Boolean]
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+      function equal(integer, boolean) does not exist
 - sql: |
     create table t (v1 int);
     select coalesce(v1, 1) as expr from t;
@@ -406,8 +407,7 @@
     Failed to bind expression: 1 < SOME(CAST(NULL AS CHARACTER VARYING[]))
 
     Caused by:
-      Feature is not yet implemented: LessThan[Int32, Varchar]
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+      function less_than(integer, character varying) does not exist
 - sql: |
     select 1 < SOME(null::date);
   binder_error: |
@@ -450,7 +450,7 @@
       └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |-
-    BatchProject { exprs: [Some((1:Int32 < ArrayCat($expr10011, ARRAY[2]:List(Int32)))) as $expr1] }
+    BatchProject { exprs: [Some((1:Int32 < ArrayCat($expr10009, ARRAY[2]:List(Int32)))) as $expr1] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
       └─BatchValues { rows: [[ARRAY[1]:List(Int32)]] }
@@ -473,7 +473,7 @@
       └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |-
-    BatchProject { exprs: [All((1:Int32 < ArrayCat($expr10011, ARRAY[2]:List(Int32)))) as $expr1] }
+    BatchProject { exprs: [All((1:Int32 < ArrayCat($expr10009, ARRAY[2]:List(Int32)))) as $expr1] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
       └─BatchValues { rows: [[ARRAY[1]:List(Int32)]] }
@@ -572,8 +572,7 @@
     Failed to bind expression: pg_teminate_backend(1)
 
     Caused by:
-      Feature is not yet implemented: unsupported function "pg_teminate_backend", do you mean "pg_terminate_backend"?
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+      function pg_teminate_backend(integer) does not exist, do you mean pg_terminate_backend
 - name: regression (#7571) - literal debug display for array with NULL values
   sql: |
     select ARRAY[1, null] t;

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use std::str::FromStr;
 
 use itertools::Itertools;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     Field, Schema, PG_CATALOG_SCHEMA_NAME, RW_INTERNAL_TABLE_FUNCTION_NAME,
 };
@@ -49,14 +50,10 @@ impl Binder {
         {
             if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
                 if with_ordinality {
-                    return Err(ErrorCode::NotImplemented(
-                        format!(
-                            "WITH ORDINALITY for internal/system table function {}",
-                            func_name
-                        ),
-                        None.into(),
-                    )
-                    .into());
+                    bail_not_implemented!(
+                        "WITH ORDINALITY for internal/system table function {}",
+                        func_name
+                    );
                 }
                 return self.bind_internal_table(args, alias);
             }
@@ -66,14 +63,10 @@ impl Binder {
                 )
             {
                 if with_ordinality {
-                    return Err(ErrorCode::NotImplemented(
-                        format!(
-                            "WITH ORDINALITY for internal/system table function {}",
-                            func_name
-                        ),
-                        None.into(),
-                    )
-                    .into());
+                    bail_not_implemented!(
+                        "WITH ORDINALITY for internal/system table function {}",
+                        func_name
+                    );
                 }
                 return self.bind_relation_by_name_inner(
                     Some(PG_CATALOG_SCHEMA_NAME),

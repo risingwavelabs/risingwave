@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ pub use risingwave_pb::expr::expr_node::Type as ExprType;
 
 pub use crate::expr::expr_rewriter::ExprRewriter;
 pub use crate::expr::function_call::FunctionCall;
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::{Expr, ExprImpl, ExprVisitor};
 use crate::session::current;
 
 /// `SessionTimezone` will be used to resolve session
@@ -76,7 +76,7 @@ impl SessionTimezone {
     fn with_timezone(
         &self,
         func_type: ExprType,
-        inputs: &Vec<ExprImpl>,
+        inputs: &[ExprImpl],
         return_type: DataType,
     ) -> Option<ExprImpl> {
         match func_type {
@@ -135,7 +135,7 @@ impl SessionTimezone {
             | ExprType::IsDistinctFrom
             | ExprType::IsNotDistinctFrom => {
                 assert_eq!(inputs.len(), 2);
-                let mut inputs = inputs.clone();
+                let mut inputs = inputs.to_vec();
                 for idx in 0..2 {
                     if matches!(inputs[(idx + 1) % 2].return_type(), DataType::Timestamptz)
                         && matches!(
@@ -212,7 +212,7 @@ impl SessionTimezone {
                     // This is optional but avoids false warning in common case.
                     return None;
                 }
-                let mut new_inputs = inputs.clone();
+                let mut new_inputs = inputs.to_vec();
                 new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
                 Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
             }
@@ -225,7 +225,7 @@ impl SessionTimezone {
                 {
                     return None;
                 }
-                let mut new_inputs = inputs.clone();
+                let mut new_inputs = inputs.to_vec();
                 new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
                 Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
             }
@@ -238,7 +238,7 @@ impl SessionTimezone {
                 {
                     return None;
                 }
-                let mut new_inputs = inputs.clone();
+                let mut new_inputs = inputs.to_vec();
                 new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
                 Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
             }
@@ -262,5 +262,37 @@ impl SessionTimezone {
             return_type,
         )
         .into()
+    }
+}
+
+#[derive(Default)]
+pub struct TimestamptzExprFinder {
+    has: bool,
+}
+
+impl TimestamptzExprFinder {
+    pub fn has(&self) -> bool {
+        self.has
+    }
+}
+
+impl ExprVisitor for TimestamptzExprFinder {
+    fn visit_function_call(&mut self, func_call: &FunctionCall) {
+        if func_call.return_type() == DataType::Timestamptz {
+            self.has = true;
+            return;
+        }
+
+        for input in &func_call.inputs {
+            if input.return_type() == DataType::Timestamptz {
+                self.has = true;
+                return;
+            }
+        }
+
+        func_call
+            .inputs()
+            .iter()
+            .for_each(|expr| self.visit_expr(expr));
     }
 }

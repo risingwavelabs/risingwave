@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -116,7 +116,6 @@ impl StreamNode for StreamExchange {
                     r#type: DispatcherType::NoShuffle as i32,
                     dist_key_indices: vec![],
                     output_indices: (0..self.schema().len() as u32).collect(),
-                    downstream_table_name: None,
                 })
             } else {
                 Some(DispatchStrategy {
@@ -133,7 +132,6 @@ impl StreamNode for StreamExchange {
                         _ => vec![],
                     },
                     output_indices: (0..self.schema().len() as u32).collect(),
-                    downstream_table_name: None,
                 })
             },
         })

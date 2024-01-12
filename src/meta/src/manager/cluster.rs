@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -184,11 +184,7 @@ impl ClusterManager {
             .await? as WorkerId;
 
         let transactional_id = match (core.available_transactional_ids.front(), r#type) {
-            (None, _) => {
-                return Err(MetaError::unavailable(
-                    "no available reusable machine id".to_string(),
-                ))
-            }
+            (None, _) => return Err(MetaError::unavailable("no available reusable machine id")),
             // We only assign transactional id to compute node and frontend.
             (Some(id), WorkerType::ComputeNode | WorkerType::Frontend) => Some(*id),
             _ => None,
@@ -336,10 +332,7 @@ impl ClusterManager {
                 return Ok(());
             }
         }
-        Err(MetaError::invalid_worker(
-            worker_id,
-            "worker not found".into(),
-        ))
+        Err(MetaError::invalid_worker(worker_id, "worker not found"))
     }
 
     pub fn start_heartbeat_checker(
@@ -555,7 +548,7 @@ impl ClusterManagerCore {
                 let transactional_id = match available_transactional_ids.pop_front() {
                     None => {
                         return Err(MetaError::unavailable(
-                            "no available transactional id for worker".to_string(),
+                            "no available transactional id for worker",
                         ))
                     }
                     Some(id) => id,

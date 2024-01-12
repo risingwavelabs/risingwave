@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ use risingwave_pb::monitor_service::{
     ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
     StackTraceRequest, StackTraceResponse,
 };
+use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
@@ -158,6 +159,7 @@ impl ComputeClient {
         task_id: TaskId,
         plan: PlanFragment,
         epoch: BatchQueryEpoch,
+        expr_context: ExprContext,
     ) -> Result<Streaming<TaskInfoResponse>> {
         Ok(self
             .task_client
@@ -167,6 +169,7 @@ impl ComputeClient {
                 plan: Some(plan),
                 epoch: Some(epoch),
                 tracing_context: TracingContext::from_current_span().to_protobuf(),
+                expr_context: Some(expr_context),
             })
             .await?
             .into_inner())

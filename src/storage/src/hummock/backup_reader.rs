@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,9 +25,10 @@ use risingwave_backup::error::BackupError;
 use risingwave_backup::meta_snapshot::{MetaSnapshot, Metadata};
 use risingwave_backup::storage::{MetaSnapshotStorage, ObjectStoreMetaSnapshotStorage};
 use risingwave_backup::{meta_snapshot_v1, MetaSnapshotId};
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::local_version::pinned_version::{PinVersionAction, PinnedVersion};
@@ -44,10 +45,11 @@ async fn create_snapshot_store(
     config: &StoreConfig,
 ) -> StorageResult<ObjectStoreMetaSnapshotStorage> {
     let backup_object_store = Arc::new(
-        parse_remote_object_store(
+        build_remote_object_store(
             &config.0,
             Arc::new(ObjectStoreMetrics::unused()),
             "Meta Backup",
+            ObjectStoreConfig::default(),
         )
         .await,
     );

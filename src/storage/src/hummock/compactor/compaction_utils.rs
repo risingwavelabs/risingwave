@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::marker::PhantomData;
+use std::ops::Bound;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -23,14 +24,20 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
-use risingwave_hummock_sdk::{EpochWithGap, KeyComparator};
-use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec, SstableInfo};
+use risingwave_hummock_sdk::{can_concat, EpochWithGap, KeyComparator};
+use risingwave_pb::hummock::{
+    compact_task, CompactTask, KeyRange as KeyRange_vec, LevelType, SstableInfo,
+};
 use tokio::time::Instant;
 
 pub use super::context::CompactorContext;
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::{
-    MultiCompactionFilter, StateCleanUpCompactionFilter, TtlCompactionFilter,
+    ConcatSstableIterator, MultiCompactionFilter, StateCleanUpCompactionFilter, TaskProgress,
+    TtlCompactionFilter,
+};
+use crate::hummock::iterator::{
+    ForwardMergeRangeIterator, SkipWatermarkIterator, UnorderedMergeIteratorInner, UserIterator,
 };
 use crate::hummock::multi_builder::TableBuilderFactory;
 use crate::hummock::sstable::DEFAULT_ENTRY_SIZE;
@@ -119,9 +126,9 @@ pub struct TaskConfig {
     pub stats_target_table_ids: Option<HashSet<u32>>,
     pub task_type: compact_task::TaskType,
     pub is_target_l0_or_lbase: bool,
-    pub split_by_table: bool,
-    pub split_weight_by_vnode: u32,
     pub use_block_based_filter: bool,
+
+    pub table_vnode_partition: BTreeMap<u32, u32>,
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {
@@ -303,4 +310,78 @@ pub fn estimate_task_output_capacity(context: CompactorContext, task: &CompactTa
 
     let capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
     std::cmp::min(capacity, total_input_uncompressed_file_size as usize)
+}
+
+pub async fn check_compaction_result(
+    compact_task: &CompactTask,
+    context: CompactorContext,
+) -> HummockResult<()> {
+    let mut table_iters = Vec::new();
+    let compact_io_retry_time = context.storage_opts.compact_iter_recreate_timeout_ms;
+    for level in &compact_task.input_ssts {
+        if level.table_infos.is_empty() {
+            continue;
+        }
+
+        // Do not need to filter the table because manager has done it.
+        if level.level_type == LevelType::Nonoverlapping as i32 {
+            debug_assert!(can_concat(&level.table_infos));
+
+            table_iters.push(ConcatSstableIterator::new(
+                compact_task.existing_table_ids.clone(),
+                level.table_infos.clone(),
+                KeyRange::inf(),
+                context.sstable_store.clone(),
+                Arc::new(TaskProgress::default()),
+                compact_io_retry_time,
+            ));
+        } else {
+            for table_info in &level.table_infos {
+                assert_eq!(table_info.range_tombstone_count, 0);
+                table_iters.push(ConcatSstableIterator::new(
+                    compact_task.existing_table_ids.clone(),
+                    vec![table_info.clone()],
+                    KeyRange::inf(),
+                    context.sstable_store.clone(),
+                    Arc::new(TaskProgress::default()),
+                    compact_io_retry_time,
+                ));
+            }
+        }
+    }
+    let iter = UnorderedMergeIteratorInner::for_compactor(table_iters);
+    let mut left_iter = UserIterator::new(
+        SkipWatermarkIterator::from_safe_epoch_watermarks(iter, &compact_task.table_watermarks),
+        (Bound::Unbounded, Bound::Unbounded),
+        u64::MAX,
+        0,
+        None,
+        ForwardMergeRangeIterator::default(),
+    );
+    let iter = ConcatSstableIterator::new(
+        compact_task.existing_table_ids.clone(),
+        compact_task.sorted_output_ssts.clone(),
+        KeyRange::inf(),
+        context.sstable_store.clone(),
+        Arc::new(TaskProgress::default()),
+        compact_io_retry_time,
+    );
+    let mut right_iter = UserIterator::new(
+        SkipWatermarkIterator::from_safe_epoch_watermarks(iter, &compact_task.table_watermarks),
+        (Bound::Unbounded, Bound::Unbounded),
+        u64::MAX,
+        0,
+        None,
+        ForwardMergeRangeIterator::default(),
+    );
+    left_iter.rewind().await?;
+    right_iter.rewind().await?;
+    while left_iter.is_valid() && right_iter.is_valid() {
+        assert_eq!(left_iter.key(), right_iter.key());
+        assert_eq!(left_iter.value(), right_iter.value());
+        left_iter.next().await?;
+        right_iter.next().await?;
+    }
+    assert!(!left_iter.is_valid() && !right_iter.is_valid());
+    Ok(())
 }

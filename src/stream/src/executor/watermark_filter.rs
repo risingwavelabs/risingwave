@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -207,6 +207,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                             watermark,
                         ));
                     }
+                    table.try_flush().await?;
                 }
                 Message::Watermark(watermark) => {
                     if watermark.col_idx == event_time_col_idx {
@@ -382,7 +383,7 @@ mod tests {
             column_descs,
             order_types.to_vec(),
             pk_indices.to_vec(),
-            Distribution::all_vnodes(vec![0]),
+            Distribution::all(vec![0]),
             Some(val_indices.to_vec()),
         )
         .await

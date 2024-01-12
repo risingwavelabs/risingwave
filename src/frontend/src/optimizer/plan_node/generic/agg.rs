@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
-use risingwave_expr::sig::FUNCTION_REGISTRY;
+use risingwave_expr::sig::{FuncBuilder, FUNCTION_REGISTRY};
 use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
 
@@ -93,7 +93,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     }
 
     fn two_phase_agg_forced(&self) -> bool {
-        self.ctx().session_ctx().config().get_force_two_phase_agg()
+        self.ctx().session_ctx().config().force_two_phase_agg()
     }
 
     pub fn two_phase_agg_enabled(&self) -> bool {
@@ -144,11 +144,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     }
 
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: IndexSet, input: PlanRef) -> Self {
-        let enable_two_phase = input
-            .ctx()
-            .session_ctx()
-            .config()
-            .get_enable_two_phase_agg();
+        let enable_two_phase = input.ctx().session_ctx().config().enable_two_phase_agg();
         Self {
             agg_calls,
             group_key,
@@ -525,7 +521,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .zip_eq_fast(&mut out_fields[self.group_key.len()..])
         {
             let sig = FUNCTION_REGISTRY
-                .get_aggregate(
+                .get(
                     agg_call.agg_kind,
                     &agg_call
                         .inputs
@@ -533,15 +529,36 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         .map(|input| input.data_type.clone())
                         .collect_vec(),
                     &agg_call.return_type,
-                    in_append_only,
                 )
                 .expect("agg not found");
-            if !in_append_only && sig.append_only {
-                // we use materialized input state for non-retractable aggregate function.
-                // for backward compatibility, the state type is same as the return type.
-                // its values in the intermediate state table are always null.
-            } else if let Some(state_type) = &sig.state_type {
-                field.data_type = state_type.clone();
+            // in_append_only: whether the input is append-only
+            // sig.is_append_only(): whether the agg function has append-only version
+            match (in_append_only, sig.is_append_only()) {
+                (false, true) => {
+                    // we use materialized input state for non-retractable aggregate function.
+                    // for backward compatibility, the state type is same as the return type.
+                    // its values in the intermediate state table are always null.
+                }
+                (true, true) => {
+                    // use append-only version
+                    if let FuncBuilder::Aggregate {
+                        append_only_state_type: Some(state_type),
+                        ..
+                    } = &sig.build
+                    {
+                        field.data_type = state_type.clone();
+                    }
+                }
+                (_, false) => {
+                    // there is only retractable version, use it
+                    if let FuncBuilder::Aggregate {
+                        retractable_state_type: Some(state_type),
+                        ..
+                    } = &sig.build
+                    {
+                        field.data_type = state_type.clone();
+                    }
+                }
             }
         }
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();

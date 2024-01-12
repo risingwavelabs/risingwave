@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -77,8 +77,7 @@ metrics_level = \"Disabled\"
         meta_nodes: 3,
         compactor_nodes: 2,
         compute_node_cores: 2,
-        etcd_timeout_rate: 0.0,
-        etcd_data_path: None,
+        ..Default::default()
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,9 @@
 
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayRef, BoolArray, DataChunk};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum, ListRef, Scalar, ScalarImpl, ScalarRefImpl};
+use risingwave_common::types::{DataType, Datum, Scalar, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, ensure};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -50,22 +49,37 @@ impl SomeAllExpression {
         }
     }
 
-    fn resolve_boolean_vec(&self, boolean_vec: Vec<Option<bool>>) -> Option<bool> {
+    // Notice that this function may not exhaust the iterator,
+    // so never pass an iterator created `by_ref`.
+    fn resolve_bools(&self, bools: impl Iterator<Item = Option<bool>>) -> Option<bool> {
         match self.expr_type {
             Type::Some => {
-                if boolean_vec.iter().any(|b| b.unwrap_or(false)) {
-                    Some(true)
-                } else if boolean_vec.iter().any(|b| b.is_none()) {
+                let mut any_none = false;
+                for b in bools {
+                    match b {
+                        Some(true) => return Some(true),
+                        Some(false) => continue,
+                        None => any_none = true,
+                    }
+                }
+                if any_none {
                     None
                 } else {
                     Some(false)
                 }
             }
             Type::All => {
-                if boolean_vec.iter().all(|b| b.unwrap_or(false)) {
+                let mut all_true = true;
+                for b in bools {
+                    if b == Some(false) {
+                        return Some(false);
+                    }
+                    if b != Some(true) {
+                        all_true = false;
+                    }
+                }
+                if all_true {
                     Some(true)
-                } else if boolean_vec.iter().any(|b| !b.unwrap_or(true)) {
-                    Some(false)
                 } else {
                     None
                 }
@@ -90,11 +104,7 @@ impl Expression for SomeAllExpression {
         let DataType::List(datatype) = arr_right_inner.data_type() else {
             unreachable!()
         };
-        let capacity = arr_right_inner
-            .iter()
-            .flatten()
-            .map(ListRef::flatten_len)
-            .sum();
+        let capacity = arr_right_inner.flatten().len();
 
         let mut unfolded_arr_left_builder = arr_left.create_builder(capacity);
         let mut unfolded_arr_right_builder = datatype.create_array_builder(capacity);
@@ -108,18 +118,13 @@ impl Expression for SomeAllExpression {
                     return;
                 }
 
-                let datum_right = right.unwrap();
-                match datum_right {
-                    ScalarRefImpl::List(array) => {
-                        let flattened = array.flatten();
-                        let len = flattened.len();
-                        num_array.push(Some(len));
-                        unfolded_arr_left_builder.append_n(len, left);
-                        for item in flattened {
-                            unfolded_arr_right_builder.append(item);
-                        }
-                    }
-                    _ => unreachable!(),
+                let array = right.unwrap().into_list();
+                let flattened = array.flatten();
+                let len = flattened.len();
+                num_array.push(Some(len));
+                unfolded_arr_left_builder.append_n(len, left);
+                for item in flattened.iter() {
+                    unfolded_arr_right_builder.append(item);
                 }
             };
 
@@ -157,13 +162,16 @@ impl Expression for SomeAllExpression {
         );
 
         let func_results = self.func.eval(&data_chunk).await?;
-        let mut func_results_iter = func_results.as_bool().iter();
+        let bools = func_results.as_bool();
+        let mut offset = 0;
         Ok(Arc::new(
             num_array
                 .into_iter()
                 .map(|num| match num {
                     Some(num) => {
-                        self.resolve_boolean_vec(func_results_iter.by_ref().take(num).collect_vec())
+                        let range = offset..offset + num;
+                        offset += num;
+                        self.resolve_bools(range.map(|i| bools.value_at(i)))
                     }
                     None => None,
                 })
@@ -175,30 +183,25 @@ impl Expression for SomeAllExpression {
     async fn eval_row(&self, row: &OwnedRow) -> Result<Datum> {
         let datum_left = self.left_expr.eval_row(row).await?;
         let datum_right = self.right_expr.eval_row(row).await?;
-        if let Some(array) = datum_right {
-            match array {
-                ScalarImpl::List(array) => {
-                    let mut scalar_vec = Vec::with_capacity(array.values().len());
-                    for d in array.values() {
-                        let e = self
-                            .func
-                            .eval_row(&OwnedRow::new(vec![datum_left.clone(), d.clone()]))
-                            .await?;
-                        scalar_vec.push(e);
-                    }
-                    let boolean_vec = scalar_vec
-                        .into_iter()
-                        .map(|scalar_ref| scalar_ref.map(|s| s.into_bool()))
-                        .collect_vec();
-                    Ok(self
-                        .resolve_boolean_vec(boolean_vec)
-                        .map(|b| b.to_scalar_value()))
-                }
-                _ => unreachable!(),
-            }
-        } else {
-            Ok(None)
-        }
+        let Some(array_right) = datum_right else {
+            return Ok(None);
+        };
+        let array_right = array_right.into_list().into_array();
+        let len = array_right.len();
+
+        // expand left to array
+        let array_left = {
+            let mut builder = self.left_expr.return_type().create_array_builder(len);
+            builder.append_n(len, datum_left);
+            builder.finish().into_ref()
+        };
+
+        let chunk = DataChunk::new(vec![array_left, Arc::new(array_right)], len);
+        let bools = self.func.eval(&chunk).await?;
+
+        Ok(self
+            .resolve_bools(bools.as_bool().iter())
+            .map(|b| b.to_scalar_value()))
     }
 }
 
@@ -264,5 +267,79 @@ impl Build for SomeAllExpression {
             outer_expr_type,
             eval_func,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::row::Row;
+    use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_common::types::ToOwnedDatum;
+    use risingwave_common::util::iter_util::ZipEqDebug;
+    use risingwave_expr::expr::build_from_pretty;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_some() {
+        let expr = SomeAllExpression::new(
+            build_from_pretty("0:int4"),
+            build_from_pretty("$0:boolean"),
+            Type::Some,
+            build_from_pretty("$1:boolean"),
+        );
+        let (input, expected) = DataChunk::from_pretty(
+            "B[]        B
+             .          .
+             {}         f
+             {NULL}     .
+             {NULL,f}   .
+             {NULL,t}   t
+             {t,f}      t
+             {f,t}      t", // <- regression test for #14214
+        )
+        .split_column_at(1);
+
+        // test eval
+        let output = expr.eval(&input).await.unwrap();
+        assert_eq!(&output, expected.column_at(0));
+
+        // test eval_row
+        for (row, expected) in input.rows().zip_eq_debug(expected.rows()) {
+            let result = expr.eval_row(&row.to_owned_row()).await.unwrap();
+            assert_eq!(result, expected.datum_at(0).to_owned_datum());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_all() {
+        let expr = SomeAllExpression::new(
+            build_from_pretty("0:int4"),
+            build_from_pretty("$0:boolean"),
+            Type::All,
+            build_from_pretty("$1:boolean"),
+        );
+        let (input, expected) = DataChunk::from_pretty(
+            "B[]        B
+             .          .
+             {}         t
+             {NULL}     .
+             {NULL,t}   .
+             {NULL,f}   f
+             {f,f}      f
+             {t}        t", // <- regression test for #14214
+        )
+        .split_column_at(1);
+
+        // test eval
+        let output = expr.eval(&input).await.unwrap();
+        assert_eq!(&output, expected.column_at(0));
+
+        // test eval_row
+        for (row, expected) in input.rows().zip_eq_debug(expected.rows()) {
+            let result = expr.eval_row(&row.to_owned_row()).await.unwrap();
+            assert_eq!(result, expected.datum_at(0).to_owned_datum());
+        }
     }
 }

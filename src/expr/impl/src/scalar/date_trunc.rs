@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::types::{Interval, Timestamp, Timestamptz};
-use risingwave_expr::expr::BoxedExpression;
-use risingwave_expr::{build_function, function, ExprError, Result};
+use risingwave_expr::{function, ExprError, Result};
 
 use super::timestamptz::timestamp_at_time_zone;
 
@@ -53,16 +52,8 @@ pub fn date_trunc_timestamp(field: &str, ts: Timestamp) -> Result<Timestamp> {
     })
 }
 
-// Only to register this signature to function signature map.
-#[build_function("date_trunc(varchar, timestamptz) -> timestamptz")]
-fn build_date_trunc_timestamptz_implicit_zone(
-    _return_type: risingwave_common::types::DataType,
-    _children: Vec<BoxedExpression>,
-) -> Result<BoxedExpression> {
-    Err(ExprError::UnsupportedFunction(
-        "date_trunc of timestamptz should have been rewritten to include timezone".into(),
-    ))
-}
+#[function("date_trunc(varchar, timestamptz) -> timestamptz", rewritten)]
+fn _date_trunc_timestamptz() {}
 
 #[function("date_trunc(varchar, timestamptz, varchar) -> timestamptz")]
 pub fn date_trunc_timestamptz_at_timezone(

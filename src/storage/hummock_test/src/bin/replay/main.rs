@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ use std::sync::Arc;
 use clap::Parser;
 use replay_impl::{get_replay_notification_client, GlobalReplayImpl};
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, NoOverride, StorageConfig,
+    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, StorageConfig,
 };
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_trace::{
@@ -36,7 +36,7 @@ use risingwave_hummock_trace::{
 };
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_storage::filter_key_extractor::{
     FakeRemoteTableAccessor, RpcFilterKeyExtractorManager,
 };
@@ -99,8 +99,13 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
 
     let compactor_metrics = Arc::new(CompactorMetrics::unused());
 
-    let object_store =
-        parse_remote_object_store(&args.object_storage, object_store_stats, "Hummock").await;
+    let object_store = build_remote_object_store(
+        &args.object_storage,
+        object_store_stats,
+        "Hummock",
+        ObjectStoreConfig::default(),
+    )
+    .await;
 
     let sstable_store = {
         Arc::new(SstableStore::new(
@@ -109,7 +114,8 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
             storage_opts.block_cache_capacity_mb * (1 << 20),
             storage_opts.meta_cache_capacity_mb * (1 << 20),
             storage_opts.high_priority_ratio,
-            storage_opts.large_query_memory_usage_mb * (1 << 20),
+            storage_opts.prefetch_buffer_capacity_mb * (1 << 20),
+            storage_opts.max_prefetch_block_number,
             FileCache::none(),
             FileCache::none(),
             None,

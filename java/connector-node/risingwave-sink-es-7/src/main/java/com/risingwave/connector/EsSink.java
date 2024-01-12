@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,16 +15,16 @@
 package com.risingwave.connector;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonMappingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.connector.api.sink.SinkWriterBase;
 import io.grpc.Status;
+import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 import org.apache.http.HttpHost;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
@@ -44,6 +44,7 @@ import org.elasticsearch.client.RestHighLevelClientBuilder;
 import org.elasticsearch.common.unit.ByteSizeUnit;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.core.TimeValue;
+import org.elasticsearch.xcontent.XContentType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -62,13 +63,97 @@ import org.slf4j.LoggerFactory;
  */
 public class EsSink extends SinkWriterBase {
     private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
-    private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
+    private static final String ERROR_REPORT_TEMPLATE = "Error message %s";
 
     private final EsSinkConfig config;
-    private final BulkProcessor bulkProcessor;
+    private BulkProcessor bulkProcessor;
     private final RestHighLevelClient client;
-    // For bulk listener
-    private final List<Integer> primaryKeyIndexes;
+
+    // Used to handle the return message of ES and throw errors
+    private final RequestTracker requestTracker;
+
+    class RequestTracker {
+        // Used to save the return results of es asynchronous writes. The capacity is Integer.Max
+        private final BlockingQueue<EsWriteResultResp> blockingQueue = new LinkedBlockingQueue<>();
+
+        // Count of write tasks in progress
+        private int taskCount = 0;
+
+        void addErrResult(String errorMsg) {
+            blockingQueue.add(new EsWriteResultResp(errorMsg));
+        }
+
+        void addOkResult(int numberOfActions) {
+            blockingQueue.add(new EsWriteResultResp(numberOfActions));
+        }
+
+        void addWriteTask() {
+            taskCount++;
+            EsWriteResultResp esWriteResultResp;
+            while (true) {
+                if ((esWriteResultResp = this.blockingQueue.poll()) != null) {
+                    checkEsWriteResultResp(esWriteResultResp);
+                } else {
+                    return;
+                }
+            }
+        }
+
+        void waitAllFlush() throws InterruptedException {
+            while (this.taskCount > 0) {
+                EsWriteResultResp esWriteResultResp = this.blockingQueue.poll(10, TimeUnit.SECONDS);
+                if (esWriteResultResp == null) {
+                    LOG.warn("EsWriteResultResp is null, try wait again");
+                } else {
+                    checkEsWriteResultResp(esWriteResultResp);
+                }
+            }
+        }
+
+        void checkEsWriteResultResp(EsWriteResultResp esWriteResultResp) {
+            if (esWriteResultResp.isOk()) {
+                this.taskCount -= esWriteResultResp.getNumberOfActions();
+            } else {
+                throw new RuntimeException(
+                        String.format("Es writer error: %s", esWriteResultResp.getErrorMsg()));
+            }
+            if (this.taskCount < 0) {
+                throw new RuntimeException("The num of task < 0, but blockingQueue is not empty");
+            }
+        }
+    }
+
+    class EsWriteResultResp {
+
+        private boolean isOK;
+
+        private String errorMsg;
+
+        // Number of actions included in completed tasks
+        private Integer numberOfActions;
+
+        public boolean isOk() {
+            return isOK;
+        }
+
+        public EsWriteResultResp(int numberOfActions) {
+            this.isOK = true;
+            this.numberOfActions = numberOfActions;
+        }
+
+        public EsWriteResultResp(String errorMsg) {
+            this.isOK = false;
+            this.errorMsg = errorMsg;
+        }
+
+        public String getErrorMsg() {
+            return errorMsg;
+        }
+
+        public int getNumberOfActions() {
+            return numberOfActions;
+        }
+    }
 
     public EsSink(EsSinkConfig config, TableSchema tableSchema) {
         super(tableSchema);
@@ -80,6 +165,7 @@ public class EsSink extends SinkWriterBase {
         }
 
         this.config = config;
+        this.requestTracker = new RequestTracker();
 
         // ApiCompatibilityMode is enabled to ensure the client can talk to newer version es sever.
         this.client =
@@ -99,12 +185,7 @@ public class EsSink extends SinkWriterBase {
         } catch (Exception e) {
             throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
         }
-        this.bulkProcessor = createBulkProcessor();
-
-        primaryKeyIndexes = new ArrayList<Integer>();
-        for (String primaryKey : tableSchema.getPrimaryKeys()) {
-            primaryKeyIndexes.add(tableSchema.getColumnIndex(primaryKey));
-        }
+        this.bulkProcessor = createBulkProcessor(this.requestTracker);
     }
 
     private static RestClientBuilder configureRestClientBuilder(
@@ -152,13 +233,18 @@ public class EsSink extends SinkWriterBase {
         return builder;
     }
 
-    private BulkProcessor createBulkProcessor() {
+    private BulkProcessor createBulkProcessor(RequestTracker requestTracker) {
         BulkProcessor.Builder builder =
-                applyBulkConfig(this.client, this.config, new BulkListener());
+                applyBulkConfig(this.client, this.config, new BulkListener(requestTracker));
         return builder.build();
     }
 
     private class BulkListener implements BulkProcessor.Listener {
+        private final RequestTracker requestTracker;
+
+        public BulkListener(RequestTracker requestTracker) {
+            this.requestTracker = requestTracker;
+        }
 
         /** This method is called just before bulk is executed. */
         @Override
@@ -169,90 +255,45 @@ public class EsSink extends SinkWriterBase {
         /** This method is called after bulk execution. */
         @Override
         public void afterBulk(long executionId, BulkRequest request, BulkResponse response) {
-            LOG.info("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
+            if (response.hasFailures()) {
+                String errMessage =
+                        String.format(
+                                "Bulk of %d actions failed. Failure: %s",
+                                request.numberOfActions(), response.buildFailureMessage());
+                this.requestTracker.addErrResult(errMessage);
+            } else {
+                this.requestTracker.addOkResult(request.numberOfActions());
+                LOG.info("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
+            }
         }
 
         /** This method is called when the bulk failed and raised a Throwable */
         @Override
         public void afterBulk(long executionId, BulkRequest request, Throwable failure) {
-            LOG.info(
-                    "Bulk of {} actions failed. Failure: {}",
-                    request.numberOfActions(),
-                    failure.getMessage());
+            String errMessage =
+                    String.format(
+                            "Bulk of %d actions failed. Failure: %s",
+                            request.numberOfActions(), failure.getMessage());
+            this.requestTracker.addErrResult(errMessage);
         }
-    }
-
-    /**
-     * The api accepts doc in map form.
-     *
-     * @param row
-     * @return Map from Field name to Value
-     * @throws JsonProcessingException
-     * @throws JsonMappingException
-     */
-    private Map<String, Object> buildDoc(SinkRow row)
-            throws JsonMappingException, JsonProcessingException {
-        Map<String, Object> doc = new HashMap();
-        var tableSchema = getTableSchema();
-        var columnDescs = tableSchema.getColumnDescs();
-        for (int i = 0; i < row.size(); i++) {
-            var type = columnDescs.get(i).getDataType().getTypeName();
-            Object col = row.get(i);
-            switch (type) {
-                case DATE:
-                    // es client doesn't natively support java.sql.Timestamp/Time/Date
-                    // so we need to convert Date type into a string as suggested in
-                    // https://github.com/elastic/elasticsearch/issues/31377#issuecomment-398102292
-                    col = col.toString();
-                    break;
-                case JSONB:
-                    ObjectMapper mapper = new ObjectMapper();
-                    col =
-                            mapper.readValue(
-                                    (String) col, new TypeReference<Map<String, Object>>() {});
-                    break;
-                default:
-                    break;
-            }
-            if (col instanceof Date) {}
-
-            doc.put(getTableSchema().getColumnDesc(i).getName(), col);
-        }
-        return doc;
-    }
-
-    /**
-     * use primary keys as id concatenated by a specific delimiter.
-     *
-     * @param row
-     * @return
-     */
-    private String buildId(SinkRow row) {
-        String id;
-        if (primaryKeyIndexes.isEmpty()) {
-            id = row.get(0).toString();
-        } else {
-            List<String> keys =
-                    primaryKeyIndexes.stream()
-                            .map(index -> row.get(primaryKeyIndexes.get(index)).toString())
-                            .collect(Collectors.toList());
-            id = String.join(config.getDelimiter(), keys);
-        }
-        return id;
     }
 
     private void processUpsert(SinkRow row) throws JsonMappingException, JsonProcessingException {
-        Map<String, Object> doc = buildDoc(row);
-        final String key = buildId(row);
+        final String key = (String) row.get(0);
+        String doc = (String) row.get(1);
 
         UpdateRequest updateRequest =
-                new UpdateRequest(config.getIndex(), "doc", key).doc(doc).upsert(doc);
+                new UpdateRequest(config.getIndex(), "_doc", key).doc(doc, XContentType.JSON);
+        updateRequest.docAsUpsert(true);
+        this.requestTracker.addWriteTask();
         bulkProcessor.add(updateRequest);
     }
 
-    private void processDelete(SinkRow row) {
-        final String key = buildId(row);
-        DeleteRequest deleteRequest = new DeleteRequest(config.getIndex(), "doc", key);
+    private void processDelete(SinkRow row) throws JsonMappingException, JsonProcessingException {
+        final String key = (String) row.get(0);
+
+        DeleteRequest deleteRequest = new DeleteRequest(config.getIndex(), "_doc", key);
+        this.requestTracker.addWriteTask();
         bulkProcessor.add(deleteRequest);
     }
 
@@ -288,7 +329,8 @@ public class EsSink extends SinkWriterBase {
     @Override
     public void sync() {
         try {
-            bulkProcessor.flush();
+            this.bulkProcessor.flush();
+            this.requestTracker.waitAllFlush();
         } catch (Exception e) {
             throw io.grpc.Status.INTERNAL
                     .withDescription(String.format(ERROR_REPORT_TEMPLATE, e.getMessage()))
@@ -299,8 +341,6 @@ public class EsSink extends SinkWriterBase {
     @Override
     public void drop() {
         try {
-            // give processor enough time to finish unfinished work, otherwise we will get an error
-            // in afterbulk
             bulkProcessor.awaitClose(100, TimeUnit.SECONDS);
             client.close();
         } catch (Exception e) {
@@ -312,5 +352,11 @@ public class EsSink extends SinkWriterBase {
 
     public RestHighLevelClient getClient() {
         return client;
+    }
+
+    private final SimpleDateFormat createSimpleDateFormat(String pattern, TimeZone timeZone) {
+        SimpleDateFormat sdf = new SimpleDateFormat(pattern);
+        sdf.setTimeZone(timeZone);
+        return sdf;
     }
 }

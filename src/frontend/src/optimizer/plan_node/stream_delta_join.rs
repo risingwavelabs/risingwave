@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -182,6 +182,11 @@ impl StreamNode for StreamDeltaJoin {
                     .map(ColumnDesc::to_protobuf)
                     .collect(),
                 table_desc: Some(left_table_desc.to_protobuf()),
+                output_col_idx: left_table
+                    .output_col_idx
+                    .iter()
+                    .map(|&v| v as u32)
+                    .collect(),
             }),
             right_info: Some(ArrangementInfo {
                 // TODO: remove it
@@ -193,6 +198,11 @@ impl StreamNode for StreamDeltaJoin {
                     .map(ColumnDesc::to_protobuf)
                     .collect(),
                 table_desc: Some(right_table_desc.to_protobuf()),
+                output_col_idx: right_table
+                    .output_col_idx
+                    .iter()
+                    .map(|&v| v as u32)
+                    .collect(),
             }),
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
         })

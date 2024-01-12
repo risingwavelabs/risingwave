@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -73,6 +73,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Length
             | expr_node::Type::Like
             | expr_node::Type::ILike
+            | expr_node::Type::SimilarToEscape
             | expr_node::Type::Upper
             | expr_node::Type::Lower
             | expr_node::Type::Trim
@@ -172,7 +173,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::ArrayContains
             | expr_node::Type::ArrayContained
             | expr_node::Type::HexToInt256
-            | expr_node::Type::JsonbCat
+            | expr_node::Type::JsonbConcat
             | expr_node::Type::JsonbAccess
             | expr_node::Type::JsonbAccessStr
             | expr_node::Type::JsonbExtractPath
@@ -190,6 +191,10 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::JsonbStripNulls
             | expr_node::Type::JsonbBuildArray
             | expr_node::Type::JsonbBuildObject
+            | expr_node::Type::JsonbPathExists
+            | expr_node::Type::JsonbPathMatch
+            | expr_node::Type::JsonbPathQueryArray
+            | expr_node::Type::JsonbPathQueryFirst
             | expr_node::Type::IsJson
             | expr_node::Type::ToJsonb
             | expr_node::Type::Sind
@@ -218,7 +223,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::PgwireRecv
             | expr_node::Type::ArrayTransform
             | expr_node::Type::Greatest
-            | expr_node::Type::Least =>
+            | expr_node::Type::Least
+            | expr_node::Type::ConvertFrom
+            | expr_node::Type::ConvertTo =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call
@@ -232,8 +239,10 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::PgSleep
             | expr_node::Type::PgSleepFor
             | expr_node::Type::PgSleepUntil
-            | expr_node::Type::ColDescription
             | expr_node::Type::CastRegclass
+            | expr_node::Type::PgGetIndexdef
+            | expr_node::Type::ColDescription
+            | expr_node::Type::PgGetViewdef
             | expr_node::Type::MakeTimestamptz => self.impure = true,
         }
     }

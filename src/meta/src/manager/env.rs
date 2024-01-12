@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,15 +16,20 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use risingwave_common::config::{CompactionConfig, DefaultParallelism};
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{ConnectorClient, StreamClientPool, StreamClientPoolRef};
 use sea_orm::EntityTrait;
 
 use super::{SystemParamsManager, SystemParamsManagerRef};
+use crate::controller::id::{
+    IdGeneratorManager as SqlIdGeneratorManager, IdGeneratorManagerRef as SqlIdGeneratorManagerRef,
+};
 use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
 use crate::controller::SqlMetaStore;
-use crate::manager::event_log::{start_event_log_manager, EventLogManger, EventLogMangerRef};
+use crate::hummock::sequence::SequenceGenerator;
+use crate::manager::event_log::{start_event_log_manager, EventLogMangerRef};
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
     NotificationManagerRef,
@@ -41,6 +46,9 @@ use crate::MetaResult;
 pub struct MetaSrvEnv {
     /// id generator manager.
     id_gen_manager: IdGeneratorManagerRef,
+
+    /// sql id generator manager.
+    sql_id_gen_manager: Option<SqlIdGeneratorManagerRef>,
 
     /// meta store.
     meta_store: MetaStoreRef,
@@ -74,6 +82,8 @@ pub struct MetaSrvEnv {
     /// Client to connector node. `None` if endpoint unspecified or unable to connect.
     connector_client: Option<ConnectorClient>,
 
+    pub hummock_seq: Option<Arc<SequenceGenerator>>,
+
     /// options read by all services
     pub opts: Arc<MetaOpts>,
 }
@@ -86,6 +96,9 @@ pub struct MetaOpts {
     pub enable_recovery: bool,
     /// Whether to enable the scale-in feature when compute-node is removed.
     pub enable_scale_in_when_recovery: bool,
+    /// Whether to enable the auto-scaling feature when compute-node is joined.
+    /// The semantics of this configuration will be expanded in the future to control the automatic scaling of the entire cluster.
+    pub enable_automatic_parallelism_control: bool,
     /// The maximum number of barriers in-flight in the compute nodes.
     pub in_flight_barrier_nums: usize,
     /// After specified seconds of idle (no mview or flush), the process will be exited.
@@ -175,9 +188,29 @@ pub struct MetaOpts {
 
     pub compaction_task_max_heartbeat_interval_secs: u64,
     pub compaction_config: Option<CompactionConfig>,
+
+    /// The size limit to split a state-table to independent sstable.
+    pub cut_table_size_limit: u64,
+
+    /// hybird compaction group config
+    ///
+    /// hybird_partition_vnode_count determines the granularity of vnodes in the hybrid compaction group for SST alignment.
+    /// When hybird_partition_vnode_count > 0, in hybrid compaction group
+    /// - Tables with high write throughput will be split at vnode granularity
+    /// - Tables with high size tables will be split by table granularity
+    /// When hybird_partition_vnode_count = 0,no longer be special alignment operations for the hybird compaction group
+    pub hybird_partition_vnode_count: u32,
+
     pub event_log_enabled: bool,
     pub event_log_channel_max_size: u32,
     pub advertise_addr: String,
+
+    /// The number of traces to be cached in-memory by the tracing collector
+    /// embedded in the meta node.
+    pub cached_traces_num: u32,
+    /// The maximum memory usage in bytes for the tracing collector embedded
+    /// in the meta node.
+    pub cached_traces_memory_limit_bytes: usize,
 }
 
 impl MetaOpts {
@@ -186,6 +219,7 @@ impl MetaOpts {
         Self {
             enable_recovery,
             enable_scale_in_when_recovery: false,
+            enable_automatic_parallelism_control: false,
             in_flight_barrier_nums: 40,
             max_idle_ms: 0,
             compaction_deterministic_test: false,
@@ -219,9 +253,13 @@ impl MetaOpts {
             partition_vnode_count: 32,
             compaction_task_max_heartbeat_interval_secs: 0,
             compaction_config: None,
+            cut_table_size_limit: 1024 * 1024 * 1024,
+            hybird_partition_vnode_count: 4,
             event_log_enabled: false,
             event_log_channel_max_size: 1,
             advertise_addr: "".to_string(),
+            cached_traces_num: 1,
+            cached_traces_memory_limit_bytes: usize::MAX,
         }
     }
 }
@@ -279,9 +317,19 @@ impl MetaSrvEnv {
             opts.event_log_enabled,
             opts.event_log_channel_max_size,
         ));
+        let hummock_seq = meta_store_sql
+            .clone()
+            .map(|m| Arc::new(SequenceGenerator::new(m.conn)));
+
+        let sql_id_gen_manager = if let Some(store) = &meta_store_sql {
+            Some(Arc::new(SqlIdGeneratorManager::new(&store.conn).await?))
+        } else {
+            None
+        };
 
         Ok(Self {
             id_gen_manager,
+            sql_id_gen_manager,
             meta_store,
             meta_store_sql,
             notification_manager,
@@ -294,6 +342,7 @@ impl MetaSrvEnv {
             cluster_first_launch,
             connector_client,
             opts: opts.into(),
+            hummock_seq,
         })
     }
 
@@ -317,6 +366,10 @@ impl MetaSrvEnv {
         self.id_gen_manager.deref()
     }
 
+    pub fn sql_id_gen_manager_ref(&self) -> Option<SqlIdGeneratorManagerRef> {
+        self.sql_id_gen_manager.clone()
+    }
+
     pub fn notification_manager_ref(&self) -> NotificationManagerRef {
         self.notification_manager.clone()
     }
@@ -331,6 +384,13 @@ impl MetaSrvEnv {
 
     pub fn idle_manager(&self) -> &IdleManager {
         self.idle_manager.deref()
+    }
+
+    pub async fn system_params_reader(&self) -> SystemParamsReader {
+        if let Some(system_ctl) = &self.system_params_controller {
+            return system_ctl.get_params().await;
+        }
+        self.system_params_manager.get_params().await
     }
 
     pub fn system_params_manager_ref(&self) -> SystemParamsManagerRef {
@@ -382,6 +442,8 @@ impl MetaSrvEnv {
     }
 
     pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {
+        use crate::manager::event_log::EventLogManger;
+
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let meta_store = MemStore::default().into_ref();
         #[cfg(madsim)]
@@ -419,9 +481,20 @@ impl MetaSrvEnv {
         };
 
         let event_log_manager = Arc::new(EventLogManger::for_test());
+        let sql_id_gen_manager = if let Some(store) = &meta_store_sql {
+            Some(Arc::new(
+                SqlIdGeneratorManager::new(&store.conn).await.unwrap(),
+            ))
+        } else {
+            None
+        };
+        let hummock_seq = meta_store_sql
+            .clone()
+            .map(|m| Arc::new(SequenceGenerator::new(m.conn)));
 
         Self {
             id_gen_manager,
+            sql_id_gen_manager,
             meta_store,
             meta_store_sql,
             notification_manager,
@@ -434,6 +507,7 @@ impl MetaSrvEnv {
             cluster_first_launch,
             connector_client: None,
             opts,
+            hummock_seq,
         }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -60,12 +60,13 @@ impl CompactionPicker for LevelCompactionPicker {
             return None;
         }
 
-        if let Some(ret) = self.pick_base_trivial_move(
+        if let Some(mut ret) = self.pick_base_trivial_move(
             l0,
             levels.get_level(self.target_level),
             level_handlers,
             stats,
         ) {
+            ret.vnode_partition_count = self.config.split_weight_by_vnode;
             return Some(ret);
         }
 
@@ -73,6 +74,7 @@ impl CompactionPicker for LevelCompactionPicker {
         if let Some(ret) = self.pick_multi_level_to_base(
             l0,
             levels.get_level(self.target_level),
+            self.config.split_weight_by_vnode,
             level_handlers,
             stats,
         ) {
@@ -128,6 +130,7 @@ impl LevelCompactionPicker {
         &self,
         l0: &OverlappingLevel,
         target_level: &Level,
+        vnode_partition_count: u32,
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
@@ -147,8 +150,18 @@ impl LevelCompactionPicker {
             overlap_strategy.clone(),
         );
 
-        let l0_select_tables_vec = non_overlap_sub_level_picker
-            .pick_l0_multi_non_overlap_level(&l0.sub_levels, &level_handlers[0]);
+        let mut max_vnode_partition_idx = 0;
+        for (idx, level) in l0.sub_levels.iter().enumerate() {
+            if level.vnode_partition_count < vnode_partition_count {
+                break;
+            }
+            max_vnode_partition_idx = idx;
+        }
+
+        let l0_select_tables_vec = non_overlap_sub_level_picker.pick_l0_multi_non_overlap_level(
+            &l0.sub_levels[..=max_vnode_partition_idx],
+            &level_handlers[0],
+        );
         if l0_select_tables_vec.is_empty() {
             stats.skip_by_pending_files += 1;
             return None;
@@ -217,6 +230,7 @@ impl LevelCompactionPicker {
                 select_input_size: input.total_file_size,
                 target_input_size: target_file_size,
                 total_file_count: (input.total_file_count + target_file_count) as u64,
+                vnode_partition_count,
                 ..Default::default()
             };
 
@@ -225,6 +239,15 @@ impl LevelCompactionPicker {
                 ValidationRuleType::ToBase,
                 stats,
             ) {
+                if l0.total_file_size > target_level.total_file_size * 8 {
+                    tracing::warn!("skip task with level count: {}, file count: {}, select size: {}, target size: {}, target level size: {}",
+                        result.input_levels.len(),
+                        result.total_file_count,
+                        result.select_input_size,
+                        result.target_input_size,
+                        target_level.total_file_size,
+                    );
+                }
                 continue;
             }
 
@@ -423,6 +446,7 @@ pub mod tests {
             total_file_size: 0,
             sub_level_id: 0,
             uncompressed_file_size: 0,
+            ..Default::default()
         }];
         let mut levels = Levels {
             levels,
@@ -487,6 +511,7 @@ pub mod tests {
                 total_file_size: 900,
                 sub_level_id: 0,
                 uncompressed_file_size: 900,
+                ..Default::default()
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
             ..Default::default()

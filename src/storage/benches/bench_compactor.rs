@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -57,6 +57,7 @@ pub fn mock_sstable_store() -> SstableStoreRef {
         128 << 20,
         0,
         64 << 20,
+        16,
         FileCache::none(),
         FileCache::none(),
         None,
@@ -193,7 +194,6 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         watermark: 0,
         stats_target_table_ids: None,
         task_type: compact_task::TaskType::Dynamic,
-        split_weight_by_vnode: 0,
         use_block_based_filter: true,
         ..Default::default()
     };
@@ -229,6 +229,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions {
         cache_policy: CachePolicy::Fill(CachePriority::High),
+        prefetch_for_large_query: false,
         must_iterated_end_user_key: None,
         max_preload_retry_times: 0,
     });

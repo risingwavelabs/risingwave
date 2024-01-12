@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,7 +54,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             // There could be arbitrary number of upstreams with simple dispatcher.
             DispatcherType::Simple => false,
             // There should be always only one upstream with no-shuffle dispatcher.
-            DispatcherType::NoShuffle | DispatcherType::CdcTablename => true,
+            DispatcherType::NoShuffle => true,
         };
 
         if always_single_input {

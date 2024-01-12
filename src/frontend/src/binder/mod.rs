@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,13 +21,14 @@ use risingwave_common::error::Result;
 use risingwave_common::session_config::{ConfigMap, SearchPath};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{Expr as AstExpr, Statement};
 
 mod bind_context;
 mod bind_param;
 mod create;
 mod delete;
 mod expr;
+mod for_system;
 mod insert;
 mod query;
 mod relation;
@@ -114,6 +115,10 @@ pub struct Binder {
     included_relations: HashSet<TableId>,
 
     param_types: ParameterTypes,
+
+    /// The mapping from sql udf parameters to ast expressions
+    /// Note: The expressions are constructed during runtime, correspond to the actual users' input
+    udf_context: HashMap<String, AstExpr>,
 }
 
 /// `ParameterTypes` is used to record the types of the parameters during binding. It works
@@ -210,11 +215,12 @@ impl Binder {
             next_values_id: 0,
             next_share_id: 0,
             session_config: session.shared_config(),
-            search_path: session.config().get_search_path(),
+            search_path: session.config().search_path(),
             bind_for,
             shared_views: HashMap::new(),
             included_relations: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
+            udf_context: HashMap::new(),
         }
     }
 

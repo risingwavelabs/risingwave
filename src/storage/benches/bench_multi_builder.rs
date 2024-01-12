@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_object_store::object::{ObjectStore, ObjectStoreImpl, S3ObjectStore};
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
@@ -131,9 +132,13 @@ fn bench_builder(
 
     let metrics = Arc::new(ObjectStoreMetrics::unused());
     let object_store = runtime.block_on(async {
-        S3ObjectStore::new(bucket.to_string(), metrics.clone())
-            .await
-            .monitored(metrics)
+        S3ObjectStore::new_with_config(
+            bucket.to_string(),
+            metrics.clone(),
+            ObjectStoreConfig::default(),
+        )
+        .await
+        .monitored(metrics)
     });
     let object_store = Arc::new(ObjectStoreImpl::S3(object_store));
     let sstable_store = Arc::new(SstableStore::new(
@@ -143,6 +148,7 @@ fn bench_builder(
         128 << 20,
         0,
         64 << 20,
+        16,
         FileCache::none(),
         FileCache::none(),
         None,

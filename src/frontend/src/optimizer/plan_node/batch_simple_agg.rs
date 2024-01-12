@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,7 +47,7 @@ impl BatchSimpleAgg {
             .ctx()
             .session_ctx()
             .config()
-            .get_enable_two_phase_agg()
+            .enable_two_phase_agg()
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {

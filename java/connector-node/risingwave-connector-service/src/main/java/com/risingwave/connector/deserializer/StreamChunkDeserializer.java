@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -239,16 +239,21 @@ public class StreamChunkDeserializer implements Deserializer {
     @Override
     public CloseableIterable<SinkRow> deserialize(
             ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch writeBatch) {
-        if (!writeBatch.hasStreamChunkPayload()) {
+        if (writeBatch.hasStreamChunkPayload()) {
+            StreamChunkPayload streamChunkPayload = writeBatch.getStreamChunkPayload();
+            return new StreamChunkIterable(
+                    StreamChunk.fromPayload(streamChunkPayload.getBinaryData().toByteArray()),
+                    valueGetters);
+        } else if (writeBatch.hasStreamChunkRefPointer()) {
+            return new StreamChunkIterable(
+                    StreamChunk.fromRefPointer(writeBatch.getStreamChunkRefPointer()),
+                    valueGetters);
+        } else {
             throw INVALID_ARGUMENT
                     .withDescription(
                             "expected StreamChunkPayload, got " + writeBatch.getPayloadCase())
                     .asRuntimeException();
         }
-        StreamChunkPayload streamChunkPayload = writeBatch.getStreamChunkPayload();
-        return new StreamChunkIterable(
-                StreamChunk.fromPayload(streamChunkPayload.getBinaryData().toByteArray()),
-                valueGetters);
     }
 
     static class StreamChunkRowWrapper implements SinkRow {

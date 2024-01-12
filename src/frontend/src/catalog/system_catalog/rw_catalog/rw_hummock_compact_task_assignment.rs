@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ use serde_json::json;
 
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
-pub const RW_HUMMOCK_COMPACT_TASK_ASSIGNMEN: BuiltinTable = BuiltinTable {
+pub const RW_HUMMOCK_COMPACT_TASK_ASSIGNMENT: BuiltinTable = BuiltinTable {
     name: "rw_hummock_compact_task_assignment",
     schema: RW_CATALOG_SCHEMA_NAME,
     columns: &[
@@ -44,16 +44,19 @@ pub const RW_HUMMOCK_COMPACT_TASK_ASSIGNMEN: BuiltinTable = BuiltinTable {
 };
 
 impl SysCatalogReaderImpl {
-    pub async fn read_hummock_compaction_status(&self) -> Result<Vec<OwnedRow>> {
-        let compact_task_assignment = self.meta_client.list_compact_task_assignment().await?;
-        Ok(assignments_to_rows(compact_task_assignment))
+    pub async fn read_hummock_compact_task_assignments(&self) -> Result<Vec<OwnedRow>> {
+        // The naming of compact_task_assignment is due to versioning; now compact_task_assignment only records the state of the compact task
+        let compact_task_assignments = self.meta_client.list_compact_task_assignment().await?;
+        Ok(compact_task_assignments_to_rows(compact_task_assignments))
     }
 }
 
-fn assignments_to_rows(assignments: Vec<CompactTaskAssignment>) -> Vec<OwnedRow> {
+fn compact_task_assignments_to_rows(
+    compact_task_assignments: Vec<CompactTaskAssignment>,
+) -> Vec<OwnedRow> {
     let mut rows = vec![];
-    for assignment in assignments {
-        let compact_task = assignment.compact_task.unwrap();
+    for compact_task_assignment in compact_task_assignments {
+        let compact_task = compact_task_assignment.compact_task.unwrap();
 
         let select_level = compact_task.input_ssts[0].level_idx;
 

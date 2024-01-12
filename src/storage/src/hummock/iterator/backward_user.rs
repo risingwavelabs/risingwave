@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -277,13 +277,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
 impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     /// Creates [`BackwardUserIterator`] with maximum epoch.
     pub(crate) fn for_test(iterator: I, key_range: UserKeyRange) -> Self {
-        Self::with_epoch(
-            iterator,
-            key_range,
-            risingwave_common::util::epoch::MAX_EPOCH,
-            0,
-            None,
-        )
+        Self::with_epoch(iterator, key_range, HummockEpoch::MAX, 0, None)
     }
 
     /// Creates [`BackwardUserIterator`] with maximum epoch.
@@ -292,13 +286,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
         key_range: UserKeyRange,
         min_epoch: HummockEpoch,
     ) -> Self {
-        Self::with_epoch(
-            iterator,
-            key_range,
-            risingwave_common::util::epoch::MAX_EPOCH,
-            min_epoch,
-            None,
-        )
+        Self::with_epoch(iterator, key_range, HummockEpoch::MAX, min_epoch, None)
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,10 +20,11 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, Schema, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
-use risingwave_common::error::{ErrorCode, Result, RwError, TrackingIssue};
+use risingwave_common::error::Result;
 use risingwave_connector::source::{ConnectorProperties, DataType};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
@@ -181,7 +182,7 @@ impl LogicalSource {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         &Field {
                             name: "last_edit_time".to_string(),
-                            data_type: DataType::Timestamp,
+                            data_type: DataType::Timestamptz,
                             sub_fields: vec![],
                             type_name: "".to_string(),
                         },
@@ -543,13 +544,10 @@ impl ToBatch for LogicalSource {
     fn to_batch(&self) -> Result<PlanRef> {
         if self.core.catalog.is_some()
             && ConnectorProperties::is_new_fs_connector_b_tree_map(
-                &self.core.catalog.as_ref().unwrap().properties,
+                &self.core.catalog.as_ref().unwrap().with_properties,
             )
         {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "New S3 connector for batch".to_string(),
-                TrackingIssue::from(None),
-            )));
+            bail_not_implemented!("New S3 connector for batch");
         }
         let source = self.wrap_with_optional_generated_columns_batch_proj()?;
         Ok(source)
@@ -562,7 +560,7 @@ impl ToStream for LogicalSource {
         let mut plan: PlanRef;
         if self.core.catalog.is_some()
             && ConnectorProperties::is_new_fs_connector_b_tree_map(
-                &self.core.catalog.as_ref().unwrap().properties,
+                &self.core.catalog.as_ref().unwrap().with_properties,
             )
         {
             plan_prefix = Some(self.rewrite_new_s3_plan()?);

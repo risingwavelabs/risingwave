@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,8 @@
 // limitations under the License.
 
 use chrono::format::Parsed;
-use risingwave_common::types::{DataType, Date, Timestamp, Timestamptz};
-use risingwave_expr::expr::BoxedExpression;
-use risingwave_expr::{build_function, function, ExprError, Result};
+use risingwave_common::types::{Date, Timestamp, Timestamptz};
+use risingwave_expr::{function, ExprError, Result};
 
 use super::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
 use super::to_char::ChronoPattern;
@@ -94,13 +93,8 @@ pub fn to_timestamp(s: &str, timezone: &str, tmpl: &ChronoPattern) -> Result<Tim
     })
 }
 
-// Only to register this signature to function signature map.
-#[build_function("to_timestamp1(varchar, varchar) -> timestamptz")]
-fn build_dummy(_return_type: DataType, _children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
-    Err(ExprError::UnsupportedFunction(
-        "to_timestamp should have been rewritten to include timezone".into(),
-    ))
-}
+#[function("to_timestamp1(varchar, varchar) -> timestamptz", rewritten)]
+fn _to_timestamp1() {}
 
 #[function(
     "char_to_date(varchar, varchar) -> date",

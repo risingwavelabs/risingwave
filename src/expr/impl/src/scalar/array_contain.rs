@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -63,27 +63,19 @@ fn array_contained(left: ListRef<'_>, right: ListRef<'_>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::{ListValue, ScalarImpl};
+    use risingwave_common::types::{ListValue, Scalar};
 
     use super::*;
 
     #[test]
     fn test_contains() {
         assert!(array_contains(
-            ListRef::ValueRef {
-                val: &ListValue::new(vec![Some(ScalarImpl::Int32(2)), Some(ScalarImpl::Int32(3))]),
-            },
-            ListRef::ValueRef {
-                val: &ListValue::new(vec![Some(ScalarImpl::Int32(2))]),
-            }
+            ListValue::from_iter([2, 3]).as_scalar_ref(),
+            ListValue::from_iter([2]).as_scalar_ref(),
         ));
         assert!(!array_contains(
-            ListRef::ValueRef {
-                val: &ListValue::new(vec![Some(ScalarImpl::Int32(2)), Some(ScalarImpl::Int32(3))]),
-            },
-            ListRef::ValueRef {
-                val: &ListValue::new(vec![Some(ScalarImpl::Int32(5))]),
-            }
+            ListValue::from_iter([2, 3]).as_scalar_ref(),
+            ListValue::from_iter([5]).as_scalar_ref(),
         ));
     }
 }

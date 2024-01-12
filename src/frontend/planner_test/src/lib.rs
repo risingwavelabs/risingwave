@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -265,7 +265,7 @@ impl TestCase {
 
         if let Some(ref config_map) = self.with_config_map() {
             for (key, val) in config_map {
-                session.set_config(key, vec![val.to_owned()]).unwrap();
+                session.set_config(key, val.to_owned()).unwrap();
             }
         }
 
@@ -424,6 +424,7 @@ impl TestCase {
                     source_watermarks,
                     append_only,
                     cdc_table_info,
+                    include_column_options,
                     ..
                 } => {
                     let source_schema = source_schema.map(|schema| schema.into_v2_with_warning());
@@ -438,6 +439,7 @@ impl TestCase {
                         source_watermarks,
                         append_only,
                         cdc_table_info,
+                        include_column_options,
                     )
                     .await?;
                 }
@@ -446,7 +448,7 @@ impl TestCase {
                         create_source::handle_create_source(handler_args, stmt).await
                     {
                         let actual_result = TestCaseResult {
-                            planner_error: Some(error.to_string()),
+                            planner_error: Some(error.to_report_string()),
                             ..Default::default()
                         };
 
@@ -587,7 +589,8 @@ impl TestCase {
         let mut logical_plan = match planner.plan(bound) {
             Ok(logical_plan) => {
                 if self.expected_outputs.contains(&TestType::LogicalPlan) {
-                    ret.logical_plan = Some(explain_plan(&logical_plan.clone().into_subplan()));
+                    ret.logical_plan =
+                        Some(explain_plan(&logical_plan.clone().into_unordered_subplan()));
                 }
                 logical_plan
             }
@@ -791,6 +794,8 @@ impl TestCase {
                     "test_db".into(),
                     "test_table".into(),
                     format_desc,
+                    false,
+                    None,
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));
@@ -873,13 +878,14 @@ pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
     let cases: Vec<TestCase> = serde_yaml::from_str(file_content).map_err(|e| {
         if let Some(loc) = e.location() {
             anyhow!(
-                "failed to parse yaml: {e}, at {}:{}:{}",
+                "failed to parse yaml: {}, at {}:{}:{}",
+                e.as_report(),
                 file_path.display(),
                 loc.line(),
                 loc.column()
             )
         } else {
-            anyhow!("failed to parse yaml: {e}")
+            anyhow!("failed to parse yaml: {}", e.as_report())
         }
     })?;
     let cases = resolve_testcase_id(cases).expect("failed to resolve");

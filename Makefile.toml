@@ -877,9 +877,9 @@ dependencies = ["prepare"]
 condition = { env_set = [
   "ENABLE_BUILD_RW_CONNECTOR",
 ], files_modified = { input = [
-  "./java/connector-node/**/*.java",
+  "./java/connector-node/**/*",
 ], output = [
-  "./java/connector-node/assembly/target/*",
+  "./java/connector-node/assembly/target/**/*",
 ] } }
 description = "Build RisingWave Connector from source"
 script = '''
@@ -965,7 +965,6 @@ set -e
 
 cargo nextest run \
   --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
-  --features fail/failpoints \
   -p risingwave_simulation \
   "$@"
 """
@@ -981,7 +980,6 @@ set -e
 
 cargo nextest archive \
   --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
-  --features fail/failpoints \
   -p risingwave_simulation \
   --archive-file simulation-it-test.tar.zst \
   "$@"
@@ -1223,7 +1221,7 @@ script = """
 scripts/check/check-trailing-spaces.sh --fix
 """
 
-[tasks.check]
+[tasks.check-fast]
 category = "RiseDev - Check"
 dependencies = [
   "warn-on-missing-tools",
@@ -1232,9 +1230,12 @@ dependencies = [
   "check-fmt",
   "check-trailing-spaces",
   "check-typos",
-  "check-clippy",
-  "check-java",
 ]
+description = "Perform part of the pre-CI checks that are fast to run"
+
+[tasks.check]
+category = "RiseDev - Check"
+dependencies = ["check-fast", "check-clippy", "check-java"]
 script = """
 #!/usr/bin/env bash
 
@@ -1250,11 +1251,7 @@ alias = "check"
 category = "RiseDev - Check"
 dependencies = [
   "warn-on-missing-tools",
-  "check-hakari",
-  "check-dep-sort",
-  "check-fmt",
-  "check-trailing-spaces",
-  "check-typos",
+  "check-fast",
   "check-clippy-fix",
   "check-java-fix",
 ]
@@ -1335,7 +1332,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.18.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.19.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ], install_command = "binstall" }
 dependencies = ["check-risedev-env-file"]

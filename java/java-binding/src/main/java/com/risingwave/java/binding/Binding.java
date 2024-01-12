@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,11 @@ public class Binding {
             JarJniLoader.loadLib(Binding.class, "/risingwave/jni", "risingwave_java_binding");
         }
     }
+
+    public static native void tracingSlf4jEvent(
+            String threadName, String name, int level, String message);
+
+    public static native boolean tracingSlf4jEventEnabled(int level);
 
     public static native int vnodeCount();
 
@@ -83,7 +88,8 @@ public class Binding {
 
     public static native boolean sendCdcSourceMsgToChannel(long channelPtr, byte[] msg);
 
-    public static native byte[] recvSinkWriterRequestFromChannel(long channelPtr);
+    public static native com.risingwave.java.binding.JniSinkWriterStreamRequest
+            recvSinkWriterRequestFromChannel(long channelPtr);
 
     public static native boolean sendSinkWriterResponseToChannel(long channelPtr, byte[] msg);
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use sea_orm::entity::prelude::*;
 
-use crate::{ActorId, ActorUpstreamActors, ConnectorSplits, Dispatchers, FragmentId, VnodeBitmap};
+use crate::{ActorId, ActorUpstreamActors, ConnectorSplits, ExprContext, FragmentId, VnodeBitmap};
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
@@ -55,12 +55,14 @@ pub struct Model {
     pub splits: Option<ConnectorSplits>,
     pub parallel_unit_id: i32,
     pub upstream_actor_ids: ActorUpstreamActors,
-    pub dispatchers: Dispatchers,
     pub vnode_bitmap: Option<VnodeBitmap>,
+    pub expr_context: ExprContext,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(has_many = "super::actor_dispatcher::Entity")]
+    ActorDispatcher,
     #[sea_orm(
         belongs_to = "super::fragment::Entity",
         from = "Column::FragmentId",
@@ -69,6 +71,12 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Fragment,
+}
+
+impl Related<super::actor_dispatcher::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::ActorDispatcher.def()
+    }
 }
 
 impl Related<super::fragment::Entity> for Entity {

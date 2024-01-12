@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::iter::once;
 use std::str::FromStr;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
@@ -24,18 +24,21 @@ use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHE
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
-use risingwave_common::{GIT_SHA, RW_VERSION};
+use risingwave_common::{bail_not_implemented, current_cluster_version, no_function};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
-    self, Function, FunctionArg, FunctionArgExpr, Ident, WindowFrameBound, WindowFrameExclusion,
-    WindowFrameUnits, WindowSpec,
+    self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, Ident, SelectItem, SetExpr,
+    Statement, WindowFrameBound, WindowFrameExclusion, WindowFrameUnits, WindowSpec,
 };
+use risingwave_sqlparser::parser::ParserError;
+use thiserror_ext::AsReport;
 
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
+use crate::catalog::function_catalog::FunctionCatalog;
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal, Now, OrderBy,
     Subquery, SubqueryKind, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
@@ -68,28 +71,22 @@ impl Binder {
                     // FIXME: handle schema correctly, so that the functions are hidden if the schema is not in the search path.
                     let function_name = name.real_value();
                     if function_name != "_pg_expandarray" {
-                        return Err(ErrorCode::NotImplemented(
-                            format!("Unsupported function name under schema: {}", schema_name),
-                            12422.into(),
-                        )
-                        .into());
+                        bail_not_implemented!(
+                            issue = 12422,
+                            "Unsupported function name under schema: {}",
+                            schema_name
+                        );
                     }
                     function_name
                 } else {
-                    return Err(ErrorCode::NotImplemented(
-                        format!("Unsupported function name under schema: {}", schema_name),
-                        12422.into(),
-                    )
-                    .into());
+                    bail_not_implemented!(
+                        issue = 12422,
+                        "Unsupported function name under schema: {}",
+                        schema_name
+                    );
                 }
             }
-            _ => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("qualified function: {}", f.name),
-                    112.into(),
-                )
-                .into());
-            }
+            _ => bail_not_implemented!(issue = 112, "qualified function {}", f.name),
         };
 
         // agg calls
@@ -122,7 +119,10 @@ impl Binder {
             return self.bind_array_transform(f);
         }
 
-        let inputs = f
+        // Used later in sql udf expression evaluation
+        let args = f.args.clone();
+
+        let mut inputs = f
             .args
             .into_iter()
             .map(|arg| self.bind_function_arg(arg))
@@ -141,11 +141,11 @@ impl Binder {
             ))
             .into());
         } else if f.over.is_some() {
-            return Err(ErrorCode::NotImplemented(
-                format!("Unrecognized window function: {}", function_name),
-                8961.into(),
-            )
-            .into());
+            bail_not_implemented!(
+                issue = 8961,
+                "Unrecognized window function: {}",
+                function_name
+            );
         }
 
         // table function
@@ -154,22 +154,156 @@ impl Binder {
             return Ok(TableFunction::new(function_type, inputs)?.into());
         }
 
+        /// TODO: add name related logic
+        /// NOTE: need to think of a way to prevent naming conflict
+        /// e.g., when existing column names conflict with parameter names in sql udf
+        fn create_udf_context(
+            args: &[FunctionArg],
+            _catalog: &Arc<FunctionCatalog>,
+        ) -> Result<HashMap<String, AstExpr>> {
+            let mut ret: HashMap<String, AstExpr> = HashMap::new();
+            for (i, current_arg) in args.iter().enumerate() {
+                if let FunctionArg::Unnamed(arg) = current_arg {
+                    let FunctionArgExpr::Expr(e) = arg else {
+                        return Err(
+                            ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into()
+                        );
+                    };
+                    // if catalog.arg_names.is_some() {
+                    //      todo!()
+                    // }
+                    ret.insert(format!("${}", i + 1), e.clone());
+                    continue;
+                }
+                return Err(ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into());
+            }
+            Ok(ret)
+        }
+
+        fn extract_udf_expression(ast: Vec<Statement>) -> Result<AstExpr> {
+            if ast.len() != 1 {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "the query for sql udf should contain only one statement".to_string(),
+                )
+                .into());
+            }
+
+            // Extract the expression out
+            let Statement::Query(query) = ast[0].clone() else {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "invalid function definition, please recheck the syntax".to_string(),
+                )
+                .into());
+            };
+
+            let SetExpr::Select(select) = query.body else {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "missing `select` body for sql udf expression, please recheck the syntax"
+                        .to_string(),
+                )
+                .into());
+            };
+
+            if select.projection.len() != 1 {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "`projection` should contain only one `SelectItem`".to_string(),
+                )
+                .into());
+            }
+
+            let SelectItem::UnnamedExpr(expr) = select.projection[0].clone() else {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "expect `UnnamedExpr` for `projection`".to_string(),
+                )
+                .into());
+            };
+
+            Ok(expr)
+        }
+
         // user defined function
         // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
         if let Ok(schema) = self.first_valid_schema()
-            && let Some(func) = schema.get_function_by_name_args(
-                &function_name,
-                &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
-            )
+            && let Some(func) = schema.get_function_by_name_inputs(&function_name, &mut inputs)
         {
             use crate::catalog::function_catalog::FunctionKind::*;
-            match &func.kind {
-                Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
-                Table { .. } => {
-                    self.ensure_table_function_allowed()?;
-                    return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
+
+            if func.language == "sql" {
+                if func.body.is_none() {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "`body` must exist for sql udf".to_string(),
+                    )
+                    .into());
                 }
-                Aggregate => todo!("support UDAF"),
+                // This represents the current user defined function is `language sql`
+                let parse_result = risingwave_sqlparser::parser::Parser::parse_sql(
+                    func.body.as_ref().unwrap().as_str(),
+                );
+                if let Err(ParserError::ParserError(err)) | Err(ParserError::TokenizerError(err)) =
+                    parse_result
+                {
+                    // Here we just return the original parse error message
+                    return Err(ErrorCode::InvalidInputSyntax(err).into());
+                }
+                debug_assert!(parse_result.is_ok());
+
+                // We can safely unwrap here
+                let ast = parse_result.unwrap();
+
+                let mut clean_flag = true;
+
+                // We need to check if the `udf_context` is empty first, consider the following example:
+                // - create function add(INT, INT) returns int language sql as 'select $1 + $2';
+                // - create function add_wrapper(INT, INT) returns int language sql as 'select add($1, $2)';
+                // - select add_wrapper(1, 1);
+                // When binding `add($1, $2)` in `add_wrapper`, the input args are [$1, $2] instead of
+                // the original [1, 1], thus we need to check `udf_context` to see if the input
+                // args already exist in the context. If so, we do NOT need to create the context again.
+                // Otherwise the current `udf_context` will be corrupted.
+                if self.udf_context.is_empty() {
+                    // The actual inline logic for sql udf
+                    if let Ok(context) = create_udf_context(&args, &Arc::clone(func)) {
+                        self.udf_context = context;
+                    } else {
+                        return Err(ErrorCode::InvalidInputSyntax(
+                            "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
+                        )
+                        .into());
+                    }
+                } else {
+                    // If the `udf_context` is not empty, this means the current binding
+                    // function is not the root binding sql udf, thus we should NOT
+                    // clean the context after binding.
+                    clean_flag = false;
+                }
+
+                if let Ok(expr) = extract_udf_expression(ast) {
+                    let bind_result = self.bind_expr(expr);
+                    // Clean the `udf_context` after inlining,
+                    // which makes sure the subsequent binding will not be affected
+                    if clean_flag {
+                        self.udf_context.clear();
+                    }
+                    return bind_result;
+                } else {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "failed to parse the input query and extract the udf expression,
+                        please recheck the syntax"
+                            .to_string(),
+                    )
+                    .into());
+                }
+            } else {
+                match &func.kind {
+                    Scalar { .. } => {
+                        return Ok(UserDefinedFunction::new(func.clone(), inputs).into())
+                    }
+                    Table { .. } => {
+                        self.ensure_table_function_allowed()?;
+                        return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
+                    }
+                    Aggregate => todo!("support UDAF"),
+                }
             }
         }
 
@@ -272,25 +406,13 @@ impl Binder {
                     .and_then(|expr| expr.enforce_bool_clause("FILTER"))?;
                 self.context.clause = clause;
                 if expr.has_subquery() {
-                    return Err(ErrorCode::NotImplemented(
-                        "subquery in filter clause".to_string(),
-                        None.into(),
-                    )
-                    .into());
+                    bail_not_implemented!("subquery in filter clause");
                 }
                 if expr.has_agg_call() {
-                    return Err(ErrorCode::NotImplemented(
-                        "aggregation function in filter clause".to_string(),
-                        None.into(),
-                    )
-                    .into());
+                    bail_not_implemented!("aggregation function in filter clause");
                 }
                 if expr.has_table_function() {
-                    return Err(ErrorCode::NotImplemented(
-                        "table function in filter clause".to_string(),
-                        None.into(),
-                    )
-                    .into());
+                    bail_not_implemented!("table function in filter clause");
                 }
                 Condition::with_expr(expr)
             }
@@ -340,22 +462,12 @@ impl Binder {
             ))
         })?;
 
-        let mut direct_args = {
-            let args: Vec<_> = f
-                .args
-                .into_iter()
-                .map(|arg| self.bind_function_arg(arg))
-                .flatten_ok()
-                .try_collect()?;
-            if args.iter().any(|arg| arg.as_literal().is_none()) {
-                return Err(ErrorCode::NotImplemented(
-                    "non-constant direct arguments for ordered-set aggregation is not supported now".to_string(),
-                    None.into()
-                )
-                .into());
-            }
-            args
-        };
+        let mut direct_args: Vec<_> = f
+            .args
+            .into_iter()
+            .map(|arg| self.bind_function_arg(arg))
+            .flatten_ok()
+            .try_collect()?;
         let mut args =
             self.bind_function_expr_arg(FunctionArgExpr::Expr(within_group.expr.clone()))?;
         let order_by = OrderBy::new(vec![self.bind_order_by_expr(within_group)?]);
@@ -363,26 +475,32 @@ impl Binder {
         // check signature and do implicit cast
         match (kind, direct_args.as_mut_slice(), args.as_mut_slice()) {
             (AggKind::PercentileCont | AggKind::PercentileDisc, [fraction], [arg]) => {
-                if fraction.cast_implicit_mut(DataType::Float64).is_ok()
-                    && let Ok(casted) = fraction.fold_const()
-                {
-                    if let Some(ref casted) = casted
-                        && !(0.0..=1.0).contains(&casted.as_float64().0)
-                    {
-                        return Err(ErrorCode::InvalidInputSyntax(format!(
-                            "direct arg in `{}` must between 0.0 and 1.0",
-                            kind
-                        ))
-                        .into());
-                    }
-                    *fraction = Literal::new(casted, DataType::Float64).into();
-                } else {
+                if fraction.cast_implicit_mut(DataType::Float64).is_err() {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "direct arg in `{}` must be castable to float64",
                         kind
                     ))
                     .into());
                 }
+
+                let Some(Ok(fraction_datum)) = fraction.try_fold_const() else {
+                    bail_not_implemented!(
+                        issue = 14079,
+                        "variable as direct argument of ordered-set aggregate",
+                    );
+                };
+
+                if let Some(ref fraction_value) = fraction_datum
+                    && !(0.0..=1.0).contains(&fraction_value.as_float64().0)
+                {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "direct arg in `{}` must between 0.0 and 1.0",
+                        kind
+                    ))
+                    .into());
+                }
+                // note that the fraction can be NULL
+                *fraction = Literal::new(fraction_datum, DataType::Float64).into();
 
                 if kind == AggKind::PercentileCont {
                     arg.cast_implicit_mut(DataType::Float64).map_err(|_| {
@@ -470,12 +588,7 @@ impl Binder {
             // restrict arguments[1..] to be constant because we don't support multiple distinct key
             // indices for now
             if args.iter().skip(1).any(|arg| arg.as_literal().is_none()) {
-                return Err(ErrorCode::NotImplemented(
-                    "non-constant arguments other than the first one for DISTINCT aggregation is not supported now"
-                        .to_string(),
-                    None.into(),
-                )
-                .into());
+                bail_not_implemented!("non-constant arguments other than the first one for DISTINCT aggregation is not supported now");
             }
 
             // restrict ORDER BY to align with PG, which says:
@@ -520,14 +633,11 @@ impl Binder {
                 match exclusion {
                     WindowFrameExclusion::CurrentRow => FrameExclusion::CurrentRow,
                     WindowFrameExclusion::Group | WindowFrameExclusion::Ties => {
-                        return Err(ErrorCode::NotImplemented(
-                            format!(
-                                "window frame exclusion `{}` is not supported yet",
-                                exclusion
-                            ),
-                            9124.into(),
-                        )
-                        .into());
+                        bail_not_implemented!(
+                            issue = 9124,
+                            "window frame exclusion `{}` is not supported yet",
+                            exclusion
+                        );
                     }
                     WindowFrameExclusion::NoOthers => FrameExclusion::NoOthers,
                 }
@@ -556,22 +666,14 @@ impl Binder {
                     FrameBounds::Rows(start, end)
                 }
                 WindowFrameUnits::Range | WindowFrameUnits::Groups => {
-                    return Err(ErrorCode::NotImplemented(
-                        format!(
-                            "window frame in `{}` mode is not supported yet",
-                            frame.units
-                        ),
-                        9124.into(),
-                    )
-                    .into());
+                    bail_not_implemented!(
+                        issue = 9124,
+                        "window frame in `{}` mode is not supported yet",
+                        frame.units
+                    );
                 }
             };
-            if !bounds.is_valid() {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "window frame bounds `{bounds}` is not valid",
-                ))
-                .into());
-            }
+            bounds.validate()?;
             Some(Frame { bounds, exclusion })
         } else {
             None
@@ -803,6 +905,8 @@ impl Binder {
                 ("string_to_array", raw_call(ExprType::StringToArray)),
                 ("encode", raw_call(ExprType::Encode)),
                 ("decode", raw_call(ExprType::Decode)),
+                ("convert_from", raw_call(ExprType::ConvertFrom)),
+                ("convert_to", raw_call(ExprType::ConvertTo)),
                 ("sha1", raw_call(ExprType::Sha1)),
                 ("sha224", raw_call(ExprType::Sha224)),
                 ("sha256", raw_call(ExprType::Sha256)),
@@ -819,7 +923,7 @@ impl Binder {
                         ""
                     };
                     inputs[0].cast_implicit_mut(DataType::Bytea).map_err(|e| {
-                        ErrorCode::BindError(format!("{e} in `recv`.{hint}"))
+                        ErrorCode::BindError(format!("{} in `recv`.{hint}", e.as_report()))
                     })?;
                     Ok(FunctionCall::new_unchecked(ExprType::PgwireRecv, inputs, DataType::Int64).into())
                 }))),
@@ -919,6 +1023,7 @@ impl Binder {
                 })),
                 ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
+                ("jsonb_concat", raw_call(ExprType::JsonbConcat)),
                 ("jsonb_object", raw_call(ExprType::JsonbObject)),
                 ("jsonb_pretty", raw_call(ExprType::JsonbPretty)),
                 ("jsonb_contains", raw_call(ExprType::JsonbContains)),
@@ -932,6 +1037,10 @@ impl Binder {
                 ("to_jsonb", raw_call(ExprType::ToJsonb)),
                 ("jsonb_build_array", raw_call(ExprType::JsonbBuildArray)),
                 ("jsonb_build_object", raw_call(ExprType::JsonbBuildObject)),
+                ("jsonb_path_match", raw_call(ExprType::JsonbPathMatch)),
+                ("jsonb_path_exists", raw_call(ExprType::JsonbPathExists)),
+                ("jsonb_path_query_array", raw_call(ExprType::JsonbPathQueryArray)),
+                ("jsonb_path_query_first", raw_call(ExprType::JsonbPathQueryFirst)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least
@@ -972,10 +1081,7 @@ impl Binder {
                         .map_err(|_| no_match_err)?;
 
                     let ExprImpl::Literal(literal) = &input else {
-                        return Err(ErrorCode::NotImplemented(
-                            "Only boolean literals are supported in `current_schemas`.".to_string(), None.into()
-                        )
-                        .into());
+                        bail_not_implemented!("Only boolean literals are supported in `current_schemas`.");
                     };
 
                     let Some(bool) = literal.get_data().as_ref().map(|bool| bool.clone().into_bool()) else {
@@ -1000,12 +1106,12 @@ impl Binder {
                             .get_schema_by_name(&binder.db_name, schema_name)
                             .is_ok()
                         {
-                            schema_names.push(Some(schema_name.into()));
+                            schema_names.push(schema_name.as_str());
                         }
                     }
 
                     Ok(ExprImpl::literal_list(
-                        ListValue::new(schema_names),
+                        ListValue::from_iter(schema_names),
                         DataType::Varchar,
                     ))
                 })),
@@ -1029,6 +1135,8 @@ impl Binder {
                         ))))
                     }
                 ))),
+                ("pg_get_indexdef", raw_call(ExprType::PgGetIndexdef)),
+                ("pg_get_viewdef", raw_call(ExprType::PgGetViewdef)),
                 ("pg_relation_size", dispatch_by_len(vec![
                     (1, raw(|binder, inputs|{
                         let table_name = &inputs[0];
@@ -1181,7 +1289,7 @@ impl Binder {
                     let mut session_config = binder.session_config.write();
 
                     // TODO: report session config changes if necessary.
-                    session_config.set(setting_name, vec![new_value.to_string()], ())?;
+                    session_config.set(setting_name, new_value.to_string(), &mut())?;
 
                     Ok(ExprImpl::literal_varchar(new_value.to_string()))
                 }))),
@@ -1221,11 +1329,7 @@ impl Binder {
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.
-                ("version", raw_literal(ExprImpl::literal_varchar(format!(
-                    "PostgreSQL 9.5-RisingWave-{} ({})",
-                    RW_VERSION,
-                    GIT_SHA
-                )))),
+                ("version", raw_literal(ExprImpl::literal_varchar(current_cluster_version()))),
                 // non-deterministic
                 ("now", now()),
                 ("current_timestamp", now()),
@@ -1248,7 +1352,7 @@ impl Binder {
         static FUNCTIONS_BKTREE: LazyLock<BKTree<&str>> = LazyLock::new(|| {
             let mut tree = BKTree::new(metrics::Levenshtein);
 
-            // TODO: Also hint other functinos, e,g, Agg or UDF.
+            // TODO: Also hint other functinos, e.g., Agg or UDF.
             for k in HANDLES.keys() {
                 tree.add(*k);
             }
@@ -1258,27 +1362,22 @@ impl Binder {
 
         match HANDLES.get(function_name) {
             Some(handle) => handle(self, inputs),
-            None => Err({
+            None => {
                 let allowed_distance = if function_name.len() > 3 { 2 } else { 1 };
 
                 let candidates = FUNCTIONS_BKTREE
                     .find(function_name, allowed_distance)
-                    .map(|(_idx, c)| c);
+                    .map(|(_idx, c)| c)
+                    .join(" or ");
 
-                let mut candidates = candidates.peekable();
-
-                let err_msg = if candidates.peek().is_none() {
-                    format!("unsupported function: \"{}\"", function_name)
-                } else {
-                    format!(
-                        "unsupported function \"{}\", do you mean \"{}\"?",
-                        function_name,
-                        candidates.join(" or ")
-                    )
-                };
-
-                ErrorCode::NotImplemented(err_msg, 112.into()).into()
-            }),
+                Err(no_function!(
+                    candidates = (!candidates.is_empty()).then_some(candidates),
+                    "{}({})",
+                    function_name,
+                    inputs.iter().map(|e| e.return_type()).join(", ")
+                )
+                .into())
+            }
         }
     }
 

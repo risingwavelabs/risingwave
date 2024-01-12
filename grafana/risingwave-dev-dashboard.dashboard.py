@@ -265,7 +265,13 @@ def section_compaction(outer_panels):
                     [
                         panels.target(
                             f"avg({metric('storage_compact_task_pending_num')}) by({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "compactor_task_split_count - {{%s}} @ {{%s}}"
+                            "compactor_task_count - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+
+                        panels.target(
+                            f"avg({metric('storage_compact_task_pending_parallelism')}) by({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "compactor_task_pending_parallelism - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
@@ -944,6 +950,52 @@ def section_streaming(outer_panels):
     ]
 
 
+def section_streaming_cdc(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Streaming CDC",
+            [
+                panels.timeseries_rowsps(
+                    "CDC Backfill Snapshot Read Throughput(rows)",
+                    "Total number of rows that have been read from the cdc backfill snapshot",
+                    [
+                        panels.target(
+                            f"rate({table_metric('stream_cdc_backfill_snapshot_read_row_count')}[$__rate_interval])",
+                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "CDC Backfill Upstream Throughput(rows)",
+                    "Total number of rows that have been output from the cdc backfill upstream",
+                    [
+                        panels.target(
+                            f"rate({table_metric('stream_cdc_backfill_upstream_output_row_count')}[$__rate_interval])",
+                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency_ms(
+                    "CDC Consume Lag Latency",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('source_cdc_event_lag_duration_milliseconds_bucket')}[$__rate_interval])) by (le, table_name))",
+                                f"lag p{legend}" + " - {{table_name}}",
+                            ),
+                            [50, 99, "max"],
+                        ),
+                    ],
+                ),
+            ],
+        ),
+    ]
+
+
 def section_streaming_actors(outer_panels):
     panels = outer_panels.sub_panel()
     return [
@@ -972,13 +1024,13 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_row(
-                    "Actor Input Rows",
+                panels.timeseries_rowsps(
+                    "Actor Input Throughput (rows/s)",
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_actor_in_record_cnt')}[$__rate_interval])) by (fragment_id)",
-                            "fragment {{fragment_id}}",
+                            f"sum(rate({metric('stream_actor_in_record_cnt')}[$__rate_interval])) by (fragment_id, upstream_fragment_id)",
+                            "fragment {{fragment_id}}<-{{upstream_fragment_id}}",
                         ),
                         panels.target_hidden(
                             f"rate({metric('stream_actor_in_record_cnt')}[$__rate_interval])",
@@ -986,8 +1038,8 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_row(
-                    "Actor Output Rows",
+                panels.timeseries_rowsps(
+                    "Actor Output Throughput (rows/s)",
                     "",
                     [
                         panels.target(
@@ -1080,6 +1132,18 @@ def section_streaming_actors(outer_panels):
                             f"rate({table_metric('stream_over_window_cache_miss_count')}[$__rate_interval])",
                             "cache miss count - table {{table_id}} actor {{actor_id}}",
                         ),
+                        panels.target(
+                            f"sum(rate({table_metric('stream_over_window_range_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id)",
+                            "partition range cache lookup count - table {{table_id}} fragment {{fragment_id}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({table_metric('stream_over_window_range_cache_left_miss_count')}[$__rate_interval])) by (table_id, fragment_id)",
+                            "partition range cache left miss count - table {{table_id}} fragment {{fragment_id}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({table_metric('stream_over_window_range_cache_right_miss_count')}[$__rate_interval])) by (table_id, fragment_id)",
+                            "partition range cache right miss count - table {{table_id}} fragment {{fragment_id}}",
+                        ),
                     ],
                 ),
                 panels.timeseries_percentage(
@@ -1088,7 +1152,7 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, fragment_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, fragment_id))",
-                            "join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} fragment {{fragment_id}}",
+                            "Join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} fragment {{fragment_id}}",
                         ),
                         panels.target(
                             f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, fragment_id))",
@@ -1116,12 +1180,20 @@ def section_streaming_actors(outer_panels):
                         ),
                         panels.target(
                             f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, fragment_id))",
-                            "materialize executor cache miss ratio - table {{table_id}} fragment {{fragment_id}}  {{%s}}"
+                            "Materialize executor cache miss ratio - table {{table_id}} fragment {{fragment_id}}  {{%s}}"
                             % NODE_LABEL,
                         ),
                         panels.target(
                             f"(sum(rate({metric('stream_over_window_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_over_window_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id))",
                             "Over window cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
+                        ),
+                        panels.target(
+                            f"(sum(rate({metric('stream_over_window_range_cache_left_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_over_window_range_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id))",
+                            "Over window partition range cache left miss ratio - table {{table_id}} fragment {{fragment_id}} ",
+                        ),
+                        panels.target(
+                            f"(sum(rate({metric('stream_over_window_range_cache_right_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_over_window_range_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id))",
+                            "Over window partition range cache right miss ratio - table {{table_id}} fragment {{fragment_id}} ",
                         ),
                     ],
                 ),
@@ -1337,6 +1409,10 @@ def section_streaming_actors(outer_panels):
                         panels.target_hidden(
                             f"{metric('stream_over_window_cached_entry_count')}",
                             "over window cached count | table {{table_id}} actor {{actor_id}}",
+                        ),
+                        panels.target(
+                            f"sum({metric('stream_over_window_range_cache_entry_count')}) by (table_id, fragment_id)",
+                            "over window partition range cache entry count | table {{table_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -2320,7 +2396,8 @@ def section_hummock_write(outer_panels):
                     [
                         panels.target(
                             f"sum(irate({table_metric('state_store_mem_table_spill_counts')}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)",
-                            "mem table spill table id - {{table_id}} @ {{%s}}" % NODE_LABEL,
+                            "mem table spill table id - {{table_id}} @ {{%s}}"
+                            % NODE_LABEL,
                         ),
                     ],
                 ),
@@ -2351,6 +2428,16 @@ def section_hummock_tiered_cache(outer_panels):
     panels = outer_panels.sub_panel()
     file_cache_hit_filter = 'op="lookup",extra="hit"'
     file_cache_miss_filter = 'op="lookup",extra="miss"'
+    refill_ops_filter = 'type=~"meta|data",op!~"filtered|ignored"'
+    inheritance_parent_lookup_filter = 'type="parent_meta"'
+    inheritance_parent_lookup_hit_filter = 'type="parent_meta",op="hit"'
+    inheritance_parent_lookup_miss_filter = 'type="parent_meta",op="miss"'
+    unit_inheritance_filter = 'type="unit_inheritance"'
+    unit_inheritance_hit_filter = 'type="unit_inheritance",op="hit"'
+    unit_inheritance_miss_filter = 'type="unit_inheritance",op="miss"'
+    block_refill_filter = 'type="block"'
+    block_refill_success_filter = 'type="block",op="success"'
+    block_refill_unfiltered_filter = 'type="block",op="unfiltered"'
     return [
         outer_panels.row_collapsed(
             "Hummock Tiered Cache",
@@ -2377,7 +2464,7 @@ def section_hummock_tiered_cache(outer_panels):
                                 + " - {{foyer}} file cache - {{op}} {{extra}} @ {{%s}}"
                                 % NODE_LABEL,
                             ),
-                            [50, 99, "max"],
+                            [50, 90, 99, "max"],
                         ),
                     ],
                 ),
@@ -2392,23 +2479,53 @@ def section_hummock_tiered_cache(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_bytes(
-                    "Size",
-                    "",
-                    [
-                        panels.target(
-                            f"sum({metric('foyer_storage_total_bytes')}) by (foyer, {NODE_LABEL})",
-                            "{{foyer}} size @ {{%s}}" % NODE_LABEL,
-                        ),
-                    ],
-                ),
                 panels.timeseries_percentage(
-                    "Cache Hit Ratio",
+                    "Hit Ratio",
                     "",
                     [
                         panels.target(
                             f"sum(rate({metric('foyer_storage_op_duration_count', file_cache_hit_filter)}[$__rate_interval])) by (foyer, {NODE_LABEL}) / (sum(rate({metric('foyer_storage_op_duration_count', file_cache_hit_filter)}[$__rate_interval])) by (foyer, {NODE_LABEL}) + sum(rate({metric('foyer_storage_op_duration_count', file_cache_miss_filter)}[$__rate_interval])) by (foyer, {NODE_LABEL}))",
                             "{{foyer}} file cache hit ratio @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Refill Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('refill_duration_count')}[$__rate_interval])) by (type, op, {NODE_LABEL})",
+                            "{{type}} file cache refill - {{op}} @ {{%s}}" % NODE_LABEL,
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('refill_total', refill_ops_filter)}[$__rate_interval])) by (type, op, {NODE_LABEL})",
+                            "{{type}} file cache refill - {{op}} @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes_per_sec(
+                    "Data Refill Throughput",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('refill_bytes')}[$__rate_interval])) by (foyer, op, {NODE_LABEL})",
+                            "{{type}} file cache - {{op}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Refill Duration",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('refill_duration_bucket')}[$__rate_interval])) by (le, foyer, op, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " - {{foyer}} cache refill - {{op}} @ {{%s}}"
+                                % NODE_LABEL,
+                            ),
+                            [50, 90, 99, "max"],
                         ),
                     ],
                 ),
@@ -2422,32 +2539,117 @@ def section_hummock_tiered_cache(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_ops(
-                    "Refill Ops",
+                panels.timeseries_bytes(
+                    "Size",
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('refill_duration_count')}[$__rate_interval])) by (type, op, {NODE_LABEL})",
-                            "{{type}} file cache refill - {{op}} @ {{%s}}" % NODE_LABEL,
-                        ),
-                        panels.target(
-                            f"sum(rate({metric('refill_total')}[$__rate_interval])) by (type, op, {NODE_LABEL})",
-                            "{{type}} file cache refill - {{op}} @ {{%s}}" % NODE_LABEL,
+                            f"sum({metric('foyer_storage_total_bytes')}) by (foyer, {NODE_LABEL})",
+                            "{{foyer}} size @ {{%s}}" % NODE_LABEL,
                         ),
                     ],
                 ),
                 panels.timeseries_latency(
-                    "Refill Latency",
+                    "Inner Op Duration",
                     "",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('refill_duration_bucket')}[$__rate_interval])) by (le, type, op, {NODE_LABEL}))",
-                                f"p{legend} - "
-                                + "{{type}} file cache refill - {{op}} @ {{%s}}"
+                                f"histogram_quantile({quantile}, sum(rate({metric('foyer_storage_inner_op_duration_bucket')}[$__rate_interval])) by (le, foyer, op, extra, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " - {{foyer}} file cache - {{op}} {{extra}} @ {{%s}}"
                                 % NODE_LABEL,
                             ),
-                            [50, 99, "max"],
+                            [50, 90, 99, "max"],
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Slow Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('foyer_storage_slow_op_duration_count')}[$__rate_interval])) by (foyer, op, extra, {NODE_LABEL})",
+                            "{{foyer}} file cache {{op}} {{extra}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Slow Op Duration",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('foyer_storage_slow_op_duration_bucket')}[$__rate_interval])) by (le, foyer, op, extra, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " - {{foyer}} file cache - {{op}} {{extra}} @ {{%s}}"
+                                % NODE_LABEL,
+                            ),
+                            [50, 90, 99, "max"],
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Inheritance - Parent Meta Lookup Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('refill_total', inheritance_parent_lookup_filter)}[$__rate_interval])) by (op, {NODE_LABEL})",
+                            "parent meta lookup {{op}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Inheritance - Parent Meta Lookup Ratio",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('refill_total', inheritance_parent_lookup_hit_filter)}[$__rate_interval])) by ({NODE_LABEL}) / (sum(rate({metric('refill_total', inheritance_parent_lookup_hit_filter)}[$__rate_interval])) by ({NODE_LABEL}) + sum(rate({metric('refill_total', inheritance_parent_lookup_miss_filter)}[$__rate_interval])) by ({NODE_LABEL}))",
+                            "parent meta lookup hit ratio @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Inheritance - Unit inheritance Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('refill_total', unit_inheritance_filter)}[$__rate_interval])) by (op, {NODE_LABEL})",
+                            "unit inheritance {{op}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Inheritance - Unit inheritance Ratio",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('refill_total', unit_inheritance_hit_filter)}[$__rate_interval])) by ({NODE_LABEL}) / (sum(rate({metric('refill_total', unit_inheritance_hit_filter)}[$__rate_interval])) by ({NODE_LABEL}) + sum(rate({metric('refill_total', unit_inheritance_miss_filter)}[$__rate_interval])) by ({NODE_LABEL}))",
+                            "unit inheritance ratio @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Block Refill Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('refill_total', block_refill_filter)}[$__rate_interval])) by (op, {NODE_LABEL})",
+                            "block refill {{op}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Block Refill Ratio",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('refill_total', block_refill_success_filter)}[$__rate_interval])) by ({NODE_LABEL}) / sum(rate({metric('refill_total', block_refill_unfiltered_filter)}[$__rate_interval])) by ({NODE_LABEL})",
+                            "block refill ratio @ {{%s}}" % NODE_LABEL,
                         ),
                     ],
                 ),
@@ -3321,6 +3523,7 @@ def section_kafka_native_metrics(outer_panels):
         )
     ]
 
+
 def section_iceberg_metrics(outer_panels):
     panels = outer_panels.sub_panel()
     return [
@@ -3328,33 +3531,63 @@ def section_iceberg_metrics(outer_panels):
             "Iceberg Sink Metrics",
             [
                 panels.timeseries_count(
-                    "Write Qps Of Iceberg File Appender",
-                    "iceberg file appender write qps",
+                    "Write Qps Of Iceberg Writer",
+                    "iceberg write qps",
                     [
                         panels.target(
-                            f"{metric('iceberg_file_appender_write_qps')}",
-                           "{{executor_id}} @ {{sink_id}}",
+                            f"{metric('iceberg_write_qps')}",
+                            "{{executor_id}} @ {{sink_id}}",
                         ),
-                    ]
+                    ],
                 ),
                 panels.timeseries_latency(
-                    "Write latency Of Iceberg File Appender",
+                    "Write Latency Of Iceberg Writer",
                     "",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('iceberg_file_appender_write_latency_bucket')}[$__rate_interval])) by (le, sink_id))",
+                                f"histogram_quantile({quantile}, sum(rate({metric('iceberg_write_latency_bucket')}[$__rate_interval])) by (le, sink_id))",
                                 f"p{legend}" + " @ {{sink_id}}",
                             ),
                             [50, 99, "max"],
                         ),
                         panels.target(
-                            f"sum by(le, sink_id)(rate({metric('iceberg_file_appender_write_latency_sum')}[$__rate_interval])) / sum by(le, type, job, instance) (rate({metric('iceberg_file_appender_write_latency_count')}[$__rate_interval]))",
+                            f"sum by(le, sink_id)(rate({metric('iceberg_write_latency_sum')}[$__rate_interval])) / sum by(le, type, job, instance) (rate({metric('iceberg_write_latency_count')}[$__rate_interval]))",
                             "avg @ {{sink_id}}",
                         ),
                     ],
                 ),
-            ]
+                panels.timeseries_count(
+                    "Iceberg rolling unfushed data file",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('iceberg_rolling_unfushed_data_file')}",
+                            "{{executor_id}} @ {{sink_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Iceberg position delete cache num",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('iceberg_position_delete_cache_num')}",
+                            "{{executor_id}} @ {{sink_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Iceberg partition num",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('iceberg_partition_num')}",
+                            "{{executor_id}} @ {{sink_id}}",
+                        ),
+                    ],
+                ),
+            ],
         )
     ]
 
@@ -3622,6 +3855,26 @@ def section_sink_metrics(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_ops(
+                    "Kv Log Store Rewind Rate",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('kv_log_store_rewind_count')}[$__rate_interval])) by (executor_id, connector, sink_id)",
+                            "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Rewind delay (second)",
+                    "",
+                    [
+                        panels.target(
+                            f"histogram_quantile(1.0, sum(rate({metric('kv_log_store_rewind_delay_bucket')}[$__rate_interval])) by (le, executor_id, connector, sink_id))",
+                            "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                        ),
+                    ],
+                ),
             ],
         )
     ]
@@ -3752,6 +4005,99 @@ def section_network_connection(outer_panels):
                             f"sum(irate({metric('connection_err_rate', filter=grpc_filter)}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}, connection_type)",
                             "{{%s}} {{connection_type}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                    ],
+                ),
+            ],
+        )
+    ]
+
+
+def section_udf(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "User Defined Function",
+            [
+                panels.timeseries_count(
+                    "UDF Calls Count",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('udf_success_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "udf_success_count - {{%s}}" % NODE_LABEL,
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('udf_failure_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "udf_failure_count - {{%s}}" % NODE_LABEL,
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('udf_success_count')}[$__rate_interval])) by (link, name)",
+                            "udf_success_count - {{link}} {{name}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('udf_failure_count')}[$__rate_interval])) by (link, name)",
+                            "udf_failure_count - {{link}} {{name}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "UDF Input Chunk Rows",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(irate({metric('udf_input_chunk_rows_sum')}[$__rate_interval])) by (link, name) / sum(irate({metric('udf_input_chunk_rows_count')}[$__rate_interval])) by (link, name)",
+                            "udf_input_chunk_rows_avg - {{link}} {{name}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "UDF Latency",
+                    "",
+                    [
+                        panels.target(
+                            f"histogram_quantile(0.50, sum(irate({metric('udf_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                            "udf_latency_p50 - {{%s}}" % NODE_LABEL,
+                        ),
+                        panels.target(
+                            f"histogram_quantile(0.90, sum(irate({metric('udf_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                            "udf_latency_p90 - {{%s}}" % NODE_LABEL,
+                        ),
+                        panels.target(
+                            f"histogram_quantile(0.99, sum(irate({metric('udf_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                            "udf_latency_p99 - {{%s}}" % NODE_LABEL,
+                        ),
+                        panels.target(
+                            f"sum(irate({metric('udf_latency_sum')}[$__rate_interval])) / sum(irate({metric('udf_latency_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "udf_latency_avg - {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "UDF Throughput (rows)",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('udf_input_rows')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "udf_throughput_rows - {{%s}}" % NODE_LABEL,
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('udf_input_rows')}[$__rate_interval])) by (link, name)",
+                            "udf_throughput_rows - {{link}} {{name}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytesps(
+                    "UDF Throughput (bytes)",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('udf_input_bytes')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}) / (1024*1024)",
+                            "udf_throughput_bytes - {{%s}}" % NODE_LABEL,
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('udf_input_bytes')}[$__rate_interval])) by (link, name) / (1024*1024)",
+                            "udf_throughput_bytes - {{link}} {{name}}",
                         ),
                     ],
                 ),
@@ -3914,6 +4260,7 @@ dashboard = Dashboard(
         *section_cluster_node(panels),
         *section_recovery_node(panels),
         *section_streaming(panels),
+        *section_streaming_cdc(panels),
         *section_streaming_actors(panels),
         *section_streaming_actors_tokio(panels),
         *section_streaming_exchange(panels),
@@ -3937,6 +4284,7 @@ dashboard = Dashboard(
         *section_sink_metrics(panels),
         *section_kafka_native_metrics(panels),
         *section_network_connection(panels),
-        *section_iceberg_metrics(panels)
+        *section_iceberg_metrics(panels),
+        *section_udf(panels),
     ],
 ).auto_panel_ids()

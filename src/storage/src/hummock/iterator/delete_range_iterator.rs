@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::collections::{BTreeSet, BinaryHeap};
 use std::future::Future;
 
-use risingwave_common::util::epoch::MAX_EPOCH;
+use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_hummock_sdk::key::{PointRange, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
@@ -54,7 +54,7 @@ pub trait DeleteRangeIterator {
     /// Retrieves the epoch of the current range delete.
     /// It returns the epoch between the previous `next_user_key` (inclusive) and the current
     /// `next_user_key` (not inclusive). When there is no range deletes, it will return
-    /// `MAX_EPOCH`.
+    /// `HummockEpoch::MAX`.
     ///
     /// Note:
     /// - Before calling this function, makes sure the iterator `is_valid`.
@@ -233,7 +233,7 @@ pub struct ForwardMergeRangeIterator {
 
 impl Default for ForwardMergeRangeIterator {
     fn default() -> Self {
-        ForwardMergeRangeIterator::new(MAX_EPOCH)
+        ForwardMergeRangeIterator::new(HummockEpoch::MAX)
     }
 }
 
@@ -281,13 +281,13 @@ impl ForwardMergeRangeIterator {
         self.current_epochs
             .range(epoch..)
             .next()
-            .map_or(MAX_EPOCH, |ret| *ret)
+            .map_or(HummockEpoch::MAX, |ret| *ret)
     }
 
     pub fn earliest_epoch(&self) -> HummockEpoch {
         self.current_epochs
             .first()
-            .map_or(MAX_EPOCH, |epoch| *epoch)
+            .map_or(HummockEpoch::MAX, |epoch| *epoch)
     }
 }
 
@@ -319,7 +319,7 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
             }
             for node in &self.tmp_buffer {
                 let epoch = node.current_epoch();
-                if epoch != MAX_EPOCH {
+                if !is_max_epoch(epoch) {
                     self.current_epochs.remove(&epoch);
                 }
             }
@@ -328,7 +328,7 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
                 node.next().await?;
                 if node.is_valid() {
                     let epoch = node.current_epoch();
-                    if epoch != MAX_EPOCH {
+                    if !is_max_epoch(epoch) {
                         self.current_epochs.insert(epoch);
                     }
                     self.heap.push(node);
@@ -349,7 +349,7 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
                 node.rewind().await?;
                 if node.is_valid() {
                     let epoch = node.current_epoch();
-                    if epoch != MAX_EPOCH {
+                    if !is_max_epoch(epoch) {
                         self.current_epochs.insert(epoch);
                     }
                     self.heap.push(node);
@@ -368,7 +368,7 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
                 node.seek(target_user_key).await?;
                 if node.is_valid() {
                     let epoch = node.current_epoch();
-                    if epoch != MAX_EPOCH {
+                    if !is_max_epoch(epoch) {
                         self.current_epochs.insert(epoch);
                     }
                     self.heap.push(node);

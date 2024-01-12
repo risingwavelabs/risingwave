@@ -98,7 +98,7 @@
     BatchLimit { limit: 3, offset: 4 }
     └─BatchExchange { order: [], dist: Single }
       └─BatchLimit { limit: 7, offset: 0 }
-        └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+        └─BatchScan { table: t, columns: [t.v1, t.v2], limit: 7, distribution: SomeShard }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t limit 5;
@@ -106,7 +106,7 @@
     BatchLimit { limit: 5, offset: 0 }
     └─BatchExchange { order: [], dist: Single }
       └─BatchLimit { limit: 5, offset: 0 }
-        └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+        └─BatchScan { table: t, columns: [t.v1, t.v2], limit: 5, distribution: SomeShard }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v1 desc limit 5 offset 7;

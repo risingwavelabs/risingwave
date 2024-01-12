@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ mod agg_common;
 mod append_only_dedup;
 mod barrier_recv;
 mod batch_query;
+mod cdc_filter;
 mod dml;
 mod dynamic_filter;
 mod eowc_over_window;
@@ -59,6 +60,7 @@ use risingwave_storage::StateStore;
 use self::append_only_dedup::*;
 use self::barrier_recv::*;
 use self::batch_query::*;
+use self::cdc_filter::CdcFilterExecutorBuilder;
 use self::dml::*;
 use self::dynamic_filter::*;
 use self::eowc_over_window::*;
@@ -147,6 +149,7 @@ pub async fn create_executor(
         NodeBody::Merge => MergeExecutorBuilder,
         NodeBody::Materialize => MaterializeExecutorBuilder,
         NodeBody::Filter => FilterExecutorBuilder,
+        NodeBody::CdcFilter => CdcFilterExecutorBuilder,
         NodeBody::Arrange => ArrangeExecutorBuilder,
         NodeBody::Lookup => LookupExecutorBuilder,
         NodeBody::Union => UnionExecutorBuilder,

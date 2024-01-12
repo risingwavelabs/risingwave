@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{ListRef, ListValue};
-use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
+use risingwave_common::array::{I32Array, ListRef, ListValue};
+use risingwave_common::types::ScalarRefImpl;
 use risingwave_expr::{function, ExprError, Result};
 
 /// Returns the subscript of the first occurrence of the second argument in the array, or `NULL` if
@@ -197,7 +197,8 @@ fn array_positions(
         values
             .enumerate()
             .filter(|(_, item)| item == &element)
-            .map(|(idx, _)| Some(ScalarImpl::Int32((idx + 1) as _)))
-            .collect(),
+            .map(|(idx, _)| idx as i32 + 1)
+            .collect::<I32Array>()
+            .into(),
     )))
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -62,11 +62,12 @@ impl BoxedExecutorBuilder for SourceExecutor {
 
         // prepare connector source
         let source_props: HashMap<String, String> =
-            HashMap::from_iter(source_node.properties.clone());
-        let config = ConnectorProperties::extract(source_props).map_err(BatchError::connector)?;
+            HashMap::from_iter(source_node.with_properties.clone());
+        let config =
+            ConnectorProperties::extract(source_props, false).map_err(BatchError::connector)?;
 
         let info = source_node.get_info().unwrap();
-        let parser_config = SpecificParserConfig::new(info, &source_node.properties)?;
+        let parser_config = SpecificParserConfig::new(info, &source_node.with_properties)?;
 
         let columns: Vec<_> = source_node
             .columns
@@ -145,6 +146,7 @@ impl SourceExecutor {
             self.metrics,
             self.source_ctrl_opts.clone(),
             None,
+            ConnectorProperties::default(),
         ));
         let stream = self
             .connector_source

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 mod block;
 
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::ops::{BitXor, Bound, Range};
 
 pub use block::*;
@@ -65,7 +65,6 @@ use super::{HummockError, HummockResult};
 use crate::hummock::CachePolicy;
 use crate::store::ReadOptions;
 
-const DEFAULT_META_BUFFER_CAPACITY: usize = 4096;
 const MAGIC: u32 = 0x5785ab73;
 const OLD_VERSION: u32 = 1;
 const VERSION: u32 = 2;
@@ -145,7 +144,7 @@ impl DeleteRangeTombstone {
 /// thus the `new epoch` is epoch2. epoch2 will be used from the event key wmk1 (5) and till the
 /// next event key wmk2 (7) (not inclusive).
 /// If there is no range deletes between current event key and next event key, `new_epoch` will be
-/// `MAX_EPOCH`.
+/// `HummockEpoch::MAX`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MonotonicDeleteEvent {
     pub event_key: PointRange<Vec<u8>>,
@@ -164,8 +163,10 @@ impl MonotonicDeleteEvent {
         }
     }
 
-    pub fn encode(&self, buf: &mut Vec<u8>) {
-        self.event_key.left_user_key.encode_length_prefixed(buf);
+    pub fn encode(&self, mut buf: impl BufMut) {
+        self.event_key
+            .left_user_key
+            .encode_length_prefixed(&mut buf);
         buf.put_u8(if self.event_key.is_exclude_left_key {
             1
         } else {
@@ -191,7 +192,18 @@ impl MonotonicDeleteEvent {
 
     #[inline]
     pub fn encoded_size(&self) -> usize {
+        // length prefixed requires 4B more than its `encoded_len()`
         4 + self.event_key.left_user_key.encoded_len() + 1 + 8
+    }
+}
+
+impl Display for MonotonicDeleteEvent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Event key {:?} epoch {:?}",
+            self.event_key, self.new_epoch
+        )
     }
 }
 
@@ -255,11 +267,12 @@ impl Sstable {
         self.filter_reader.may_match(user_key_range, hash)
     }
 
+    #[inline(always)]
     pub fn block_count(&self) -> usize {
         self.meta.block_metas.len()
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn estimate_size(&self) -> usize {
         8 /* id */ + self.filter_reader.estimate_size() + self.meta.encoded_size()
     }
@@ -281,7 +294,7 @@ impl BlockMeta {
     /// ```plain
     /// | offset (4B) | len (4B) | uncompressed size (4B) | smallest key len (4B) | smallest key |
     /// ```
-    pub fn encode(&self, buf: &mut Vec<u8>) {
+    pub fn encode(&self, mut buf: impl BufMut) {
         buf.put_u32_le(self.offset);
         buf.put_u32_le(self.len);
         buf.put_u32_le(self.uncompressed_size);
@@ -356,7 +369,7 @@ pub struct SstableMeta {
     /// epoch1 to epoch2, thus the `new epoch` is epoch2. epoch2 will be used from the event
     /// key wmk1 (5) and till the next event key wmk2 (7) (not inclusive).
     /// If there is no range deletes between current event key and next event key, `new_epoch` will
-    /// be `MAX_EPOCH`.
+    /// be `HummockEpoch::MAX`.
     pub monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
     /// Format version, for further compatibility.
     pub version: u32,
@@ -378,30 +391,51 @@ impl SstableMeta {
     /// | checksum (8B) | version (4B) | magic (4B) |
     /// ```
     pub fn encode_to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(DEFAULT_META_BUFFER_CAPACITY);
+        let encoded_size = self.encoded_size();
+        let mut buf = Vec::with_capacity(encoded_size);
         self.encode_to(&mut buf);
         buf
     }
 
-    pub fn encode_to(&self, buf: &mut Vec<u8>) {
-        let start_offset = buf.len();
-        buf.put_u32_le(utils::checked_into_u32(self.block_metas.len()));
+    pub fn encode_to(&self, mut buf: impl BufMut + AsRef<[u8]>) {
+        let start = buf.as_ref().len();
+
+        buf.put_u32_le(
+            utils::checked_into_u32(self.block_metas.len()).unwrap_or_else(|_| {
+                let tmp_full_key = FullKey::decode(&self.smallest_key);
+                panic!(
+                    "WARN overflow can't convert block_metas_len {} into u32 table {}",
+                    self.block_metas.len(),
+                    tmp_full_key.user_key.table_id,
+                )
+            }),
+        );
         for block_meta in &self.block_metas {
-            block_meta.encode(buf);
+            block_meta.encode(&mut buf);
         }
-        put_length_prefixed_slice(buf, &self.bloom_filter);
+        put_length_prefixed_slice(&mut buf, &self.bloom_filter);
         buf.put_u32_le(self.estimated_size);
         buf.put_u32_le(self.key_count);
-        put_length_prefixed_slice(buf, &self.smallest_key);
-        put_length_prefixed_slice(buf, &self.largest_key);
-        buf.put_u32_le(utils::checked_into_u32(
-            self.monotonic_tombstone_events.len(),
-        ));
+        put_length_prefixed_slice(&mut buf, &self.smallest_key);
+        put_length_prefixed_slice(&mut buf, &self.largest_key);
+        buf.put_u32_le(
+            utils::checked_into_u32(self.monotonic_tombstone_events.len()).unwrap_or_else(|_| {
+                let tmp_full_key = FullKey::decode(&self.smallest_key);
+                panic!(
+                    "WARN overflow can't convert monotonic_tombstone_events_len {} into u32 table {}",
+                    self.monotonic_tombstone_events.len(),
+                    tmp_full_key.user_key.table_id,
+                )
+            }),
+        );
         for monotonic_tombstone_event in &self.monotonic_tombstone_events {
-            monotonic_tombstone_event.encode(buf);
+            monotonic_tombstone_event.encode(&mut buf);
         }
         buf.put_u64_le(self.meta_offset);
-        let checksum = xxhash64_checksum(&buf[start_offset..]);
+
+        let end = buf.as_ref().len();
+
+        let checksum = xxhash64_checksum(&buf.as_ref()[start..end]);
         buf.put_u64_le(checksum);
         buf.put_u32_le(VERSION);
         buf.put_u32_le(MAGIC);
@@ -499,6 +533,7 @@ pub struct SstableIteratorReadOptions {
     pub cache_policy: CachePolicy,
     pub must_iterated_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
     pub max_preload_retry_times: usize,
+    pub prefetch_for_large_query: bool,
 }
 
 impl SstableIteratorReadOptions {
@@ -507,6 +542,7 @@ impl SstableIteratorReadOptions {
             cache_policy: read_options.cache_policy,
             must_iterated_end_user_key: None,
             max_preload_retry_times: 0,
+            prefetch_for_large_query: read_options.prefetch_options.for_large_query,
         }
     }
 }

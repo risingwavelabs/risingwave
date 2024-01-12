@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
 use risingwave_expr::aggregate::AggCall;
 use risingwave_expr::expr::*;
+use risingwave_pb::plan_common::ExprContext;
 use risingwave_storage::memory::MemoryStateStore;
 
 use super::exchange::permit::channel_for_test;
@@ -42,6 +43,10 @@ use crate::task::SharedContext;
 /// and do this again and again.
 #[tokio::test]
 async fn test_merger_sum_aggr() {
+    let expr_context = ExprContext {
+        time_zone: String::from("UTC"),
+    };
+
     let actor_ctx = ActorContext::create(0);
     // `make_actor` build an actor to do local aggregation
     let make_actor = |input_rx| {
@@ -78,6 +83,7 @@ async fn test_merger_sum_aggr() {
             context,
             StreamingMetrics::unused().into(),
             actor_ctx.clone(),
+            expr_context.clone(),
         );
         (actor, rx)
     };
@@ -129,6 +135,7 @@ async fn test_merger_sum_aggr() {
         context,
         StreamingMetrics::unused().into(),
         actor_ctx.clone(),
+        expr_context.clone(),
     );
     handles.push(tokio::spawn(actor.run()));
 
@@ -184,6 +191,7 @@ async fn test_merger_sum_aggr() {
         context,
         StreamingMetrics::unused().into(),
         actor_ctx.clone(),
+        expr_context.clone(),
     );
     handles.push(tokio::spawn(actor.run()));
 
