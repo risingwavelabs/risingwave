@@ -12,29 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod layer;
+
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::OnceLock;
 use std::task::{Context, Poll};
 
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::propagation::TraceContextPropagator;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-
-static TOGGLE_OTEL_LAYER: OnceLock<Box<dyn Fn(bool) + Sync + Send>> = OnceLock::new();
-
-pub fn set_toggle_otel_layer_fn(f: impl Fn(bool) + Sync + Send + 'static) {
-    TOGGLE_OTEL_LAYER
-        .set(Box::new(f))
-        .ok()
-        .expect("toggle otel layer fn set twice");
-}
-
-pub fn toggle_otel_layer(enabled: bool) {
-    if let Some(f) = TOGGLE_OTEL_LAYER.get() {
-        f(enabled);
-    }
-}
 
 /// Context for tracing used for propagating tracing information in a distributed system.
 ///

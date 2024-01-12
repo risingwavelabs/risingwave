@@ -20,6 +20,7 @@ use risingwave_common::metrics::MetricsLayer;
 use risingwave_common::util::deployment::Deployment;
 use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_common::util::query_log::*;
+use risingwave_common::util::tracing::layer::set_toggle_otel_layer_fn;
 use thiserror_ext::AsReport;
 use tracing::level_filters::LevelFilter as Level;
 use tracing_subscriber::filter::{FilterFn, Targets};
@@ -131,6 +132,11 @@ impl LoggerSettings {
         self.tracing_endpoint = Some(endpoint.into());
         self
     }
+}
+
+/// Create a filter that disables all events or spans.
+fn disabled_filter() -> filter::Targets {
+    filter::Targets::new()
 }
 
 /// Init logger for RisingWave binaries.
@@ -436,15 +442,16 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                 .unwrap()
         };
 
-        // Disable all events and spans by default.
-        let (reload_filter, reload_handle) = reload::Layer::new(filter::Targets::new());
+        // Disable by filtering out all events or spans by default.
+        // It'll be enabled with `toggle_otel_layer` based on the system parameter `enable_tracing` later.
+        let (reload_filter, reload_handle) = reload::Layer::new(disabled_filter());
 
-        risingwave_common::util::tracing::set_toggle_otel_layer_fn(move |enabled: bool| {
+        set_toggle_otel_layer_fn(move |enabled: bool| {
             let result = reload_handle.modify(|f| {
                 *f = if enabled {
                     default_filter.clone()
                 } else {
-                    filter::Targets::new()
+                    disabled_filter()
                 }
             });
 

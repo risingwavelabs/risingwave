@@ -45,6 +45,7 @@ impl LocalSystemParamsManager {
         let params = Arc::new(ArcSwap::from_pointee(initial_params.clone()));
         let (tx, _) = channel(params.clone());
 
+        // Spawn a task to run the common handler.
         tokio::spawn({
             let mut rx = tx.subscribe();
             async move {

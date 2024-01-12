@@ -45,7 +45,7 @@ pub struct SystemParamsController {
     notification_manager: NotificationManagerRef,
     // Cached parameters.
     params: RwLock<PbSystemParams>,
-
+    /// Common handler for system params.
     common_handler: CommonHandler,
 }
 

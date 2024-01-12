@@ -956,8 +956,8 @@ impl SystemConfig {
             backup_storage_directory: self.backup_storage_directory,
             max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
             pause_on_next_bootstrap: self.pause_on_next_bootstrap,
-            enable_tracing: Some(true), // okay?
-            telemetry_enabled: None,    // deprecated
+            enable_tracing: self.enable_tracing,
+            telemetry_enabled: None, // deprecated
         }
     }
 }
