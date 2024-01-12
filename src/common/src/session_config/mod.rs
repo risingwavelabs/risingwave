@@ -23,6 +23,9 @@ mod visibility_mode;
 use chrono_tz::Tz;
 pub use over_window::OverWindowCachePolicy;
 pub use query_mode::QueryMode;
+use risingwave_common::{
+    CLIENT_ENCODING, PG_VERSION, SERVER_VERSION_NUM, STANDARD_CONFORMING_STRINGS,
+};
 use risingwave_common_proc_macro::SessionConfig;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 use thiserror::Error;
@@ -175,11 +178,11 @@ pub struct ConfigMap {
     batch_parallelism: ConfigNonZeroU64,
 
     /// The version of PostgreSQL that Risingwave claims to be.
-    #[parameter(default = "9.5.0")]
+    #[parameter(default = PG_VERSION)]
     server_version: String,
 
     /// The version of PostgreSQL that Risingwave claims to be.
-    #[parameter(default = 90500)]
+    #[parameter(default = SERVER_VERSION_NUM)]
     server_version_num: i32,
 
     /// see <https://www.postgresql.org/docs/15/runtime-config-client.html#GUC-CLIENT-MIN-MESSAGES>
@@ -187,7 +190,7 @@ pub struct ConfigMap {
     client_min_messages: String,
 
     /// see <https://www.postgresql.org/docs/15/runtime-config-client.html#GUC-CLIENT-ENCODING>
-    #[parameter(default = "UTF8", check_hook = check_client_encoding)]
+    #[parameter(default = CLIENT_ENCODING , check_hook = check_client_encoding)]
     client_encoding: String,
 
     /// Enable decoupling sink and internal streaming graph or not
@@ -217,7 +220,7 @@ pub struct ConfigMap {
     row_security: bool,
 
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-STANDARD-CONFORMING-STRINGS>
-    #[parameter(default = "on")]
+    #[parameter(default = STANDARD_CONFORMING_STRINGS)]
     standard_conforming_strings: String,
 
     /// Set streaming rate limit (rows per second) for each parallelism for mv backfilling
@@ -234,7 +237,7 @@ pub struct ConfigMap {
     background_ddl: bool,
 
     /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
-    #[parameter(default = "UTF8")]
+    #[parameter(default = CLIENT_ENCODING)]
     server_encoding: String,
 
     #[parameter(default = "hex", check_hook = check_bytea_output)]

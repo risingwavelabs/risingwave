@@ -91,6 +91,16 @@ pub const RW_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Placeholder for unknown git sha.
 pub const UNKNOWN_GIT_SHA: &str = "unknown";
 
+// The single source of truth of the pg parameters, The used in ConfigMap and other places.
+// The version of PostgreSQL that Risingwave claims to be.
+pub const PG_VERSION: &str = "9.5.0";
+/// The version of PostgreSQL that Risingwave claims to be.
+pub const SERVER_VERSION_NUM: i32 = 90500;
+/// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
+pub const CLIENT_ENCODING: &str = "UTF8";
+/// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-STANDARD-CONFORMING-STRINGS>
+pub const STANDARD_CONFORMING_STRINGS: &str = "on";
+
 #[macro_export]
 macro_rules! git_sha {
     ($env:literal) => {
@@ -107,5 +117,8 @@ macro_rules! git_sha {
 pub const GIT_SHA: &str = git_sha!("GIT_SHA");
 
 pub fn current_cluster_version() -> String {
-    format!("PostgreSQL 9.5-RisingWave-{} ({})", RW_VERSION, GIT_SHA)
+    format!(
+        "PostgreSQL {}-RisingWave-{} ({})",
+        PG_VERSION, RW_VERSION, GIT_SHA
+    )
 }
