@@ -63,7 +63,7 @@ impl Display for Frame {
 impl Frame {
     pub fn rows(start: FrameBound<usize>, end: FrameBound<usize>) -> Self {
         Self {
-            bounds: FrameBounds::Rows(start, end),
+            bounds: FrameBounds::Rows(RowsFrameBounds { start, end }),
             exclusion: FrameExclusion::default(),
         }
     }
@@ -74,13 +74,9 @@ impl Frame {
         exclusion: FrameExclusion,
     ) -> Self {
         Self {
-            bounds: FrameBounds::Rows(start, end),
+            bounds: FrameBounds::Rows(RowsFrameBounds { start, end }),
             exclusion,
         }
-    }
-
-    pub fn is_unbounded(&self) -> bool {
-        self.bounds.is_unbounded()
     }
 }
 
@@ -92,7 +88,7 @@ impl Frame {
             PbType::Rows => {
                 let start = FrameBound::from_protobuf(frame.get_start()?)?;
                 let end = FrameBound::from_protobuf(frame.get_end()?)?;
-                FrameBounds::Rows(start, end)
+                FrameBounds::Rows(RowsFrameBounds { start, end })
             }
         };
         let exclusion = FrameExclusion::from_protobuf(frame.get_exclusion()?)?;
@@ -103,7 +99,7 @@ impl Frame {
         use risingwave_pb::expr::window_frame::PbType;
         let exclusion = self.exclusion.to_protobuf() as _;
         match &self.bounds {
-            FrameBounds::Rows(start, end) => PbWindowFrame {
+            FrameBounds::Rows(RowsFrameBounds { start, end }) => PbWindowFrame {
                 r#type: PbType::Rows as _,
                 start: Some(start.to_protobuf()),
                 end: Some(end.to_protobuf()),
@@ -116,19 +112,19 @@ impl Frame {
 impl FrameBounds {
     pub fn validate(&self) -> Result<()> {
         match self {
-            Self::Rows(start, end) => FrameBound::validate_bounds(start, end),
+            Self::Rows(bounds) => bounds.validate(),
         }
     }
 
     pub fn start_is_unbounded(&self) -> bool {
         match self {
-            Self::Rows(start, _) => matches!(start, FrameBound::UnboundedPreceding),
+            Self::Rows(RowsFrameBounds { start, .. }) => start.is_unbounded_preceding(),
         }
     }
 
     pub fn end_is_unbounded(&self) -> bool {
         match self {
-            Self::Rows(_, end) => matches!(end, FrameBound::UnboundedFollowing),
+            Self::Rows(RowsFrameBounds { end, .. }) => end.is_unbounded_following(),
         }
     }
 
@@ -140,22 +136,38 @@ impl FrameBounds {
 impl Display for FrameBounds {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Rows(start, end) => {
-                write!(f, "ROWS BETWEEN {} AND {}", start, end)?;
-            }
+            Self::Rows(bounds) => bounds.fmt(f),
         }
-        Ok(())
     }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum FrameBounds {
-    Rows(FrameBound<usize>, FrameBound<usize>),
-    // Groups(FrameBound<usize>, FrameBound<usize>),
-    // Range(FrameBound<ScalarImpl>, FrameBound<ScalarImpl>),
+    Rows(RowsFrameBounds),
+    // Groups(GroupsFrameBounds),
+    // Range(RangeFrameBounds),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct RowsFrameBounds {
+    pub start: FrameBound<usize>,
+    pub end: FrameBound<usize>,
+}
+
+impl Display for RowsFrameBounds {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ROWS BETWEEN {} AND {}", self.start, self.end)?;
+        Ok(())
+    }
+}
+
+impl RowsFrameBounds {
+    fn validate(&self) -> Result<()> {
+        FrameBound::validate_bounds(&self.start, &self.end)
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, EnumAsInner)]
 pub enum FrameBound<T> {
     UnboundedPreceding,
     Preceding(T),

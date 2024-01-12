@@ -27,7 +27,7 @@ use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
 use risingwave_common::{bail_not_implemented, current_cluster_version, no_function};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
-    Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
+    Frame, FrameBound, FrameBounds, FrameExclusion, RowsFrameBounds, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
     self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, Ident, SelectItem, SetExpr,
@@ -663,7 +663,7 @@ impl Binder {
                     } else {
                         FrameBound::CurrentRow
                     };
-                    FrameBounds::Rows(start, end)
+                    FrameBounds::Rows(RowsFrameBounds { start, end })
                 }
                 WindowFrameUnits::Range | WindowFrameUnits::Groups => {
                     bail_not_implemented!(
