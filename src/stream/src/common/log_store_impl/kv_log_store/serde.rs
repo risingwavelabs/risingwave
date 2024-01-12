@@ -205,7 +205,13 @@ impl LogStoreRowSerde {
     fn compute_vnode(&self, row: impl Row) -> VirtualNode {
         match &self.vnodes {
             None => SINGLETON_VNODE,
-            Some(vnodes) => compute_vnode(row, &self.dist_key_indices, vnodes),
+            Some(vnodes) => {
+                if self.dist_key_indices.is_empty() {
+                    SINGLETON_VNODE
+                } else {
+                    compute_vnode(row, &self.dist_key_indices, vnodes)
+                }
+            }
         }
     }
 

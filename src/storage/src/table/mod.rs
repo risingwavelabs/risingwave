@@ -41,7 +41,7 @@ pub const DEFAULT_VNODE: VirtualNode = VirtualNode::ZERO;
 /// Represents the distribution for a specific table instance.
 pub enum TableDistribution {
     Singleton,
-    DistKeyInPkIndices {
+    DistKeyIndices {
         /// Indices of distribution key for computing vnode, based on the all columns of the table.
         dist_key_in_pk_indices: Vec<usize>,
 
@@ -88,7 +88,7 @@ impl TableDistribution {
                         vnodes,
                     }
                 } else if !dist_key_in_pk_indices.is_empty() {
-                    Self::DistKeyInPkIndices {
+                    Self::DistKeyIndices {
                         dist_key_in_pk_indices,
                         vnodes,
                     }
@@ -131,7 +131,7 @@ impl TableDistribution {
 
     /// Distribution that accesses all vnodes
     pub fn all(dist_key_in_pk_indices: Vec<usize>) -> Self {
-        Self::DistKeyInPkIndices {
+        Self::DistKeyIndices {
             dist_key_in_pk_indices,
             vnodes: Self::all_vnodes(),
         }
@@ -151,7 +151,7 @@ impl TableDistribution {
                 }
                 ret
             }
-            TableDistribution::DistKeyInPkIndices { ref mut vnodes, .. }
+            TableDistribution::DistKeyIndices { ref mut vnodes, .. }
             | TableDistribution::VnodeColumnIndex { ref mut vnodes, .. } => {
                 assert_eq!(vnodes.len(), new_vnodes.len());
                 replace(vnodes, new_vnodes)
@@ -162,7 +162,7 @@ impl TableDistribution {
     pub fn vnodes(&self) -> &Arc<Bitmap> {
         match self {
             TableDistribution::Singleton => TableDistribution::singleton_vnode_bitmap_ref(),
-            TableDistribution::DistKeyInPkIndices { vnodes, .. }
+            TableDistribution::DistKeyIndices { vnodes, .. }
             | TableDistribution::VnodeColumnIndex { vnodes, .. } => vnodes,
         }
     }
@@ -171,7 +171,7 @@ impl TableDistribution {
     pub fn compute_vnode_by_pk(&self, pk: impl Row) -> VirtualNode {
         match &self {
             TableDistribution::Singleton => SINGLETON_VNODE,
-            TableDistribution::DistKeyInPkIndices {
+            TableDistribution::DistKeyIndices {
                 dist_key_in_pk_indices,
                 vnodes,
             } => compute_vnode(pk, dist_key_in_pk_indices, vnodes),
@@ -185,7 +185,7 @@ impl TableDistribution {
     pub fn try_compute_vnode_by_pk_prefix(&self, pk_prefix: impl Row) -> Option<VirtualNode> {
         match self {
             TableDistribution::Singleton => Some(SINGLETON_VNODE),
-            TableDistribution::DistKeyInPkIndices {
+            TableDistribution::DistKeyIndices {
                 dist_key_in_pk_indices,
                 vnodes,
             } => dist_key_in_pk_indices
@@ -303,7 +303,7 @@ impl TableDistribution {
             TableDistribution::Singleton => {
                 vec![SINGLETON_VNODE; chunk.capacity()]
             }
-            TableDistribution::DistKeyInPkIndices {
+            TableDistribution::DistKeyIndices {
                 dist_key_in_pk_indices,
                 vnodes,
             } => {
