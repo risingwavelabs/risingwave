@@ -286,9 +286,10 @@ impl Binder {
                         // Without the pre-binding here, the ($1 + 1) will not be correctly populated,
                         // causing the result to always be 1.
                         let Ok(e) = self.bind_expr(e) else {
-                            return Err(ErrorCode::BindError(format!(
+                            return Err(ErrorCode::BindError(
                                 "failed to bind the argument, please recheck the syntax"
-                            ))
+                                    .to_string(),
+                            )
                             .into());
                         };
                         udf_context.insert(c, e);
