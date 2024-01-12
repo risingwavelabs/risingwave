@@ -96,7 +96,7 @@ pub const UNKNOWN_GIT_SHA: &str = "unknown";
 pub const PG_VERSION: &str = "9.5.0";
 /// The version of PostgreSQL that Risingwave claims to be.
 pub const SERVER_VERSION_NUM: i32 = 90500;
-/// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time. It is also the default value of CLIENT_ENCODING.
+/// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time. It is also the default value of `client_encoding`.
 pub const SERVER_ENCODING: &str = "UTF8";
 /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-STANDARD-CONFORMING-STRINGS>
 pub const STANDARD_CONFORMING_STRINGS: &str = "on";
