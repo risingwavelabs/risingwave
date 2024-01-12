@@ -201,7 +201,7 @@ public class JsonDeserializer implements Deserializer {
                 if (!(value instanceof String)) {
                     throw io.grpc.Status.INVALID_ARGUMENT
                             .withDescription(
-                                    "Expected timestamp in string, got " + value.getClass())
+                                    "Expected timestamptz in string, got " + value.getClass())
                             .asRuntimeException();
                 }
                 return OffsetDateTime.parse((String) value);
