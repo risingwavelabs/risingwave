@@ -52,38 +52,13 @@ enum IteratorState {
 
 impl IteratorState {
     #[inline]
-    fn is_next(&self) -> bool {
-        matches!(self, Self::Next)
-    }
-
-    #[inline]
     fn is_ready(&self) -> bool {
         matches!(self, Self::Ready)
     }
 
     #[inline]
-    fn is_init(&self) -> bool {
-        matches!(self, Self::Init)
-    }    
-
-    #[inline]
-    fn next(&mut self) {
-        *self = IteratorState::Next;
-    }
-
-    #[inline]
-    fn ready(&mut self) {
-        *self = IteratorState::Ready;
-    }
-
-    #[inline]
-    fn reset(&mut self) {
-        *self = IteratorState::Init;
-    }
-
-    #[inline]
-    fn invalidate(&mut self) {
-        *self = IteratorState::Invalid;
+    fn transition_to(&mut self, new_state: IteratorState) {
+        *self = new_state;
     }
 }
 
@@ -164,12 +139,25 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     ///   (may reach to the end and thus not valid)
     /// - if `Err(_) ` is returned, it means that some error happened.
     pub async fn next(&mut self) -> HummockResult<()> {
-        // Iterator must be initialized via seek/rewind before calling next is called
-        assert!(!self.state.is_init());
+        // Move the iterator to the next step if it is currently potined to a ready entry.
+        if self.state.is_ready() {
+            self.state.transition_to(IteratorState::Next);
+        }
+
+        // Loop until the iterator becomes ready or invalid.
         loop {
-            self.step_one().await?;
-            if !self.state.is_next() {
-                return Ok(());
+            match self.state {
+                IteratorState::Init => {
+                    self.last_key = FullKey::default();
+                    self.step_one().await?;
+                }
+                IteratorState::Next => {
+                    self.iterator.next().await?;
+                    self.step_one().await?;
+                }
+                IteratorState::Ready | IteratorState::Invalid => {
+                    return Ok(());
+                }
             }
         }
     }
@@ -196,7 +184,8 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
     /// Resets the iterating position to the beginning.
     pub async fn rewind(&mut self) -> HummockResult<()> {
-        self.state.reset();
+        // Reset
+        self.state.transition_to(IteratorState::Init);
 
         // Handle range scan
         match &self.key_range.0 {
@@ -207,12 +196,12 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                 };
                 self.iterator.seek(full_key.to_ref()).await?;
                 if !self.iterator.is_valid() {
-                    self.state.invalidate();
+                    self.state.transition_to(IteratorState::Invalid);
                     return Ok(());
                 }
 
                 if self.key_out_of_range() {
-                    self.state.invalidate();
+                    self.state.transition_to(IteratorState::Invalid);
                     return Ok(());
                 }
 
@@ -222,7 +211,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             Unbounded => {
                 self.iterator.rewind().await?;
                 if !self.iterator.is_valid() {
-                    self.state.invalidate();
+                    self.state.transition_to(IteratorState::Invalid);
                     return Ok(());
                 }
 
@@ -230,17 +219,14 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             }
         };
 
-        self.step_one().await?;
-        if self.state.is_next() {
-            self.next().await?;
-        }
+        self.next().await?;
         Ok(())
     }
 
     /// Resets the iterating position to the first position where the key >= provided key.
     pub async fn seek(&mut self, user_key: UserKey<&[u8]>) -> HummockResult<()> {
         // Reset
-        self.state.reset();
+        self.state.transition_to(IteratorState::Init);
 
         // Handle range scan when key < begin_key
         let user_key = match &self.key_range.0 {
@@ -262,21 +248,18 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         };
         self.iterator.seek(full_key).await?;
         if !self.iterator.is_valid() {
-            self.state.invalidate();
+            self.state.transition_to(IteratorState::Invalid);
             return Ok(());
         }
 
         if self.key_out_of_range() {
-            self.state.invalidate();
+            self.state.transition_to(IteratorState::Invalid);
             return Ok(());
         }
 
         self.delete_range_iter.seek(full_key.user_key).await?;
 
-        self.step_one().await?;
-        if self.state.is_next() {
-            self.next().await?;
-        }
+        self.next().await?;
         Ok(())
     }
 
@@ -290,34 +273,10 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         self.iterator.collect_local_statistic(stats);
     }
 
-    /// Transition iterator state.
-    /// See `IteratorState` for the state machine details.
+    /// Check the inner iterator and try move onto the next state once.
     async fn step_one(&mut self) -> HummockResult<()> {
-        match self.state {
-            IteratorState::Init => {
-                self.last_key = FullKey::default();
-                self.on_next().await?;
-                Ok(())
-            }
-            IteratorState::Ready => {
-                self.state.next();
-                Ok(())
-            }
-            IteratorState::Next => {
-                self.iterator.next().await?;
-                self.on_next().await?;
-                Ok(())
-            }
-            IteratorState::Invalid => {
-                // End state
-                Ok(())
-            }
-        }
-    }
-
-    async fn on_next(&mut self) -> HummockResult<()> {
         if !self.iterator.is_valid() {
-            self.state.invalidate();
+            self.state.transition_to(IteratorState::Invalid);
             return Ok(());
         }
 
@@ -326,7 +285,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
         // Handle epoch visibility
         if epoch < self.min_epoch || epoch > self.read_epoch {
-            self.state.next();
+            self.state.transition_to(IteratorState::Next);
             return Ok(());
         }
 
@@ -337,14 +296,14 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         // current key is 0xff, we will access range tombstones in [0x0c, 0xff],
         // which is a waste of work.
         if self.key_out_of_range() {
-            self.state.invalidate();
+            self.state.transition_to(IteratorState::Invalid);
             return Ok(());
         }
 
         // Skip older version entry for the same user key
         if self.last_key.user_key.as_ref() == full_key.user_key {
             self.stats.skip_multi_version_key_count += 1;
-            self.state.next();
+            self.state.transition_to(IteratorState::Next);
             return Ok(());
         }
 
@@ -359,7 +318,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                 } else {
                     self.last_val = Bytes::copy_from_slice(val);
                     self.stats.processed_key_count += 1;
-                    self.state.ready();
+                    self.state.transition_to(IteratorState::Ready);
                     return Ok(());
                 }
             }
@@ -371,7 +330,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             }
         }
 
-        self.state.next();
+        self.state.transition_to(IteratorState::Next);
         Ok(())
     }
 
