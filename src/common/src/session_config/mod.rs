@@ -24,7 +24,7 @@ use chrono_tz::Tz;
 pub use over_window::OverWindowCachePolicy;
 pub use query_mode::QueryMode;
 use risingwave_common::{
-    CLIENT_ENCODING, PG_VERSION, SERVER_VERSION_NUM, STANDARD_CONFORMING_STRINGS,
+    SERVER_ENCODING, PG_VERSION, SERVER_VERSION_NUM, STANDARD_CONFORMING_STRINGS,
 };
 use risingwave_common_proc_macro::SessionConfig;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
@@ -190,7 +190,7 @@ pub struct ConfigMap {
     client_min_messages: String,
 
     /// see <https://www.postgresql.org/docs/15/runtime-config-client.html#GUC-CLIENT-ENCODING>
-    #[parameter(default = CLIENT_ENCODING , check_hook = check_client_encoding)]
+    #[parameter(default = SERVER_ENCODING , check_hook = check_client_encoding)]
     client_encoding: String,
 
     /// Enable decoupling sink and internal streaming graph or not
@@ -237,7 +237,7 @@ pub struct ConfigMap {
     background_ddl: bool,
 
     /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
-    #[parameter(default = CLIENT_ENCODING)]
+    #[parameter(default = SERVER_ENCODING)]
     server_encoding: String,
 
     #[parameter(default = "hex", check_hook = check_bytea_output)]

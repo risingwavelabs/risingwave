@@ -28,7 +28,7 @@ use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use risingwave_common::types::DataType;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::query_log::*;
-use risingwave_common::{CLIENT_ENCODING, PG_VERSION, STANDARD_CONFORMING_STRINGS};
+use risingwave_common::{SERVER_ENCODING, PG_VERSION, STANDARD_CONFORMING_STRINGS};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
@@ -974,7 +974,7 @@ where
 
     fn write_parameter_status_msg_no_flush(&mut self, status: &ParameterStatus) -> io::Result<()> {
         self.write_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::ClientEncoding(CLIENT_ENCODING),
+            BeParameterStatusMessage::ClientEncoding(SERVER_ENCODING),
         ))?;
         self.write_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::StandardConformingString(STANDARD_CONFORMING_STRINGS),
