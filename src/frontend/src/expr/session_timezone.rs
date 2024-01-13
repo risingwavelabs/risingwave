@@ -323,3 +323,6 @@ impl ExprVisitor for TimestamptzExprFinder {
             .for_each(|expr| self.visit_expr(expr));
     }
 }
+
+// Timezone visitor to determine which is using timezone
+// Refactor the mard_used part
