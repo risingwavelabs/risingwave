@@ -115,11 +115,15 @@ impl TableDistribution {
         Self::singleton_vnode_bitmap_ref().clone()
     }
 
-    pub fn all_vnodes() -> Arc<Bitmap> {
+    pub fn all_vnodes_ref() -> &'static Arc<Bitmap> {
         /// A bitmap that all vnodes are set.
         static ALL_VNODES: LazyLock<Arc<Bitmap>> =
             LazyLock::new(|| Bitmap::ones(VirtualNode::COUNT).into());
-        ALL_VNODES.clone()
+        &ALL_VNODES
+    }
+
+    pub fn all_vnodes() -> Arc<Bitmap> {
+        Self::all_vnodes_ref().clone()
     }
 
     /// Distribution that accesses all vnodes, mainly used for tests.

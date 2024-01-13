@@ -18,7 +18,7 @@ use futures::future::join_all;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::{bail, row};
@@ -28,6 +28,7 @@ use risingwave_expr::expr::{
 };
 use risingwave_expr::Result as ExprResult;
 use risingwave_pb::expr::expr_node::Type;
+use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
@@ -315,20 +316,23 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
     async fn get_global_max_watermark(
         table: &StateTable<S>,
     ) -> StreamExecutorResult<Option<ScalarImpl>> {
-        let watermark_iter_futures = (0..VirtualNode::COUNT).map(|vnode| async move {
-            let pk = row::once(VirtualNode::from_index(vnode).to_datum());
-            let watermark_row: Option<OwnedRow> = table.get_row(pk).await?;
-            match watermark_row {
-                Some(row) => {
-                    if row.len() == 1 {
-                        Ok::<_, StreamExecutorError>(row[0].to_owned())
-                    } else {
-                        bail!("The watermark row should only contains 1 datum");
+        let watermark_iter_futures =
+            Distribution::all_vnodes_ref()
+                .iter_vnodes()
+                .map(|vnode| async move {
+                    let pk = row::once(vnode.to_datum());
+                    let watermark_row: Option<OwnedRow> = table.get_row(pk).await?;
+                    match watermark_row {
+                        Some(row) => {
+                            if row.len() == 1 {
+                                Ok::<_, StreamExecutorError>(row[0].to_owned())
+                            } else {
+                                bail!("The watermark row should only contains 1 datum");
+                            }
+                        }
+                        _ => Ok(None),
                     }
-                }
-                _ => Ok(None),
-            }
-        });
+                });
         let watermarks: Vec<_> = join_all(watermark_iter_futures)
             .await
             .into_iter()
