@@ -21,6 +21,13 @@ create function to_string(a boolean, b smallint, c int, d bigint, e real, f floa
     return a.toString() + b.toString() + c.toString() + d.toString() + e.toString() + f.toString() + g.toString();
 $$;
 
+statement ok
+create function series(n int) returns table (x int) language javascript as $$
+    for(let i = 0; i < n; i++) {
+        yield i;
+    }
+$$;
+
 query I
 select int_42();
 ----
@@ -36,6 +43,15 @@ select to_string(false, 1::smallint, 2, 3, 4.5, 6.7, 'abc');
 ----
 false1234.56.7abc
 
+query I
+select series(5);
+----
+0
+1
+2
+3
+4
+
 statement ok
 drop function int_42;
 
@@ -44,3 +60,6 @@ drop function gcd;
 
 statement ok
 drop function to_string;
+
+statement ok
+drop function series;
