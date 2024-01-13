@@ -165,7 +165,7 @@ where
         for i in PK::LEN..predefined_column_len {
             assert_eq!(
                 data_types[i],
-                KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS[i].1
+                KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS[i - PK::LEN].1
             );
         }
 

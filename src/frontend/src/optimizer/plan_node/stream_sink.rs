@@ -20,7 +20,6 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, Field, TableId};
-use risingwave_common::constants::log_store::v1::KvLogStoreV1Pk;
 use risingwave_common::constants::log_store::{
     KvLogStorePk, KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS,
 };
@@ -341,23 +340,22 @@ impl StreamSink {
 
     /// The table schema is: | epoch | seq id | row op | sink columns |
     /// Pk is: | epoch | seq id |
-    fn infer_kv_log_store_table_catalog<PK: KvLogStorePk>(&self) -> TableCatalog
-    where
-        [(); PK::LEN]: Sized,
-    {
+    fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
+        type Pk = risingwave_common::constants::log_store::v1::KvLogStoreV1Pk;
+
         let mut table_catalog_builder =
             TableCatalogBuilder::new(self.input.ctx().with_options().internal_table_subset());
 
         let mut value_indices = Vec::with_capacity(
-            PK::pk_types().len()
+            Pk::pk_types().len()
                 + KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS.len()
                 + self.sink_desc.columns.len(),
         );
 
-        let pk_column_names = PK::pk_names();
-        let pk_types = PK::pk_types();
+        let pk_column_names = Pk::pk_names();
+        let pk_types = Pk::pk_types();
 
-        for i in 0..PK::LEN {
+        for i in 0..Pk::LEN {
             let (name, data_type) = (pk_column_names[i], pk_types[i].clone());
             let indice = table_catalog_builder.add_column(&Field::with_name(data_type, name));
             value_indices.push(indice);
@@ -368,9 +366,9 @@ impl StreamSink {
             value_indices.push(indice);
         }
 
-        let predefined_column_len = PK::LEN + KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS.len();
+        let predefined_column_len = Pk::LEN + KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS.len();
 
-        for (i, ordering) in PK::pk_ordering().into_iter().enumerate() {
+        for (i, ordering) in Pk::pk_ordering().into_iter().enumerate() {
             table_catalog_builder.add_order_column(i, ordering);
         }
 
@@ -447,7 +445,7 @@ impl StreamNode for StreamSink {
 
         // We need to create a table for sink with a kv log store.
         let table = self
-            .infer_kv_log_store_table_catalog::<KvLogStoreV1Pk>()
+            .infer_kv_log_store_table_catalog()
             .with_id(state.gen_table_id_wrapped());
 
         PbNodeBody::Sink(SinkNode {
