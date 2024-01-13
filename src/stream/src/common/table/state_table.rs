@@ -627,6 +627,11 @@ where
             .expect("For streaming, the given prefix must be enough to calculate the vnode")
     }
 
+    /// Get the vnode value of the given primary key
+    pub fn compute_vnode_by_pk(&self, pk: impl Row) -> VirtualNode {
+        self.distribution.compute_vnode_by_pk(pk)
+    }
+
     /// NOTE(kwannoel): This is used by backfill.
     /// We want to check pk indices of upstream table.
     pub fn pk_indices(&self) -> &[usize] {
@@ -717,11 +722,8 @@ where
             debug_assert_eq!(self.prefix_hint_len, pk.len());
         }
 
-        let serialized_pk = serialize_pk_with_vnode(
-            &pk,
-            &self.pk_serde,
-            self.distribution.compute_vnode_by_pk(&pk),
-        );
+        let serialized_pk =
+            serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_vnode_by_pk(&pk));
 
         let prefix_hint = if self.prefix_hint_len != 0 && self.prefix_hint_len == pk.len() {
             Some(serialized_pk.slice(VirtualNode::SIZE..))
@@ -868,11 +870,7 @@ where
             self.watermark_cache.insert(&pk);
         }
 
-        let key_bytes = serialize_pk_with_vnode(
-            pk,
-            &self.pk_serde,
-            self.distribution.compute_vnode_by_pk(pk),
-        );
+        let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_vnode_by_pk(pk));
         let value_bytes = self.serialize_value(value);
         self.insert_inner(key_bytes, value_bytes);
     }
@@ -886,11 +884,7 @@ where
             self.watermark_cache.delete(&pk);
         }
 
-        let key_bytes = serialize_pk_with_vnode(
-            pk,
-            &self.pk_serde,
-            self.distribution.compute_vnode_by_pk(pk),
-        );
+        let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_vnode_by_pk(pk));
         let value_bytes = self.serialize_value(old_value);
         self.delete_inner(key_bytes, value_bytes);
     }
@@ -904,11 +898,8 @@ where
             "pk should not change: {old_pk:?} vs {new_pk:?}",
         );
 
-        let new_key_bytes = serialize_pk_with_vnode(
-            new_pk,
-            &self.pk_serde,
-            self.distribution.compute_vnode_by_pk(new_pk),
-        );
+        let new_key_bytes =
+            serialize_pk_with_vnode(new_pk, &self.pk_serde, self.compute_vnode_by_pk(new_pk));
         let old_value_bytes = self.serialize_value(old_value);
         let new_value_bytes = self.serialize_value(new_value);
 
@@ -920,11 +911,8 @@ where
     /// `op_consistency_level` should be set to `Inconsistent`.
     pub fn update_without_old_value(&mut self, new_value: impl Row) {
         let new_pk = (&new_value).project(self.pk_indices());
-        let new_key_bytes = serialize_pk_with_vnode(
-            new_pk,
-            &self.pk_serde,
-            self.distribution.compute_vnode_by_pk(new_pk),
-        );
+        let new_key_bytes =
+            serialize_pk_with_vnode(new_pk, &self.pk_serde, self.compute_vnode_by_pk(new_pk));
         let new_value_bytes = self.serialize_value(new_value);
 
         self.update_inner(new_key_bytes, None, new_value_bytes);

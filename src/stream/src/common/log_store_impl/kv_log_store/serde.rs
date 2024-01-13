@@ -106,14 +106,14 @@ pub(crate) struct LogStoreRowSerde {
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
     // FIXME: revisit constructions and usages.
-    dist_key_indices: Vec<usize>,
+    dist_key_indices: Option<Vec<usize>>,
 
     /// Virtual nodes that the table is partitioned into.
     ///
     /// Only the rows whose vnode of the primary key is in this set will be visible to the
     /// executor. The table will also check whether the written rows
     /// conform to this partition.
-    vnodes: Option<Arc<Bitmap>>,
+    vnodes: Arc<Bitmap>,
 
     /// The schema of payload
     payload_schema: Vec<DataType>,
@@ -153,6 +153,12 @@ impl LogStoreRowSerde {
 
         let row_serde = BasicSerde::new(input_value_indices.into(), table_columns.into());
 
+        let vnodes = match vnodes {
+            Some(vnodes) => vnodes,
+
+            None => TableDistribution::singleton_vnode_bitmap(),
+        };
+
         // epoch and seq_id. The seq_id of barrier is set null, and therefore the second order type
         // is nulls last
         let pk_serde = OrderedRowSerde::new(
@@ -162,6 +168,18 @@ impl LogStoreRowSerde {
 
         let epoch_serde =
             OrderedRowSerde::new(vec![EPOCH_COLUMN_TYPE], vec![OrderType::ascending()]);
+
+        let dist_key_indices = if dist_key_indices.is_empty() {
+            if &vnodes != TableDistribution::singleton_vnode_bitmap_ref() {
+                warn!(
+                    ?vnodes,
+                    "singleton log store gets non-singleton vnode bitmap"
+                );
+            }
+            None
+        } else {
+            Some(dist_key_indices)
+        };
 
         Self {
             pk_serde,
@@ -173,23 +191,12 @@ impl LogStoreRowSerde {
         }
     }
 
-    pub(crate) fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
-        match &mut self.vnodes {
-            Some(vnodes) => {
-                *vnodes = new_vnodes;
-            }
-            None => {
-                if new_vnodes != TableDistribution::singleton_vnode_bitmap() {
-                    warn!(?new_vnodes, "call update vnode on singletone log store");
-                }
-            }
-        }
+    pub(crate) fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) {
+        self.vnodes = vnodes;
     }
 
     pub(crate) fn vnodes(&self) -> &Arc<Bitmap> {
-        self.vnodes
-            .as_ref()
-            .unwrap_or_else(|| TableDistribution::singleton_vnode_bitmap_ref())
+        &self.vnodes
     }
 
     pub(crate) fn encode_epoch(epoch: u64) -> i64 {
@@ -203,15 +210,10 @@ impl LogStoreRowSerde {
 
 impl LogStoreRowSerde {
     fn compute_vnode(&self, row: impl Row) -> VirtualNode {
-        match &self.vnodes {
-            None => SINGLETON_VNODE,
-            Some(vnodes) => {
-                if self.dist_key_indices.is_empty() {
-                    SINGLETON_VNODE
-                } else {
-                    compute_vnode(row, &self.dist_key_indices, vnodes)
-                }
-            }
+        if let Some(dist_key_indices) = &self.dist_key_indices {
+            compute_vnode(row, dist_key_indices, &self.vnodes)
+        } else {
+            SINGLETON_VNODE
         }
     }
 

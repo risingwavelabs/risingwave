@@ -38,23 +38,26 @@ use crate::error::StorageResult;
 pub const DEFAULT_VNODE: VirtualNode = VirtualNode::ZERO;
 
 #[derive(Debug, Clone)]
-/// Represents the distribution for a specific table instance.
-pub enum TableDistribution {
+enum ComputeVnode {
     Singleton,
     DistKeyIndices {
         /// Indices of distribution key for computing vnode, based on the all columns of the table.
         dist_key_in_pk_indices: Vec<usize>,
-
-        /// Virtual nodes that the table is partitioned into.
-        vnodes: Arc<Bitmap>,
     },
     VnodeColumnIndex {
         /// Indices of vnode columns.
         vnode_col_idx_in_pk: usize,
-
-        /// Virtual nodes that the table is partitioned into.
-        vnodes: Arc<Bitmap>,
     },
+}
+
+#[derive(Debug, Clone)]
+/// Represents the distribution for a specific table instance.
+pub struct TableDistribution {
+    /// The way to compute vnode provided primary key
+    compute_vnode: ComputeVnode,
+
+    /// Virtual nodes that the table is partitioned into.
+    vnodes: Arc<Bitmap>,
 }
 
 pub const SINGLETON_VNODE: VirtualNode = DEFAULT_VNODE;
@@ -65,46 +68,31 @@ impl TableDistribution {
         dist_key_in_pk_indices: Vec<usize>,
         vnode_col_idx_in_pk: Option<usize>,
     ) -> Self {
-        match vnodes {
-            None => {
-                if !dist_key_in_pk_indices.is_empty() {
-                    warn!(
-                        ?dist_key_in_pk_indices,
-                        "has dist key but no vnodes provided"
-                    );
-                }
-                if vnode_col_idx_in_pk.is_some() {
-                    warn!(
-                        vnode_col_idx_in_pk = vnode_col_idx_in_pk.unwrap(),
-                        "has vnode col idx in pk but no vnodes provided"
-                    );
-                }
-                Self::Singleton
+        let compute_vnode = if let Some(vnode_col_idx_in_pk) = vnode_col_idx_in_pk {
+            ComputeVnode::VnodeColumnIndex {
+                vnode_col_idx_in_pk,
             }
-            Some(vnodes) => {
-                if let Some(vnode_col_idx_in_pk) = vnode_col_idx_in_pk {
-                    Self::VnodeColumnIndex {
-                        vnode_col_idx_in_pk,
-                        vnodes,
-                    }
-                } else if !dist_key_in_pk_indices.is_empty() {
-                    Self::DistKeyIndices {
-                        dist_key_in_pk_indices,
-                        vnodes,
-                    }
-                } else {
-                    warn!(
-                        ?vnodes,
-                        "no dist key or vnode col idx provided but provided vnodes"
-                    );
-                    Self::Singleton
-                }
+        } else if !dist_key_in_pk_indices.is_empty() {
+            ComputeVnode::DistKeyIndices {
+                dist_key_in_pk_indices,
             }
+        } else {
+            ComputeVnode::Singleton
+        };
+
+        let vnodes = vnodes.unwrap_or_else(Self::singleton_vnode_bitmap);
+        if let ComputeVnode::Singleton = &compute_vnode {
+            assert!(vnodes.is_set(SINGLETON_VNODE.to_index()));
+        }
+
+        Self {
+            compute_vnode,
+            vnodes,
         }
     }
 
     pub fn is_singleton(&self) -> bool {
-        matches!(self, Self::Singleton)
+        matches!(&self.compute_vnode, ComputeVnode::Singleton)
     }
 
     pub fn singleton_vnode_bitmap_ref() -> &'static Arc<Bitmap> {
@@ -129,77 +117,76 @@ impl TableDistribution {
         ALL_VNODES.clone()
     }
 
-    /// Distribution that accesses all vnodes
+    /// Distribution that accesses all vnodes, mainly used for tests.
     pub fn all(dist_key_in_pk_indices: Vec<usize>) -> Self {
-        Self::DistKeyIndices {
-            dist_key_in_pk_indices,
+        Self {
+            compute_vnode: ComputeVnode::DistKeyIndices {
+                dist_key_in_pk_indices,
+            },
             vnodes: Self::all_vnodes(),
         }
     }
 
     /// Fallback distribution for singleton or tests.
     pub fn singleton() -> Self {
-        Self::Singleton
+        Self {
+            compute_vnode: ComputeVnode::Singleton,
+            vnodes: Self::singleton_vnode_bitmap(),
+        }
     }
 
     pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-        match self {
-            TableDistribution::Singleton => {
-                let ret = Self::singleton_vnode_bitmap();
-                if ret != new_vnodes {
-                    warn!(?new_vnodes, "update vnode on singleton distribution");
-                }
-                ret
+        if self.is_singleton() {
+            if &new_vnodes != Self::singleton_vnode_bitmap_ref() {
+                warn!(?new_vnodes, "update vnode on singleton distribution");
             }
-            TableDistribution::DistKeyIndices { ref mut vnodes, .. }
-            | TableDistribution::VnodeColumnIndex { ref mut vnodes, .. } => {
-                assert_eq!(vnodes.len(), new_vnodes.len());
-                replace(vnodes, new_vnodes)
-            }
+            assert!(
+                new_vnodes.is_set(SINGLETON_VNODE.to_index()),
+                "singleton distribution get vnode bitmap without SINGLETON_VNODE: {:?}",
+                new_vnodes
+            );
         }
+        assert_eq!(self.vnodes.len(), new_vnodes.len());
+        replace(&mut self.vnodes, new_vnodes)
     }
 
     pub fn vnodes(&self) -> &Arc<Bitmap> {
-        match self {
-            TableDistribution::Singleton => TableDistribution::singleton_vnode_bitmap_ref(),
-            TableDistribution::DistKeyIndices { vnodes, .. }
-            | TableDistribution::VnodeColumnIndex { vnodes, .. } => vnodes,
-        }
+        &self.vnodes
     }
 
     /// Get vnode value with given primary key.
     pub fn compute_vnode_by_pk(&self, pk: impl Row) -> VirtualNode {
-        match &self {
-            TableDistribution::Singleton => SINGLETON_VNODE,
-            TableDistribution::DistKeyIndices {
+        match &self.compute_vnode {
+            ComputeVnode::Singleton => SINGLETON_VNODE,
+            ComputeVnode::DistKeyIndices {
                 dist_key_in_pk_indices,
-                vnodes,
-            } => compute_vnode(pk, dist_key_in_pk_indices, vnodes),
-            TableDistribution::VnodeColumnIndex {
+            } => compute_vnode(pk, dist_key_in_pk_indices, &self.vnodes),
+            ComputeVnode::VnodeColumnIndex {
                 vnode_col_idx_in_pk,
-                vnodes,
-            } => get_vnode_from_row(pk, *vnode_col_idx_in_pk, vnodes),
+            } => get_vnode_from_row(pk, *vnode_col_idx_in_pk, &self.vnodes),
         }
     }
 
     pub fn try_compute_vnode_by_pk_prefix(&self, pk_prefix: impl Row) -> Option<VirtualNode> {
-        match self {
-            TableDistribution::Singleton => Some(SINGLETON_VNODE),
-            TableDistribution::DistKeyIndices {
+        match &self.compute_vnode {
+            ComputeVnode::Singleton => Some(SINGLETON_VNODE),
+            ComputeVnode::DistKeyIndices {
                 dist_key_in_pk_indices,
-                vnodes,
             } => dist_key_in_pk_indices
                 .iter()
                 .all(|&d| d < pk_prefix.len())
-                .then(|| compute_vnode(pk_prefix, dist_key_in_pk_indices, vnodes)),
-            TableDistribution::VnodeColumnIndex {
+                .then(|| compute_vnode(pk_prefix, dist_key_in_pk_indices, &self.vnodes)),
+            ComputeVnode::VnodeColumnIndex {
                 vnode_col_idx_in_pk,
-                vnodes,
             } => {
                 if *vnode_col_idx_in_pk >= pk_prefix.len() {
                     None
                 } else {
-                    Some(get_vnode_from_row(pk_prefix, *vnode_col_idx_in_pk, vnodes))
+                    Some(get_vnode_from_row(
+                        pk_prefix,
+                        *vnode_col_idx_in_pk,
+                        &self.vnodes,
+                    ))
                 }
             }
         }
@@ -302,13 +289,12 @@ impl TableDistribution {
     ///
     /// Vnode of invisible rows will be included. Only the vnode of visible row check if it's accessible
     pub fn compute_chunk_vnode(&self, chunk: &DataChunk, pk_indices: &[usize]) -> Vec<VirtualNode> {
-        match self {
-            TableDistribution::Singleton => {
+        match &self.compute_vnode {
+            ComputeVnode::Singleton => {
                 vec![SINGLETON_VNODE; chunk.capacity()]
             }
-            TableDistribution::DistKeyIndices {
+            ComputeVnode::DistKeyIndices {
                 dist_key_in_pk_indices,
-                vnodes,
             } => {
                 let dist_key_indices = dist_key_in_pk_indices
                     .iter()
@@ -321,15 +307,14 @@ impl TableDistribution {
                     .map(|(vnode, vis)| {
                         // Ignore the invisible rows.
                         if vis {
-                            check_vnode_is_set(vnode, vnodes);
+                            check_vnode_is_set(vnode, &self.vnodes);
                         }
                         vnode
                     })
                     .collect()
             }
-            TableDistribution::VnodeColumnIndex {
+            ComputeVnode::VnodeColumnIndex {
                 vnode_col_idx_in_pk,
-                vnodes,
             } => {
                 let array: &PrimitiveArray<i16> =
                     chunk.columns()[pk_indices[*vnode_col_idx_in_pk]].as_int16();
@@ -341,7 +326,7 @@ impl TableDistribution {
                         let vnode = VirtualNode::from_scalar(vnode);
                         if vis {
                             assert!(exist);
-                            check_vnode_is_set(vnode, vnodes);
+                            check_vnode_is_set(vnode, &self.vnodes);
                         }
                         vnode
                     })
