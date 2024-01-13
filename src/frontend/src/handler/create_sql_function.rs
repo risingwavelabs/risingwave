@@ -122,8 +122,10 @@ pub async fn handle_create_sql_function(
         }
     };
 
+    let mut arg_names = vec![];
     let mut arg_types = vec![];
     for arg in args.unwrap_or_default() {
+        arg_names.push(arg.name.map_or("".to_string(), |n| n.real_value()));
         arg_types.push(bind_data_type(&arg.data_type)?);
     }
 
@@ -165,6 +167,7 @@ pub async fn handle_create_sql_function(
         database_id,
         name: function_name,
         kind: Some(kind),
+        arg_names,
         arg_types: arg_types.into_iter().map(|t| t.into()).collect(),
         return_type: Some(return_type.into()),
         language,

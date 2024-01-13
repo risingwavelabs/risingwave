@@ -36,6 +36,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub function_id: FunctionId,
     pub name: String,
+    pub arg_names: Vec<String>,
     pub arg_types: DataTypeArray,
     pub return_type: DataType,
     pub language: String,
@@ -90,6 +91,7 @@ impl From<PbFunction> for ActiveModel {
         Self {
             function_id: Set(function.id as _),
             name: Set(function.name),
+            arg_names: Set(function.arg_names),
             arg_types: Set(DataTypeArray(function.arg_types)),
             return_type: Set(DataType(function.return_type.unwrap())),
             language: Set(function.language),

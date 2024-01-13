@@ -468,6 +468,7 @@ message WindowFunction {
 message UserDefinedFunction {
   repeated ExprNode children = 1;
   string name = 2;
+  repeated string arg_names = 8;
   repeated data.DataType arg_types = 3;
   string language = 4;
   // For external UDF: the link to the external function service.
@@ -484,6 +485,7 @@ message UserDefinedFunction {
 
 // Additional information for user defined table functions.
 message UserDefinedTableFunction {
+  repeated string arg_names = 8;
   repeated data.DataType arg_types = 3;
   string language = 4;
   optional string link = 5;

@@ -51,6 +51,7 @@ impl UserDefinedFunction {
             // FIXME(yuhao): owner is not in udf proto.
             owner: u32::MAX - 1,
             kind: FunctionKind::Scalar,
+            arg_names: udf.arg_names.clone(),
             arg_types,
             return_type,
             language: udf.get_language().clone(),
@@ -80,6 +81,7 @@ impl Expr for UserDefinedFunction {
             rex_node: Some(RexNode::Udf(UserDefinedFunction {
                 children: self.args.iter().map(Expr::to_expr_proto).collect(),
                 name: self.catalog.name.clone(),
+                arg_names: self.catalog.arg_names.clone(),
                 arg_types: self
                     .catalog
                     .arg_types

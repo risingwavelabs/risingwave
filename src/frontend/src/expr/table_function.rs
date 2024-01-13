@@ -73,6 +73,7 @@ impl TableFunction {
                 .udtf_catalog
                 .as_ref()
                 .map(|c| UserDefinedTableFunctionPb {
+                    arg_names: c.arg_names.clone(),
                     arg_types: c.arg_types.iter().map(|t| t.to_protobuf()).collect(),
                     language: c.language.clone(),
                     link: c.link.clone(),

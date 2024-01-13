@@ -204,11 +204,17 @@ impl Build for UserDefinedFunction {
             }
             "javascript" => {
                 let mut rt = JsRuntime::new()?;
+                let body = format!(
+                    "export function {}({}) {{ {} }}",
+                    identifier,
+                    udf.arg_names.join(","),
+                    udf.get_body()?
+                );
                 rt.add_function(
                     identifier,
                     arrow_schema::DataType::try_from(&return_type)?,
                     CallMode::CalledOnNullInput,
-                    udf.get_body()?,
+                    &body,
                 )?;
                 UdfImpl::JavaScript(rt)
             }
