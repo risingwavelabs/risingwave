@@ -8,7 +8,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-arrow-udf = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "51d941d" }
+arrow-udf = "0.1"
 genawaiter = "0.99"
 rust_decimal = "1"
 serde_json = "1"
