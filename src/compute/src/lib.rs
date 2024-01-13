@@ -19,6 +19,8 @@
 #![feature(lint_reasons)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(lazy_cell)]
+#![expect(incomplete_features)]
+#![feature(generic_const_exprs)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
 
 #[macro_use]
