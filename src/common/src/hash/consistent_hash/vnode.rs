@@ -18,7 +18,7 @@ use parse_display::Display;
 use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::hash::Crc32HashCode;
 use crate::row::{Row, RowExt};
-use crate::types::{DataType, DatumRef, ScalarRefImpl};
+use crate::types::{DataType, Datum, DatumRef, ScalarImpl, ScalarRefImpl};
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::row_id::extract_vnode_id_from_row_id;
 
@@ -89,6 +89,10 @@ impl VirtualNode {
 
     pub fn from_datum(datum: DatumRef<'_>) -> Self {
         Self::from_scalar(datum.expect("should not be none").into_int16())
+    }
+
+    pub const fn to_datum(self) -> Datum {
+        Some(ScalarImpl::Int16(self.to_scalar()))
     }
 
     /// Returns the scalar representation of the virtual node. Used by `VNODE` expression.

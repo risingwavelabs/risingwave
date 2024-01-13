@@ -341,7 +341,7 @@ impl StreamSink {
     /// The table schema is: | epoch | seq id | row op | sink columns |
     /// Pk is: | epoch | seq id |
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
-        type Pk = risingwave_common::constants::log_store::v1::KvLogStoreV1Pk;
+        type Pk = risingwave_common::constants::log_store::v2::KvLogStoreV2Pk;
 
         let mut table_catalog_builder =
             TableCatalogBuilder::new(self.input.ctx().with_options().internal_table_subset());
@@ -351,6 +351,8 @@ impl StreamSink {
 
         let pk_column_names = Pk::pk_names();
         let pk_types = Pk::pk_types();
+
+        table_catalog_builder.set_vnode_col_idx(Pk::vnode_column_index());
 
         for i in 0..Pk::LEN {
             let (name, data_type) = (pk_column_names[i], pk_types[i].clone());

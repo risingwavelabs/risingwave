@@ -47,6 +47,7 @@ pub mod log_store {
     pub const EPOCH_COLUMN_NAME: &str = "kv_log_store_epoch";
     pub const SEQ_ID_COLUMN_NAME: &str = "kv_log_store_seq_id";
     pub const ROW_OP_COLUMN_NAME: &str = "kv_log_store_row_op";
+    pub const VNODE_COLUMN_NAME: &str = "kv_log_store_vnode";
 
     /// Predefined column includes log store pk columns + `row_op`
     pub const KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS: [(&str, DataType); 1] =
@@ -55,6 +56,7 @@ pub mod log_store {
     pub const EPOCH_COLUMN_TYPE: DataType = DataType::Int64;
     pub const SEQ_ID_COLUMN_TYPE: DataType = DataType::Int32;
     pub const ROW_OP_COLUMN_TYPE: DataType = DataType::Int16;
+    pub const VNODE_COLUMN_TYPE: DataType = DataType::Int16;
 
     pub trait KvLogStorePk: Clone + Send + Sync + Unpin + 'static {
         const LEN: usize;
@@ -110,6 +112,61 @@ pub mod log_store {
                 [
                     Some(ScalarImpl::Int64(encoded_epoch)),
                     seq_id.map(ScalarImpl::Int32),
+                ]
+            }
+        }
+    }
+
+    pub mod v2 {
+        use super::*;
+
+        const EPOCH_COLUMN_INDEX: usize = 0;
+        const SEQ_ID_COLUMN_INDEX: usize = 1;
+        const VNODE_COLUMN_INDEX: usize = 2;
+        const ROW_OP_COLUMN_INDEX: usize = 3;
+
+        /// `epoch`, `seq_id`, `vnode`
+        const PK_TYPES: [DataType; 3] = [EPOCH_COLUMN_TYPE, SEQ_ID_COLUMN_TYPE, VNODE_COLUMN_TYPE];
+        const PK_COLUMN_NAMES: [&str; 3] =
+            [EPOCH_COLUMN_NAME, SEQ_ID_COLUMN_NAME, VNODE_COLUMN_NAME];
+
+        #[derive(Clone)]
+        pub struct KvLogStoreV2Pk;
+
+        impl KvLogStoreV2Pk {
+            pub fn vnode_column_index() -> usize {
+                VNODE_COLUMN_INDEX
+            }
+        }
+
+        impl KvLogStorePk for KvLogStoreV2Pk {
+            const EPOCH_COLUMN_INDEX: usize = EPOCH_COLUMN_INDEX;
+            const LEN: usize = PK_TYPES.len();
+            const ROW_OP_COLUMN_INDEX: usize = ROW_OP_COLUMN_INDEX;
+            const SEQ_ID_COLUMN_INDEX: usize = SEQ_ID_COLUMN_INDEX;
+
+            fn pk_types() -> &'static [DataType] {
+                &PK_TYPES[..]
+            }
+
+            fn pk_names() -> &'static [&'static str] {
+                &PK_COLUMN_NAMES[..]
+            }
+
+            fn pk_ordering() -> &'static [OrderType] {
+                static PK_ORDERING: [OrderType; PK_TYPES.len()] = [
+                    OrderType::ascending(),
+                    OrderType::ascending_nulls_last(),
+                    OrderType::ascending(),
+                ];
+                &PK_ORDERING[..]
+            }
+
+            fn pk(vnode: VirtualNode, encoded_epoch: i64, seq_id: Option<SeqIdType>) -> impl Row {
+                [
+                    Some(ScalarImpl::Int64(encoded_epoch)),
+                    seq_id.map(ScalarImpl::Int32),
+                    vnode.to_datum(),
                 ]
             }
         }

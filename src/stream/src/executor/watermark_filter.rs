@@ -247,7 +247,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         // Persist the watermark when checkpoint arrives.
                         if let Some(watermark) = current_watermark.clone() {
                             for vnode in table.vnodes().clone().iter_vnodes() {
-                                let pk = Some(ScalarImpl::Int16(vnode.to_scalar()));
+                                let pk = vnode.to_datum();
                                 let row = [pk, Some(watermark.clone())];
                                 // This is an upsert.
                                 table.insert(row);
@@ -316,7 +316,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         table: &StateTable<S>,
     ) -> StreamExecutorResult<Option<ScalarImpl>> {
         let watermark_iter_futures = (0..VirtualNode::COUNT).map(|vnode| async move {
-            let pk = row::once(Some(ScalarImpl::Int16(vnode as _)));
+            let pk = row::once(VirtualNode::from_index(vnode).to_datum());
             let watermark_row: Option<OwnedRow> = table.get_row(pk).await?;
             match watermark_row {
                 Some(row) => {

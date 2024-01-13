@@ -17,7 +17,7 @@ use rand::RngCore;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::constants::log_store::v1::KvLogStoreV1Pk;
+use risingwave_common::constants::log_store::v2::KvLogStoreV2Pk;
 use risingwave_common::constants::log_store::KvLogStorePk;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
@@ -30,7 +30,7 @@ use crate::common::table::test_utils::gen_prost_table_with_dist_key;
 pub(crate) const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
 pub(crate) const TEST_DATA_SIZE: usize = 10;
 
-pub(crate) type TestKvLogStorePk = KvLogStoreV1Pk;
+pub(crate) type TestKvLogStorePk = KvLogStoreV2Pk;
 
 pub(crate) fn gen_test_data(base: i64) -> (Vec<Op>, Vec<OwnedRow>) {
     gen_sized_test_data(base, TEST_DATA_SIZE)
@@ -84,8 +84,8 @@ pub(crate) fn gen_sized_test_data(base: i64, max_count: usize) -> (Vec<Op>, Vec<
 
 pub(crate) fn test_payload_schema() -> Vec<ColumnDesc> {
     vec![
-        ColumnDesc::unnamed(ColumnId::from(3), DataType::Int64), // id
-        ColumnDesc::unnamed(ColumnId::from(4), DataType::Varchar), // name
+        ColumnDesc::unnamed(ColumnId::from(4), DataType::Int64), // id
+        ColumnDesc::unnamed(ColumnId::from(5), DataType::Varchar), // name
     ]
 }
 
@@ -93,7 +93,8 @@ pub(crate) fn test_log_store_table_schema() -> Vec<ColumnDesc> {
     let mut column_descs = vec![
         ColumnDesc::unnamed(ColumnId::from(0), DataType::Int64), // epoch
         ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32), // Seq id
-        ColumnDesc::unnamed(ColumnId::from(2), DataType::Int16), // op code
+        ColumnDesc::unnamed(ColumnId::from(2), DataType::Int16), // vnode
+        ColumnDesc::unnamed(ColumnId::from(3), DataType::Int16), // op code
     ];
     column_descs.extend(test_payload_schema());
     column_descs
