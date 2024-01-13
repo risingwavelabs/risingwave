@@ -371,7 +371,19 @@ impl StreamSink {
 
         let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
 
-        let payload_indices = table_catalog_builder.extend_columns(&self.sink_desc().columns);
+        let payload_indices = table_catalog_builder.extend_columns(
+            &self
+                .sink_desc()
+                .columns
+                .iter()
+                .map(|column| {
+                    // make payload hidden column visible in kv log store batch query
+                    let mut column = column.clone();
+                    column.is_hidden = false;
+                    column
+                })
+                .collect_vec(),
+        );
 
         value_indices.extend(payload_indices);
         table_catalog_builder.set_value_indices(value_indices);
