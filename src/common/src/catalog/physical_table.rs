@@ -40,6 +40,8 @@ pub struct TableDesc {
     /// Column indices for primary keys.
     pub stream_key: Vec<usize>,
 
+    pub vnode_col_index: Option<usize>,
+
     /// Whether the table source is append-only
     pub append_only: bool,
 
@@ -84,21 +86,34 @@ impl TableDesc {
             .iter()
             .map(|v| v.to_protobuf().column_index)
             .collect();
-        let dist_key_in_pk_indices = dist_key_indices
-            .iter()
-            .map(|&di| {
+        let vnode_col_idx_in_pk = self
+            .vnode_col_index
+            .and_then(|vnode_col_index| {
                 pk_indices
                     .iter()
-                    .position(|&pi| di == pi)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "distribution key {:?} must be a subset of primary key {:?}",
-                            dist_key_indices, pk_indices
-                        )
-                    })
+                    .position(|&pk_index| pk_index == vnode_col_index as u32)
             })
-            .map(|d| d as u32)
-            .collect_vec();
+            .map(|i| i as u32);
+
+        let dist_key_in_pk_indices = if vnode_col_idx_in_pk.is_none() {
+            dist_key_indices
+                .iter()
+                .map(|&di| {
+                    pk_indices
+                        .iter()
+                        .position(|&pi| di == pi)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "distribution key {:?} must be a subset of primary key {:?}",
+                                dist_key_indices, pk_indices
+                            )
+                        })
+                })
+                .map(|d| d as u32)
+                .collect_vec()
+        } else {
+            Vec::new()
+        };
         StorageTableDesc {
             table_id: self.table_id.into(),
             columns: self.columns.iter().map(Into::into).collect(),
@@ -109,6 +124,7 @@ impl TableDesc {
             read_prefix_len_hint: self.read_prefix_len_hint as u32,
             versioned: self.versioned,
             stream_key: self.stream_key.iter().map(|&x| x as u32).collect(),
+            vnode_col_idx_in_pk,
         }
     }
 
