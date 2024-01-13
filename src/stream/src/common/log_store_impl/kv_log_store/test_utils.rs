@@ -18,14 +18,11 @@ use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::constants::log_store::v1::KvLogStoreV1Pk;
-use risingwave_common::constants::log_store::{
-    KvLogStorePk, KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS,
-};
+use risingwave_common::constants::log_store::KvLogStorePk;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl, ScalarRef};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::PbTable;
 
 use crate::common::table::test_utils::gen_prost_table_with_dist_key;
@@ -156,8 +153,8 @@ pub(crate) const TEST_SCHEMA_DIST_KEY_INDEX: usize = 0;
 
 pub(crate) fn gen_test_log_store_table() -> PbTable {
     let schema = test_log_store_table_schema();
-    let order_types = vec![OrderType::ascending(), OrderType::ascending_nulls_last()];
-    let pk_index = vec![0_usize, 1_usize];
+    let order_types = TestKvLogStorePk::pk_ordering().into_iter().collect();
+    let pk_index = (0..TestKvLogStorePk::LEN).collect();
     let read_prefix_len_hint = 0;
     gen_prost_table_with_dist_key(
         TEST_TABLE_ID,
@@ -165,7 +162,7 @@ pub(crate) fn gen_test_log_store_table() -> PbTable {
         order_types,
         pk_index,
         read_prefix_len_hint,
-        vec![KvLogStoreV1Pk::LEN + KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS.len()], // id field
+        vec![TestKvLogStorePk::predefined_column_len()], // id field
     )
 }
 

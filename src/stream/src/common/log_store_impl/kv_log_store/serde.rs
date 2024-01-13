@@ -132,8 +132,7 @@ where
             .iter()
             .map(|col| col.column_desc.as_ref().unwrap().into())
             .collect();
-        let predefined_column_len: usize =
-            PK::LEN + KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS.len();
+        let predefined_column_len: usize = PK::predefined_column_len();
         let dist_key_indices: Vec<usize> = table_catalog
             .distribution_key
             .iter()
@@ -157,8 +156,7 @@ where
 
         let pk_types = PK::pk_types();
 
-        // There are 3 predefined columns for kv log store:
-        assert!(data_types.len() > PK::LEN + KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS.len());
+        assert!(data_types.len() >= predefined_column_len);
         for i in 0..PK::LEN {
             assert_eq!(data_types[i], pk_types[i]);
         }
@@ -315,9 +313,7 @@ where
     fn deserialize(&self, value_bytes: Bytes) -> LogStoreResult<(u64, LogStoreRowOp)> {
         let row_data = self.row_serde.deserialize(&value_bytes)?;
 
-        let payload_row = OwnedRow::new(
-            row_data[PK::LEN + KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS.len()..].to_vec(),
-        );
+        let payload_row = OwnedRow::new(row_data[PK::predefined_column_len()..].to_vec());
         let epoch = Self::decode_epoch(
             *row_data[PK::EPOCH_COLUMN_INDEX]
                 .as_ref()

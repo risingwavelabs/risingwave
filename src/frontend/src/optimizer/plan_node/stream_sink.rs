@@ -346,11 +346,8 @@ impl StreamSink {
         let mut table_catalog_builder =
             TableCatalogBuilder::new(self.input.ctx().with_options().internal_table_subset());
 
-        let mut value_indices = Vec::with_capacity(
-            Pk::pk_types().len()
-                + KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS.len()
-                + self.sink_desc.columns.len(),
-        );
+        let mut value_indices =
+            Vec::with_capacity(Pk::predefined_column_len() + self.sink_desc.columns.len());
 
         let pk_column_names = Pk::pk_names();
         let pk_types = Pk::pk_types();
@@ -365,8 +362,6 @@ impl StreamSink {
             let indice = table_catalog_builder.add_column(&Field::with_name(data_type, name));
             value_indices.push(indice);
         }
-
-        let predefined_column_len = Pk::LEN + KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS.len();
 
         for (i, ordering) in Pk::pk_ordering().into_iter().enumerate() {
             table_catalog_builder.add_order_column(i, ordering);
@@ -385,7 +380,7 @@ impl StreamSink {
             .distribution()
             .dist_column_indices()
             .iter()
-            .map(|idx| idx + predefined_column_len)
+            .map(|idx| idx + Pk::predefined_column_len())
             .collect_vec();
 
         table_catalog_builder.build(dist_key, read_prefix_len_hint)

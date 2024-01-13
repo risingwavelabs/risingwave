@@ -69,6 +69,10 @@ pub mod log_store {
             encoded_epoch: i64,
             seq_id: Option<SeqIdType>,
         ) -> [Option<ScalarImpl>; Self::LEN];
+
+        fn predefined_column_len() -> usize {
+            Self::LEN + KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS.len()
+        }
     }
 
     pub mod v1 {
