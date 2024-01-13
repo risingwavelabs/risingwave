@@ -151,6 +151,11 @@ impl LogicalJoin {
         self.core.join_type
     }
 
+    /// Get the eq join key of the logical join.
+    pub fn eq_indexes(&self) -> Vec<(usize, usize)> {
+        self.core.eq_indexes()
+    }
+
     /// Get the output indices of the logical join.
     pub fn output_indices(&self) -> &Vec<usize> {
         &self.core.output_indices

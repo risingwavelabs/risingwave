@@ -65,7 +65,7 @@ use self::plan_node::{
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
-use self::plan_visitor::{has_batch_exchange, CardinalityVisitor};
+use self::plan_visitor::{has_batch_exchange, CardinalityVisitor, StreamKeyChecker};
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
@@ -348,7 +348,18 @@ impl PlanRoot {
 
     /// Generate optimized stream plan
     fn gen_optimized_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
-        self.gen_optimized_stream_plan_inner(emit_on_window_close, StreamScanType::Backfill)
+        let stream_scan_type = if self
+            .plan
+            .ctx()
+            .session_ctx()
+            .config()
+            .streaming_enable_arrangement_backfill()
+        {
+            StreamScanType::ArrangementBackfill
+        } else {
+            StreamScanType::Backfill
+        };
+        self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)
     }
 
     fn gen_optimized_stream_plan_inner(
@@ -417,6 +428,18 @@ impl PlanRoot {
 
         let plan = match self.plan.convention() {
             Convention::Logical => {
+                if !ctx
+                    .session_ctx()
+                    .config()
+                    .streaming_allow_jsonb_in_stream_key()
+                    && let Some(err) = StreamKeyChecker.visit(self.plan.clone())
+                {
+                    return Err(ErrorCode::NotSupported(
+                        err,
+                        "Using JSONB columns as part of the join or aggregation keys can severely impair performance. \
+                        If you intend to proceed, force to enable it with: `set rw_streaming_allow_jsonb_in_stream_key to true`".to_string(),
+                    ).into());
+                }
                 let plan = self.gen_optimized_logical_plan_for_stream()?;
 
                 let (plan, out_col_change) = {
@@ -766,6 +789,14 @@ impl PlanRoot {
     ) -> Result<StreamSink> {
         let stream_scan_type = if without_backfill {
             StreamScanType::UpstreamOnly
+        } else if self
+            .plan
+            .ctx()
+            .session_ctx()
+            .config()
+            .streaming_enable_arrangement_backfill()
+        {
+            StreamScanType::ArrangementBackfill
         } else {
             StreamScanType::Backfill
         };

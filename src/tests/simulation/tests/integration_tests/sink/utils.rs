@@ -363,8 +363,7 @@ pub async fn start_sink_test_cluster() -> Result<Cluster> {
         meta_nodes: 1,
         compactor_nodes: 1,
         compute_node_cores: 2,
-        etcd_timeout_rate: 0.0,
-        etcd_data_path: None,
+        ..Default::default()
     })
     .await
 }

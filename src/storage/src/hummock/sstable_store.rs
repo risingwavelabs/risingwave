@@ -172,6 +172,7 @@ pub struct SstableStore {
     recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
     prefetch_buffer_usage: Arc<AtomicUsize>,
     prefetch_buffer_capacity: usize,
+    max_prefetch_block_number: usize,
 }
 
 impl SstableStore {
@@ -182,6 +183,7 @@ impl SstableStore {
         meta_cache_capacity: usize,
         high_priority_ratio: usize,
         prefetch_buffer_capacity: usize,
+        max_prefetch_block_number: usize,
         data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
         meta_file_cache: FileCache<HummockSstableObjectId, CachedSstable>,
         recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
@@ -218,6 +220,7 @@ impl SstableStore {
             recent_filter,
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             prefetch_buffer_capacity,
+            max_prefetch_block_number,
         }
     }
 
@@ -239,6 +242,7 @@ impl SstableStore {
             meta_file_cache: FileCache::none(),
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             prefetch_buffer_capacity: block_cache_capacity,
+            max_prefetch_block_number: 16, /* compactor won't use this parameter, so just assign a default value. */
             recent_filter: None,
         }
     }
@@ -306,7 +310,6 @@ impl SstableStore {
         policy: CachePolicy,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<Box<dyn BlockStream>> {
-        const MAX_PREFETCH_BLOCK: usize = 16;
         let object_id = sst.id;
         if self.prefetch_buffer_usage.load(Ordering::Acquire) > self.prefetch_buffer_capacity {
             let block = self.get(sst, block_index, policy, stats).await?;
@@ -324,7 +327,7 @@ impl SstableStore {
                 None,
             )));
         }
-        let end_index = std::cmp::min(end_index, block_index + MAX_PREFETCH_BLOCK);
+        let end_index = std::cmp::min(end_index, block_index + self.max_prefetch_block_number);
         let mut end_index = std::cmp::min(end_index, sst.meta.block_metas.len());
         let start_offset = sst.meta.block_metas[block_index].offset as usize;
         let mut min_hit_index = end_index;
