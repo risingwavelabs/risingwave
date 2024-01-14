@@ -84,10 +84,10 @@ mod tests {
     #[test]
     fn test_cmp_encoded_full_key() {
         // 1 compared with 256 under little-endian encoding would return wrong result.
-        let key1 = FullKey::for_test(TableId::new(0), b"0".to_vec(), 1);
-        let key2 = FullKey::for_test(TableId::new(1), b"0".to_vec(), 1);
-        let key3 = FullKey::for_test(TableId::new(1), b"1".to_vec(), 256);
-        let key4 = FullKey::for_test(TableId::new(1), b"1".to_vec(), 1);
+        let key1 = FullKey::for_test(TableId::new(0), b"0".to_vec(), 65536);
+        let key2 = FullKey::for_test(TableId::new(1), b"0".to_vec(), 65536);
+        let key3 = FullKey::for_test(TableId::new(1), b"1".to_vec(), 65536 * 2);
+        let key4 = FullKey::for_test(TableId::new(1), b"1".to_vec(), 65536);
 
         assert_eq!(
             KeyComparator::compare_encoded_full_key(&key1.encode(), &key1.encode()),

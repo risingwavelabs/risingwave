@@ -110,7 +110,7 @@ async fn test_snapshot_inner(
         .new_local(NewLocalOptions::for_test(Default::default()))
         .await;
 
-    let epoch1: u64 = 1;
+    let epoch1: u64 = 65536;
     local.init_for_test(epoch1).await.unwrap();
     local
         .ingest_batch(
@@ -132,7 +132,7 @@ async fn test_snapshot_inner(
         )
         .await
         .unwrap();
-    let epoch2 = epoch1 + 1;
+    let epoch2 = epoch1 + 65536;
     local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     if enable_sync {
         let ssts = hummock_storage
@@ -177,7 +177,7 @@ async fn test_snapshot_inner(
         )
         .await
         .unwrap();
-    let epoch3 = epoch2 + 1;
+    let epoch3 = epoch2 + 65536;
     local.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
     if enable_sync {
         let ssts = hummock_storage
@@ -252,7 +252,7 @@ async fn test_snapshot_range_scan_inner(
     enable_sync: bool,
     enable_commit: bool,
 ) {
-    let epoch: u64 = 1;
+    let epoch: u64 = 65536;
     let mut local = hummock_storage
         .new_local(NewLocalOptions::for_test(Default::default()))
         .await;

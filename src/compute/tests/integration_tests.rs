@@ -274,7 +274,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     assert!(result.is_none());
 
     // Send a barrier to start materialized view.
-    let mut curr_epoch = 1919;
+    let mut curr_epoch = 65536;
     barrier_tx
         .send(Barrier::new_test_barrier(curr_epoch))
         .unwrap();
@@ -288,7 +288,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         }) if epoch.curr == curr_epoch
     ));
 
-    curr_epoch += 1;
+    curr_epoch += 65536;
     let barrier_tx_clone = barrier_tx.clone();
     tokio::spawn(async move {
         let mut stream = insert.execute();
@@ -370,7 +370,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         0,
     ));
 
-    curr_epoch += 1;
+    curr_epoch += 65536;
     let barrier_tx_clone = barrier_tx.clone();
     tokio::spawn(async move {
         let mut stream = delete.execute();
@@ -463,7 +463,7 @@ async fn test_row_seq_scan() -> Result<()> {
         vec![0, 1, 2],
     );
 
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(65536);
     state.init_epoch(epoch);
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),

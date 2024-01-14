@@ -290,7 +290,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let stream_chunk2 = create_stream_chunk(chunk2_datums, &chunk_schema);
 
     // The first barrier
-    let curr_epoch = 11;
+    let mut curr_epoch = 65536;
     let mut splits = HashMap::new();
     splits.insert(
         actor_id,
@@ -332,17 +332,23 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     // ingest data and barrier
     let interval = Duration::from_millis(10);
     tx.push_chunk(stream_chunk1);
-
+    println!("1 cur epoch = {}", curr_epoch);
     tokio::time::sleep(interval).await;
-    tx.push_barrier(curr_epoch + 1, false);
+    curr_epoch += 1 << 16;
+    println!("2 cur epoch = {}", curr_epoch);
+    tx.push_barrier(curr_epoch, false);
 
     tx.push_chunk(stream_chunk2);
 
     tokio::time::sleep(interval).await;
-    tx.push_barrier(curr_epoch + 2, false);
+    curr_epoch += 1 << 16;
+    println!("3 cur epoch = {}", curr_epoch);
+    tx.push_barrier(curr_epoch, false);
 
     tokio::time::sleep(interval).await;
-    tx.push_barrier(curr_epoch + 3, true);
+    curr_epoch += 1 << 16;
+    println!("4 cur epoch = {}", curr_epoch);
+    tx.push_barrier(curr_epoch, true);
 
     // scan the final result of the mv table
     let column_descs = vec![

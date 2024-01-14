@@ -917,7 +917,7 @@ mod tests {
                 inserts.iter().map(|(time, value)| {
                     let full_key = FullKey {
                         user_key: key.clone(),
-                        epoch_with_gap: EpochWithGap::new_from_epoch(time.0),
+                        epoch_with_gap: EpochWithGap::new_from_epoch(time.0 * 65536),
                     };
                     (full_key, value.clone())
                 })
@@ -1064,13 +1064,13 @@ mod tests {
             |x| x * 3,
             sstable_store.clone(),
             TEST_KEYS_COUNT,
-            1,
+            65536,
         )
         .await;
 
         let backward_iters = vec![BackwardSstableIterator::new(table0, sstable_store)];
 
-        let min_epoch = (TEST_KEYS_COUNT / 5) as u64;
+        let min_epoch = ((TEST_KEYS_COUNT / 5) * 65536) as u64;
         let mi = UnorderedMergeIteratorInner::new(backward_iters);
         let mut ui = BackwardUserIterator::with_min_epoch(mi, (Unbounded, Unbounded), min_epoch);
         ui.rewind().await.unwrap();
@@ -1079,13 +1079,13 @@ mod tests {
         while ui.is_valid() {
             let key = ui.key();
             let key_epoch = key.epoch_with_gap.pure_epoch();
-            assert!(key_epoch > min_epoch);
+            assert!(key_epoch > min_epoch as u64);
 
             i += 1;
             ui.next().await.unwrap();
         }
 
-        let expect_count = TEST_KEYS_COUNT - min_epoch as usize;
+        let expect_count = (TEST_KEYS_COUNT - (min_epoch / 65536) as usize) as usize;
         assert_eq!(i, expect_count);
     }
 }

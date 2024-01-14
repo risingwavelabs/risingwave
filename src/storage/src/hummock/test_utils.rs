@@ -345,7 +345,7 @@ pub fn test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
 pub fn test_key_of(idx: usize) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: test_user_key_of(idx),
-        epoch_with_gap: EpochWithGap::new_from_epoch(233),
+        epoch_with_gap: EpochWithGap::new_from_epoch(65536),
     }
 }
 
@@ -407,7 +407,7 @@ pub mod delete_range {
         ) {
             let size = SharedBufferBatch::measure_delete_range_size(&delete_ranges);
             let batch = SharedBufferBatch::build_shared_buffer_batch(
-                epoch,
+                epoch * 65536,
                 0,
                 vec![],
                 size,

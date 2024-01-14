@@ -151,8 +151,8 @@ impl EpochPair {
     }
 
     pub fn inc(&mut self) {
-        self.curr += 1;
-        self.prev += 1;
+        self.prev = self.curr;
+        self.curr += 1 << 16;
     }
 
     pub fn inc_for_test(&mut self, inc_by: u64) {
@@ -162,8 +162,8 @@ impl EpochPair {
     }
 
     pub fn new_test_epoch(curr: u64) -> Self {
-        assert!(curr > 0);
-        Self::new(curr, curr - 1)
+        assert!(curr > 65535);
+        Self::new(curr, curr - 65536)
     }
 }
 

@@ -88,15 +88,15 @@ pub fn iterator_test_bytes_user_key_of(idx: usize) -> UserKey<Bytes> {
     )
 }
 
-/// Generates keys like `{table_id=0}key_test_00002` with epoch 233.
+/// Generates keys like `{table_id=0}key_test_00002` with epoch 65536.
 pub fn iterator_test_key_of(idx: usize) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: iterator_test_user_key_of(idx),
-        epoch_with_gap: EpochWithGap::new_from_epoch(233),
+        epoch_with_gap: EpochWithGap::new_from_epoch(65536),
     }
 }
 
-/// Generates keys like `{table_id=0}key_test_00002` with epoch 233.
+/// Generates keys like `{table_id=0}key_test_00002` with epoch 65536.
 pub fn iterator_test_bytes_key_of(idx: usize) -> FullKey<Bytes> {
     iterator_test_key_of(idx).into_bytes()
 }
@@ -111,7 +111,7 @@ pub fn iterator_test_key_of_epoch(idx: usize, epoch: HummockEpoch) -> FullKey<Ve
 
 /// Generates keys like `{table_id=0}key_test_00002` with epoch `epoch` .
 pub fn iterator_test_bytes_key_of_epoch(idx: usize, epoch: HummockEpoch) -> FullKey<Bytes> {
-    iterator_test_key_of_epoch(idx, epoch).into_bytes()
+    iterator_test_key_of_epoch(idx, epoch * 65536).into_bytes()
 }
 
 /// The value of an index, like `value_test_00002` without value meta
@@ -187,7 +187,7 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
         object_id,
         kv_pairs
             .into_iter()
-            .map(|kv| (iterator_test_key_of_epoch(kv.0, kv.1), kv.2)),
+            .map(|kv| (iterator_test_key_of_epoch(kv.0, kv.1 * 65536), kv.2)),
         sstable_store,
     )
     .await
@@ -209,7 +209,7 @@ pub async fn gen_iterator_test_sstable_with_range_tombstones(
                 false,
                 iterator_test_table_key_of(end),
                 false,
-                epoch,
+                epoch * 65536,
             )
         })
         .collect_vec();
@@ -218,7 +218,7 @@ pub async fn gen_iterator_test_sstable_with_range_tombstones(
         object_id,
         kv_pairs
             .into_iter()
-            .map(|kv| (iterator_test_key_of_epoch(kv.0, kv.1), kv.2)),
+            .map(|kv| (iterator_test_key_of_epoch(kv.0, kv.1 * 65536), kv.2)),
         range_tombstones,
         sstable_store,
     )
@@ -262,7 +262,7 @@ pub async fn gen_iterator_test_sstable_with_incr_epoch(
         object_id,
         (0..total).map(|i| {
             (
-                iterator_test_key_of_epoch(idx_mapping(i), epoch_base + i as u64),
+                iterator_test_key_of_epoch(idx_mapping(i), epoch_base + (i * 65536) as u64),
                 HummockValue::put(iterator_test_value_of(idx_mapping(i))),
             )
         }),

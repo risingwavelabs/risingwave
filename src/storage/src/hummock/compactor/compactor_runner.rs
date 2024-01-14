@@ -969,13 +969,13 @@ mod tests {
                 TableId::new(1),
                 b"abc".to_vec(),
                 b"cde".to_vec(),
-                1,
+                65536,
             ),
             DeleteRangeTombstone::new_for_test(
                 TableId::new(2),
                 b"abc".to_vec(),
                 b"def".to_vec(),
-                1,
+                65536,
             ),
         ];
         let mut sstable_info_1 = gen_test_sstable_impl::<Bytes, Xor16FilterBuilder>(

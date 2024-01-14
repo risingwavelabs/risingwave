@@ -133,6 +133,6 @@ mod tests {
     #[test]
     fn test_ttl_u32() {
         let mut ttl_filter = TtlCompactionFilter::new(HashMap::from_iter([(1, 4000000000)]), 1);
-        ttl_filter.should_delete(FullKey::new(TableId::new(1), TableKey(vec![]), 1).to_ref());
+        ttl_filter.should_delete(FullKey::new(TableId::new(1), TableKey(vec![]), 65536).to_ref());
     }
 }

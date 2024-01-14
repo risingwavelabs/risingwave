@@ -54,7 +54,7 @@ pub async fn add_test_tables(
     context_id: HummockContextId,
 ) -> Vec<Vec<SstableInfo>> {
     // Increase version by 2.
-    let mut epoch: u64 = 1;
+    let mut epoch: u64 = 65536;
     let sstable_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables = generate_test_sstables_with_table_id(epoch, 1, sstable_ids);
     register_sstable_infos_to_compaction_group(
@@ -131,7 +131,7 @@ pub async fn add_test_tables(
             .remove_compactor(context_id);
     }
     // Increase version by 1.
-    epoch += 1;
+    epoch += 65536;
     let test_tables_3 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager,

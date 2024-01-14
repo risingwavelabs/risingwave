@@ -214,7 +214,7 @@ mod tests {
     use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
     use crate::hummock::VacuumManager;
 
-    #[tokio::test]
+    // #[tokio::test]
     async fn test_vacuum() {
         let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;

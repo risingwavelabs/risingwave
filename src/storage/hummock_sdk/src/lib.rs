@@ -287,18 +287,11 @@ impl EpochWithGap {
         // We only use 48 high bit to store epoch and use 16 low bit to store spill offset. But for MAX epoch,
         // we still keep `u64::MAX` because we have use it in delete range and persist this value to sstable files.
         //  So for compatibility, we must skip checking it for u64::MAX. See bug description in https://github.com/risingwavelabs/risingwave/issues/13717
-        #[cfg(not(feature = "enable_test_epoch"))]
-        {
-            if risingwave_common::util::epoch::is_max_epoch(epoch) {
-                EpochWithGap::new_max_epoch()
-            } else {
-                debug_assert!((epoch & EPOCH_SPILL_TIME_MASK) == 0);
-                EpochWithGap(epoch + spill_offset as u64)
-            }
-        }
-        #[cfg(feature = "enable_test_epoch")]
-        {
-            EpochWithGap(epoch)
+        if risingwave_common::util::epoch::is_max_epoch(epoch) {
+            EpochWithGap::new_max_epoch()
+        } else {
+            debug_assert!((epoch & EPOCH_SPILL_TIME_MASK) == 0);
+            EpochWithGap(epoch + spill_offset as u64)
         }
     }
 
@@ -326,14 +319,7 @@ impl EpochWithGap {
 
     // return the pure epoch without spill offset
     pub fn pure_epoch(&self) -> HummockEpoch {
-        #[cfg(not(feature = "enable_test_epoch"))]
-        {
-            self.0 & !EPOCH_SPILL_TIME_MASK
-        }
-        #[cfg(feature = "enable_test_epoch")]
-        {
-            self.0
-        }
+        self.0 & !EPOCH_SPILL_TIME_MASK
     }
 
     pub fn offset(&self) -> u64 {
