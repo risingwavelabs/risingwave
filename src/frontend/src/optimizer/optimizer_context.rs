@@ -104,7 +104,7 @@ impl OptimizerContext {
             logical_explain: RefCell::new(None),
             next_correlated_id: RefCell::new(0),
             with_options: Default::default(),
-            session_timezone: RefCell::new(SessionTimezone::new("UTC".into())),
+            session_timezone: RefCell::new(SessionTimezone::new("UTC".into(), true)),
             next_expr_display_id: RefCell::new(0),
             total_rule_applied: RefCell::new(0),
             overwrite_options: OverwriteOptions::default(),

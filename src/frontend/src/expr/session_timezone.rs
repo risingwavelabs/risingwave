@@ -37,7 +37,6 @@ impl ExprRewriter for SessionTimezone {
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         if let Some(expr) = self.with_timezone(func_type, &inputs, ret.clone()) {
-            self.mark_used();
             expr
         } else {
             FunctionCall::new_unchecked(func_type, inputs, ret).into()
@@ -76,7 +75,7 @@ impl SessionTimezone {
 
     // Inlines conversions based on session timezone if required by the function
     fn with_timezone(
-        &self,
+        &mut self,
         func_type: ExprType,
         inputs: &[ExprImpl],
         return_type: DataType,
@@ -205,9 +204,6 @@ impl SessionTimezone {
             // `date_trunc(field_string, input_timestamptz)`
             // => `date_trunc(field_string, input_timestamptz, zone_string)`
             ExprType::DateTrunc | ExprType::Extract | ExprType::DatePart => {
-                if !self.enable_timezone_rewriting {
-                    return None;
-                }
                 if !(inputs.len() == 2 && inputs[1].return_type() == DataType::Timestamptz) {
                     return None;
                 }
@@ -223,47 +219,44 @@ impl SessionTimezone {
                     // This is optional but avoids false warning in common case.
                     return None;
                 }
-                let mut new_inputs = inputs.to_vec();
-                new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
-                Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
+                self.rewrite_func_with_timezone(inputs, func_type)
             }
             // `to_timestamp1(input_string, format_string)`
             // => `to_timestamp1(input_string, format_string, zone_string)`
             ExprType::ToTimestamp1 => {
-                if !self.enable_timezone_rewriting {
-                    return None;
-                }
                 if !(inputs.len() == 2
                     && inputs[0].return_type() == DataType::Varchar
                     && inputs[1].return_type() == DataType::Varchar)
                 {
                     return None;
                 }
-                let mut new_inputs = inputs.to_vec();
-                new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
-                Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
+                self.rewrite_func_with_timezone(inputs, func_type)
             }
             // `to_char(input_timestamptz, format_string)`
             // => `to_char(input_timestamptz, format_string, zone_string)`
             ExprType::ToChar => {
-                if !self.enable_timezone_rewriting {
-                    return None;
-                }
                 if !(inputs.len() == 2
                     && inputs[0].return_type() == DataType::Timestamptz
                     && inputs[1].return_type() == DataType::Varchar)
                 {
                     return None;
                 }
-                let mut new_inputs = inputs.to_vec();
-                new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
-                Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
+                self.rewrite_func_with_timezone(inputs, func_type)
+            }
+            // only to `mark_used` here.
+            ExprType::MakeTimestamptz => {
+                if !(inputs.len() == 6) {
+                    return None;
+                }
+                self.mark_used();
+                None
             }
             _ => None,
         }
     }
 
-    fn at_timezone(&self, input: ExprImpl) -> ExprImpl {
+    fn at_timezone(&mut self, input: ExprImpl) -> ExprImpl {
+        self.mark_used();
         if self.enable_timezone_rewriting {
             FunctionCall::new(
                 ExprType::AtTimeZone,
@@ -278,7 +271,8 @@ impl SessionTimezone {
         }
     }
 
-    fn cast_with_timezone(&self, input: ExprImpl, return_type: DataType) -> ExprImpl {
+    fn cast_with_timezone(&mut self, input: ExprImpl, return_type: DataType) -> ExprImpl {
+        self.mark_used();
         if self.enable_timezone_rewriting {
             FunctionCall::new_unchecked(
                 ExprType::CastWithTimeZone,
@@ -288,6 +282,21 @@ impl SessionTimezone {
             .into()
         } else {
             FunctionCall::new_unchecked(ExprType::CastWithTimeZone, vec![input], return_type).into()
+        }
+    }
+
+    fn rewrite_func_with_timezone(
+        &mut self,
+        inputs: &[ExprImpl],
+        func_type: ExprType,
+    ) -> Option<ExprImpl> {
+        if self.enable_timezone_rewriting {
+            let mut new_inputs = inputs.to_vec();
+            new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
+            Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
+        } else {
+            self.mark_used();
+            None
         }
     }
 }
