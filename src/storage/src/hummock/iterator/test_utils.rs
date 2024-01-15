@@ -194,7 +194,7 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
 }
 
 // key=[idx, epoch], value
-pub async fn gen_iterator_test_sstable_with_range_tombstones(
+pub async fn gen_iterator_test_sstable_with_range_tombstones_for_test(
     object_id: HummockSstableObjectId,
     kv_pairs: Vec<(usize, u64, HummockValue<Vec<u8>>)>,
     delete_ranges: Vec<(usize, usize, u64)>,

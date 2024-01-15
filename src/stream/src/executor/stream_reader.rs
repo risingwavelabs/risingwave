@@ -196,14 +196,16 @@ mod tests {
 
         assert_matches!(next!().unwrap(), Either::Right(_));
         // Write a barrier, and we should receive it.
-        barrier_tx.send(Barrier::new_test_barrier(1)).unwrap();
+        barrier_tx.send(Barrier::new_test_barrier(65536)).unwrap();
         assert_matches!(next!().unwrap(), Either::Left(_));
 
         // Pause the stream.
         stream.pause_stream();
 
         // Write a barrier.
-        barrier_tx.send(Barrier::new_test_barrier(2)).unwrap();
+        barrier_tx
+            .send(Barrier::new_test_barrier(65536 * 2))
+            .unwrap();
         // Then write a chunk.
         write_handle2.begin().unwrap();
         write_handle2

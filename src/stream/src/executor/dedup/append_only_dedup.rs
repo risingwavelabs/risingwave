@@ -269,7 +269,7 @@ mod tests {
         ))
         .execute();
 
-        tx.push_barrier(1, false);
+        tx.push_barrier(65536, false);
         dedup_executor.next().await.unwrap().unwrap();
 
         let chunk = StreamChunk::from_pretty(
@@ -290,7 +290,7 @@ mod tests {
             )
         );
 
-        tx.push_barrier(2, false);
+        tx.push_barrier(2 * 65536, false);
         dedup_executor.next().await.unwrap().unwrap();
 
         let chunk = StreamChunk::from_pretty(

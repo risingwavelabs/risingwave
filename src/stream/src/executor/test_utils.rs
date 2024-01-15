@@ -155,10 +155,10 @@ impl MockSource {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self: Box<Self>) {
-        let mut epoch = 1;
+        let mut epoch = 65536;
 
         while let Some(msg) = self.rx.recv().await {
-            epoch += 1;
+            epoch += 65536;
             yield msg;
         }
 

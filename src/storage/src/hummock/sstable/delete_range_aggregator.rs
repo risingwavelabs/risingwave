@@ -117,7 +117,7 @@ impl CompactionDeleteRangeIterator {
     /// Return the earliest range-tombstone which deletes target-key.
     /// Target-key must be given in order.
     #[cfg(test)]
-    pub async fn earliest_delete_which_can_see_key(
+    pub async fn earliest_delete_which_can_see_key_for_test(
         &mut self,
         target_user_key: UserKey<&[u8]>,
         epoch: HummockEpoch,
@@ -131,7 +131,7 @@ impl CompactionDeleteRangeIterator {
         {
             self.inner.next().await?;
         }
-        Ok(self.earliest_delete_since(epoch))
+        Ok(self.earliest_delete_since(epoch * 65536))
     }
 
     pub fn key(&self) -> PointRange<&[u8]> {
@@ -262,7 +262,7 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        gen_iterator_test_sstable_with_range_tombstones, iterator_test_user_key_of,
+        gen_iterator_test_sstable_with_range_tombstones_for_test, iterator_test_user_key_of,
         mock_sstable_store,
     };
     use crate::hummock::test_utils::delete_range::CompactionDeleteRangesBuilder;
@@ -273,7 +273,7 @@ mod tests {
     pub async fn test_compaction_delete_range_iterator() {
         let mut builder = CompactionDeleteRangesBuilder::default();
         let table_id = TableId::default();
-        builder.add_delete_events(
+        builder.add_delete_events_for_test(
             9,
             table_id,
             vec![
@@ -291,7 +291,7 @@ mod tests {
                 ),
             ],
         );
-        builder.add_delete_events(
+        builder.add_delete_events_for_test(
             12,
             table_id,
             vec![(
@@ -299,7 +299,7 @@ mod tests {
                 Bound::Excluded(Bytes::copy_from_slice(b"bbbccc")),
             )],
         );
-        builder.add_delete_events(
+        builder.add_delete_events_for_test(
             8,
             table_id,
             vec![(
@@ -307,7 +307,7 @@ mod tests {
                 Bound::Included(Bytes::copy_from_slice(b"eeeeee")),
             )],
         );
-        builder.add_delete_events(
+        builder.add_delete_events_for_test(
             6,
             table_id,
             vec![(
@@ -315,7 +315,7 @@ mod tests {
                 Bound::Excluded(Bytes::copy_from_slice(b"bbbdddf")),
             )],
         );
-        builder.add_delete_events(
+        builder.add_delete_events_for_test(
             7,
             table_id,
             vec![(
@@ -327,78 +327,78 @@ mod tests {
         iter.rewind().await.unwrap();
 
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 13)
+            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbb").as_ref(), 13)
                 .await
                 .unwrap(),
             HummockEpoch::MAX,
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 11)
+            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbb").as_ref(), 11)
                 .await
                 .unwrap(),
-            12
+            12 * 65536
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 8)
+            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbb").as_ref(), 8)
                 .await
                 .unwrap(),
-            9
+            9 * 65536
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(test_user_key(b"bbbaaa").as_ref(), 8)
+            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbbaaa").as_ref(), 8)
                 .await
                 .unwrap(),
-            9
+            9 * 65536
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(test_user_key(b"bbbccd").as_ref(), 8)
+            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbbccd").as_ref(), 8)
                 .await
                 .unwrap(),
-            9
+            9 * 65536
         );
 
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(test_user_key(b"bbbddd").as_ref(), 8)
+            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbbddd").as_ref(), 8)
                 .await
                 .unwrap(),
             HummockEpoch::MAX,
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(test_user_key(b"bbbeee").as_ref(), 8)
+            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbbeee").as_ref(), 8)
                 .await
                 .unwrap(),
             HummockEpoch::MAX,
         );
 
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(test_user_key(b"bbbeef").as_ref(), 10)
+            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbbeef").as_ref(), 10)
                 .await
                 .unwrap(),
             HummockEpoch::MAX,
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(test_user_key(b"eeeeee").as_ref(), 8)
+            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"eeeeee").as_ref(), 8)
                 .await
                 .unwrap(),
-            8
+            8 * 65536
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(test_user_key(b"gggggg").as_ref(), 8)
+            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"gggggg").as_ref(), 8)
                 .await
                 .unwrap(),
-            9
+            9 * 65536
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(test_user_key(b"hhhhhh").as_ref(), 6)
+            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"hhhhhh").as_ref(), 6)
                 .await
                 .unwrap(),
             HummockEpoch::MAX,
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(test_user_key(b"iiiiii").as_ref(), 6)
+            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"iiiiii").as_ref(), 6)
                 .await
                 .unwrap(),
-            7
+            7 * 65536
         );
     }
 
@@ -406,7 +406,7 @@ mod tests {
     pub async fn test_delete_range_split() {
         let table_id = TableId::default();
         let mut builder = CompactionDeleteRangesBuilder::default();
-        builder.add_delete_events(
+        builder.add_delete_events_for_test(
             13,
             table_id,
             vec![(
@@ -414,7 +414,7 @@ mod tests {
                 Bound::Excluded(Bytes::copy_from_slice(b"cccc")),
             )],
         );
-        builder.add_delete_events(
+        builder.add_delete_events_for_test(
             10,
             table_id,
             vec![(
@@ -422,7 +422,7 @@ mod tests {
                 Bound::Excluded(Bytes::copy_from_slice(b"dddd")),
             )],
         );
-        builder.add_delete_events(
+        builder.add_delete_events_for_test(
             12,
             table_id,
             vec![(
@@ -430,7 +430,7 @@ mod tests {
                 Bound::Included(Bytes::copy_from_slice(b"eeee")),
             )],
         );
-        builder.add_delete_events(
+        builder.add_delete_events_for_test(
             15,
             table_id,
             vec![(
@@ -477,7 +477,7 @@ mod tests {
     async fn test_delete_range_get() {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
-        let sst_info = gen_iterator_test_sstable_with_range_tombstones(
+        let sst_info = gen_iterator_test_sstable_with_range_tombstones_for_test(
             0,
             vec![],
             vec![(0, 2, 300), (1, 4, 150), (3, 6, 50), (5, 8, 150)],
@@ -492,22 +492,22 @@ mod tests {
             sstable.value(),
             iterator_test_user_key_of(0).as_ref(),
         );
-        assert_eq!(ret, 300);
+        assert_eq!(ret, 300 * 65536);
         let ret = get_min_delete_range_epoch_from_sstable(
             sstable.value(),
             iterator_test_user_key_of(1).as_ref(),
         );
-        assert_eq!(ret, 150);
+        assert_eq!(ret, 150 * 65536);
         let ret = get_min_delete_range_epoch_from_sstable(
             sstable.value(),
             iterator_test_user_key_of(3).as_ref(),
         );
-        assert_eq!(ret, 50);
+        assert_eq!(ret, 50 * 65536);
         let ret = get_min_delete_range_epoch_from_sstable(
             sstable.value(),
             iterator_test_user_key_of(6).as_ref(),
         );
-        assert_eq!(ret, 150);
+        assert_eq!(ret, 150 * 65536);
         let ret = get_min_delete_range_epoch_from_sstable(
             sstable.value(),
             iterator_test_user_key_of(8).as_ref(),

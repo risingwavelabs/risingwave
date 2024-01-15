@@ -1201,7 +1201,7 @@ mod tests {
                 hash_mapping: Default::default(),
             }]
         };
-        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update(UpdateMutation {
+        let b1 = Barrier::new_test_barrier(65536).with_mutation(Mutation::Update(UpdateMutation {
             dispatchers: dispatcher_updates,
             merges: Default::default(),
             vnode_bitmaps: Default::default(),
@@ -1225,7 +1225,7 @@ mod tests {
         try_recv!(old_simple).unwrap().as_barrier().unwrap(); // Untouched.
 
         // 6. Send another barrier.
-        tx.send(Message::Barrier(Barrier::new_test_barrier(2)))
+        tx.send(Message::Barrier(Barrier::new_test_barrier(65536 * 2)))
             .await
             .unwrap();
         executor.next().await.unwrap().unwrap();
@@ -1253,14 +1253,15 @@ mod tests {
                 hash_mapping: Default::default(),
             }]
         };
-        let b3 = Barrier::new_test_barrier(3).with_mutation(Mutation::Update(UpdateMutation {
-            dispatchers: dispatcher_updates,
-            merges: Default::default(),
-            vnode_bitmaps: Default::default(),
-            dropped_actors: Default::default(),
-            actor_splits: Default::default(),
-            actor_new_dispatchers: Default::default(),
-        }));
+        let b3 =
+            Barrier::new_test_barrier(65536 * 3).with_mutation(Mutation::Update(UpdateMutation {
+                dispatchers: dispatcher_updates,
+                merges: Default::default(),
+                vnode_bitmaps: Default::default(),
+                dropped_actors: Default::default(),
+                actor_splits: Default::default(),
+                actor_new_dispatchers: Default::default(),
+            }));
         tx.send(Message::Barrier(b3)).await.unwrap();
         executor.next().await.unwrap().unwrap();
 
@@ -1271,7 +1272,7 @@ mod tests {
         try_recv!(new_simple).unwrap().as_barrier().unwrap(); // Since it's just added, it won't receive the chunk.
 
         // 11. Send another barrier.
-        tx.send(Message::Barrier(Barrier::new_test_barrier(4)))
+        tx.send(Message::Barrier(Barrier::new_test_barrier(65536 * 4)))
             .await
             .unwrap();
         executor.next().await.unwrap().unwrap();

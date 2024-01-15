@@ -49,7 +49,7 @@ pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore>
         vec![0],
         vec![0, 1, 2],
     );
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(65536);
     state.init_epoch(epoch);
 
     for idx in 0..row_count {

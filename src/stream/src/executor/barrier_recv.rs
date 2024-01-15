@@ -99,13 +99,15 @@ mod tests {
         let stream = barrier_recv.execute();
         pin_mut!(stream);
 
-        barrier_tx.send(Barrier::new_test_barrier(114)).unwrap();
-        barrier_tx.send(Barrier::new_test_barrier(514)).unwrap();
+        barrier_tx.send(Barrier::new_test_barrier(65536)).unwrap();
+        barrier_tx
+            .send(Barrier::new_test_barrier(65536 * 2))
+            .unwrap();
 
         let barrier_1 = stream.next_unwrap_ready_barrier().unwrap();
-        assert_eq!(barrier_1.epoch.curr, 114);
+        assert_eq!(barrier_1.epoch.curr, 65536);
         let barrier_2 = stream.next_unwrap_ready_barrier().unwrap();
-        assert_eq!(barrier_2.epoch.curr, 514);
+        assert_eq!(barrier_2.epoch.curr, 65536 * 2);
 
         stream.next_unwrap_pending();
 

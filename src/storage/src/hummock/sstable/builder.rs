@@ -918,7 +918,10 @@ pub(super) mod tests {
                 let k = UserKey::for_test(TableId::new(table_id), table_key.as_ref());
                 let v = test_value_of(idx);
                 builder
-                    .add(FullKey::from_user_key(k, 1), HummockValue::put(v.as_ref()))
+                    .add(
+                        FullKey::from_user_key(k, 65536),
+                        HummockValue::put(v.as_ref()),
+                    )
                     .await
                     .unwrap();
             }

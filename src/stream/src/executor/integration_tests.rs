@@ -195,12 +195,12 @@ async fn test_merger_sum_aggr() {
     );
     handles.push(tokio::spawn(actor.run()));
 
-    let mut epoch = 1;
+    let mut epoch = 65536;
     input
         .send(Message::Barrier(Barrier::new_test_barrier(epoch)))
         .await
         .unwrap();
-    epoch += 1;
+    epoch += 65536;
     for j in 0..11 {
         let op = if j % 2 == 0 { Op::Insert } else { Op::Delete };
         for i in 0..10 {
@@ -214,7 +214,7 @@ async fn test_merger_sum_aggr() {
             .send(Message::Barrier(Barrier::new_test_barrier(epoch)))
             .await
             .unwrap();
-        epoch += 1;
+        epoch += 65536;
     }
     input
         .send(Message::Barrier(

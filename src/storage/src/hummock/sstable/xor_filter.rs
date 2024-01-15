@@ -486,7 +486,7 @@ mod tests {
         for i in 0..TEST_KEYS_COUNT {
             let epoch_count = rng.next_u64() % 20;
             for j in 0..epoch_count {
-                let epoch = 20 - j;
+                let epoch = (20 - j) * 65536 as u64;
                 let k = FullKey {
                     user_key: test_user_key_of(i),
                     epoch_with_gap: EpochWithGap::new_from_epoch(epoch),

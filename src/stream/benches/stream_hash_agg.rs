@@ -120,11 +120,11 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
 
     // ---- Create MockSourceExecutor ----
     let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
-    tx.push_barrier(1, false);
+    tx.push_barrier(65536 * 1, false);
     for chunk in chunks {
         tx.push_chunk(chunk);
     }
-    tx.push_barrier_with_prev_epoch_for_test(1002, 1, false);
+    tx.push_barrier_with_prev_epoch_for_test(65536 * 2, 65536, false);
 
     // ---- Create HashAggExecutor to be benchmarked ----
     let row_count_index = 0;

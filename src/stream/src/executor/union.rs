@@ -178,22 +178,22 @@ mod tests {
         let streams = vec![
             try_stream! {
                 yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
-                yield Message::Barrier(Barrier::new_test_barrier(1));
+                yield Message::Barrier(Barrier::new_test_barrier(65536));
                 yield Message::Chunk(StreamChunk::from_pretty("I\n + 2"));
-                yield Message::Barrier(Barrier::new_test_barrier(2));
-                yield Message::Barrier(Barrier::new_test_barrier(3));
+                yield Message::Barrier(Barrier::new_test_barrier(65536*2));
+                yield Message::Barrier(Barrier::new_test_barrier(65536*3));
                 yield Message::Watermark(Watermark::new(0, DataType::Int64, ScalarImpl::Int64(4)));
-                yield Message::Barrier(Barrier::new_test_barrier(4));
+                yield Message::Barrier(Barrier::new_test_barrier(65536*4));
             }
             .boxed(),
             try_stream! {
                 yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
-                yield Message::Barrier(Barrier::new_test_barrier(1));
-                yield Message::Barrier(Barrier::new_test_barrier(2));
+                yield Message::Barrier(Barrier::new_test_barrier(65536));
+                yield Message::Barrier(Barrier::new_test_barrier(65536*2));
                 yield Message::Chunk(StreamChunk::from_pretty("I\n + 3"));
-                yield Message::Barrier(Barrier::new_test_barrier(3));
+                yield Message::Barrier(Barrier::new_test_barrier(65536*3));
                 yield Message::Watermark(Watermark::new(0, DataType::Int64, ScalarImpl::Int64(5)));
-                yield Message::Barrier(Barrier::new_test_barrier(4));
+                yield Message::Barrier(Barrier::new_test_barrier(65536*4));
             }
             .boxed(),
         ];
@@ -203,13 +203,13 @@ mod tests {
         let result = vec![
             Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
             Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
-            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Barrier(Barrier::new_test_barrier(65536)),
             Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
-            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Barrier(Barrier::new_test_barrier(65536 * 2)),
             Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
-            Message::Barrier(Barrier::new_test_barrier(3)),
+            Message::Barrier(Barrier::new_test_barrier(65536 * 3)),
             Message::Watermark(Watermark::new(0, DataType::Int64, ScalarImpl::Int64(4))),
-            Message::Barrier(Barrier::new_test_barrier(4)),
+            Message::Barrier(Barrier::new_test_barrier(65536 * 4)),
         ];
         for _ in 0..result.len() {
             output.push(merged.next().await.unwrap().unwrap());

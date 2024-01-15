@@ -206,8 +206,8 @@ mod tests {
             Bound::Excluded(Bytes::copy_from_slice(b"eeee")),
         );
         let mut range_builder = CompactionDeleteRangesBuilder::default();
-        range_builder.add_delete_events(10, table_id, vec![tombstone1.clone()]);
-        range_builder.add_delete_events(12, table_id, vec![tombstone2.clone()]);
+        range_builder.add_delete_events_for_test(10, table_id, vec![tombstone1.clone()]);
+        range_builder.add_delete_events_for_test(12, table_id, vec![tombstone2.clone()]);
         let compaction_delete_range = range_builder.build_for_compaction();
         let ranges1 = compaction_delete_range
             .get_tombstone_between(
@@ -236,8 +236,8 @@ mod tests {
             opts.clone(),
         );
         let mut range_builder = CompactionDeleteRangesBuilder::default();
-        range_builder.add_delete_events(10, table_id, vec![tombstone1.clone()]);
-        range_builder.add_delete_events(12, table_id, vec![tombstone2.clone()]);
+        range_builder.add_delete_events_for_test(10, table_id, vec![tombstone1.clone()]);
+        range_builder.add_delete_events_for_test(12, table_id, vec![tombstone2.clone()]);
         let compaction_delete_range = range_builder.build_for_compaction();
         let ranges2 = compaction_delete_range
             .get_tombstone_between(test_user_key(b"bbbb").as_ref(), test_user_key(b"").as_ref())

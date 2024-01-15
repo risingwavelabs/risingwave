@@ -444,7 +444,7 @@ mod tests {
         // Simulate recovery test
         drop(tx_r);
 
-        tx_l.push_barrier(1, false);
+        tx_l.push_barrier(65536 * 1, false);
 
         tx_l.push_chunk(chunk_l1);
 

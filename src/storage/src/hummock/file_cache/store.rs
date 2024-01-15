@@ -681,7 +681,7 @@ mod tests {
     use super::*;
     use crate::hummock::{BlockBuilder, BlockBuilderOptions, BlockMeta, CompressionAlgorithm};
 
-    pub fn construct_full_key_struct(
+    pub fn construct_full_key_struct_for_test(
         table_id: u32,
         table_key: &[u8],
         epoch: u64,
@@ -696,10 +696,22 @@ mod tests {
         };
 
         let mut builder = BlockBuilder::new(options);
-        builder.add_for_test(construct_full_key_struct(0, b"k1", 1 * 65536), b"v01");
-        builder.add_for_test(construct_full_key_struct(0, b"k2", 2 * 65536), b"v02");
-        builder.add_for_test(construct_full_key_struct(0, b"k3", 3 * 65536), b"v03");
-        builder.add_for_test(construct_full_key_struct(0, b"k4", 4 * 65536), b"v04");
+        builder.add_for_test(
+            construct_full_key_struct_for_test(0, b"k1", 1 * 65536),
+            b"v01",
+        );
+        builder.add_for_test(
+            construct_full_key_struct_for_test(0, b"k2", 2 * 65536),
+            b"v02",
+        );
+        builder.add_for_test(
+            construct_full_key_struct_for_test(0, b"k3", 3 * 65536),
+            b"v03",
+        );
+        builder.add_for_test(
+            construct_full_key_struct_for_test(0, b"k4", 4 * 65536),
+            b"v04",
+        );
 
         Box::new(
             Block::decode(

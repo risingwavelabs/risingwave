@@ -510,7 +510,7 @@ async fn test_hummock_manager_basic() {
         FIRST_VERSION_ID
     );
 
-    let mut epoch = 1;
+    let mut epoch = 65536;
     let mut register_log_count = 0;
     let mut commit_log_count = 0;
     let commit_one = |epoch: HummockEpoch, hummock_manager: HummockManagerRef| async move {
@@ -773,7 +773,7 @@ async fn test_print_compact_task() {
 async fn test_invalid_sst_id() {
     let (_, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    let epoch = 1;
+    let epoch = 65536;
     let ssts = generate_test_tables(epoch, vec![1]);
     register_sstable_infos_to_compaction_group(
         &hummock_manager,
@@ -1149,7 +1149,7 @@ async fn test_version_stats() {
     assert!(init_stats.table_stats.is_empty());
 
     // Commit epoch
-    let epoch = 1;
+    let epoch = 65536;
     register_table_ids_to_compaction_group(
         &hummock_manager,
         &[1, 2, 3],

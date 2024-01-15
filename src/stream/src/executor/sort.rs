@@ -235,7 +235,7 @@ mod tests {
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, store).await;
 
         // Init barrier
-        tx.push_barrier(1, false);
+        tx.push_barrier(65536 * 1, false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -285,7 +285,7 @@ mod tests {
         ));
 
         // Push barrier
-        tx.push_barrier(2, false);
+        tx.push_barrier(65536 * 2, false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -320,7 +320,7 @@ mod tests {
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, store.clone()).await;
 
         // Init barrier
-        tx.push_barrier(1, false);
+        tx.push_barrier(65536 * 1, false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -342,7 +342,7 @@ mod tests {
         ));
 
         // Push barrier
-        tx.push_barrier(2, false);
+        tx.push_barrier(65536 * 2, false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -352,7 +352,7 @@ mod tests {
             create_executor(sort_column_index, store).await;
 
         // Push barrier
-        recovered_tx.push_barrier(3, false);
+        recovered_tx.push_barrier(65536 * 3, false);
 
         // Consume the barrier
         recovered_sort_executor.expect_barrier().await;

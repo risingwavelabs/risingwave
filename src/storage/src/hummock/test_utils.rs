@@ -399,7 +399,7 @@ pub mod delete_range {
     }
 
     impl CompactionDeleteRangesBuilder {
-        pub fn add_delete_events(
+        pub fn add_delete_events_for_test(
             &mut self,
             epoch: HummockEpoch,
             table_id: TableId,

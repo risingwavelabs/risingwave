@@ -469,12 +469,12 @@ mod test {
             schema.clone(),
             pk_indices.clone(),
             vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(65536)),
                 Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                     " I I I
                     + 3 2 1",
                 ))),
-                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Barrier(Barrier::new_test_barrier(65536 * 2)),
                 Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                     "  I I I
                     U- 3 2 1
@@ -592,12 +592,12 @@ mod test {
             schema.clone(),
             vec![0, 1],
             vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(65536)),
                 Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                     " I I I
                     + 1 1 10",
                 ))),
-                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Barrier(Barrier::new_test_barrier(65536 * 2)),
                 Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                     " I I I
                     + 1 3 30",
@@ -611,7 +611,7 @@ mod test {
                     " I I I
                     - 1 1 10",
                 ))),
-                Message::Barrier(Barrier::new_test_barrier(3)),
+                Message::Barrier(Barrier::new_test_barrier(65536 * 3)),
             ],
         );
 
@@ -733,9 +733,9 @@ mod test {
             schema.clone(),
             pk_indices.clone(),
             vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Barrier(Barrier::new_test_barrier(3)),
+                Message::Barrier(Barrier::new_test_barrier(65536)),
+                Message::Barrier(Barrier::new_test_barrier(65536 * 2)),
+                Message::Barrier(Barrier::new_test_barrier(65536 * 3)),
             ],
         );
 
@@ -777,19 +777,19 @@ mod test {
         // Barrier message.
         assert_eq!(
             executor.next().await.unwrap().unwrap(),
-            Message::Barrier(Barrier::new_test_barrier(1))
+            Message::Barrier(Barrier::new_test_barrier(65536))
         );
 
         // Barrier message.
         assert_eq!(
             executor.next().await.unwrap().unwrap(),
-            Message::Barrier(Barrier::new_test_barrier(2))
+            Message::Barrier(Barrier::new_test_barrier(65536 * 2))
         );
 
         // The last barrier message.
         assert_eq!(
             executor.next().await.unwrap().unwrap(),
-            Message::Barrier(Barrier::new_test_barrier(3))
+            Message::Barrier(Barrier::new_test_barrier(65536 * 3))
         );
     }
 }

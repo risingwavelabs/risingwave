@@ -363,7 +363,7 @@ mod tests {
         );
 
         // The first barrier
-        tx.push_barrier(1, false);
+        tx.push_barrier(65536, false);
         let msg = dml_executor.next().await.unwrap().unwrap();
         assert!(matches!(msg, Message::Barrier(_)));
 
@@ -387,7 +387,7 @@ mod tests {
         tokio::spawn(async move {
             write_handle.end().await.unwrap();
             // a barrier to trigger batch group flush
-            tx.push_barrier(2, false);
+            tx.push_barrier(2 * 65536, false);
         });
 
         // Consume the 1st message from upstream executor

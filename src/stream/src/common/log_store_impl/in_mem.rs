@@ -330,9 +330,9 @@ mod tests {
         let factory = BoundedInMemLogStoreFactory::new(4);
         let (mut reader, mut writer) = factory.build().await;
 
-        let init_epoch = 233;
-        let epoch1 = init_epoch + 1;
-        let epoch2 = init_epoch + 2;
+        let init_epoch = 65536;
+        let epoch1 = init_epoch + 1 * 65536;
+        let epoch2 = init_epoch + 2 * 65536;
 
         let ops = vec![Op::Insert, Op::Delete, Op::UpdateInsert, Op::UpdateDelete];
         let mut builder = StreamChunkBuilder::new(10000, vec![DataType::Int64, DataType::Varchar]);

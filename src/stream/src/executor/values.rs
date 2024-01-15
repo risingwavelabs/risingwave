@@ -226,7 +226,7 @@ mod tests {
 
         // Init barrier
         let first_message =
-            Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
+            Barrier::new_test_barrier(65536).with_mutation(Mutation::Add(AddMutation {
                 adds: Default::default(),
                 added_actors: maplit::hashset! {actor_id},
                 splits: Default::default(),
@@ -267,14 +267,14 @@ mod tests {
         assert_eq!(*result.column_at(4), I64Array::from_iter([0]).into_ref());
 
         // ValueExecutor should simply forward following barriers
-        tx.send(Barrier::new_test_barrier(2)).unwrap();
+        tx.send(Barrier::new_test_barrier(65536 * 2)).unwrap();
 
         assert!(matches!(
             values_executor.next_unwrap_ready_barrier().unwrap(),
             Barrier { .. }
         ));
 
-        tx.send(Barrier::new_test_barrier(3)).unwrap();
+        tx.send(Barrier::new_test_barrier(65536 * 3)).unwrap();
 
         assert!(matches!(
             values_executor.next_unwrap_ready_barrier().unwrap(),

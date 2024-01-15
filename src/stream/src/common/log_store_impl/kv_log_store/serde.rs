@@ -756,9 +756,9 @@ mod tests {
     };
     use crate::common::log_store_impl::kv_log_store::{KvLogStoreReadMetrics, SeqIdType};
 
-    const EPOCH0: u64 = 233;
-    const EPOCH1: u64 = EPOCH0 + 1;
-    const EPOCH2: u64 = EPOCH1 + 1;
+    const EPOCH0: u64 = 65536;
+    const EPOCH1: u64 = EPOCH0 + 65536;
+    const EPOCH2: u64 = EPOCH1 + 65536;
 
     #[test]
     fn test_serde() {

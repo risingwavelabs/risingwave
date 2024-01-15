@@ -82,7 +82,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             .await
     });
 
-    let epoch = 100;
+    let epoch = 100 * 65536;
     runtime
         .block_on(hummock_storage.init_for_test(epoch))
         .unwrap();

@@ -181,7 +181,7 @@ mod tests {
         let mut row_id_gen_executor = row_id_gen_executor.execute();
 
         // Init barrier
-        tx.push_barrier(1, false);
+        tx.push_barrier(65536 * 1, false);
         row_id_gen_executor.next().await.unwrap().unwrap();
 
         // Insert operation

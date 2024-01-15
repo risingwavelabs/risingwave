@@ -25,7 +25,7 @@ mod tests {
     use super::*;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_info,
-        gen_iterator_test_sstable_with_range_tombstones, iterator_test_key_of,
+        gen_iterator_test_sstable_with_range_tombstones_for_test, iterator_test_key_of,
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::HummockIterator;
@@ -229,14 +229,14 @@ mod tests {
     #[tokio::test]
     async fn test_concat_seek_empty_sst() {
         let sstable_store = mock_sstable_store();
-        let table1 = gen_iterator_test_sstable_with_range_tombstones(
+        let table1 = gen_iterator_test_sstable_with_range_tombstones_for_test(
             1,
             vec![],
             vec![(1, 2, 1), (3, 4, 1)],
             sstable_store.clone(),
         )
         .await;
-        let table2 = gen_iterator_test_sstable_with_range_tombstones(
+        let table2 = gen_iterator_test_sstable_with_range_tombstones_for_test(
             1,
             vec![],
             vec![(4, 5, 1), (6, 7, 1)],

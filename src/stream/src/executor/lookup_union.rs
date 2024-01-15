@@ -159,11 +159,11 @@ mod tests {
             vec![0],
             vec![
                 Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
-                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(65536)),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
-                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Barrier(Barrier::new_test_barrier(65536 * 2)),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
-                Message::Barrier(Barrier::new_test_barrier(3)),
+                Message::Barrier(Barrier::new_test_barrier(65536 * 3)),
             ],
         )
         .stop_on_finish(false);
@@ -172,9 +172,9 @@ mod tests {
             vec![0],
             vec![
                 Message::Chunk(StreamChunk::from_pretty("I\n + 11")),
-                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(65536)),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 12")),
-                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Barrier(Barrier::new_test_barrier(65536 * 2)),
             ],
         )
         .stop_on_finish(false);
@@ -183,9 +183,9 @@ mod tests {
             vec![0],
             vec![
                 Message::Chunk(StreamChunk::from_pretty("I\n + 21")),
-                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(65536)),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 22")),
-                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Barrier(Barrier::new_test_barrier(65536 * 2)),
             ],
         )
         .stop_on_finish(false);
@@ -208,13 +208,13 @@ mod tests {
                 Message::Chunk(StreamChunk::from_pretty("I\n + 21")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 11")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
-                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(65536)),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 22")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 12")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
-                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Barrier(Barrier::new_test_barrier(65536 * 2)),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
-                Message::Barrier(Barrier::new_test_barrier(3)),
+                Message::Barrier(Barrier::new_test_barrier(65536 * 3)),
             ]
         );
     }
