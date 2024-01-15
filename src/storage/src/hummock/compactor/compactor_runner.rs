@@ -190,16 +190,13 @@ impl CompactorRunner {
                 if !delete_range_ssts.is_empty() {
                     del_iter.add_concat_iter(delete_range_ssts, self.sstable_store.clone());
                 }
-                table_iters.push(MonitoredCompactorIterator::new(
-                    ConcatSstableIterator::new(
-                        self.compact_task.existing_table_ids.clone(),
-                        tables,
-                        self.compactor.task_config.key_range.clone(),
-                        self.sstable_store.clone(),
-                        task_progress.clone(),
-                        compact_io_retry_time,
-                    ),
+                table_iters.push(ConcatSstableIterator::new(
+                    self.compact_task.existing_table_ids.clone(),
+                    tables,
+                    self.compactor.task_config.key_range.clone(),
+                    self.sstable_store.clone(),
                     task_progress.clone(),
+                    compact_io_retry_time,
                 ));
             } else {
                 for table_info in &level.table_infos {
@@ -219,16 +216,13 @@ impl CompactorRunner {
                             .await?;
                         del_iter.add_sst_iter(SstableDeleteRangeIterator::new(table));
                     }
-                    table_iters.push(MonitoredCompactorIterator::new(
-                        ConcatSstableIterator::new(
-                            self.compact_task.existing_table_ids.clone(),
-                            vec![table_info.clone()],
-                            self.compactor.task_config.key_range.clone(),
-                            self.sstable_store.clone(),
-                            task_progress.clone(),
-                            compact_io_retry_time,
-                        ),
+                    table_iters.push(ConcatSstableIterator::new(
+                        self.compact_task.existing_table_ids.clone(),
+                        vec![table_info.clone()],
+                        self.compactor.task_config.key_range.clone(),
+                        self.sstable_store.clone(),
                         task_progress.clone(),
+                        compact_io_retry_time,
                     ));
                 }
             }
@@ -238,7 +232,10 @@ impl CompactorRunner {
         // in https://github.com/risingwavelabs/risingwave/issues/13148
         Ok((
             SkipWatermarkIterator::from_safe_epoch_watermarks(
-                UnorderedMergeIteratorInner::for_compactor(table_iters),
+                MonitoredCompactorIterator::new(
+                    UnorderedMergeIteratorInner::for_compactor(table_iters),
+                    task_progress.clone(),
+                ),
                 &self.compact_task.table_watermarks,
             ),
             CompactionDeleteRangeIterator::new(del_iter),
