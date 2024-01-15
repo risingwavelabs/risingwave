@@ -5,6 +5,7 @@ $$;
 
 statement ok
 create function gcd(a int, b int) returns int language javascript as $$
+    // required before we support `RETURNS NULL ON NULL INPUT`
     if(a == null || b == null) {
         return null;
     }
@@ -17,8 +18,24 @@ create function gcd(a int, b int) returns int language javascript as $$
 $$;
 
 statement ok
-create function to_string(a boolean, b smallint, c int, d bigint, e real, f float, g varchar) returns varchar language javascript as $$
-    return a.toString() + b.toString() + c.toString() + d.toString() + e.toString() + f.toString() + g.toString();
+create function to_string(a boolean, b smallint, c int, d bigint, e real, f float, g varchar, h bytea, i jsonb) returns varchar language javascript as $$
+    return a.toString() + b.toString() + c.toString() + d.toString() + e.toString() + f.toString() + g.toString() + h.toString() + JSON.stringify(i);
+$$;
+
+# show data types in javascript
+statement ok
+create function js_typeof(a boolean, b smallint, c int, d bigint, e real, f float, g varchar, h bytea, i jsonb) returns jsonb language javascript as $$
+    return {
+        boolean: typeof a,
+        smallint: typeof b,
+        int: typeof c,
+        bigint: typeof d,
+        real: typeof e,
+        float: typeof f,
+        varchar: typeof g,
+        bytea: typeof h,
+        jsonb: typeof i,
+    };
 $$;
 
 statement ok
@@ -39,9 +56,14 @@ select gcd(25, 15);
 5
 
 query T
-select to_string(false, 1::smallint, 2, 3, 4.5, 6.7, 'abc');
+select to_string(false, 1::smallint, 2, 3, 4.5, 6.7, 'abc', '\x010203', '{"key": 1}');
 ----
-false1234.56.7abc
+false1234.56.7abc1,2,3{"key":1}
+
+query T
+select js_typeof(false, 1::smallint, 2, 3, 4.5, 6.7, 'abc', '\x010203', '{"key": 1}');
+----
+{"bigint": "number", "boolean": "boolean", "bytea": "object", "float": "number", "int": "number", "jsonb": "object", "real": "number", "smallint": "number", "varchar": "string"}
 
 query I
 select series(5);
@@ -63,3 +85,6 @@ drop function to_string;
 
 statement ok
 drop function series;
+
+statement ok
+drop function js_typeof;
