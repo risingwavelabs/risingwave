@@ -15,8 +15,6 @@
 mod client;
 mod util;
 pub use client::*;
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::RwError;
 use risingwave_pb::catalog::SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy;
 pub(crate) use util::*;
 
@@ -29,34 +27,42 @@ pub fn name_strategy_from_str(value: &str) -> Option<PbSchemaRegistryNameStrateg
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("{name_strategy} expect non-empty field {record_option}")]
+pub struct SubjectError {
+    name_strategy: &'static str,
+    record_option: &'static str,
+}
+
+impl From<SubjectError> for risingwave_common::error::RwError {
+    fn from(value: SubjectError) -> Self {
+        anyhow::anyhow!(value).into()
+    }
+}
+
 pub fn get_subject_by_strategy(
     name_strategy: &PbSchemaRegistryNameStrategy,
     topic: &str,
     record: Option<&str>,
     is_key: bool,
-) -> Result<String, RwError> {
-    let build_error_lack_field = |ns: &PbSchemaRegistryNameStrategy, expect: &str| -> RwError {
-        RwError::from(ProtocolError(format!(
-            "{} expect num-empty field {}",
-            ns.as_str_name(),
-            expect,
-        )))
-    };
+) -> Result<String, SubjectError> {
     let record_option_name = if is_key { "key.message" } else { "message" };
+    let build_error_lack_field = || SubjectError {
+        name_strategy: name_strategy.as_str_name(),
+        record_option: record_option_name,
+    };
     match name_strategy {
         PbSchemaRegistryNameStrategy::Unspecified => {
             // default behavior
             let suffix = if is_key { "key" } else { "value" };
             Ok(format!("{topic}-{suffix}",))
         }
-        ns @ PbSchemaRegistryNameStrategy::RecordNameStrategy => {
-            let record_name =
-                record.ok_or_else(|| build_error_lack_field(ns, record_option_name))?;
+        PbSchemaRegistryNameStrategy::RecordNameStrategy => {
+            let record_name = record.ok_or_else(build_error_lack_field)?;
             Ok(record_name.to_string())
         }
-        ns @ PbSchemaRegistryNameStrategy::TopicRecordNameStrategy => {
-            let record_name =
-                record.ok_or_else(|| build_error_lack_field(ns, record_option_name))?;
+        PbSchemaRegistryNameStrategy::TopicRecordNameStrategy => {
+            let record_name = record.ok_or_else(build_error_lack_field)?;
             Ok(format!("{topic}-{record_name}"))
         }
     }
