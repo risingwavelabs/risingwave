@@ -143,7 +143,6 @@ mod tests {
     use futures::{pin_mut, FutureExt};
     use risingwave_common::array::StreamChunk;
     use risingwave_common::transaction::transaction_id::TxnId;
-    use risingwave_connector::source::StreamChunk;
     use risingwave_source::TableDmlHandle;
     use tokio::sync::mpsc;
 
