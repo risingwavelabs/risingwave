@@ -111,7 +111,7 @@ impl Frame {
     }
 }
 
-#[derive(Display, Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Display, Debug, Clone, Eq, PartialEq, Hash, EnumAsInner)]
 #[display("{0}")]
 pub enum FrameBounds {
     Rows(RowsFrameBounds),
