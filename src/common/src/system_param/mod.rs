@@ -44,21 +44,21 @@ type Result<T> = core::result::Result<T, SystemParamsError>;
 macro_rules! for_all_params {
     ($macro:ident) => {
         $macro! {
-            // name                                     type    default value                               mutable
-            { barrier_interval_ms,                      u32,    Some(1000_u32),                             true,   },
-            { checkpoint_frequency,                     u64,    Some(1_u64),                                true,   },
-            { sstable_size_mb,                          u32,    Some(256_u32),                              false,  },
-            { parallel_compact_size_mb,                 u32,    Some(512_u32),                              false,  },
-            { block_size_kb,                            u32,    Some(64_u32),                               false,  },
-            { bloom_false_positive,                     f64,    Some(0.001_f64),                            false,  },
-            { state_store,                              String, None,                                       false,  },
-            { data_directory,                           String, None,                                       false,  },
-            { backup_storage_url,                       String, Some("memory".to_string()),                 true,   },
-            { backup_storage_directory,                 String, Some("backup".to_string()),                 true,   },
-            { max_concurrent_creating_streaming_jobs,   u32,    Some(1_u32),                                true,   },
-            { pause_on_next_bootstrap,                  bool,   Some(false),                                true,   },
-            { wasm_storage_url,                         String, Some("fs://.risingwave/data".to_string()),  false,  },
-            { enable_tracing,                           bool,   Some(false),                                true,   },
+            // name                                     type    default value                               mut?    doc
+            { barrier_interval_ms,                      u32,    Some(1000_u32),                             true,   "The interval of periodic barrier.", },
+            { checkpoint_frequency,                     u64,    Some(1_u64),                                true,   "There will be a checkpoint for every n barriers.", },
+            { sstable_size_mb,                          u32,    Some(256_u32),                              false,  "Target size of the Sstable.", },
+            { parallel_compact_size_mb,                 u32,    Some(512_u32),                              false,  "", },
+            { block_size_kb,                            u32,    Some(64_u32),                               false,  "Size of each block in bytes in SST.", },
+            { bloom_false_positive,                     f64,    Some(0.001_f64),                            false,  "False positive probability of bloom filter.", },
+            { state_store,                              String, None,                                       false,  "", },
+            { data_directory,                           String, None,                                       false,  "Remote directory for storing data and metadata objects.", },
+            { backup_storage_url,                       String, Some("memory".to_string()),                 true,   "Remote storage url for storing snapshots.", },
+            { backup_storage_directory,                 String, Some("backup".to_string()),                 true,   "Remote directory for storing snapshots.", },
+            { max_concurrent_creating_streaming_jobs,   u32,    Some(1_u32),                                true,   "Max number of concurrent creating streaming jobs.", },
+            { pause_on_next_bootstrap,                  bool,   Some(false),                                true,   "Whether to pause all data sources on next bootstrap.", },
+            { wasm_storage_url,                         String, Some("fs://.risingwave/data".to_string()),  false,  "", },
+            { enable_tracing,                           bool,   Some(false),                                true,   "Whether to enable distributed tracing.", },
         }
     };
 }
@@ -188,7 +188,7 @@ macro_rules! impl_system_params_from_kv {
 /// If you want custom rules, please override the default implementation in
 /// `OverrideValidateOnSet` below.
 macro_rules! impl_default_validation_on_set {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $($rest:tt)* },)*) => {
         #[allow(clippy::ptr_arg)]
         trait ValidateOnSet {
             $(
@@ -277,7 +277,7 @@ macro_rules! impl_set_system_param {
 }
 
 macro_rules! impl_is_mutable {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $($rest:tt)* },)*) => {
         pub fn is_mutable(field: &str) -> Result<bool> {
             match field {
                 $(

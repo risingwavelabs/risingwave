@@ -79,7 +79,7 @@ macro_rules! impl_system_params_from_db {
 
 /// Derive serialization to db models.
 macro_rules! impl_system_params_to_models {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $($rest:tt)* },)*) => {
         #[allow(clippy::vec_init_then_push)]
         pub fn system_params_to_model(params: &PbSystemParams) -> MetaResult<Vec<system_parameter::ActiveModel>> {
             check_missing_params(params).map_err(|e| anyhow!(e))?;
