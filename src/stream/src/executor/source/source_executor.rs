@@ -23,7 +23,6 @@ use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::{
     BoxChunkedSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
-    StreamChunk,
 };
 use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
@@ -374,6 +373,12 @@ impl<S: StateStore> SourceExecutor<S> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
+        let (Some(partition_idx), Some(offset_idx)) =
+            get_partition_offset_col_idx(&source_desc.columns)
+        else {
+            unreachable!("Partition and offset columns must be set.");
+        };
+
         let mut boot_state = Vec::default();
         if let Some(mutation) = barrier.mutation.as_ref() {
             match mutation.as_ref() {
@@ -541,10 +546,13 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
                         },
 
-                        Either::Right(StreamChunk {
-                            chunk,
-                            split_offset_mapping,
-                        }) => {
+                        Either::Right(chunk) => {
+                            // TODO: confirm when split_offset_mapping is None
+                            let split_offset_mapping = get_split_offset_mapping_from_chunk(
+                                &chunk,
+                                partition_idx,
+                                offset_idx,
+                            );
                             if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
                                 // Exceeds the max wait barrier time, the source will be paused.
                                 // Currently we can guarantee the
@@ -605,6 +613,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                         .collect::<Vec<&str>>(),
                                 )
                                 .inc_by(chunk.cardinality() as u64);
+                            let chunk = prune_additional_cols(&chunk, partition_idx, offset_idx);
                             yield Message::Chunk(chunk);
                             self.try_flush_data().await?;
                         }

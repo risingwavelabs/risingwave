@@ -13,11 +13,18 @@
 // limitations under the License.
 
 pub mod executor_core;
+use std::collections::HashMap;
+
 use await_tree::InstrumentAwait;
 pub use executor_core::StreamSourceCore;
 mod fs_source_executor;
 pub use fs_source_executor::*;
+use itertools::Itertools;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
+use risingwave_common::row::Row;
+use risingwave_connector::source::{SourceColumnDesc, SplitId};
+use risingwave_pb::plan_common::AdditionalColumnType;
 pub use state_table_handler::*;
 pub mod fetch_executor;
 pub use fetch_executor::*;
@@ -40,4 +47,50 @@ pub async fn barrier_to_message_stream(mut rx: UnboundedReceiver<Barrier>) {
         yield Message::Barrier(barrier);
     }
     bail!("barrier reader closed unexpectedly");
+}
+
+pub fn get_split_offset_mapping_from_chunk(
+    chunk: &StreamChunk,
+    partition_idx: usize,
+    offset_idx: usize,
+) -> Option<HashMap<SplitId, String>> {
+    let mut split_offset_mapping = HashMap::new();
+    for (_, row) in chunk.rows() {
+        let split_id: SplitId = row.datum_at(partition_idx).unwrap().into_utf8().into();
+        let offset = row.datum_at(offset_idx).unwrap().into_utf8();
+        split_offset_mapping.insert(split_id, offset.to_string());
+    }
+    Some(split_offset_mapping)
+}
+
+pub fn get_partition_offset_col_idx(
+    column_descs: &[SourceColumnDesc],
+) -> (Option<usize>, Option<usize>) {
+    let mut partition_idx = None;
+    let mut offset_idx = None;
+    for (idx, column) in column_descs.iter().enumerate() {
+        match column.additional_column_type {
+            AdditionalColumnType::Partition => {
+                partition_idx = Some(idx);
+            }
+            AdditionalColumnType::Offset => {
+                offset_idx = Some(idx);
+            }
+            _ => (),
+        }
+    }
+    (partition_idx, offset_idx)
+}
+
+pub fn prune_additional_cols(
+    chunk: &StreamChunk,
+    partition_idx: usize,
+    offset_idx: usize,
+) -> StreamChunk {
+    // TODO: ignore if it is user defined
+    chunk.project(
+        &(0..chunk.dimension())
+            .filter(|&idx| idx != partition_idx && idx != offset_idx)
+            .collect_vec(),
+    )
 }

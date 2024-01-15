@@ -25,7 +25,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::{
     BoxChunkedSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
-    SplitMetaData
+    SplitMetaData,
 };
 use risingwave_source::source_desc::{FsSourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
@@ -280,6 +280,12 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .build_fs_source_desc()
             .map_err(StreamExecutorError::connector_error)?;
 
+        let (Some(partition_idx), Some(offset_idx)) =
+            get_partition_offset_col_idx(&source_desc.columns)
+        else {
+            unreachable!("Partition and offset columns must be set.");
+        };
+
         // If the first barrier requires us to pause on startup, pause the stream.
         let start_with_paused = barrier.is_pause_on_startup();
 
@@ -407,6 +413,9 @@ impl<S: StateStore> FsSourceExecutor<S> {
                 },
 
                 Either::Right(chunk) => {
+                    // TODO: confirm when split_offset_mapping is None
+                    let split_offset_mapping =
+                        get_split_offset_mapping_from_chunk(&chunk, partition_idx, offset_idx);
                     if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
                         // Exceeds the max wait barrier time, the source will be paused. Currently
                         // we can guarantee the source is not paused since it received stream
@@ -446,7 +455,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             self.actor_ctx.id.to_string().as_str(),
                         ])
                         .inc_by(chunk.cardinality() as u64);
+
+                    let chunk = prune_additional_cols(&chunk, partition_idx, offset_idx);
                     yield Message::Chunk(chunk);
+
                     self.try_flush_data().await?;
                 }
             }

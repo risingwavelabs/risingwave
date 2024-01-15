@@ -31,15 +31,15 @@ use risingwave_connector::source::filesystem::opendal_source::{
 };
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::{
-    BoxChunkedSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
+    BoxChunkedSourceStream, SourceContext, SourceCtrlOpts, SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_connector::ConnectorParams;
-use risingwave_pb::plan_common::AdditionalColumnType;
 use risingwave_source::source_desc::SourceDesc;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 
+use super::{get_partition_offset_col_idx, prune_additional_cols};
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
@@ -196,22 +196,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
-        let (Some(partition_idx), Some(col_idx)) = ({
-            let mut partition_idx = None;
-            let mut col_idx = None;
-            for (idx, column) in source_desc.columns.iter().enumerate() {
-                match additional_column_type {
-                    AdditionalColumnType::Partition => {
-                        partition_idx = Some(idx);
-                    }
-                    AdditionalColumnType::Offset => {
-                        col_idx = Some(idx);
-                    }
-                    _ => (),
-                }
-            }
-            (partition_idx, col_idx)
-        }) else {
+        let (Some(partition_idx), Some(offset_idx)) =
+            get_partition_offset_col_idx(&source_desc.columns)
+        else {
             unreachable!("Partition and offset columns must be set.");
         };
 
@@ -319,13 +306,16 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                         }
                         // StreamChunk from FsSourceReader, and the reader reads only one file.
                         Either::Right(chunk) => {
-                            let chunk_last_row = chunk
+                            let (_, chunk_last_row) = chunk
                                 .rows()
                                 .last()
                                 .expect("The chunk should have at least one row.");
-                            let split_id =
-                                chunk_last_row.datum_at(partition_idx).unwrap().into_utf8();
-                            let offset = chunk_last_row.datum_at(col_idx).unwrap().into_utf8();
+                            let split_id: SplitId = chunk_last_row
+                                .datum_at(partition_idx)
+                                .unwrap()
+                                .into_utf8()
+                                .into();
+                            let offset = chunk_last_row.datum_at(offset_idx).unwrap().into_utf8();
 
                             let state = state_store_handler
                                 .get(split_id.clone())
@@ -348,12 +338,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     .await?;
                             }
 
-                            // TODO: ignore if it is user defined
-                            let chunk = chunk.project(
-                                (0..chunk.dimension())
-                                    .filter(|&idx| idx != partition_idx && idx != col_idx),
-                            );
-
+                            let chunk = prune_additional_cols(&chunk, partition_idx, offset_idx);
                             yield Message::Chunk(chunk);
                         }
                     }
