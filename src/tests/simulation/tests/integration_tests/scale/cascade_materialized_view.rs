@@ -32,6 +32,8 @@ const MV5: &str = "create materialized view m5 as select * from m4;";
 async fn test_simple_cascade_materialized_view() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
+    let arrangement_backfill_is_enabled = session.run("show streaming_enable_arrangement_backfill").await?;
+    let arrangement_backfill_is_enabled = arrangement_backfill_is_enabled == "true";
 
     session.run(ROOT_TABLE_CREATE).await?;
     session.run(MV1).await?;
@@ -57,10 +59,25 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
         .locate_one_fragment([identity_contains("StreamTableScan")])
         .await?;
 
-    assert_eq!(
-        chain_fragment.inner.actors.len(),
-        fragment.inner.actors.len()
-    );
+    if arrangement_backfill_is_enabled {
+        // The chain fragment is in a different table fragment.
+        assert_eq!(
+            chain_fragment.inner.actors.len(),
+            6,
+        );
+        // The upstream materialized fragment should be scaled in
+        assert_eq!(
+            fragment.inner.actors.len(),
+            1,
+        );
+    } else {
+        // No shuffle, so the fragment of upstream materialized node is the same
+        // as stream table scan.
+        assert_eq!(
+            chain_fragment.inner.actors.len(),
+            fragment.inner.actors.len()
+        );
+    }
 
     session
         .run(&format!(
