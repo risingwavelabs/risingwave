@@ -452,6 +452,8 @@ async fn check_result<
 ) -> HummockResult<bool> {
     left_iter.rewind().await?;
     right_iter.rewind().await?;
+    let mut right_count = 0;
+    let mut left_count = 0;
     while left_iter.is_valid() && right_iter.is_valid() {
         if left_iter.key() != right_iter.key() {
             tracing::error!(
@@ -472,9 +474,24 @@ async fn check_result<
         }
         left_iter.next().await?;
         right_iter.next().await?;
+        left_count += 1;
+        right_count += 1;
     }
-    if left_iter.is_valid() || right_iter.is_valid() {
-        tracing::error!("The key count of input and output not equal");
+    while left_iter.is_valid() {
+        left_count += 1;
+        left_iter.next().await?;
+        return Ok(false);
+    }
+    while right_iter.is_valid() {
+        right_count += 1;
+        right_iter.next().await?;
+    }
+    if left_count != right_count {
+        tracing::error!(
+            "The key count of input and output not equal: {} vs {}",
+            left_count,
+            right_count
+        );
         return Ok(false);
     }
     Ok(true)
