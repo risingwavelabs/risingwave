@@ -493,6 +493,7 @@ async fn test_compatibility_with_low_level() -> Result<()> {
     );
     let mut cluster = Cluster::start(config.clone()).await?;
     let mut session = cluster.start_session();
+    session.run("SET streaming_enable_arrangement_backfill = false;").await?;
 
     // Keep one worker reserved for adding later.
     let select_worker = "compute-2";

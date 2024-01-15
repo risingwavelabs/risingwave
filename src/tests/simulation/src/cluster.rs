@@ -131,6 +131,28 @@ impl Configuration {
             ..Default::default()
         }
     }
+    pub fn for_scale_no_shuffle() -> Self {
+        // Embed the config file and create a temporary file at runtime. The file will be deleted
+        // automatically when it's dropped.
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+            file.write_all(include_bytes!("risingwave-scale.toml"))
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 2,
+            compute_nodes: 3,
+            meta_nodes: 3,
+            compactor_nodes: 2,
+            compute_node_cores: 2,
+            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL = false;".into()].into(),
+            ..Default::default()
+        }
+    }
 
     pub fn for_auto_parallelism(
         max_heartbeat_interval_secs: u64,

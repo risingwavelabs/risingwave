@@ -175,9 +175,8 @@ async fn test_resize_single() -> Result<()> {
 
 #[tokio::test]
 async fn test_resize_single_failed() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale_no_shuffle()).await?;
     let mut session = cluster.start_session();
-    session.run("SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL=false").await?;
 
     session.run("create table t (v int);").await?;
     session
@@ -246,7 +245,7 @@ async fn test_resize_single_failed() -> Result<()> {
 }
 #[tokio::test]
 async fn test_resize_no_shuffle() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale_no_shuffle()).await?;
     let mut session = cluster.start_session();
 
     session.run("create table t (v int);").await?;
