@@ -438,7 +438,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
     /// Try to find affected ranges on immutable range cache + delta. If the algorithm reaches
     /// any sentinel node in the cache, which means some entries in the affected range may be
-    /// in the state table, it returns and `Err((bool, bool))` to notify the caller that the
+    /// in the state table, it returns an `Err((bool, bool))` to notify the caller that the
     /// left side or the right side or both sides of the cache should be extended.
     ///
     /// TODO(rc): Currently at most one range will be in the result vector. Ideally we should
