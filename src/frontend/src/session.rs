@@ -514,6 +514,9 @@ pub struct SessionImpl {
 
     /// execution context represents the lifetime of a running SQL in the current session
     exec_context: Mutex<Option<Weak<ExecContext>>>,
+
+    /// Last idle instant
+    last_idle_instant: Arc<Mutex<Option<Instant>>>,
 }
 
 #[derive(Error, Debug)]
@@ -552,6 +555,7 @@ impl SessionImpl {
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
             exec_context: Mutex::new(None),
+            last_idle_instant: Default::default(),
         }
     }
 
@@ -577,6 +581,7 @@ impl SessionImpl {
                 8080,
             ))
             .into(),
+            last_idle_instant: Default::default(),
         }
     }
 
@@ -656,6 +661,13 @@ impl SessionImpl {
             .as_ref()
             .and_then(|weak| weak.upgrade())
             .map(|context| context.last_instant.elapsed().as_millis())
+    }
+
+    pub fn elapse_since_last_idle_instant(&self) -> Option<u128> {
+        self.last_idle_instant
+            .lock()
+            .as_ref()
+            .map(|x| x.elapsed().as_millis())
     }
 
     pub fn check_relation_name_duplicated(
@@ -1129,9 +1141,20 @@ impl Session for SessionImpl {
         let exec_context = Arc::new(ExecContext {
             running_sql: sql,
             last_instant: Instant::now(),
+            last_idle_instant: self.last_idle_instant.clone(),
         });
         *self.exec_context.lock() = Some(Arc::downgrade(&exec_context));
         ExecContextGuard::new(exec_context)
+    }
+
+    fn check_idle_in_transaction_timeout(&self) -> bool {
+        if matches!(self.transaction_status(), TransactionStatus::InTransaction) {
+            if let Some(elapse_since_last_idle_instant) = self.elapse_since_last_idle_instant() {
+                return elapse_since_last_idle_instant
+                    > self.config().idle_in_transaction_session_timeout() as u128;
+            }
+        }
+        false
     }
 }
 

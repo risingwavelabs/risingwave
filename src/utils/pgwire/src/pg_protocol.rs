@@ -550,6 +550,12 @@ where
         record_sql_in_span(&sql);
         let session = self.session.clone().unwrap();
 
+        if session.check_idle_in_transaction_timeout() {
+            self.process_terminate();
+            return Err(PsqlError::SimpleQueryError(
+                "terminating connection due to idle-in-transaction timeout".into(),
+            ));
+        }
         let _exec_context_guard = session.init_exec_context(sql.clone());
         self.inner_process_query_msg(sql.clone(), session.clone())
             .await
@@ -585,6 +591,7 @@ where
         session: Arc<SM::Session>,
     ) -> PsqlResult<()> {
         let session = session.clone();
+
         // execute query
         let res = session
             .clone()
@@ -792,6 +799,12 @@ where
             let sql: Arc<str> = Arc::from(format!("{}", portal));
             record_sql_in_span(&sql);
 
+            if session.check_idle_in_transaction_timeout() {
+                self.process_terminate();
+                return Err(PsqlError::ExtendedPrepareError(
+                    "terminating connection due to idle-in-transaction timeout".into(),
+                ))?;
+            }
             let _exec_context_guard = session.init_exec_context(sql.clone());
             let result = session.clone().execute(portal).await;
 

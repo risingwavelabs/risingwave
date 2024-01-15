@@ -7262,6 +7262,7 @@ dependencies = [
  "madsim-tokio",
  "openssl",
  "panic-message",
+ "parking_lot 0.12.1",
  "risingwave_common",
  "risingwave_sqlparser",
  "tempfile",
