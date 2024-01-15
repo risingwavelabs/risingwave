@@ -21,7 +21,7 @@ use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::Distribution;
+use risingwave_storage::table::TableDistribution;
 use risingwave_storage::StateStore;
 use risingwave_stream::common::table::state_table::StateTable;
 
@@ -63,7 +63,7 @@ pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -
             .collect(),
         table.pk().iter().map(|x| x.order_type).collect(),
         table.pk().iter().map(|x| x.column_index).collect(),
-        Distribution::all(table.distribution_key().to_vec()), // scan all vnodes
+        TableDistribution::all(table.distribution_key().to_vec()), // scan all vnodes
         Some(table.value_indices.clone()),
     )
     .await
@@ -78,7 +78,7 @@ pub fn make_storage_table<S: StateStore>(hummock: S, table: &TableCatalog) -> St
     StorageTable::new_partial(
         hummock,
         output_columns_ids,
-        Some(Distribution::all_vnodes()),
+        Some(TableDistribution::all_vnodes()),
         &table.table_desc().to_protobuf(),
     )
 }
