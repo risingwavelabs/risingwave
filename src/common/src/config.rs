@@ -902,6 +902,10 @@ pub struct SystemConfig {
 
     #[serde(default = "default::system::wasm_storage_url")]
     pub wasm_storage_url: Option<String>,
+
+    /// Whether to enable distributed tracing.
+    #[serde(default = "default::system::enable_tracing")]
+    pub enable_tracing: Option<bool>,
 }
 
 /// The subsections `[storage.object_store]`.
@@ -955,8 +959,9 @@ impl SystemConfig {
             backup_storage_directory: self.backup_storage_directory,
             max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
             pause_on_next_bootstrap: self.pause_on_next_bootstrap,
-            telemetry_enabled: None, // deprecated
             wasm_storage_url: self.wasm_storage_url,
+            enable_tracing: self.enable_tracing,
+            telemetry_enabled: None, // deprecated
         }
     }
 }
