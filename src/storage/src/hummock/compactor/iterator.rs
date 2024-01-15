@@ -28,7 +28,7 @@ use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
-use crate::hummock::iterator::{Forward, HummockIterator, SkipWatermarkIterator};
+use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{BlockHolder, BlockIterator, BlockMeta, HummockResult};
@@ -487,14 +487,14 @@ impl HummockIterator for ConcatSstableIterator {
 }
 
 pub struct MonitoredCompactorIterator<I> {
-    inner: SkipWatermarkIterator<I>,
+    inner: I,
     task_progress: Arc<TaskProgress>,
 
     processed_key_num: usize,
 }
 
 impl<I: HummockIterator<Direction = Forward>> MonitoredCompactorIterator<I> {
-    pub fn new(inner: SkipWatermarkIterator<I>, task_progress: Arc<TaskProgress>) -> Self {
+    pub fn new(inner: I, task_progress: Arc<TaskProgress>) -> Self {
         Self {
             inner,
             task_progress,
