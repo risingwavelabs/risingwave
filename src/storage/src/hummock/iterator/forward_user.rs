@@ -26,42 +26,6 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
 
-/// State transitions:
-/// Init       -> Ready:     The initial entry after seek/rewind can be exposed.
-/// Init       -> Next:      The initial entry after seek/rewind cannot be exposed.
-/// Init/Next  -> Invalid:   Iterator has been invalidated.
-/// Ready/Next -> Next:      Continue to call next on the inner iterator.
-/// Next       -> Ready:     The current entry can be exposed.
-enum IteratorState {
-    /// Initial state on iterator creation
-    Init,
-
-    /// Iterator is pointed to a valid key that can be exposed.
-    Ready,
-
-    /// Iterator is pointed to a key that should not be exposed. next() should be called.
-    Next,
-
-    /// Iterator is no longer valid. Reasons:
-    /// - Iterator is pointed to a out-of-range key.
-    /// - Iteraror meets EOF.
-    /// - The internal iterator is not valid.
-    /// - Error happens during iteration.
-    Invalid,
-}
-
-impl IteratorState {
-    #[inline]
-    fn is_ready(&self) -> bool {
-        matches!(self, Self::Ready)
-    }
-
-    #[inline]
-    fn transition_to(&mut self, new_state: IteratorState) {
-        *self = new_state;
-    }
-}
-
 /// [`UserIterator`] can be used by user directly.
 pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     /// Inner table iterator.
@@ -89,8 +53,8 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
 
     delete_range_iter: ForwardMergeRangeIterator,
 
-    /// Current state of the iterator
-    state: IteratorState,
+    /// Whether the iterator is pointing to a valid position
+    is_current_pos_valid: bool,
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
@@ -114,7 +78,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             stats: StoreLocalStatistic::default(),
             delete_range_iter,
             _version: version,
-            state: IteratorState::Init,
+            is_current_pos_valid: false,
         }
     }
 
@@ -140,26 +104,10 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// - if `Err(_) ` is returned, it means that some error happened.
     pub async fn next(&mut self) -> HummockResult<()> {
         // Move the iterator to the next step if it is currently potined to a ready entry.
-        if self.state.is_ready() {
-            self.state.transition_to(IteratorState::Next);
-        }
+        self.iterator.next().await?;
 
-        // Loop until the iterator becomes ready or invalid.
-        loop {
-            match self.state {
-                IteratorState::Init => {
-                    self.last_key = FullKey::default();
-                    self.step_one().await?;
-                }
-                IteratorState::Next => {
-                    self.iterator.next().await?;
-                    self.step_one().await?;
-                }
-                IteratorState::Ready | IteratorState::Invalid => {
-                    return Ok(());
-                }
-            }
-        }
+        // Check and move onto the next valid position if any
+        self.try_advance_to_next_valid().await
     }
 
     /// Returns the key with the newest version. Thus no version in it, and only the `user_key` will
@@ -185,7 +133,8 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Resets the iterating position to the beginning.
     pub async fn rewind(&mut self) -> HummockResult<()> {
         // Reset
-        self.state.transition_to(IteratorState::Init);
+        self.is_current_pos_valid = false;
+        self.last_key = FullKey::default();
 
         // Handle range scan
         match &self.key_range.0 {
@@ -196,12 +145,10 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                 };
                 self.iterator.seek(full_key.to_ref()).await?;
                 if !self.iterator.is_valid() {
-                    self.state.transition_to(IteratorState::Invalid);
                     return Ok(());
                 }
 
                 if self.key_out_of_range() {
-                    self.state.transition_to(IteratorState::Invalid);
                     return Ok(());
                 }
 
@@ -211,7 +158,6 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             Unbounded => {
                 self.iterator.rewind().await?;
                 if !self.iterator.is_valid() {
-                    self.state.transition_to(IteratorState::Invalid);
                     return Ok(());
                 }
 
@@ -219,13 +165,14 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             }
         };
 
-        self.next().await
+        self.try_advance_to_next_valid().await
     }
 
     /// Resets the iterating position to the first position where the key >= provided key.
     pub async fn seek(&mut self, user_key: UserKey<&[u8]>) -> HummockResult<()> {
         // Reset
-        self.state.transition_to(IteratorState::Init);
+        self.is_current_pos_valid = false;
+        self.last_key = FullKey::default();
 
         // Handle range scan when key < begin_key
         let user_key = match &self.key_range.0 {
@@ -247,23 +194,21 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         };
         self.iterator.seek(full_key).await?;
         if !self.iterator.is_valid() {
-            self.state.transition_to(IteratorState::Invalid);
             return Ok(());
         }
 
         if self.key_out_of_range() {
-            self.state.transition_to(IteratorState::Invalid);
             return Ok(());
         }
 
         self.delete_range_iter.seek(full_key.user_key).await?;
 
-        self.next().await
+        self.try_advance_to_next_valid().await
     }
 
     /// Indicates whether the iterator can be used.
     pub fn is_valid(&self) -> bool {
-        self.state.is_ready()
+        self.is_current_pos_valid
     }
 
     pub fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
@@ -271,64 +216,66 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         self.iterator.collect_local_statistic(stats);
     }
 
-    /// Check the inner iterator and try move onto the next state once.
-    async fn step_one(&mut self) -> HummockResult<()> {
-        if !self.iterator.is_valid() {
-            self.state.transition_to(IteratorState::Invalid);
-            return Ok(());
-        }
+    /// Advance the inner iterator to a valid position, in which the entry can be exposed.
+    /// Iterator will not be advanced if it already pointed to a valid position.
+    async fn try_advance_to_next_valid(&mut self) -> HummockResult<()> {
+        loop {
+            if !self.iterator.is_valid() {
+                break;
+            }
 
-        let full_key = self.iterator.key();
-        let epoch = full_key.epoch_with_gap.pure_epoch();
+            let full_key = self.iterator.key();
+            let epoch = full_key.epoch_with_gap.pure_epoch();
 
-        // Handle epoch visibility
-        if epoch < self.min_epoch || epoch > self.read_epoch {
-            self.state.transition_to(IteratorState::Next);
-            return Ok(());
-        }
+            // Handle epoch visibility
+            if epoch < self.min_epoch || epoch > self.read_epoch {
+                self.iterator.next().await?;
+                continue;
+            }
 
-        // It is better to early return here if the user key is already
-        // out of range to avoid unnecessary access on the range tomestones
-        // via `delete_range_iter`.
-        // For example, if we are iterating with key range [0x0a, 0x0c) and the
-        // current key is 0xff, we will access range tombstones in [0x0c, 0xff],
-        // which is a waste of work.
-        if self.key_out_of_range() {
-            self.state.transition_to(IteratorState::Invalid);
-            return Ok(());
-        }
+            // It is better to early return here if the user key is already
+            // out of range to avoid unnecessary access on the range tomestones
+            // via `delete_range_iter`.
+            // For example, if we are iterating with key range [0x0a, 0x0c) and the
+            // current key is 0xff, we will access range tombstones in [0x0c, 0xff],
+            // which is a waste of work.
+            if self.key_out_of_range() {
+                break;
+            }
 
-        // Skip older version entry for the same user key
-        if self.last_key.user_key.as_ref() == full_key.user_key {
-            self.stats.skip_multi_version_key_count += 1;
-            self.state.transition_to(IteratorState::Next);
-            return Ok(());
-        }
+            // Skip older version entry for the same user key
+            if self.last_key.user_key.as_ref() == full_key.user_key {
+                self.stats.skip_multi_version_key_count += 1;
+                self.iterator.next().await?;
+                continue;
+            }
 
-        self.last_key = full_key.copy_into();
+            self.last_key = full_key.copy_into();
 
-        // Handle delete operation
-        match self.iterator.value() {
-            HummockValue::Put(val) => {
-                self.delete_range_iter.next_until(full_key.user_key).await?;
-                if self.delete_range_iter.current_epoch() >= epoch {
+            // Handle delete operation
+            match self.iterator.value() {
+                HummockValue::Put(val) => {
+                    self.delete_range_iter.next_until(full_key.user_key).await?;
+                    if self.delete_range_iter.current_epoch() >= epoch {
+                        self.stats.skip_delete_key_count += 1;
+                    } else {
+                        self.last_val = Bytes::copy_from_slice(val);
+                        self.stats.processed_key_count += 1;
+                        self.is_current_pos_valid = true;
+                        return Ok(());
+                    }
+                }
+                // It means that the key is deleted from the storage.
+                // Deleted kv and the previous versions (if any) of the key should not be
+                // returned to user.
+                HummockValue::Delete => {
                     self.stats.skip_delete_key_count += 1;
-                } else {
-                    self.last_val = Bytes::copy_from_slice(val);
-                    self.stats.processed_key_count += 1;
-                    self.state.transition_to(IteratorState::Ready);
-                    return Ok(());
                 }
             }
-            // It means that the key is deleted from the storage.
-            // Deleted kv and the previous versions (if any) of the key should not be
-            // returned to user.
-            HummockValue::Delete => {
-                self.stats.skip_delete_key_count += 1;
-            }
+            self.iterator.next().await?;
         }
 
-        self.state.transition_to(IteratorState::Next);
+        self.is_current_pos_valid = false;
         Ok(())
     }
 
