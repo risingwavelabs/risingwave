@@ -1,9 +1,10 @@
 import psycopg2
 
-class client:
-    def __init__(self, host, port,database, user, password):
+
+class Client:
+    def __init__(self, host, port, database, user, password):
         self.host = host
-        self.port=port
+        self.port = port
         self.database = database
         self.user = user
         self.password = password
