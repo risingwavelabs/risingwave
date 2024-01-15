@@ -19,7 +19,7 @@ use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row};
@@ -166,11 +166,8 @@ where
             .await?;
         tracing::trace!(is_finished, row_count, "backfill state recovered");
 
-        let mut builder = create_builder(
-            rate_limit,
-            self.chunk_size,
-            self.upstream_table.schema().data_types(),
-        );
+        let data_types = self.upstream_table.schema().data_types();
+        let mut builder = create_builder(rate_limit, self.chunk_size, data_types.clone());
 
         // Use this buffer to construct state,
         // which will then be persisted.
@@ -237,7 +234,6 @@ where
                         &self.upstream_table,
                         snapshot_read_epoch,
                         current_pos.clone(),
-                        true,
                     )
                     .map(Either::Right),);
 
@@ -279,6 +275,23 @@ where
                                 has_snapshot_read = true;
                                 match msg? {
                                     None => {
+                                        // Consume remaining rows in the builder.
+                                        if let Some(data_chunk) = builder.consume_all() {
+                                            let ops = vec![Op::Insert; data_chunk.capacity()];
+                                            let chunk = StreamChunk::from_parts(ops, data_chunk);
+
+                                            current_pos =
+                                                Some(get_new_pos(&chunk, &pk_in_output_indices));
+
+                                            let chunk_cardinality = chunk.cardinality() as u64;
+                                            total_snapshot_processed_rows += chunk_cardinality;
+
+                                            yield Message::Chunk(mapping_chunk(
+                                                chunk,
+                                                &self.output_indices,
+                                            ));
+                                        }
+
                                         // End of the snapshot read stream.
                                         // We should not mark the chunk anymore,
                                         // otherwise, we will ignore some rows
@@ -328,6 +341,7 @@ where
                     // do a snapshot read first.
                     // This is so we don't lose the tombstone iteration progress.
                     if !has_snapshot_read {
+                        assert!(builder.is_empty());
                         let (_, snapshot) = backfill_stream.into_inner();
                         #[for_await]
                         for msg in snapshot {
@@ -343,13 +357,7 @@ where
                                     break;
                                 }
                                 Some(row) => {
-                                    let chunk = match builder.append_one_row(row) {
-                                        Some(chunk) => chunk,
-                                        None => builder.consume_all().expect(
-                                            "we just appended one row, should have data chunk",
-                                        ),
-                                    };
-                                    assert_eq!(chunk.cardinality(), 1);
+                                    let chunk = DataChunk::from_rows(&[row], &data_types);
                                     let ops = vec![Op::Insert; 1];
                                     let chunk = StreamChunk::from_parts(ops, chunk);
                                     // Raise the current position.
@@ -633,7 +641,6 @@ where
         upstream_table: &StorageTable<S>,
         epoch: u64,
         current_pos: Option<OwnedRow>,
-        ordered: bool,
     ) {
         let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
         let range_bounds = match range_bounds {
@@ -651,7 +658,7 @@ where
                 HummockReadEpoch::NoWait(epoch),
                 row::empty(),
                 range_bounds,
-                ordered,
+                true,
                 // Here we only use small range prefetch because every barrier change, the executor will recreate a new iterator. So we do not need prefetch too much data.
                 PrefetchOptions::prefetch_for_small_range_scan(),
             )
