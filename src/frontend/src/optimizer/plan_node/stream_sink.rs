@@ -363,8 +363,8 @@ impl StreamSink {
             value_indices.push(indice);
         }
 
-        for (i, ordering) in Pk::pk_ordering().into_iter().enumerate() {
-            table_catalog_builder.add_order_column(i, ordering);
+        for (i, ordering) in Pk::pk_ordering().iter().enumerate() {
+            table_catalog_builder.add_order_column(i, *ordering);
         }
 
         let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();

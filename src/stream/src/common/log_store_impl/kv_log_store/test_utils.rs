@@ -153,7 +153,7 @@ pub(crate) const TEST_SCHEMA_DIST_KEY_INDEX: usize = 0;
 
 pub(crate) fn gen_test_log_store_table() -> PbTable {
     let schema = test_log_store_table_schema();
-    let order_types = TestKvLogStorePk::pk_ordering().into_iter().collect();
+    let order_types = TestKvLogStorePk::pk_ordering().to_vec();
     let pk_index = (0..TestKvLogStorePk::LEN).collect();
     let read_prefix_len_hint = 0;
     gen_prost_table_with_dist_key(

@@ -122,10 +122,7 @@ pub(crate) struct LogStoreRowSerde<PK: KvLogStorePk> {
     _phantom: PhantomData<PK>,
 }
 
-impl<PK: KvLogStorePk> LogStoreRowSerde<PK>
-where
-    [(); PK::LEN]: Sized,
-{
+impl<PK: KvLogStorePk> LogStoreRowSerde<PK> {
     pub(crate) fn new(table_catalog: &Table, vnodes: Option<Arc<Bitmap>>) -> Self {
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns
@@ -213,10 +210,7 @@ where
     }
 }
 
-impl<PK: KvLogStorePk> LogStoreRowSerde<PK>
-where
-    [(); PK::LEN]: Sized,
-{
+impl<PK: KvLogStorePk> LogStoreRowSerde<PK> {
     pub(crate) fn serialize_data_row(
         &self,
         epoch: u64,
@@ -232,20 +226,14 @@ where
             Op::UpdateDelete => UPDATE_DELETE_OP_CODE,
             Op::UpdateInsert => UPDATE_INSERT_OP_CODE,
         };
-        let extended_row_for_vnode = pk
-            .clone()
-            .chain([Some(ScalarImpl::Int16(op_code))])
-            .chain(&row);
+        let extended_row_for_vnode = (&pk).chain([Some(ScalarImpl::Int16(op_code))]).chain(&row);
         let vnode = compute_vnode(
             &extended_row_for_vnode,
             &self.dist_key_indices,
             &self.vnodes,
         );
         let pk = PK::pk(vnode, encoded_epoch, Some(seq_id));
-        let extended_row = pk
-            .clone()
-            .chain([Some(ScalarImpl::Int16(op_code))])
-            .chain(&row);
+        let extended_row = (&pk).chain([Some(ScalarImpl::Int16(op_code))]).chain(&row);
         let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serde, vnode);
         let value_bytes = self.row_serde.serialize(extended_row).into();
         (vnode, key_bytes, value_bytes)
@@ -265,8 +253,7 @@ where
             BARRIER_OP_CODE
         };
 
-        let extended_row = pk
-            .clone()
+        let extended_row = (&pk)
             .chain([Some(ScalarImpl::Int16(op_code))])
             .chain(OwnedRow::new(vec![None; self.payload_schema.len()]));
         let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serde, vnode);
@@ -306,10 +293,7 @@ where
     }
 }
 
-impl<PK: KvLogStorePk> LogStoreRowSerde<PK>
-where
-    [(); PK::LEN]: Sized,
-{
+impl<PK: KvLogStorePk> LogStoreRowSerde<PK> {
     fn deserialize(&self, value_bytes: Bytes) -> LogStoreResult<(u64, LogStoreRowOp)> {
         let row_data = self.row_serde.deserialize(&value_bytes)?;
 
@@ -440,10 +424,7 @@ pub(crate) enum KvLogStoreItem {
 
 type BoxPeekableLogStoreItemStream<S, PK> = Pin<Box<Peekable<LogStoreItemStream<S, PK>>>>;
 
-struct LogStoreRowOpStream<S: StateStoreReadIterStream, PK: KvLogStorePk>
-where
-    [(); PK::LEN]: Sized,
-{
+struct LogStoreRowOpStream<S: StateStoreReadIterStream, PK: KvLogStorePk> {
     serde: LogStoreRowSerde<PK>,
 
     /// Streams that have not reached a barrier
@@ -459,10 +440,7 @@ where
     metrics: KvLogStoreReadMetrics,
 }
 
-impl<S: StateStoreReadIterStream, PK: KvLogStorePk> LogStoreRowOpStream<S, PK>
-where
-    [(); PK::LEN]: Sized,
-{
+impl<S: StateStoreReadIterStream, PK: KvLogStorePk> LogStoreRowOpStream<S, PK> {
     pub(crate) fn new(
         streams: Vec<S>,
         serde: LogStoreRowSerde<PK>,
@@ -554,24 +532,16 @@ pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIterStream, PK: KvLog
     serde: LogStoreRowSerde<PK>,
     chunk_size: usize,
     metrics: KvLogStoreReadMetrics,
-) -> LogStoreItemMergeStream<S, PK>
-where
-    [(); PK::LEN]: Sized,
-{
+) -> LogStoreItemMergeStream<S, PK> {
     LogStoreRowOpStream::new(streams, serde, metrics).into_log_store_item_stream(chunk_size)
 }
 
-type LogStoreItemStream<S: StateStoreReadIterStream, PK: KvLogStorePk>
-where
-    [(); PK::LEN]: Sized,
-= impl Stream<Item = LogStoreResult<(u64, LogStoreRowOp, usize)>> + Send;
+type LogStoreItemStream<S: StateStoreReadIterStream, PK: KvLogStorePk> =
+    impl Stream<Item = LogStoreResult<(u64, LogStoreRowOp, usize)>> + Send;
 fn deserialize_stream<S: StateStoreReadIterStream, PK: KvLogStorePk>(
     stream: S,
     serde: LogStoreRowSerde<PK>,
-) -> LogStoreItemStream<S, PK>
-where
-    [(); PK::LEN]: Sized,
-{
+) -> LogStoreItemStream<S, PK> {
     stream.map(
         move |result: Result<_, StorageError>| -> LogStoreResult<(u64, LogStoreRowOp, usize)> {
             match result {
@@ -587,10 +557,7 @@ where
     )
 }
 
-impl<S: StateStoreReadIterStream, PK: KvLogStorePk> LogStoreRowOpStream<S, PK>
-where
-    [(); PK::LEN]: Sized,
-{
+impl<S: StateStoreReadIterStream, PK: KvLogStorePk> LogStoreRowOpStream<S, PK> {
     // Return Ok(false) means all streams have reach the end.
     async fn init(&mut self) -> LogStoreResult<bool> {
         match &self.stream_state {

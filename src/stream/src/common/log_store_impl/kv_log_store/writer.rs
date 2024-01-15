@@ -73,10 +73,7 @@ impl<LS: LocalStateStore, PK: KvLogStorePk> KvLogStoreWriter<LS, PK> {
     }
 }
 
-impl<LS: LocalStateStore, PK: KvLogStorePk> LogWriter for KvLogStoreWriter<LS, PK>
-where
-    [(); PK::LEN]: Sized,
-{
+impl<LS: LocalStateStore, PK: KvLogStorePk> LogWriter for KvLogStoreWriter<LS, PK> {
     async fn init(
         &mut self,
         epoch: EpochPair,

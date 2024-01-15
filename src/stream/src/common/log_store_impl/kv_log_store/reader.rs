@@ -181,10 +181,7 @@ impl<S: StateStore, PK: KvLogStorePk> KvLogStoreReader<S, PK> {
     }
 }
 
-impl<S: StateStore, PK: KvLogStorePk> KvLogStoreReader<S, PK>
-where
-    [(); PK::LEN]: Sized,
-{
+impl<S: StateStore, PK: KvLogStorePk> KvLogStoreReader<S, PK> {
     fn read_persisted_log_store(
         &self,
         last_persisted_epoch: Option<u64>,
@@ -242,10 +239,7 @@ where
     }
 }
 
-impl<S: StateStore, PK: KvLogStorePk> LogReader for KvLogStoreReader<S, PK>
-where
-    [(); PK::LEN]: Sized,
-{
+impl<S: StateStore, PK: KvLogStorePk> LogReader for KvLogStoreReader<S, PK> {
     async fn init(&mut self) -> LogStoreResult<()> {
         let first_write_epoch = self.rx.init().await;
 

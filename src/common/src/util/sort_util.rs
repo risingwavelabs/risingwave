@@ -64,16 +64,25 @@ impl Direction {
 }
 
 /// Nulls are largest/smallest.
-#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display)]
 enum NullsAre {
-    #[default]
     #[display("LARGEST")]
     Largest,
     #[display("SMALLEST")]
     Smallest,
 }
 
+impl Default for NullsAre {
+    fn default() -> Self {
+        Self::const_default()
+    }
+}
+
 impl NullsAre {
+    pub const fn const_default() -> Self {
+        NullsAre::Largest
+    }
+
     fn from_protobuf(nulls_are: &PbNullsAre) -> Self {
         match nulls_are {
             PbNullsAre::Largest => Self::Largest,
@@ -114,7 +123,7 @@ impl OrderType {
 }
 
 impl OrderType {
-    fn new(direction: Direction, nulls_are: NullsAre) -> Self {
+    const fn new(direction: Direction, nulls_are: NullsAre) -> Self {
         Self {
             direction,
             nulls_are,
@@ -128,7 +137,7 @@ impl OrderType {
         }
     }
 
-    fn nulls_last(direction: Direction) -> Self {
+    const fn nulls_last(direction: Direction) -> Self {
         match direction {
             Direction::Ascending => Self::new(direction, NullsAre::Largest),
             Direction::Descending => Self::new(direction, NullsAre::Smallest),
@@ -150,10 +159,10 @@ impl OrderType {
 
     // TODO(rc): Many places that call `ascending` should've call `default`.
     /// Create an `ASC` order type.
-    pub fn ascending() -> Self {
+    pub const fn ascending() -> Self {
         Self {
             direction: Direction::Ascending,
-            nulls_are: NullsAre::default(),
+            nulls_are: NullsAre::const_default(),
         }
     }
 
@@ -171,7 +180,7 @@ impl OrderType {
     }
 
     /// Create an `ASC NULLS LAST` order type.
-    pub fn ascending_nulls_last() -> Self {
+    pub const fn ascending_nulls_last() -> Self {
         Self::nulls_last(Direction::Ascending)
     }
 

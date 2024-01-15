@@ -225,10 +225,7 @@ impl<S: StateStore, PK: KvLogStorePk> KvLogStoreFactory<S, PK> {
     }
 }
 
-impl<S: StateStore, PK: KvLogStorePk> LogStoreFactory for KvLogStoreFactory<S, PK>
-where
-    [(); PK::LEN]: Sized,
-{
+impl<S: StateStore, PK: KvLogStorePk> LogStoreFactory for KvLogStoreFactory<S, PK> {
     type Reader = KvLogStoreReader<S, PK>;
     type Writer = KvLogStoreWriter<S::Local, PK>;
 

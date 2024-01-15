@@ -37,6 +37,7 @@ pub mod hummock {
 
 pub mod log_store {
     use crate::hash::VirtualNode;
+    use crate::row::Row;
     use crate::types::{DataType, ScalarImpl};
     use crate::util::sort_util::OrderType;
 
@@ -61,14 +62,10 @@ pub mod log_store {
         const ROW_OP_COLUMN_INDEX: usize;
         const SEQ_ID_COLUMN_INDEX: usize;
 
-        fn pk_types() -> [DataType; Self::LEN];
-        fn pk_names() -> [&'static str; Self::LEN];
-        fn pk_ordering() -> [OrderType; Self::LEN];
-        fn pk(
-            vnode: VirtualNode,
-            encoded_epoch: i64,
-            seq_id: Option<SeqIdType>,
-        ) -> [Option<ScalarImpl>; Self::LEN];
+        fn pk_types() -> &'static [DataType];
+        fn pk_names() -> &'static [&'static str];
+        fn pk_ordering() -> &'static [OrderType];
+        fn pk(vnode: VirtualNode, encoded_epoch: i64, seq_id: Option<SeqIdType>) -> impl Row;
 
         fn predefined_column_len() -> usize {
             Self::LEN + KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS.len()
@@ -95,23 +92,21 @@ pub mod log_store {
             const ROW_OP_COLUMN_INDEX: usize = ROW_OP_COLUMN_INDEX;
             const SEQ_ID_COLUMN_INDEX: usize = SEQ_ID_COLUMN_INDEX;
 
-            fn pk_types() -> [DataType; Self::LEN] {
-                PK_TYPES
+            fn pk_types() -> &'static [DataType] {
+                &PK_TYPES[..]
             }
 
-            fn pk_names() -> [&'static str; Self::LEN] {
-                PK_COLUMN_NAMES
+            fn pk_names() -> &'static [&'static str] {
+                &PK_COLUMN_NAMES[..]
             }
 
-            fn pk_ordering() -> [OrderType; Self::LEN] {
-                [OrderType::ascending(), OrderType::ascending_nulls_last()]
+            fn pk_ordering() -> &'static [OrderType] {
+                static PK_ORDERING: [OrderType; PK_TYPES.len()] =
+                    [OrderType::ascending(), OrderType::ascending_nulls_last()];
+                &PK_ORDERING[..]
             }
 
-            fn pk(
-                _vnode: VirtualNode,
-                encoded_epoch: i64,
-                seq_id: Option<SeqIdType>,
-            ) -> [Option<ScalarImpl>; Self::LEN] {
+            fn pk(_vnode: VirtualNode, encoded_epoch: i64, seq_id: Option<SeqIdType>) -> impl Row {
                 [
                     Some(ScalarImpl::Int64(encoded_epoch)),
                     seq_id.map(ScalarImpl::Int32),
