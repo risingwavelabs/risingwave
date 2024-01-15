@@ -294,10 +294,15 @@ pub struct MetaConfig {
     /// split it to an single group.
     pub min_table_split_write_throughput: u64,
 
+    // If the compaction task does not report heartbeat beyond the
+    // `compaction_task_max_heartbeat_interval_secs` interval, we will cancel the task
     #[serde(default = "default::meta::compaction_task_max_heartbeat_interval_secs")]
+    pub compaction_task_max_heartbeat_interval_secs: u64,
+
     // If the compaction task does not change in progress beyond the
     // `compaction_task_max_heartbeat_interval_secs` interval, we will cancel the task
-    pub compaction_task_max_heartbeat_interval_secs: u64,
+    #[serde(default = "default::meta::compaction_task_max_progress_interval_secs")]
+    pub compaction_task_max_progress_interval_secs: u64,
 
     #[serde(default)]
     pub compaction_config: CompactionConfig,
@@ -902,6 +907,10 @@ pub struct SystemConfig {
 
     #[serde(default = "default::system::wasm_storage_url")]
     pub wasm_storage_url: Option<String>,
+
+    /// Whether to enable distributed tracing.
+    #[serde(default = "default::system::enable_tracing")]
+    pub enable_tracing: Option<bool>,
 }
 
 /// The subsections `[storage.object_store]`.
@@ -955,8 +964,9 @@ impl SystemConfig {
             backup_storage_directory: self.backup_storage_directory,
             max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
             pause_on_next_bootstrap: self.pause_on_next_bootstrap,
-            telemetry_enabled: None, // deprecated
             wasm_storage_url: self.wasm_storage_url,
+            enable_tracing: self.enable_tracing,
+            telemetry_enabled: None, // deprecated
         }
     }
 }
@@ -1054,7 +1064,11 @@ pub mod default {
         }
 
         pub fn compaction_task_max_heartbeat_interval_secs() -> u64 {
-            60 // 1min
+            30 // 30s
+        }
+
+        pub fn compaction_task_max_progress_interval_secs() -> u64 {
+            60 * 10 // 10min
         }
 
         pub fn cut_table_size_limit() -> u64 {
@@ -1484,19 +1498,19 @@ pub mod default {
 
     pub mod object_store_config {
         pub fn object_store_streaming_read_timeout_ms() -> u64 {
-            10 * 60 * 1000
+            8 * 60 * 1000
         }
 
         pub fn object_store_streaming_upload_timeout_ms() -> u64 {
-            10 * 60 * 1000
+            8 * 60 * 1000
         }
 
         pub fn object_store_upload_timeout_ms() -> u64 {
-            60 * 60 * 1000
+            8 * 60 * 1000
         }
 
         pub fn object_store_read_timeout_ms() -> u64 {
-            60 * 60 * 1000
+            8 * 60 * 1000
         }
 
         pub mod s3 {

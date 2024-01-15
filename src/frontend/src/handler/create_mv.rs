@@ -200,7 +200,7 @@ It only indicates the physical clustering of the data, which may improve the per
         }
         let can_run_in_background = plan_has_backfill_leaf_nodes(&plan);
         let context = plan.plan_base().ctx().clone();
-        let mut graph = build_graph(plan);
+        let mut graph = build_graph(plan)?;
         graph.parallelism =
             session
                 .config()
