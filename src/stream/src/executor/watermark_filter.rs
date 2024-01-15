@@ -383,7 +383,7 @@ mod tests {
             column_descs,
             order_types.to_vec(),
             pk_indices.to_vec(),
-            Distribution::all_vnodes(vec![0]),
+            Distribution::all(vec![0]),
             Some(val_indices.to_vec()),
         )
         .await
