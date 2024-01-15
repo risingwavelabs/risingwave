@@ -147,6 +147,11 @@ impl<Fut: Future> RwFutureExt for Fut {
 }
 
 pub trait RwTryStreamExt: TryStream {
+    /// Similar to https://docs.rs/futures/latest/futures/stream/trait.TryStreamExt.html#method.try_buffered, but respect to fence.
+    ///
+    /// Fence is provided by [`Future`] that implements [`MaybeFence`] and returns `true`.
+    /// When the stream receive a fenced future, it'll not do a sync operation. In brief, don't poll later futures until the current
+    /// buffer is cleared.
     fn try_buffered_with_fence(self, n: usize) -> TryBufferedWithFence<Self>
     where
         Self: Sized,
