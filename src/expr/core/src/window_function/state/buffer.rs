@@ -26,7 +26,6 @@ struct Entry<K: Ord, V> {
     value: V,
 }
 
-// TODO(rc): May be a good idea to extract this into a separate crate.
 /// A common sliding window buffer.
 pub struct WindowBuffer<K: Ord, V: Clone> {
     frame: Frame,
@@ -68,8 +67,8 @@ impl<K: Ord, V: Clone> WindowBuffer<K, V> {
     fn preceding_saturated(&self) -> bool {
         self.curr_key().is_some()
             && match &self.frame.bounds {
-                FrameBounds::Rows(start, _) => {
-                    let start_off = start.to_offset();
+                FrameBounds::Rows(bounds) => {
+                    let start_off = bounds.start.to_offset();
                     if let Some(start_off) = start_off {
                         if start_off >= 0 {
                             true // pure following frame, always preceding-saturated
@@ -92,8 +91,8 @@ impl<K: Ord, V: Clone> WindowBuffer<K, V> {
     fn following_saturated(&self) -> bool {
         self.curr_key().is_some()
             && match &self.frame.bounds {
-                FrameBounds::Rows(_, end) => {
-                    let end_off = end.to_offset();
+                FrameBounds::Rows(bounds) => {
+                    let end_off = bounds.end.to_offset();
                     if let Some(end_off) = end_off {
                         if end_off <= 0 {
                             true // pure preceding frame, always following-saturated
@@ -178,9 +177,9 @@ impl<K: Ord, V: Clone> WindowBuffer<K, V> {
         }
 
         match &self.frame.bounds {
-            FrameBounds::Rows(start, end) => {
-                let start_off = start.to_offset();
-                let end_off = end.to_offset();
+            FrameBounds::Rows(bounds) => {
+                let start_off = bounds.start.to_offset();
+                let end_off = bounds.end.to_offset();
                 if let Some(start_off) = start_off {
                     let logical_left_idx = self.curr_idx as isize + start_off;
                     if logical_left_idx >= 0 {
