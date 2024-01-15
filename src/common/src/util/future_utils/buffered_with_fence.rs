@@ -147,7 +147,7 @@ impl<Fut: Future> RwFutureExt for Fut {
 }
 
 pub trait RwTryStreamExt: TryStream {
-    /// Similar to https://docs.rs/futures/latest/futures/stream/trait.TryStreamExt.html#method.try_buffered, but respect to fence.
+    /// Similar to [`TryStreamExt::try_buffered`](https://docs.rs/futures/latest/futures/stream/trait.TryStreamExt.html#method.try_buffered), but respect to fence.
     ///
     /// Fence is provided by [`Future`] that implements [`MaybeFence`] and returns `true`.
     /// When the stream receive a fenced future, it'll not do a sync operation. In brief, don't poll later futures until the current
