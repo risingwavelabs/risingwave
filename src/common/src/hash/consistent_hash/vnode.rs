@@ -87,10 +87,6 @@ impl VirtualNode {
         Self(scalar as _)
     }
 
-    pub const fn vnode_data_type() -> DataType {
-        DataType::Int16
-    }
-
     pub fn from_datum(datum: DatumRef<'_>) -> Self {
         Self::from_scalar(datum.expect("should not be none").into_int16())
     }

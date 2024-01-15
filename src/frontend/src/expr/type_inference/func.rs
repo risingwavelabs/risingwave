@@ -579,7 +579,7 @@ fn infer_type_for_special(
         }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);
-            Ok(Some(VirtualNode::vnode_data_type()))
+            Ok(Some(VirtualNode::RW_TYPE))
         }
         ExprType::Greatest | ExprType::Least => {
             ensure_arity!("greatest/least", 1 <= | inputs |);
