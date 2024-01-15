@@ -144,11 +144,14 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                     epoch_with_gap: EpochWithGap::new(self.read_epoch, MAX_SPILL_TIMES),
                 };
                 self.iterator.seek(full_key.to_ref()).await?;
+                // We check `is_valid` and `user_key_out_of_range` here to avoid `delete_range_iter.seek`
+                // as much as possible because it can be expensive. We can simplify this logic after delete
+                // range is deprecated and replaced with vnode watermark.
                 if !self.iterator.is_valid() {
                     return Ok(());
                 }
 
-                if self.key_out_of_range() {
+                if self.user_key_out_of_range(self.iterator.key().user_key) {
                     return Ok(());
                 }
 
@@ -156,6 +159,9 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => {
+                // We check `is_valid` here to avoid `delete_range_iter.rewind`
+                // as much as possible because it can be expensive. We can simplify this logic after delete
+                // range is deprecated and replaced with vnode watermark.
                 self.iterator.rewind().await?;
                 if !self.iterator.is_valid() {
                     return Ok(());
@@ -193,11 +199,14 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             epoch_with_gap: EpochWithGap::new(self.read_epoch, MAX_SPILL_TIMES),
         };
         self.iterator.seek(full_key).await?;
+        // We check `is_valid` and `user_key_out_of_range` here to avoid `delete_range_iter.seek`
+        // as much as possible because it can be expensive. We can simplify this logic after delete
+        // range is deprecated and replaced with vnode watermark.
         if !self.iterator.is_valid() {
             return Ok(());
         }
 
-        if self.key_out_of_range() {
+        if self.user_key_out_of_range(self.iterator.key().user_key) {
             return Ok(());
         }
 
@@ -233,16 +242,6 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                 continue;
             }
 
-            // It is better to early return here if the user key is already
-            // out of range to avoid unnecessary access on the range tomestones
-            // via `delete_range_iter`.
-            // For example, if we are iterating with key range [0x0a, 0x0c) and the
-            // current key is 0xff, we will access range tombstones in [0x0c, 0xff],
-            // which is a waste of work.
-            if self.key_out_of_range() {
-                break;
-            }
-
             // Skip older version entry for the same user key
             if self.last_key.user_key.as_ref() == full_key.user_key {
                 self.stats.skip_multi_version_key_count += 1;
@@ -250,7 +249,18 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                 continue;
             }
 
+            // A new user key is observed.
             self.last_key = full_key.copy_into();
+
+            // It is better to early return here if the user key is already
+            // out of range to avoid unnecessary access on the range tomestones
+            // via `delete_range_iter`.
+            // For example, if we are iterating with key range [0x0a, 0x0c) and the
+            // current key is 0xff, we will access range tombstones in [0x0c, 0xff],
+            // which is a waste of work.
+            if self.user_key_out_of_range(full_key.user_key) {
+                break;
+            }
 
             // Handle delete operation
             match self.iterator.value() {
@@ -280,13 +290,11 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     }
 
     // Validate whether the current key is already out of range.
-    fn key_out_of_range(&self) -> bool {
-        assert!(self.iterator.is_valid());
-        let current_user_key = self.iterator.key().user_key;
+    fn user_key_out_of_range(&self, user_key: UserKey<&[u8]>) -> bool {
         // handle range scan
         match &self.key_range.1 {
-            Included(end_key) => current_user_key > end_key.as_ref(),
-            Excluded(end_key) => current_user_key >= end_key.as_ref(),
+            Included(end_key) => user_key > end_key.as_ref(),
+            Excluded(end_key) => user_key >= end_key.as_ref(),
             Unbounded => false,
         }
     }
