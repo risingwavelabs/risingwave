@@ -39,15 +39,8 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 
-use super::{
-    get_partition_offset_col_idx, get_split_offset_mapping_from_chunk, prune_additional_cols,
-};
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, Mutation, PkIndicesRef, SourceStateTableHandler, StreamExecutorError,
-    StreamExecutorResult, StreamSourceCore,
-};
+use crate::executor::*;
 
 const SPLIT_BATCH_SIZE: usize = 1000;
 
