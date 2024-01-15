@@ -32,6 +32,7 @@ use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType};
 use tokio::sync::oneshot::Receiver;
 
+use super::iterator::MonitoredCompactorIterator;
 use super::task_progress::TaskProgress;
 use super::{check_compaction_result, CompactionStatistics, TaskConfig};
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
@@ -230,12 +231,12 @@ impl CompactorRunner {
         // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
         // in https://github.com/risingwavelabs/risingwave/issues/13148
         Ok((
-            SkipWatermarkIterator::from_safe_epoch_watermarks(
-                UnorderedMergeIteratorInner::for_compactor(
-                    table_iters,
-                    Some(task_progress.clone()),
+            MonitoredCompactorIterator::new(
+                SkipWatermarkIterator::from_safe_epoch_watermarks(
+                    UnorderedMergeIteratorInner::for_compactor(table_iters),
+                    &self.compact_task.table_watermarks,
                 ),
-                &self.compact_task.table_watermarks,
+                task_progress.clone(),
             ),
             CompactionDeleteRangeIterator::new(del_iter),
         ))

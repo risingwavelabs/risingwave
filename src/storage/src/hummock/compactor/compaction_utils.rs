@@ -349,7 +349,7 @@ pub async fn check_compaction_result(
             }
         }
     }
-    let iter = UnorderedMergeIteratorInner::for_compactor(table_iters, None);
+    let iter = UnorderedMergeIteratorInner::for_compactor(table_iters);
     let mut left_iter = UserIterator::new(
         SkipWatermarkIterator::from_safe_epoch_watermarks(iter, &compact_task.table_watermarks),
         (Bound::Unbounded, Bound::Unbounded),

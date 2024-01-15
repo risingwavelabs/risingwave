@@ -28,7 +28,7 @@ use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
-use crate::hummock::iterator::{Forward, HummockIterator};
+use crate::hummock::iterator::{Forward, HummockIterator, SkipWatermarkIterator};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{BlockHolder, BlockIterator, BlockMeta, HummockResult};
@@ -483,6 +483,66 @@ impl HummockIterator for ConcatSstableIterator {
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         stats.add(&self.stats)
+    }
+}
+
+pub struct MonitoredCompactorIterator<I> {
+    inner: SkipWatermarkIterator<I>,
+    task_progress: Arc<TaskProgress>,
+
+    processed_key_num: usize,
+}
+
+impl<I: HummockIterator<Direction = Forward>> MonitoredCompactorIterator<I> {
+    pub fn new(inner: SkipWatermarkIterator<I>, task_progress: Arc<TaskProgress>) -> Self {
+        Self {
+            inner,
+            task_progress,
+            processed_key_num: 0,
+        }
+    }
+}
+
+impl<I: HummockIterator<Direction = Forward>> HummockIterator for MonitoredCompactorIterator<I> {
+    type Direction = Forward;
+
+    async fn next(&mut self) -> HummockResult<()> {
+        self.inner.next().await?;
+        self.processed_key_num += 1;
+
+        if self.processed_key_num % 100 == 0 {
+            self.task_progress.inc_progress_key(100);
+        }
+
+        Ok(())
+    }
+
+    fn key(&self) -> FullKey<&[u8]> {
+        self.inner.key()
+    }
+
+    fn value(&self) -> HummockValue<&[u8]> {
+        self.inner.value()
+    }
+
+    fn is_valid(&self) -> bool {
+        self.inner.is_valid()
+    }
+
+    async fn rewind(&mut self) -> HummockResult<()> {
+        self.processed_key_num = 0;
+        self.inner.rewind().await?;
+        Ok(())
+    }
+
+    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+        self.processed_key_num = 0;
+        self.inner.seek(key).await?;
+        Ok(())
+    }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        self.inner.collect_local_statistic(stats)
     }
 }
 
