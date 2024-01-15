@@ -27,7 +27,7 @@ use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
 use risingwave_common::{bail_not_implemented, current_cluster_version, no_function};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
-    Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
+    Frame, FrameBound, FrameBounds, FrameExclusion, RowsFrameBounds, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
     self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, Ident, SelectItem, SetExpr,
@@ -54,6 +54,12 @@ pub const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
     "current_schema",
     "current_timestamp",
 ];
+
+/// The global max calling depth for the global counter in `udf_context`
+/// To reduce the chance that the current running rw thread
+/// be killed by os, the current allowance depth of calling
+/// stack is set to `16`.
+const SQL_UDF_MAX_CALLING_DEPTH: u32 = 16;
 
 impl Binder {
     pub(in crate::binder) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
@@ -235,6 +241,7 @@ impl Binder {
                     )
                     .into());
                 }
+
                 // This represents the current user defined function is `language sql`
                 let parse_result = risingwave_sqlparser::parser::Parser::parse_sql(
                     func.body.as_ref().unwrap().as_str(),
@@ -245,6 +252,7 @@ impl Binder {
                     // Here we just return the original parse error message
                     return Err(ErrorCode::InvalidInputSyntax(err).into());
                 }
+
                 debug_assert!(parse_result.is_ok());
 
                 // We can safely unwrap here
@@ -263,7 +271,7 @@ impl Binder {
                 if self.udf_context.is_empty() {
                     // The actual inline logic for sql udf
                     if let Ok(context) = create_udf_context(&args, &Arc::clone(func)) {
-                        self.udf_context = context;
+                        self.udf_context.update_context(context);
                     } else {
                         return Err(ErrorCode::InvalidInputSyntax(
                             "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
@@ -277,9 +285,21 @@ impl Binder {
                     clean_flag = false;
                 }
 
+                // Check for potential recursive calling
+                if self.udf_context.global_count() >= SQL_UDF_MAX_CALLING_DEPTH {
+                    return Err(ErrorCode::BindError(format!(
+                        "function {} calling stack depth limit exceeded",
+                        &function_name
+                    ))
+                    .into());
+                } else {
+                    // Update the status for the global counter
+                    self.udf_context.incr_global_count();
+                }
+
                 if let Ok(expr) = extract_udf_expression(ast) {
                     let bind_result = self.bind_expr(expr);
-                    // Clean the `udf_context` after inlining,
+                    // Clean the `udf_context` & `udf_recursive_context` after inlining,
                     // which makes sure the subsequent binding will not be affected
                     if clean_flag {
                         self.udf_context.clear();
@@ -294,13 +314,6 @@ impl Binder {
                     .into());
                 }
             } else {
-                // Note that `language` may be empty for external udf
-                if !func.language.is_empty() {
-                    debug_assert!(
-                        func.language == "python" || func.language == "java",
-                        "only `python` and `java` are currently supported for general udf"
-                    );
-                }
                 match &func.kind {
                     Scalar { .. } => {
                         return Ok(UserDefinedFunction::new(func.clone(), inputs).into())
@@ -670,7 +683,7 @@ impl Binder {
                     } else {
                         FrameBound::CurrentRow
                     };
-                    FrameBounds::Rows(start, end)
+                    FrameBounds::Rows(RowsFrameBounds { start, end })
                 }
                 WindowFrameUnits::Range | WindowFrameUnits::Groups => {
                     bail_not_implemented!(

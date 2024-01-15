@@ -82,7 +82,12 @@ impl TableDistribution {
 
         let vnodes = vnodes.unwrap_or_else(Self::singleton_vnode_bitmap);
         if let ComputeVnode::Singleton = &compute_vnode {
-            assert!(vnodes.is_set(SINGLETON_VNODE.to_index()));
+            if &vnodes != Self::singleton_vnode_bitmap_ref() {
+                warn!(
+                    ?vnodes,
+                    "singleton distribution get non-singleton vnode bitmap"
+                );
+            }
         }
 
         Self {
@@ -136,15 +141,8 @@ impl TableDistribution {
     }
 
     pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-        if self.is_singleton() {
-            if &new_vnodes != Self::singleton_vnode_bitmap_ref() {
-                warn!(?new_vnodes, "update vnode on singleton distribution");
-            }
-            assert!(
-                new_vnodes.is_set(SINGLETON_VNODE.to_index()),
-                "singleton distribution get vnode bitmap without SINGLETON_VNODE: {:?}",
-                new_vnodes
-            );
+        if self.is_singleton() && &new_vnodes != Self::singleton_vnode_bitmap_ref() {
+            warn!(?new_vnodes, "update vnode on singleton distribution");
         }
         assert_eq!(self.vnodes.len(), new_vnodes.len());
         replace(&mut self.vnodes, new_vnodes)
@@ -370,6 +368,10 @@ impl<T: AsRef<[u8]>> KeyedRow<T> {
 
     pub fn key(&self) -> &[u8] {
         self.vnode_prefixed_key.key_part()
+    }
+
+    pub fn row(&self) -> &OwnedRow {
+        &self.row
     }
 
     pub fn into_parts(self) -> (TableKey<T>, OwnedRow) {
