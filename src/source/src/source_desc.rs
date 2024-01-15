@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, ADDITION_PARTITION_COLUMN_NAME};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -95,7 +95,7 @@ impl SourceDescBuilder {
             ColumnCatalog {
                 column_desc: Some(
                     ColumnDesc::named_with_additional_column(
-                        "_rw_partition",
+                        ADDITION_PARTITION_COLUMN_NAME,
                         last_column_id.next(),
                         DataType::Varchar,
                         AdditionalColumnType::Partition,
@@ -107,7 +107,7 @@ impl SourceDescBuilder {
             ColumnCatalog {
                 column_desc: Some(
                     ColumnDesc::named_with_additional_column(
-                        "_rw_offset",
+                        ADDITION_PARTITION_COLUMN_NAME,
                         last_column_id.next().next(),
                         DataType::Varchar,
                         AdditionalColumnType::Offset,
@@ -123,20 +123,22 @@ impl SourceDescBuilder {
             .iter()
             .chain(additional_columns.iter())
             .filter_map(|c| {
-                if match c.column_desc.as_ref().unwrap().get_additional_column_type() {
-                    Ok(AdditionalColumnType::Partition) => {
-                        std::mem::replace(&mut columns_exist[0], true)
-                    }
-                    Ok(AdditionalColumnType::Offset) => {
-                        std::mem::replace(&mut columns_exist[1], true)
-                    }
-                    _ => false,
-                } {
-                    None
-                } else {
+                let addition_col_existed =
+                    match c.column_desc.as_ref().unwrap().get_additional_column_type() {
+                        Ok(AdditionalColumnType::Partition) => {
+                            std::mem::replace(&mut columns_exist[0], true)
+                        }
+                        Ok(AdditionalColumnType::Offset) => {
+                            std::mem::replace(&mut columns_exist[1], true)
+                        }
+                        _ => false,
+                    };
+                if !addition_col_existed {
                     Some(SourceColumnDesc::from(&ColumnDesc::from(
                         c.column_desc.as_ref().unwrap(),
                     )))
+                } else {
+                    None
                 }
             })
             .collect();
