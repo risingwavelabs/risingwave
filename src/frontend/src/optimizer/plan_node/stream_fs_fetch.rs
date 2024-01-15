@@ -101,6 +101,8 @@ impl StreamNode for StreamFsFetch {
             source_id: source_catalog.id,
             source_name: source_catalog.name.clone(),
             state_table: Some(
+                // `StreamFsSource` will do range scan according to assigned vnodes, so we need to set
+                // the key for distributing data to different vnodes.
                 generic::Source::infer_internal_table_catalog(true)
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),

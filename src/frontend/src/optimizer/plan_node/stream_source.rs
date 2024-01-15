@@ -75,6 +75,8 @@ impl StreamNode for StreamSource {
             source_id: source_catalog.id,
             source_name: source_catalog.name.clone(),
             state_table: Some(
+                // `StreamSource` can write all data to the same vnode
+                // but it is ok because we only do point get on each key rather than range scan.
                 generic::Source::infer_internal_table_catalog(false)
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
