@@ -141,15 +141,8 @@ impl TableDistribution {
     }
 
     pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-        if self.is_singleton() {
-            if &new_vnodes != Self::singleton_vnode_bitmap_ref() {
-                warn!(?new_vnodes, "update vnode on singleton distribution");
-            }
-            assert!(
-                new_vnodes.is_set(SINGLETON_VNODE.to_index()),
-                "singleton distribution get vnode bitmap without SINGLETON_VNODE: {:?}",
-                new_vnodes
-            );
+        if self.is_singleton() && &new_vnodes != Self::singleton_vnode_bitmap_ref() {
+            warn!(?new_vnodes, "update vnode on singleton distribution");
         }
         assert_eq!(self.vnodes.len(), new_vnodes.len());
         replace(&mut self.vnodes, new_vnodes)
