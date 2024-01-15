@@ -326,6 +326,24 @@ impl FrontendEnv {
         let creating_streaming_job_tracker =
             Arc::new(StreamingJobTracker::new(frontend_meta_client.clone()));
 
+        let sessions_map: SessionMapRef = Arc::new(RwLock::new(HashMap::new()));
+        let sessions = sessions_map.clone();
+
+        // Idle transaction background monitor
+        let join_handle = tokio::spawn(async move {
+            let mut check_idle_txn_interval =
+                tokio::time::interval(core::time::Duration::from_secs(5));
+            check_idle_txn_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            check_idle_txn_interval.reset();
+            loop {
+                check_idle_txn_interval.tick().await;
+                sessions.read().values().for_each(|session| {
+                    let _ = session.check_idle_in_transaction_timeout();
+                })
+            }
+        });
+        join_handles.push(join_handle);
+
         Ok((
             Self {
                 catalog_reader,
@@ -339,7 +357,7 @@ impl FrontendEnv {
                 server_addr: frontend_address,
                 client_pool,
                 frontend_metrics,
-                sessions_map: Arc::new(RwLock::new(HashMap::new())),
+                sessions_map,
                 batch_config,
                 meta_config,
                 source_metrics,
@@ -1148,12 +1166,15 @@ impl Session for SessionImpl {
         ExecContextGuard::new(exec_context)
     }
 
+    /// Check whether idle transaction timeout.
+    /// If yes, unpin snapshot and return an `IdleInTxnTimeout` error.
     fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()> {
         if matches!(self.transaction_status(), TransactionStatus::InTransaction) {
             if let Some(elapse_since_last_idle_instant) = self.elapse_since_last_idle_instant() {
                 if elapse_since_last_idle_instant
                     > self.config().idle_in_transaction_session_timeout() as u128
                 {
+                    self.unpin_snapshot();
                     return Err(PsqlError::IdleInTxnTimeout);
                 }
             }
