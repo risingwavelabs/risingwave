@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod buffered_with_fence;
+
 use std::future::pending;
 use std::pin::{pin, Pin};
 
+pub use buffered_with_fence::*;
 use futures::future::{select, Either};
 use futures::stream::Peekable;
 use futures::{Future, FutureExt, Stream, StreamExt};
