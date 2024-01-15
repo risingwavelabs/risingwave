@@ -13,13 +13,12 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::pin::pin;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use futures::future::{select, Either};
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 use thiserror_ext::AsReport;
+use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 
@@ -33,7 +32,6 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
-use risingwave_common::util::drop_either_future;
 use risingwave_storage::store::SyncResult;
 use risingwave_storage::StateStoreImpl;
 
@@ -49,6 +47,7 @@ pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 /// Collect result of some barrier on current compute node. Will be reported to the meta service.
 #[derive(Debug)]
 pub struct BarrierCompleteResult {
+    /// The result returned from `sync` of `StateStore`.
     pub sync_result: Option<SyncResult>,
 
     /// The updated creation progress of materialized view after this barrier.
@@ -116,60 +115,60 @@ impl LocalBarrierWorker {
 
     async fn run(mut self, mut event_rx: UnboundedReceiver<LocalBarrierEvent>) {
         loop {
-            let item = drop_either_future(
-                select(
-                    pin!(self.state.next_completed_epoch()),
-                    pin!(event_rx.recv()),
-                )
-                .await,
-            );
-            match item {
-                Either::Left(epoch) => {
-                    self.on_epoch_completed(epoch);
-                }
-                Either::Right(Some(event)) => match event {
-                    LocalBarrierEvent::RegisterSender { actor_id, sender } => {
-                        self.register_sender(actor_id, sender);
-                    }
-                    LocalBarrierEvent::InjectBarrier {
-                        barrier,
-                        actor_ids_to_send,
-                        actor_ids_to_collect,
-                        result_sender,
-                    } => {
-                        let result =
-                            self.send_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect);
-                        let _ = result_sender.send(result).inspect_err(|e| {
-                            warn!(err=?e, "fail to send inject barrier result");
-                        });
-                    }
-                    LocalBarrierEvent::Reset => {
-                        self.reset();
-                    }
-                    ReportActorCollected { actor_id, barrier } => self.collect(actor_id, &barrier),
-                    ReportActorFailure { actor_id, err } => {
-                        self.notify_failure(actor_id, err);
-                    }
-                    LocalBarrierEvent::AwaitEpochCompleted {
-                        epoch,
-                        result_sender,
-                    } => {
-                        self.await_epoch_completed(epoch, result_sender);
-                    }
-                    LocalBarrierEvent::ReportCreateProgress {
-                        current_epoch,
-                        actor,
-                        state,
-                    } => {
-                        self.update_create_mview_progress(current_epoch, actor, state);
-                    }
-                    #[cfg(test)]
-                    LocalBarrierEvent::Flush(sender) => sender.send(()).unwrap(),
+            select! {
+                completed_epoch = self.state.next_completed_epoch() => {
+                    self.on_epoch_completed(completed_epoch);
                 },
-                Either::Right(None) => {
-                    break;
+                event = event_rx.recv() => {
+                    if let Some(event) = event {
+                        self.handle_event(event);
+                    }
+                    else {
+                        break;
+                    }
                 }
             }
+        }
+    }
+
+    fn handle_event(&mut self, event: LocalBarrierEvent) {
+        match event {
+            LocalBarrierEvent::RegisterSender { actor_id, sender } => {
+                self.register_sender(actor_id, sender);
+            }
+            LocalBarrierEvent::InjectBarrier {
+                barrier,
+                actor_ids_to_send,
+                actor_ids_to_collect,
+                result_sender,
+            } => {
+                let result = self.send_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect);
+                let _ = result_sender.send(result).inspect_err(|e| {
+                    warn!(err=?e, "fail to send inject barrier result");
+                });
+            }
+            LocalBarrierEvent::Reset => {
+                self.reset();
+            }
+            ReportActorCollected { actor_id, barrier } => self.collect(actor_id, &barrier),
+            ReportActorFailure { actor_id, err } => {
+                self.notify_failure(actor_id, err);
+            }
+            LocalBarrierEvent::AwaitEpochCompleted {
+                epoch,
+                result_sender,
+            } => {
+                self.await_epoch_completed(epoch, result_sender);
+            }
+            LocalBarrierEvent::ReportCreateProgress {
+                current_epoch,
+                actor,
+                state,
+            } => {
+                self.update_create_mview_progress(current_epoch, actor, state);
+            }
+            #[cfg(test)]
+            LocalBarrierEvent::Flush(sender) => sender.send(()).unwrap(),
         }
     }
 }

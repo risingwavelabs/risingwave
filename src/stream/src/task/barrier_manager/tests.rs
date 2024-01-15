@@ -14,6 +14,7 @@
 
 use std::future::{poll_fn, Future};
 use std::iter::once;
+use std::pin::pin;
 use std::task::Poll;
 
 use itertools::Itertools;

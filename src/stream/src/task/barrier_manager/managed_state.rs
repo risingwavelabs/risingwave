@@ -161,7 +161,9 @@ impl ManagedBarrierState {
         }
     }
 
-    /// Notify if we have collected barriers from all actor ids. The state must be `Issued`.
+    /// This method is called when barrier state is modified in either `Issued` or `Stashed`
+    /// to turn the state to `AllCollected` when the barrier has been collected from all actors
+    /// for an `Issued` barrier.
     fn may_have_collected_all(&mut self, prev_epoch: u64) {
         // Report if there's progress on the earliest in-flight barrier.
         if self.epoch_barrier_state_map.keys().next() == Some(&prev_epoch) {
