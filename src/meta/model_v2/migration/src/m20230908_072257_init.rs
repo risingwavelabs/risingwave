@@ -703,6 +703,7 @@ impl MigrationTrait for Migration {
                     .table(Function::Table)
                     .col(ColumnDef::new(Function::FunctionId).integer().primary_key())
                     .col(ColumnDef::new(Function::Name).string().not_null())
+                    .col(ColumnDef::new(Function::ArgNames).json().not_null())
                     .col(ColumnDef::new(Function::ArgTypes).json().not_null())
                     .col(ColumnDef::new(Function::ReturnType).json().not_null())
                     .col(ColumnDef::new(Function::Language).string().not_null())
@@ -1095,6 +1096,7 @@ enum Function {
     Table,
     FunctionId,
     Name,
+    ArgNames,
     ArgTypes,
     ReturnType,
     Language,
