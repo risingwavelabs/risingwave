@@ -21,6 +21,7 @@ use either::Either;
 use futures::pin_mut;
 use futures::stream::{self, StreamExt};
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row};
@@ -33,6 +34,7 @@ use risingwave_connector::source::{
     BoxChunkedSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData, StreamChunk,
 };
 use risingwave_connector::ConnectorParams;
+use risingwave_pb::plan_common::AdditionalColumnType;
 use risingwave_source::source_desc::SourceDesc;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
@@ -194,6 +196,25 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
+        let (Some(partition_idx), Some(col_idx)) = ({
+            let mut partition_idx = None;
+            let mut col_idx = None;
+            for (idx, column) in source_desc.columns.iter().enumerate() {
+                match additional_column_type {
+                    AdditionalColumnType::Partition => {
+                        partition_idx = Some(idx);
+                    }
+                    AdditionalColumnType::Offset => {
+                        col_idx = Some(idx);
+                    }
+                    _ => (),
+                }
+            }
+            (partition_idx, col_idx)
+        }) else {
+            unreachable!("Partition and offset columns must be set.");
+        };
+
         // Initialize state table.
         state_store_handler.init_epoch(barrier.epoch);
 
@@ -275,7 +296,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     yield msg;
                                 }
                                 // Receiving file assignments from upstream list executor,
-                                // store into state table and try building a new reader.
+                                // store into state table.
                                 Message::Chunk(chunk) => {
                                     let file_assignment = chunk
                                         .data_chunk()
@@ -297,36 +318,40 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                             }
                         }
                         // StreamChunk from FsSourceReader, and the reader reads only one file.
-                        // If the file read out, replace with a new file reader.
-                        Either::Right(StreamChunk {
-                            chunk,
-                            split_offset_mapping,
-                        }) => {
-                            let mapping = split_offset_mapping.unwrap();
-                            debug_assert_eq!(mapping.len(), 1);
-                            if let Some((split_id, offset)) = mapping.into_iter().next() {
-                                let row = state_store_handler
-                                    .get(split_id.clone())
-                                    .await?
-                                    .expect("The fs_split should be in the state table.");
-                                let fs_split = match row.datum_at(1) {
-                                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                                        OpendalFsSplit::<Src>::restore_from_json(
-                                            jsonb_ref.to_owned_scalar(),
-                                        )?
-                                    }
-                                    _ => unreachable!(),
-                                };
+                        Either::Right(chunk) => {
+                            let chunk_last_row = chunk
+                                .rows()
+                                .last()
+                                .expect("The chunk should have at least one row.");
+                            let split_id =
+                                chunk_last_row.datum_at(partition_idx).unwrap().into_utf8();
+                            let offset = chunk_last_row.datum_at(col_idx).unwrap().into_utf8();
 
-                                if offset.parse::<usize>().unwrap() >= fs_split.size {
-                                    splits_on_fetch -= 1;
-                                    state_store_handler.delete(split_id).await?;
-                                } else {
-                                    state_store_handler
-                                        .set(split_id, fs_split.encode_to_json())
-                                        .await?;
+                            let state = state_store_handler
+                                .get(split_id.clone())
+                                .await?
+                                .expect("The fs_split should be in the state table.");
+                            let fs_split = match state.datum_at(1) {
+                                Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
+                                    OpendalFsSplit::<Src>::restore_from_json(
+                                        jsonb_ref.to_owned_scalar(),
+                                    )?
                                 }
+                                _ => unreachable!(),
+                            };
+                            if offset.parse::<usize>().unwrap() >= fs_split.size {
+                                splits_on_fetch -= 1;
+                                state_store_handler.delete(split_id).await?;
+                            } else {
+                                state_store_handler
+                                    .set(split_id, fs_split.encode_to_json())
+                                    .await?;
                             }
+
+                            let chunk = chunk.project(
+                                (0..chunk.dimension())
+                                    .filter(|&idx| idx != partition_idx && idx != col_idx),
+                            );
 
                             yield Message::Chunk(chunk);
                         }
