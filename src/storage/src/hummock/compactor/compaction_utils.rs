@@ -314,10 +314,11 @@ pub fn estimate_task_output_capacity(context: CompactorContext, task: &CompactTa
     std::cmp::min(capacity, total_input_uncompressed_file_size as usize)
 }
 
+/// Compare result of compaction task and input. The data saw by user shall not change after applying compaction result.
 pub async fn check_compaction_result(
     compact_task: &CompactTask,
     context: CompactorContext,
-) -> HummockResult<()> {
+) -> HummockResult<bool> {
     let has_ttl = compact_task
         .table_options
         .iter()
@@ -336,8 +337,9 @@ pub async fn check_compaction_result(
     let need_clean_state_table = compact_table_ids
         .iter()
         .any(|table_id| !existing_table_ids.contains(table_id));
+    // This check method does not consider dropped keys by compaction filter.
     if has_ttl || need_clean_state_table {
-        return Ok(());
+        return Ok(true);
     }
 
     let mut table_iters = Vec::new();
@@ -419,7 +421,7 @@ pub async fn check_flush_result<I: HummockIterator<Direction = Forward>>(
     existing_table_ids: Vec<StateTableId>,
     sort_ssts: Vec<SstableInfo>,
     context: CompactorContext,
-) -> HummockResult<()> {
+) -> HummockResult<bool> {
     let mut del_iter = ForwardMergeRangeIterator::default();
     del_iter.add_concat_iter(sort_ssts.clone(), context.sstable_store.clone());
     let iter = ConcatSstableIterator::new(
@@ -447,15 +449,22 @@ async fn check_result<
 >(
     mut left_iter: UserIterator<I1>,
     mut right_iter: UserIterator<I2>,
-) -> HummockResult<()> {
+) -> HummockResult<bool> {
     left_iter.rewind().await?;
     right_iter.rewind().await?;
     while left_iter.is_valid() && right_iter.is_valid() {
-        assert_eq!(left_iter.key(), right_iter.key());
-        assert_eq!(left_iter.value(), right_iter.value());
+        if left_iter.key() != right_iter.key() {
+            return Ok(false);
+        }
+        if left_iter.value() != right_iter.value() {
+            return Ok(false);
+        }
         left_iter.next().await?;
         right_iter.next().await?;
     }
-    assert!(!left_iter.is_valid() && !right_iter.is_valid());
-    Ok(())
+    if left_iter.is_valid() || right_iter.is_valid() {
+        tracing::error!("The key count of input and output not equal");
+        return Ok(false);
+    }
+    Ok(true)
 }

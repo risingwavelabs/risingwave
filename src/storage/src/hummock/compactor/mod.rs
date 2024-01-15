@@ -49,7 +49,7 @@ use futures::{pin_mut, StreamExt};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
-use risingwave_hummock_sdk::{HummockCompactionTaskId, LocalSstableInfo};
+use risingwave_hummock_sdk::{compact_task_to_string, HummockCompactionTaskId, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
     Event as RequestEvent, HeartBeat, PullTask, ReportTask,
@@ -681,16 +681,25 @@ pub fn start_shared_compactor(
                                         Ok(_) => {
                                             // TODO: remove this method after we have running risingwave cluster with fast compact algorithm stably for a long time.
 
-                                            if context.storage_opts.check_fast_compaction_result
+                                            if context.storage_opts.check_compaction_result
                                                 && !compact_task.sorted_output_ssts.is_empty()
                                                 && compact_task.task_status() == TaskStatus::Success
-                                                && let Err(e) = check_compaction_result(&compact_task, context.clone()).await
                                             {
-                                                tracing::error!(
-                "Failed to check fast compaction task {} because: {:?}",
+
+                                            }
+                                                match check_compaction_result(&compact_task, context.clone()).await {
+                                                    Err(e) => {
+                                                        tracing::warn!(
+                "Failed to check compaction task {} because: {:?}",
                 compact_task.task_id,
                 e
             );
+                                                    },
+                                                    Ok(true) => (),
+                                                    Ok(false) => {
+                                                        panic!("Failed to pass consistency check for result of compaction task:\n{:?}", compact_task_to_string(&compact_task));
+                                                    }
+
                                             }
                                         }
                                         Err(e) => tracing::warn!("Failed to report task {task_id:?} . {e:?}"),

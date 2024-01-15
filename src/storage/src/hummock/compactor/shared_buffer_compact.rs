@@ -308,7 +308,7 @@ async fn compact_shared_buffer(
             }
             level0.extend(ssts);
         }
-        if context.storage_opts.check_fast_compaction_result {
+        if context.storage_opts.check_compaction_result {
             let compaction_executor = context.compaction_executor.clone();
             let mut forward_iters = Vec::with_capacity(payload.len());
             let mut del_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
@@ -329,13 +329,25 @@ async fn compact_shared_buffer(
                 del_iter,
             );
             compaction_executor.spawn(async move {
-                check_flush_result(
+                match check_flush_result(
                     left_iter,
                     Vec::from_iter(existing_table_ids.iter().cloned()),
                     sst_infos,
                     context,
                 )
                 .await
+                {
+                    Err(e) => {
+                        tracing::warn!("Failed check flush result of memtable because of {:?}", e);
+                    }
+                    Ok(true) => (),
+                    Ok(false) => {
+                        panic!(
+                            "failed to check flush result consistency of state-table {:?}",
+                            existing_table_ids
+                        );
+                    }
+                }
             });
         }
         Ok(level0)
