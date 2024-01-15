@@ -125,7 +125,7 @@ async fn test_over_window_lag_lead_append_only() {
     check_with_script(
         || create_executor(calls.clone(), store.clone()),
         r###"
-        - !barrier 1
+        - !barrier 65536
         - !chunk |2
               I T  I   i
             + 1 p1 100 10
@@ -133,18 +133,18 @@ async fn test_over_window_lag_lead_append_only() {
         - !chunk |2
               I T  I   i
             + 5 p1 102 18
-        - !barrier 2
+        - !barrier 131072
         - recovery
-        - !barrier 3
+        - !barrier 196608
         - !chunk |2
               I  T  I   i
             + 10 p1 103 13
-        - !barrier 4
+        - !barrier 262144
         "###,
         expect![[r#"
-            - input: !barrier 1
+            - input: !barrier 65536
               output:
-              - !barrier 1
+              - !barrier 65536
             - input: !chunk |-
                 +---+---+----+-----+----+
                 | + | 1 | p1 | 100 | 10 |
@@ -178,14 +178,14 @@ async fn test_over_window_lag_lead_append_only() {
                 | 1 | p1 | 101 | 16 | 10 | 18 |
                 | 5 | p1 | 102 | 18 | 16 |    |
                 +---+----+-----+----+----+----+
-            - input: !barrier 2
+            - input: !barrier 131072
               output:
-              - !barrier 2
+              - !barrier 131072
             - input: recovery
               output: []
-            - input: !barrier 3
+            - input: !barrier 196608
               output:
-              - !barrier 3
+              - !barrier 196608
             - input: !chunk |-
                 +---+----+----+-----+----+
                 | + | 10 | p1 | 103 | 13 |
@@ -204,9 +204,9 @@ async fn test_over_window_lag_lead_append_only() {
                 | 5  | p1 | 102 | 18 | 16 | 13 |
                 | 10 | p1 | 103 | 13 | 18 |    |
                 +----+----+-----+----+----+----+
-            - input: !barrier 4
+            - input: !barrier 262144
               output:
-              - !barrier 4
+              - !barrier 262144
         "#]],
         snapshot_options(),
     )
@@ -236,7 +236,7 @@ async fn test_over_window_lag_lead_with_updates() {
     check_with_script(
         || create_executor(calls.clone(), store.clone()),
         r###"
-        - !barrier 1
+        - !barrier 65536
         - !chunk |2
               I T  I   i
             + 1 p1 100 10
@@ -250,26 +250,26 @@ async fn test_over_window_lag_lead_with_updates() {
            U+ 3 p1 100 13 // an order-change update, `x` also changed
             + 5 p1 105 18
             + 6 p2 203 23
-        - !barrier 2
+        - !barrier 131072
         - recovery
-        - !barrier 3
+        - !barrier 196608
         - !chunk |2
               I T  I   i
             - 6 p2 203 23
            U- 2 p1 101 16
            U+ 2 p2 101 16 // a partition-change update
-        - !barrier 4
+        - !barrier 262144
         - recovery
-        - !barrier 5
+        - !barrier 327680
         - !chunk |2
               I  T  I   i
             + 10 p3 300 30
-        - !barrier 6
+        - !barrier 393216
         "###,
         expect![[r#"
-            - input: !barrier 1
+            - input: !barrier 65536
               output:
-              - !barrier 1
+              - !barrier 65536
             - input: !chunk |-
                 +---+---+----+-----+----+
                 | + | 1 | p1 | 100 | 10 |
@@ -318,14 +318,14 @@ async fn test_over_window_lag_lead_with_updates() {
                 | 5 | p1 | 105 | 18 | 13 |    |
                 | 6 | p2 | 203 | 23 | 20 |    |
                 +---+----+-----+----+----+----+
-            - input: !barrier 2
+            - input: !barrier 131072
               output:
-              - !barrier 2
+              - !barrier 131072
             - input: recovery
               output: []
-            - input: !barrier 3
+            - input: !barrier 196608
               output:
-              - !barrier 3
+              - !barrier 196608
             - input: !chunk |-
                 +----+---+----+-----+----+
                 |  - | 6 | p2 | 203 | 23 |
@@ -350,14 +350,14 @@ async fn test_over_window_lag_lead_with_updates() {
                 | 3 | p1 | 100 | 13 |    | 18 |
                 | 5 | p1 | 105 | 18 | 13 |    |
                 +---+----+-----+----+----+----+
-            - input: !barrier 4
+            - input: !barrier 262144
               output:
-              - !barrier 4
+              - !barrier 262144
             - input: recovery
               output: []
-            - input: !barrier 5
+            - input: !barrier 327680
               output:
-              - !barrier 5
+              - !barrier 327680
             - input: !chunk |-
                 +---+----+----+-----+----+
                 | + | 10 | p3 | 300 | 30 |
@@ -375,9 +375,9 @@ async fn test_over_window_lag_lead_with_updates() {
                 | 5  | p1 | 105 | 18 | 13 |    |
                 | 10 | p3 | 300 | 30 |    |    |
                 +----+----+-----+----+----+----+
-            - input: !barrier 6
+            - input: !barrier 393216
               output:
-              - !barrier 6
+              - !barrier 393216
         "#]],
         snapshot_options(),
     )
@@ -408,7 +408,7 @@ async fn test_over_window_sum() {
     check_with_script(
         || create_executor(calls.clone(), store.clone()),
         r###"
-        - !barrier 1
+        - !barrier 65536
         - !chunk |2
               I T  I   i
             + 1 p1 100 10
@@ -421,26 +421,26 @@ async fn test_over_window_sum() {
            U+ 3 p1 100 13 // an order-change update, `x` also changed
             + 5 p1 105 18
             + 6 p2 203 23
-        - !barrier 2
+        - !barrier 131072
         - recovery
-        - !barrier 3
+        - !barrier 196608
         - !chunk |2
               I T  I   i
             - 6 p2 203 23
            U- 2 p1 101 16
            U+ 2 p2 101 16 // a partition-change update
-        - !barrier 4
+        - !barrier 262144
         - recovery
-        - !barrier 5
+        - !barrier 327680
         - !chunk |2
               I  T  I   i
             + 10 p3 300 30
-        - !barrier 6
+        - !barrier 393216
         "###,
         expect![[r#"
-            - input: !barrier 1
+            - input: !barrier 65536
               output:
-              - !barrier 1
+              - !barrier 65536
             - input: !chunk |-
                 +---+---+----+-----+----+
                 | + | 1 | p1 | 100 | 10 |
@@ -493,14 +493,14 @@ async fn test_over_window_sum() {
                 | 5 | p1 | 105 | 18 | 13 |
                 | 6 | p2 | 203 | 23 | 20 |
                 +---+----+-----+----+----+
-            - input: !barrier 2
+            - input: !barrier 131072
               output:
-              - !barrier 2
+              - !barrier 131072
             - input: recovery
               output: []
-            - input: !barrier 3
+            - input: !barrier 196608
               output:
-              - !barrier 3
+              - !barrier 196608
             - input: !chunk |-
                 +----+---+----+-----+----+
                 |  - | 6 | p2 | 203 | 23 |
@@ -526,14 +526,14 @@ async fn test_over_window_sum() {
                 | 3 | p1 | 100 | 13 | 35 |
                 | 5 | p1 | 105 | 18 | 13 |
                 +---+----+-----+----+----+
-            - input: !barrier 4
+            - input: !barrier 262144
               output:
-              - !barrier 4
+              - !barrier 262144
             - input: recovery
               output: []
-            - input: !barrier 5
+            - input: !barrier 327680
               output:
-              - !barrier 5
+              - !barrier 327680
             - input: !chunk |-
                 +---+----+----+-----+----+
                 | + | 10 | p3 | 300 | 30 |
@@ -552,9 +552,9 @@ async fn test_over_window_sum() {
                 | 5  | p1 | 105 | 18 | 13 |
                 | 10 | p3 | 300 | 30 |    |
                 +----+----+-----+----+----+
-            - input: !barrier 6
+            - input: !barrier 393216
               output:
-              - !barrier 6
+              - !barrier 393216
         "#]],
         snapshot_options(),
     )

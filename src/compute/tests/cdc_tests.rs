@@ -332,22 +332,18 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     // ingest data and barrier
     let interval = Duration::from_millis(10);
     tx.push_chunk(stream_chunk1);
-    println!("1 cur epoch = {}", curr_epoch);
     tokio::time::sleep(interval).await;
     curr_epoch += 1 << 16;
-    println!("2 cur epoch = {}", curr_epoch);
     tx.push_barrier(curr_epoch, false);
 
     tx.push_chunk(stream_chunk2);
 
     tokio::time::sleep(interval).await;
     curr_epoch += 1 << 16;
-    println!("3 cur epoch = {}", curr_epoch);
     tx.push_barrier(curr_epoch, false);
 
     tokio::time::sleep(interval).await;
     curr_epoch += 1 << 16;
-    println!("4 cur epoch = {}", curr_epoch);
     tx.push_barrier(curr_epoch, true);
 
     // scan the final result of the mv table

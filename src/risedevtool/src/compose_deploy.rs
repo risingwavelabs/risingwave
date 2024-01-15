@@ -81,19 +81,19 @@ while getopts '1234' OPT; do
         1)
             DO_SYNC=1
             DO_ALL_STEPS=0
-            ;
+            ;;
         2)
             DO_TEAR_DOWN=1
             DO_ALL_STEPS=0
-            ;
+            ;;
         3)
             DO_START=1
             DO_ALL_STEPS=0
-            ;
+            ;;
         4)
             DO_CHECK=1
             DO_ALL_STEPS=0
-        ;
+        ;;
     esac
 done
 

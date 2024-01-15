@@ -2805,7 +2805,7 @@ fn parse_multiple_statements() {
     test_with("INSERT INTO foo VALUES (1)", "SELECT", " bar");
     test_with("CREATE TABLE foo (baz INT)", "SELECT", " bar");
     // Make sure that empty statements do not cause an error:
-    let res = parse_sql_statements(";");
+    let res = parse_sql_statements(";;");
     assert_eq!(0, res.unwrap().len());
 }
 
