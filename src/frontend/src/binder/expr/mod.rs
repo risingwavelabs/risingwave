@@ -35,7 +35,7 @@ mod order_by;
 mod subquery;
 mod value;
 
-const CASE_WHEN_ARMS_OPTIMIZE_LIMIT: usize = 0;
+const CASE_WHEN_ARMS_OPTIMIZE_LIMIT: usize = 1;
 
 impl Binder {
     /// Bind an expression with `bind_expr_inner`, attach the original expression
