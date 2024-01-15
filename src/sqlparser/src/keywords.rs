@@ -93,6 +93,7 @@ define_keywords!(
     AUTHORIZATION,
     AUTO,
     AVG,
+    BASE64,
     BEGIN,
     BEGIN_FRAME,
     BEGIN_PARTITION,

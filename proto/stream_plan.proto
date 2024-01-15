@@ -839,6 +839,7 @@ message StreamActor {
   plan_common.ExprContext expr_context = 10;
 }
 
+// Indicates whether the fragment contains some special kind of nodes.
 enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_FRAGMENT_UNSPECIFIED = 0;
   FRAGMENT_TYPE_FLAG_SOURCE = 1;
@@ -864,7 +865,7 @@ message StreamFragmentGraph {
     uint32 fragment_id = 1;
     // root stream node in this fragment.
     StreamNode node = 2;
-    // Bitwise-OR of FragmentTypeFlags
+    // Bitwise-OR of `FragmentTypeFlag`s
     uint32 fragment_type_mask = 3;
     // Mark whether this fragment requires exactly one actor.
     // Note: if this is `false`, the fragment may still be a singleton according to the scheduler.

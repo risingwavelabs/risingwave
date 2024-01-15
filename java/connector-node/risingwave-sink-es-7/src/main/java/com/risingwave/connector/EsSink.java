@@ -20,7 +20,6 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.connector.api.sink.SinkWriterBase;
 import io.grpc.Status;
-import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -352,11 +351,5 @@ public class EsSink extends SinkWriterBase {
 
     public RestHighLevelClient getClient() {
         return client;
-    }
-
-    private final SimpleDateFormat createSimpleDateFormat(String pattern, TimeZone timeZone) {
-        SimpleDateFormat sdf = new SimpleDateFormat(pattern);
-        sdf.setTimeZone(timeZone);
-        return sdf;
     }
 }

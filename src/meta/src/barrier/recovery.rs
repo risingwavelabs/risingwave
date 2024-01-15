@@ -113,10 +113,7 @@ impl GlobalBarrierManagerContext {
                     state_table_ids,
                     source_ids,
                     ..
-                } = mgr
-                    .catalog_controller
-                    .clean_foreground_creating_jobs()
-                    .await?;
+                } = mgr.catalog_controller.clean_dirty_creating_jobs().await?;
 
                 // unregister compaction group for cleaned state tables.
                 self.hummock_manager
@@ -432,13 +429,9 @@ impl GlobalBarrierManagerContext {
                         if mce != INVALID_EPOCH {
                             command_ctx.wait_epoch_commit(mce).await?;
                         }
-                    }
-
-                    let (barrier_complete_tx, mut barrier_complete_rx) =
-                        tokio::sync::mpsc::unbounded_channel();
-                    self.inject_barrier(command_ctx.clone(), &barrier_complete_tx)
-                        .await;
-                    let res = match barrier_complete_rx.recv().await.unwrap().result {
+                    };
+                    let await_barrier_complete = self.inject_barrier(command_ctx.clone()).await;
+                    let res = match await_barrier_complete.await.result {
                         Ok(response) => {
                             if let Err(err) = command_ctx.post_collect().await {
                                 warn!(err = ?err, "post_collect failed");

@@ -29,13 +29,11 @@ import { sortBy } from "lodash"
 import Head from "next/head"
 import { Fragment, useEffect, useState } from "react"
 import useErrorToast from "../hook/useErrorToast"
-import { getActorBackPressures } from "../pages/api/metric"
+import {
+  BackPressuresMetrics,
+  getActorBackPressures,
+} from "../pages/api/metric"
 import RateBar from "./RateBar"
-import { Metrics } from "./metrics"
-
-interface BackPressuresMetrics {
-  outputBufferBlockingDuration: Metrics[]
-}
 
 export default function BackPressureTable({
   selectedFragmentIds,
@@ -50,7 +48,7 @@ export default function BackPressureTable({
     async function doFetch() {
       while (true) {
         try {
-          let metrics: BackPressuresMetrics = await getActorBackPressures()
+          let metrics = await getActorBackPressures()
           metrics.outputBufferBlockingDuration = sortBy(
             metrics.outputBufferBlockingDuration,
             (m) => (m.metric.fragment_id, m.metric.downstream_fragment_id)

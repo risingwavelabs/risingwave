@@ -14,7 +14,9 @@
 
 use itertools::Itertools as _;
 use num_integer::Integer as _;
+use risingwave_common::bail_no_function;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::AggKind;
@@ -577,7 +579,7 @@ fn infer_type_for_special(
         }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);
-            Ok(Some(DataType::Int16))
+            Ok(Some(VirtualNode::RW_TYPE))
         }
         ExprType::Greatest | ExprType::Least => {
             ensure_arity!("greatest/least", 1 <= | inputs |);
@@ -643,13 +645,17 @@ pub fn infer_type_name<'a>(
 
     let mut candidates = top_matches(&candidates, inputs);
 
-    if candidates.is_empty() {
-        return Err(ErrorCode::NoFunction(format!(
+    // show function in error message
+    let sig = || {
+        format!(
             "{}({})",
             func_name,
             inputs.iter().map(TypeDisplay).format(", ")
-        ))
-        .into());
+        )
+    };
+
+    if candidates.is_empty() {
+        bail_no_function!("{}", sig());
     }
 
     // After this line `candidates` will never be empty, as the narrow rules will retain original
@@ -663,9 +669,8 @@ pub fn infer_type_name<'a>(
         [] => unreachable!(),
         [sig] => Ok(*sig),
         _ => Err(ErrorCode::BindError(format!(
-            "function {}({}) is not unique\nHINT:  Could not choose a best candidate function. You might need to add explicit type casts.",
-            func_name,
-            inputs.iter().map(TypeDisplay).format(", "),
+            "function {} is not unique\nHINT:  Could not choose a best candidate function. You might need to add explicit type casts.",
+            sig(),
         ))
         .into()),
     }

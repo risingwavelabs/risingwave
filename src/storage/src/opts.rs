@@ -53,6 +53,9 @@ pub struct StorageOpts {
     pub high_priority_ratio: usize,
     /// max memory usage for large query.
     pub prefetch_buffer_capacity_mb: usize,
+
+    pub max_prefetch_block_number: usize,
+
     pub disable_remote_compactor: bool,
     /// Number of tasks shared buffer can upload in parallel.
     pub share_buffer_upload_concurrency: usize,
@@ -127,6 +130,7 @@ pub struct StorageOpts {
     pub compactor_max_sst_size: u64,
     /// enable FastCompactorRunner.
     pub enable_fast_compaction: bool,
+    pub check_fast_compaction_result: bool,
     pub max_preload_io_retry_times: usize,
     pub compactor_fast_max_compact_delete_ratio: u32,
     pub compactor_fast_max_compact_task_size: u64,
@@ -164,6 +168,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             high_priority_ratio: s.high_priority_ratio_in_percent,
             block_cache_capacity_mb: s.block_cache_capacity_mb,
             prefetch_buffer_capacity_mb: s.prefetch_buffer_capacity_mb,
+            max_prefetch_block_number: c.storage.max_prefetch_block_number,
             meta_cache_capacity_mb: s.meta_cache_capacity_mb,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,
@@ -248,6 +253,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             compactor_max_task_multiplier: c.storage.compactor_max_task_multiplier,
             compactor_max_sst_size: c.storage.compactor_max_sst_size,
             enable_fast_compaction: c.storage.enable_fast_compaction,
+            check_fast_compaction_result: c.storage.check_fast_compaction_result,
             mem_table_spill_threshold: c.storage.mem_table_spill_threshold,
             object_store_config: c.storage.object_store.clone(),
             compactor_fast_max_compact_delete_ratio: c

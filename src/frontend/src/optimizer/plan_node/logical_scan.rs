@@ -22,7 +22,6 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::stream_plan::StreamScanType;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{childless_record, Distill};
@@ -521,20 +520,11 @@ impl ToBatch for LogicalScan {
 impl ToStream for LogicalScan {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         if self.predicate().always_true() {
-            if self
-                .ctx()
-                .session_ctx()
-                .config()
-                .streaming_enable_arrangement_backfill()
-            {
-                Ok(StreamTableScan::new_with_stream_scan_type(
-                    self.core.clone(),
-                    StreamScanType::ArrangementBackfill,
-                )
-                .into())
-            } else {
-                Ok(StreamTableScan::new(self.core.clone()).into())
-            }
+            Ok(StreamTableScan::new_with_stream_scan_type(
+                self.core.clone(),
+                ctx.stream_scan_type(),
+            )
+            .into())
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);

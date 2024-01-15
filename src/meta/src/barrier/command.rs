@@ -935,8 +935,15 @@ impl CommandContext {
                                 .await?;
                         }
                     }
-                    MetadataManager::V2(_) => {
-                        unimplemented!("support post collect in v2");
+                    MetadataManager::V2(mgr) => {
+                        mgr.catalog_controller
+                            .post_collect_table_fragments(
+                                table_fragments.table_id().table_id as _,
+                                table_fragments.actor_ids(),
+                                dispatchers.clone(),
+                                init_split_assignment,
+                            )
+                            .await?;
                     }
                 }
 
@@ -994,6 +1001,21 @@ impl CommandContext {
                         init_split_assignment.clone(),
                     )
                     .await?;
+
+                // Apply the split changes in source manager.
+                self.barrier_manager_context
+                    .source_manager
+                    .drop_source_fragments(std::slice::from_ref(old_table_fragments))
+                    .await;
+                let source_fragments = new_table_fragments.stream_source_fragments();
+                self.barrier_manager_context
+                    .source_manager
+                    .apply_source_change(
+                        Some(source_fragments),
+                        Some(init_split_assignment.clone()),
+                        None,
+                    )
+                    .await;
             }
         }
 

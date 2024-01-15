@@ -48,10 +48,6 @@ pub struct StreamTableScan {
 }
 
 impl StreamTableScan {
-    pub fn new(core: generic::Scan) -> Self {
-        Self::new_with_stream_scan_type(core, StreamScanType::Backfill)
-    }
-
     pub fn new_with_stream_scan_type(
         core: generic::Scan,
         stream_scan_type: StreamScanType,

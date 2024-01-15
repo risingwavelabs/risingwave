@@ -241,6 +241,7 @@ mod tests {
         SystemParams {
             state_store: Some("state_store".to_string()),
             data_directory: Some("data_directory".to_string()),
+            wasm_storage_url: Some("wasm_storage_url".to_string()),
             ..SystemConfig::default().into_init_system_params()
         }
     }

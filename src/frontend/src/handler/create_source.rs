@@ -821,16 +821,24 @@ fn check_and_add_timestamp_column(
     columns: &mut Vec<ColumnCatalog>,
 ) {
     if is_kafka_connector(with_properties) {
-        let kafka_timestamp_column = ColumnCatalog {
-            column_desc: ColumnDesc::named(
-                KAFKA_TIMESTAMP_COLUMN_NAME,
-                ColumnId::placeholder(),
-                DataType::Timestamptz,
-            ),
+        if columns
+            .iter()
+            .any(|col| col.column_desc.additional_column_type == AdditionalColumnType::Timestamp)
+        {
+            // already has timestamp column, no need to add a new one
+            return;
+        }
 
-            is_hidden: true,
-        };
-        columns.push(kafka_timestamp_column);
+        // add a hidden column `_rw_kafka_timestamp` to each message from Kafka source
+        let mut catalog = get_connector_compatible_additional_columns(KAFKA_CONNECTOR)
+            .unwrap()
+            .iter()
+            .find(|(col_name, _)| col_name.eq(&"timestamp"))
+            .unwrap()
+            .1(ColumnId::placeholder(), KAFKA_TIMESTAMP_COLUMN_NAME);
+        catalog.is_hidden = true;
+
+        columns.push(catalog);
     }
 }
 
@@ -1158,6 +1166,7 @@ pub async fn handle_create_source(
         with_properties.insert(CDC_SHARING_MODE_KEY.into(), "true".into());
     }
 
+    // must behind `handle_addition_columns`
     check_and_add_timestamp_column(&with_properties, &mut columns);
 
     let mut col_id_gen = ColumnIdGenerator::new_initial();
