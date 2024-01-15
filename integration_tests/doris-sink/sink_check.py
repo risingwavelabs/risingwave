@@ -19,8 +19,9 @@ for rel in relations:
         failed_cases.append(rel)
 
 # update data
-subprocess.run(["docker", "compose", "exec", "postgres", "bash", "-c", "psql -h risingwave-standalone -p 4566 -d dev -U root -f update_delete.sql"])
+subprocess.run(["docker", "compose", "exec", "postgres", "bash", "-c", "psql -h risingwave-standalone -p 4566 -d dev -U root -f update_delete.sql"], check=True)
 
+# delete
 sql = f"SELECT COUNT(*) FROM demo.upsert_table;"
 command = f'mysql -uroot -P9030 -hfe -e "{sql}"'
 output = subprocess.check_output(
@@ -31,6 +32,7 @@ if rows != 3:
     print(f"rows expected 3, get {rows}")
     failed_cases.append("delete demo.upsert_table")
 
+# update
 sql = f"SELECT target_id FROM demo.upsert_table WHERE user_id = 3;"
 command = f'mysql -uroot -P9030 -hfe -e "{sql}"'
 output = subprocess.check_output(
