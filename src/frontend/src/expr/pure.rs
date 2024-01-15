@@ -57,14 +57,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::BitwiseNot
             | expr_node::Type::BitwiseShiftLeft
             | expr_node::Type::BitwiseShiftRight
-            | expr_node::Type::Extract
-            | expr_node::Type::DatePart
             | expr_node::Type::TumbleStart
             | expr_node::Type::ToTimestamp
-            | expr_node::Type::DateTrunc
             | expr_node::Type::CharToDate
-            | expr_node::Type::AddWithTimeZone
-            | expr_node::Type::SubtractWithTimeZone
             | expr_node::Type::Cast
             | expr_node::Type::Substr
             | expr_node::Type::Length
@@ -90,7 +85,6 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Ceil
             | expr_node::Type::Floor
             | expr_node::Type::Trunc
-            | expr_node::Type::ToChar
             | expr_node::Type::Md5
             | expr_node::Type::CharLength
             | expr_node::Type::Repeat
@@ -237,13 +231,21 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::PgSleep
             | expr_node::Type::PgSleepFor
             | expr_node::Type::PgSleepUntil
+            // local-execution-mode-only functions
             | expr_node::Type::CastRegclass
             | expr_node::Type::PgGetIndexdef
             | expr_node::Type::ColDescription
             | expr_node::Type::PgGetViewdef
+            // functions that may rely on session timezone
             | expr_node::Type::AtTimeZone
             | expr_node::Type::CastWithTimeZone
+            | expr_node::Type::AddWithTimeZone
+            | expr_node::Type::SubtractWithTimeZone
+            | expr_node::Type::DateTrunc
+            | expr_node::Type::Extract
+            | expr_node::Type::DatePart
             | expr_node::Type::ToTimestamp1
+            | expr_node::Type::ToChar
             | expr_node::Type::MakeTimestamptz => self.impure = true,
         }
     }
