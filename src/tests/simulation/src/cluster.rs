@@ -128,8 +128,6 @@ impl Configuration {
             meta_nodes: 3,
             compactor_nodes: 2,
             compute_node_cores: 2,
-            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL=false".into()]
-                .into(),
             ..Default::default()
         }
     }
@@ -171,7 +169,6 @@ metrics_level = "Disabled"
             compactor_nodes: 1,
             compute_node_cores: 2,
             per_session_queries: vec![
-                "SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL=false".into(),
                 "create view if not exists table_parallelism as select t.name, tf.parallelism from rw_tables t, rw_table_fragments tf where t.id = tf.table_id;".into(),
                 "create view if not exists mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;".into(),
             ]
@@ -822,6 +819,11 @@ impl Session {
     pub async fn flush(&mut self) -> Result<()> {
         self.run("FLUSH").await?;
         Ok(())
+    }
+
+    pub async fn is_arrangement_backfill_enabled(&mut self) -> Result<bool> {
+        let result = self.run("show streaming_enable_arrangement_backfill").await?;
+        Ok(result == "true")
     }
 }
 

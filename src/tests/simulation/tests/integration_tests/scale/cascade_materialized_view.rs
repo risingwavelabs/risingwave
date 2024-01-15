@@ -32,8 +32,7 @@ const MV5: &str = "create materialized view m5 as select * from m4;";
 async fn test_simple_cascade_materialized_view() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
-    let arrangement_backfill_is_enabled = session.run("show streaming_enable_arrangement_backfill").await?;
-    let arrangement_backfill_is_enabled = arrangement_backfill_is_enabled == "true";
+    let arrangement_backfill_is_enabled = session.is_arrangement_backfill_enabled().await?;
 
     session.run(ROOT_TABLE_CREATE).await?;
     session.run(MV1).await?;
