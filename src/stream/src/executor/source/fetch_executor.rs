@@ -21,7 +21,7 @@ use either::Either;
 use futures::pin_mut;
 use futures::stream::{self, StreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row};
@@ -31,7 +31,7 @@ use risingwave_connector::source::filesystem::opendal_source::{
 };
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::{
-    BoxChunkedSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData, StreamChunk,
+    BoxChunkedSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
 use risingwave_connector::ConnectorParams;
 use risingwave_pb::plan_common::AdditionalColumnType;
@@ -348,6 +348,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     .await?;
                             }
 
+                            // TODO: ignore if it is user defined
                             let chunk = chunk.project(
                                 (0..chunk.dimension())
                                     .filter(|&idx| idx != partition_idx && idx != col_idx),

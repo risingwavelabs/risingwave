@@ -22,7 +22,6 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
-use risingwave_connector::source::StreamChunk;
 use tokio::sync::oneshot;
 
 use crate::txn_channel::{txn_channel, Receiver, Sender};
@@ -261,7 +260,7 @@ impl TableStreamReader {
                 }
                 TxnMsg::Data(_, chunk) => {
                     _ = notifier.send(chunk.cardinality());
-                    yield chunk.into();
+                    yield chunk;
                 }
             }
         }

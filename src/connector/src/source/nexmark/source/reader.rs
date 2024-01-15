@@ -148,7 +148,7 @@ impl NexmarkSplitReader {
                     break;
                 }
                 let event = self.generator.next().unwrap();
-                let fields = match self.event_type {
+                let mut fields = match self.event_type {
                     Some(_) => event_to_row(event, self.row_id_index),
                     None => combined_event_to_row(new_combined_event(event), self.row_id_index),
                 };

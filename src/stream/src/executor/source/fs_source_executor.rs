@@ -25,7 +25,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::{
     BoxChunkedSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
-    SplitMetaData, StreamChunk,
+    SplitMetaData
 };
 use risingwave_source::source_desc::{FsSourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
@@ -406,10 +406,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     }
                 },
 
-                Either::Right(StreamChunk {
-                    chunk,
-                    split_offset_mapping,
-                }) => {
+                Either::Right(chunk) => {
                     if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
                         // Exceeds the max wait barrier time, the source will be paused. Currently
                         // we can guarantee the source is not paused since it received stream

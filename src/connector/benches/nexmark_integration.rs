@@ -19,6 +19,7 @@ use std::sync::LazyLock;
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use itertools::Itertools;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
@@ -26,7 +27,6 @@ use risingwave_connector::parser::{
 };
 use risingwave_connector::source::{
     BoxChunkedSourceStream, BoxSourceStream, SourceColumnDesc, SourceMessage, SourceMeta,
-    StreamChunk,
 };
 use tracing::Level;
 use tracing_subscriber::prelude::*;
