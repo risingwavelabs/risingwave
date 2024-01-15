@@ -51,7 +51,7 @@ pub struct SystemParamsController {
 
 /// Derive system params from db models.
 macro_rules! impl_system_params_from_db {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $type:ty, $($rest:tt)* },)*) => {
         /// Try to deserialize deprecated fields as well.
         /// Warn if there are unrecognized fields.
         pub fn system_params_from_db(mut models: Vec<system_parameter::Model>) -> MetaResult<PbSystemParams> {
@@ -79,7 +79,7 @@ macro_rules! impl_system_params_from_db {
 
 /// Derive serialization to db models.
 macro_rules! impl_system_params_to_models {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, },)*) => {
         #[allow(clippy::vec_init_then_push)]
         pub fn system_params_to_model(params: &PbSystemParams) -> MetaResult<Vec<system_parameter::ActiveModel>> {
             check_missing_params(params).map_err(|e| anyhow!(e))?;
@@ -106,7 +106,7 @@ macro_rules! impl_system_params_to_models {
 // 4. None, None: A new version of RW cluster is launched for the first time and newly introduced
 // params are not set. The new field is not initialized either, just leave it as `None`.
 macro_rules! impl_merge_params {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $($rest:tt)* },)*) => {
         fn merge_params(mut persisted: PbSystemParams, init: PbSystemParams) -> PbSystemParams {
             $(
                 match (persisted.$field.as_ref(), init.$field) {

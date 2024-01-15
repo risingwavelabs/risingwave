@@ -44,20 +44,21 @@ type Result<T> = core::result::Result<T, SystemParamsError>;
 macro_rules! for_all_params {
     ($macro:ident) => {
         $macro! {
-            { barrier_interval_ms, u32, Some(1000_u32), true },
-            { checkpoint_frequency, u64, Some(1_u64), true },
-            { sstable_size_mb, u32, Some(256_u32), false },
-            { parallel_compact_size_mb, u32, Some(512_u32), false },
-            { block_size_kb, u32, Some(64_u32), false },
-            { bloom_false_positive, f64, Some(0.001_f64), false },
-            { state_store, String, None, false },
-            { data_directory, String, None, false },
-            { backup_storage_url, String, Some("memory".to_string()), true },
-            { backup_storage_directory, String, Some("backup".to_string()), true },
-            { max_concurrent_creating_streaming_jobs, u32, Some(1_u32), true },
-            { pause_on_next_bootstrap, bool, Some(false), true },
-            { wasm_storage_url, String, Some("fs://.risingwave/data".to_string()), false },
-            { enable_tracing, bool, Some(false), true },
+            // name                                     type    default value                               mutable
+            { barrier_interval_ms,                      u32,    Some(1000_u32),                             true,   },
+            { checkpoint_frequency,                     u64,    Some(1_u64),                                true,   },
+            { sstable_size_mb,                          u32,    Some(256_u32),                              false,  },
+            { parallel_compact_size_mb,                 u32,    Some(512_u32),                              false,  },
+            { block_size_kb,                            u32,    Some(64_u32),                               false,  },
+            { bloom_false_positive,                     f64,    Some(0.001_f64),                            false,  },
+            { state_store,                              String, None,                                       false,  },
+            { data_directory,                           String, None,                                       false,  },
+            { backup_storage_url,                       String, Some("memory".to_string()),                 true,   },
+            { backup_storage_directory,                 String, Some("backup".to_string()),                 true,   },
+            { max_concurrent_creating_streaming_jobs,   u32,    Some(1_u32),                                true,   },
+            { pause_on_next_bootstrap,                  bool,   Some(false),                                true,   },
+            { wasm_storage_url,                         String, Some("fs://.risingwave/data".to_string()),  false,  },
+            { enable_tracing,                           bool,   Some(false),                                true,   },
         }
     };
 }
@@ -72,7 +73,7 @@ macro_rules! key_of {
 
 /// Define key constants for fields in `PbSystemParams` for use of other modules.
 macro_rules! def_key {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $($rest:tt)* },)*) => {
         paste! {
             $(
                 pub const [<$field:upper _KEY>]: &str = key_of!($field);
@@ -85,7 +86,7 @@ for_all_params!(def_key);
 
 /// Define default value functions.
 macro_rules! def_default {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default: expr, $($rest:tt)* },)*) => {
         pub mod default {
             $(
                 pub fn $field() -> Option<$type> {
@@ -99,7 +100,7 @@ macro_rules! def_default {
 for_all_params!(def_default);
 
 macro_rules! impl_check_missing_fields {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $($rest:tt)* },)*) => {
         /// Check if any undeprecated fields are missing.
         pub fn check_missing_params(params: &PbSystemParams) -> Result<()> {
             $(
@@ -114,7 +115,7 @@ macro_rules! impl_check_missing_fields {
 
 /// Derive serialization to kv pairs.
 macro_rules! impl_system_params_to_kv {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $($rest:tt)* },)*) => {
         /// The returned map only contains undeprecated fields.
         /// Return error if there are missing fields.
         #[allow(clippy::vec_init_then_push)]
@@ -131,7 +132,7 @@ macro_rules! impl_system_params_to_kv {
 }
 
 macro_rules! impl_derive_missing_fields {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $($rest:tt)* },)*) => {
         pub fn derive_missing_fields(params: &mut PbSystemParams) {
             $(
                 if params.$field.is_none() && let Some(v) = OverrideFromParams::$field(params) {
@@ -144,7 +145,7 @@ macro_rules! impl_derive_missing_fields {
 
 /// Derive deserialization from kv pairs.
 macro_rules! impl_system_params_from_kv {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $($rest:tt)* },)*) => {
         /// Try to deserialize deprecated fields as well.
         /// Return error if there are unrecognized fields.
         pub fn system_params_from_kv<K, V>(mut kvs: Vec<(K, V)>) -> Result<PbSystemParams>
@@ -187,7 +188,7 @@ macro_rules! impl_system_params_from_kv {
 /// If you want custom rules, please override the default implementation in
 /// `OverrideValidateOnSet` below.
 macro_rules! impl_default_validation_on_set {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, },)*) => {
         #[allow(clippy::ptr_arg)]
         trait ValidateOnSet {
             $(
@@ -236,7 +237,7 @@ macro_rules! impl_default_validation_on_set {
 ///
 /// Note that newer versions must be prioritized during derivation.
 macro_rules! impl_default_from_other_params {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $type:ty, $($rest:tt)* },)*) => {
         trait FromParams {
             $(
                 fn $field(_params: &PbSystemParams) -> Option<$type> {
@@ -248,7 +249,7 @@ macro_rules! impl_default_from_other_params {
 }
 
 macro_rules! impl_set_system_param {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $($rest:tt)* },)*) => {
         /// Set a system parameter with the given value or default one, returns the new value.
         pub fn set_system_param(params: &mut PbSystemParams, key: &str, value: Option<String>) -> Result<String> {
              match key {
@@ -276,7 +277,7 @@ macro_rules! impl_set_system_param {
 }
 
 macro_rules! impl_is_mutable {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, },)*) => {
         pub fn is_mutable(field: &str) -> Result<bool> {
             match field {
                 $(
@@ -289,7 +290,7 @@ macro_rules! impl_is_mutable {
 }
 
 macro_rules! impl_system_params_for_test {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $($rest:tt)* },)*) => {
         #[allow(clippy::needless_update)]
         pub fn system_params_for_test() -> PbSystemParams {
             let mut ret = PbSystemParams {
