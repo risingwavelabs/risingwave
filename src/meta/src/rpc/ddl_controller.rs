@@ -1259,6 +1259,7 @@ impl DdlController {
     }
 
     /// Builds the actor graph:
+    /// - Add the upstream fragments to the fragment graph
     /// - Schedule the fragments based on their distribution
     /// - Expand each fragment into one or several actors
     pub(crate) async fn build_stream_job(
@@ -1278,10 +1279,7 @@ impl DdlController {
 
         let upstream_root_fragments = self
             .metadata_manager
-            .get_upstream_root_fragments(
-                fragment_graph.dependent_table_ids(),
-                stream_job.table_job_type(),
-            )
+            .get_upstream_root_fragments(fragment_graph.dependent_table_ids())
             .await?;
 
         let upstream_actors: HashMap<_, _> = upstream_root_fragments
@@ -1297,7 +1295,7 @@ impl DdlController {
         let complete_graph = CompleteStreamFragmentGraph::with_upstreams(
             fragment_graph,
             upstream_root_fragments,
-            stream_job.table_job_type(),
+            stream_job.into(),
         )?;
 
         // 2. Build the actor graph.
@@ -1717,6 +1715,7 @@ impl DdlController {
             fragment_graph,
             original_table_fragment.fragment_id,
             downstream_fragments,
+            stream_job.into(),
         )?;
 
         // 2. Build the actor graph.
@@ -1979,7 +1978,8 @@ impl DdlController {
     }
 }
 
-/// Fill in necessary information for table stream graph.
+/// Fill in necessary information for `Table` stream graph.
+/// e.g., fill source id for table with connector, fill external table id for CDC table.
 pub fn fill_table_stream_graph_info(
     source: &mut Option<PbSource>,
     table: &mut PbTable,
