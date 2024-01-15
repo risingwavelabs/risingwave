@@ -31,7 +31,7 @@ use risingwave_connector::source::filesystem::opendal_source::{
 };
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::{
-    BoxChunkedSourceStream, SourceContext, SourceCtrlOpts, SplitId, SplitImpl, SplitMetaData,
+    BoxChunkedSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
 use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::SourceDesc;
@@ -39,7 +39,9 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 
-use super::{get_partition_offset_col_idx, prune_additional_cols};
+use super::{
+    get_partition_offset_col_idx, get_split_offset_mapping_from_chunk, prune_additional_cols,
+};
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
@@ -306,36 +308,35 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                         }
                         // StreamChunk from FsSourceReader, and the reader reads only one file.
                         Either::Right(chunk) => {
-                            let (_, chunk_last_row) = chunk
-                                .rows()
-                                .last()
-                                .expect("The chunk should have at least one row.");
-                            let split_id: SplitId = chunk_last_row
-                                .datum_at(partition_idx)
-                                .unwrap()
-                                .into_utf8()
-                                .into();
-                            let offset = chunk_last_row.datum_at(offset_idx).unwrap().into_utf8();
+                            let mapping = get_split_offset_mapping_from_chunk(
+                                &chunk,
+                                partition_idx,
+                                offset_idx,
+                            )
+                            .unwrap();
+                            debug_assert_eq!(mapping.len(), 1);
+                            if let Some((split_id, offset)) = mapping.into_iter().next() {
+                                let row = state_store_handler
+                                    .get(split_id.clone())
+                                    .await?
+                                    .expect("The fs_split should be in the state table.");
+                                let fs_split = match row.datum_at(1) {
+                                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
+                                        OpendalFsSplit::<Src>::restore_from_json(
+                                            jsonb_ref.to_owned_scalar(),
+                                        )?
+                                    }
+                                    _ => unreachable!(),
+                                };
 
-                            let state = state_store_handler
-                                .get(split_id.clone())
-                                .await?
-                                .expect("The fs_split should be in the state table.");
-                            let fs_split = match state.datum_at(1) {
-                                Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                                    OpendalFsSplit::<Src>::restore_from_json(
-                                        jsonb_ref.to_owned_scalar(),
-                                    )?
+                                if offset.parse::<usize>().unwrap() >= fs_split.size {
+                                    splits_on_fetch -= 1;
+                                    state_store_handler.delete(split_id).await?;
+                                } else {
+                                    state_store_handler
+                                        .set(split_id, fs_split.encode_to_json())
+                                        .await?;
                                 }
-                                _ => unreachable!(),
-                            };
-                            if offset.parse::<usize>().unwrap() >= fs_split.size {
-                                splits_on_fetch -= 1;
-                                state_store_handler.delete(split_id).await?;
-                            } else {
-                                state_store_handler
-                                    .set(split_id, fs_split.encode_to_json())
-                                    .await?;
                             }
 
                             let chunk = prune_additional_cols(&chunk, partition_idx, offset_idx);
