@@ -25,9 +25,8 @@ import io.delta.standalone.OptimisticTransaction;
 import io.delta.standalone.actions.AddFile;
 import io.delta.standalone.exceptions.DeltaConcurrentModificationException;
 import java.io.IOException;
-import java.sql.Timestamp;
-import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
 import org.apache.avro.Conversions;
 import org.apache.avro.Schema;
@@ -88,13 +87,11 @@ public class DeltaLakeSink extends SinkWriterBase {
                     GenericRecord record = new GenericData.Record(this.sinkSchema);
                     for (int i = 0; i < this.sinkSchema.getFields().size(); i++) {
                         Object values;
-                        if (row.get(i) instanceof Timestamp) {
-                            values = ((Timestamp) row.get(i)).getTime();
-                        } else if (row.get(i) instanceof java.sql.Date) {
+                        if (row.get(i) instanceof LocalDateTime) {
                             values =
-                                    ChronoUnit.DAYS.between(
-                                            LocalDate.ofEpochDay(0),
-                                            ((java.sql.Date) row.get(i)).toLocalDate());
+                                    ((LocalDateTime) row.get(i))
+                                            .toInstant(ZoneOffset.UTC)
+                                            .toEpochMilli();
                         } else {
                             values = row.get(i);
                         }
