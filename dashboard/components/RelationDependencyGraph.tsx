@@ -19,15 +19,23 @@ import { theme } from "@chakra-ui/react"
 import * as d3 from "d3"
 import { useCallback, useEffect, useRef } from "react"
 import {
-  FragmentPoint,
-  FragmentPointPosition,
+  Enter,
   Position,
-  flipLayoutPoint,
-  generatePointEdges,
+  RelationPoint,
+  RelationPointPosition,
+  flipLayoutRelation,
+  generateRelationEdges,
 } from "../lib/layout"
+import {
+  Relation,
+  relationIsStreamingJob,
+  relationType,
+  relationTypeTitleCase,
+} from "../pages/api/streaming"
+import { CatalogModal, useCatalogModal } from "./CatalogModal"
 
 function boundBox(
-  fragmentPosition: FragmentPointPosition[],
+  relationPosition: RelationPointPosition[],
   nodeRadius: number
 ): {
   width: number
@@ -35,7 +43,7 @@ function boundBox(
 } {
   let width = 0
   let height = 0
-  for (const { x, y } of fragmentPosition) {
+  for (const { x, y } of relationPosition) {
     width = Math.max(width, x + nodeRadius)
     height = Math.max(height, y + nodeRadius)
   }
@@ -43,21 +51,25 @@ function boundBox(
 }
 
 const layerMargin = 50
-const rowMargin = 200
-const nodeRadius = 10
-const layoutMargin = 100
+const rowMargin = 50
+export const nodeRadius = 12
+const layoutMargin = 50
 
 export default function RelationDependencyGraph({
   nodes,
   selectedId,
+  setSelectedId,
 }: {
-  nodes: FragmentPoint[]
-  selectedId?: string
+  nodes: RelationPoint[]
+  selectedId: string | undefined
+  setSelectedId: (id: string) => void
 }) {
-  const svgRef = useRef<any>()
+  const [modalData, setModalId] = useCatalogModal(nodes.map((n) => n.relation))
+
+  const svgRef = useRef<SVGSVGElement>(null)
 
   const layoutMapCallback = useCallback(() => {
-    const layoutMap = flipLayoutPoint(
+    const layoutMap = flipLayoutRelation(
       nodes,
       layerMargin,
       rowMargin,
@@ -68,9 +80,9 @@ export default function RelationDependencyGraph({
           x: x + layoutMargin,
           y: y + layoutMargin,
           ...data,
-        } as FragmentPointPosition)
+        } as RelationPointPosition)
     )
-    const links = generatePointEdges(layoutMap)
+    const links = generateRelationEdges(layoutMap)
     const { width, height } = boundBox(layoutMap, nodeRadius)
     return {
       layoutMap,
@@ -96,29 +108,30 @@ export default function RelationDependencyGraph({
 
     const edgeSelection = svgSelection
       .select(".edges")
-      .selectAll(".edge")
+      .selectAll<SVGPathElement, null>(".edge")
       .data(links)
+    type EdgeSelection = typeof edgeSelection
 
     const isSelected = (id: string) => id === selectedId
 
-    const applyEdge = (sel: any) =>
+    const applyEdge = (sel: EdgeSelection) =>
       sel
-        .attr("d", ({ points }: any) => line(points))
+        .attr("d", ({ points }) => line(points))
         .attr("fill", "none")
         .attr("stroke-width", 1)
-        .attr("stroke-width", (d: any) =>
-          isSelected(d.source) || isSelected(d.target) ? 2 : 1
+        .attr("stroke-width", (d) =>
+          isSelected(d.source) || isSelected(d.target) ? 4 : 2
         )
-        .attr("opacity", (d: any) =>
+        .attr("opacity", (d) =>
           isSelected(d.source) || isSelected(d.target) ? 1 : 0.5
         )
-        .attr("stroke", (d: any) =>
+        .attr("stroke", (d) =>
           isSelected(d.source) || isSelected(d.target)
             ? theme.colors.blue["500"]
             : theme.colors.gray["300"]
         )
 
-    const createEdge = (sel: any) =>
+    const createEdge = (sel: Enter<EdgeSelection>) =>
       sel.append("path").attr("class", "edge").call(applyEdge)
     edgeSelection.exit().remove()
     edgeSelection.enter().call(createEdge)
@@ -127,21 +140,23 @@ export default function RelationDependencyGraph({
     const applyNode = (g: NodeSelection) => {
       g.attr("transform", ({ x, y }) => `translate(${x},${y})`)
 
+      // Circle
       let circle = g.select<SVGCircleElement>("circle")
       if (circle.empty()) {
         circle = g.append("circle")
       }
 
-      circle
-        .attr("r", nodeRadius)
-        .style("cursor", "pointer")
-        .attr("fill", ({ id }) =>
-          isSelected(id) ? theme.colors.blue["500"] : theme.colors.gray["500"]
-        )
+      circle.attr("r", nodeRadius).attr("fill", ({ id, relation }) => {
+        const weight = relationIsStreamingJob(relation) ? "500" : "400"
+        return isSelected(id)
+          ? theme.colors.blue[weight]
+          : theme.colors.gray[weight]
+      })
 
-      let text = g.select<SVGTextElement>("text")
+      // Relation name
+      let text = g.select<SVGTextElement>(".text")
       if (text.empty()) {
-        text = g.append("text")
+        text = g.append("text").attr("class", "text")
       }
 
       text
@@ -150,24 +165,66 @@ export default function RelationDependencyGraph({
         .attr("font-family", "inherit")
         .attr("text-anchor", "middle")
         .attr("dy", nodeRadius * 2)
-        .attr("fill", "black")
         .attr("font-size", 12)
         .attr("transform", "rotate(-8)")
+
+      // Relation type
+      let typeText = g.select<SVGTextElement>(".type")
+      if (typeText.empty()) {
+        typeText = g.append("text").attr("class", "type")
+      }
+
+      const relationTypeAbbr = (relation: Relation) => {
+        const type = relationType(relation)
+        if (type === "SINK") {
+          return "K"
+        } else {
+          return type.charAt(0)
+        }
+      }
+
+      typeText
+        .attr("fill", "white")
+        .text(({ relation }) => `${relationTypeAbbr(relation)}`)
+        .attr("font-family", "inherit")
+        .attr("text-anchor", "middle")
+        .attr("dy", nodeRadius * 0.5)
+        .attr("font-size", 16)
+        .attr("font-weight", "bold")
+
+      // Relation type tooltip
+      let typeTooltip = g.select<SVGTitleElement>("title")
+      if (typeTooltip.empty()) {
+        typeTooltip = g.append<SVGTitleElement>("title")
+      }
+
+      typeTooltip.text(
+        ({ relation }) =>
+          `${relation.name} (${relationTypeTitleCase(relation)})`
+      )
+
+      // Relation modal
+      g.style("cursor", "pointer").on("click", (_, { relation, id }) => {
+        setSelectedId(id)
+        setModalId(relation.id)
+      })
 
       return g
     }
 
-    const createNode = (sel: any) =>
+    const createNode = (sel: Enter<NodeSelection>) =>
       sel.append("g").attr("class", "node").call(applyNode)
 
     const g = svgSelection.select(".boxes")
-    const nodeSelection = g.selectAll(".node").data(layoutMap)
+    const nodeSelection = g
+      .selectAll<SVGGElement, null>(".node")
+      .data(layoutMap)
     type NodeSelection = typeof nodeSelection
 
     nodeSelection.enter().call(createNode)
     nodeSelection.call(applyNode)
     nodeSelection.exit().remove()
-  }, [layoutMap, links, selectedId])
+  }, [layoutMap, links, selectedId, setModalId, setSelectedId])
 
   return (
     <>
@@ -175,6 +232,7 @@ export default function RelationDependencyGraph({
         <g className="edges" />
         <g className="boxes" />
       </svg>
+      <CatalogModal modalData={modalData} onClose={() => setModalId(null)} />
     </>
   )
 }
