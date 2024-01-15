@@ -312,13 +312,32 @@ fn infer_type_for_special(
     inputs: &mut [ExprImpl],
 ) -> Result<Option<DataType>> {
     match func_type {
-        ExprType::Case | ExprType::ConstantLookup => {
+        ExprType::Case => {
             let len = inputs.len();
             align_types(inputs.iter_mut().enumerate().filter_map(|(i, e)| {
                 // `Case` organize `inputs` as (cond, res) pairs with a possible `else` res at
                 // the end. So we align exprs at odd indices as well as the last one when length
                 // is odd.
                 match i.is_odd() || len.is_odd() && i == len - 1 {
+                    true => Some(e),
+                    false => None,
+                }
+            }))
+            .map(Some)
+            .map_err(Into::into)
+        }
+        ExprType::ConstantLookup => {
+            let len = inputs.len();
+            align_types(inputs.iter_mut().enumerate().filter_map(|(i, e)| {
+                // This optimized `ConstantLookup` organize `inputs` as
+                // [operand_const_expr]? (cond, res) [else]? pairs.
+                // So we align exprs at even indices as well as the last one
+                // when length is odd.
+                // Note that currently we assume fallback expression must exist
+                match (len.is_even() && i != 0 && i.is_even())
+                    || (len.is_odd() && i.is_odd())
+                    || i == len - 1
+                {
                     true => Some(e),
                     false => None,
                 }

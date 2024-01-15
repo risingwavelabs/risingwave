@@ -480,11 +480,29 @@ impl Binder {
             .map(|expr| self.bind_expr_inner(*expr))
             .transpose()?;
 
+        let mut constant_lookup_inputs = Vec::new();
+
         // We will see if the currently binding case-when expression
         // can be optimized to a constant lookup expression on-the-fly
-        let mut optimize_flag = if conditions.len() >= CASE_WHEN_ARMS_OPTIMIZE_LIMIT { true } else { false };
-
-        let mut constant_lookup_inputs = Vec::new();
+        let mut optimize_flag = if conditions.len() >= CASE_WHEN_ARMS_OPTIMIZE_LIMIT {
+            if let Some(Expr::Value(_)) | None = operand.as_deref() {
+                if operand.is_some() {
+                    let Ok(input) = self.bind_expr_inner(operand.as_deref().unwrap().clone())
+                    else {
+                        return Err(ErrorCode::BindError(
+                            "failed to bind the operand of case when expression".to_string(),
+                        )
+                        .into());
+                    };
+                    constant_lookup_inputs.push(input);
+                }
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
 
         for (condition, result) in zip_eq_fast(conditions, results_expr) {
             // See if the current condition could be optimized
@@ -492,9 +510,9 @@ impl Binder {
                 if let Expr::Value(_) = condition.clone() {
                     let Ok(input) = self.bind_expr_inner(condition.clone()) else {
                         return Err(ErrorCode::BindError(
-                            "failed to bind case when expression".to_string()
+                            "failed to bind case when expression".to_string(),
                         )
-                        .into())
+                        .into());
                     };
                     constant_lookup_inputs.push(input);
                 } else {
@@ -535,13 +553,10 @@ impl Binder {
                 ErrorCode::BindError("table functions are not allowed in CASE".into()).into(),
             );
         }
-        
+
         if optimize_flag {
-            println!("[bind_case] tada!");
             Ok(FunctionCall::new(ExprType::ConstantLookup, constant_lookup_inputs)?.into())
         } else {
-            println!("[bind_case] data!");
-            println!("[bind_case] inputs: {:#?}", inputs);
             Ok(FunctionCall::new(ExprType::Case, inputs)?.into())
         }
     }

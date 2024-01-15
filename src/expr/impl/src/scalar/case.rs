@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::bail;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_expr::expr::{BoxedExpression, Expression};
 use risingwave_expr::{build_function, Result};
 
@@ -95,14 +95,9 @@ impl Expression for CaseExpression {
     }
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        println!("[normal] Current input: {:#?}", input.clone().into_inner().len());
-        // println!("[eval_row] input len: {:#?}", input());
         for WhenClause { when, then } in &self.when_clauses {
             if when.eval_row(input).await?.map_or(false, |w| w.into_bool()) {
-                // return then.eval_row(input).await;
-                let res = then.eval_row(input).await;
-                println!("rsssss: {:#?}",res);
-                return res;
+                return then.eval_row(input).await;
             }
         }
         if let Some(ref else_expr) = self.else_clause {
@@ -121,6 +116,13 @@ struct ConstantLookupExpression {
     return_type: DataType,
     arms: HashMap<ScalarImpl, BoxedExpression>,
     fallback: Option<BoxedExpression>,
+    // When this field is some, it means we have already
+    // evaluated the expression during building time,
+    // and the result is put to `operand_const_expr`
+    // when executing `eval_row`, directly return the result
+    // of this expression
+    // e.g., `select case 1 when 1 then 114514 else 1919810 end;`
+    operand_const_expr: Option<BoxedExpression>,
 }
 
 impl ConstantLookupExpression {
@@ -128,11 +130,13 @@ impl ConstantLookupExpression {
         return_type: DataType,
         arms: HashMap<ScalarImpl, BoxedExpression>,
         fallback: Option<BoxedExpression>,
+        operand_const_expr: Option<BoxedExpression>,
     ) -> Self {
         Self {
             return_type,
             arms,
             fallback,
+            operand_const_expr,
         }
     }
 }
@@ -143,19 +147,22 @@ impl Expression for ConstantLookupExpression {
         self.return_type.clone()
     }
 
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let columns = input.column_at(0);
-        println!("[ConstantLookupExpression] columns: {:#?}", columns);
+    async fn eval(&self, _input: &DataChunk) -> Result<ArrayRef> {
+        let _ = &self.arms;
         todo!()
     }
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        println!("[ConstantLookupExpression] input: {:#?}", input);
-        // if let Some(then) = self.arms.get(input.clone().into_inner()[0].as_ref().unwrap()) {
-            // return then.eval_row(input).await;
-        // } else {
-            return self.fallback.as_ref().unwrap().eval_row(input).await;
-        // }
+        if self.operand_const_expr.is_some() {
+            return self
+                .operand_const_expr
+                .as_ref()
+                .unwrap()
+                .eval_row(input)
+                .await;
+        }
+        // Currently we assume fallback arm must exist
+        return self.fallback.as_ref().unwrap().eval_row(input).await;
     }
 }
 
@@ -168,6 +175,33 @@ fn build_constant_lookup_expr(
         bail!("children expression must not be empty for constant lookup expression");
     }
 
+    let mut children = children;
+
+    // Just a dummy value to make rustc happy
+    let mut operand_value = ScalarImpl::Int16(0);
+    let mut operand_const_expr = None;
+    let mut operand_const_flag = false;
+
+    // Check if operand if included in child expressions
+    // In this case the operand is a constant expression
+    // We can evaluate the result when building the expression
+    if children.len() % 2 == 0 {
+        let operand_expr = children.remove(0);
+        let Ok(Some(v)) = operand_expr.eval_const() else {
+            bail!("operand must be const");
+        };
+        operand_value = v;
+        operand_const_flag = true;
+    }
+
+    let else_clause = children.remove(children.len() - 1);
+    let fallback = {
+        if else_clause.return_type() != return_type {
+            bail!("Type mismatched between else and case.");
+        }
+        Some(else_clause)
+    };
+
     let mut arms = HashMap::new();
 
     let mut iter = children.into_iter().array_chunks();
@@ -175,22 +209,21 @@ fn build_constant_lookup_expr(
         let Ok(Some(s)) = when.eval_const() else {
             bail!("expect when expression to be const");
         };
+        if operand_const_flag && s == operand_value {
+            operand_const_expr = Some(then);
+            // Short circuit evaluation
+            // i.e., We will not evaluate subsequent expressions
+            // whenever we find a match if the operand is constant
+            break;
+        }
         arms.insert(s, then);
     }
-
-    let fallback = if let Some(else_clause) = iter.into_remainder().unwrap().next() {
-        if else_clause.return_type() != return_type {
-            bail!("Type mismatched between else and case.");
-        }
-        Some(else_clause)
-    } else {
-        None
-    };
 
     Ok(Box::new(ConstantLookupExpression::new(
         return_type,
         arms,
         fallback,
+        operand_const_expr,
     )))
 }
 
