@@ -685,21 +685,15 @@ pub fn start_shared_compactor(
                                                 && !compact_task.sorted_output_ssts.is_empty()
                                                 && compact_task.task_status() == TaskStatus::Success
                                             {
-
-                                            }
                                                 match check_compaction_result(&compact_task, context.clone()).await {
                                                     Err(e) => {
-                                                        tracing::warn!(
-                "Failed to check compaction task {} because: {:?}",
-                compact_task.task_id,
-                e
-            );
+                                                        tracing::warn!("Failed to check compaction task {} because: {:?}",compact_task.task_id, e);
                                                     },
                                                     Ok(true) => (),
                                                     Ok(false) => {
                                                         panic!("Failed to pass consistency check for result of compaction task:\n{:?}", compact_task_to_string(&compact_task));
                                                     }
-
+                                                }
                                             }
                                         }
                                         Err(e) => tracing::warn!("Failed to report task {task_id:?} . {e:?}"),

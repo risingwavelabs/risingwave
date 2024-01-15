@@ -454,9 +454,20 @@ async fn check_result<
     right_iter.rewind().await?;
     while left_iter.is_valid() && right_iter.is_valid() {
         if left_iter.key() != right_iter.key() {
+            tracing::error!(
+                "The key of input and output not equal. key: {:?} vs {:?}",
+                left_iter.key(),
+                right_iter.key()
+            );
             return Ok(false);
         }
         if left_iter.value() != right_iter.value() {
+            tracing::error!(
+                "The value of input and output not equal. key: {:?}, value: {:?} vs {:?}",
+                left_iter.key(),
+                left_iter.value(),
+                right_iter.value()
+            );
             return Ok(false);
         }
         left_iter.next().await?;
