@@ -505,10 +505,6 @@ async fn test_compatibility_with_low_level() -> Result<()> {
     ))
     .await;
 
-    // helper views
-    session.run("create view table_parallelism as select t.name, tf.parallelism from rw_tables t, rw_table_fragments tf where t.id = tf.table_id;").await?;
-    session.run("create view mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;").await?;
-
     session.run("create table t(v int);").await?;
 
     // single fragment downstream
@@ -626,3 +622,116 @@ async fn test_compatibility_with_low_level() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<()> {
+    let config = Configuration::for_auto_parallelism(
+        MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE,
+        false,
+        true,
+    );
+    let mut cluster = Cluster::start(config.clone()).await?;
+    let mut session = cluster.start_session();
+
+    // Keep one worker reserved for adding later.
+    let select_worker = "compute-2";
+    cluster
+        .simple_kill_nodes(vec![select_worker.to_string()])
+        .await;
+
+    sleep(Duration::from_secs(
+        MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
+    ))
+        .await;
+
+    session.run("create table t(v int);").await?;
+
+    // Streaming arrangement backfill
+    session.run("SET streaming_enable_arrangement_backfill = true;").await?;
+    session
+        .run("create materialized view m_simple as select * from t;")
+        .await?;
+
+    session
+        .run("select parallelism from table_parallelism")
+        .await?
+        .assert_result_eq("AUTO");
+
+    // Find the table materialize fragment
+    let table_mat_fragment = cluster
+        .locate_one_fragment(vec![
+            identity_contains("materialize"),
+            identity_contains("union"),
+        ])
+        .await?;
+
+    let (mut all_parallel_units, _) = table_mat_fragment.parallel_unit_usage();
+
+    let chosen_parallel_unit_a = all_parallel_units.pop().unwrap();
+    let chosen_parallel_unit_b = all_parallel_units.pop().unwrap();
+
+    let table_mat_fragment_id = table_mat_fragment.id();
+
+    // manual scale in table materialize fragment
+    cluster
+        .reschedule(format!(
+            "{table_mat_fragment_id}-[{chosen_parallel_unit_a}]",
+        ))
+        .await?;
+
+    session
+        .run("select parallelism from table_parallelism")
+        .await?
+        .assert_result_eq("CUSTOM");
+
+    // Upstream changes should not affect downstream.
+    session
+        .run("select parallelism from mview_parallelism where name = 'm_simple'")
+        .await?
+        .assert_result_eq("AUTO");
+
+    // Find the table fragment for materialized view
+    let simple_mv_fragment = cluster
+        .locate_one_fragment(vec![
+            identity_contains("materialize"),
+            identity_contains("StreamTableScan"),
+        ])
+        .await?;
+
+    let simple_mv_fragment_id = simple_mv_fragment.id();
+
+    // manual scale in m_simple materialize fragment
+    cluster
+        .reschedule_resolve_no_shuffle(format!(
+            "{simple_mv_fragment_id}-[{chosen_parallel_unit_b}]",
+        ))
+        .await?;
+
+    // The downstream table fragment should be separate from the upstream table fragment.
+    session
+        .run("select parallelism from mview_parallelism where name = 'm_simple'")
+        .await?
+        .assert_result_eq("CUSTOM");
+
+    let before_fragment_parallelism = session
+        .run("select fragment_id, parallelism from rw_fragments order by fragment_id;")
+        .await?;
+
+    cluster
+        .simple_restart_nodes(vec![select_worker.to_string()])
+        .await;
+
+    sleep(Duration::from_secs(
+        MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
+    ))
+        .await;
+
+    let after_fragment_parallelism = session
+        .run("select fragment_id, parallelism from rw_fragments order by fragment_id;")
+        .await?;
+
+    assert_eq!(before_fragment_parallelism, after_fragment_parallelism);
+
+    Ok(())
+}
+
