@@ -26,12 +26,13 @@ use risingwave_common::estimate_size::collections::EstimatedBTreeMap;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::Sentinelled;
-use risingwave_expr::window_function::{FrameBounds, StateKey, WindowFuncCall};
+use risingwave_expr::window_function::{RowsFrameBounds, StateKey, WindowFuncCall};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::general::RowConverter;
 use crate::common::table::state_table::StateTable;
+use crate::executor::over_window::frame_finder::*;
 use crate::executor::StreamExecutorResult;
 
 pub(super) type CacheKey = Sentinelled<StateKey>;
@@ -229,7 +230,9 @@ pub(super) struct OverPartition<'a, S: StateStore> {
     range_cache: &'a mut PartitionCache,
     cache_policy: CachePolicy,
 
-    calls: &'a [WindowFuncCall],
+    super_rows_frame_bounds: RowsFrameBounds,
+    start_is_unbounded: bool,
+    end_is_unbounded: bool,
     row_conv: RowConverter<'a>,
 
     stats: OverPartitionStats,
@@ -248,12 +251,28 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         calls: &'a [WindowFuncCall],
         row_conv: RowConverter<'a>,
     ) -> Self {
+        let rows_frames = calls
+            .iter()
+            .filter_map(|call| call.frame.bounds.as_rows())
+            .collect::<Vec<_>>();
+        // TODO(rc): maybe should avoid repeated merging
+        let super_rows_frame_bounds = merge_rows_frames(&rows_frames);
+
+        let start_is_unbounded = calls
+            .iter()
+            .any(|call| call.frame.bounds.start_is_unbounded());
+        let end_is_unbounded = calls
+            .iter()
+            .any(|call| call.frame.bounds.end_is_unbounded());
+
         Self {
             this_partition_key,
             range_cache: cache,
             cache_policy,
 
-            calls,
+            super_rows_frame_bounds,
+            start_is_unbounded,
+            end_is_unbounded,
             row_conv,
 
             stats: Default::default(),
@@ -350,9 +369,9 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         }
     }
 
-    /// Find all ranges in the partition that are affected by the given delta.
+    //// Find all ranges in the partition that are affected by the given delta.
     /// The returned ranges are guaranteed to be sorted and non-overlapping. All keys in the ranges
-    /// are guaranteed to be cached.
+    /// are guaranteed to be cached, which means they should be [`Sentinelled::Normal`]s.
     pub async fn find_affected_ranges<'s, 'cache>(
         &'s mut self,
         table: &'_ StateTable<S>,
@@ -382,49 +401,184 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         }
 
         loop {
-            // Terminateability: `extend_cache_leftward_by_n` and `extend_cache_rightward_by_n` keep
+            // TERMINATEABILITY: `extend_cache_leftward_by_n` and `extend_cache_rightward_by_n` keep
             // pushing the cache to the boundary of current partition. In these two methods, when
             // any side of boundary is reached, the sentinel key will be removed, so finally
-            // `self::find_affected_ranges` will return ranges without any sentinels.
+            // `Self::find_affected_ranges_readonly` will return ranges without any sentinels.
 
-            let (left_reached_sentinel, right_reached_sentinel) = {
-                // SAFETY: Here we shortly borrow the range cache and turn the reference into a
-                // `'cache` one to bypass the borrow checker. This is safe because we only return
-                // the reference once we don't need to do any further mutation.
-                let cache_inner = unsafe { &*(self.range_cache.inner() as *const _) };
-                let ranges =
-                    self::find_affected_ranges(self.calls, DeltaBTreeMap::new(cache_inner, delta));
-                self.stats.lookup_count += 1;
+            // SAFETY: Here we shortly borrow the range cache and turn the reference into a
+            // `'cache` one to bypass the borrow checker. This is safe because we only return
+            // the reference once we don't need to do any further mutation.
+            let cache_inner = unsafe { &*(self.range_cache.inner() as *const _) };
+            let part_with_delta = DeltaBTreeMap::new(cache_inner, delta);
 
-                if ranges.is_empty() {
-                    // no ranges affected, we're done
-                    return Ok((DeltaBTreeMap::new(cache_inner, delta), ranges));
-                }
+            self.stats.lookup_count += 1;
+            let res = self.find_affected_ranges_readonly(part_with_delta);
 
-                let left_reached_sentinel = ranges.first().unwrap().0.is_sentinel();
-                let right_reached_sentinel = ranges.last().unwrap().3.is_sentinel();
-
-                if !left_reached_sentinel && !right_reached_sentinel {
-                    // all affected ranges are already cached, we're done
-                    return Ok((DeltaBTreeMap::new(cache_inner, delta), ranges));
-                }
-
-                (left_reached_sentinel, right_reached_sentinel)
+            let (need_extend_leftward, need_extend_rightward) = match res {
+                Ok(ranges) => return Ok((part_with_delta, ranges)),
+                Err(cache_extend_hint) => cache_extend_hint,
             };
 
-            if left_reached_sentinel {
+            if need_extend_leftward {
                 self.stats.left_miss_count += 1;
                 tracing::trace!(partition=?self.this_partition_key, "partition cache left extension triggered");
                 let left_most = self.cache_real_first_key().unwrap_or(delta_first).clone();
                 self.extend_cache_leftward_by_n(table, &left_most).await?;
             }
-            if right_reached_sentinel {
+            if need_extend_rightward {
                 self.stats.right_miss_count += 1;
                 tracing::trace!(partition=?self.this_partition_key, "partition cache right extension triggered");
                 let right_most = self.cache_real_last_key().unwrap_or(delta_last).clone();
                 self.extend_cache_rightward_by_n(table, &right_most).await?;
             }
             tracing::trace!(partition=?self.this_partition_key, "partition cache extended");
+        }
+    }
+
+    /// Try to find affected ranges on immutable range cache + delta. If the algorithm reaches
+    /// any sentinel node in the cache, which means some entries in the affected range may be
+    /// in the state table, it returns and `Err((bool, bool))` to notify the caller that the
+    /// left side or the right side or both sides of the cache should be extended.
+    ///
+    /// TODO(rc): Currently at most one range will be in the result vector. Ideally we should
+    /// recognize uncontinuous changes in the delta and find multiple ranges, but that will be
+    /// too complex for now.
+    #[allow(clippy::type_complexity)]
+    fn find_affected_ranges_readonly<'cache>(
+        &'_ self,
+        part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
+    ) -> std::result::Result<
+        Vec<(
+            &'cache CacheKey,
+            &'cache CacheKey,
+            &'cache CacheKey,
+            &'cache CacheKey,
+        )>,
+        (bool, bool),
+    > {
+        if part_with_delta.first_key().is_none() {
+            // nothing is left after applying the delta, meaning all entries are deleted
+            return Ok(vec![]);
+        }
+
+        let delta_first_key = part_with_delta.delta().first_key_value().unwrap().0;
+        let delta_last_key = part_with_delta.delta().last_key_value().unwrap().0;
+
+        if part_with_delta.snapshot().is_empty() {
+            // all existing keys are inserted in the delta
+            return Ok(vec![(
+                delta_first_key,
+                delta_first_key,
+                delta_last_key,
+                delta_last_key,
+            )]);
+        }
+
+        let first_key = part_with_delta.first_key().unwrap();
+        let last_key = part_with_delta.last_key().unwrap();
+
+        let first_curr_key = if self.end_is_unbounded || delta_first_key == first_key {
+            // If the frame end is unbounded, or, the first key is in delta, then the frame corresponding
+            // to the first key is always affected.
+            first_key
+        } else {
+            find_first_curr_for_rows_frame(
+                &self.super_rows_frame_bounds,
+                part_with_delta,
+                delta_first_key,
+            )
+        };
+
+        let last_curr_key = if self.start_is_unbounded || delta_last_key == last_key {
+            // similar to `first_curr_key`
+            last_key
+        } else {
+            find_last_curr_for_rows_frame(
+                &self.super_rows_frame_bounds,
+                part_with_delta,
+                delta_last_key,
+            )
+        };
+
+        {
+            // We quickly return if there's any sentinel in `[first_curr_key, last_curr_key]`,
+            // just for the sake of simplicity.
+            let mut need_extend_leftward = false;
+            let mut need_extend_rightward = false;
+            for key in [first_curr_key, last_curr_key] {
+                if key.is_smallest() {
+                    need_extend_leftward = true;
+                } else if key.is_largest() {
+                    need_extend_rightward = true;
+                }
+            }
+            if need_extend_leftward || need_extend_rightward {
+                return Err((need_extend_leftward, need_extend_rightward));
+            }
+        }
+
+        // From now on we definitely have two normal `curr_key`s.
+
+        if first_curr_key > last_curr_key {
+            // Note that we cannot move the this check before the above block, because for example,
+            // if the range cache contains `[Smallest, 5, Largest]`, and the delta contains only
+            // `Delete 5`, the frame is `RANGE BETWEEN CURRENT ROW AND CURRENT ROW`, then
+            // `first_curr_key` will be `Largest`, `last_curr_key` will be `Smallest`, in this case
+            // there may be some other entries with order value `5` in the table, which should be
+            // *affected*.
+            return Ok(vec![]);
+        }
+
+        let first_frame_start = if self.start_is_unbounded || first_curr_key == first_key {
+            // If the frame start is unbounded, or, the first curr key is the first key, then the first key
+            // always need to be included in the affected range.
+            first_key
+        } else {
+            find_frame_start_for_rows_frame(
+                &self.super_rows_frame_bounds,
+                part_with_delta,
+                first_curr_key,
+            )
+        };
+        assert!(first_frame_start <= first_curr_key);
+
+        let last_frame_end = if self.end_is_unbounded || last_curr_key == last_key {
+            // similar to `first_frame_start`
+            last_key
+        } else {
+            find_frame_end_for_rows_frame(
+                &self.super_rows_frame_bounds,
+                part_with_delta,
+                last_curr_key,
+            )
+        };
+        assert!(last_frame_end >= last_curr_key);
+
+        let mut need_extend_leftward = false;
+        let mut need_extend_rightward = false;
+        for key in [
+            first_curr_key,
+            last_curr_key,
+            first_frame_start,
+            last_frame_end,
+        ] {
+            if key.is_smallest() {
+                need_extend_leftward = true;
+            } else if key.is_largest() {
+                need_extend_rightward = true;
+            }
+        }
+
+        if need_extend_leftward || need_extend_rightward {
+            Err((need_extend_leftward, need_extend_rightward))
+        } else {
+            Ok(vec![(
+                first_frame_start,
+                first_curr_key,
+                last_curr_key,
+                last_frame_end,
+            )])
         }
     }
 
@@ -758,579 +912,5 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         }
 
         Ok(())
-    }
-}
-
-/// Find all affected ranges in the given partition with delta.
-///
-/// # Returns
-///
-/// `Vec<(first_frame_start, first_curr_key, last_curr_key, last_frame_end_incl)>`
-///
-/// Each affected range is a union of many small window frames affected by some adajcent
-/// keys in the delta.
-///
-/// Example:
-/// - frame 1: `rows between 2 preceding and current row`
-/// - frame 2: `rows between 1 preceding and 2 following`
-/// - partition: `[1, 2, 4, 5, 7, 8, 9, 10, 11, 12, 14]`
-/// - delta: `[3, 4, 15]`
-/// - affected ranges: `[(1, 1, 7, 9), (10, 12, 15, 15)]`
-///
-/// TODO(rc):
-/// Note that, since we assume input chunks have data locality on order key columns, we now only
-/// calculate one single affected range. So the affected ranges in the above example will be
-/// `(1, 1, 15, 15)`. Later we may optimize this.
-fn find_affected_ranges<'cache>(
-    calls: &'_ [WindowFuncCall],
-    part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
-) -> Vec<(
-    &'cache CacheKey,
-    &'cache CacheKey,
-    &'cache CacheKey,
-    &'cache CacheKey,
-)> {
-    // XXX(rc): NOTE FOR DEVS
-    // Must carefully consider the sentinel keys in the cache when extending this function to
-    // support `RANGE` and `GROUPS` frames later. May introduce a return value variant to clearly
-    // tell the caller that there exists at least one affected range that touches the sentinel.
-
-    if part_with_delta.first_key().is_none() {
-        // all keys are deleted in the delta
-        return vec![];
-    }
-
-    let delta_first_key = part_with_delta.delta().first_key_value().unwrap().0;
-    let delta_last_key = part_with_delta.delta().last_key_value().unwrap().0;
-
-    if part_with_delta.snapshot().is_empty() {
-        // all existing keys are inserted in the delta
-        return vec![(
-            delta_first_key,
-            delta_first_key,
-            delta_last_key,
-            delta_last_key,
-        )];
-    }
-
-    let first_key = part_with_delta.first_key().unwrap();
-    let last_key = part_with_delta.last_key().unwrap();
-
-    let start_is_unbounded = calls
-        .iter()
-        .any(|call| call.frame.bounds.start_is_unbounded());
-    let end_is_unbounded = calls
-        .iter()
-        .any(|call| call.frame.bounds.end_is_unbounded());
-
-    // NOTE: Don't be too clever! Here we must calculate `first_frame_start` after calculating
-    // `first_curr_key`, because the correct calculation of `first_frame_start` depends on
-    // `first_curr_key` which is the MINIMUM of all `first_curr_key`s of all frames of all window
-    // function calls.
-
-    let first_curr_key = if end_is_unbounded || delta_first_key == first_key {
-        // If the frame end is unbounded, or, the first key is in delta, then the frame corresponding
-        // to the first key is always affected.
-        first_key
-    } else {
-        let mut min_first_curr_key = &Sentinelled::Largest;
-
-        for call in calls {
-            let key = match &call.frame.bounds {
-                FrameBounds::Rows(bounds) => {
-                    let mut cursor = part_with_delta.lower_bound(Bound::Included(delta_first_key));
-                    for _ in 0..bounds.end.n_following_rows().unwrap() {
-                        // Note that we have to move before check, to handle situation where the
-                        // cursor is at ghost position at first.
-                        cursor.move_prev();
-                        if cursor.position().is_ghost() {
-                            break;
-                        }
-                    }
-                    cursor.key().unwrap_or(first_key)
-                }
-            };
-            min_first_curr_key = min_first_curr_key.min(key);
-            if min_first_curr_key == first_key {
-                // if we already pushed the affected curr key to the first key, no more pushing is needed
-                break;
-            }
-        }
-
-        min_first_curr_key
-    };
-
-    let first_frame_start = if start_is_unbounded || first_curr_key == first_key {
-        // If the frame start is unbounded, or, the first curr key is the first key, then the first key
-        // always need to be included in the affected range.
-        first_key
-    } else {
-        let mut min_frame_start = &Sentinelled::Largest;
-
-        for call in calls {
-            let key = match &call.frame.bounds {
-                FrameBounds::Rows(bounds) => {
-                    let mut cursor = part_with_delta.find(first_curr_key).unwrap();
-                    for _ in 0..bounds.start.n_preceding_rows().unwrap() {
-                        cursor.move_prev();
-                        if cursor.position().is_ghost() {
-                            break;
-                        }
-                    }
-                    cursor.key().unwrap_or(first_key)
-                }
-            };
-            min_frame_start = min_frame_start.min(key);
-            if min_frame_start == first_key {
-                // if we already pushed the affected frame start to the first key, no more pushing is needed
-                break;
-            }
-        }
-
-        min_frame_start
-    };
-
-    let last_curr_key = if start_is_unbounded || delta_last_key == last_key {
-        last_key
-    } else {
-        let mut max_last_curr_key = &Sentinelled::Smallest;
-
-        for call in calls {
-            let key = match &call.frame.bounds {
-                FrameBounds::Rows(bounds) => {
-                    let mut cursor = part_with_delta.upper_bound(Bound::Included(delta_last_key));
-                    for _ in 0..bounds.start.n_preceding_rows().unwrap() {
-                        cursor.move_next();
-                        if cursor.position().is_ghost() {
-                            break;
-                        }
-                    }
-                    cursor.key().unwrap_or(last_key)
-                }
-            };
-            max_last_curr_key = max_last_curr_key.max(key);
-            if max_last_curr_key == last_key {
-                // if we already pushed the affected curr key to the last key, no more pushing is needed
-                break;
-            }
-        }
-
-        max_last_curr_key
-    };
-
-    let last_frame_end = if end_is_unbounded || last_curr_key == last_key {
-        last_key
-    } else {
-        let mut max_frame_end = &Sentinelled::Smallest;
-
-        for call in calls {
-            let key = match &call.frame.bounds {
-                FrameBounds::Rows(bounds) => {
-                    let mut cursor = part_with_delta.find(last_curr_key).unwrap();
-                    for _ in 0..bounds.end.n_following_rows().unwrap() {
-                        cursor.move_next();
-                        if cursor.position().is_ghost() {
-                            break;
-                        }
-                    }
-                    cursor.key().unwrap_or(last_key)
-                }
-            };
-            max_frame_end = max_frame_end.max(key);
-            if max_frame_end == last_key {
-                // if we already pushed the affected frame end to the last key, no more pushing is needed
-                break;
-            }
-        }
-
-        max_frame_end
-    };
-
-    if first_curr_key > last_curr_key {
-        // all affected keys are deleted in the delta
-        return vec![];
-    }
-
-    vec![(
-        first_frame_start,
-        first_curr_key,
-        last_curr_key,
-        last_frame_end,
-    )]
-}
-
-#[cfg(test)]
-mod find_affected_ranges_tests {
-    //! Function `find_affected_ranges` is important enough to deserve its own test module. We must
-    //! test it thoroughly.
-
-    use itertools::Itertools;
-    use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_expr::aggregate::{AggArgs, AggKind};
-    use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
-
-    use super::*;
-
-    fn create_call(frame: Frame) -> WindowFuncCall {
-        WindowFuncCall {
-            kind: WindowFuncKind::Aggregate(AggKind::Sum),
-            args: AggArgs::Unary(DataType::Int32, 0),
-            return_type: DataType::Int32,
-            frame,
-        }
-    }
-
-    macro_rules! create_cache {
-        (..., $( $pk:literal ),* , ...) => {
-            {
-                let mut cache = create_cache!( $( $pk ),* );
-                cache.insert(CacheKey::Smallest, OwnedRow::empty().into());
-                cache.insert(CacheKey::Largest, OwnedRow::empty().into());
-                cache
-            }
-        };
-        (..., $( $pk:literal ),*) => {
-            {
-                let mut cache = create_cache!( $( $pk ),* );
-                cache.insert(CacheKey::Smallest, OwnedRow::empty().into());
-                cache
-            }
-        };
-        ($( $pk:literal ),* , ...) => {
-            {
-                let mut cache = create_cache!( $( $pk ),* );
-                cache.insert(CacheKey::Largest, OwnedRow::empty().into());
-                cache
-            }
-        };
-        ($( $pk:literal ),*) => {
-            {
-                #[allow(unused_mut)]
-                let mut cache = BTreeMap::new();
-                $(
-                    cache.insert(
-                        CacheKey::Normal(
-                            StateKey {
-                                // order key doesn't matter here
-                                order_key: vec![].into(),
-                                pk: OwnedRow::new(vec![Some($pk.into())]).into(),
-                            },
-                        ),
-                        // value row doesn't matter here
-                        OwnedRow::empty(),
-                    );
-                )*
-                cache
-            }
-        };
-    }
-
-    macro_rules! create_change {
-        (Delete) => {
-            Change::Delete
-        };
-        (Insert) => {
-            Change::Insert(OwnedRow::empty())
-        };
-    }
-
-    macro_rules! create_delta {
-        ($(( $pk:literal, $change:ident )),* $(,)?) => {
-            {
-                #[allow(unused_mut)]
-                let mut delta = BTreeMap::new();
-                $(
-                    delta.insert(
-                        CacheKey::Normal(
-                            StateKey {
-                                // order key doesn't matter here
-                                order_key: vec![].into(),
-                                pk: OwnedRow::new(vec![Some($pk.into())]).into(),
-                            },
-                        ),
-                        // value row doesn't matter here
-                        create_change!( $change ),
-                    );
-                )*
-                delta
-            }
-        };
-    }
-
-    fn assert_ranges_eq(
-        result: Vec<(&CacheKey, &CacheKey, &CacheKey, &CacheKey)>,
-        expected: impl IntoIterator<Item = (ScalarImpl, ScalarImpl, ScalarImpl, ScalarImpl)>,
-    ) {
-        result
-            .into_iter()
-            .zip_eq(expected)
-            .for_each(|(result, expected)| {
-                assert_eq!(
-                    result.0.as_normal_expect().pk.0,
-                    OwnedRow::new(vec![Some(expected.0)])
-                );
-                assert_eq!(
-                    result.1.as_normal_expect().pk.0,
-                    OwnedRow::new(vec![Some(expected.1)])
-                );
-                assert_eq!(
-                    result.2.as_normal_expect().pk.0,
-                    OwnedRow::new(vec![Some(expected.2)])
-                );
-                assert_eq!(
-                    result.3.as_normal_expect().pk.0,
-                    OwnedRow::new(vec![Some(expected.3)])
-                );
-            })
-    }
-
-    #[test]
-    fn test_insert_delta_only() {
-        let cache = create_cache!();
-        let delta = create_delta!((1, Insert), (2, Insert), (3, Insert));
-        let calls = vec![create_call(Frame::rows(
-            FrameBound::Preceding(2),
-            FrameBound::Preceding(1),
-        ))];
-        let affected_ranges = find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta));
-        assert_ranges_eq(affected_ranges, [(1.into(), 1.into(), 3.into(), 3.into())]);
-    }
-
-    #[test]
-    fn test_simple() {
-        let cache = create_cache!(1, 2, 3, 4, 5, 6);
-        let delta = create_delta!((2, Insert), (3, Delete));
-
-        {
-            let calls = vec![create_call(Frame::rows(
-                FrameBound::Preceding(2),
-                FrameBound::Preceding(1),
-            ))];
-            assert_ranges_eq(
-                find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
-                [(1.into(), 2.into(), 5.into(), 5.into())],
-            );
-        }
-
-        {
-            let calls = vec![create_call(Frame::rows(
-                FrameBound::Preceding(1),
-                FrameBound::Following(2),
-            ))];
-            assert_ranges_eq(
-                find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
-                [(1.into(), 1.into(), 4.into(), 6.into())],
-            );
-        }
-
-        {
-            let calls = vec![create_call(Frame::rows(
-                FrameBound::CurrentRow,
-                FrameBound::Following(2),
-            ))];
-            assert_ranges_eq(
-                find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
-                [(1.into(), 1.into(), 2.into(), 5.into())],
-            );
-        }
-    }
-
-    #[test]
-    fn test_multiple_calls() {
-        let cache = create_cache!(1, 2, 3, 4, 5, 6);
-        let delta = create_delta!((2, Insert), (3, Delete));
-        let calls = vec![
-            create_call(Frame::rows(
-                FrameBound::Preceding(1),
-                FrameBound::Preceding(1),
-            )),
-            create_call(Frame::rows(
-                FrameBound::Following(1),
-                FrameBound::Following(1),
-            )),
-        ];
-        assert_ranges_eq(
-            find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
-            [(1.into(), 1.into(), 4.into(), 5.into())],
-        );
-    }
-
-    #[test]
-    fn test_lag_corner_case() {
-        let cache = create_cache!(1, 2, 3, 4, 5, 6);
-        let delta = create_delta!((1, Delete), (2, Delete), (3, Delete));
-        let calls = vec![create_call(Frame::rows(
-            FrameBound::Preceding(1),
-            FrameBound::Preceding(1),
-        ))];
-        assert_ranges_eq(
-            find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
-            [(4.into(), 4.into(), 4.into(), 4.into())],
-        );
-    }
-
-    #[test]
-    fn test_lead_corner_case() {
-        let cache = create_cache!(1, 2, 3, 4, 5, 6);
-        let delta = create_delta!((4, Delete), (5, Delete), (6, Delete));
-        let calls = vec![create_call(Frame::rows(
-            FrameBound::Following(1),
-            FrameBound::Following(1),
-        ))];
-        assert_ranges_eq(
-            find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
-            [(3.into(), 3.into(), 3.into(), 3.into())],
-        );
-    }
-
-    #[test]
-    fn test_lag_lead_offset_0_corner_case_1() {
-        let cache = create_cache!(1, 2, 3, 4);
-        let delta = create_delta!((2, Delete), (3, Delete));
-        let calls = vec![create_call(Frame::rows(
-            FrameBound::CurrentRow,
-            FrameBound::CurrentRow,
-        ))];
-        assert_ranges_eq(
-            find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
-            [],
-        );
-    }
-
-    #[test]
-    fn test_lag_lead_offset_0_corner_case_2() {
-        let cache = create_cache!(1, 2, 3, 4, 5);
-        let delta = create_delta!((2, Delete), (3, Insert), (4, Delete));
-        let calls = vec![create_call(Frame::rows(
-            FrameBound::CurrentRow,
-            FrameBound::CurrentRow,
-        ))];
-        assert_ranges_eq(
-            find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
-            [(3.into(), 3.into(), 3.into(), 3.into())],
-        );
-    }
-
-    #[test]
-    fn test_empty_with_sentinels() {
-        let cache: BTreeMap<Sentinelled<StateKey>, OwnedRow> = create_cache!(..., , ...);
-        let delta = create_delta!((1, Insert), (2, Insert));
-
-        {
-            let calls = vec![create_call(Frame::rows(
-                FrameBound::CurrentRow,
-                FrameBound::CurrentRow,
-            ))];
-            assert_ranges_eq(
-                find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
-                [(1.into(), 1.into(), 2.into(), 2.into())],
-            );
-        }
-
-        {
-            let calls = vec![create_call(Frame::rows(
-                FrameBound::Preceding(1),
-                FrameBound::Preceding(1),
-            ))];
-            let range = find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta))[0];
-            assert!(range.0.is_smallest());
-            assert_eq!(
-                range.1.as_normal_expect().pk.0,
-                OwnedRow::new(vec![Some(1.into())])
-            );
-            assert!(range.2.is_largest());
-            assert!(range.3.is_largest());
-        }
-
-        {
-            let calls = vec![create_call(Frame::rows(
-                FrameBound::Following(1),
-                FrameBound::Following(3),
-            ))];
-            let range = find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta))[0];
-            assert!(range.0.is_smallest());
-            assert!(range.1.is_smallest());
-            assert_eq!(
-                range.2.as_normal_expect().pk.0,
-                OwnedRow::new(vec![Some(2.into())])
-            );
-            assert!(range.3.is_largest());
-        }
-    }
-
-    #[test]
-    fn test_with_left_sentinel() {
-        let cache = create_cache!(..., 2, 4, 5, 8);
-        let delta = create_delta!((3, Insert), (4, Insert), (8, Delete));
-
-        {
-            let calls = vec![create_call(Frame::rows(
-                FrameBound::Following(1),
-                FrameBound::Following(1),
-            ))];
-            assert_ranges_eq(
-                find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
-                [(2.into(), 2.into(), 5.into(), 5.into())],
-            );
-        }
-
-        {
-            let calls = vec![create_call(Frame::rows(
-                FrameBound::Preceding(1),
-                FrameBound::Following(1),
-            ))];
-            let range = find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta))[0];
-            assert!(range.0.is_smallest());
-            assert_eq!(
-                range.1.as_normal_expect().pk.0,
-                OwnedRow::new(vec![Some(2.into())])
-            );
-            assert_eq!(
-                range.2.as_normal_expect().pk.0,
-                OwnedRow::new(vec![Some(5.into())])
-            );
-            assert_eq!(
-                range.3.as_normal_expect().pk.0,
-                OwnedRow::new(vec![Some(5.into())])
-            );
-        }
-    }
-
-    #[test]
-    fn test_with_right_sentinel() {
-        let cache = create_cache!(1, 2, 4, 5, 8, ...);
-        let delta = create_delta!((3, Insert), (4, Insert), (5, Delete));
-
-        {
-            let calls = vec![create_call(Frame::rows(
-                FrameBound::Preceding(1),
-                FrameBound::Preceding(1),
-            ))];
-            assert_ranges_eq(
-                find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
-                [(2.into(), 3.into(), 8.into(), 8.into())],
-            );
-        }
-
-        {
-            let calls = vec![create_call(Frame::rows(
-                FrameBound::Preceding(1),
-                FrameBound::Following(1),
-            ))];
-            let range = find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta))[0];
-            assert_eq!(
-                range.0.as_normal_expect().pk.0,
-                OwnedRow::new(vec![Some(1.into())])
-            );
-            assert_eq!(
-                range.1.as_normal_expect().pk.0,
-                OwnedRow::new(vec![Some(2.into())])
-            );
-            assert_eq!(
-                range.2.as_normal_expect().pk.0,
-                OwnedRow::new(vec![Some(8.into())])
-            );
-            assert!(range.3.is_largest());
-        }
     }
 }
