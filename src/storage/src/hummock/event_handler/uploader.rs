@@ -1428,7 +1428,7 @@ mod tests {
         assert_eq!(epoch1, uploader.max_committed_epoch());
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn test_uploader_merge_imms_without_flush() {
         let mut uploader = test_uploader(dummy_success_upload_future);
         let mut all_imms = VecDeque::new();
@@ -1468,14 +1468,15 @@ mod tests {
             }
 
             let epoch_cnt = (epoch - INITIAL_EPOCH) as usize;
-            if epoch_cnt < imm_merge_threshold {
+            if epoch_cnt / 65536 < imm_merge_threshold {
                 assert!(uploader.sealed_data.merging_tasks.is_empty());
                 assert!(uploader.sealed_data.spilled_data.is_empty());
-                assert_eq!(epoch_cnt, uploader.sealed_data.epochs.len());
+                assert_eq!(epoch_cnt / 65536, uploader.sealed_data.epochs.len());
             } else {
-                assert_eq!(epoch_cnt, uploader.sealed_data.epochs.len());
+                assert_eq!(epoch_cnt / 65536, uploader.sealed_data.epochs.len());
 
-                let unmerged_imm_cnt: usize = epoch_cnt - imm_merge_threshold * merged_imms.len();
+                let unmerged_imm_cnt: usize =
+                    epoch_cnt / 65536 - imm_merge_threshold * merged_imms.len();
 
                 if unmerged_imm_cnt < imm_merge_threshold {
                     continue;

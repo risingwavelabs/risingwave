@@ -87,7 +87,6 @@ async fn test_read_version_basic() {
     {
         // several epoch
         for _ in 0..5 {
-            // epoch from 1 to 6
             epoch += 65536;
             let kv_pairs = gen_dummy_batch(epoch);
             let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
@@ -106,14 +105,13 @@ async fn test_read_version_basic() {
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
         }
 
-        for e in 1..epoch {
+        for e in 1..epoch / 65536 {
             let epoch = e * 65536;
             let key = iterator_test_table_key_of(epoch as usize);
             let key_range = map_table_key_range((
                 Bound::Included(Bytes::from(key.to_vec())),
                 Bound::Included(Bytes::from(key.to_vec())),
             ));
-            println!("epoch = {}", epoch);
             let (staging_imm_iter, staging_sst_iter) =
                 read_version
                     .staging()
