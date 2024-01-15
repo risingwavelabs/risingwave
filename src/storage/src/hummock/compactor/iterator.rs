@@ -34,6 +34,8 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{BlockHolder, BlockIterator, BlockMeta, HummockResult};
 use crate::monitor::StoreLocalStatistic;
 
+const PROGRESS_KEY_INTERVAL: usize = 100;
+
 /// Iterates over the KV-pairs of an SST while downloading it.
 pub struct SstableStreamIterator {
     sstable_store: SstableStoreRef,
@@ -510,8 +512,9 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for MonitoredCompa
         self.inner.next().await?;
         self.processed_key_num += 1;
 
-        if self.processed_key_num % 100 == 0 {
-            self.task_progress.inc_progress_key(100);
+        if self.processed_key_num % PROGRESS_KEY_INTERVAL == 0 {
+            self.task_progress
+                .inc_progress_key(PROGRESS_KEY_INTERVAL as _);
         }
 
         Ok(())
