@@ -131,6 +131,7 @@ impl Configuration {
             ..Default::default()
         }
     }
+
     pub fn for_scale_no_shuffle() -> Self {
         // Embed the config file and create a temporary file at runtime. The file will be deleted
         // automatically when it's dropped.
@@ -149,7 +150,8 @@ impl Configuration {
             meta_nodes: 3,
             compactor_nodes: 2,
             compute_node_cores: 2,
-            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL = false;".into()].into(),
+            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL = false;".into()]
+                .into(),
             ..Default::default()
         }
     }
@@ -844,7 +846,9 @@ impl Session {
     }
 
     pub async fn is_arrangement_backfill_enabled(&mut self) -> Result<bool> {
-        let result = self.run("show streaming_enable_arrangement_backfill").await?;
+        let result = self
+            .run("show streaming_enable_arrangement_backfill")
+            .await?;
         Ok(result == "true")
     }
 }

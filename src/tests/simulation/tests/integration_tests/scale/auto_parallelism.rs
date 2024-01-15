@@ -493,7 +493,9 @@ async fn test_compatibility_with_low_level() -> Result<()> {
     );
     let mut cluster = Cluster::start(config.clone()).await?;
     let mut session = cluster.start_session();
-    session.run("SET streaming_enable_arrangement_backfill = false;").await?;
+    session
+        .run("SET streaming_enable_arrangement_backfill = false;")
+        .await?;
 
     // Keep one worker reserved for adding later.
     let select_worker = "compute-2";
@@ -643,12 +645,14 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
     sleep(Duration::from_secs(
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
     ))
-        .await;
+    .await;
 
     session.run("create table t(v int);").await?;
 
     // Streaming arrangement backfill
-    session.run("SET streaming_enable_arrangement_backfill = true;").await?;
+    session
+        .run("SET streaming_enable_arrangement_backfill = true;")
+        .await?;
     session
         .run("create materialized view m_simple as select * from t;")
         .await?;
@@ -725,7 +729,7 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
     sleep(Duration::from_secs(
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
     ))
-        .await;
+    .await;
 
     let after_fragment_parallelism = session
         .run("select fragment_id, parallelism from rw_fragments order by fragment_id;")
@@ -735,4 +739,3 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
 
     Ok(())
 }
-

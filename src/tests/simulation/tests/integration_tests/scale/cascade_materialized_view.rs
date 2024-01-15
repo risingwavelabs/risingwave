@@ -60,15 +60,9 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
 
     if arrangement_backfill_is_enabled {
         // The chain fragment is in a different table fragment.
-        assert_eq!(
-            chain_fragment.inner.actors.len(),
-            6,
-        );
+        assert_eq!(chain_fragment.inner.actors.len(), 6,);
         // The upstream materialized fragment should be scaled in
-        assert_eq!(
-            fragment.inner.actors.len(),
-            1,
-        );
+        assert_eq!(fragment.inner.actors.len(), 1,);
     } else {
         // No shuffle, so the fragment of upstream materialized node is the same
         // as stream table scan.
