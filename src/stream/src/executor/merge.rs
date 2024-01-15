@@ -486,8 +486,10 @@ mod tests {
         let merger = MergeExecutor::for_test(rxs, Schema::default());
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
-        let epochs = (10..1000u64).step_by(10).collect_vec();
-
+        let mut epochs = (10..1000u64).step_by(10).collect_vec();
+        for epoch in epochs.iter_mut() {
+            *epoch *= 65536;
+        }
         for (tx_id, tx) in txs.into_iter().enumerate() {
             let epochs = epochs.clone();
             let handle = tokio::spawn(async move {
@@ -511,7 +513,7 @@ mod tests {
                     sleep(Duration::from_millis(1)).await;
                 }
                 tx.send(Message::Barrier(
-                    Barrier::new_test_barrier(1000)
+                    Barrier::new_test_barrier(1000 * 65536)
                         .with_mutation(Mutation::Stop(HashSet::default())),
                 ))
                 .await
@@ -704,7 +706,7 @@ mod tests {
             .await
             .unwrap();
             // send barrier
-            let barrier = Barrier::new_test_barrier(12345);
+            let barrier = Barrier::new_test_barrier(65536);
             tx.send(Ok(GetStreamResponse {
                 message: Some(StreamMessage {
                     stream_message: Some(
@@ -721,7 +723,7 @@ mod tests {
         }
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn test_stream_exchange_client() {
         const BATCHED_PERMITS: usize = 1024;
         let rpc_called = Arc::new(AtomicBool::new(false));
@@ -769,7 +771,7 @@ mod tests {
             assert!(visibility.is_empty());
         });
         assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
-            assert_eq!(barrier_epoch.curr, 12345);
+            assert_eq!(barrier_epoch.curr, 65536);
         });
         assert!(rpc_called.load(Ordering::SeqCst));
 

@@ -147,8 +147,9 @@ pub(crate) mod tests {
         let mut local = storage.new_local(Default::default()).await;
         // 1. add sstables
         let val = b"0"[..].repeat(value_size);
-        local.init_for_test(epochs[0]).await.unwrap();
-        for (i, &epoch) in epochs.iter().enumerate() {
+        local.init_for_test(epochs[0] * 65536).await.unwrap();
+        for (i, &e) in epochs.iter().enumerate() {
+            let epoch = e * 65536;
             let mut new_val = val.clone();
             new_val.extend_from_slice(&epoch.to_be_bytes());
             local
@@ -166,7 +167,8 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
             if i + 1 < epochs.len() {
-                local.seal_current_epoch(epochs[i + 1], SealCurrentEpochOptions::for_test());
+                local
+                    .seal_current_epoch(epochs[i + 1] * 65536, SealCurrentEpochOptions::for_test());
             } else {
                 local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
             }
@@ -273,7 +275,7 @@ pub(crate) mod tests {
             &hummock_meta_client,
             &key,
             1 << 10,
-            (1..SST_COUNT + 1).map(|v| (v * 1000) << 16).collect_vec(),
+            (1..SST_COUNT + 1).map(|v| (v * 1000)).collect_vec(),
         )
         .await;
         // 2. get compact task
@@ -500,7 +502,7 @@ pub(crate) mod tests {
         let get_val = storage
             .get(
                 TableKey(key.clone()),
-                SST_COUNT + 1,
+                (SST_COUNT + 1) * 65536,
                 ReadOptions {
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
@@ -542,7 +544,7 @@ pub(crate) mod tests {
         // 1. add sstables
         let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
         for idx in 0..kv_count {
-            epoch += 1;
+            epoch += 65536;
 
             if idx == 0 {
                 local.init_for_test(epoch).await.unwrap();
@@ -586,7 +588,7 @@ pub(crate) mod tests {
         (get_compactor_context(storage), filter_key_extractor_manager)
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn test_compaction_drop_all_key() {
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
@@ -863,7 +865,7 @@ pub(crate) mod tests {
         assert_eq!(key_count, scan_count);
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn test_compaction_drop_key_by_retention_seconds() {
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
@@ -1031,7 +1033,7 @@ pub(crate) mod tests {
             .unwrap();
         assert!(compact_task.is_none());
 
-        epoch += 1;
+        epoch += 65536;
         // to update version for hummock_storage
         storage.wait_version(version).await;
 
@@ -1059,7 +1061,7 @@ pub(crate) mod tests {
         assert_eq!(key_count, scan_count);
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn test_compaction_with_filter_key_extractor() {
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
@@ -1221,7 +1223,7 @@ pub(crate) mod tests {
             .unwrap();
         assert!(compact_task.is_none());
 
-        epoch += 1;
+        epoch += 65536;
         // to update version for hummock_storage
         storage.wait_version(version).await;
 
@@ -1543,7 +1545,7 @@ pub(crate) mod tests {
         check_compaction_result(compact_ctx.sstable_store, ret, fast_ret, capacity).await;
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn test_fast_compact() {
         const KEY_COUNT: usize = 20000;
         let mut last_k: u64 = 0;
@@ -1555,15 +1557,15 @@ pub(crate) mod tests {
         );
         let mut data1 = Vec::with_capacity(KEY_COUNT / 2);
         let mut data = Vec::with_capacity(KEY_COUNT);
-        let mut last_epoch = 400;
+        let mut last_epoch = 400 * 65536;
         for _ in 0..KEY_COUNT {
             let rand_v = rng.next_u32() % 100;
             let (k, epoch) = if rand_v == 0 {
-                (last_k + 2000, 400)
+                (last_k + 2000, 400 * 65536)
             } else if rand_v < 5 {
-                (last_k, last_epoch - 1)
+                (last_k, last_epoch - 1 * 65536)
             } else {
-                (last_k + 1, 400)
+                (last_k + 1, 400 * 65536)
             };
             let key = k.to_be_bytes().to_vec();
             let key = FullKey::new(TableId::new(1), TableKey(key), epoch);
@@ -1584,7 +1586,7 @@ pub(crate) mod tests {
         let mut data3 = Vec::with_capacity(KEY_COUNT);
         let mut data = Vec::with_capacity(KEY_COUNT);
         let mut last_k: u64 = 0;
-        let max_epoch = std::cmp::min(300, last_epoch - 1);
+        let max_epoch = std::cmp::min(300 * 65536, last_epoch - 1 * 65536);
         last_epoch = max_epoch;
 
         for _ in 0..KEY_COUNT * 4 {
@@ -1592,7 +1594,7 @@ pub(crate) mod tests {
             let (k, epoch) = if rand_v == 0 {
                 (last_k + 1000, max_epoch)
             } else if rand_v < 5 {
-                (last_k, last_epoch - 1)
+                (last_k, last_epoch - 1 * 65536)
             } else {
                 (last_k + 1, max_epoch)
             };
@@ -1610,7 +1612,7 @@ pub(crate) mod tests {
         test_fast_compact_impl(vec![data1, data2, data3, data4]).await;
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn test_fast_compact_cut_file() {
         const KEY_COUNT: usize = 20000;
         let mut rng = rand::rngs::StdRng::seed_from_u64(
@@ -1624,7 +1626,7 @@ pub(crate) mod tests {
             let base = start_idx * KEY_COUNT;
             for k in 0..KEY_COUNT / 3 {
                 let key = (k + base).to_be_bytes().to_vec();
-                let key = FullKey::new(TableId::new(1), TableKey(key), 400);
+                let key = FullKey::new(TableId::new(1), TableKey(key), 400 * 65536);
                 let rand_v = rng.next_u32() % 10;
                 let v = if rand_v == 1 {
                     HummockValue::delete()
@@ -1638,14 +1640,14 @@ pub(crate) mod tests {
         let mut data2 = Vec::with_capacity(KEY_COUNT);
         for k in 0..KEY_COUNT * 4 {
             let key = k.to_be_bytes().to_vec();
-            let key = FullKey::new(TableId::new(1), TableKey(key), 300);
+            let key = FullKey::new(TableId::new(1), TableKey(key), 300 * 65536);
             let v = HummockValue::put(format!("sst2-{}", 300).into_bytes());
             data2.push((key, v));
         }
         test_fast_compact_impl(vec![data1, data2]).await;
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn test_tombstone_recycle() {
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
@@ -1697,8 +1699,9 @@ pub(crate) mod tests {
                 None,
             );
             let mut last_k: u64 = 1;
-            let init_epoch = 65536 * object_id;
+            let init_epoch = 100 * 65536 * object_id;
             let mut last_epoch = init_epoch;
+
             for idx in 0..KEY_COUNT {
                 let rand_v = rng.next_u32() % 10;
                 let (k, epoch) = if rand_v == 0 {

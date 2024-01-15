@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::f64::consts::E;
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -105,13 +106,14 @@ async fn test_read_version_basic() {
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
         }
 
-        for epoch in 1..epoch {
+        for e in 1..epoch {
+            let epoch = e * 65536;
             let key = iterator_test_table_key_of(epoch as usize);
             let key_range = map_table_key_range((
                 Bound::Included(Bytes::from(key.to_vec())),
                 Bound::Included(Bytes::from(key.to_vec())),
             ));
-
+            println!("epoch = {}", epoch);
             let (staging_imm_iter, staging_sst_iter) =
                 read_version
                     .staging()
@@ -153,8 +155,8 @@ async fn test_read_version_basic() {
                     object_id: 1,
                     sst_id: 1,
                     key_range: Some(KeyRange {
-                        left: key_with_epoch(iterator_test_user_key_of(1).encode(), 1),
-                        right: key_with_epoch(iterator_test_user_key_of(2).encode(), 2),
+                        left: key_with_epoch(iterator_test_user_key_of(1).encode(), 1 * 65536),
+                        right: key_with_epoch(iterator_test_user_key_of(2).encode(), 2 * 65536),
                         right_exclusive: false,
                     }),
                     file_size: 1,
@@ -169,8 +171,8 @@ async fn test_read_version_basic() {
                     object_id: 2,
                     sst_id: 2,
                     key_range: Some(KeyRange {
-                        left: key_with_epoch(iterator_test_user_key_of(3).encode(), 3),
-                        right: key_with_epoch(iterator_test_user_key_of(3).encode(), 3),
+                        left: key_with_epoch(iterator_test_user_key_of(3).encode(), 3 * 65536),
+                        right: key_with_epoch(iterator_test_user_key_of(3).encode(), 3 * 65536),
                         right_exclusive: false,
                     }),
                     file_size: 1,

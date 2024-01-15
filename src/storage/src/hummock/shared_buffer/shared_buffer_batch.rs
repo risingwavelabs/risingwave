@@ -1017,7 +1017,7 @@ mod tests {
         );
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn test_shared_buffer_batch_seek() {
         let epoch = 65536;
         let shared_buffer_items = vec![
@@ -1075,7 +1075,7 @@ mod tests {
 
         // FORWARD: Seek to 2nd key with future epoch, expect last two items to return
         let mut iter = shared_buffer_batch.clone().into_forward_iter();
-        iter.seek(iterator_test_key_of_epoch(2, epoch + 1).to_ref())
+        iter.seek(iterator_test_key_of_epoch(2, epoch + 65536).to_ref())
             .await
             .unwrap();
         for item in &shared_buffer_items[1..] {
@@ -1088,7 +1088,7 @@ mod tests {
 
         // FORWARD: Seek to 2nd key with old epoch, expect last item to return
         let mut iter = shared_buffer_batch.clone().into_forward_iter();
-        iter.seek(iterator_test_key_of_epoch(2, epoch - 1).to_ref())
+        iter.seek(iterator_test_key_of_epoch(2, epoch - 65536).to_ref())
             .await
             .unwrap();
         let item = shared_buffer_items.last().unwrap();
@@ -1133,7 +1133,7 @@ mod tests {
 
         // BACKWARD: Seek to 2nd key with future epoch, expect first item to return
         let mut iter = shared_buffer_batch.clone().into_backward_iter();
-        iter.seek(iterator_test_key_of_epoch(2, epoch + 1).to_ref())
+        iter.seek(iterator_test_key_of_epoch(2, epoch + 65536).to_ref())
             .await
             .unwrap();
         assert!(iter.is_valid());
@@ -1145,7 +1145,7 @@ mod tests {
 
         // BACKWARD: Seek to 2nd key with old epoch, expect first two item to return
         let mut iter = shared_buffer_batch.clone().into_backward_iter();
-        iter.seek(iterator_test_key_of_epoch(2, epoch - 1).to_ref())
+        iter.seek(iterator_test_key_of_epoch(2, epoch - 65536).to_ref())
             .await
             .unwrap();
         for item in shared_buffer_items[0..=1].iter().rev() {
@@ -1262,7 +1262,7 @@ mod tests {
         assert!(!shared_buffer_batch.range_exists(&map_table_key_range(range)));
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn test_merge_imms_basic() {
         let table_id = TableId { table_id: 1004 };
         let shared_buffer_items1: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
@@ -1360,7 +1360,7 @@ mod tests {
         assert_eq!(
             merged_imm.get(
                 TableKey(iterator_test_table_key_of(4).as_slice()),
-                1,
+                1 * 65536,
                 &ReadOptions::default()
             ),
             None
@@ -1368,7 +1368,7 @@ mod tests {
         assert_eq!(
             merged_imm.get(
                 TableKey(iterator_test_table_key_of(5).as_slice()),
-                1,
+                1 * 65536,
                 &ReadOptions::default()
             ),
             None
@@ -1390,7 +1390,7 @@ mod tests {
                 }
                 iter.next().await.unwrap();
             }
-            assert_eq!(output, batch_items[snapshot_epoch as usize - 65536]);
+            assert_eq!(output, batch_items[(snapshot_epoch / 65536) as usize - 1]);
         }
 
         // Forward and Backward iterator
@@ -1434,7 +1434,7 @@ mod tests {
         format!("{:03}", idx).as_bytes().to_vec()
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn test_merge_imms_delete_range() {
         let table_id = TableId { table_id: 1004 };
         let epoch = 65536;
@@ -1544,7 +1544,7 @@ mod tests {
         assert_eq!(
             HummockValue::put(Bytes::from("value12")),
             merged_imm
-                .get(TableKey(b"111"), 2, &ReadOptions::default())
+                .get(TableKey(b"111"), 2 * 65536, &ReadOptions::default())
                 .unwrap()
                 .0
         );
@@ -1553,7 +1553,7 @@ mod tests {
         assert_eq!(
             HummockValue::Delete,
             merged_imm
-                .get(TableKey(b"555"), 1, &ReadOptions::default())
+                .get(TableKey(b"555"), 1 * 65536, &ReadOptions::default())
                 .unwrap()
                 .0
         );
@@ -1562,7 +1562,7 @@ mod tests {
         assert_eq!(
             HummockValue::put(Bytes::from("value52")),
             merged_imm
-                .get(TableKey(b"555"), 2, &ReadOptions::default())
+                .get(TableKey(b"555"), 2 * 65536, &ReadOptions::default())
                 .unwrap()
                 .0
         );
@@ -1571,7 +1571,7 @@ mod tests {
         assert_eq!(
             HummockValue::Delete,
             merged_imm
-                .get(TableKey(b"666"), 2, &ReadOptions::default())
+                .get(TableKey(b"666"), 2 * 65536, &ReadOptions::default())
                 .unwrap()
                 .0
         );
@@ -1579,7 +1579,7 @@ mod tests {
         assert_eq!(
             HummockValue::Delete,
             merged_imm
-                .get(TableKey(b"888"), 2, &ReadOptions::default())
+                .get(TableKey(b"888"), 2 * 65536, &ReadOptions::default())
                 .unwrap()
                 .0
         );
@@ -1588,7 +1588,7 @@ mod tests {
         assert_eq!(
             HummockValue::put(Bytes::from("value8")),
             merged_imm
-                .get(TableKey(b"888"), 1, &ReadOptions::default())
+                .get(TableKey(b"888"), 1 * 65536, &ReadOptions::default())
                 .unwrap()
                 .0
         );

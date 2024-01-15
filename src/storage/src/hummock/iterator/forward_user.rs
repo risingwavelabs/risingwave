@@ -833,18 +833,13 @@ mod tests {
         assert_eq!(i, expect_count);
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn test_delete_range() {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
         let table = generate_test_data(
             sstable_store.clone(),
-            vec![
-                (0, 2 * 65536, 300),
-                (1, 4 * 65536, 150),
-                (3, 6 * 65536, 50),
-                (5, 8 * 65536, 150),
-            ],
+            vec![(0, 2, 300), (1, 4, 150), (3, 6, 50), (5, 8, 150)],
         )
         .await;
         let read_options = SstableIteratorReadOptions::default();
