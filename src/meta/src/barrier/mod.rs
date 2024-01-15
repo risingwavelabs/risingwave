@@ -38,6 +38,7 @@ use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -856,7 +857,7 @@ impl GlobalBarrierManager {
             // back to frontend
             fail_point!("inject_barrier_err_success");
             let fail_node = self.checkpoint_control.barrier_failed();
-            tracing::warn!("Failed to complete epoch {}: {:?}", prev_epoch, err);
+            tracing::warn!(prev_epoch, error = %err.as_report(), "Failed to complete epoch");
             self.failure_recovery(err, fail_node).await;
             return;
         }

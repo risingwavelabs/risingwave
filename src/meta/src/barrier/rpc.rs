@@ -18,16 +18,19 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use either::Either;
 use fail::fail_point;
-use futures::future::try_join_all;
+use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::bail;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::pending_on_none;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::stream_plan::{Barrier, BarrierMutation};
 use risingwave_pb::stream_service::{BarrierCompleteRequest, InjectBarrierRequest};
+use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::StreamClientPoolRef;
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -35,7 +38,7 @@ use uuid::Uuid;
 use super::command::CommandContext;
 use super::{BarrierCompletion, GlobalBarrierManagerContext};
 use crate::manager::{MetaSrvEnv, WorkerId};
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 pub(super) struct BarrierRpcManager {
     context: GlobalBarrierManagerContext,
@@ -157,7 +160,26 @@ impl GlobalBarrierManagerContext {
                 .into()
             }
         });
-        try_join_all(inject_futures).await.inspect_err(|e| {
+
+        // join_all rather than try_join_all, in order to gather errors from all compute nodes.
+        let inject_results = join_all(inject_futures).await;
+        let mut errors = inject_results
+            .into_iter()
+            .zip_eq_debug(node_need_collect.iter().filter_map(|(id, v)| {
+                if *v {
+                    return Some(*id);
+                }
+                None
+            }))
+            .filter_map(|(result, id)| {
+                if let Err(e) = result {
+                    return Some((id, e));
+                }
+                None
+            })
+            .peekable();
+        if errors.peek().is_some() {
+            let e = merge_compute_node_rpc_error("inject barrier failure", errors);
             // Record failure in event log.
             use risingwave_pb::meta::event_log;
             use thiserror_ext::AsReport;
@@ -169,7 +191,9 @@ impl GlobalBarrierManagerContext {
             self.env
                 .event_log_manager_ref()
                 .add_event_logs(vec![event_log::Event::InjectBarrierFail(event)]);
-        })?;
+            return Err(e);
+        }
+        drop(errors);
         Ok(node_need_collect)
     }
 
@@ -213,23 +237,56 @@ impl GlobalBarrierManagerContext {
             }
         });
 
-        let result = try_join_all(collect_futures)
-            .await
-            .inspect_err(|e| {
-                // Record failure in event log.
-                use risingwave_pb::meta::event_log;
-                use thiserror_ext::AsReport;
-                let event = event_log::EventCollectBarrierFail {
-                    prev_epoch: command_context.prev_epoch.value().0,
-                    cur_epoch: command_context.curr_epoch.value().0,
-                    error: e.to_report_string(),
-                };
-                env.event_log_manager_ref()
-                    .add_event_logs(vec![event_log::Event::CollectBarrierFail(event)]);
-            })
-            .map_err(Into::into);
+        // join_all rather than try_join_all, in order to gather errors from all compute nodes.
+        let collect_result = join_all(collect_futures).await;
+        let (successes, failures): (Vec<_>, Vec<_>) = collect_result
+            .into_iter()
+            .zip_eq_debug(node_need_collect.iter().filter_map(|(id, v)| {
+                if *v {
+                    return Some(*id);
+                }
+                None
+            }))
+            .partition_map(|(r, id)| match r {
+                Ok(v) => Either::Left(v),
+                Err(e) => Either::Right((id, e)),
+            });
+        let result = if failures.is_empty() {
+            Ok(successes)
+        } else {
+            let e = merge_compute_node_rpc_error("collect barrier failure", failures);
+            // Record failure in event log.
+            use risingwave_pb::meta::event_log;
+            use thiserror_ext::AsReport;
+            let event = event_log::EventCollectBarrierFail {
+                prev_epoch: command_context.prev_epoch.value().0,
+                cur_epoch: command_context.curr_epoch.value().0,
+                error: e.to_report_string(),
+            };
+            env.event_log_manager_ref()
+                .add_event_logs(vec![event_log::Event::CollectBarrierFail(event)]);
+            Err(e)
+        };
+
         let _ = barrier_complete_tx
             .send(BarrierCompletion { prev_epoch, result })
             .inspect_err(|_| tracing::warn!(prev_epoch, "failed to notify barrier completion"));
     }
+}
+
+fn merge_compute_node_rpc_error(
+    message: &str,
+    errors: impl IntoIterator<Item = (WorkerId, RpcError)>,
+) -> MetaError {
+    use std::fmt::Write;
+
+    use thiserror_ext::AsReport;
+
+    let concat: String = errors
+        .into_iter()
+        .fold(format!("{message}:"), |mut s, (w, e)| {
+            write!(&mut s, " worker node {}, {};", w, e.as_report()).unwrap();
+            s
+        });
+    anyhow::anyhow!(concat).into()
 }
