@@ -32,7 +32,7 @@ import {
   relationType,
   relationTypeTitleCase,
 } from "../pages/api/streaming"
-import { CatalogModal, useCatalogModal } from "./Relations"
+import { CatalogModal, useCatalogModal } from "./CatalogModal"
 
 function boundBox(
   relationPosition: RelationPointPosition[],

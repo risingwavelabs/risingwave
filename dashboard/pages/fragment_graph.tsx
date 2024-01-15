@@ -64,7 +64,7 @@ function buildPlanNodeDependency(
 
   const hierarchyActorNode = (node: StreamNode): PlanNodeDatum => {
     return {
-      name: node.nodeBody?.$case.toString() || "unknown",
+      name: node.nodeBody?.$case?.toString() || "unknown",
       children: (node.input || []).map(hierarchyActorNode),
       operatorId: node.operatorId,
       node,

@@ -18,13 +18,6 @@
 import {
   Box,
   Button,
-  Modal,
-  ModalBody,
-  ModalCloseButton,
-  ModalContent,
-  ModalFooter,
-  ModalHeader,
-  ModalOverlay,
   Table,
   TableContainer,
   Tbody,
@@ -37,24 +30,19 @@ import loadable from "@loadable/component"
 import Head from "next/head"
 
 import Link from "next/link"
-import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment } from "react"
 import Title from "../components/Title"
 import extractColumnInfo from "../lib/extractInfo"
 import useFetch from "../pages/api/fetch"
-import {
-  Relation,
-  StreamingJob,
-  relationIsStreamingJob,
-  relationTypeTitleCase,
-} from "../pages/api/streaming"
+import { Relation, StreamingJob } from "../pages/api/streaming"
 import {
   Sink as RwSink,
   Source as RwSource,
   Table as RwTable,
 } from "../proto/gen/catalog"
+import { CatalogModal, useCatalogModal } from "./CatalogModal"
 
-const ReactJson = loadable(() => import("react-json-view"))
+export const ReactJson = loadable(() => import("react-json-view"))
 
 export type Column<R> = {
   name: string
@@ -120,57 +108,6 @@ export const connectorColumnSink: Column<RwSink> = {
 }
 
 export const streamingJobColumns = [dependentsColumn, fragmentsColumn]
-
-export function useCatalogModal(relationList: Relation[] | undefined) {
-  const [modalId, setModalId] = useQueryState("modalId", parseAsInteger)
-  const modalData = relationList?.find((r) => r.id === modalId)
-
-  return [modalData, setModalId] as const
-}
-
-export function CatalogModal({
-  modalData,
-  onClose,
-}: {
-  modalData: Relation | undefined
-  onClose: () => void
-}) {
-  return (
-    <Modal isOpen={modalData !== undefined} onClose={onClose} size="3xl">
-      <ModalOverlay />
-      <ModalContent>
-        <ModalHeader>
-          Catalog of {modalData && relationTypeTitleCase(modalData)}{" "}
-          {modalData?.id} - {modalData?.name}
-        </ModalHeader>
-        <ModalCloseButton />
-        <ModalBody>
-          {modalData && (
-            <ReactJson
-              src={modalData}
-              collapsed={1}
-              name={null}
-              displayDataTypes={false}
-            />
-          )}
-        </ModalBody>
-
-        <ModalFooter>
-          {modalData && relationIsStreamingJob(modalData) && (
-            <Button colorScheme="blue" mr={3}>
-              <Link href={`/fragment_graph/?id=${modalData.id}`}>
-                View Fragments
-              </Link>
-            </Button>
-          )}
-          <Button mr={3} onClick={onClose}>
-            Close
-          </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
-  )
-}
 
 export function Relations<R extends Relation>(
   title: string,
