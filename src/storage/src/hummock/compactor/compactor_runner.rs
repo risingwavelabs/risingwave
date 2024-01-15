@@ -45,8 +45,7 @@ use crate::hummock::compactor::{
     fast_compactor_runner, CompactOutput, CompactionFilter, Compactor, CompactorContext,
 };
 use crate::hummock::iterator::{
-    Forward, ForwardMergeRangeIterator, HummockIterator, SkipWatermarkIterator,
-    UnorderedMergeIteratorInner,
+    Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator, SkipWatermarkIterator,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::value::HummockValue;
@@ -233,7 +232,7 @@ impl CompactorRunner {
         Ok((
             SkipWatermarkIterator::from_safe_epoch_watermarks(
                 MonitoredCompactorIterator::new(
-                    UnorderedMergeIteratorInner::for_compactor(table_iters),
+                    MergeIterator::for_compactor(table_iters),
                     task_progress.clone(),
                 ),
                 &self.compact_task.table_watermarks,
