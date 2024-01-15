@@ -25,6 +25,7 @@ use risingwave_sqlparser::ast::Statement;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite};
 
+use crate::error::PsqlResult;
 use crate::net::{AddressRef, Listener};
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_message::TransactionStatus;
@@ -114,7 +115,7 @@ pub trait Session: Send + Sync {
 
     fn init_exec_context(&self, sql: Arc<str>) -> ExecContextGuard;
 
-    fn check_idle_in_transaction_timeout(&self) -> bool;
+    fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()>;
 }
 
 /// Each session could run different SQLs multiple times.
@@ -236,6 +237,7 @@ mod tests {
     use risingwave_sqlparser::ast::Statement;
     use tokio_postgres::NoTls;
 
+    use crate::error::PsqlResult;
     use crate::pg_field_descriptor::PgFieldDescriptor;
     use crate::pg_message::TransactionStatus;
     use crate::pg_response::{PgResponse, RowSetResult, StatementType};
@@ -378,8 +380,8 @@ mod tests {
             ExecContextGuard::new(exec_context)
         }
 
-        fn check_idle_in_transaction_timeout(&self) -> bool {
-            false
+        fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()> {
+            Ok(())
         }
     }
 

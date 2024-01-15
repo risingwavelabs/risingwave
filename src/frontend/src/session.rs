@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use either::Either;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
+use pgwire::error::{PsqlError, PsqlResult};
 use pgwire::net::{Address, AddressRef};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_message::TransactionStatus;
@@ -1147,14 +1148,17 @@ impl Session for SessionImpl {
         ExecContextGuard::new(exec_context)
     }
 
-    fn check_idle_in_transaction_timeout(&self) -> bool {
+    fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()> {
         if matches!(self.transaction_status(), TransactionStatus::InTransaction) {
             if let Some(elapse_since_last_idle_instant) = self.elapse_since_last_idle_instant() {
-                return elapse_since_last_idle_instant
-                    > self.config().idle_in_transaction_session_timeout() as u128;
+                if elapse_since_last_idle_instant
+                    > self.config().idle_in_transaction_session_timeout() as u128
+                {
+                    return Err(PsqlError::IdleInTxnTimeout);
+                }
             }
         }
-        false
+        Ok(())
     }
 }
 
