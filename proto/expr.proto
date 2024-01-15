@@ -278,7 +278,11 @@ message ExprNode {
     PG_GET_INDEXDEF = 2400;
     COL_DESCRIPTION = 2401;
     PG_GET_VIEWDEF = 2402;
+
+    // EXTERNAL
+    ICEBERG_TRANSFORM = 2201;
   }
+  // Only use this field for function call. For other types of expression, it should be UNSPECIFIED.
   Type function_type = 1;
   data.DataType return_type = 3;
   oneof rex_node {
@@ -464,15 +468,24 @@ message WindowFunction {
   WindowFrame frame = 5;
 }
 
+// Note: due to historic reasons, UserDefinedFunction is a oneof variant parallel to FunctionCall,
+// while UserDefinedTableFunction is embedded as a field in TableFunction.
+
 message UserDefinedFunction {
   repeated ExprNode children = 1;
   string name = 2;
   repeated data.DataType arg_types = 3;
   string language = 4;
+  // For external UDF: the link to the external function service.
+  // For WASM UDF: the link to the wasm binary file.
   string link = 5;
+  // An unique identifier for the function.
+  // For external UDF, it's the name of the function in the external function service.
+  // For WASM UDF, it's the name of the function in the wasm binary file.
   string identifier = 6;
 }
 
+// Additional information for user defined table functions.
 message UserDefinedTableFunction {
   repeated data.DataType arg_types = 3;
   string language = 4;

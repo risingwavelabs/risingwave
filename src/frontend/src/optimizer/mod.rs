@@ -45,6 +45,7 @@ pub use logical_optimization::*;
 pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
+use risingwave_common::bail;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId,
 };
@@ -64,7 +65,7 @@ use self::plan_node::{
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
-use self::plan_visitor::{has_batch_exchange, CardinalityVisitor};
+use self::plan_visitor::{has_batch_exchange, CardinalityVisitor, StreamKeyChecker};
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
@@ -151,19 +152,46 @@ impl PlanRoot {
         }
     }
 
-    /// Get out fields of the plan root.
-    pub fn out_fields(&self) -> &FixedBitSet {
-        &self.out_fields
-    }
-
     /// Transform the [`PlanRoot`] back to a [`PlanRef`] suitable to be used as a subplan, for
     /// example as insert source or subquery. This ignores Order but retains post-Order pruning
     /// (`out_fields`).
-    pub fn into_subplan(self) -> PlanRef {
+    pub fn into_unordered_subplan(self) -> PlanRef {
         if self.out_fields.count_ones(..) == self.out_fields.len() {
             return self.plan;
         }
         LogicalProject::with_out_fields(self.plan, &self.out_fields).into()
+    }
+
+    /// Transform the [`PlanRoot`] wrapped in an array-construction subquery to a [`PlanRef`]
+    /// supported by `ARRAY_AGG`. Similar to the unordered version, this abstracts away internal
+    /// `self.plan` which is further modified by `self.required_order` then `self.out_fields`.
+    pub fn into_array_agg(self) -> Result<PlanRef> {
+        use generic::Agg;
+        use plan_node::PlanAggCall;
+        use risingwave_common::types::DataType;
+        use risingwave_expr::aggregate::AggKind;
+
+        use crate::expr::InputRef;
+        use crate::utils::{Condition, IndexSet};
+
+        let Ok(select_idx) = self.out_fields.ones().exactly_one() else {
+            bail!("subquery must return only one column");
+        };
+        let input_column_type = self.plan.schema().fields()[select_idx].data_type();
+        Ok(Agg::new(
+            vec![PlanAggCall {
+                agg_kind: AggKind::ArrayAgg,
+                return_type: DataType::List(input_column_type.clone().into()),
+                inputs: vec![InputRef::new(select_idx, input_column_type)],
+                distinct: false,
+                order_by: self.required_order.column_orders,
+                filter: Condition::true_cond(),
+                direct_args: vec![],
+            }],
+            IndexSet::empty(),
+            self.plan,
+        )
+        .into())
     }
 
     /// Apply logical optimization to the plan for stream.
@@ -320,7 +348,18 @@ impl PlanRoot {
 
     /// Generate optimized stream plan
     fn gen_optimized_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
-        self.gen_optimized_stream_plan_inner(emit_on_window_close, StreamScanType::Backfill)
+        let stream_scan_type = if self
+            .plan
+            .ctx()
+            .session_ctx()
+            .config()
+            .streaming_enable_arrangement_backfill()
+        {
+            StreamScanType::ArrangementBackfill
+        } else {
+            StreamScanType::Backfill
+        };
+        self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)
     }
 
     fn gen_optimized_stream_plan_inner(
@@ -389,6 +428,18 @@ impl PlanRoot {
 
         let plan = match self.plan.convention() {
             Convention::Logical => {
+                if !ctx
+                    .session_ctx()
+                    .config()
+                    .streaming_allow_jsonb_in_stream_key()
+                    && let Some(err) = StreamKeyChecker.visit(self.plan.clone())
+                {
+                    return Err(ErrorCode::NotSupported(
+                        err,
+                        "Using JSONB columns as part of the join or aggregation keys can severely impair performance. \
+                        If you intend to proceed, force to enable it with: `set rw_streaming_allow_jsonb_in_stream_key to true`".to_string(),
+                    ).into());
+                }
                 let plan = self.gen_optimized_logical_plan_for_stream()?;
 
                 let (plan, out_col_change) = {
@@ -738,6 +789,14 @@ impl PlanRoot {
     ) -> Result<StreamSink> {
         let stream_scan_type = if without_backfill {
             StreamScanType::UpstreamOnly
+        } else if self
+            .plan
+            .ctx()
+            .session_ctx()
+            .config()
+            .streaming_enable_arrangement_backfill()
+        {
+            StreamScanType::ArrangementBackfill
         } else {
             StreamScanType::Backfill
         };
@@ -882,7 +941,7 @@ mod tests {
             out_fields,
             out_names,
         );
-        let subplan = root.into_subplan();
+        let subplan = root.into_unordered_subplan();
         assert_eq!(
             subplan.schema(),
             &Schema::new(vec![Field::with_name(DataType::Int32, "v1")])

@@ -15,10 +15,10 @@
 use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_meta_model_v2::SourceId;
 use risingwave_pb::catalog::PbSource;
 use risingwave_pb::common::worker_node::{PbResource, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerType};
-use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::PbStreamActor;
@@ -174,15 +174,28 @@ impl MetadataManager {
         }
     }
 
+    /// Get and filter the "**root**" fragments of the specified relations.
+    /// The root fragment is the bottom-most fragment of its fragment graph, and can be a `MView` or a `Source`.
+    ///
+    /// ## What can be the root fragment
+    /// - For MV, it should have one `MView` fragment.
+    /// - For table, it should have one `MView` fragment and one or two `Source` fragments. `MView` should be the root.
+    /// - For source, it should have one `Source` fragment.
+    ///
+    /// In other words, it's the `MView` fragment if it exists, otherwise it's the `Source` fragment.
+    ///
+    /// ## What do we expect to get for different creating streaming job
+    /// - MV/Sink/Index should have MV upstream fragments for upstream MV/Tables, and Source upstream fragments for upstream backfill-able sources.
+    /// - CDC Table has a Source upstream fragment.
+    /// - Sources and other Tables shouldn't have an upstream fragment.
     pub async fn get_upstream_root_fragments(
         &self,
         upstream_table_ids: &HashSet<TableId>,
-        table_job_type: Option<TableJobType>,
     ) -> MetaResult<HashMap<TableId, Fragment>> {
         match self {
             MetadataManager::V1(mgr) => {
                 mgr.fragment_manager
-                    .get_upstream_root_fragments(upstream_table_ids, table_job_type)
+                    .get_upstream_root_fragments(upstream_table_ids)
                     .await
             }
             MetadataManager::V2(mgr) => {
@@ -193,7 +206,6 @@ impl MetadataManager {
                             .iter()
                             .map(|id| id.table_id as _)
                             .collect(),
-                        table_job_type,
                     )
                     .await?;
                 Ok(upstream_root_fragments
@@ -363,6 +375,54 @@ impl MetadataManager {
             MetadataManager::V2(_) => {
                 // Do nothing. Need to refine drop and cancel process.
                 Ok(())
+            }
+        }
+    }
+
+    pub async fn update_source_rate_limit_by_source_id(
+        &self,
+        source_id: SourceId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .update_source_rate_limit_by_source_id(source_id, rate_limit)
+                    .await
+            }
+            MetadataManager::V2(mgr) => {
+                let fragment_actors = mgr
+                    .catalog_controller
+                    .update_source_rate_limit_by_source_id(source_id as _, rate_limit)
+                    .await?;
+                Ok(fragment_actors
+                    .into_iter()
+                    .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
+                    .collect())
+            }
+        }
+    }
+
+    pub async fn update_mv_rate_limit_by_table_id(
+        &self,
+        table_id: TableId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .update_mv_rate_limit_by_table_id(table_id, rate_limit)
+                    .await
+            }
+            MetadataManager::V2(mgr) => {
+                let fragment_actors = mgr
+                    .catalog_controller
+                    .update_mv_rate_limit_by_job_id(table_id.table_id as _, rate_limit)
+                    .await?;
+                Ok(fragment_actors
+                    .into_iter()
+                    .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
+                    .collect())
             }
         }
     }
