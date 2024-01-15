@@ -13,7 +13,10 @@
 // limitations under the License.
 
 #![feature(let_chains)]
+#![feature(register_tool)]
+#![register_tool(rw)]
 #![allow(clippy::derive_partial_eq_without_eq)]
+#![allow(rw::await_in_loop)] // test code
 
 //! Data-driven tests.
 

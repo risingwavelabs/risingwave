@@ -20,6 +20,7 @@
 #![feature(register_tool)]
 #![register_tool(rw)]
 #![allow(rw::format_error)] // test code
+#![allow(rw::await_in_loop)] // test code
 
 pub mod client;
 pub mod cluster;

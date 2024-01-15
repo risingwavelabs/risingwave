@@ -1,3 +1,7 @@
+#![feature(register_tool)]
+#![register_tool(rw)]
+#![allow(rw::await_in_loop)] // test code
+
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
