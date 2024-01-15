@@ -158,7 +158,7 @@ async fn compact_shared_buffer(
 
     let table_vnode_partition = if existing_table_ids.len() == 1 {
         let table_id = existing_table_ids.iter().next().unwrap();
-        vec![(*table_id, split_weight_by_vnode as u32)]
+        vec![(*table_id, split_weight_by_vnode)]
             .into_iter()
             .collect()
     } else {
