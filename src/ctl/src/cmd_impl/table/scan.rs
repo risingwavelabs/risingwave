@@ -69,18 +69,21 @@ pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -
     .await
 }
 
-pub fn make_storage_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StorageTable<S> {
+pub fn make_storage_table<S: StateStore>(
+    hummock: S,
+    table: &TableCatalog,
+) -> Result<StorageTable<S>> {
     let output_columns_ids = table
         .columns()
         .iter()
         .map(|x| x.column_desc.column_id)
         .collect();
-    StorageTable::new_partial(
+    Ok(StorageTable::new_partial(
         hummock,
         output_columns_ids,
         Some(TableDistribution::all_vnodes()),
-        &table.table_desc().to_protobuf(),
-    )
+        &table.table_desc().try_to_protobuf()?,
+    ))
 }
 
 pub async fn scan(context: &CtlContext, mv_name: String, data_dir: Option<String>) -> Result<()> {
@@ -106,7 +109,7 @@ async fn do_scan(table: TableCatalog, hummock: MonitoredStateStore<HummockStorag
 
     println!("Rows:");
     let read_epoch = hummock.inner().get_pinned_version().max_committed_epoch();
-    let storage_table = make_storage_table(hummock, &table);
+    let storage_table = make_storage_table(hummock, &table)?;
     let stream = storage_table
         .batch_iter(
             HummockReadEpoch::Committed(read_epoch),

@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use anyhow::anyhow;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_pb::common::PbColumnOrder;
@@ -79,7 +80,7 @@ impl TableDesc {
             .collect()
     }
 
-    pub fn to_protobuf(&self) -> StorageTableDesc {
+    pub fn try_to_protobuf(&self) -> anyhow::Result<StorageTableDesc> {
         let dist_key_indices: Vec<u32> = self.distribution_key.iter().map(|&k| k as u32).collect();
         let pk_indices: Vec<u32> = self
             .pk
@@ -102,19 +103,20 @@ impl TableDesc {
                     pk_indices
                         .iter()
                         .position(|&pi| di == pi)
-                        .unwrap_or_else(|| {
-                            panic!(
+                        .ok_or_else(|| {
+                            anyhow!(
                                 "distribution key {:?} must be a subset of primary key {:?}",
-                                dist_key_indices, pk_indices
+                                dist_key_indices,
+                                pk_indices
                             )
                         })
+                        .map(|d| d as u32)
                 })
-                .map(|d| d as u32)
-                .collect_vec()
+                .try_collect()?
         } else {
             Vec::new()
         };
-        StorageTableDesc {
+        Ok(StorageTableDesc {
             table_id: self.table_id.into(),
             columns: self.columns.iter().map(Into::into).collect(),
             pk: self.pk.iter().map(|v| v.to_protobuf()).collect(),
@@ -125,7 +127,7 @@ impl TableDesc {
             versioned: self.versioned,
             stream_key: self.stream_key.iter().map(|&x| x as u32).collect(),
             vnode_col_idx_in_pk,
-        }
+        })
     }
 
     /// Helper function to create a mapping from `column id` to `column index`
