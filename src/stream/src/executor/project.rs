@@ -34,7 +34,7 @@ pub struct ProjectExecutor {
     input: BoxedExecutor,
     inner: Inner,
     /// The mutable parts of inner fields.
-    inner_state: InnerState,
+    vars: ExecutionVars,
 }
 
 struct Inner {
@@ -54,7 +54,7 @@ struct Inner {
     materialize_selectivity_threshold: f64,
 }
 
-struct InnerState {
+struct ExecutionVars {
     /// Last seen values of nondecreasing expressions, buffered to periodically produce watermarks.
     last_nondec_expr_values: Vec<Option<ScalarImpl>>,
 }
@@ -81,7 +81,7 @@ impl ProjectExecutor {
                 nondecreasing_expr_indices,
                 materialize_selectivity_threshold,
             },
-            inner_state: InnerState {
+            vars: ExecutionVars {
                 last_nondec_expr_values: vec![None; n_nondecreasing_exprs],
             },
         }
@@ -110,7 +110,7 @@ impl Executor for ProjectExecutor {
     }
 
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.inner.execute(self.input, self.inner_state).boxed()
+        self.inner.execute(self.input, self.vars).boxed()
     }
 }
 
@@ -163,7 +163,7 @@ impl Inner {
     fn execute(
         self,
         input: BoxedExecutor,
-        mut state: InnerState,
+        mut vars: ExecutionVars,
     ) -> impl Stream<Item = MessageStreamItem> {
         let return_types: Vec<_> = self.exprs.iter().map(|expr| expr.return_type()).collect();
 
@@ -237,7 +237,7 @@ impl Inner {
                                         .iter()
                                         .enumerate()
                                         .for_each(|(idx, value)| {
-                                            state.last_nondec_expr_values[idx] =
+                                            vars.last_nondec_expr_values[idx] =
                                                 Some(value.to_owned_datum().expect(
                                                     "non-decreasing expression should never be NULL",
                                                 ));
@@ -252,7 +252,7 @@ impl Inner {
                         for (&expr_idx, value) in this
                             .nondecreasing_expr_indices
                             .iter()
-                            .zip_eq_fast(&mut state.last_nondec_expr_values)
+                            .zip_eq_fast(&mut vars.last_nondec_expr_values)
                         {
                             if let Some(value) = std::mem::take(value) {
                                 yield Message::Watermark(Watermark::new(
