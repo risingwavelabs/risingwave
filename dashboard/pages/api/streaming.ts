@@ -58,6 +58,10 @@ export function relationType(x: Relation) {
 }
 export type RelationType = ReturnType<typeof relationType>
 
+export function relationTypeTitleCase(x: Relation) {
+  return _.startCase(_.toLower(relationType(x)))
+}
+
 export function relationIsStreamingJob(x: Relation): x is StreamingJob {
   const type = relationType(x)
   return type !== "UNKNOWN" && type !== "SOURCE" && type !== "INTERNAL"

@@ -30,6 +30,7 @@ import {
   Relation,
   relationIsStreamingJob,
   relationType,
+  relationTypeTitleCase,
 } from "../pages/api/streaming"
 import { CatalogModal, useCatalogModal } from "./Relations"
 
@@ -190,6 +191,17 @@ export default function RelationDependencyGraph({
         .attr("dy", nodeRadius * 0.5)
         .attr("font-size", 16)
         .attr("font-weight", "bold")
+
+      // Relation type tooltip
+      let typeTooltip = g.select<SVGTitleElement>("title")
+      if (typeTooltip.empty()) {
+        typeTooltip = g.append<SVGTitleElement>("title")
+      }
+
+      typeTooltip.text(
+        ({ relation }) =>
+          `${relation.name} (${relationTypeTitleCase(relation)})`
+      )
 
       // Relation modal
       g.style("cursor", "pointer").on("click", (_, { relation, id }) => {

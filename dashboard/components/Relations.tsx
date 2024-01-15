@@ -36,7 +36,6 @@ import {
 import loadable from "@loadable/component"
 import Head from "next/head"
 
-import _ from "lodash"
 import Link from "next/link"
 import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment } from "react"
@@ -47,7 +46,7 @@ import {
   Relation,
   StreamingJob,
   relationIsStreamingJob,
-  relationType,
+  relationTypeTitleCase,
 } from "../pages/api/streaming"
 import {
   Sink as RwSink,
@@ -141,7 +140,7 @@ export function CatalogModal({
       <ModalOverlay />
       <ModalContent>
         <ModalHeader>
-          Catalog of {modalData && _.lowerCase(relationType(modalData))}{" "}
+          Catalog of {modalData && relationTypeTitleCase(modalData)}{" "}
           {modalData?.id} - {modalData?.name}
         </ModalHeader>
         <ModalCloseButton />
