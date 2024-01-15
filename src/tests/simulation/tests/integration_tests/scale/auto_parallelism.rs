@@ -593,7 +593,7 @@ async fn test_compatibility_with_low_level() -> Result<()> {
 
     let hash_join_fragment_id = hash_join_fragment.id();
 
-    // manual scale in m_simple materialize fragment
+    // manual scale in m_join materialize fragment
     cluster
         .reschedule_resolve_no_shuffle(format!(
             "{hash_join_fragment_id}-[{chosen_parallel_unit_a}]"
