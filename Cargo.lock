@@ -3212,6 +3212,7 @@ dependencies = [
 name = "delta_btree_map"
 version = "1.7.0-alpha"
 dependencies = [
+ "educe 0.5.7",
  "enum-as-inner",
 ]
 

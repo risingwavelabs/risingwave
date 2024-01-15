@@ -16,6 +16,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 enum-as-inner = "0.6"
+educe = "0.5"
 
 [lints]
 workspace = true
