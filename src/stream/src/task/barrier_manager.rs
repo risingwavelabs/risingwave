@@ -314,15 +314,6 @@ impl LocalBarrierWorker {
             }
         }
     }
-
-    pub fn take_actor_failures(&mut self) -> Vec<StreamError> {
-        match &mut self.state {
-            #[cfg(test)]
-            BarrierState::Local => vec![],
-
-            BarrierState::Managed(managed_state) => managed_state.take_actor_failures(),
-        }
-    }
 }
 
 #[derive(Clone)]

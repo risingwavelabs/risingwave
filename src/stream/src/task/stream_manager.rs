@@ -43,7 +43,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult};
-use crate::error::{StreamError, StreamResult};
+use crate::error::StreamResult;
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
@@ -361,11 +361,6 @@ impl LocalStreamManager {
 
     pub fn total_mem_usage(&self) -> usize {
         self.total_mem_val.get() as usize
-    }
-
-    pub fn take_actor_failures(&self) -> Vec<StreamError> {
-        let mut barrier_manager = self.context.lock_barrier_manager();
-        barrier_manager.take_actor_failures()
     }
 }
 
@@ -858,29 +853,6 @@ impl LocalStreamManagerCore {
     pub fn get_watermark_epoch(&self) -> AtomicU64Ref {
         self.watermark_epoch.clone()
     }
-}
-
-/// Tries to find the root cause of previous failures, based on hard-coded rules.
-pub fn try_find_root_cause(
-    actor_errors: impl IntoIterator<Item = StreamError>,
-) -> Option<StreamError> {
-    let stream_executor_error_score = |e: &StreamExecutorError| {
-        use crate::executor::error::ErrorKind;
-        match e.kind() {
-            ErrorKind::ChannelClosed(_) => 0,
-            ErrorKind::Internal(_) => 1,
-            _ => 999,
-        }
-    };
-    let stream_error_score = |e: &StreamError| {
-        use crate::error::ErrorKind;
-        match e.kind() {
-            ErrorKind::Internal(_) => 1000,
-            ErrorKind::Executor(ee) => 2000 + stream_executor_error_score(ee),
-            _ => 3000,
-        }
-    };
-    actor_errors.into_iter().max_by_key(stream_error_score)
 }
 
 #[cfg(test)]
