@@ -65,7 +65,7 @@ hmac = { version = "0.12", default-features = false, features = ["reset"] }
 hyper = { version = "0.14", features = ["full"] }
 indexmap-dff4ba8e3ae991db = { package = "indexmap", version = "1", default-features = false, features = ["serde", "std"] }
 indexmap-f595c2ba2a3f28df = { package = "indexmap", version = "2", features = ["serde"] }
-itertools = { version = "0.10" }
+itertools = { version = "0.11" }
 jni = { version = "0.21", features = ["invocation"] }
 lazy_static = { version = "1", default-features = false, features = ["spin_no_std"] }
 lexical-core = { version = "0.8", features = ["format"] }
@@ -169,7 +169,7 @@ frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 generic-array = { version = "0.14", default-features = false, features = ["more_lengths", "zeroize"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly", "raw"] }
 indexmap-f595c2ba2a3f28df = { package = "indexmap", version = "2", features = ["serde"] }
-itertools = { version = "0.10" }
+itertools = { version = "0.11" }
 lazy_static = { version = "1", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2", features = ["extra_traits"] }
 log = { version = "0.4", default-features = false, features = ["kv_unstable", "std"] }
