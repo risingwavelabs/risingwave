@@ -115,11 +115,15 @@ impl TableDistribution {
         Self::singleton_vnode_bitmap_ref().clone()
     }
 
-    pub fn all_vnodes() -> Arc<Bitmap> {
+    pub fn all_vnodes_ref() -> &'static Arc<Bitmap> {
         /// A bitmap that all vnodes are set.
         static ALL_VNODES: LazyLock<Arc<Bitmap>> =
             LazyLock::new(|| Bitmap::ones(VirtualNode::COUNT).into());
-        ALL_VNODES.clone()
+        &ALL_VNODES
+    }
+
+    pub fn all_vnodes() -> Arc<Bitmap> {
+        Self::all_vnodes_ref().clone()
     }
 
     /// Distribution that accesses all vnodes, mainly used for tests.
@@ -272,10 +276,9 @@ pub fn compute_vnode(row: impl Row, indices: &[usize], vnodes: &Bitmap) -> Virtu
     vnode
 }
 
-pub fn get_vnode_from_row(row: impl Row, index: usize, _vnodes: &Bitmap) -> VirtualNode {
+pub fn get_vnode_from_row(row: impl Row, index: usize, vnodes: &Bitmap) -> VirtualNode {
     let vnode = VirtualNode::from_datum(row.datum_at(index));
-    // TODO: enable this check when `WatermarkFilterExecutor` use `StorageTable` to read global max watermark
-    // check_vnode_is_set(vnode, vnodes);
+    check_vnode_is_set(vnode, vnodes);
 
     tracing::debug!(target: "events::storage::storage_table", "get vnode from row: {:?} vnode column index {:?} => {}", row, index, vnode);
 
