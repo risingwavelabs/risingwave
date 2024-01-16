@@ -458,17 +458,17 @@ async fn check_result<
         if left_iter.key() != right_iter.key() {
             tracing::error!(
                 "The key of input and output not equal. key: {:?} vs {:?}",
-                hex::encode(left_iter.key()),
-                hex::encode(right_iter.key()),
+                left_iter.key(),
+                right_iter.key()
             );
             return Ok(false);
         }
         if left_iter.value() != right_iter.value() {
             tracing::error!(
                 "The value of input and output not equal. key: {:?}, value: {:?} vs {:?}",
-                hex::encode(left_iter.key()),
-                hex::encode(left_iter.value()),
-                hex::encode(right_iter.value()),
+                left_iter.key(),
+                left_iter.value(),
+                right_iter.value()
             );
             return Ok(false);
         }
