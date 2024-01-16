@@ -478,6 +478,14 @@ pub struct StreamingConfig {
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
+
+    #[serde(default = "default::streaming::compute_runtime_worker_threads")]
+    /// compute runtime worker threads
+    pub compute_runtime_worker_threads: usize,
+
+    #[serde(default = "default::streaming::compute_runtime_worker_name")]
+    /// compute runtime worker threads
+    pub compute_runtime_worker_name: String,
 }
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
@@ -1249,6 +1257,14 @@ pub mod default {
 
         pub fn unique_user_stream_errors() -> usize {
             10
+        }
+
+        pub fn compute_runtime_worker_threads() -> usize {
+            4
+        }
+
+        pub fn compute_runtime_worker_name() -> String {
+            "rw-batch-local".to_string()
         }
     }
 
