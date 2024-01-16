@@ -16,8 +16,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use reqwest::Method;
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result as RwResult, RwError};
 use serde::de::DeserializeOwned;
 use serde_derive::Deserialize;
 use url::{ParseError, Url};
@@ -96,11 +94,27 @@ pub(crate) struct SchemaRegistryCtx {
     pub path: Vec<String>,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum RequestError {
+    #[error("confluent registry send req error")]
+    Send(#[source] reqwest::Error),
+    #[error("confluent registry parse resp error")]
+    Json(#[source] reqwest::Error),
+    #[error(transparent)]
+    Unsuccessful(ErrorResp),
+}
+
+impl From<RequestError> for risingwave_common::error::RwError {
+    fn from(value: RequestError) -> Self {
+        anyhow::anyhow!(value).into()
+    }
+}
+
 pub(crate) async fn req_inner<T>(
     ctx: Arc<SchemaRegistryCtx>,
     mut url: Url,
     method: Method,
-) -> RwResult<T>
+) -> Result<T, RequestError>
 where
     T: DeserializeOwned + Send + Sync + 'static,
 {
@@ -117,35 +131,17 @@ where
     request(request_builder).await
 }
 
-async fn request<T>(req: reqwest::RequestBuilder) -> RwResult<T>
+async fn request<T>(req: reqwest::RequestBuilder) -> Result<T, RequestError>
 where
     T: DeserializeOwned,
 {
-    let res = req.send().await.map_err(|e| {
-        RwError::from(ProtocolError(format!(
-            "confluent registry send req error {}",
-            e
-        )))
-    })?;
+    let res = req.send().await.map_err(RequestError::Send)?;
     let status = res.status();
     if status.is_success() {
-        res.json().await.map_err(|e| {
-            RwError::from(ProtocolError(format!(
-                "confluent registry parse resp error {}",
-                e
-            )))
-        })
+        res.json().await.map_err(RequestError::Json)
     } else {
-        let res = res.json::<ErrorResp>().await.map_err(|e| {
-            RwError::from(ProtocolError(format!(
-                "confluent registry resp error {}",
-                e
-            )))
-        })?;
-        Err(RwError::from(ProtocolError(format!(
-            "confluent registry resp error, code: {}, msg {}",
-            res.error_code, res.message
-        ))))
+        let res = res.json().await.map_err(RequestError::Json)?;
+        Err(RequestError::Unsuccessful(res))
     }
 }
 
@@ -197,8 +193,10 @@ pub struct GetBySubjectResp {
     pub references: Vec<SchemaReference>,
 }
 
-#[derive(Debug, Deserialize)]
-struct ErrorResp {
+/// <https://docs.confluent.io/platform/7.5/schema-registry/develop/api.html#errors>
+#[derive(Debug, Deserialize, thiserror::Error)]
+#[error("confluent schema registry error {error_code}: {message}")]
+pub struct ErrorResp {
     error_code: i32,
     message: String,
 }

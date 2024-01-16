@@ -124,7 +124,7 @@ impl Client {
                     let _ = remaining.iter().map(|ele| ele.abort());
                     return Ok(res);
                 }
-                Ok(Err(e)) => errs.push(e),
+                Ok(Err(e)) => errs.push(RwError::from(e)),
                 Err(e) => errs.push(RwError::from(e)),
             }
             fut_req = remaining;
