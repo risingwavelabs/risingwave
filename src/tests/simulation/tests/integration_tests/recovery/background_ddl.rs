@@ -325,12 +325,6 @@ async fn test_high_barrier_latency_cancel() -> Result<()> {
             }
             Err(e) => {
                 return Err(e);
-                // if e.to_string().contains("in creating procedure") {
-                //     // MV already created and recovered.
-                //     break;
-                // } else {
-                //     return Err(e);
-                // }
             }
             Ok(s) => {
                 tracing::info!("created mv stream job with status: {}", s);
@@ -341,7 +335,8 @@ async fn test_high_barrier_latency_cancel() -> Result<()> {
 
     tracing::info!("restarted cn: trigger stream job recovery");
 
-    // Loop in case the cancel gets dropped before it drops the table fragment.
+    // Loop in case the cancel gets dropped after
+    // cn kill, before it drops the table fragment.
     for _ in 0..5 {
         let mut session2 = cluster.start_session();
         let handle = tokio::spawn(async move {
