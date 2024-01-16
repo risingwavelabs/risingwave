@@ -148,7 +148,7 @@ impl UdfContext {
         self.udf_global_counter += 1;
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub fn _is_empty(&self) -> bool {
         self.udf_param_context.is_empty()
     }
 
@@ -156,7 +156,7 @@ impl UdfContext {
         self.udf_param_context = context;
     }
 
-    pub fn clear(&mut self) {
+    pub fn _clear(&mut self) {
         self.udf_global_counter = 0;
         self.udf_param_context.clear();
     }
