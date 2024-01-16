@@ -245,7 +245,7 @@ impl SessionTimezone {
             }
             // only to `mark_used` here.
             ExprType::MakeTimestamptz => {
-                if !(inputs.len() == 6) {
+                if inputs.len() != 6 {
                     return None;
                 }
                 self.mark_used();
@@ -332,6 +332,3 @@ impl ExprVisitor for TimestamptzExprFinder {
             .for_each(|expr| self.visit_expr(expr));
     }
 }
-
-// Timezone visitor to determine which is using timezone
-// Refactor the mard_used part
