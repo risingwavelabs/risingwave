@@ -335,6 +335,10 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     pub fn table_id(&self) -> TableId {
         self.table_id
     }
+
+    pub fn vnodes(&self) -> &Arc<Bitmap> {
+        self.distribution.vnodes()
+    }
 }
 /// Point get
 impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {

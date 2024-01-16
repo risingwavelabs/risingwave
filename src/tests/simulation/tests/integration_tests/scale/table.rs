@@ -88,7 +88,7 @@ async fn test_mv_on_scaled_table() -> Result<()> {
 
 #[tokio::test]
 async fn test_scale_on_schema_change() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale_no_shuffle()).await?;
     cluster.run(ROOT_TABLE_CREATE).await?;
 
     cluster.run(MV1).await?;
