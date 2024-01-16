@@ -53,7 +53,7 @@
         │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
         │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
         └─StreamExchange { dist: Broadcast }
-          └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+          └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
             └─StreamNow { output: [now] }
 - id: nexmark_q1
   before:
@@ -74,7 +74,7 @@
         │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
         │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
         └─StreamExchange { dist: Broadcast }
-          └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+          └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
             └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -90,7 +90,7 @@
             └── StreamExchange Broadcast from 1
 
     Fragment 1
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
     └── StreamNow { output: [now] } { tables: [ Now: 3 ] }
 
     Table 0
@@ -121,7 +121,7 @@
         │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
         │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
         └─StreamExchange { dist: Broadcast }
-          └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+          └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
             └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -135,7 +135,7 @@
             └── StreamExchange Broadcast from 1
 
     Fragment 1
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
     └── StreamNow { output: [now] } { tables: [ Now: 3 ] }
 
     Table 0 { columns: [ event_type, person, auction, bid, $expr1, _row_id ], primary key: [ $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 1 }
@@ -192,7 +192,7 @@
                           │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                           │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                           └─StreamExchange { dist: Broadcast }
-                            └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr6], output_watermarks: [$expr6] }
+                            └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr6], output_watermarks: [$expr6] }
                               └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -235,7 +235,7 @@
         └── StreamExchange Broadcast from 5
 
     Fragment 5
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr6], output_watermarks: [$expr6] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr6], output_watermarks: [$expr6] }
     └── StreamNow { output: [now] } { tables: [ Now: 10 ] }
 
     Table 0
@@ -331,7 +331,7 @@
           │             │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
           │             │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
           │             └─StreamExchange { dist: Broadcast }
-          │               └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+          │               └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
           │                 └─StreamNow { output: [now] }
           └─StreamProject { exprs: [window_start, max(count)] }
             └─StreamHashAgg { group_key: [window_start], aggs: [max(count), count] }
@@ -347,7 +347,7 @@
                             │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                             │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                             └─StreamExchange { dist: Broadcast }
-                              └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+                              └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
                                 └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -382,7 +382,7 @@
             └── StreamExchange Broadcast from 4
 
     Fragment 4
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
     └── StreamNow { output: [now] } { tables: [ Now: 8 ] }
 
     Fragment 5
@@ -485,7 +485,7 @@
                             │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                             │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                             └─StreamExchange { dist: Broadcast }
-                              └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr6], output_watermarks: [$expr6] }
+                              └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr6], output_watermarks: [$expr6] }
                                 └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -527,7 +527,7 @@
         └── StreamExchange Broadcast from 6
 
     Fragment 6
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr6], output_watermarks: [$expr6] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr6], output_watermarks: [$expr6] }
     └── StreamNow { output: [now] } { tables: [ Now: 9 ] }
 
     Table 0 { columns: [ $expr5, $expr8, $expr9, $expr2, sum, count ], primary key: [ $0 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
@@ -589,7 +589,7 @@
           │       │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
           │       │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
           │       └─StreamExchange { dist: Broadcast }
-          │         └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+          │         └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
           │           └─StreamNow { output: [now] }
           └─StreamExchange { dist: HashShard(max($expr5)) }
             └─StreamProject { exprs: [$expr7, max($expr5), ($expr7 - '00:00:10':Interval) as $expr8] }
@@ -604,7 +604,7 @@
                           │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                           │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                           └─StreamExchange { dist: Broadcast }
-                            └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+                            └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
                               └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -631,7 +631,7 @@
         └── StreamExchange Broadcast from 3
 
     Fragment 3
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
     └── StreamNow { output: [now] } { tables: [ Now: 7 ] }
 
     Fragment 4
@@ -833,7 +833,7 @@
                   │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                   │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                   └─StreamExchange { dist: Broadcast }
-                    └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr11], output_watermarks: [$expr11] }
+                    └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr11], output_watermarks: [$expr11] }
                       └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -866,7 +866,7 @@
         └── StreamExchange Broadcast from 4
 
     Fragment 4
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr11], output_watermarks: [$expr11] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr11], output_watermarks: [$expr11] }
     └── StreamNow { output: [now] } { tables: [ Now: 8 ] }
 
     Table 0 { columns: [ $expr2, $expr3, $expr4, $expr5, $expr6, $expr7, $expr8, $expr9, $expr10, $expr12, $expr13, $expr14, $expr15, _row_id, _row_id_0 ], primary key: [ $0 ASC, $11 DESC, $12 ASC, $13 ASC, $14 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
@@ -972,7 +972,7 @@
           │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
           │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
           └─StreamExchange { dist: Broadcast }
-            └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+            └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
               └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -987,7 +987,7 @@
                 └── StreamExchange Broadcast from 1
 
     Fragment 1
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
     └── StreamNow { output: [now] } { tables: [ Now: 3 ] }
 
     Table 0 { columns: [ event_type, person, auction, bid, $expr1, _row_id ], primary key: [ $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 1 }
@@ -1019,7 +1019,7 @@
             │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
             │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
             └─StreamExchange { dist: Broadcast }
-              └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+              └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
                 └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -1038,7 +1038,7 @@
         └── StreamExchange Broadcast from 2
 
     Fragment 2
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
     └── StreamNow { output: [now] } { tables: [ Now: 4 ] }
 
     Table 0 { columns: [ $expr3, $expr4, $expr5, $expr6, $expr7, $expr8, $expr9, _row_id ], primary key: [ $1 ASC, $0 ASC, $5 DESC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 1, 0 ], read pk prefix len hint: 2 }
@@ -1072,7 +1072,7 @@
             │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
             │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
             └─StreamExchange { dist: Broadcast }
-              └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+              └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
                 └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -1091,7 +1091,7 @@
         └── StreamExchange Broadcast from 2
 
     Fragment 2
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
     └── StreamNow { output: [now] } { tables: [ Now: 4 ] }
 
     Table 0 { columns: [ $expr3, $expr4, $expr5, $expr6, $expr7, $expr8, $expr9, _row_id ], primary key: [ $1 ASC, $0 ASC, $5 DESC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 1, 0 ], read pk prefix len hint: 2 }
@@ -1125,7 +1125,7 @@
               │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
               │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
               └─StreamExchange { dist: Broadcast }
-                └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+                └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
                   └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -1145,7 +1145,7 @@
         └── StreamExchange Broadcast from 2
 
     Fragment 2
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
     └── StreamNow { output: [now] } { tables: [ Now: 5 ] }
 
     Table 0 { columns: [ $expr3, $expr4, $expr5, $expr6, $expr7, $expr8, $expr9, $expr1, _row_id, row_number ], primary key: [ $0 ASC, $2 DESC, $8 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
@@ -1187,7 +1187,7 @@
         │     │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
         │     │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
         │     └─StreamExchange { dist: Broadcast }
-        │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+        │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
         │         └─StreamNow { output: [now] }
         └─StreamExchange { dist: HashShard($expr9) }
           └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr9, Field(auction, 1:Int32) as $expr10, Field(auction, 2:Int32) as $expr11, Field(auction, 3:Int32) as $expr12, Field(auction, 4:Int32) as $expr13, Field(auction, 5:Int32) as $expr14, Field(auction, 6:Int32) as $expr15, Field(auction, 7:Int32) as $expr16, Field(auction, 8:Int32) as $expr17, _row_id] }
@@ -1224,7 +1224,7 @@
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 6 ] }
 
     Fragment 4
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
     └── StreamNow { output: [now] } { tables: [ Now: 7 ] }
 
     Fragment 5
@@ -1281,7 +1281,7 @@
           │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
           │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
           └─StreamExchange { dist: Broadcast }
-            └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+            └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
               └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -1296,7 +1296,7 @@
                 └── StreamExchange Broadcast from 1
 
     Fragment 1
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
     └── StreamNow { output: [now] } { tables: [ Now: 3 ] }
 
     Table 0 { columns: [ event_type, person, auction, bid, $expr1, _row_id ], primary key: [ $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 1 }
@@ -1328,7 +1328,7 @@
           │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
           │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
           └─StreamExchange { dist: Broadcast }
-            └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+            └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
               └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -1344,7 +1344,7 @@
                 └── StreamExchange Broadcast from 1
 
     Fragment 1
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr2], output_watermarks: [$expr2] }
     └── StreamNow { output: [now] } { tables: [ Now: 3 ] }
 
     Table 0 { columns: [ event_type, person, auction, bid, $expr1, _row_id ], primary key: [ $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 1 }
@@ -1403,7 +1403,7 @@
                   │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                   │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                   └─StreamExchange { dist: Broadcast }
-                    └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
+                    └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr4], output_watermarks: [$expr4] }
                       └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -1440,7 +1440,7 @@
         └── StreamExchange Broadcast from 5
 
     Fragment 5
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr4], output_watermarks: [$expr4] }
     └── StreamNow { output: [now] } { tables: [ Now: 9 ] }
 
     Table 0 { columns: [ $expr2, $expr3, _row_id ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
@@ -1515,7 +1515,7 @@
       │             │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
       │             │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
       │             └─StreamExchange { dist: Broadcast }
-      │               └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
+      │               └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr4], output_watermarks: [$expr4] }
       │                 └─StreamNow { output: [now] }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr5))) as $expr6] }
@@ -1535,7 +1535,7 @@
                           │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                           │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                           └─StreamExchange { dist: Broadcast }
-                            └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
+                            └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr4], output_watermarks: [$expr4] }
                               └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -1575,7 +1575,7 @@
         └── StreamExchange Broadcast from 5
 
     Fragment 5
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr4], output_watermarks: [$expr4] }
     └── StreamNow { output: [now] } { tables: [ Now: 10 ] }
 
     Fragment 6
@@ -1673,7 +1673,7 @@
                     │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                     │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                     └─StreamExchange { dist: Broadcast }
-                      └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
+                      └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr4], output_watermarks: [$expr4] }
                         └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -1711,7 +1711,7 @@
         └── StreamExchange Broadcast from 5
 
     Fragment 5
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr4], output_watermarks: [$expr4] }
     └── StreamNow { output: [now] } { tables: [ Now: 8 ] }
 
     Table 0 { columns: [ $expr2, $expr3, _row_id ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
@@ -1787,7 +1787,7 @@
                     │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                     │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                     └─StreamExchange { dist: Broadcast }
-                      └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
+                      └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr4], output_watermarks: [$expr4] }
                         └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -1825,7 +1825,7 @@
         └── StreamExchange Broadcast from 5
 
     Fragment 5
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr4], output_watermarks: [$expr4] }
     └── StreamNow { output: [now] } { tables: [ Now: 8 ] }
 
     Table 0 { columns: [ $expr2, $expr3, _row_id ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
@@ -1903,7 +1903,7 @@
                         │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                         │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                         └─StreamExchange { dist: Broadcast }
-                          └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
+                          └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr4], output_watermarks: [$expr4] }
                             └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -1943,7 +1943,7 @@
         └── StreamExchange Broadcast from 5
 
     Fragment 5
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr4], output_watermarks: [$expr4] }
     └── StreamNow { output: [now] } { tables: [ Now: 10 ] }
 
     Table 0 { columns: [ $expr2, $expr3, count($expr5), $expr6 ], primary key: [ $2 DESC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
@@ -2030,7 +2030,7 @@
                             │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                             │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                             └─StreamExchange { dist: Broadcast }
-                              └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr5], output_watermarks: [$expr5] }
+                              └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr5], output_watermarks: [$expr5] }
                                 └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -2079,7 +2079,7 @@
         └── StreamExchange Broadcast from 5
 
     Fragment 5
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr5], output_watermarks: [$expr5] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval) as $expr5], output_watermarks: [$expr5] }
     └── StreamNow { output: [now] } { tables: [ Now: 13 ] }
 
     Table 0 { columns: [ min(max($expr7)), $expr9 ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }

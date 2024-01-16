@@ -331,7 +331,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: id = id, output: [id, id, date_time, date_time] }
       ├─BatchExchange { order: [], dist: HashShard(id) }
-      │ └─BatchFilter { predicate: (initial_bid = 1:Int32) AND (AtTimeZone(date_time) > '2021-03-31 23:59:59+00:00':Timestamptz) }
+      │ └─BatchFilter { predicate: (initial_bid = 1:Int32) AND (AtTimeZone(date_time) > SubtractWithTimeZone('2021-04-01 00:00:00+00:00':Timestamptz, '00:00:01':Interval)) }
       │   └─BatchProject { exprs: [id, initial_bid, date_time] }
       │     └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id], filter: (None, None) }
       └─BatchExchange { order: [], dist: HashShard(id) }
@@ -353,7 +353,7 @@
         │     │         └─StreamRowIdGen { row_id_index: 10 }
         │     │           └─StreamSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] }
         │     └─StreamExchange { dist: Broadcast }
-        │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:00:01':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+        │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:00:01':Interval) as $expr2], output_watermarks: [$expr2] }
         │         └─StreamNow { output: [now] }
         └─StreamExchange { dist: HashShard(id) }
           └─StreamFilter { predicate: (initial_bid = 2:Int32) }

@@ -98,7 +98,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchGroupTopN { order: [], limit: 1, offset: 0, group_key: [$expr1] }
       └─BatchExchange { order: [], dist: HashShard($expr1) }
-        └─BatchProject { exprs: [secret_one.field_one, secret_one.field_two, secret_one.field_three, secret_one.field_four, secret_one.field_five, $expr1, AddWithTimeZone($expr1, '00:01:00':Interval, 'UTC':Varchar) as $expr2] }
+        └─BatchProject { exprs: [secret_one.field_one, secret_one.field_two, secret_one.field_three, secret_one.field_four, secret_one.field_five, $expr1, AddWithTimeZone($expr1, '00:01:00':Interval) as $expr2] }
           └─BatchProject { exprs: [secret_one.field_one, secret_one.field_two, secret_one.field_three, secret_one.field_four, secret_one.field_five, TumbleStart(secret_one.field_two, '00:01:00':Interval) as $expr1] }
             └─BatchScan { table: secret_one, columns: [secret_one.field_one, secret_one.field_two, secret_one.field_three, secret_one.field_four, secret_one.field_five], distribution: SomeShard }
 - sql: |

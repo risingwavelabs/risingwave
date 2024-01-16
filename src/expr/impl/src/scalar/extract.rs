@@ -473,7 +473,7 @@ mod tests {
     fn test_extract_from_timestamptz() {
         let ts: Timestamptz = "2023-06-01 00:00:00Z".parse().unwrap();
         let extract = |unit| {
-            extract_from_timestamptz_at_timezone(ts, "pst8pdt", &unit)
+            extract_from_timestamptz1(ts, "pst8pdt", &unit)
                 .unwrap()
                 .to_string()
         };
