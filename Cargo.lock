@@ -9448,6 +9448,7 @@ dependencies = [
 name = "risingwave_meta_model_v2"
 version = "1.7.0-alpha"
 dependencies = [
+ "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",
  "sea-orm",
