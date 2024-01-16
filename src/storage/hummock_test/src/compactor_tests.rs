@@ -1263,7 +1263,7 @@ pub(crate) mod tests {
         assert_eq!(key_count, scan_count);
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn test_compaction_delete_range() {
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
@@ -1292,7 +1292,7 @@ pub(crate) mod tests {
         let mut local = storage
             .new_local(NewLocalOptions::for_test(existing_table_id.into()))
             .await;
-        local.init_for_test(65536).await.unwrap();
+        local.init_for_test(65536 * 130).await.unwrap();
         let prefix_key_range = |k: u16| {
             let key = k.to_be_bytes();
             (
@@ -1306,7 +1306,7 @@ pub(crate) mod tests {
             .unwrap();
         local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
-        flush_and_commit(&hummock_meta_client, &storage, 65536).await;
+        flush_and_commit(&hummock_meta_client, &storage, 65536 * 130).await;
 
         let manual_compcation_option = ManualCompactionOption {
             level: 0,

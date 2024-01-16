@@ -36,7 +36,7 @@ use risingwave_storage::hummock::test_utils::gen_dummy_batch;
 
 use crate::test_utils::prepare_first_valid_version;
 
-// #[tokio::test]
+#[tokio::test]
 async fn test_read_version_basic() {
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
@@ -50,7 +50,7 @@ async fn test_read_version_basic() {
 
     {
         // single imm
-        let kv_pairs = gen_dummy_batch(epoch);
+        let kv_pairs = gen_dummy_batch(epoch / 65536);
         let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
         let size = SharedBufferBatch::measure_batch_size(&sorted_items);
         let imm = SharedBufferBatch::build_shared_buffer_batch(
@@ -66,7 +66,7 @@ async fn test_read_version_basic() {
 
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
-        let key = iterator_test_table_key_of(epoch as usize);
+        let key = iterator_test_table_key_of((epoch / 65536) as usize);
         let key_range = map_table_key_range((
             Bound::Included(Bytes::from(key.to_vec())),
             Bound::Included(Bytes::from(key.to_vec())),
@@ -88,7 +88,7 @@ async fn test_read_version_basic() {
         // several epoch
         for _ in 0..5 {
             epoch += 65536;
-            let kv_pairs = gen_dummy_batch(epoch);
+            let kv_pairs = gen_dummy_batch(epoch / 65536);
             let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
             let size = SharedBufferBatch::measure_batch_size(&sorted_items);
             let imm = SharedBufferBatch::build_shared_buffer_batch(
@@ -107,7 +107,7 @@ async fn test_read_version_basic() {
 
         for e in 1..epoch / 65536 {
             let epoch = e * 65536;
-            let key = iterator_test_table_key_of(epoch as usize);
+            let key = iterator_test_table_key_of((epoch / 65536) as usize);
             let key_range = map_table_key_range((
                 Bound::Included(Bytes::from(key.to_vec())),
                 Bound::Included(Bytes::from(key.to_vec())),
@@ -226,7 +226,7 @@ async fn test_read_version_basic() {
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
-        assert_eq!(4, staging_imm[0].min_epoch());
+        assert_eq!(4 * 65536, staging_imm[0].min_epoch());
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(2, staging_ssts.len());
@@ -250,7 +250,7 @@ async fn test_read_version_basic() {
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
-        assert_eq!(4, staging_imm[0].min_epoch());
+        assert_eq!(4 * 65536, staging_imm[0].min_epoch());
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(1, staging_ssts.len());
