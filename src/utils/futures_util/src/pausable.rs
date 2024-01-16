@@ -14,8 +14,8 @@
 
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, Waker};
 
 use futures::Stream;
 use pin_project_lite::pin_project;
@@ -29,23 +29,31 @@ pin_project! {
         #[pin]
         stream: St,
         paused: Arc<AtomicBool>,
+        waker: Arc<Mutex<Option<Waker>>>,
     }
 }
 
 #[derive(Clone)]
 pub struct Valve {
     paused: Arc<AtomicBool>,
+    waker: Arc<Mutex<Option<Waker>>>,
 }
 
 impl Valve {
     /// Pause the stream controlled by the valve.
     pub fn pause(&self) {
-        self.paused.store(true, Ordering::Relaxed)
+        self.paused.store(true, Ordering::Relaxed);
+        if let Some(waker) = self.waker.lock().unwrap().as_ref() {
+            waker.wake_by_ref()
+        }
     }
 
     /// Resume the stream controlled by the valve.
     pub fn resume(&self) {
         self.paused.store(false, Ordering::Relaxed);
+        if let Some(waker) = self.waker.lock().unwrap().as_ref() {
+            waker.wake_by_ref()
+        }
     }
 }
 
@@ -55,12 +63,14 @@ where
 {
     pub(crate) fn new(stream: St) -> (Self, Valve) {
         let paused = Arc::new(AtomicBool::new(false));
+        let waker = Arc::new(Mutex::new(None));
         (
             Pausable {
                 stream,
                 paused: paused.clone(),
+                waker: waker.clone(),
             },
-            Valve { paused },
+            Valve { paused, waker },
         )
     }
 }
@@ -74,6 +84,8 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.project();
         if this.paused.load(Ordering::Relaxed) {
+            let mut waker = this.waker.lock().unwrap();
+            waker.get_or_insert(cx.waker().clone());
             Poll::Pending
         } else {
             this.stream.poll_next(cx)
