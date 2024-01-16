@@ -18,7 +18,7 @@ use parse_display::Display;
 use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::hash::Crc32HashCode;
 use crate::row::{Row, RowExt};
-use crate::types::{DataType, DatumRef, ScalarRefImpl};
+use crate::types::{DataType, Datum, DatumRef, ScalarImpl, ScalarRefImpl};
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::row_id::extract_vnode_id_from_row_id;
 
@@ -94,6 +94,10 @@ impl VirtualNode {
     /// Returns the scalar representation of the virtual node. Used by `VNODE` expression.
     pub const fn to_scalar(self) -> i16 {
         self.0 as _
+    }
+
+    pub const fn to_datum(self) -> Datum {
+        Some(ScalarImpl::Int16(self.to_scalar()))
     }
 
     /// Creates a virtual node from the given big-endian bytes representation.
