@@ -18,12 +18,24 @@ use std::sync::Arc;
 use byteorder::{BigEndian, ByteOrder};
 use reqwest::Method;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{Result as RwResult, RwError};
 use serde::de::DeserializeOwned;
 use serde_derive::Deserialize;
 use url::{ParseError, Url};
 
-pub fn handle_sr_list(addr: &str) -> Result<Vec<Url>> {
+#[derive(Debug, thiserror::Error)]
+#[error("no valid url provided, got {errs:?}")]
+pub struct SrUrlError {
+    errs: Vec<ParseError>,
+}
+
+impl From<SrUrlError> for risingwave_common::error::RwError {
+    fn from(value: SrUrlError) -> Self {
+        anyhow::anyhow!(value).into()
+    }
+}
+
+pub fn handle_sr_list(addr: &str) -> Result<Vec<Url>, SrUrlError> {
     let segment = addr.split(',').collect::<Vec<&str>>();
     let mut errs: Vec<ParseError> = Vec::with_capacity(segment.len());
     let mut urls = Vec::with_capacity(segment.len());
@@ -34,10 +46,7 @@ pub fn handle_sr_list(addr: &str) -> Result<Vec<Url>> {
         }
     }
     if urls.is_empty() {
-        return Err(RwError::from(ProtocolError(format!(
-            "no valid url provided, got {:?}",
-            errs
-        ))));
+        return Err(SrUrlError { errs });
     }
     tracing::debug!(
         "schema registry client will use url {:?} to connect, the rest failed because: {:?}",
@@ -52,7 +61,7 @@ pub fn handle_sr_list(addr: &str) -> Result<Vec<Url>> {
 /// 0 -> magic number
 /// 1-4 -> schema id
 /// 5-... -> message payload
-pub(crate) fn extract_schema_id(payload: &[u8]) -> Result<(i32, &[u8])> {
+pub(crate) fn extract_schema_id(payload: &[u8]) -> RwResult<(i32, &[u8])> {
     let header_len = 5;
 
     if payload.len() < header_len {
@@ -84,7 +93,7 @@ pub(crate) async fn req_inner<T>(
     ctx: Arc<SchemaRegistryCtx>,
     mut url: Url,
     method: Method,
-) -> Result<T>
+) -> RwResult<T>
 where
     T: DeserializeOwned + Send + Sync + 'static,
 {
@@ -101,7 +110,7 @@ where
     request(request_builder).await
 }
 
-async fn request<T>(req: reqwest::RequestBuilder) -> Result<T>
+async fn request<T>(req: reqwest::RequestBuilder) -> RwResult<T>
 where
     T: DeserializeOwned,
 {
@@ -185,12 +194,6 @@ pub struct GetBySubjectResp {
 struct ErrorResp {
     error_code: i32,
     message: String,
-}
-
-#[derive(Debug)]
-enum ReqResp<T> {
-    Succeed(T),
-    Failed(ErrorResp),
 }
 
 #[cfg(test)]
