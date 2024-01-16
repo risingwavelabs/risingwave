@@ -484,7 +484,7 @@ pub struct StreamingConfig {
     pub compute_runtime_worker_threads: usize,
 
     #[serde(default = "default::streaming::compute_runtime_worker_name")]
-    /// compute runtime worker threads
+    /// compute runtime worker name
     pub compute_runtime_worker_name: String,
 }
 
