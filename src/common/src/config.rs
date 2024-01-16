@@ -1360,9 +1360,7 @@ pub mod default {
         }
     }
 
-    pub mod system {
-        pub use crate::system_param::default::*;
-    }
+    pub use crate::system_param::default as system;
 
     pub mod batch {
         pub fn enable_barrier_read() -> bool {
