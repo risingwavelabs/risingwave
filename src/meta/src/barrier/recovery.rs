@@ -832,10 +832,22 @@ impl GlobalBarrierManagerContext {
             .flatten_ok()
             .try_collect()?;
 
-        let mut node_actors = self.metadata_manager.all_node_actors(false).await?;
+        let mut all_node_actors = self.metadata_manager.all_node_actors(false).await?;
+
+        // Check if any actors were dropped after info resolved.
+        if all_node_actors.iter().any(|(node_id, node_actors)| {
+            !info.node_map.contains_key(node_id)
+                || info
+                    .actor_map
+                    .get(node_id)
+                    .map(|actors| actors.len() != node_actors.len())
+                    .unwrap_or(true)
+        }) {
+            return Err(anyhow!("actors dropped during update").into());
+        }
 
         info.actor_map.iter().map(|(node_id, actors)| {
-            let new_actors = node_actors.remove(node_id).unwrap_or_default();
+            let node_actors = all_node_actors.remove(node_id).unwrap_or_default();
             let node = info.node_map.get(node_id).unwrap();
             let actor_infos = actor_infos.clone();
 
@@ -852,7 +864,7 @@ impl GlobalBarrierManagerContext {
                 client
                     .update_actors(UpdateActorsRequest {
                         request_id,
-                        actors: new_actors,
+                        actors: node_actors,
                     })
                     .await?;
 
