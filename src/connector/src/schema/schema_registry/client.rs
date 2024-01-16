@@ -19,8 +19,6 @@ use std::sync::Arc;
 use futures::future::select_all;
 use itertools::Itertools;
 use reqwest::{Method, Url};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
 use serde::de::DeserializeOwned;
 
 use super::util::*;
@@ -61,8 +59,40 @@ pub struct Client {
     password: Option<String>,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum ClientInitError {
+    #[error("no valid url provided, got {0:?}")]
+    InvalidUrls(Vec<Url>),
+    #[error("build reqwest client failed")]
+    Builder(#[source] reqwest::Error),
+}
+
+impl From<ClientInitError> for risingwave_common::error::RwError {
+    fn from(value: ClientInitError) -> Self {
+        anyhow::anyhow!(value).into()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{context}, errs: {errs:?}")]
+pub struct ConcurrentRequestError {
+    errs: Vec<itertools::Either<RequestError, tokio::task::JoinError>>,
+    context: String,
+}
+
+impl From<ConcurrentRequestError> for risingwave_common::error::RwError {
+    fn from(value: ConcurrentRequestError) -> Self {
+        anyhow::anyhow!(value).into()
+    }
+}
+
+type SrResult<T> = Result<T, ConcurrentRequestError>;
+
 impl Client {
-    pub(crate) fn new(url: Vec<Url>, client_config: &SchemaRegistryAuth) -> Result<Self> {
+    pub(crate) fn new(
+        url: Vec<Url>,
+        client_config: &SchemaRegistryAuth,
+    ) -> Result<Self, ClientInitError> {
         let valid_urls = url
             .iter()
             .map(|url| (url.cannot_be_a_base(), url))
@@ -70,10 +100,7 @@ impl Client {
             .map(|(_, url)| url.clone())
             .collect_vec();
         if valid_urls.is_empty() {
-            return Err(RwError::from(ProtocolError(format!(
-                "no valid url provided, got {:?}",
-                url
-            ))));
+            return Err(ClientInitError::InvalidUrls(url));
         } else {
             tracing::debug!(
                 "schema registry client will use url {:?} to connect",
@@ -81,9 +108,9 @@ impl Client {
             );
         }
 
-        let inner = reqwest::Client::builder().build().map_err(|e| {
-            RwError::from(ProtocolError(format!("build reqwest client failed {}", e)))
-        })?;
+        let inner = reqwest::Client::builder()
+            .build()
+            .map_err(ClientInitError::Builder)?;
 
         Ok(Client {
             inner,
@@ -97,7 +124,7 @@ impl Client {
         &'a self,
         method: Method,
         path: &'a [&'a (impl AsRef<str> + ?Sized + Debug + ToString)],
-    ) -> Result<T>
+    ) -> SrResult<T>
     where
         T: DeserializeOwned + Send + Sync + 'static,
     {
@@ -124,22 +151,23 @@ impl Client {
                     let _ = remaining.iter().map(|ele| ele.abort());
                     return Ok(res);
                 }
-                Ok(Err(e)) => errs.push(RwError::from(e)),
-                Err(e) => errs.push(RwError::from(e)),
+                Ok(Err(e)) => errs.push(itertools::Either::Left(e)),
+                Err(e) => errs.push(itertools::Either::Right(e)),
             }
             fut_req = remaining;
         }
 
-        Err(RwError::from(ProtocolError(format!(
-            "all request confluent registry all timeout, req path {:?}, urls {:?}, err: {:?}",
-            path,
-            self.url,
-            errs.iter().map(|e| e.to_string()).collect_vec()
-        ))))
+        Err(ConcurrentRequestError {
+            errs,
+            context: format!(
+                "all request confluent registry all timeout, req path {:?}, urls {:?}",
+                path, self.url
+            ),
+        })
     }
 
     /// get schema by id
-    pub async fn get_schema_by_id(&self, id: i32) -> Result<ConfluentSchema> {
+    pub async fn get_schema_by_id(&self, id: i32) -> SrResult<ConfluentSchema> {
         let res: GetByIdResp = self
             .concurrent_req(Method::GET, &["schemas", "ids", &id.to_string()])
             .await?;
@@ -150,12 +178,12 @@ impl Client {
     }
 
     /// get the latest schema of the subject
-    pub async fn get_schema_by_subject(&self, subject: &str) -> Result<ConfluentSchema> {
+    pub async fn get_schema_by_subject(&self, subject: &str) -> SrResult<ConfluentSchema> {
         self.get_subject(subject).await.map(|s| s.schema)
     }
 
     /// get the latest version of the subject
-    pub async fn get_subject(&self, subject: &str) -> Result<Subject> {
+    pub async fn get_subject(&self, subject: &str) -> SrResult<Subject> {
         let res: GetBySubjectResp = self
             .concurrent_req(Method::GET, &["subjects", subject, "versions", "latest"])
             .await?;
@@ -174,7 +202,7 @@ impl Client {
     pub async fn get_subject_and_references(
         &self,
         subject: &str,
-    ) -> Result<(Subject, Vec<Subject>)> {
+    ) -> SrResult<(Subject, Vec<Subject>)> {
         let mut subjects = vec![];
         let mut visited = HashSet::new();
         let mut queue = vec![(subject.to_owned(), "latest".to_owned())];
