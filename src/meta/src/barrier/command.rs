@@ -777,11 +777,8 @@ impl CommandContext {
             Command::Resume(_) => {}
 
             Command::SourceSplitAssignment(split_assignment) => {
-                let MetadataManager::V1(mgr) = &self.barrier_manager_context.metadata_manager
-                else {
-                    unimplemented!("implement config change funcs in v2");
-                };
-                mgr.fragment_manager
+                self.barrier_manager_context
+                    .metadata_manager
                     .update_actor_splits_by_split_assignment(split_assignment)
                     .await?;
                 self.barrier_manager_context
@@ -981,26 +978,40 @@ impl CommandContext {
                 dispatchers,
                 init_split_assignment,
             }) => {
-                let MetadataManager::V1(mgr) = &self.barrier_manager_context.metadata_manager
-                else {
-                    unimplemented!("implement replace funcs in v2");
-                };
                 let table_ids = HashSet::from_iter(std::iter::once(old_table_fragments.table_id()));
-
                 // Tell compute nodes to drop actors.
-                let node_actors = mgr.fragment_manager.table_node_actors(&table_ids).await?;
+                let node_actors = self
+                    .barrier_manager_context
+                    .metadata_manager
+                    .get_worker_actor_ids(table_ids)
+                    .await?;
                 self.clean_up(node_actors).await?;
 
-                // Drop fragment info in meta store.
-                mgr.fragment_manager
-                    .post_replace_table(
-                        old_table_fragments,
-                        new_table_fragments,
-                        merge_updates,
-                        dispatchers,
-                        init_split_assignment.clone(),
-                    )
-                    .await?;
+                match &self.barrier_manager_context.metadata_manager {
+                    MetadataManager::V1(mgr) => {
+                        // Drop fragment info in meta store.
+                        mgr.fragment_manager
+                            .post_replace_table(
+                                old_table_fragments,
+                                new_table_fragments,
+                                merge_updates,
+                                dispatchers,
+                                init_split_assignment.clone(),
+                            )
+                            .await?;
+                    }
+                    MetadataManager::V2(mgr) => {
+                        // Update actors and actor_dispatchers for new table fragments.
+                        mgr.catalog_controller
+                            .post_collect_table_fragments(
+                                new_table_fragments.table_id().table_id as _,
+                                new_table_fragments.actor_ids(),
+                                dispatchers.clone(),
+                                init_split_assignment,
+                            )
+                            .await?;
+                    }
+                }
 
                 // Apply the split changes in source manager.
                 self.barrier_manager_context
