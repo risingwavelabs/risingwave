@@ -14,14 +14,12 @@
 
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::{build_non_strict_from_prost, NonStrictExpression};
 use risingwave_pb::plan_common::{JoinType as JoinTypeProto, StorageTableDesc};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::Distribution;
 
 use super::*;
 use crate::executor::monitor::StreamingMetrics;
@@ -41,71 +39,17 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
     ) -> StreamResult<BoxedExecutor> {
         let table_desc: &StorageTableDesc = node.get_table_desc()?;
         let table = {
-            let table_id = TableId {
-                table_id: table_desc.table_id,
-            };
-
-            let order_types = table_desc
-                .pk
-                .iter()
-                .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
-                .collect_vec();
-
-            let column_descs = table_desc
+            let column_ids = table_desc
                 .columns
                 .iter()
-                .map(ColumnDesc::from)
+                .map(|x| ColumnId::new(x.column_id))
                 .collect_vec();
-            let column_ids = column_descs.iter().map(|x| x.column_id).collect_vec();
-
-            // Use indices based on full table instead of streaming executor output.
-            let pk_indices = table_desc
-                .pk
-                .iter()
-                .map(|k| k.column_index as usize)
-                .collect_vec();
-
-            let dist_key_in_pk_indices = table_desc
-                .dist_key_in_pk_indices
-                .iter()
-                .map(|&k| k as usize)
-                .collect_vec();
-            let distribution = match params.vnode_bitmap.clone() {
-                Some(vnodes) => Distribution {
-                    dist_key_in_pk_indices,
-                    vnodes: vnodes.into(),
-                },
-                None => Distribution::fallback(),
-            };
-
-            let table_option = TableOption {
-                retention_seconds: if table_desc.retention_seconds > 0 {
-                    Some(table_desc.retention_seconds)
-                } else {
-                    None
-                },
-            };
-
-            let value_indices = table_desc
-                .get_value_indices()
-                .iter()
-                .map(|&k| k as usize)
-                .collect_vec();
-
-            let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
 
             StorageTable::new_partial(
                 store,
-                table_id,
-                column_descs,
                 column_ids,
-                order_types,
-                pk_indices,
-                distribution,
-                table_option,
-                value_indices,
-                prefix_hint_len,
-                table_desc.versioned,
+                params.vnode_bitmap.map(Into::into),
+                table_desc,
             )
         };
 

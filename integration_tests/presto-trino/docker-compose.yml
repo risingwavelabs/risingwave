@@ -33,14 +33,16 @@ services:
     profiles: [ "client" ]
     entrypoint: [ "trino", "--server", "trino:8080", "--catalog", "risingwave", "--schema", "public" ]
   presto:
-    image: ahanaio/prestodb-sandbox
+    image: prestodb/presto:0.284
     container_name: presto
     volumes:
       - ./etc/risingwave.properties:/opt/presto-server/etc/catalog/risingwave.properties
+      - ./etc/config.properties:/opt/presto-server/etc/config.properties
+      - ./etc/jvm.config:/opt/presto-server/etc/jvm.config
     ports:
       - "8080:8080"
   presto-client:
-    image: ahanaio/prestodb-sandbox
+    image: prestodb/presto:0.284
     profiles: [ "client" ]
     entrypoint: [ "presto-cli", "--server", "presto:8080", "--catalog", "risingwave", "--schema", "public" ]
 volumes:

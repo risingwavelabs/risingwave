@@ -100,6 +100,7 @@ message StorageTableDesc {
   // be used to be compatible with schema changes.
   bool versioned = 8;
   repeated uint32 stream_key = 9;
+  optional uint32 vnode_col_idx_in_pk = 10;
 }
 
 // Represents a table in external database for CDC scenario
