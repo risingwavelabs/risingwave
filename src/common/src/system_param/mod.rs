@@ -135,11 +135,16 @@ macro_rules! def_default {
         pub fn $field() -> $type {
             $default.unwrap()
         }
+        paste::paste!(
+            pub static [<$field:upper>]: LazyLock<$type> = LazyLock::new($field);
+        );
     };
 }
 
 /// Default values for all parameters.
 pub mod default {
+    use std::sync::LazyLock;
+
     for_all_params!(def_default_opt);
     for_all_params!(def_default);
 }

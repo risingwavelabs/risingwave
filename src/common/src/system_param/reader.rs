@@ -50,8 +50,10 @@ impl From<PbSystemParams> for SystemParamsReader {
     }
 }
 
-// Unwrap the field if it exists from the initial release.
-// Otherwise, fill it with the backward compatibility logic.
+/// - Unwrap the field if it always exists.
+///   For example, if a parameter is introduced before the initial public release.
+///
+/// - Otherwise, specify the fallback logic when the field is missing.
 impl SystemParamsRead for SystemParamsReader {
     fn barrier_interval_ms(&self) -> u32 {
         self.prost.barrier_interval_ms.unwrap()
@@ -110,7 +112,10 @@ impl SystemParamsRead for SystemParamsReader {
     }
 
     fn wasm_storage_url(&self) -> &str {
-        self.prost.wasm_storage_url.as_ref().unwrap()
+        self.prost
+            .wasm_storage_url
+            .as_ref()
+            .unwrap_or(&default::WASM_STORAGE_URL)
     }
 }
 
