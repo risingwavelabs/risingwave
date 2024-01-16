@@ -320,7 +320,6 @@ impl ExprImpl {
     /// Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/3479>
     pub async fn eval_row(&self, input: &OwnedRow) -> RwResult<Datum> {
         let backend_expr = build_from_prost(&self.to_expr_proto())?;
-        println!("[eval_row] backend_expr: {:#?}", backend_expr);
         Ok(backend_expr.eval_row(input).await?)
     }
 
