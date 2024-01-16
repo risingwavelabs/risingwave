@@ -23,6 +23,7 @@ use itertools::Itertools;
 use rand::Rng;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::stream_graph_visitor::{

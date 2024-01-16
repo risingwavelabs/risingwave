@@ -24,6 +24,7 @@ use itertools::Itertools;
 use prometheus::HistogramTimer;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::table_watermark::{

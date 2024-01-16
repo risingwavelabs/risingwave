@@ -767,6 +767,7 @@ mod tests {
 
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::ParallelUnitMapping;
+    use risingwave_common::system_param::reader::SystemParamsRead;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::add_worker_node_request::Property;
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
