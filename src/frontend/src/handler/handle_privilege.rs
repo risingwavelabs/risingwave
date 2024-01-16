@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -62,7 +62,7 @@ fn make_prost_privilege(
         }
         GrantObjects::Mviews(tables) => {
             let db_name = session.database();
-            let search_path = session.config().get_search_path();
+            let search_path = session.config().search_path();
             let user_name = &session.auth_context().user_name;
 
             for name in tables {
@@ -85,7 +85,7 @@ fn make_prost_privilege(
         }
         GrantObjects::Tables(tables) => {
             let db_name = session.database();
-            let search_path = session.config().get_search_path();
+            let search_path = session.config().search_path();
             let user_name = &session.auth_context().user_name;
 
             for name in tables {
@@ -108,7 +108,7 @@ fn make_prost_privilege(
         }
         GrantObjects::Sources(sources) => {
             let db_name = session.database();
-            let search_path = session.config().get_search_path();
+            let search_path = session.config().search_path();
             let user_name = &session.auth_context().user_name;
 
             for name in sources {

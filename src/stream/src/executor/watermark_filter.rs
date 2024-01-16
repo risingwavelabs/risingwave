@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -207,6 +207,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                             watermark,
                         ));
                     }
+                    table.try_flush().await?;
                 }
                 Message::Watermark(watermark) => {
                     if watermark.col_idx == event_time_col_idx {
@@ -245,8 +246,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         last_checkpoint_watermark = current_watermark.clone();
                         // Persist the watermark when checkpoint arrives.
                         if let Some(watermark) = current_watermark.clone() {
-                            let vnodes = table.get_vnodes();
-                            for vnode in vnodes.iter_vnodes() {
+                            for vnode in table.vnodes().clone().iter_vnodes() {
                                 let pk = Some(ScalarImpl::Int16(vnode.to_scalar()));
                                 let row = [pk, Some(watermark.clone())];
                                 // This is an upsert.
@@ -352,7 +352,7 @@ mod tests {
     use risingwave_common::types::Date;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::Distribution;
+    use risingwave_storage::table::TableDistribution;
 
     use super::*;
     use crate::executor::test_utils::expr::build_from_pretty;
@@ -382,7 +382,7 @@ mod tests {
             column_descs,
             order_types.to_vec(),
             pk_indices.to_vec(),
-            Distribution::all_vnodes(vec![0]),
+            TableDistribution::all(vec![0]),
             Some(val_indices.to_vec()),
         )
         .await

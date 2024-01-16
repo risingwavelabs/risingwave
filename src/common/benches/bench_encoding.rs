@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -124,7 +124,7 @@ fn bench_encoding(c: &mut Criterion) {
         Case::new(
             "List of Bool (len = 100)",
             DataType::List(Box::new(DataType::Boolean)),
-            ScalarImpl::List(ListValue::new(vec![Some(ScalarImpl::Bool(true)); 100])),
+            ScalarImpl::List(ListValue::from_iter([true; 100])),
         ),
     ];
 

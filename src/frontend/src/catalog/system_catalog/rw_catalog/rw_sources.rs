@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,6 +44,8 @@ pub static RW_SOURCES_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = Lazy
         (DataType::Varchar, "acl"),
         (DataType::Timestamptz, "initialized_at"),
         (DataType::Timestamptz, "created_at"),
+        (DataType::Varchar, "initialized_at_cluster_version"),
+        (DataType::Varchar, "created_at_cluster_version"),
     ]
 });
 
@@ -75,19 +77,15 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int32(source.owner as i32)),
                             Some(ScalarImpl::Utf8(
                                 source
-                                    .properties
+                                    .with_properties
                                     .get(UPSTREAM_SOURCE_KEY)
                                     .cloned()
                                     .unwrap_or("".to_string())
                                     .to_uppercase()
                                     .into(),
                             )),
-                            Some(ScalarImpl::List(ListValue::new(
-                                source
-                                    .columns
-                                    .iter()
-                                    .map(|c| Some(ScalarImpl::Utf8(c.name().into())))
-                                    .collect_vec(),
+                            Some(ScalarImpl::List(ListValue::from_iter(
+                                source.columns.iter().map(|c| c.name()),
                             ))),
                             source
                                 .info
@@ -115,6 +113,14 @@ impl SysCatalogReaderImpl {
                             ),
                             source.initialized_at_epoch.map(|e| e.as_scalar()),
                             source.created_at_epoch.map(|e| e.as_scalar()),
+                            source
+                                .initialized_at_cluster_version
+                                .clone()
+                                .map(|v| ScalarImpl::Utf8(v.into())),
+                            source
+                                .created_at_cluster_version
+                                .clone()
+                                .map(|v| ScalarImpl::Utf8(v.into())),
                         ])
                     })
             })

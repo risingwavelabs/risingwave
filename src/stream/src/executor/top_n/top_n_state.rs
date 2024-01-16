@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,12 @@
 // limitations under the License.
 
 use std::ops::Bound;
+use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
@@ -31,7 +34,7 @@ use crate::executor::error::StreamExecutorResult;
 /// `group_key` is not included.
 pub struct ManagedTopNState<S: StateStore> {
     /// Relational table.
-    pub(crate) state_table: StateTable<S>,
+    state_table: StateTable<S>,
 
     /// Used for serializing pk into CacheKey.
     cache_key_serde: CacheKeySerde,
@@ -55,6 +58,26 @@ impl<S: StateStore> ManagedTopNState<S> {
             state_table,
             cache_key_serde,
         }
+    }
+
+    /// Get the immutable reference of managed state table.
+    pub fn table(&self) -> &StateTable<S> {
+        &self.state_table
+    }
+
+    /// Init epoch for the managed state table.
+    pub fn init_epoch(&mut self, epoch: EpochPair) {
+        self.state_table.init_epoch(epoch)
+    }
+
+    /// Update vnode bitmap of state table, returning `cache_may_stale`.
+    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> bool {
+        self.state_table.update_vnode_bitmap(new_vnodes).1
+    }
+
+    /// Update watermark for the managed state table.
+    pub fn update_watermark(&mut self, watermark: ScalarImpl, eager_cleaning: bool) {
+        self.state_table.update_watermark(watermark, eager_cleaning)
     }
 
     pub fn insert(&mut self, value: impl Row) {
@@ -121,6 +144,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         cache_size_limit: usize,
     ) -> StreamExecutorResult<()> {
         let cache = &mut topn_cache.high;
+
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let state_table_iter = self
             .state_table
@@ -128,12 +152,18 @@ impl<S: StateStore> ManagedTopNState<S> {
                 &group_key,
                 sub_range,
                 PrefetchOptions {
-                    preload: cache_size_limit == usize::MAX,
+                    prefetch: cache_size_limit == usize::MAX,
+                    for_large_query: false,
                 },
             )
             .await?;
         pin_mut!(state_table_iter);
+
+        let mut group_row_count = 0;
+
         while let Some(item) = state_table_iter.next().await {
+            group_row_count += 1;
+
             // Note(bugen): should first compare with start key before constructing TopNStateRow.
             let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
             if let Some(start_key) = start_key.as_ref()
@@ -141,15 +171,17 @@ impl<S: StateStore> ManagedTopNState<S> {
             {
                 continue;
             }
-            // let row= &topn_row.row;
             cache.insert(topn_row.cache_key, (&topn_row.row).into());
             if cache.len() == cache_size_limit {
                 break;
             }
         }
+
         if WITH_TIES && topn_cache.is_high_cache_full() {
             let high_last_sort_key = topn_cache.high.last_key_value().unwrap().0 .0.clone();
             while let Some(item) = state_table_iter.next().await {
+                group_row_count += 1;
+
                 let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
                 if topn_row.cache_key.0 == high_last_sort_key {
                     topn_cache
@@ -159,6 +191,11 @@ impl<S: StateStore> ManagedTopNState<S> {
                     break;
                 }
             }
+        }
+
+        if state_table_iter.next().await.is_none() {
+            // We can only update the row count when we have seen all rows of the group in the table.
+            topn_cache.update_table_row_count(group_row_count);
         }
 
         Ok(())
@@ -179,13 +216,18 @@ impl<S: StateStore> ManagedTopNState<S> {
                 &group_key,
                 sub_range,
                 PrefetchOptions {
-                    preload: topn_cache.limit == usize::MAX,
+                    prefetch: topn_cache.limit == usize::MAX,
+                    for_large_query: false,
                 },
             )
             .await?;
         pin_mut!(state_table_iter);
+
+        let mut group_row_count = 0;
+
         if topn_cache.offset > 0 {
             while let Some(item) = state_table_iter.next().await {
+                group_row_count += 1;
                 let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
                 topn_cache
                     .low
@@ -198,6 +240,7 @@ impl<S: StateStore> ManagedTopNState<S> {
 
         assert!(topn_cache.limit > 0, "topn cache limit should always > 0");
         while let Some(item) = state_table_iter.next().await {
+            group_row_count += 1;
             let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
             topn_cache
                 .middle
@@ -209,6 +252,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         if WITH_TIES && topn_cache.is_middle_cache_full() {
             let middle_last_sort_key = topn_cache.middle.last_key_value().unwrap().0 .0.clone();
             while let Some(item) = state_table_iter.next().await {
+                group_row_count += 1;
                 let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
                 if topn_row.cache_key.0 == middle_last_sort_key {
                     topn_cache
@@ -230,6 +274,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         while !topn_cache.is_high_cache_full()
             && let Some(item) = state_table_iter.next().await
         {
+            group_row_count += 1;
             let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
             topn_cache
                 .high
@@ -238,6 +283,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         if WITH_TIES && topn_cache.is_high_cache_full() {
             let high_last_sort_key = topn_cache.high.last_key_value().unwrap().0 .0.clone();
             while let Some(item) = state_table_iter.next().await {
+                group_row_count += 1;
                 let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
                 if topn_row.cache_key.0 == high_last_sort_key {
                     topn_cache
@@ -249,11 +295,22 @@ impl<S: StateStore> ManagedTopNState<S> {
             }
         }
 
+        if state_table_iter.next().await.is_none() {
+            // After trying to initially fill in the cache, all table entries are in the cache,
+            // we then get the precise table row count.
+            topn_cache.update_table_row_count(group_row_count);
+        }
+
         Ok(())
     }
 
     pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.state_table.commit(epoch).await?;
+        Ok(())
+    }
+
+    pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
+        self.state_table.try_flush().await?;
         Ok(())
     }
 }

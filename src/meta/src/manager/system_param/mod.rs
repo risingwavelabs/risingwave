@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use risingwave_common::system_param::common::CommonHandler;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::{check_missing_params, set_system_param};
 use risingwave_common::{for_all_params, key_of};
@@ -43,6 +44,8 @@ pub struct SystemParamsManager {
     notification_manager: NotificationManagerRef,
     // Cached parameters.
     params: RwLock<SystemParams>,
+    /// Common handler for system params.
+    common_handler: CommonHandler,
 }
 
 impl SystemParamsManager {
@@ -58,7 +61,7 @@ impl SystemParamsManager {
         } else if let Some(persisted) = SystemParams::get(&meta_store).await? {
             merge_params(persisted, init_params)
         } else {
-            return Err(MetaError::system_param(
+            return Err(MetaError::system_params(
                 "cluster is not newly created but no system parameters can be found",
             ));
         };
@@ -69,7 +72,8 @@ impl SystemParamsManager {
         Ok(Self {
             meta_store,
             notification_manager,
-            params: RwLock::new(params),
+            params: RwLock::new(params.clone()),
+            common_handler: CommonHandler::new(params.into()),
         })
     }
 
@@ -86,13 +90,18 @@ impl SystemParamsManager {
         let params = params_guard.deref_mut();
         let mut mem_txn = VarTransaction::new(params);
 
-        set_system_param(mem_txn.deref_mut(), name, value).map_err(MetaError::system_param)?;
+        set_system_param(mem_txn.deref_mut(), name, value).map_err(MetaError::system_params)?;
 
         let mut store_txn = Transaction::default();
         mem_txn.apply_to_txn(&mut store_txn).await?;
         self.meta_store.txn(store_txn).await?;
 
         mem_txn.commit();
+
+        // TODO: check if the parameter is actually changed.
+
+        // Run common handler.
+        self.common_handler.handle_change(params.clone().into());
 
         // Sync params to other managers on the meta node only once, since it's infallible.
         self.notification_manager

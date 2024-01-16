@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
 use crate::types::{DataType, StructType};
 use crate::util::iter_util::ZipEqFast;
+
 /// The field in the schema of the executor's return data
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Field {

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,13 +29,12 @@
 #![feature(int_roundings)]
 #![feature(allocator_api)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(result_option_inspect)]
 #![feature(assert_matches)]
 #![feature(lazy_cell)]
 #![feature(array_methods)]
 #![feature(error_generic_member_access)]
 
-mod error;
+pub mod error;
 pub mod exchange_source;
 pub mod execution;
 pub mod executor;

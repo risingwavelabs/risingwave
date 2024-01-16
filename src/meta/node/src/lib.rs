@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ use clap::Parser;
 pub use error::{MetaError, MetaResult};
 use redact::Secret;
 use risingwave_common::config::OverrideConfig;
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
@@ -43,8 +44,9 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_VPC_SECURITY_GROUP_ID")]
     security_group_id: Option<String>,
 
+    // TODO: use `SocketAddr`
     #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:5690")]
-    listen_addr: String,
+    pub listen_addr: String,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
@@ -85,6 +87,12 @@ pub struct MetaNodeOpts {
     /// For dashboard service to fetch cluster info.
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
     prometheus_endpoint: Option<String>,
+
+    /// The additional selector used when querying Prometheus.
+    ///
+    /// The format is same as PromQL. Example: `instance="foo",namespace="bar"`
+    #[clap(long, env = "RW_PROMETHEUS_SELECTOR")]
+    prometheus_selector: Option<String>,
 
     /// Endpoint of the connector node, there will be a sidecar connector node
     /// colocated with Meta node in the cloud environment
@@ -152,23 +160,22 @@ pub struct MetaNodeOpts {
     #[override_opts(path = system.backup_storage_directory)]
     backup_storage_directory: Option<String>,
 
-    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_READ_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_streaming_read_timeout_ms)]
-    pub object_store_streaming_read_timeout_ms: Option<u64>,
-    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_UPLOAD_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_streaming_upload_timeout_ms)]
-    pub object_store_streaming_upload_timeout_ms: Option<u64>,
-    #[clap(long, env = "RW_OBJECT_STORE_UPLOAD_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_upload_timeout_ms)]
-    pub object_store_upload_timeout_ms: Option<u64>,
-    #[clap(long, env = "RW_OBJECT_STORE_READ_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_read_timeout_ms)]
-    pub object_store_read_timeout_ms: Option<u64>,
-
     /// Enable heap profile dump when memory usage is high.
     #[clap(long, env = "RW_HEAP_PROFILING_DIR")]
     #[override_opts(path = server.heap_profiling.dir)]
     pub heap_profiling_dir: Option<String>,
+}
+
+impl risingwave_common::opts::Opts for MetaNodeOpts {
+    fn name() -> &'static str {
+        "meta"
+    }
+
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        format!("http://{}", self.listen_addr)
+            .parse()
+            .expect("invalid listen address")
+    }
 }
 
 use std::future::Future;
@@ -234,12 +241,34 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             });
 
         let add_info = AddressInfo {
-            advertise_addr: opts.advertise_addr,
+            advertise_addr: opts.advertise_addr.to_owned(),
             listen_addr,
             prometheus_addr,
             dashboard_addr,
             ui_path: opts.dashboard_ui_path,
         };
+
+        const MIN_TIMEOUT_INTERVAL_SEC: u64 = 20;
+        let compaction_task_max_progress_interval_secs = {
+            config
+                .storage
+                .object_store
+                .object_store_read_timeout_ms
+                .max(config.storage.object_store.object_store_upload_timeout_ms)
+                .max(
+                    config
+                        .storage
+                        .object_store
+                        .object_store_streaming_read_timeout_ms,
+                )
+                .max(
+                    config
+                        .storage
+                        .object_store
+                        .object_store_streaming_upload_timeout_ms,
+                )
+                .max(config.meta.compaction_task_max_progress_interval_secs)
+        } + MIN_TIMEOUT_INTERVAL_SEC;
 
         let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
             add_info,
@@ -250,6 +279,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             MetaOpts {
                 enable_recovery: !config.meta.disable_recovery,
                 enable_scale_in_when_recovery: config.meta.enable_scale_in_when_recovery,
+                enable_automatic_parallelism_control: config
+                    .meta
+                    .enable_automatic_parallelism_control,
                 in_flight_barrier_nums,
                 max_idle_ms,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
@@ -271,6 +303,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
                 prometheus_endpoint: opts.prometheus_endpoint,
+                prometheus_selector: opts.prometheus_selector,
                 vpc_id: opts.vpc_id,
                 security_group_id: opts.security_group_id,
                 connector_rpc_endpoint: opts.connector_rpc_endpoint,
@@ -299,7 +332,18 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 compaction_task_max_heartbeat_interval_secs: config
                     .meta
                     .compaction_task_max_heartbeat_interval_secs,
+                compaction_task_max_progress_interval_secs,
                 compaction_config: Some(config.meta.compaction_config),
+                cut_table_size_limit: config.meta.cut_table_size_limit,
+                hybird_partition_vnode_count: config.meta.hybird_partition_vnode_count,
+                event_log_enabled: config.meta.event_log_enabled,
+                event_log_channel_max_size: config.meta.event_log_channel_max_size,
+                advertise_addr: opts.advertise_addr,
+                cached_traces_num: config.meta.developer.cached_traces_num,
+                cached_traces_memory_limit_bytes: config
+                    .meta
+                    .developer
+                    .cached_traces_memory_limit_bytes,
             },
             config.system.into_init_system_params(),
         )

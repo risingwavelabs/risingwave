@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::hummock::CompactionFilterFlag;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{next_key, user_key};
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
@@ -298,7 +297,10 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         )
         .unwrap();
     local.flush(Vec::new()).await.unwrap();
-    local.seal_current_epoch(101);
+    local.seal_current_epoch(
+        101,
+        risingwave_storage::store::SealCurrentEpochOptions::for_test(),
+    );
     flush_and_commit(&hummock_meta_client, &storage, 100).await;
     compact_once(
         hummock_manager_ref.clone(),
@@ -329,7 +331,10 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         )])
         .await
         .unwrap();
-    local.seal_current_epoch(102);
+    local.seal_current_epoch(
+        102,
+        risingwave_storage::store::SealCurrentEpochOptions::for_test(),
+    );
     flush_and_commit(&hummock_meta_client, &storage, 101).await;
     compact_once(
         hummock_manager_ref.clone(),
@@ -360,7 +365,10 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         )])
         .await
         .unwrap();
-    local.seal_current_epoch(103);
+    local.seal_current_epoch(
+        103,
+        risingwave_storage::store::SealCurrentEpochOptions::for_test(),
+    );
     flush_and_commit(&hummock_meta_client, &storage, 102).await;
     // move this two file to the same level.
     compact_once(
@@ -386,7 +394,10 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         )
         .unwrap();
     local.flush(Vec::new()).await.unwrap();
-    local.seal_current_epoch(u64::MAX);
+    local.seal_current_epoch(
+        u64::MAX,
+        risingwave_storage::store::SealCurrentEpochOptions::for_test(),
+    );
     flush_and_commit(&hummock_meta_client, &storage, 103).await;
     // move this two file to the same level.
     compact_once(

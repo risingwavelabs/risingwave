@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -117,6 +117,8 @@ impl FunctionAttr {
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
+        } else if self.rewritten {
+            quote! { |_, _| Err(ExprError::UnsupportedFunction(#name.into())) }
         } else {
             self.generate_build_scalar_function(user_fn, true)?
         };
@@ -137,8 +139,6 @@ impl FunctionAttr {
                     build: FuncBuilder::Scalar(#build_fn),
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
-                    state_type: None,
-                    append_only: false,
                 }) };
             }
         })
@@ -326,8 +326,18 @@ impl FunctionAttr {
             _ if self.ret == "void" => quote! { { #output; Option::<i32>::None } },
             ReturnTypeKind::T => quote! { Some(#output) },
             ReturnTypeKind::Option => output,
-            ReturnTypeKind::Result => quote! { Some(#output?) },
-            ReturnTypeKind::ResultOption => quote! { #output? },
+            ReturnTypeKind::Result => quote! {
+                match #output {
+                    Ok(x) => Some(x),
+                    Err(e) => { errors.push(e); None }
+                }
+            },
+            ReturnTypeKind::ResultOption => quote! {
+                match #output {
+                    Ok(x) => x,
+                    Err(e) => { errors.push(e); None }
+                }
+            },
         };
         // if user function accepts non-option arguments, we assume the function
         // returns null on null input, so we need to unwrap the inputs before calling.
@@ -382,7 +392,7 @@ impl FunctionAttr {
             let fn_name = format_ident!("{}", batch_fn);
             quote! {
                 let c = #fn_name(#(#arrays),*);
-                Ok(Arc::new(c.into()))
+                Arc::new(c.into())
             }
         } else if (types::is_primitive(&self.ret) || self.ret == "boolean")
             && user_fn.is_pure()
@@ -396,14 +406,14 @@ impl FunctionAttr {
                         std::iter::repeat_with(|| #fn_name()).take(input.capacity())
                         Bitmap::ones(input.capacity()),
                     );
-                    Ok(Arc::new(c.into()))
+                    Arc::new(c.into())
                 },
                 1 => quote! {
                     let c = #ret_array_type::from_iter_bitmap(
                         a0.raw_iter().map(|a| #fn_name(a)),
                         a0.null_bitmap().clone()
                     );
-                    Ok(Arc::new(c.into()))
+                    Arc::new(c.into())
                 },
                 2 => quote! {
                     // allow using `zip` for performance
@@ -414,7 +424,7 @@ impl FunctionAttr {
                             .map(|(a, b)| #fn_name #generic(a, b)),
                         a0.null_bitmap() & a1.null_bitmap(),
                     );
-                    Ok(Arc::new(c.into()))
+                    Arc::new(c.into())
                 },
                 n => todo!("SIMD optimization for {n} arguments"),
             }
@@ -449,7 +459,7 @@ impl FunctionAttr {
                         #append_output
                     }
                 }
-                Ok(Arc::new(builder.finish().into()))
+                Arc::new(builder.finish().into())
             }
         };
 
@@ -465,7 +475,7 @@ impl FunctionAttr {
                 use risingwave_common::util::iter_util::ZipEqFast;
 
                 use risingwave_expr::expr::{Context, BoxedExpression};
-                use risingwave_expr::Result;
+                use risingwave_expr::{ExprError, Result};
                 use risingwave_expr::codegen::*;
 
                 #check_children
@@ -492,7 +502,13 @@ impl FunctionAttr {
                             let #arrays: &#arg_arrays = #array_refs.as_ref().into();
                         )*
                         #eval_variadic
-                        #eval
+                        let mut errors = vec![];
+                        let array = { #eval };
+                        if errors.is_empty() {
+                            Ok(array)
+                        } else {
+                            Err(ExprError::Multiple(array, errors.into()))
+                        }
                     }
                     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
                         #(
@@ -500,7 +516,13 @@ impl FunctionAttr {
                             let #inputs: Option<#arg_types> = #datums.as_ref().map(|s| s.as_scalar_ref_impl().try_into().unwrap());
                         )*
                         #eval_row_variadic
-                        Ok(#row_output)
+                        let mut errors: Vec<ExprError> = vec![];
+                        let output = #row_output;
+                        if let Some(err) = errors.into_iter().next() {
+                            Err(err.into())
+                        } else {
+                            Ok(output)
+                        }
                     }
                 }
 
@@ -550,8 +572,26 @@ impl FunctionAttr {
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.as_fn().name);
             quote! { #name }
+        } else if self.rewritten {
+            quote! { |_| Err(ExprError::UnsupportedFunction(#name.into())) }
         } else {
             self.generate_agg_build_fn(user_fn)?
+        };
+        let build_retractable = match append_only {
+            true => quote! { None },
+            false => quote! { Some(#build_fn) },
+        };
+        let build_append_only = match append_only {
+            false => quote! { None },
+            true => quote! { Some(#build_fn) },
+        };
+        let retractable_state_type = match append_only {
+            true => quote! { None },
+            false => state_type.clone(),
+        };
+        let append_only_state_type = match append_only {
+            false => quote! { None },
+            true => state_type,
         };
         let type_infer_fn = self.generate_type_infer_fn()?;
         let deprecated = self.deprecated;
@@ -567,10 +607,13 @@ impl FunctionAttr {
                     inputs_type: vec![#(#args),*],
                     variadic: false,
                     ret_type: #ret,
-                    build: FuncBuilder::Aggregate(#build_fn),
+                    build: FuncBuilder::Aggregate {
+                        retractable: #build_retractable,
+                        append_only: #build_append_only,
+                        retractable_state_type: #retractable_state_type,
+                        append_only_state_type: #append_only_state_type,
+                    },
                     type_infer: #type_infer_fn,
-                    state_type: #state_type,
-                    append_only: #append_only,
                     deprecated: #deprecated,
                 }) };
             }
@@ -735,7 +778,7 @@ impl FunctionAttr {
             quote! { state = #next_state; }
         };
         let get_result = if custom_state.is_some() {
-            quote! { Ok(Some(state.downcast_ref::<#state_type>().into())) }
+            quote! { Ok(state.downcast_ref::<#state_type>().into()) }
         } else if let AggregateFnOrImpl::Impl(impl_) = user_fn
             && impl_.finalize.is_some()
         {
@@ -876,6 +919,8 @@ impl FunctionAttr {
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
+        } else if self.rewritten {
+            quote! { |_, _| Err(ExprError::UnsupportedFunction(#name.into())) }
         } else {
             self.generate_build_table_function(user_fn)?
         };
@@ -896,8 +941,6 @@ impl FunctionAttr {
                     build: FuncBuilder::Table(#build_fn),
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
-                    state_type: None,
-                    append_only: false,
                 }) };
             }
         })
@@ -924,10 +967,9 @@ impl FunctionAttr {
         let child: Vec<_> = arg_ids.iter().map(|i| format_ident!("child{i}")).collect();
         let array_refs: Vec<_> = arg_ids.iter().map(|i| format_ident!("array{i}")).collect();
         let arrays: Vec<_> = arg_ids.iter().map(|i| format_ident!("a{i}")).collect();
-        let arg_arrays = self
-            .args
+        let arg_arrays = arg_ids
             .iter()
-            .map(|t| format_ident!("{}", types::array_type(t)));
+            .map(|i| format_ident!("{}", types::array_type(&self.args[*i])));
         let outputs = (0..return_types.len())
             .map(|i| format_ident!("o{i}"))
             .collect_vec();
@@ -985,9 +1027,11 @@ impl FunctionAttr {
         };
         let iter = match user_fn.return_type_kind {
             ReturnTypeKind::T => quote! { iter },
-            ReturnTypeKind::Option => quote! { iter.flatten() },
+            ReturnTypeKind::Option => quote! { if let Some(it) = iter { it } else { continue; } },
             ReturnTypeKind::Result => quote! { iter? },
-            ReturnTypeKind::ResultOption => quote! { value?.flatten() },
+            ReturnTypeKind::ResultOption => {
+                quote! { if let Some(it) = iter? { it } else { continue; } }
+            }
         };
         let iterator_item_type = user_fn.iterator_item_kind.clone().ok_or_else(|| {
             Error::new(

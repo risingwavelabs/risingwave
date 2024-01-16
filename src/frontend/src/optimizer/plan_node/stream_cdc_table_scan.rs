@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,20 +14,22 @@
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, Field};
+use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
+use risingwave_pb::stream_plan::PbStreamNode;
 
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
+use super::{generic, ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
-use crate::expr::ExprRewriter;
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef};
 use crate::handler::create_source::debezium_cdc_source_schema;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{Explain, TableCatalog};
 
@@ -36,14 +38,11 @@ use crate::{Explain, TableCatalog};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamCdcTableScan {
     pub base: PlanBase<Stream>,
-    core: generic::Scan,
-    batch_plan_id: PlanNodeId,
-    stream_scan_type: StreamScanType,
+    core: generic::CdcScan,
 }
 
 impl StreamCdcTableScan {
-    pub fn new(core: generic::Scan) -> Self {
-        let batch_plan_id = core.ctx.next_plan_node_id();
+    pub fn new(core: generic::CdcScan) -> Self {
         let distribution = Distribution::SomeShard;
         let base = PlanBase::new_stream_with_core(
             &core,
@@ -52,24 +51,15 @@ impl StreamCdcTableScan {
             false,
             core.watermark_columns(),
         );
-        Self {
-            base,
-            core,
-            batch_plan_id,
-            stream_scan_type: StreamScanType::CdcBackfill,
-        }
+        Self { base, core }
     }
 
     pub fn table_name(&self) -> &str {
         &self.core.table_name
     }
 
-    pub fn core(&self) -> &generic::Scan {
+    pub fn core(&self) -> &generic::CdcScan {
         &self.core
-    }
-
-    pub fn stream_scan_type(&self) -> StreamScanType {
-        StreamScanType::CdcBackfill
     }
 
     /// Build catalog for cdc backfill state
@@ -142,7 +132,10 @@ impl StreamNode for StreamCdcTableScan {
 }
 
 impl StreamCdcTableScan {
-    pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> PbStreamNode {
+    pub fn adhoc_to_stream_prost(
+        &self,
+        state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<PbStreamNode> {
         use risingwave_pb::stream_plan::*;
 
         let stream_key = self
@@ -157,38 +150,84 @@ impl StreamCdcTableScan {
             .map(|x| *x as u32)
             .collect_vec();
 
-        // The required columns from the table (both scan and upstream).
+        // The schema of the shared cdc source upstream is different from snapshot,
+        // refer to `debezium_cdc_source_schema()` for details.
+        let cdc_source_schema = {
+            let columns = debezium_cdc_source_schema();
+            columns
+                .into_iter()
+                .map(|c| Field::from(c.column_desc).to_prost())
+                .collect_vec()
+        };
+
+        let catalog = self
+            .build_backfill_state_catalog(state)
+            .to_internal_table_prost();
+
+        // We need to pass the id of upstream source job here
+        let upstream_source_id = self.core.cdc_table_desc.source_id.table_id;
+
+        // split the table name from the qualified table name, e.g. `database_name.table_name`
+        let (_, cdc_table_name) = self
+            .core
+            .cdc_table_desc
+            .external_table_name
+            .split_once('.')
+            .unwrap();
+
+        // jsonb filter expr: payload->'source'->>'table' = <cdc_table_name>
+        let filter_expr = Self::build_cdc_filter_expr(cdc_table_name);
+
+        let filter_operator_id = self.core.ctx.next_plan_node_id();
+        // The filter node receive chunks in `(payload, _rw_offset, _rw_table_name)` schema
+        let filter_stream_node = StreamNode {
+            operator_id: filter_operator_id.0 as _,
+            input: vec![
+                // The merge node body will be filled by the `ActorBuilder` on the meta service.
+                PbStreamNode {
+                    node_body: Some(PbNodeBody::Merge(Default::default())),
+                    identity: "Upstream".into(),
+                    fields: cdc_source_schema.clone(),
+                    stream_key: vec![], // not used
+                    ..Default::default()
+                },
+            ],
+            stream_key: vec![], // not used
+            append_only: true,
+            identity: "StreamCdcFilter".to_string(),
+            fields: cdc_source_schema.clone(),
+            node_body: Some(PbNodeBody::CdcFilter(CdcFilterNode {
+                search_condition: Some(filter_expr.to_expr_proto()),
+                upstream_source_id,
+                upstream_column_ids: vec![], // not used,
+            })),
+        };
+
+        let exchange_operator_id = self.core.ctx.next_plan_node_id();
+        // Add a simple exchange node between filter and stream scan
+        let exchange_stream_node = StreamNode {
+            operator_id: exchange_operator_id.0 as _,
+            input: vec![filter_stream_node],
+            stream_key: vec![], // not used
+            append_only: true,
+            identity: "Exchange".to_string(),
+            fields: cdc_source_schema.clone(),
+            node_body: Some(PbNodeBody::Exchange(ExchangeNode {
+                strategy: Some(DispatchStrategy {
+                    r#type: DispatcherType::Simple as _,
+                    dist_key_indices: vec![], // simple exchange doesn't need dist key
+                    output_indices: (0..cdc_source_schema.len() as u32).collect(),
+                }),
+            })),
+        };
+
+        // The required columns from the external table
         let upstream_column_ids = self
             .core
             .output_and_pk_column_ids()
             .iter()
             .map(ColumnId::get_id)
             .collect_vec();
-
-        // The schema of the snapshot read stream
-        let snapshot_schema = upstream_column_ids
-            .iter()
-            .map(|&id| {
-                let col = self
-                    .core
-                    .get_table_columns()
-                    .iter()
-                    .find(|c| c.column_id.get_id() == id)
-                    .unwrap();
-                Field::from(col).to_prost()
-            })
-            .collect_vec();
-
-        // The schema of the shared cdc source upstream is different from snapshot,
-        // refer to `debezium_cdc_source_schema()` for details.
-        let upstream_schema = {
-            let mut columns = debezium_cdc_source_schema();
-            columns.push(ColumnCatalog::row_id_column());
-            columns
-                .into_iter()
-                .map(|c| Field::from(c.column_desc).to_prost())
-                .collect_vec()
-        };
 
         let output_indices = self
             .core
@@ -202,58 +241,61 @@ impl StreamCdcTableScan {
             })
             .collect_vec();
 
-        let batch_plan_node = BatchPlanNode {
-            table_desc: None,
-            column_ids: upstream_column_ids.clone(),
-        };
-
-        let catalog = self
-            .build_backfill_state_catalog(state)
-            .to_internal_table_prost();
-
-        // We need to pass the id of upstream source job here
-        let upstream_source_id = self.core.cdc_table_desc.source_id.table_id;
-        let node_body = PbNodeBody::StreamScan(StreamScanNode {
-            table_id: upstream_source_id,
-            stream_scan_type: self.stream_scan_type as i32,
-            // The column indices need to be forwarded to the downstream
-            output_indices,
+        tracing::debug!(
+            "output_column_ids: {:?}, upstream_column_ids: {:?}, output_indices: {:?}",
+            self.core.output_column_ids(),
             upstream_column_ids,
+            output_indices
+        );
+
+        let stream_scan_body = PbNodeBody::StreamCdcScan(StreamCdcScanNode {
+            table_id: upstream_source_id,
+            upstream_column_ids,
+            output_indices,
             // The table desc used by backfill executor
             state_table: Some(catalog),
-            rate_limit: None,
             cdc_table_desc: Some(self.core.cdc_table_desc.to_protobuf()),
-            ..Default::default()
         });
 
-        PbStreamNode {
+        // plan: merge -> filter -> exchange(simple) -> stream_scan
+        Ok(PbStreamNode {
             fields: self.schema().to_prost(),
-            input: vec![
-                // The merge node body will be filled by the `ActorBuilder` on the meta service.
-                PbStreamNode {
-                    node_body: Some(PbNodeBody::Merge(Default::default())),
-                    identity: "Upstream".into(),
-                    fields: upstream_schema.clone(),
-                    stream_key: vec![], // not used
-                    ..Default::default()
-                },
-                PbStreamNode {
-                    node_body: Some(PbNodeBody::BatchPlan(batch_plan_node)),
-                    operator_id: self.batch_plan_id.0 as u64,
-                    identity: "BatchPlanNode".into(),
-                    fields: snapshot_schema,
-                    stream_key: vec![], // not used
-                    input: vec![],
-                    append_only: true,
-                },
-            ],
-
-            node_body: Some(node_body),
+            input: vec![exchange_stream_node],
+            node_body: Some(stream_scan_body),
             stream_key,
             operator_id: self.base.id().0 as u64,
             identity: self.distill_to_string(),
             append_only: self.append_only(),
-        }
+        })
+    }
+
+    pub fn build_cdc_filter_expr(cdc_table_name: &str) -> ExprImpl {
+        // jsonb filter expr: payload->'source'->>'table' = <cdc_table_name>
+        FunctionCall::new(
+            ExprType::Equal,
+            vec![
+                FunctionCall::new(
+                    ExprType::JsonbAccessStr,
+                    vec![
+                        FunctionCall::new(
+                            ExprType::JsonbAccess,
+                            vec![
+                                InputRef::new(0, DataType::Jsonb).into(),
+                                ExprImpl::literal_varchar("source".into()),
+                            ],
+                        )
+                        .unwrap()
+                        .into(),
+                        ExprImpl::literal_varchar("table".into()),
+                    ],
+                )
+                .unwrap()
+                .into(),
+                ExprImpl::literal_varchar(cdc_table_name.into()),
+            ],
+        )
+        .unwrap()
+        .into()
     }
 }
 
@@ -263,8 +305,55 @@ impl ExprRewritable for StreamCdcTableScan {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut core = self.core.clone();
+        let core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core).into()
+    }
+}
+
+impl ExprVisitable for StreamCdcTableScan {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::{JsonbVal, ScalarImpl};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_cdc_filter_expr() {
+        let t1_json = JsonbVal::from_str(r#"{ "before": null, "after": { "v": 111, "v2": 222.2 }, "source": { "version": "2.2.0.Alpha3", "connector": "mysql", "name": "dbserver1", "ts_ms": 1678428689000, "snapshot": "false", "db": "inventory", "sequence": null, "table": "t1", "server_id": 223344, "gtid": null, "file": "mysql-bin.000003", "pos": 774, "row": 0, "thread": 8, "query": null }, "op": "c", "ts_ms": 1678428689389, "transaction": null }"#).unwrap();
+        let t2_json = JsonbVal::from_str(r#"{ "before": null, "after": { "v": 333, "v2": 666.6 }, "source": { "version": "2.2.0.Alpha3", "connector": "mysql", "name": "dbserver1", "ts_ms": 1678428689000, "snapshot": "false", "db": "inventory", "sequence": null, "table": "t2", "server_id": 223344, "gtid": null, "file": "mysql-bin.000003", "pos": 884, "row": 0, "thread": 8, "query": null }, "op": "c", "ts_ms": 1678428689389, "transaction": null }"#).unwrap();
+        let trx_json = JsonbVal::from_str(r#"{"data_collections": null, "event_count": null, "id": "35319:3962662584", "status": "BEGIN", "ts_ms": 1704263537068}"#).unwrap();
+        let row1 = OwnedRow::new(vec![
+            Some(t1_json.into()),
+            Some(r#"{"file": "1.binlog", "pos": 100}"#.into()),
+        ]);
+        let row2 = OwnedRow::new(vec![
+            Some(t2_json.into()),
+            Some(r#"{"file": "2.binlog", "pos": 100}"#.into()),
+        ]);
+
+        let row3 = OwnedRow::new(vec![
+            Some(trx_json.into()),
+            Some(r#"{"file": "3.binlog", "pos": 100}"#.into()),
+        ]);
+
+        let filter_expr = StreamCdcTableScan::build_cdc_filter_expr("t1");
+        assert_eq!(
+            filter_expr.eval_row(&row1).await.unwrap(),
+            Some(ScalarImpl::Bool(true))
+        );
+        assert_eq!(
+            filter_expr.eval_row(&row2).await.unwrap(),
+            Some(ScalarImpl::Bool(false))
+        );
+        assert_eq!(filter_expr.eval_row(&row3).await.unwrap(), None)
     }
 }

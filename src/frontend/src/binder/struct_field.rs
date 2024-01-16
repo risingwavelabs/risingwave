@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -67,7 +67,7 @@ impl Binder {
         idents: &[Ident],
         wildcard: bool,
     ) -> Result<Vec<(ExprImpl, String)>> {
-        match idents.get(0) {
+        match idents.first() {
             Some(ident) => {
                 let field_name = ident.real_value();
                 let (field_type, field_index) = find_field(expr.return_type(), ident.real_value())?;

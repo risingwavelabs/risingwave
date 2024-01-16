@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -622,23 +622,7 @@ impl Condition {
                         op,
                     ) {
                         Ok(ResultForCmp::Success(expr)) => expr,
-                        Ok(ResultForCmp::OutUpperBound) => {
-                            if op == ExprType::GreaterThan || op == ExprType::GreaterThanOrEqual {
-                                return Ok(None);
-                            }
-                            // op == < and <= means result is always true, don't need any extra
-                            // work.
-                            continue;
-                        }
-                        Ok(ResultForCmp::OutLowerBound) => {
-                            if op == ExprType::LessThan || op == ExprType::LessThanOrEqual {
-                                return Ok(None);
-                            }
-                            // op == > and >= means result is always true, don't need any extra
-                            // work.
-                            continue;
-                        }
-                        Err(_) => {
+                        _ => {
                             other_conds.push(expr);
                             continue;
                         }
@@ -844,12 +828,10 @@ impl Condition {
         .simplify()
     }
 
-    pub fn visit_expr<V: ExprVisitor + ?Sized>(&self, visitor: &mut V) -> V::Result {
+    pub fn visit_expr<V: ExprVisitor + ?Sized>(&self, visitor: &mut V) {
         self.conjunctions
             .iter()
-            .map(|expr| visitor.visit_expr(expr))
-            .reduce(V::merge)
-            .unwrap_or_default()
+            .for_each(|expr| visitor.visit_expr(expr));
     }
 
     pub fn visit_expr_mut(&mut self, mutator: &mut (impl ExprMutator + ?Sized)) {

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,8 +34,9 @@ use crate::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use crate::hash::HashCode;
 use crate::row::Row;
 use crate::types::{DataType, DatumRef, StructType, ToOwnedDatum, ToText};
+use crate::util::chunk_coalesce::DataChunkBuilder;
 use crate::util::hash_util::finalize_hashers;
-use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+use crate::util::iter_util::ZipEqFast;
 use crate::util::value_encoding::{
     estimate_serialize_datum_size, serialize_datum_into, try_get_exact_serialize_datum_size,
     ValueRowSerializer,
@@ -95,23 +96,24 @@ impl DataChunk {
     }
 
     /// Build a `DataChunk` with rows.
+    ///
+    /// Panics if the `rows` is empty.
+    ///
+    /// Should prefer using [`DataChunkBuilder`] instead to avoid unnecessary allocation
+    /// of rows.
     pub fn from_rows(rows: &[impl Row], data_types: &[DataType]) -> Self {
-        let mut array_builders = data_types
-            .iter()
-            .map(|data_type| data_type.create_array_builder(1))
-            .collect::<Vec<_>>();
+        // `append_one_row` will cause the builder to finish immediately once capacity is met.
+        // Hence, we allocate an extra row here, to avoid the builder finishing prematurely.
+        // This just makes the code cleaner, since we can loop through all rows, and consume it finally.
+        // TODO: introduce `new_unlimited` to decouple memory reservation from builder capacity.
+        let mut builder = DataChunkBuilder::new(data_types.to_vec(), rows.len() + 1);
 
         for row in rows {
-            for (datum, builder) in row.iter().zip_eq_debug(array_builders.iter_mut()) {
-                builder.append(datum);
-            }
+            let none = builder.append_one_row(row);
+            debug_assert!(none.is_none());
         }
 
-        let new_columns = array_builders
-            .into_iter()
-            .map(|builder| builder.finish().into())
-            .collect::<Vec<_>>();
-        DataChunk::new(new_columns, rows.len())
+        builder.consume_all().expect("chunk should not be empty")
     }
 
     /// Return the next visible row index on or after `row_idx`.
@@ -322,83 +324,24 @@ impl DataChunk {
     /// `rechunk` creates a new vector of data chunk whose size is `each_size_limit`.
     /// When the total cardinality of all the chunks is not evenly divided by the `each_size_limit`,
     /// the last new chunk will be the remainder.
-    ///
-    /// Currently, `rechunk` would ignore visibility map. May or may not support it later depending
-    /// on the demand
     pub fn rechunk(chunks: &[DataChunk], each_size_limit: usize) -> ArrayResult<Vec<DataChunk>> {
-        assert!(each_size_limit > 0);
-        // Corner case: one of the `chunks` may have 0 length
-        // remove the chunks with zero physical length here,
-        // or skip them in the loop below
-        let chunks = chunks
-            .iter()
-            .filter(|chunk| chunk.capacity() != 0)
-            .collect::<Vec<_>>();
-        if chunks.is_empty() {
+        let Some(data_types) = chunks.first().map(|c| c.data_types()) else {
             return Ok(Vec::new());
-        }
+        };
 
-        let mut total_capacity = chunks.iter().map(|chunk| chunk.capacity()).sum();
-        let num_chunks = (total_capacity + each_size_limit - 1) / each_size_limit;
+        let mut builder = DataChunkBuilder::new(data_types, each_size_limit);
+        let mut outputs = Vec::new();
 
-        // the idx of `chunks`
-        let mut chunk_idx = 0;
-        // the row idx of `chunks[chunk_idx]`
-        let mut start_row_idx = 0;
-        // how many rows does this new chunk need?
-        let mut new_chunk_require = std::cmp::min(total_capacity, each_size_limit);
-        let mut array_builders: Vec<ArrayBuilderImpl> = chunks[0]
-            .columns
-            .iter()
-            .map(|col| col.create_builder(new_chunk_require))
-            .collect();
-        let mut array_len = new_chunk_require;
-        let mut new_chunks = Vec::with_capacity(num_chunks);
-        while chunk_idx < chunks.len() {
-            let capacity = chunks[chunk_idx].capacity();
-            let num_rows_left = capacity - start_row_idx;
-            let actual_acquire = std::cmp::min(new_chunk_require, num_rows_left);
-            let end_row_idx = start_row_idx + actual_acquire - 1;
-            array_builders
-                .iter_mut()
-                .zip_eq_fast(chunks[chunk_idx].columns())
-                .for_each(|(builder, column)| {
-                    let mut array_builder = column.create_builder(end_row_idx - start_row_idx + 1);
-                    for row_idx in start_row_idx..=end_row_idx {
-                        array_builder.append(column.value_at(row_idx));
-                    }
-                    builder.append_array(&array_builder.finish());
-                });
-            // since `end_row_idx` is inclusive, exclude it for the next round.
-            start_row_idx = end_row_idx + 1;
-            // if the current `chunks[chunk_idx] is used up, move to the next one
-            if start_row_idx == capacity {
-                chunk_idx += 1;
-                start_row_idx = 0;
-            }
-            new_chunk_require -= actual_acquire;
-            total_capacity -= actual_acquire;
-            // a new chunk receives enough rows, finalize it
-            if new_chunk_require == 0 {
-                let new_columns: Vec<ArrayRef> = array_builders
-                    .drain(..)
-                    .map(|builder| builder.finish().into())
-                    .collect();
-
-                array_builders = new_columns
-                    .iter()
-                    .map(|col_type| col_type.create_builder(new_chunk_require))
-                    .collect();
-
-                let data_chunk = DataChunk::new(new_columns, array_len);
-                new_chunks.push(data_chunk);
-
-                new_chunk_require = std::cmp::min(total_capacity, each_size_limit);
-                array_len = new_chunk_require;
+        for chunk in chunks {
+            for output in builder.append_chunk(chunk.clone()) {
+                outputs.push(output);
             }
         }
+        if let Some(output) = builder.consume_all() {
+            outputs.push(output);
+        }
 
-        Ok(new_chunks)
+        Ok(outputs)
     }
 
     /// Compute hash values for each row.
@@ -733,7 +676,7 @@ pub trait DataChunkTestExt {
     /// //     T: str
     /// //    TS: Timestamp
     /// //   SRL: Serial
-    /// // {i,f}: struct
+    /// // <i,f>: struct
     /// ```
     fn from_pretty(s: &str) -> Self;
 
@@ -783,7 +726,7 @@ impl DataChunkTestExt for DataChunk {
                 "TZ" => DataType::Timestamptz,
                 "T" => DataType::Varchar,
                 "SRL" => DataType::Serial,
-                array if array.starts_with('{') && array.ends_with('}') => {
+                array if array.starts_with('<') && array.ends_with('>') => {
                     DataType::Struct(StructType::unnamed(
                         array[1..array.len() - 1]
                             .split(',')
@@ -817,10 +760,8 @@ impl DataChunkTestExt for DataChunk {
             {
                 let datum = match val_str {
                     "." => None,
-                    "t" => Some(true.into()),
-                    "f" => Some(false.into()),
                     "(empty)" => Some("".into()),
-                    _ => Some(ScalarImpl::from_text(val_str.as_bytes(), ty).unwrap()),
+                    _ => Some(ScalarImpl::from_text(val_str, ty).unwrap()),
                 };
                 builder.append(datum);
             }
@@ -1114,7 +1055,7 @@ mod tests {
     #[test]
     fn test_chunk_estimated_size() {
         assert_eq!(
-            96,
+            72,
             DataChunk::from_pretty(
                 "I I I
                  1 5 2
@@ -1124,7 +1065,7 @@ mod tests {
             .estimated_heap_size()
         );
         assert_eq!(
-            64,
+            48,
             DataChunk::from_pretty(
                 "I I
                  1 2

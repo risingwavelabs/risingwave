@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,7 +34,6 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::{
@@ -42,12 +41,13 @@ use risingwave_common::util::value_encoding::{
 };
 use risingwave_connector::sink::log_store::LogStoreResult;
 use risingwave_hummock_sdk::key::{next_key, TableKey};
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::error::StorageError;
-use risingwave_storage::row_serde::row_serde_util::serialize_pk_with_vnode;
+use risingwave_storage::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::StateStoreReadIterStream;
-use risingwave_storage::table::{compute_vnode, Distribution};
+use risingwave_storage::table::{compute_vnode, TableDistribution, SINGLETON_VNODE};
 
 use crate::common::log_store_impl::kv_log_store::{
     KvLogStoreReadMetrics, ReaderTruncationOffsetType, RowOpCodeType, SeqIdType,
@@ -106,7 +106,7 @@ pub(crate) struct LogStoreRowSerde {
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
     // FIXME: revisit constructions and usages.
-    dist_key_indices: Vec<usize>,
+    dist_key_indices: Option<Vec<usize>>,
 
     /// Virtual nodes that the table is partitioned into.
     ///
@@ -156,7 +156,7 @@ impl LogStoreRowSerde {
         let vnodes = match vnodes {
             Some(vnodes) => vnodes,
 
-            None => Distribution::fallback_vnodes(),
+            None => TableDistribution::singleton_vnode_bitmap(),
         };
 
         // epoch and seq_id. The seq_id of barrier is set null, and therefore the second order type
@@ -168,6 +168,18 @@ impl LogStoreRowSerde {
 
         let epoch_serde =
             OrderedRowSerde::new(vec![EPOCH_COLUMN_TYPE], vec![OrderType::ascending()]);
+
+        let dist_key_indices = if dist_key_indices.is_empty() {
+            if &vnodes != TableDistribution::singleton_vnode_bitmap_ref() {
+                warn!(
+                    ?vnodes,
+                    "singleton log store gets non-singleton vnode bitmap"
+                );
+            }
+            None
+        } else {
+            Some(dist_key_indices)
+        };
 
         Self {
             pk_serde,
@@ -183,8 +195,8 @@ impl LogStoreRowSerde {
         self.vnodes = vnodes;
     }
 
-    pub(crate) fn vnodes(&self) -> &Bitmap {
-        self.vnodes.as_ref()
+    pub(crate) fn vnodes(&self) -> &Arc<Bitmap> {
+        &self.vnodes
     }
 
     pub(crate) fn encode_epoch(epoch: u64) -> i64 {
@@ -197,6 +209,14 @@ impl LogStoreRowSerde {
 }
 
 impl LogStoreRowSerde {
+    fn compute_vnode(&self, row: impl Row) -> VirtualNode {
+        if let Some(dist_key_indices) = &self.dist_key_indices {
+            compute_vnode(row, dist_key_indices, &self.vnodes)
+        } else {
+            SINGLETON_VNODE
+        }
+    }
+
     pub(crate) fn serialize_data_row(
         &self,
         epoch: u64,
@@ -218,7 +238,7 @@ impl LogStoreRowSerde {
             .clone()
             .chain([Some(ScalarImpl::Int16(op_code))])
             .chain(row);
-        let vnode = compute_vnode(&extended_row, &self.dist_key_indices, &self.vnodes);
+        let vnode = self.compute_vnode(&extended_row);
         let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serde, vnode);
         let value_bytes = self.row_serde.serialize(extended_row).into();
         (vnode, key_bytes, value_bytes)
@@ -247,11 +267,10 @@ impl LogStoreRowSerde {
         (key_bytes, value_bytes)
     }
 
-    pub(crate) fn serialize_epoch(&self, vnode: VirtualNode, epoch: u64) -> TableKey<Bytes> {
-        serialize_pk_with_vnode(
+    pub(crate) fn serialize_epoch(&self, epoch: u64) -> Bytes {
+        serialize_pk(
             [Some(ScalarImpl::Int64(Self::encode_epoch(epoch)))],
             &self.epoch_serde,
-            vnode,
         )
     }
 
@@ -273,14 +292,16 @@ impl LogStoreRowSerde {
 
     pub(crate) fn serialize_truncation_offset_watermark(
         &self,
-        vnode: VirtualNode,
         offset: ReaderTruncationOffsetType,
     ) -> Bytes {
         let (epoch, seq_id) = offset;
-        let curr_offset = self.serialize_log_store_pk(vnode, epoch, seq_id);
-        let ret = Bytes::from(next_key(&curr_offset));
-        assert!(!ret.is_empty());
-        ret
+        Bytes::from(next_key(&serialize_pk(
+            [
+                Some(ScalarImpl::Int64(Self::encode_epoch(epoch))),
+                seq_id.map(ScalarImpl::Int32),
+            ],
+            &self.pk_serde,
+        )))
     }
 }
 
@@ -580,7 +601,7 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
 
         // sorted by epoch descending. Earlier epoch at the end
         self.not_started_streams
-            .sort_by_key(|(epoch, _)| MAX_EPOCH - *epoch);
+            .sort_by_key(|(epoch, _)| HummockEpoch::MAX - *epoch);
 
         let (epoch, stream) = self
             .not_started_streams
@@ -782,9 +803,7 @@ mod tests {
         fn remove_vnode_prefix(key: &Bytes) -> Bytes {
             key.slice(VirtualNode::SIZE..)
         }
-        let delete_range_right1 = remove_vnode_prefix(
-            &serde.serialize_truncation_offset_watermark(DEFAULT_VNODE, (epoch, None)),
-        );
+        let delete_range_right1 = serde.serialize_truncation_offset_watermark((epoch, None));
 
         for (op, row) in stream_chunk.rows() {
             let (_, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
@@ -821,9 +840,7 @@ mod tests {
         seq_id = 1;
         epoch += 1;
 
-        let delete_range_right2 = remove_vnode_prefix(
-            &serde.serialize_truncation_offset_watermark(DEFAULT_VNODE, (epoch, None)),
-        );
+        let delete_range_right2 = serde.serialize_truncation_offset_watermark((epoch, None));
 
         for (op, row) in stream_chunk.rows() {
             let (_, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);

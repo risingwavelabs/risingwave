@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -55,15 +55,11 @@ mod tests {
         SourceStreamChunkBuilder, SpecificParserConfig,
     };
 
-    type Item = (Vec<u8>, Vec<u8>);
-    fn get_item() -> Vec<Item> {
-        vec![
-            (br#"a"#.to_vec(), br#"t"#.to_vec()),
-            (br#"r"#.to_vec(), br#"random"#.to_vec()),
-        ]
+    fn get_payload() -> Vec<Vec<u8>> {
+        vec![br#"t"#.to_vec(), br#"random"#.to_vec()]
     }
 
-    async fn test_bytes_parser(get_item: fn() -> Vec<Item>) {
+    async fn test_bytes_parser(get_payload: fn() -> Vec<Vec<u8>>) {
         let descs = vec![SourceColumnDesc::simple("id", DataType::Bytea, 0.into())];
         let props = SpecificParserConfig {
             key_encoding_config: None,
@@ -76,10 +72,10 @@ mod tests {
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
-        for item in get_item() {
+        for payload in get_payload() {
             let writer = builder.row_writer();
             parser
-                .parse_inner(Some(item.0), Some(item.1), writer)
+                .parse_inner(None, Some(payload), writer)
                 .await
                 .unwrap();
         }
@@ -107,6 +103,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_bytes_parse_object_top_level() {
-        test_bytes_parser(get_item).await;
+        test_bytes_parser(get_payload).await;
     }
 }

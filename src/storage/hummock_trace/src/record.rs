@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ use risingwave_pb::meta::SubscribeResponse;
 
 use crate::{
     LocalStorageId, StorageType, TracedHummockReadEpoch, TracedInitOptions, TracedNewLocalOptions,
-    TracedReadOptions,
+    TracedReadOptions, TracedSealCurrentEpochOptions,
 };
 
 pub type RecordId = u64;
@@ -173,7 +173,10 @@ pub enum Operation {
     ClearSharedBuffer,
 
     /// Seal current epoch
-    SealCurrentEpoch(u64),
+    SealCurrentEpoch {
+        epoch: u64,
+        opts: TracedSealCurrentEpochOptions,
+    },
 
     /// validate read epoch
     ValidateReadEpoch(TracedHummockReadEpoch),

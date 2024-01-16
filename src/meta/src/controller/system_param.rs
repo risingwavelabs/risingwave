@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use risingwave_common::system_param::common::CommonHandler;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::{
     check_missing_params, derive_missing_fields, set_system_param,
@@ -44,6 +45,8 @@ pub struct SystemParamsController {
     notification_manager: NotificationManagerRef,
     // Cached parameters.
     params: RwLock<PbSystemParams>,
+    /// Common handler for system params.
+    common_handler: CommonHandler,
 }
 
 /// Derive system params from db models.
@@ -146,7 +149,8 @@ impl SystemParamsController {
         let ctl = Self {
             db,
             notification_manager,
-            params: RwLock::new(params),
+            params: RwLock::new(params.clone()),
+            common_handler: CommonHandler::new(params.into()),
         };
         // flush to db.
         ctl.flush_params().await?;
@@ -184,7 +188,7 @@ impl SystemParamsController {
             .one(&self.db)
             .await?
         else {
-            return Err(MetaError::system_param(format!(
+            return Err(MetaError::system_params(format!(
                 "unrecognized system parameter {}",
                 name
             )));
@@ -192,9 +196,14 @@ impl SystemParamsController {
         let mut params = params_guard.clone();
         let mut param: system_parameter::ActiveModel = param.into();
         param.value =
-            Set(set_system_param(&mut params, name, value).map_err(MetaError::system_param)?);
+            Set(set_system_param(&mut params, name, value).map_err(MetaError::system_params)?);
         param.update(&self.db).await?;
         *params_guard = params.clone();
+
+        // TODO: check if the parameter is actually changed.
+
+        // Run common handler.
+        self.common_handler.handle_change(params.clone().into());
 
         // Sync params to other managers on the meta node only once, since it's infallible.
         self.notification_manager

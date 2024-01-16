@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ use risingwave_connector::sink::{
     SinkError, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
 };
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
-use risingwave_storage::dispatch_state_store;
 
 use super::*;
 use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
@@ -37,7 +36,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
     async fn new_boxed_executor(
         params: ExecutorParams,
         node: &Self::Node,
-        _store: impl StateStore,
+        state_store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input_executor]: [_; 1] = params.input.try_into().unwrap();
@@ -119,6 +118,11 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             sink_metrics,
         };
 
+        let log_store_identity = format!(
+            "sink[{}]-[{}]-executor[{}]",
+            connector, sink_id.sink_id, params.executor_id
+        );
+
         match node.log_store_type() {
             // Default value is the normal in memory log store to be backward compatible with the
             // previously unset value
@@ -145,28 +149,27 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     connector,
                 );
                 // TODO: support setting max row count in config
-                dispatch_state_store!(params.env.state_store(), state_store, {
-                    let factory = KvLogStoreFactory::new(
-                        state_store,
-                        node.table.as_ref().unwrap().clone(),
-                        params.vnode_bitmap.clone().map(Arc::new),
-                        65536,
-                        metrics,
-                    );
+                let factory = KvLogStoreFactory::new(
+                    state_store,
+                    node.table.as_ref().unwrap().clone(),
+                    params.vnode_bitmap.clone().map(Arc::new),
+                    65536,
+                    metrics,
+                    log_store_identity,
+                );
 
-                    Ok(Box::new(
-                        SinkExecutor::new(
-                            params.actor_context,
-                            params.info,
-                            input_executor,
-                            sink_write_param,
-                            sink_param,
-                            columns,
-                            factory,
-                        )
-                        .await?,
-                    ))
-                })
+                Ok(Box::new(
+                    SinkExecutor::new(
+                        params.actor_context,
+                        params.info,
+                        input_executor,
+                        sink_write_param,
+                        sink_param,
+                        columns,
+                        factory,
+                    )
+                    .await?,
+                ))
             }
         }
     }

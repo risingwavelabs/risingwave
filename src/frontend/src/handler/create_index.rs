@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use either::Either;
 use fixedbitset::FixedBitSet;
@@ -35,13 +36,13 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
+use crate::TableCatalog;
 
 pub(crate) fn gen_create_index_plan(
     session: &SessionImpl,
@@ -54,7 +55,7 @@ pub(crate) fn gen_create_index_plan(
 ) -> Result<(PlanRef, PbTable, PbIndex)> {
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
-    let search_path = session.config().get_search_path();
+    let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
@@ -183,7 +184,7 @@ pub(crate) fn gen_create_index_plan(
     // Manually assemble the materialization plan for the index MV.
     let materialize = assemble_materialize(
         table_name,
-        table_desc.clone(),
+        table.clone(),
         context,
         index_table_name.clone(),
         &index_columns_ordered_expr,
@@ -218,13 +219,7 @@ pub(crate) fn gen_create_index_plan(
     index_table_prost.owner = session.user_id();
     index_table_prost.dependent_relations = vec![table.id.table_id];
 
-    // FIXME: why sqlalchemy need these information?
-    let original_columns = index_table
-        .columns
-        .iter()
-        .map(|x| x.column_desc.column_id.get_id())
-        .collect();
-
+    let index_columns_len = index_columns_ordered_expr.len() as u32;
     let index_item = build_index_item(
         index_table.table_desc().into(),
         table.name(),
@@ -241,10 +236,12 @@ pub(crate) fn gen_create_index_plan(
         index_table_id: TableId::placeholder().table_id,
         primary_table_id: table.id.table_id,
         index_item,
-        original_columns,
+        index_columns_len,
         initialized_at_epoch: None,
         created_at_epoch: None,
         stream_job_status: PbStreamJobStatus::Creating.into(),
+        initialized_at_cluster_version: None,
+        created_at_cluster_version: None,
     };
 
     let plan: PlanRef = materialize.into();
@@ -309,7 +306,7 @@ fn build_index_item(
 /// `distributed_by_columns_len` to represent distributed by columns
 fn assemble_materialize(
     table_name: String,
-    table_desc: Rc<TableDesc>,
+    table_catalog: Arc<TableCatalog>,
     context: OptimizerContextRef,
     index_name: String,
     index_columns: &[(ExprImpl, OrderType)],
@@ -325,8 +322,7 @@ fn assemble_materialize(
 
     let logical_scan = LogicalScan::create(
         table_name,
-        ScanTableType::default(),
-        table_desc.clone(),
+        table_catalog.clone(),
         // Index table has no indexes.
         vec![],
         context,
@@ -350,12 +346,12 @@ fn assemble_materialize(
     let out_names: Vec<String> = index_columns
         .iter()
         .map(|(expr, _)| match expr {
-            ExprImpl::InputRef(input_ref) => table_desc
-                .columns
+            ExprImpl::InputRef(input_ref) => table_catalog
+                .columns()
                 .get(input_ref.index)
                 .unwrap()
-                .name
-                .clone(),
+                .name()
+                .to_string(),
             ExprImpl::FunctionCall(func) => {
                 let func_name = func.func_type().as_str_name().to_string();
                 let mut name = func_name.clone();
@@ -369,12 +365,12 @@ fn assemble_materialize(
         })
         .chain(include_columns.iter().map(|expr| {
             match expr {
-                ExprImpl::InputRef(input_ref) => table_desc
-                    .columns
+                ExprImpl::InputRef(input_ref) => table_catalog
+                    .columns()
                     .get(input_ref.index)
                     .unwrap()
-                    .name
-                    .clone(),
+                    .name()
+                    .to_string(),
                 _ => unreachable!(),
             }
         }))
@@ -430,11 +426,14 @@ pub async fn handle_create_index(
             include,
             distributed_by,
         )?;
-        let mut graph = build_graph(plan);
-        graph.parallelism = session
-            .config()
-            .get_streaming_parallelism()
-            .map(|parallelism| Parallelism { parallelism });
+        let mut graph = build_graph(plan)?;
+        graph.parallelism =
+            session
+                .config()
+                .streaming_parallelism()
+                .map(|parallelism| Parallelism {
+                    parallelism: parallelism.get(),
+                });
         (graph, index_table, index)
     };
 

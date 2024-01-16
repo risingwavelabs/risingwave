@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ use super::{AtomicMutGuard, MutGuard};
 use crate::estimate_size::{EstimateSize, KvSize};
 
 /// The managed cache is a lru cache that bounds the memory usage by epoch.
-/// Should be used with `GlobalMemoryManager`.
+/// Should be used with `MemoryManager`.
 pub struct EstimatedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
     inner: LruCache<K, V, S, A>,
     kv_heap_size: KvSize,

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ use super::utils::impl_distill_by_unit;
 use super::{
     ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     generic, ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
     ToStreamContext,
@@ -75,6 +76,8 @@ impl ColPrunable for LogicalIntersect {
 }
 
 impl ExprRewritable for LogicalIntersect {}
+
+impl ExprVisitable for LogicalIntersect {}
 
 impl PredicatePushdown for LogicalIntersect {
     fn predicate_pushdown(

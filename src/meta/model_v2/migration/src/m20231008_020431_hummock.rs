@@ -135,7 +135,6 @@ impl MigrationTrait for Migration {
                             .big_integer()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(HummockVersionDelta::GroupDeltas).json_binary())
                     .col(
                         ColumnDef::new(HummockVersionDelta::MaxCommittedEpoch)
                             .big_integer()
@@ -151,7 +150,7 @@ impl MigrationTrait for Migration {
                             .boolean()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(HummockVersionDelta::GcObjectIds).json_binary())
+                    .col(ColumnDef::new(HummockVersionDelta::FullVersionDelta).json_binary())
                     .to_owned(),
             )
             .await?;
@@ -169,6 +168,24 @@ impl MigrationTrait for Migration {
                     .col(
                         ColumnDef::new(HummockVersionStats::Stats)
                             .json_binary()
+                            .not_null(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                Table::create()
+                    .table(HummockSequence::Table)
+                    .col(
+                        ColumnDef::new(HummockSequence::Name)
+                            .string()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(HummockSequence::Seq)
+                            .big_integer()
                             .not_null(),
                     )
                     .to_owned(),
@@ -202,7 +219,8 @@ impl MigrationTrait for Migration {
             HummockPinnedVersion,
             HummockPinnedSnapshot,
             HummockVersionDelta,
-            HummockVersionStats
+            HummockVersionStats,
+            HummockSequence
         );
         Ok(())
     }
@@ -249,11 +267,10 @@ enum HummockVersionDelta {
     Table,
     Id,
     PrevId,
-    GroupDeltas,
     MaxCommittedEpoch,
     SafeEpoch,
     TrivialMove,
-    GcObjectIds,
+    FullVersionDelta,
 }
 
 #[derive(DeriveIden)]
@@ -261,4 +278,11 @@ enum HummockVersionStats {
     Table,
     Id,
     Stats,
+}
+
+#[derive(DeriveIden)]
+enum HummockSequence {
+    Table,
+    Name,
+    Seq,
 }

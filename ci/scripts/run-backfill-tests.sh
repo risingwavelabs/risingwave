@@ -4,7 +4,6 @@
 
 # USAGE:
 # ```sh
-# cargo make ci-start ci-backfill
 # ./ci/scripts/run-backfill-tests.sh
 # ```
 # Example progress:
@@ -23,8 +22,8 @@ TEST_DIR=$PWD/e2e_test
 BACKGROUND_DDL_DIR=$TEST_DIR/background_ddl
 COMMON_DIR=$BACKGROUND_DDL_DIR/common
 
-CLUSTER_PROFILE='ci-1cn-1fe-with-recovery'
-export RUST_LOG="risingwave_meta=debug"
+CLUSTER_PROFILE='ci-1cn-1fe-kafka-with-recovery'
+export RUST_LOG="info,risingwave_meta::barrier::progress=debug,risingwave_meta::rpc::ddl_controller=debug"
 
 run_sql_file() {
   psql -h localhost -p 4566 -d dev -U root -f "$@"
@@ -97,21 +96,20 @@ restart_cn() {
 test_snapshot_and_upstream_read() {
   echo "--- e2e, ci-backfill, test_snapshot_and_upstream_read"
   cargo make ci-start ci-backfill
-
-  run_sql_file "$PARENT_PATH"/sql/backfill/create_base_table.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_base_table.sql
 
   # Provide snapshot
-  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert.sql
 
   # Provide updates ...
-  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert.sql &
 
   # ... and concurrently create mv.
-  run_sql_file "$PARENT_PATH"/sql/backfill/create_mv.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_mv.sql &
 
   wait
 
-  run_sql_file "$PARENT_PATH"/sql/backfill/select.sql </dev/null
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/select.sql </dev/null
 
   cargo make kill
   cargo make wait-processes-exit
@@ -126,7 +124,7 @@ test_backfill_tombstone() {
   WITH (
     connector = 'datagen',
     fields.v1._.kind = 'sequence',
-    datagen.rows.per.second = '1000000'
+    datagen.rows.per.second = '2000000'
   )
   FORMAT PLAIN
   ENCODE JSON;
@@ -147,6 +145,58 @@ test_backfill_tombstone() {
   ./risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
   echo "--- Kill cluster"
   kill_cluster
+  cargo make wait-processes-exit
+  wait
+}
+
+test_replication_with_column_pruning() {
+  echo "--- e2e, test_replication_with_column_pruning"
+  cargo make ci-start ci-backfill
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/create_base_table.sql
+  # Provide snapshot
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert.sql
+
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/create_mv.sql &
+
+  # Provide upstream updates
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert.sql &
+
+  wait
+
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/select.sql </dev/null
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/drop.sql
+  echo "--- Kill cluster"
+  cargo make kill
+  cargo make wait-processes-exit
+  wait
+}
+
+# Test sink backfill recovery
+test_sink_backfill_recovery() {
+  echo "--- e2e, test_sink_backfill_recovery"
+  cargo make ci-start $CLUSTER_PROFILE
+
+  # Check progress
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/create_sink.slt'
+
+  # Restart
+  restart_cluster
+  sleep 3
+
+  # Sink back into rw
+  run_sql "CREATE TABLE table_kafka (v1 int primary key)
+    WITH (
+      connector = 'kafka',
+      topic = 's_kafka',
+      properties.bootstrap.server = 'localhost:29092',
+  ) FORMAT DEBEZIUM ENCODE JSON;"
+
+  sleep 10
+
+  # Verify data matches upstream table.
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/validate_sink.slt'
+  cargo make kill
+  cargo make wait-processes-exit
   wait
 }
 
@@ -154,6 +204,8 @@ main() {
   set -euo pipefail
   test_snapshot_and_upstream_read
   test_backfill_tombstone
+  test_replication_with_column_pruning
+  test_sink_backfill_recovery
 }
 
 main

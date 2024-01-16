@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -292,11 +292,33 @@ impl FieldGeneratorImpl {
                 Some(ScalarImpl::Struct(StructValue::new(data)))
             }
             FieldGeneratorImpl::List(field, list_length) => {
-                let data = (0..*list_length)
-                    .map(|_| field.generate_datum(offset))
-                    .collect::<Vec<_>>();
-                Some(ScalarImpl::List(ListValue::new(data)))
+                Some(ScalarImpl::List(ListValue::from_datum_iter(
+                    &field.data_type(),
+                    std::iter::repeat_with(|| field.generate_datum(offset)).take(*list_length),
+                )))
             }
+        }
+    }
+
+    fn data_type(&self) -> DataType {
+        match self {
+            Self::I16Sequence(_) => DataType::Int16,
+            Self::I32Sequence(_) => DataType::Int32,
+            Self::I64Sequence(_) => DataType::Int64,
+            Self::F32Sequence(_) => DataType::Float32,
+            Self::F64Sequence(_) => DataType::Float64,
+            Self::I16Random(_) => DataType::Int16,
+            Self::I32Random(_) => DataType::Int32,
+            Self::I64Random(_) => DataType::Int64,
+            Self::F32Random(_) => DataType::Float32,
+            Self::F64Random(_) => DataType::Float64,
+            Self::VarcharRandomFixedLength(_) => DataType::Varchar,
+            Self::VarcharRandomVariableLength(_) => DataType::Varchar,
+            Self::VarcharConstant => DataType::Varchar,
+            Self::Timestamp(_) => DataType::Timestamp,
+            Self::Timestamptz(_) => DataType::Timestamptz,
+            Self::Struct(_) => todo!("data_type for struct"),
+            Self::List(inner, _) => DataType::List(Box::new(inner.data_type())),
         }
     }
 }

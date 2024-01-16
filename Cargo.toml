@@ -7,14 +7,17 @@ members = [
   "src/cmd_all",
   "src/common",
   "src/common/common_service",
+  "src/common/fields-derive",
   "src/common/heap_profiling",
   "src/compute",
   "src/connector",
+  "src/connector/with_options",
   "src/ctl",
   "src/error",
   "src/expr/core",
   "src/expr/impl",
   "src/expr/macro",
+  "src/expr/udf",
   "src/frontend",
   "src/frontend/planner_test",
   "src/java_binding",
@@ -39,6 +42,7 @@ members = [
   "src/storage/hummock_sdk",
   "src/storage/hummock_test",
   "src/stream",
+  "src/stream/spill_test",
   "src/test_runner",
   "src/tests/compaction_test",
   "src/tests/e2e_extended_mode",
@@ -46,20 +50,20 @@ members = [
   "src/tests/simulation",
   "src/tests/sqlsmith",
   "src/tests/state_cleaning_test",
-  "src/udf",
+  "src/utils/delta_btree_map",
   "src/utils/local_stats_alloc",
   "src/utils/pgwire",
   "src/utils/runtime",
   "src/utils/sync-point",
   "src/utils/variables",
-  "src/utils/with_options",
   "src/utils/workspace-config",
   "src/workspace-hack",
 ]
+exclude = ["e2e_test/udf/wasm", "lints"]
 resolver = "2"
 
 [workspace.package]
-version = "1.3.0-alpha"
+version = "1.7.0-alpha"
 edition = "2021"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -68,39 +72,42 @@ repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
 await-tree = "0.1.1"
-aws-config = { version = "0.57", default-features = false, features = [
+aws-config = { version = "1", default-features = false, features = [
+  "behavior-version-latest",
   "rt-tokio",
   "rustls",
 ] }
-aws-credential-types = { version = "0.57", default-features = false, features = [
+aws-credential-types = { version = "1", default-features = false, features = [
   "hardcoded-credentials",
 ] }
-aws-sdk-kinesis = { version = "0.35", default-features = false, features = [
+aws-sdk-kinesis = { version = "1", default-features = false, features = [
   "rt-tokio",
   "rustls",
 ] }
-aws-sdk-s3 = { version = "0.35", default-features = false, features = [
+aws-sdk-s3 = { version = "1", default-features = false, features = [
   "rt-tokio",
   "rustls",
 ] }
-aws-sdk-ec2 = { version = "0.35", default-features = false, features = [
+aws-sdk-ec2 = { version = "1", default-features = false, features = [
   "rt-tokio",
   "rustls",
 ] }
-aws-sdk-sqs = { version = "0.35", default-features = false, features = [
+aws-sdk-sqs = { version = "1", default-features = false, features = [
   "rt-tokio",
   "rustls",
 ] }
-aws-smithy-http = "0.57"
-aws-smithy-runtime-api = "0.57"
-aws-smithy-runtime = "0.57"
-aws-smithy-types = { version = "0.57", default-features = false, features = ["hyper-0-14-x"] }
-aws-endpoint = "0.57"
-aws-types = "0.57"
+aws-smithy-http = "0.60"
+aws-smithy-runtime-api = "1"
+aws-smithy-runtime = "1"
+aws-smithy-types = { version = "1", default-features = false, features = [
+  "hyper-0-14-x",
+] }
+aws-endpoint = "0.60"
+aws-types = "1"
 etcd-client = { package = "madsim-etcd-client", version = "0.4" }
 futures-async-stream = "0.2.9"
 hytra = "0.1"
-rdkafka = { package = "madsim-rdkafka", version = "0.3.0", features = [
+rdkafka = { package = "madsim-rdkafka", version = "0.3.1", features = [
   "cmake-build",
 ] }
 hashbrown = { version = "0.14.0", features = [
@@ -109,20 +116,34 @@ hashbrown = { version = "0.14.0", features = [
   "nightly",
 ] }
 criterion = { version = "0.5", features = ["async_futures"] }
-tonic = { package = "madsim-tonic", version = "0.4.0" }
+tonic = { package = "madsim-tonic", version = "0.4.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
+otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "58c1f003484449d7c6dd693b348bf19dd44889cb" }
 prost = { version = "0.12" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "5cdcdffd24f4624a0a43f92c5f368988169a799b", features = [
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "b4f4ca3c6d29092bd331925ead0bcceaa38bdd57", features = [
   "prometheus",
 ] }
-arrow-array = "48"
-arrow-cast = "48"
-arrow-schema = "48"
-arrow-buffer = "48"
-arrow-flight = "48"
-arrow-select = "48"
-arrow-ord = "48"
-thiserror-ext = "0.0.6"
+arrow-array = "49"
+arrow-arith = "49"
+arrow-cast = "49"
+arrow-schema = "49"
+arrow-buffer = "49"
+arrow-flight = "49"
+arrow-select = "49"
+arrow-ord = "49"
+arrow-row = "49"
+arrow-udf-wasm = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "f9a9e0d" }
+arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
+arrow-buffer-deltalake = { package = "arrow-buffer", version = "48.0.1" }
+arrow-cast-deltalake = { package = "arrow-cast", version = "48.0.1" }
+arrow-schema-deltalake = { package = "arrow-schema", version = "48.0.1" }
+# Use a forked version which removes the dependencies on dynamo db to reduce
+# compile time and binary size.
+deltalake = { git = "https://github.com/risingwavelabs/delta-rs", rev = "5c2dccd4640490202ffe98adbd13b09cef8e007b", features = [
+  "s3-no-concurrent-write",
+] }
+parquet = "49"
+thiserror-ext = "0.0.11"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
   "profiling",
@@ -146,6 +167,7 @@ risingwave_frontend = { path = "./src/frontend" }
 risingwave_hummock_sdk = { path = "./src/storage/hummock_sdk" }
 risingwave_hummock_test = { path = "./src/storage/hummock_test" }
 risingwave_hummock_trace = { path = "./src/storage/hummock_trace" }
+risingwave_mem_table_spill_test = { path = "./src/stream/spill_test" }
 risingwave_meta = { path = "./src/meta" }
 risingwave_meta_service = { path = "./src/meta/service" }
 risingwave_meta_model_migration = { path = "src/meta/model_v2/migration" }
@@ -161,10 +183,11 @@ risingwave_sqlsmith = { path = "./src/tests/sqlsmith" }
 risingwave_storage = { path = "./src/storage" }
 risingwave_stream = { path = "./src/stream" }
 risingwave_test_runner = { path = "./src/test_runner" }
-risingwave_udf = { path = "./src/udf" }
+risingwave_udf = { path = "./src/expr/udf" }
 risingwave_variables = { path = "./src/utils/variables" }
 risingwave_java_binding = { path = "./src/java_binding" }
 risingwave_jni_core = { path = "src/jni_core" }
+tokio-util = "0.7"
 
 [workspace.lints.rust]
 # `forbid` will also prevent the misuse of `#[allow(unused)]`
@@ -186,8 +209,14 @@ explicit_iter_loop = "warn"
 inconsistent_struct_constructor = "warn"
 unused_async = "warn"
 map_flatten = "warn"
-no_effect_underscore_binding = "warn"
 await_holding_lock = "warn"
+# For private code, this is a little pedantic and not worth fixing.
+# &Vec or &String is acceptable
+ptr_arg = "allow"
+# a little pedantic
+get_first = "allow"
+# https://github.com/rust-lang/rust-clippy/issues/12016
+blocks_in_conditions = "allow"
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
@@ -248,3 +277,6 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
+
+[workspace.metadata.dylint]
+libraries = [{ path = "./lints" }]

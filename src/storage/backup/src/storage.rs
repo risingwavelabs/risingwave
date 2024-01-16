@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,7 +31,11 @@ pub type MetaSnapshotStorageRef = Arc<ObjectStoreMetaSnapshotStorage>;
 #[async_trait::async_trait]
 pub trait MetaSnapshotStorage: 'static + Sync + Send {
     /// Creates a snapshot.
-    async fn create<S: Metadata>(&self, snapshot: &MetaSnapshot<S>) -> BackupResult<()>;
+    async fn create<S: Metadata>(
+        &self,
+        snapshot: &MetaSnapshot<S>,
+        remarks: Option<String>,
+    ) -> BackupResult<()>;
 
     /// Gets a snapshot by id.
     async fn get<S: Metadata>(&self, id: MetaSnapshotId) -> BackupResult<MetaSnapshot<S>>;
@@ -112,7 +116,11 @@ impl ObjectStoreMetaSnapshotStorage {
 
 #[async_trait::async_trait]
 impl MetaSnapshotStorage for ObjectStoreMetaSnapshotStorage {
-    async fn create<S: Metadata>(&self, snapshot: &MetaSnapshot<S>) -> BackupResult<()> {
+    async fn create<S: Metadata>(
+        &self,
+        snapshot: &MetaSnapshot<S>,
+        remarks: Option<String>,
+    ) -> BackupResult<()> {
         let path = self.get_snapshot_path(snapshot.id);
         self.store.upload(&path, snapshot.encode()?.into()).await?;
 
@@ -125,6 +133,7 @@ impl MetaSnapshotStorage for ObjectStoreMetaSnapshotStorage {
                 snapshot.id,
                 snapshot.metadata.hummock_version_ref(),
                 snapshot.format_version,
+                remarks,
             ));
         self.update_manifest(new_manifest).await?;
         Ok(())

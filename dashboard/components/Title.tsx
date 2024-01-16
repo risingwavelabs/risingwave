@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import React from "react"
 
 function Title({ children }: { children: React.ReactNode }) {
   return (
-    <Text mb={2} textColor="teal.500" fontWeight="semibold" lineHeight="6">
+    <Text mb={2} textColor="blue.500" fontWeight="semibold" lineHeight="6">
       {children}
     </Text>
   )

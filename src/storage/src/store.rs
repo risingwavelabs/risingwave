@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::default::Default;
 use std::future::Future;
 use std::ops::Bound;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use prost::Message;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::table_watermark::{
+    TableWatermarks, VnodeWatermark, WatermarkDirection,
+};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
-    TracedInitOptions, TracedNewLocalOptions, TracedPrefetchOptions, TracedReadOptions,
-    TracedWriteOptions,
+    TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
+    TracedReadOptions, TracedSealCurrentEpochOptions, TracedWriteOptions,
 };
 
 use crate::error::{StorageError, StorageResult};
@@ -36,15 +41,14 @@ use crate::storage_value::StorageValue;
 
 pub trait StaticSendSync = Send + Sync + 'static;
 
-pub trait StateStoreIter: StaticSendSync {
+pub trait StateStoreIter: Send + Sync {
     type Item: Send;
 
     fn next(&mut self) -> impl Future<Output = StorageResult<Option<Self::Item>>> + Send + '_;
 }
 
-pub trait StateStoreIterStreamTrait<Item> = Stream<Item = StorageResult<Item>> + Send + 'static;
 pub trait StateStoreIterExt: StateStoreIter {
-    type ItemStream: StateStoreIterStreamTrait<<Self as StateStoreIter>::Item>;
+    type ItemStream: Stream<Item = StorageResult<<Self as StateStoreIter>::Item>> + Send;
 
     fn into_stream(self) -> Self::ItemStream;
 }
@@ -120,7 +124,7 @@ impl<S: StateStoreRead> StateStoreReadExt for S {
         mut read_options: ReadOptions,
     ) -> StorageResult<Vec<StateStoreIterItem>> {
         if limit.is_some() {
-            read_options.prefetch_options.preload = false;
+            read_options.prefetch_options.prefetch = false;
         }
         let limit = limit.unwrap_or(usize::MAX);
         self.iter(key_range, epoch, read_options)
@@ -151,7 +155,7 @@ pub trait StateStoreWrite: StaticSendSync {
         kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
-    ) -> impl Future<Output = StorageResult<usize>> + Send + '_;
+    ) -> StorageResult<usize>;
 }
 
 #[derive(Default, Debug)]
@@ -160,6 +164,8 @@ pub struct SyncResult {
     pub sync_size: usize,
     /// The sst_info of sync.
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
+    /// The collected table watermarks written by state tables.
+    pub table_watermarks: HashMap<TableId, TableWatermarks>,
 }
 
 pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
@@ -245,12 +251,12 @@ pub trait LocalStateStore: StaticSendSync {
     /// In some cases like replicated state table, state table may not be empty initially,
     /// as such we need to wait for `epoch.prev` checkpoint to complete,
     /// hence this interface is made async.
-    fn init(&mut self, epoch: InitOptions) -> impl Future<Output = StorageResult<()>> + Send + '_;
+    fn init(&mut self, opts: InitOptions) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
     /// Updates the monotonically increasing write epoch to `new_epoch`.
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
     /// the previous write epoch is sealed.
-    fn seal_current_epoch(&mut self, next_epoch: u64);
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
 
     /// Check existence of a given `key_range`.
     /// It is better to provide `prefix_hint` in `read_options`, which will be used
@@ -268,23 +274,35 @@ pub trait LocalStateStore: StaticSendSync {
     ) -> impl Future<Output = StorageResult<bool>> + Send + '_;
 }
 
-/// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory
+/// If `prefetch` is true, prefetch will be enabled. Prefetching may increase the memory
 /// footprint of the CN process because the prefetched blocks cannot be evicted.
+/// Since the streaming-read of object-storage may hung in some case, we still use sync short read
+/// for both batch-query and streaming process. So this configure is unused.
 #[derive(Default, Clone, Copy)]
 pub struct PrefetchOptions {
-    /// `exhaust_iter` is set `true` only if the return value of `iter()` will definitely be
-    /// exhausted, i.e., will iterate until end.
-    pub preload: bool,
+    pub prefetch: bool,
+    pub for_large_query: bool,
 }
 
 impl PrefetchOptions {
-    pub fn new_for_large_range_scan() -> Self {
-        Self::new_with_exhaust_iter(true)
+    pub fn prefetch_for_large_range_scan() -> Self {
+        Self {
+            prefetch: true,
+            for_large_query: true,
+        }
     }
 
-    pub fn new_with_exhaust_iter(exhaust_iter: bool) -> Self {
+    pub fn prefetch_for_small_range_scan() -> Self {
         Self {
-            preload: exhaust_iter,
+            prefetch: true,
+            for_large_query: false,
+        }
+    }
+
+    pub fn new(prefetch: bool, for_large_query: bool) -> Self {
+        Self {
+            prefetch,
+            for_large_query,
         }
     }
 }
@@ -292,7 +310,8 @@ impl PrefetchOptions {
 impl From<TracedPrefetchOptions> for PrefetchOptions {
     fn from(value: TracedPrefetchOptions) -> Self {
         Self {
-            preload: value.exhaust_iter,
+            prefetch: value.prefetch,
+            for_large_query: value.for_large_query,
         }
     }
 }
@@ -300,7 +319,8 @@ impl From<TracedPrefetchOptions> for PrefetchOptions {
 impl From<PrefetchOptions> for TracedPrefetchOptions {
     fn from(value: PrefetchOptions) -> Self {
         Self {
-            exhaust_iter: value.preload,
+            prefetch: value.prefetch,
+            for_large_query: value.for_large_query,
         }
     }
 }
@@ -377,6 +397,18 @@ impl From<TracedWriteOptions> for WriteOptions {
     }
 }
 
+pub trait CheckOldValueEquality = Fn(&Bytes, &Bytes) -> bool + Send + Sync;
+
+pub static CHECK_BYTES_EQUAL: LazyLock<Arc<dyn CheckOldValueEquality>> =
+    LazyLock::new(|| Arc::new(|first: &Bytes, second: &Bytes| first == second));
+
+#[derive(Default, Clone)]
+pub enum OpConsistencyLevel {
+    #[default]
+    Inconsistent,
+    ConsistentOldValue(Arc<dyn CheckOldValueEquality>),
+}
+
 #[derive(Clone, Default)]
 pub struct NewLocalOptions {
     pub table_id: TableId,
@@ -387,7 +419,7 @@ pub struct NewLocalOptions {
     ///
     /// 2. The old value passed from
     /// `update` and `delete` should match the original stored value.
-    pub is_consistent_op: bool,
+    pub op_consistency_level: OpConsistencyLevel,
     pub table_option: TableOption,
 
     /// Indicate if this is replicated. If it is, we should not
@@ -399,7 +431,12 @@ impl From<TracedNewLocalOptions> for NewLocalOptions {
     fn from(value: TracedNewLocalOptions) -> Self {
         Self {
             table_id: value.table_id.into(),
-            is_consistent_op: value.is_consistent_op,
+            op_consistency_level: match value.op_consistency_level {
+                TracedOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
+                TracedOpConsistencyLevel::ConsistentOldValue => {
+                    OpConsistencyLevel::ConsistentOldValue(CHECK_BYTES_EQUAL.clone())
+                }
+            },
             table_option: value.table_option.into(),
             is_replicated: value.is_replicated,
         }
@@ -410,7 +447,12 @@ impl From<NewLocalOptions> for TracedNewLocalOptions {
     fn from(value: NewLocalOptions) -> Self {
         Self {
             table_id: value.table_id.into(),
-            is_consistent_op: value.is_consistent_op,
+            op_consistency_level: match value.op_consistency_level {
+                OpConsistencyLevel::Inconsistent => TracedOpConsistencyLevel::Inconsistent,
+                OpConsistencyLevel::ConsistentOldValue(_) => {
+                    TracedOpConsistencyLevel::ConsistentOldValue
+                }
+            },
             table_option: value.table_option.into(),
             is_replicated: value.is_replicated,
         }
@@ -418,10 +460,14 @@ impl From<NewLocalOptions> for TracedNewLocalOptions {
 }
 
 impl NewLocalOptions {
-    pub fn new(table_id: TableId, is_consistent_op: bool, table_option: TableOption) -> Self {
+    pub fn new(
+        table_id: TableId,
+        op_consistency_level: OpConsistencyLevel,
+        table_option: TableOption,
+    ) -> Self {
         NewLocalOptions {
             table_id,
-            is_consistent_op,
+            op_consistency_level,
             table_option,
             is_replicated: false,
         }
@@ -429,12 +475,12 @@ impl NewLocalOptions {
 
     pub fn new_replicated(
         table_id: TableId,
-        is_consistent_op: bool,
+        op_consistency_level: OpConsistencyLevel,
         table_option: TableOption,
     ) -> Self {
         NewLocalOptions {
             table_id,
-            is_consistent_op,
+            op_consistency_level,
             table_option,
             is_replicated: true,
         }
@@ -443,7 +489,7 @@ impl NewLocalOptions {
     pub fn for_test(table_id: TableId) -> Self {
         Self {
             table_id,
-            is_consistent_op: false,
+            op_consistency_level: OpConsistencyLevel::Inconsistent,
             table_option: TableOption {
                 retention_seconds: None,
             },
@@ -482,5 +528,68 @@ impl From<TracedInitOptions> for InitOptions {
         InitOptions {
             epoch: value.epoch.into(),
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SealCurrentEpochOptions {
+    pub table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>)>,
+}
+
+impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
+    fn from(value: SealCurrentEpochOptions) -> Self {
+        TracedSealCurrentEpochOptions {
+            table_watermarks: value.table_watermarks.map(|(direction, watermarks)| {
+                (
+                    direction == WatermarkDirection::Ascending,
+                    watermarks
+                        .iter()
+                        .map(|watermark| Message::encode_to_vec(&watermark.to_protobuf()))
+                        .collect(),
+                )
+            }),
+        }
+    }
+}
+
+impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
+    fn from(value: TracedSealCurrentEpochOptions) -> SealCurrentEpochOptions {
+        SealCurrentEpochOptions {
+            table_watermarks: value.table_watermarks.map(|(is_ascending, watermarks)| {
+                (
+                    if is_ascending {
+                        WatermarkDirection::Ascending
+                    } else {
+                        WatermarkDirection::Descending
+                    },
+                    watermarks
+                        .iter()
+                        .map(|serialized_watermark| {
+                            Message::decode(serialized_watermark.as_slice())
+                                .map(|pb| VnodeWatermark::from_protobuf(&pb))
+                                .expect("should not failed")
+                        })
+                        .collect(),
+                )
+            }),
+        }
+    }
+}
+
+impl SealCurrentEpochOptions {
+    pub fn new(watermarks: Vec<VnodeWatermark>, direction: WatermarkDirection) -> Self {
+        Self {
+            table_watermarks: Some((direction, watermarks)),
+        }
+    }
+
+    pub fn no_watermark() -> Self {
+        Self {
+            table_watermarks: None,
+        }
+    }
+
+    pub fn for_test() -> Self {
+        Self::no_watermark()
     }
 }

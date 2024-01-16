@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,7 +54,9 @@ impl<K: Ord, V> JoinRowSet<K, V> {
         key: K,
         value: V,
     ) -> Result<&'_ mut V, JoinRowSetOccupiedError<'_, K, V>> {
-        if let Self::Vec(inner) = self && inner.len() >= MAX_VEC_SIZE {
+        if let Self::Vec(inner) = self
+            && inner.len() >= MAX_VEC_SIZE
+        {
             let btree = BTreeMap::from_iter(inner.drain(..));
             mem::swap(self, &mut Self::BTree(btree));
         }
@@ -91,7 +93,9 @@ impl<K: Ord, V> JoinRowSet<K, V> {
                 .position(|elem| &elem.0 == key)
                 .map(|pos| inner.swap_remove(pos).1),
         };
-        if let Self::BTree(inner) = self && inner.len() <= MAX_VEC_SIZE / 2 {
+        if let Self::BTree(inner) = self
+            && inner.len() <= MAX_VEC_SIZE / 2
+        {
             let btree = mem::take(inner);
             let vec = Vec::from_iter(btree);
             mem::swap(self, &mut Self::Vec(vec));

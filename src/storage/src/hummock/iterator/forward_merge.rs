@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 #[cfg(test)]
 mod test {
-    use std::future::{pending, poll_fn, Future};
+    use std::future::{pending, poll_fn};
     use std::iter::once;
     use std::sync::Arc;
     use std::task::Poll;
@@ -304,12 +304,8 @@ mod test {
     impl HummockIterator for CancellationTestIterator {
         type Direction = Forward;
 
-        type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-        type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-        type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-
-        fn next(&mut self) -> Self::NextFuture<'_> {
-            async { pending::<HummockResult<()>>().await }
+        async fn next(&mut self) -> HummockResult<()> {
+            pending::<HummockResult<()>>().await
         }
 
         fn key(&self) -> FullKey<&[u8]> {
@@ -330,12 +326,12 @@ mod test {
             true
         }
 
-        fn rewind(&mut self) -> Self::RewindFuture<'_> {
-            async { Ok(()) }
+        async fn rewind(&mut self) -> HummockResult<()> {
+            Ok(())
         }
 
-        fn seek<'a>(&'a mut self, _key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
-            async { Ok(()) }
+        async fn seek<'a>(&'a mut self, _key: FullKey<&'a [u8]>) -> HummockResult<()> {
+            Ok(())
         }
 
         fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}

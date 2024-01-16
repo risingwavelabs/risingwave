@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::is_system_schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
@@ -81,11 +82,7 @@ pub async fn handle_drop_schema(
             }
         }
         Some(DropMode::Cascade) => {
-            return Err(ErrorCode::NotImplemented(
-                "drop schema with cascade mode".to_string(),
-                6773.into(),
-            )
-            .into())
+            bail_not_implemented!(issue = 6773, "drop schema with cascade mode");
         }
     };
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::any::{type_name, Any};
-use std::sync::Arc;
-
 pub use self::prost::*;
-use crate::error::ErrorCode::InternalError;
-use crate::error::{Result, RwError};
 
 pub mod addr;
 pub mod chunk_coalesce;
@@ -30,9 +25,11 @@ mod future_utils;
 pub mod hash_util;
 pub mod iter_util;
 pub mod memcmp_encoding;
+pub mod meta_addr;
 pub mod panic;
 pub mod pretty_bytes;
 pub mod prost;
+pub mod query_log;
 pub mod resource_util;
 pub mod row_id;
 pub mod row_serde;
@@ -47,44 +44,7 @@ pub mod worker_util;
 
 pub use future_utils::{
     await_future_with_monitor_error_stream, drop_either_future, pending_on_none, select_all,
+    RwFutureExt, RwTryStreamExt,
 };
 #[macro_use]
 pub mod match_util;
-
-pub fn downcast_ref<S, T>(source: &S) -> Result<&T>
-where
-    S: AsRef<dyn Any> + ?Sized,
-    T: 'static,
-{
-    source.as_ref().downcast_ref::<T>().ok_or_else(|| {
-        RwError::from(InternalError(format!(
-            "Failed to cast to {}",
-            type_name::<T>()
-        )))
-    })
-}
-
-pub fn downcast_arc<T>(source: Arc<dyn Any + Send + Sync>) -> Result<Arc<T>>
-where
-    T: 'static + Send + Sync,
-{
-    source.downcast::<T>().map_err(|_| {
-        RwError::from(InternalError(format!(
-            "Failed to cast to {}",
-            type_name::<T>()
-        )))
-    })
-}
-
-pub fn downcast_mut<S, T>(source: &mut S) -> Result<&mut T>
-where
-    S: AsMut<dyn Any> + ?Sized,
-    T: 'static,
-{
-    source.as_mut().downcast_mut::<T>().ok_or_else(|| {
-        RwError::from(InternalError(format!(
-            "Failed to cast to {}",
-            type_name::<T>()
-        )))
-    })
-}

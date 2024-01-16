@@ -8,3 +8,4 @@ source ci/scripts/run-unit-test.sh
 
 echo "--- Show sccache stats"
 sccache --show-stats
+sccache --zero-stats

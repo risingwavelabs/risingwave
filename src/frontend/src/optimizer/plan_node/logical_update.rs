@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,8 @@ use super::{
     LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
-use crate::expr::{ExprImpl, ExprRewriter};
+use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -88,6 +89,12 @@ impl ExprRewritable for LogicalUpdate {
         let mut new = self.core.clone();
         new.exprs = new.exprs.into_iter().map(|e| r.rewrite_expr(e)).collect();
         Self::from(new).into()
+    }
+}
+
+impl ExprVisitable for LogicalUpdate {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.exprs.iter().for_each(|e| v.visit_expr(e));
     }
 }
 

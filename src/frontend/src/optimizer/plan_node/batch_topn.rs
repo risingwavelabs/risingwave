@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
 use crate::optimizer::plan_node::batch::BatchPlanRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{BatchLimit, ToLocalBatch};
 use crate::optimizer::property::{Order, RequiredDist};
 
@@ -116,3 +117,5 @@ impl ToLocalBatch for BatchTopN {
 }
 
 impl ExprRewritable for BatchTopN {}
+
+impl ExprVisitable for BatchTopN {}

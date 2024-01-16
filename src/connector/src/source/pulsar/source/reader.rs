@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,7 +32,6 @@ use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::ROWID_PREFIX;
 use risingwave_common::error::RwError;
 
-use crate::aws_utils::{ACCESS_KEY, REGION, SECRET_ACCESS};
 use crate::error::ConnectorError;
 use crate::parser::ParserConfig;
 use crate::source::pulsar::split::PulsarSplit;
@@ -163,7 +162,10 @@ impl SplitReader for PulsarBrokerReader {
     ) -> Result<Self> {
         ensure!(splits.len() == 1, "only support single split");
         let split = splits.into_iter().next().unwrap();
-        let pulsar = props.common.build_client().await?;
+        let pulsar = props
+            .common
+            .build_client(&props.oauth, &props.aws_auth_props)
+            .await?;
         let topic = split.topic.to_string();
 
         tracing::debug!("creating consumer for pulsar split topic {}", topic,);
@@ -430,24 +432,20 @@ impl PulsarIcebergReader {
             ),
         );
 
-        if let Some(s3_configs) = self.props.common.oauth.as_ref().map(|s| &s.s3_credentials) {
-            if let Some(region) = s3_configs.get(REGION) {
-                iceberg_configs.insert("iceberg.table.io.region".to_string(), region.to_string());
-            }
-
-            if let Some(access_key) = s3_configs.get(ACCESS_KEY) {
-                iceberg_configs.insert(
-                    "iceberg.table.io.access_key_id".to_string(),
-                    access_key.to_string(),
-                );
-            }
-
-            if let Some(secret_key) = s3_configs.get(SECRET_ACCESS) {
-                iceberg_configs.insert(
-                    "iceberg.table.io.secret_access_key".to_string(),
-                    secret_key.to_string(),
-                );
-            }
+        if let Some(region) = &self.props.aws_auth_props.region {
+            iceberg_configs.insert("iceberg.table.io.region".to_string(), region.to_string());
+        }
+        if let Some(access_key) = &self.props.aws_auth_props.access_key {
+            iceberg_configs.insert(
+                "iceberg.table.io.access_key_id".to_string(),
+                access_key.to_string(),
+            );
+        }
+        if let Some(secret_key) = &self.props.aws_auth_props.secret_key {
+            iceberg_configs.insert(
+                "iceberg.table.io.secret_access_key".to_string(),
+                secret_key.to_string(),
+            );
         }
 
         iceberg_configs.insert("iceberg.table.io.bucket".to_string(), bucket.to_string());

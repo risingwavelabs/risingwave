@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,5 +21,5 @@ use risingwave_expr::function;
     type_infer = "|args| Ok(args[0].unnest_list().clone())"
 )]
 fn unnest(list: ListRef<'_>) -> impl Iterator<Item = Option<ScalarRefImpl<'_>>> {
-    list.flatten().into_iter()
+    list.flatten().iter()
 }

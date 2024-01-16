@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,7 +34,8 @@ use tokio::task_local;
 use crate::write::{TraceWriter, TraceWriterImpl};
 use crate::{
     ConcurrentIdGenerator, Operation, OperationResult, Record, RecordId, RecordIdGenerator,
-    TracedInitOptions, TracedNewLocalOptions, TracedReadOptions, TracedSubResp, UniqueIdGenerator,
+    TracedInitOptions, TracedNewLocalOptions, TracedReadOptions, TracedSealCurrentEpochOptions,
+    TracedSubResp, UniqueIdGenerator,
 };
 
 // Global collector instance used for trace collection
@@ -205,8 +206,12 @@ impl TraceSpan {
         Self::new_global_op(Operation::LocalStorageIsDirty, storage_type)
     }
 
-    pub fn new_seal_current_epoch_span(epoch: u64, storage_type: StorageType) -> MayTraceSpan {
-        Self::new_global_op(Operation::SealCurrentEpoch(epoch), storage_type)
+    pub fn new_seal_current_epoch_span(
+        epoch: u64,
+        opts: TracedSealCurrentEpochOptions,
+        storage_type: StorageType,
+    ) -> MayTraceSpan {
+        Self::new_global_op(Operation::SealCurrentEpoch { epoch, opts }, storage_type)
     }
 
     pub fn new_clear_shared_buffer_span() -> MayTraceSpan {

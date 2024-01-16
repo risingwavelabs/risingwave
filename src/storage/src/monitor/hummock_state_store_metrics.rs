@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ use std::sync::{Arc, OnceLock};
 use prometheus::core::{AtomicU64, Collector, Desc, GenericCounter, GenericGauge};
 use prometheus::{
     exponential_buckets, histogram_opts, proto, register_histogram_vec_with_registry,
-    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
-    register_int_gauge_with_registry, Gauge, IntGauge, IntGaugeVec, Opts, Registry,
+    register_int_counter_vec_with_registry, register_int_gauge_with_registry, Gauge, IntGauge,
+    Opts, Registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
@@ -75,8 +75,6 @@ pub struct HummockStateStoreMetrics {
     pub uploader_uploading_task_size: GenericGauge<AtomicU64>,
 
     // memory
-    pub mem_table_memory_size: IntGaugeVec,
-    pub mem_table_item_count: IntGaugeVec,
     pub mem_table_spill_counts: RelabeledCounterVec,
 }
 
@@ -359,22 +357,6 @@ impl HummockStateStoreMetrics {
             metric_level,
         );
 
-        let mem_table_memory_size = register_int_gauge_vec_with_registry!(
-            "state_store_mem_table_memory_size",
-            "Memory usage of mem_table",
-            &["table_id", "instance_id"],
-            registry
-        )
-        .unwrap();
-
-        let mem_table_item_count = register_int_gauge_vec_with_registry!(
-            "state_store_mem_table_item_count",
-            "Item counts in mem_table",
-            &["table_id", "instance_id"],
-            registry
-        )
-        .unwrap();
-
         let mem_table_spill_counts = register_int_counter_vec_with_registry!(
             "state_store_mem_table_spill_counts",
             "Total number of mem table spill occurs for one table",
@@ -413,8 +395,6 @@ impl HummockStateStoreMetrics {
             spill_task_size_from_sealed: spill_task_size.with_label_values(&["sealed"]),
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
-            mem_table_memory_size,
-            mem_table_item_count,
             mem_table_spill_counts,
         }
     }

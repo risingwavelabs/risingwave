@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -57,15 +57,6 @@ pub struct OptimizerContext {
     overwrite_options: OverwriteOptions,
 }
 
-// Still not sure if we need to introduce "on_optimization_finish" or other common callback methods,
-impl Drop for OptimizerContext {
-    fn drop(&mut self) {
-        if let Some(warning) = self.session_timezone.borrow().warning() {
-            self.warn_to_user(warning);
-        };
-    }
-}
-
 pub type OptimizerContextRef = Rc<OptimizerContext>;
 
 impl OptimizerContext {
@@ -78,7 +69,7 @@ impl OptimizerContext {
     /// Create a new [`OptimizerContext`] from the given [`HandlerArgs`] and [`ExplainOptions`].
     pub fn new(mut handler_args: HandlerArgs, explain_options: ExplainOptions) -> Self {
         let session_timezone = RefCell::new(SessionTimezone::new(
-            handler_args.session.config().get_timezone().to_owned(),
+            handler_args.session.config().timezone().to_owned(),
         ));
         let overwrite_options = OverwriteOptions::new(&mut handler_args);
         Self {

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,8 @@ use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
 };
-use crate::expr::{Expr, ExprDisplay, ExprRewriter, InequalityInputPair};
+use crate::expr::{Expr, ExprDisplay, ExprRewriter, ExprVisitor, InequalityInputPair};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::Distribution;
@@ -135,37 +136,45 @@ impl StreamHashJoin {
                     continue;
                 }
 
-                let (internal, do_state_cleaning) = if key_required_larger < key_required_smaller {
-                    (
-                        l2i.try_map(key_required_larger),
-                        if !equal_condition_clean_state
-                            && clean_left_state_conjunction_idx.is_none()
-                        {
-                            clean_left_state_conjunction_idx = Some(conjunction_idx);
-                            true
-                        } else {
-                            false
-                        },
-                    )
-                } else {
-                    (
-                        r2i.try_map(key_required_larger - left_cols_num),
-                        if !equal_condition_clean_state
-                            && clean_right_state_conjunction_idx.is_none()
-                        {
-                            clean_right_state_conjunction_idx = Some(conjunction_idx);
-                            true
-                        } else {
-                            false
-                        },
-                    )
-                };
+                let (internal_col1, internal_col2, do_state_cleaning) =
+                    if key_required_larger < key_required_smaller {
+                        (
+                            l2i.try_map(key_required_larger),
+                            r2i.try_map(key_required_smaller - left_cols_num),
+                            if !equal_condition_clean_state
+                                && clean_left_state_conjunction_idx.is_none()
+                            {
+                                clean_left_state_conjunction_idx = Some(conjunction_idx);
+                                true
+                            } else {
+                                false
+                            },
+                        )
+                    } else {
+                        (
+                            r2i.try_map(key_required_larger - left_cols_num),
+                            l2i.try_map(key_required_smaller),
+                            if !equal_condition_clean_state
+                                && clean_right_state_conjunction_idx.is_none()
+                            {
+                                clean_right_state_conjunction_idx = Some(conjunction_idx);
+                                true
+                            } else {
+                                false
+                            },
+                        )
+                    };
                 let mut is_valuable_inequality = do_state_cleaning;
-                if let Some(internal) = internal
+                if let Some(internal) = internal_col1
                     && !watermark_columns.contains(internal)
                 {
                     watermark_columns.insert(internal);
                     is_valuable_inequality = true;
+                }
+                if let Some(internal) = internal_col2
+                    && !watermark_columns.contains(internal)
+                {
+                    watermark_columns.insert(internal);
                 }
                 if is_valuable_inequality {
                     inequality_pairs.push((
@@ -452,5 +461,11 @@ impl ExprRewritable for StreamHashJoin {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core, self.eq_join_predicate.rewrite_exprs(r)).into()
+    }
+}
+
+impl ExprVisitable for StreamHashJoin {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -335,7 +335,6 @@ impl ColIndexMapping {
             r#type: strategy.r#type,
             dist_key_indices: map(&strategy.dist_key_indices)?,
             output_indices: map(&strategy.output_indices)?,
-            downstream_table_name: strategy.downstream_table_name.clone(),
         })
     }
 }

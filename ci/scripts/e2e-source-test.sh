@@ -56,9 +56,16 @@ echo "--- inline cdc test"
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc_inline/**/*.slt'
 
+echo "--- opendal source test"
+sqllogictest -p 4566 -d dev './e2e_test/source/opendal/**/*.slt'
+
 echo "--- mysql & postgres cdc validate test"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.mysql.slt'
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.postgres.slt'
+
+# cdc share stream test cases
+export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.share_stream.slt'
 
 echo "--- mysql & postgres load and check"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.load.slt'
@@ -66,15 +73,11 @@ sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.load.slt'
 sleep 10
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
 
-# cdc share stream test cases
-export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
-sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.share_stream.slt'
-
-
 # kill cluster
 cargo make kill
-echo "cluster killed "
+echo "> cluster killed "
 
+echo "--- mysql & postgres recovery check"
 # insert into mytest database (cdc.share_stream.slt)
 mysql --protocol=tcp -u root mytest -e "INSERT INTO products
        VALUES (default,'RisingWave','Next generation Streaming Database'),
@@ -85,16 +88,19 @@ mysql --protocol=tcp -u root mytest -e "INSERT INTO products
 
 # insert new rows
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc_insert.sql
+echo "> inserted new rows into mysql"
+
 psql < ./e2e_test/source/cdc/postgres_cdc_insert.sql
-echo "inserted new rows into mysql and postgres"
+echo "> inserted new rows into postgres"
 
 # start cluster w/o clean-data
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+unset RISINGWAVE_CI
+export RUST_LOG="events::stream::message::chunk=trace,risingwave_stream=debug,risingwave_batch=info,risingwave_storage=info" \
 
 cargo make dev ci-1cn-1fe-with-recovery
-echo "wait for cluster recovery finish"
+echo "> wait for cluster recovery finish"
 sleep 20
-echo "check mviews after cluster recovery"
+echo "> check mviews after cluster recovery"
 # check results
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
 
@@ -105,6 +111,7 @@ echo "--- Kill cluster"
 cargo make ci-kill
 
 echo "--- e2e, ci-1cn-1fe, protobuf schema registry"
+export RISINGWAVE_CI=true
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-1cn-1fe
 python3 -m pip install requests protobuf confluent-kafka

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use anyhow::{anyhow, Result};
 use futures::{pin_mut, StreamExt};
-use risingwave_common::catalog::TableOption;
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_rpc_client::MetaClient;
@@ -24,7 +21,7 @@ use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::Distribution;
+use risingwave_storage::table::TableDistribution;
 use risingwave_storage::StateStore;
 use risingwave_stream::common::table::state_table::StateTable;
 
@@ -66,34 +63,27 @@ pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -
             .collect(),
         table.pk().iter().map(|x| x.order_type).collect(),
         table.pk().iter().map(|x| x.column_index).collect(),
-        Distribution::all_vnodes(table.distribution_key().to_vec()), // scan all vnodes
+        TableDistribution::all(table.distribution_key().to_vec()), // scan all vnodes
         Some(table.value_indices.clone()),
     )
     .await
 }
 
-pub fn make_storage_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StorageTable<S> {
-    StorageTable::new_partial(
+pub fn make_storage_table<S: StateStore>(
+    hummock: S,
+    table: &TableCatalog,
+) -> Result<StorageTable<S>> {
+    let output_columns_ids = table
+        .columns()
+        .iter()
+        .map(|x| x.column_desc.column_id)
+        .collect();
+    Ok(StorageTable::new_partial(
         hummock,
-        table.id,
-        table
-            .columns()
-            .iter()
-            .map(|x| x.column_desc.clone())
-            .collect(),
-        table
-            .columns()
-            .iter()
-            .map(|x| x.column_desc.column_id)
-            .collect(),
-        table.pk().iter().map(|x| x.order_type).collect(),
-        table.pk().iter().map(|x| x.column_index).collect(),
-        Distribution::all_vnodes(table.distribution_key().to_vec()),
-        TableOption::build_table_option(&HashMap::new()),
-        table.value_indices.clone(),
-        table.read_prefix_len_hint,
-        table.version.is_some(),
-    )
+        output_columns_ids,
+        Some(TableDistribution::all_vnodes()),
+        &table.table_desc().try_to_protobuf()?,
+    ))
 }
 
 pub async fn scan(context: &CtlContext, mv_name: String, data_dir: Option<String>) -> Result<()> {
@@ -119,12 +109,12 @@ async fn do_scan(table: TableCatalog, hummock: MonitoredStateStore<HummockStorag
 
     println!("Rows:");
     let read_epoch = hummock.inner().get_pinned_version().max_committed_epoch();
-    let storage_table = make_storage_table(hummock, &table);
+    let storage_table = make_storage_table(hummock, &table)?;
     let stream = storage_table
         .batch_iter(
             HummockReadEpoch::Committed(read_epoch),
             true,
-            PrefetchOptions::default(),
+            PrefetchOptions::prefetch_for_large_range_scan(),
         )
         .await?;
     pin_mut!(stream);

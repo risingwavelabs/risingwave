@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use itertools::Itertools;
 use risingwave_common::array::*;
-use risingwave_common::types::ToOwnedDatum;
 use risingwave_expr::function;
 
 /// Returns a new array removing all the duplicates from the input array
@@ -52,7 +51,7 @@ use risingwave_expr::function;
 
 #[function("array_distinct(anyarray) -> anyarray")]
 pub fn array_distinct(list: ListRef<'_>) -> ListValue {
-    ListValue::new(list.iter().unique().map(|x| x.to_owned_datum()).collect())
+    ListValue::from_datum_iter(&list.data_type(), list.iter().unique())
 }
 
 #[cfg(test)]
@@ -63,8 +62,8 @@ mod tests {
 
     #[test]
     fn test_array_distinct_array_of_primitives() {
-        let array = ListValue::new([42, 43, 42].into_iter().map(|x| Some(x.into())).collect());
-        let expected = ListValue::new([42, 43].into_iter().map(|x| Some(x.into())).collect());
+        let array = ListValue::from_iter([42, 43, 42]);
+        let expected = ListValue::from_iter([42, 43]);
         let actual = array_distinct(array.as_scalar_ref());
         assert_eq!(actual, expected);
     }

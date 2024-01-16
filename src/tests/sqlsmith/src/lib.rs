@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,9 @@
 #![feature(if_let_guard)]
 #![feature(lazy_cell)]
 #![feature(box_patterns)]
+#![feature(register_tool)]
+#![register_tool(rw)]
+#![allow(rw::format_error)] // test code
 
 risingwave_expr_impl::enable!();
 
@@ -34,8 +37,8 @@ use risingwave_sqlparser::parser::Parser;
 use crate::sql_gen::SqlGenerator;
 
 pub mod reducer;
-pub mod runner;
 mod sql_gen;
+pub mod test_runners;
 mod utils;
 pub mod validation;
 pub use validation::is_permissible_error;
@@ -278,6 +281,7 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             append_only: false,
                             query: None,
                             cdc_table_info: None,
+                            include_column_options: [],
                         },
                         CreateTable {
                             or_replace: false,
@@ -322,6 +326,7 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             append_only: false,
                             query: None,
                             cdc_table_info: None,
+                            include_column_options: [],
                         },
                         CreateTable {
                             or_replace: false,
@@ -377,6 +382,7 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             append_only: false,
                             query: None,
                             cdc_table_info: None,
+                            include_column_options: [],
                         },
                     ],
                 )"#]],
@@ -508,6 +514,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             append_only: false,
                             query: None,
                             cdc_table_info: None,
+                            include_column_options: [],
                         },
                         CreateTable {
                             or_replace: false,
@@ -559,6 +566,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             append_only: false,
                             query: None,
                             cdc_table_info: None,
+                            include_column_options: [],
                         },
                         CreateTable {
                             or_replace: false,
@@ -617,6 +625,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             append_only: false,
                             query: None,
                             cdc_table_info: None,
+                            include_column_options: [],
                         },
                         CreateTable {
                             or_replace: false,
@@ -693,6 +702,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             append_only: false,
                             query: None,
                             cdc_table_info: None,
+                            include_column_options: [],
                         },
                     ],
                 )"#]],

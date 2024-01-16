@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
 use risingwave_common::error::ErrorCode::InvalidParameterValue;
 use risingwave_common::error::{anyhow_error, RwError};
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::Deserialize;
 use serde_with::json::JsonString;
 use serde_with::{serde_as, DisplayFromStr};
 use tempfile::NamedTempFile;
@@ -34,7 +34,6 @@ use time::OffsetDateTime;
 use url::Url;
 use with_options::WithOptions;
 
-use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::deserialize_duration_from_string;
 use crate::sink::SinkError;
@@ -45,14 +44,106 @@ use crate::source::nats::source::NatsOffset;
 pub const BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
 pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct AwsPrivateLinkItem {
     pub az_id: Option<String>,
     pub port: u16,
 }
 
+use aws_config::default_provider::region::DefaultRegionChain;
+use aws_config::sts::AssumeRoleProvider;
+use aws_credential_types::provider::SharedCredentialsProvider;
+use aws_types::region::Region;
+use aws_types::SdkConfig;
+
+/// A flatten config map for aws auth.
+#[derive(Deserialize, Debug, Clone, WithOptions)]
+pub struct AwsAuthProps {
+    pub region: Option<String>,
+    #[serde(alias = "endpoint_url")]
+    pub endpoint: Option<String>,
+    pub access_key: Option<String>,
+    pub secret_key: Option<String>,
+    pub session_token: Option<String>,
+    pub arn: Option<String>,
+    /// This field was added for kinesis. Not sure if it's useful for other connectors.
+    /// Please ignore it in the documentation for now.
+    pub external_id: Option<String>,
+    pub profile: Option<String>,
+}
+
+impl AwsAuthProps {
+    async fn build_region(&self) -> anyhow::Result<Region> {
+        if let Some(region_name) = &self.region {
+            Ok(Region::new(region_name.clone()))
+        } else {
+            let mut region_chain = DefaultRegionChain::builder();
+            if let Some(profile_name) = &self.profile {
+                region_chain = region_chain.profile_name(profile_name);
+            }
+
+            Ok(region_chain
+                .build()
+                .region()
+                .await
+                .ok_or_else(|| anyhow::format_err!("region should be provided"))?)
+        }
+    }
+
+    fn build_credential_provider(&self) -> anyhow::Result<SharedCredentialsProvider> {
+        if self.access_key.is_some() && self.secret_key.is_some() {
+            Ok(SharedCredentialsProvider::new(
+                aws_credential_types::Credentials::from_keys(
+                    self.access_key.as_ref().unwrap(),
+                    self.secret_key.as_ref().unwrap(),
+                    self.session_token.clone(),
+                ),
+            ))
+        } else {
+            Err(anyhow!(
+                "Both \"access_key\" and \"secret_access\" are required."
+            ))
+        }
+    }
+
+    async fn with_role_provider(
+        &self,
+        credential: SharedCredentialsProvider,
+    ) -> anyhow::Result<SharedCredentialsProvider> {
+        if let Some(role_name) = &self.arn {
+            let region = self.build_region().await?;
+            let mut role = AssumeRoleProvider::builder(role_name)
+                .session_name("RisingWave")
+                .region(region);
+            if let Some(id) = &self.external_id {
+                role = role.external_id(id);
+            }
+            let provider = role.build_from_provider(credential).await;
+            Ok(SharedCredentialsProvider::new(provider))
+        } else {
+            Ok(credential)
+        }
+    }
+
+    pub async fn build_config(&self) -> anyhow::Result<SdkConfig> {
+        let region = self.build_region().await?;
+        let credentials_provider = self
+            .with_role_provider(self.build_credential_provider()?)
+            .await?;
+        let mut config_loader = aws_config::from_env()
+            .region(region)
+            .credentials_provider(credentials_provider);
+
+        if let Some(endpoint) = self.endpoint.as_ref() {
+            config_loader = config_loader.endpoint_url(endpoint);
+        }
+
+        Ok(config_loader.load().await)
+    }
+}
+
 #[serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize, WithOptions)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct KafkaCommon {
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
@@ -75,6 +166,9 @@ pub struct KafkaCommon {
     /// PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
     #[serde(rename = "properties.security.protocol")]
     security_protocol: Option<String>,
+
+    #[serde(rename = "properties.ssl.endpoint.identification.algorithm")]
+    ssl_endpoint_identification_algorithm: Option<String>,
 
     // For the properties below, please refer to [librdkafka](https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md) for more information.
     /// Path to CA certificate file for verifying the broker's key.
@@ -128,9 +222,6 @@ pub struct KafkaCommon {
     /// Configurations for SASL/OAUTHBEARER.
     #[serde(rename = "properties.sasl.oauthbearer.config")]
     sasl_oathbearer_config: Option<String>,
-
-    #[serde(flatten)]
-    pub rdkafka_properties: RdKafkaPropertiesCommon,
 }
 
 const fn default_kafka_sync_call_timeout() -> Duration {
@@ -138,7 +229,7 @@ const fn default_kafka_sync_call_timeout() -> Duration {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize, WithOptions)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct RdKafkaPropertiesCommon {
     /// Maximum Kafka protocol request message size. Due to differing framing overhead between
     /// protocol versions the producer is unable to reliably enforce a strict max message limit at
@@ -174,7 +265,7 @@ impl RdKafkaPropertiesCommon {
         if let Some(v) = self.message_max_bytes {
             c.set("message.max.bytes", v.to_string());
         }
-        if let Some(v) = self.message_max_bytes {
+        if let Some(v) = self.receive_message_max_bytes {
             c.set("receive.message.max.bytes", v.to_string());
         }
         if let Some(v) = self.client_id.as_ref() {
@@ -202,6 +293,15 @@ impl KafkaCommon {
         }
         if let Some(ssl_key_password) = self.ssl_key_password.as_ref() {
             config.set("ssl.key.password", ssl_key_password);
+        }
+        if let Some(ssl_endpoint_identification_algorithm) =
+            self.ssl_endpoint_identification_algorithm.as_ref()
+        {
+            // accept only `none` and `http` here, let the sdk do the check
+            config.set(
+                "ssl.endpoint.identification.algorithm",
+                ssl_endpoint_identification_algorithm,
+            );
         }
 
         // SASL mechanism
@@ -246,10 +346,6 @@ impl KafkaCommon {
         // Currently, we only support unsecured OAUTH.
         config.set("enable.sasl.oauthbearer.unsecure.jwt", "true");
     }
-
-    pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
-        self.rdkafka_properties.set_client(c);
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]
@@ -262,9 +358,6 @@ pub struct PulsarCommon {
 
     #[serde(rename = "auth.token")]
     pub auth_token: Option<String>,
-
-    #[serde(flatten)]
-    pub oauth: Option<PulsarOauthCommon>,
 }
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]
@@ -280,30 +373,21 @@ pub struct PulsarOauthCommon {
 
     #[serde(rename = "oauth.scope")]
     pub scope: Option<String>,
-
-    #[serde(flatten)]
-    /// required keys refer to [`crate::aws_utils::AWS_DEFAULT_CONFIG`]
-    pub s3_credentials: HashMap<String, String>,
 }
 
 impl PulsarCommon {
-    pub(crate) async fn build_client(&self) -> anyhow::Result<Pulsar<TokioExecutor>> {
+    pub(crate) async fn build_client(
+        &self,
+        oauth: &Option<PulsarOauthCommon>,
+        aws_auth_props: &AwsAuthProps,
+    ) -> anyhow::Result<Pulsar<TokioExecutor>> {
         let mut pulsar_builder = Pulsar::builder(&self.service_url, TokioExecutor);
         let mut temp_file = None;
-        if let Some(oauth) = &self.oauth {
+        if let Some(oauth) = oauth.as_ref() {
             let url = Url::parse(&oauth.credentials_url)?;
             match url.scheme() {
                 "s3" => {
-                    let credentials = load_file_descriptor_from_s3(
-                        &url,
-                        &AwsAuthProps::from_pairs(
-                            oauth
-                                .s3_credentials
-                                .iter()
-                                .map(|(k, v)| (k.as_str(), v.as_str())),
-                        ),
-                    )
-                    .await?;
+                    let credentials = load_file_descriptor_from_s3(&url, aws_auth_props).await?;
                     let mut f = NamedTempFile::new()?;
                     f.write_all(&credentials)?;
                     f.as_file().sync_all()?;
@@ -352,7 +436,7 @@ impl PulsarCommon {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct KinesisCommon {
     #[serde(rename = "stream", alias = "kinesis.stream.name")]
     pub stream_name: String,
@@ -404,7 +488,7 @@ impl KinesisCommon {
         Ok(KinesisClient::from_conf(builder.build()))
     }
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct UpsertMessage<'a> {
     #[serde(borrow)]
     pub primary_key: Cow<'a, [u8]>,
@@ -413,7 +497,7 @@ pub struct UpsertMessage<'a> {
 }
 
 #[serde_as]
-#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct NatsCommon {
     #[serde(rename = "server_url")]
     pub server_url: String,

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,8 @@ use super::{
     generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeBinary,
     PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
-use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::DynamicFilter;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
@@ -150,6 +151,11 @@ impl LogicalJoin {
         self.core.join_type
     }
 
+    /// Get the eq join key of the logical join.
+    pub fn eq_indexes(&self) -> Vec<(usize, usize)> {
+        self.core.eq_indexes()
+    }
+
     /// Get the output indices of the logical join.
     pub fn output_indices(&self) -> &Vec<usize> {
         &self.core.output_indices
@@ -185,56 +191,6 @@ impl LogicalJoin {
 
     pub fn output_indices_are_trivial(&self) -> bool {
         self.output_indices() == &(0..self.internal_column_num()).collect_vec()
-    }
-
-    /// Try to split and pushdown `predicate` into a join's left/right child or the on clause.
-    /// Returns the pushed predicates. The pushed part will be removed from the original predicate.
-    ///
-    /// `InputRef`s in the right `Condition` are shifted by `-left_col_num`.
-    pub fn push_down(
-        predicate: &mut Condition,
-        left_col_num: usize,
-        right_col_num: usize,
-        push_left: bool,
-        push_right: bool,
-        push_on: bool,
-    ) -> (Condition, Condition, Condition) {
-        let conjunctions = std::mem::take(&mut predicate.conjunctions);
-
-        let (mut left, right, mut others) =
-            Condition { conjunctions }.split(left_col_num, right_col_num);
-
-        if !push_left {
-            others.conjunctions.extend(left);
-            left = Condition::true_cond();
-        };
-
-        let right = if push_right {
-            let mut mapping = ColIndexMapping::with_shift_offset(
-                left_col_num + right_col_num,
-                -(left_col_num as isize),
-            );
-            right.rewrite_expr(&mut mapping)
-        } else {
-            others.conjunctions.extend(right);
-            Condition::true_cond()
-        };
-
-        let on = if push_on {
-            // Do not push now on to the on, it will be pulled up into a filter instead.
-            Condition {
-                conjunctions: others
-                    .conjunctions
-                    .extract_if(|expr| expr.count_nows() == 0)
-                    .collect(),
-            }
-        } else {
-            Condition::true_cond()
-        };
-
-        predicate.conjunctions = others.conjunctions;
-
-        (left, right, on)
     }
 
     /// Try to simplify the outer join with the predicate on the top of the join
@@ -644,6 +600,12 @@ impl ExprRewritable for LogicalJoin {
     }
 }
 
+impl ExprVisitable for LogicalJoin {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
+    }
+}
+
 /// We are trying to derive a predicate to apply to the other side of a join if all
 /// the `InputRef`s in the predicate are eq condition columns, and can hence be substituted
 /// with the corresponding eq condition columns of the other side.
@@ -786,12 +748,24 @@ impl PredicatePushdown for LogicalJoin {
         let right_col_num = self.right().schema().len();
         let join_type = LogicalJoin::simplify_outer(&predicate, left_col_num, self.join_type());
 
-        let (left_from_filter, right_from_filter, on) =
-            push_down_into_join(&mut predicate, left_col_num, right_col_num, join_type);
+        let push_down_temporal_predicate = !self.should_be_temporal_join();
+
+        let (left_from_filter, right_from_filter, on) = push_down_into_join(
+            &mut predicate,
+            left_col_num,
+            right_col_num,
+            join_type,
+            push_down_temporal_predicate,
+        );
 
         let mut new_on = self.on().clone().and(on);
-        let (left_from_on, right_from_on) =
-            push_down_join_condition(&mut new_on, left_col_num, right_col_num, join_type);
+        let (left_from_on, right_from_on) = push_down_join_condition(
+            &mut new_on,
+            left_col_num,
+            right_col_num,
+            join_type,
+            push_down_temporal_predicate,
+        );
 
         let left_predicate = left_from_filter.and(left_from_on);
         let right_predicate = right_from_filter.and(right_from_on);
@@ -1314,7 +1288,7 @@ impl ToBatch for LogicalJoin {
                 ))
                 .into());
             }
-            if config.get_batch_enable_lookup_join() {
+            if config.batch_enable_lookup_join() {
                 if let Some(lookup_join) = self.to_batch_lookup_join_with_index_selection(
                     predicate.clone(),
                     logical_join.clone(),

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -65,7 +65,9 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
-pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, TaskConfig};
+pub use self::compaction_utils::{
+    check_compaction_result, CompactionStatistics, RemoteBuilderFactory, TaskConfig,
+};
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
@@ -79,9 +81,9 @@ use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::SplitTableOutput;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, BatchSstableWriterFactory, BlockedXor16FilterBuilder,
-    CompactionDeleteRangeIterator, FilterBuilder, HummockError, SharedComapctorObjectIdManager,
-    SstableWriterFactory, StreamingSstableWriterFactory,
+    validate_ssts, BlockedXor16FilterBuilder, CompactionDeleteRangeIterator, FilterBuilder,
+    HummockError, SharedComapctorObjectIdManager, SstableWriterFactory,
+    UnifiedSstableWriterFactory,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -141,40 +143,8 @@ impl Compactor {
                 .start_timer()
         };
 
-        let (split_table_outputs, table_stats_map) = if self
-            .context
-            .sstable_store
-            .store()
-            .support_streaming_upload()
-        {
-            let factory = StreamingSstableWriterFactory::new(self.context.sstable_store.clone());
-            if self.task_config.use_block_based_filter {
-                self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_iter,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                    self.object_id_getter.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
-            } else {
-                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_iter,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                    self.object_id_getter.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
-            }
-        } else {
-            let factory = BatchSstableWriterFactory::new(self.context.sstable_store.clone());
+        let (split_table_outputs, table_stats_map) = {
+            let factory = UnifiedSstableWriterFactory::new(self.context.sstable_store.clone());
             if self.task_config.use_block_based_filter {
                 self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
                     factory,
@@ -256,9 +226,7 @@ impl Compactor {
             rets.push(ret);
             if let Some(tracker) = &task_progress {
                 tracker.inc_ssts_uploaded();
-                tracker
-                    .num_pending_write_io
-                    .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                tracker.dec_num_pending_write_io();
             }
             if is_share_buffer_compact {
                 metrics.shared_buffer_to_sstable_size.observe(sst_size as _);
@@ -297,9 +265,7 @@ impl Compactor {
             builder_factory,
             self.context.compactor_metrics.clone(),
             task_progress.clone(),
-            self.task_config.is_target_l0_or_lbase,
-            self.task_config.split_by_table,
-            self.task_config.split_weight_by_vnode,
+            self.task_config.table_vnode_partition.clone(),
         );
         let compaction_statistics = compact_and_build_sst(
             &mut sst_builder,
@@ -308,7 +274,6 @@ impl Compactor {
             self.context.compactor_metrics.clone(),
             iter,
             compaction_filter,
-            task_progress,
         )
         .verbose_instrument_await("compact_and_build_sst")
         .await?;
@@ -336,17 +301,19 @@ pub fn start_compactor(
     let stream_retry_interval = Duration::from_secs(30);
     let task_progress = compactor_context.task_progress_manager.clone();
     let periodic_event_update_interval = Duration::from_millis(1000);
-    let cpu_core_num = compactor_context.compaction_executor.worker_num() as u32;
-    let running_task_count = compactor_context.running_task_count.clone();
     let pull_task_ack = Arc::new(AtomicBool::new(true));
+    const MAX_PULL_TASK_COUNT: u32 = 4;
+    let max_pull_task_count = std::cmp::min(
+        compactor_context
+            .max_task_parallelism
+            .load(Ordering::SeqCst),
+        MAX_PULL_TASK_COUNT,
+    );
 
     assert_ge!(
         compactor_context.storage_opts.compactor_max_task_multiplier,
         0.0
     );
-    let max_pull_task_count = (cpu_core_num as f32
-        * compactor_context.storage_opts.compactor_max_task_multiplier)
-        .ceil() as u32;
 
     let join_handle = tokio::spawn(async move {
         let shutdown_map = CompactionShutdownMap::default();
@@ -400,7 +367,6 @@ pub fn start_compactor(
                     event_loop_iteration_now = Instant::now();
                 }
 
-                let running_task_count = running_task_count.clone();
                 let pull_task_ack = pull_task_ack.clone();
                 let request_sender = request_sender.clone();
                 let event: Option<Result<SubscribeCompactionEventResponse, _>> = tokio::select! {
@@ -426,11 +392,8 @@ pub fn start_compactor(
 
                         let mut pending_pull_task_count = 0;
                         if pull_task_ack.load(Ordering::SeqCst) {
-                            // reset pending_pull_task_count when all pending task had been refill
-                            pending_pull_task_count = {
-                                assert_ge!(max_pull_task_count, running_task_count.load(Ordering::SeqCst));
-                                max_pull_task_count - running_task_count.load(Ordering::SeqCst)
-                            };
+                            // TODO: Compute parallelism on meta side
+                            pending_pull_task_count = compactor_context.get_free_quota().max(max_pull_task_count);
 
                             if pending_pull_task_count > 0 {
                                 if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
@@ -455,7 +418,7 @@ pub fn start_compactor(
                         }
 
                         tracing::info!(
-                            running_task_count = %running_task_count.load(Ordering::Relaxed),
+                            running_parallelism_count = %compactor_context.running_task_parallelism.load(Ordering::Relaxed),
                             pull_task_ack = %pull_task_ack.load(Ordering::Relaxed),
                             pending_pull_task_count = %pending_pull_task_count
                         );
@@ -494,10 +457,8 @@ pub fn start_compactor(
                         let sstable_object_id_manager = sstable_object_id_manager.clone();
                         let filter_key_extractor_manager = filter_key_extractor_manager.clone();
                         executor.spawn(async move {
-                                let running_task_count = running_task_count.clone();
                                 match event {
                                     ResponseEvent::CompactTask(compact_task)  => {
-                                        running_task_count.fetch_add(1, Ordering::SeqCst);
                                         let (tx, rx) = tokio::sync::oneshot::channel();
                                         let task_id = compact_task.task_id;
                                         shutdown.lock().unwrap().insert(task_id, tx);
@@ -516,13 +477,11 @@ pub fn start_compactor(
                                             Err(err) => {
                                                 tracing::warn!("Failed to track pending SST object id. {:#?}", err);
                                                 let mut compact_task = compact_task;
-                                                // return TaskStatus::TrackSstObjectIdFailed;
                                                 compact_task.set_task_status(TaskStatus::TrackSstObjectIdFailed);
                                                 (compact_task, HashMap::default())
                                             }
                                         };
                                         shutdown.lock().unwrap().remove(&task_id);
-                                        running_task_count.fetch_sub(1, Ordering::SeqCst);
 
                                         if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
                                             event: Some(RequestEvent::ReportTask(
@@ -691,7 +650,6 @@ pub fn start_shared_compactor(
                             SharedComapctorObjectIdManager::new(output_object_ids_deque, cloned_grpc_proxy_client.clone(), context.storage_opts.sstable_id_remote_fetch_number);
                             match dispatch_task.unwrap() {
                                 dispatch_compaction_task_request::Task::CompactTask(compact_task) => {
-                                    context.running_task_count.fetch_add(1, Ordering::SeqCst);
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
@@ -705,7 +663,6 @@ pub fn start_shared_compactor(
                                     )
                                     .await;
                                     shutdown.lock().unwrap().remove(&task_id);
-                                    context.running_task_count.fetch_sub(1, Ordering::SeqCst);
                                     let report_compaction_task_request = ReportCompactionTaskRequest {
                                         event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
                                             compact_task: Some(compact_task),
@@ -804,14 +761,7 @@ fn get_task_progress(
 ) -> Vec<CompactTaskProgress> {
     let mut progress_list = Vec::new();
     for (&task_id, progress) in &*task_progress.lock() {
-        progress_list.push(CompactTaskProgress {
-            task_id,
-            num_ssts_sealed: progress.num_ssts_sealed.load(Ordering::Relaxed),
-            num_ssts_uploaded: progress.num_ssts_uploaded.load(Ordering::Relaxed),
-            num_progress_key: progress.num_progress_key.load(Ordering::Relaxed),
-            num_pending_read_io: progress.num_pending_read_io.load(Ordering::Relaxed) as u64,
-            num_pending_write_io: progress.num_pending_write_io.load(Ordering::Relaxed) as u64,
-        });
+        progress_list.push(progress.snapshot(task_id));
     }
     progress_list
 }

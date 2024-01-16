@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -130,7 +130,6 @@ pub fn try_get_exact_serialize_datum_size(arr: &ArrayImpl) -> Option<usize> {
         ArrayImpl::Float32(_) => Some(4),
         ArrayImpl::Float64(_) => Some(8),
         ArrayImpl::Bool(_) => Some(1),
-        ArrayImpl::Jsonb(_) => Some(8),
         ArrayImpl::Decimal(_) => Some(estimate_serialize_decimal_size()),
         ArrayImpl::Interval(_) => Some(estimate_serialize_interval_size()),
         ArrayImpl::Date(_) => Some(estimate_serialize_date_size()),
@@ -246,7 +245,8 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Timestamp(_) => estimate_serialize_timestamp_size(),
         ScalarRefImpl::Timestamptz(_) => 8,
         ScalarRefImpl::Time(_) => estimate_serialize_time_size(),
-        ScalarRefImpl::Jsonb(_) => 8,
+        // not exact as we use internal encoding size to estimate the json string size
+        ScalarRefImpl::Jsonb(v) => v.capacity(),
         ScalarRefImpl::Struct(s) => estimate_serialize_struct_size(s),
         ScalarRefImpl::List(v) => estimate_serialize_list_size(v),
     }
@@ -366,11 +366,11 @@ fn deserialize_struct(struct_def: &StructType, data: &mut impl Buf) -> Result<Sc
 
 fn deserialize_list(item_type: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
     let len = data.get_u32_le();
-    let mut values = Vec::with_capacity(len as usize);
+    let mut builder = item_type.create_array_builder(len as usize);
     for _ in 0..len {
-        values.push(inner_deserialize_datum(data, item_type)?);
+        builder.append(inner_deserialize_datum(data, item_type)?);
     }
-    Ok(ScalarImpl::List(ListValue::new(values)))
+    Ok(ScalarImpl::List(ListValue::new(builder.finish())))
 }
 
 fn deserialize_str(data: &mut impl Buf) -> Result<Box<str>> {
@@ -493,10 +493,7 @@ mod tests {
             ScalarImpl::Int64(233).into(),
             ScalarImpl::Float64(23.33.into()).into(),
         ])));
-        test_estimate_serialize_scalar_size(ScalarImpl::List(ListValue::new(vec![
-            ScalarImpl::Int64(233).into(),
-            ScalarImpl::Int64(2333).into(),
-        ])));
+        test_estimate_serialize_scalar_size(ScalarImpl::List(ListValue::from_iter([233i64, 2333])));
     }
 
     #[test]

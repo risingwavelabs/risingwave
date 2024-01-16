@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@ use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tokio::time::Instant;
 use tracing::error;
-use tracing_futures::Instrument;
 
 #[cfg(all(not(madsim), feature = "hm-trace"))]
 use super::traced_store::TracedStateStore;
@@ -141,6 +140,8 @@ impl<S> MonitoredStateStore<S> {
         table_id: TableId,
         key_len: usize,
     ) -> StorageResult<Option<Bytes>> {
+        use tracing::Instrument;
+
         let table_id_label = table_id.to_string();
         let timer = self
             .storage_metrics
@@ -280,9 +281,9 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         self.inner.init(options).await
     }
 
-    fn seal_current_epoch(&mut self, next_epoch: u64) {
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
         // TODO: may collect metrics
-        self.inner.seal_current_epoch(next_epoch)
+        self.inner.seal_current_epoch(next_epoch, opts)
     }
 
     fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
@@ -402,6 +403,8 @@ impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
     }
 
     fn into_stream(self) -> MonitoredStateStoreIterStream<S> {
+        use risingwave_common::util::tracing::InstrumentStream;
+
         Self::into_stream_inner(self).instrument(tracing::trace_span!("store_iter"))
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 
-use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId};
+use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId, SinkId};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
 use crate::user::UserId;
@@ -119,8 +119,7 @@ pub struct TableCatalog {
     /// `None`.
     pub row_id_index: Option<usize>,
 
-    /// The column indices which are stored in the state store's value with row-encoding. Currently
-    /// is not supported yet and expected to be `[0..columns.len()]`.
+    /// The column indices which are stored in the state store's value with row-encoding.
     pub value_indices: Vec<usize>,
 
     /// The full `CREATE TABLE` or `CREATE MATERIALIZED VIEW` definition of the table.
@@ -155,6 +154,13 @@ pub struct TableCatalog {
 
     /// description of table, set by `comment on`.
     pub description: Option<String>,
+
+    /// Incoming sinks, used for sink into table
+    pub incoming_sinks: Vec<SinkId>,
+
+    pub created_at_cluster_version: Option<String>,
+
+    pub initialized_at_cluster_version: Option<String>,
 }
 
 // How the stream job was created will determine
@@ -367,6 +373,7 @@ impl TableCatalog {
             read_prefix_len_hint: self.read_prefix_len_hint,
             watermark_columns: self.watermark_columns.clone(),
             versioned: self.version.is_some(),
+            vnode_col_index: self.vnode_col_index,
         }
     }
 
@@ -442,6 +449,9 @@ impl TableCatalog {
             stream_job_status: PbStreamJobStatus::Creating.into(),
             create_type: self.create_type.to_prost().into(),
             description: self.description.clone(),
+            incoming_sinks: self.incoming_sinks.clone(),
+            created_at_cluster_version: self.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
         }
     }
 
@@ -556,6 +566,9 @@ impl From<PbTable> for TableCatalog {
             cleaned_by_watermark: matches!(tb.cleaned_by_watermark, true),
             create_type: CreateType::from_prost(create_type),
             description: tb.description,
+            incoming_sinks: tb.incoming_sinks.clone(),
+            created_at_cluster_version: tb.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: tb.initialized_at_cluster_version.clone(),
         }
     }
 }
@@ -584,7 +597,9 @@ mod tests {
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::{PbStreamJobStatus, PbTable};
-    use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
+    use risingwave_pb::plan_common::{
+        AdditionalColumnType, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
+    };
 
     use super::*;
     use crate::catalog::table_catalog::{TableCatalog, TableType};
@@ -649,6 +664,9 @@ mod tests {
             stream_job_status: PbStreamJobStatus::Creating.into(),
             create_type: PbCreateType::Foreground.into(),
             description: Some("description".to_string()),
+            incoming_sinks: vec![],
+            created_at_cluster_version: None,
+            initialized_at_cluster_version: None,
         }
         .into();
 
@@ -676,6 +694,8 @@ mod tests {
                             type_name: ".test.Country".to_string(),
                             description: None,
                             generated_or_default_column: None,
+                            additional_column_type: AdditionalColumnType::Normal,
+                            version: ColumnDescVersion::Pr13707,
                         },
                         is_hidden: false
                     }
@@ -705,7 +725,10 @@ mod tests {
                 initialized_at_epoch: None,
                 cleaned_by_watermark: false,
                 create_type: CreateType::Foreground,
-                description: Some("description".to_string())
+                description: Some("description".to_string()),
+                incoming_sinks: vec![],
+                created_at_cluster_version: None,
+                initialized_at_cluster_version: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

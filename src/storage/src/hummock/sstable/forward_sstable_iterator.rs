@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,16 +13,17 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Less};
-use std::future::Future;
 use std::ops::Bound::*;
 use std::sync::Arc;
 
+use await_tree::InstrumentAwait;
 use risingwave_hummock_sdk::key::FullKey;
 
 use super::super::{HummockResult, HummockValue};
+use crate::hummock::block_stream::BlockStream;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::{BatchBlockStream, BlockIterator, SstableStoreRef, TableHolder};
+use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 pub trait SstableIteratorType: HummockIterator + 'static {
@@ -41,7 +42,7 @@ pub struct SstableIterator {
     /// Current block index.
     cur_idx: usize,
 
-    preload_stream: Option<BatchBlockStream>,
+    preload_stream: Option<Box<dyn BlockStream>>,
     /// Reference to the sst
     pub sst: TableHolder,
     preload_end_block_idx: usize,
@@ -72,6 +73,7 @@ impl SstableIterator {
     }
 
     fn init_block_prefetch_range(&mut self, start_idx: usize) {
+        self.preload_end_block_idx = 0;
         if let Some(bound) = self.options.must_iterated_end_user_key.as_ref() {
             let block_metas = &self.sst.value().meta.block_metas;
             let next_to_start_idx = start_idx + 1;
@@ -126,13 +128,20 @@ impl SstableIterator {
             return Ok(());
         }
         // Maybe the previous preload stream breaks on some cached block, so here we can try to preload some data again
-        if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx
-            && let Ok(preload_stream) = self.sstable_store
-                .preload_blocks(self.sst.value(), idx, self.preload_end_block_idx)
-                .await
-        {
-            self.preload_stream = preload_stream;
+        if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx {
+            match self
+                .sstable_store
+                .prefetch_blocks(self.sst.value(), idx, self.preload_end_block_idx,
+                                 self.options.cache_policy,
+                                 &mut self.stats,
+                )
+                .verbose_instrument_await("prefetch_blocks")
+                .await {
+                Ok(preload_stream) => self.preload_stream = Some(preload_stream),
+                Err(e) => tracing::warn!("failed to create stream for prefetch data because of {:?}, fall back to block get.", e),
+            }
         }
+
         if self
             .preload_stream
             .as_ref()
@@ -147,6 +156,7 @@ impl SstableIterator {
                         break;
                     }
                 }
+                assert_eq!(preload_stream.next_block_index(), idx);
                 if ret.is_ok() {
                     match preload_stream.next_block().await {
                         Ok(Some(block)) => {
@@ -156,7 +166,6 @@ impl SstableIterator {
                         }
                         Ok(None) => {
                             self.preload_stream.take();
-                            break;
                         }
                         Err(e) => {
                             self.preload_stream.take();
@@ -166,23 +175,32 @@ impl SstableIterator {
                 } else {
                     self.preload_stream.take();
                 }
-                if let Err(e) = ret {
-                    assert!(self.preload_stream.is_none());
-                    if self.preload_retry_times >= self.options.max_preload_retry_times {
-                        break;
+                if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx {
+                    if let Err(e) = ret {
+                        tracing::warn!("recreate stream because the connection to remote storage has closed, reason: {:?}", e);
+                        if self.preload_retry_times >= self.options.max_preload_retry_times {
+                            break;
+                        }
+                        self.preload_retry_times += 1;
                     }
-                    self.preload_retry_times += 1;
-                    tracing::warn!("recreate stream because the connection to remote storage has closed, reason: {:?}", e);
+
                     match self
                         .sstable_store
-                        .preload_blocks(self.sst.value(), idx, self.preload_end_block_idx)
+                        .prefetch_blocks(
+                            self.sst.value(),
+                            idx,
+                            self.preload_end_block_idx,
+                            self.options.cache_policy,
+                            &mut self.stats,
+                        )
+                        .verbose_instrument_await("prefetch_blocks")
                         .await
                     {
                         Ok(stream) => {
-                            self.preload_stream = stream;
+                            self.preload_stream = Some(stream);
                         }
                         Err(e) => {
-                            tracing::error!("failed to recreate stream meet IO error: {:?}", e);
+                            tracing::warn!("failed to recreate stream meet IO error: {:?}", e);
                             break;
                         }
                     }
@@ -216,20 +234,14 @@ impl SstableIterator {
 impl HummockIterator for SstableIterator {
     type Direction = Forward;
 
-    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
+    async fn next(&mut self) -> HummockResult<()> {
         self.stats.total_key_count += 1;
-        async move {
-            let block_iter = self.block_iter.as_mut().expect("no block iter");
-            if !block_iter.try_next() {
-                // seek to next block
-                self.seek_idx(self.cur_idx + 1, None).await?;
-            }
-            Ok(())
+        let block_iter = self.block_iter.as_mut().expect("no block iter");
+        if !block_iter.try_next() {
+            // seek to next block
+            self.seek_idx(self.cur_idx + 1, None).await?;
         }
+        Ok(())
     }
 
     fn key(&self) -> FullKey<&[u8]> {
@@ -246,38 +258,34 @@ impl HummockIterator for SstableIterator {
         self.block_iter.as_ref().map_or(false, |i| i.is_valid())
     }
 
-    fn rewind(&mut self) -> Self::RewindFuture<'_> {
-        async move {
-            self.init_block_prefetch_range(0);
-            self.seek_idx(0, None).await?;
-            Ok(())
-        }
+    async fn rewind(&mut self) -> HummockResult<()> {
+        self.init_block_prefetch_range(0);
+        self.seek_idx(0, None).await?;
+        Ok(())
     }
 
-    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
-        async move {
-            let block_idx = self
-                .sst
-                .value()
-                .meta
-                .block_metas
-                .partition_point(|block_meta| {
-                    // compare by version comparator
-                    // Note: we are comparing against the `smallest_key` of the `block`, thus the
-                    // partition point should be `prev(<=)` instead of `<`.
-                    let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
-                    ord == Less || ord == Equal
-                })
-                .saturating_sub(1); // considering the boundary of 0
-            self.init_block_prefetch_range(block_idx);
+    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+        let block_idx = self
+            .sst
+            .value()
+            .meta
+            .block_metas
+            .partition_point(|block_meta| {
+                // compare by version comparator
+                // Note: we are comparing against the `smallest_key` of the `block`, thus the
+                // partition point should be `prev(<=)` instead of `<`.
+                let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
+                ord == Less || ord == Equal
+            })
+            .saturating_sub(1); // considering the boundary of 0
+        self.init_block_prefetch_range(block_idx);
 
-            self.seek_idx(block_idx, Some(key)).await?;
-            if !self.is_valid() {
-                // seek to next block
-                self.seek_idx(block_idx + 1, None).await?;
-            }
-            Ok(())
+        self.seek_idx(block_idx, Some(key)).await?;
+        if !self.is_valid() {
+            // seek to next block
+            self.seek_idx(block_idx + 1, None).await?;
         }
+        Ok(())
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
@@ -311,7 +319,7 @@ mod tests {
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_default_test_sstable, gen_test_sstable, test_key_of,
+        default_builder_opt_for_test, gen_default_test_sstable, gen_test_sstable_info, test_key_of,
         test_value_of, TEST_KEYS_COUNT,
     };
     use crate::hummock::CachePolicy;
@@ -450,7 +458,7 @@ mod tests {
         // when upload data is successful, but upload meta is fail and delete is fail
         let kv_iter =
             (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
-        let table = gen_test_sstable(
+        let sst_info = gen_test_sstable_info(
             default_builder_opt_for_test(),
             0,
             kv_iter,
@@ -458,22 +466,47 @@ mod tests {
         )
         .await;
 
-        let end_key = test_key_of(TEST_KEYS_COUNT / 2);
+        let end_key = test_key_of(TEST_KEYS_COUNT);
         let uk = UserKey::new(
             end_key.user_key.table_id,
             TableKey(Bytes::from(end_key.user_key.table_key.0)),
         );
+        let options = Arc::new(SstableIteratorReadOptions {
+            cache_policy: CachePolicy::Fill(CachePriority::High),
+            must_iterated_end_user_key: Some(Bound::Included(uk.clone())),
+            max_preload_retry_times: 0,
+            prefetch_for_large_query: false,
+        });
+        let mut stats = StoreLocalStatistic::default();
         let mut sstable_iter = SstableIterator::create(
-            table,
-            sstable_store,
-            Arc::new(SstableIteratorReadOptions {
-                cache_policy: CachePolicy::Fill(CachePriority::High),
-                must_iterated_end_user_key: Some(Bound::Included(uk)),
-                max_preload_retry_times: 0,
-            }),
+            sstable_store.sstable(&sst_info, &mut stats).await.unwrap(),
+            sstable_store.clone(),
+            options.clone(),
         );
-        let mut cnt = 0;
-        sstable_iter.rewind().await.unwrap();
+        let mut cnt = 1000;
+        sstable_iter.seek(test_key_of(cnt).to_ref()).await.unwrap();
+        while sstable_iter.is_valid() {
+            let key = sstable_iter.key();
+            let value = sstable_iter.value();
+            assert_eq!(
+                key,
+                test_key_of(cnt).to_ref(),
+                "fail at {}, get key :{:?}",
+                cnt,
+                String::from_utf8(key.user_key.table_key.key_part().to_vec()).unwrap()
+            );
+            assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
+            cnt += 1;
+            sstable_iter.next().await.unwrap();
+        }
+        assert_eq!(cnt, TEST_KEYS_COUNT);
+        let mut sstable_iter = SstableIterator::create(
+            sstable_store.sstable(&sst_info, &mut stats).await.unwrap(),
+            sstable_store,
+            options.clone(),
+        );
+        let mut cnt = 1000;
+        sstable_iter.seek(test_key_of(cnt).to_ref()).await.unwrap();
         while sstable_iter.is_valid() {
             let key = sstable_iter.key();
             let value = sstable_iter.value();

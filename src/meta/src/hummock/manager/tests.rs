@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,20 +21,20 @@ use prometheus::Registry;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ssts, BranchedSstInfo, HummockVersionExt,
+    get_compaction_group_ssts, BranchedSstInfo,
 };
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     CompactionGroupId, ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId,
     HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::{
-    CompactTask, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
-    KeyRange, SstableInfo,
+    CompactTask, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
+    SstableInfo,
 };
 use risingwave_pb::meta::add_worker_node_request::Property;
 
@@ -46,8 +46,8 @@ use crate::hummock::compaction::selector::{
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
-use crate::hummock::{HummockManager, HummockManagerRef};
-use crate::manager::WorkerId;
+use crate::hummock::{CommitEpochInfo, HummockManager, HummockManagerRef};
+use crate::manager::{MetaSrvEnv, WorkerId};
 use crate::model::MetadataModel;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -99,6 +99,40 @@ fn get_compaction_group_object_ids(
         .collect_vec()
 }
 
+async fn list_pinned_snapshot_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedSnapshot> {
+    match env.sql_meta_store() {
+        None => HummockPinnedSnapshot::list(env.meta_store()).await.unwrap(),
+        Some(sql_meta_store) => {
+            use risingwave_meta_model_v2::hummock_pinned_snapshot;
+            use sea_orm::EntityTrait;
+            hummock_pinned_snapshot::Entity::find()
+                .all(&sql_meta_store.conn)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(Into::into)
+                .collect()
+        }
+    }
+}
+
+async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedVersion> {
+    match env.sql_meta_store() {
+        None => HummockPinnedVersion::list(env.meta_store()).await.unwrap(),
+        Some(sql_meta_store) => {
+            use risingwave_meta_model_v2::hummock_pinned_version;
+            use sea_orm::EntityTrait;
+            hummock_pinned_version::Entity::find()
+                .all(&sql_meta_store.conn)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(Into::into)
+                .collect()
+        }
+    }
+}
+
 #[tokio::test]
 async fn test_unpin_snapshot_before() {
     let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
@@ -108,7 +142,7 @@ async fn test_unpin_snapshot_before() {
     for _ in 0..2 {
         let pin_result = hummock_manager.pin_snapshot(context_id).await.unwrap();
         assert_eq!(pin_result.committed_epoch, epoch);
-        let pinned_snapshots = HummockPinnedSnapshot::list(env.meta_store()).await.unwrap();
+        let pinned_snapshots = list_pinned_snapshot_from_meta_store(&env).await;
         assert_eq!(pinned_snapshots[0].context_id, context_id);
         assert_eq!(
             pinned_snapshots[0].minimal_pinned_snapshot,
@@ -129,7 +163,7 @@ async fn test_unpin_snapshot_before() {
             .await
             .unwrap();
         assert_eq!(
-            pin_snapshots_epoch(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
+            pin_snapshots_epoch(&list_pinned_snapshot_from_meta_store(&env).await),
             vec![epoch]
         );
     }
@@ -147,7 +181,7 @@ async fn test_unpin_snapshot_before() {
             .await
             .unwrap();
         assert_eq!(
-            pin_snapshots_epoch(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
+            pin_snapshots_epoch(&list_pinned_snapshot_from_meta_store(&env).await),
             vec![epoch]
         );
     }
@@ -382,13 +416,14 @@ async fn test_release_context_resource() {
                 is_serving: true,
                 is_unschedulable: false,
             },
+            Default::default(),
         )
         .await
         .unwrap();
     let context_id_2 = worker_node_2.id;
 
     assert_eq!(
-        pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await.unwrap()),
+        pin_versions_sum(&list_pinned_version_from_meta_store(&env).await),
         0
     );
     hummock_manager.pin_version(context_id_1).await.unwrap();
@@ -396,24 +431,18 @@ async fn test_release_context_resource() {
     hummock_manager.pin_snapshot(context_id_1).await.unwrap();
     hummock_manager.pin_snapshot(context_id_2).await.unwrap();
     assert_eq!(
-        pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await.unwrap()),
+        pin_versions_sum(&list_pinned_version_from_meta_store(&env).await),
         2
     );
-    assert_eq!(
-        HummockPinnedSnapshot::list(env.meta_store())
-            .await
-            .unwrap()
-            .len(),
-        2
-    );
+    assert_eq!(list_pinned_version_from_meta_store(&env).await.len(), 2);
     hummock_manager
         .release_contexts(&vec![context_id_1])
         .await
         .unwrap();
-    let pinned_versions = HummockPinnedVersion::list(env.meta_store()).await.unwrap();
+    let pinned_versions = list_pinned_version_from_meta_store(&env).await;
     assert_eq!(pin_versions_sum(&pinned_versions), 1);
     assert_eq!(pinned_versions[0].context_id, context_id_2);
-    let pinned_snapshots = HummockPinnedSnapshot::list(env.meta_store()).await.unwrap();
+    let pinned_snapshots = list_pinned_snapshot_from_meta_store(&env).await;
     assert_eq!(pinned_snapshots[0].context_id, context_id_2);
     // it's OK to call again
     hummock_manager
@@ -425,7 +454,7 @@ async fn test_release_context_resource() {
         .await
         .unwrap();
     assert_eq!(
-        pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await.unwrap()),
+        pin_versions_sum(&list_pinned_version_from_meta_store(&env).await),
         0
     );
 }
@@ -469,6 +498,7 @@ async fn test_hummock_manager_basic() {
                 is_serving: true,
                 is_unschedulable: false,
             },
+            Default::default(),
         )
         .await
         .unwrap();
@@ -529,14 +559,9 @@ async fn test_hummock_manager_basic() {
         );
 
         // should pin latest because u64::MAX
-        let version = match hummock_manager.pin_version(context_id_1).await.unwrap() {
-            Payload::VersionDeltas(_) => {
-                unreachable!("should get full version")
-            }
-            Payload::PinnedVersion(version) => version,
-        };
+        let version = hummock_manager.pin_version(context_id_1).await.unwrap();
         assert_eq!(
-            version.get_id(),
+            version.id,
             init_version_id + commit_log_count + register_log_count
         );
         assert_eq!(
@@ -551,14 +576,9 @@ async fn test_hummock_manager_basic() {
 
     for _ in 0..2 {
         // should pin latest because deltas cannot contain INVALID_EPOCH
-        let version = match hummock_manager.pin_version(context_id_2).await.unwrap() {
-            Payload::VersionDeltas(_) => {
-                unreachable!("should get full version")
-            }
-            Payload::PinnedVersion(version) => version,
-        };
+        let version = hummock_manager.pin_version(context_id_2).await.unwrap();
         assert_eq!(
-            version.get_id(),
+            version.id,
             init_version_id + commit_log_count + register_log_count
         );
         // pinned by context_id_1
@@ -768,7 +788,10 @@ async fn test_invalid_sst_id() {
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), WorkerId::MAX))
         .collect();
     let error = hummock_manager
-        .commit_epoch(epoch, ssts.clone(), sst_to_worker)
+        .commit_epoch(
+            epoch,
+            CommitEpochInfo::for_test(ssts.clone(), sst_to_worker),
+        )
         .await
         .unwrap_err();
     assert!(matches!(error, Error::InvalidSst(1)));
@@ -778,7 +801,7 @@ async fn test_invalid_sst_id() {
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
         .await
         .unwrap();
 }
@@ -1168,7 +1191,7 @@ async fn test_version_stats() {
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), worker_node.id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
         .await
         .unwrap();
 
@@ -1267,7 +1290,10 @@ async fn test_split_compaction_group_on_commit() {
         table_stats: Default::default(),
     };
     hummock_manager
-        .commit_epoch(30, vec![sst_1], HashMap::from([(10, context_id)]))
+        .commit_epoch(
+            30,
+            CommitEpochInfo::for_test(vec![sst_1], HashMap::from([(10, context_id)])),
+        )
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
@@ -1408,8 +1434,10 @@ async fn test_split_compaction_group_on_demand_basic() {
     hummock_manager
         .commit_epoch(
             30,
-            vec![sst_1, sst_2],
-            HashMap::from([(10, context_id), (11, context_id)]),
+            CommitEpochInfo::for_test(
+                vec![sst_1, sst_2],
+                HashMap::from([(10, context_id), (11, context_id)]),
+            ),
         )
         .await
         .unwrap();
@@ -1501,7 +1529,10 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
         .await
         .unwrap();
     hummock_manager
-        .commit_epoch(30, vec![sst_1], HashMap::from([(10, context_id)]))
+        .commit_epoch(
+            30,
+            CommitEpochInfo::for_test(vec![sst_1], HashMap::from([(10, context_id)])),
+        )
         .await
         .unwrap();
 
@@ -1616,13 +1647,15 @@ async fn test_split_compaction_group_trivial_expired() {
     hummock_manager
         .commit_epoch(
             30,
-            vec![sst_1, sst_2, sst_3, sst_4],
-            HashMap::from([
-                (10, context_id),
-                (11, context_id),
-                (9, context_id),
-                (8, context_id),
-            ]),
+            CommitEpochInfo::for_test(
+                vec![sst_1, sst_2, sst_3, sst_4],
+                HashMap::from([
+                    (10, context_id),
+                    (11, context_id),
+                    (9, context_id),
+                    (8, context_id),
+                ]),
+            ),
         )
         .await
         .unwrap();
@@ -1751,7 +1784,10 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
         table_stats: Default::default(),
     };
     hummock_manager
-        .commit_epoch(30, vec![sst_1.clone()], HashMap::from([(10, context_id)]))
+        .commit_epoch(
+            30,
+            CommitEpochInfo::for_test(vec![sst_1.clone()], HashMap::from([(10, context_id)])),
+        )
         .await
         .unwrap();
     // Construct data via manual compaction
@@ -1914,8 +1950,10 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     hummock_manager
         .commit_epoch(
             30,
-            vec![sst_1, sst_2],
-            HashMap::from([(10, context_id), (11, context_id)]),
+            CommitEpochInfo::for_test(
+                vec![sst_1, sst_2],
+                HashMap::from([(10, context_id), (11, context_id)]),
+            ),
         )
         .await
         .unwrap();
@@ -1972,7 +2010,10 @@ async fn test_move_tables_between_compaction_group() {
         .unwrap();
     let sst_1 = gen_extend_sstable_info(10, 2, 1, vec![100, 101, 102]);
     hummock_manager
-        .commit_epoch(30, vec![sst_1.clone()], HashMap::from([(10, context_id)]))
+        .commit_epoch(
+            30,
+            CommitEpochInfo::for_test(vec![sst_1.clone()], HashMap::from([(10, context_id)])),
+        )
         .await
         .unwrap();
     // Construct data via manual compaction
@@ -1995,7 +2036,10 @@ async fn test_move_tables_between_compaction_group() {
         .unwrap());
     let sst_2 = gen_extend_sstable_info(14, 2, 1, vec![101, 102]);
     hummock_manager
-        .commit_epoch(31, vec![sst_2.clone()], HashMap::from([(14, context_id)]))
+        .commit_epoch(
+            31,
+            CommitEpochInfo::for_test(vec![sst_2.clone()], HashMap::from([(14, context_id)])),
+        )
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;

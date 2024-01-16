@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,9 @@ pub use upsert::UpsertFormatter;
 
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
 use super::encoder::template::TemplateEncoder;
-use super::encoder::{KafkaConnectParams, TimestamptzHandlingMode};
+use super::encoder::{
+    DateHandlingMode, KafkaConnectParams, TimeHandlingMode, TimestamptzHandlingMode,
+};
 use super::redis::{KEY_FORMAT, VALUE_FORMAT};
 use crate::sink::encoder::{
     AvroEncoder, AvroHeader, JsonEncoder, ProtoEncoder, TimestampHandlingMode,
@@ -99,8 +101,10 @@ impl SinkFormatterImpl {
                     JsonEncoder::new(
                         schema.clone(),
                         Some(pk_indices.clone()),
+                        DateHandlingMode::FromCe,
                         TimestampHandlingMode::Milli,
                         timestamptz_mode,
+                        TimeHandlingMode::Milli,
                     )
                 });
 
@@ -109,8 +113,10 @@ impl SinkFormatterImpl {
                         let val_encoder = JsonEncoder::new(
                             schema,
                             None,
+                            DateHandlingMode::FromCe,
                             TimestampHandlingMode::Milli,
                             timestamptz_mode,
+                            TimeHandlingMode::Milli,
                         );
                         let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::AppendOnlyJson(formatter))
@@ -169,14 +175,18 @@ impl SinkFormatterImpl {
                         let mut key_encoder = JsonEncoder::new(
                             schema.clone(),
                             Some(pk_indices),
+                            DateHandlingMode::FromCe,
                             TimestampHandlingMode::Milli,
                             timestamptz_mode,
+                            TimeHandlingMode::Milli,
                         );
                         let mut val_encoder = JsonEncoder::new(
                             schema,
                             None,
+                            DateHandlingMode::FromCe,
                             TimestampHandlingMode::Milli,
                             timestamptz_mode,
+                            TimeHandlingMode::Milli,
                         );
 
                         if let Some(s) = format_desc.options.get("schemas.enable") {

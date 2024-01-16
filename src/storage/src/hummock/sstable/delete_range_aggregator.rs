@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::BTreeSet;
 use std::future::Future;
 
-use risingwave_common::util::epoch::MAX_EPOCH;
+#[cfg(test)]
+use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_hummock_sdk::key::{PointRange, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 
@@ -52,56 +52,6 @@ impl Ord for SortedBoundary {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct TombstoneEnterExitEvent {
-    pub(crate) tombstone_epoch: HummockEpoch,
-}
-
-pub(crate) type CompactionDeleteRangeEvent = (
-    // event key
-    PointRange<Vec<u8>>,
-    // Old tombstones which exits at the event key
-    Vec<TombstoneEnterExitEvent>,
-    // New tombstones which enters at the event key
-    Vec<TombstoneEnterExitEvent>,
-);
-/// We introduce `event` to avoid storing excessive range tombstones after compaction if there are
-/// overlaps among range tombstones among different SSTs/batchs in compaction.
-/// The core idea contains two parts:
-/// 1) we only need to keep the smallest epoch of the overlapping
-/// range tomstone intervals since the key covered by the range tombstone in lower level must have
-/// smaller epoches;
-/// 2) due to 1), we lose the information to delete a key by tombstone in a single
-/// SST so we add a tombstone key in the data block.
-/// We leverage `events` to calculate the epoch information mentioned above.
-/// e.g. Delete range [1, 5) at epoch1, delete range [3, 7) at epoch2 and delete range [10, 12) at
-/// epoch3 will first be transformed into `events` below:
-/// `<1, +epoch1> <5, -epoch1> <3, +epoch2> <7, -epoch2> <10, +epoch3> <12, -epoch3>`
-/// Then `events` are sorted by user key:
-/// `<1, +epoch1> <3, +epoch2> <5, -epoch1> <7, -epoch2> <10, +epoch3> <12, -epoch3>`
-/// We rely on the fact that keys met in compaction are in order.
-/// When user key 0 comes, no events have happened yet so no range delete epoch. (will be
-/// represented as range delete epoch `MAX_EPOCH`)
-/// When user key 1 comes, event `<1, +epoch1>` happens so there is currently one range delete
-/// epoch: epoch1.
-/// When user key 2 comes, no more events happen so the set remains `{epoch1}`.
-/// When user key 3 comes, event `<3, +epoch2>` happens so the range delete epoch set is now
-/// `{epoch1, epoch2}`.
-/// When user key 5 comes, event `<5, -epoch1>` happens so epoch1 exits the set,
-/// therefore the current range delete epoch set is `{epoch2}`.
-/// When user key 11 comes, events `<7, -epoch2>` and `<10, +epoch3>`
-/// both happen, one after another. The set changes to `{epoch3}` from `{epoch2}`.
-pub(crate) fn apply_event(epochs: &mut BTreeSet<HummockEpoch>, event: &CompactionDeleteRangeEvent) {
-    let (_, exit, enter) = event;
-    // Correct because ranges in an epoch won't intersect.
-    for TombstoneEnterExitEvent { tombstone_epoch } in exit {
-        epochs.remove(tombstone_epoch);
-    }
-    for TombstoneEnterExitEvent { tombstone_epoch } in enter {
-        epochs.insert(*tombstone_epoch);
-    }
-}
-
 pub struct CompactionDeleteRangeIterator {
     inner: ForwardMergeRangeIterator,
 }
@@ -126,7 +76,7 @@ impl CompactionDeleteRangeIterator {
         let extended_smallest_user_key = PointRange::from_user_key(smallest_user_key, false);
         let extended_largest_user_key = PointRange::from_user_key(largest_user_key, false);
         let mut monotonic_events = vec![];
-        if iter.earliest_epoch() < MAX_EPOCH {
+        if !is_max_epoch(iter.earliest_epoch()) {
             monotonic_events.push(MonotonicDeleteEvent {
                 event_key: extended_smallest_user_key.to_vec(),
                 new_epoch: iter.earliest_epoch(),
@@ -138,7 +88,7 @@ impl CompactionDeleteRangeIterator {
                 if !monotonic_events.is_empty() {
                     monotonic_events.push(MonotonicDeleteEvent {
                         event_key: extended_largest_user_key.to_vec(),
-                        new_epoch: MAX_EPOCH,
+                        new_epoch: HummockEpoch::MAX,
                     });
                 }
                 break;
@@ -158,8 +108,8 @@ impl CompactionDeleteRangeIterator {
                 && a.new_epoch == b.new_epoch
         });
         if !monotonic_events.is_empty() {
-            assert_ne!(monotonic_events.first().unwrap().new_epoch, MAX_EPOCH);
-            assert_eq!(monotonic_events.last().unwrap().new_epoch, MAX_EPOCH);
+            assert!(!is_max_epoch(monotonic_events.first().unwrap().new_epoch));
+            assert!(is_max_epoch(monotonic_events.last().unwrap().new_epoch));
         }
         Ok(monotonic_events)
     }
@@ -249,7 +199,7 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
         if self.next_idx > 0 {
             self.table.value().meta.monotonic_tombstone_events[self.next_idx - 1].new_epoch
         } else {
-            MAX_EPOCH
+            HummockEpoch::MAX
         }
     }
 
@@ -296,7 +246,7 @@ pub fn get_min_delete_range_epoch_from_sstable(
         |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(&query_extended_user_key),
     );
     if idx == 0 {
-        MAX_EPOCH
+        HummockEpoch::MAX
     } else {
         table.meta.monotonic_tombstone_events[idx - 1].new_epoch
     }
@@ -308,13 +258,15 @@ mod tests {
 
     use bytes::Bytes;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::is_max_epoch;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
         gen_iterator_test_sstable_with_range_tombstones, iterator_test_user_key_of,
         mock_sstable_store,
     };
-    use crate::hummock::test_utils::{test_user_key, CompactionDeleteRangesBuilder};
+    use crate::hummock::test_utils::delete_range::CompactionDeleteRangesBuilder;
+    use crate::hummock::test_utils::test_user_key;
     use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
@@ -378,7 +330,7 @@ mod tests {
             iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 13)
                 .await
                 .unwrap(),
-            MAX_EPOCH,
+            HummockEpoch::MAX,
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 11)
@@ -409,20 +361,20 @@ mod tests {
             iter.earliest_delete_which_can_see_key(test_user_key(b"bbbddd").as_ref(), 8)
                 .await
                 .unwrap(),
-            MAX_EPOCH,
+            HummockEpoch::MAX,
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key(test_user_key(b"bbbeee").as_ref(), 8)
                 .await
                 .unwrap(),
-            MAX_EPOCH,
+            HummockEpoch::MAX,
         );
 
         assert_eq!(
             iter.earliest_delete_which_can_see_key(test_user_key(b"bbbeef").as_ref(), 10)
                 .await
                 .unwrap(),
-            MAX_EPOCH,
+            HummockEpoch::MAX,
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key(test_user_key(b"eeeeee").as_ref(), 8)
@@ -440,7 +392,7 @@ mod tests {
             iter.earliest_delete_which_can_see_key(test_user_key(b"hhhhhh").as_ref(), 6)
                 .await
                 .unwrap(),
-            MAX_EPOCH,
+            HummockEpoch::MAX,
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key(test_user_key(b"iiiiii").as_ref(), 6)
@@ -560,6 +512,6 @@ mod tests {
             sstable.value(),
             iterator_test_user_key_of(8).as_ref(),
         );
-        assert_eq!(ret, MAX_EPOCH);
+        assert!(is_max_epoch(ret));
     }
 }

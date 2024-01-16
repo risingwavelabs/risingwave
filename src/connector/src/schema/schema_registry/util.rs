@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use reqwest::Method;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use serde::de::DeserializeOwned;
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::Deserialize;
 use url::{ParseError, Url};
 
 pub fn handle_sr_list(addr: &str) -> Result<Vec<Url>> {
@@ -155,7 +155,7 @@ pub struct Subject {
 
 /// One schema can reference another schema
 /// (e.g., import "other.proto" in protobuf)
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct SchemaReference {
     /// The name of the reference.
     pub name: String,

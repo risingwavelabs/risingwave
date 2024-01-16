@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -75,6 +75,8 @@ pub enum StatementType {
     ALTER_MATERIALIZED_VIEW,
     ALTER_SINK,
     ALTER_SOURCE,
+    ALTER_FUNCTION,
+    ALTER_CONNECTION,
     ALTER_SYSTEM,
     REVOKE_PRIVILEGE,
     // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note
@@ -396,7 +398,7 @@ where
         }
 
         if let Some(callback) = self.callback.take() {
-            callback.await.map_err(PsqlError::ExecuteError)?;
+            callback.await.map_err(PsqlError::SimpleQueryError)?;
         }
         Ok(())
     }

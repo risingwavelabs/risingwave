@@ -1,0 +1,90 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+query T
+SELECT make_timestamptz(1973, 07, 15, 08, 15, 55.33);
+----
+1973-07-15 08:15:55.330+00:00
+
+query T
+SELECT make_timestamptz(-1973, 07, 15, 08, 15, 55.33);
+----
+-1973-07-15 08:15:55.330+00:00
+
+query error Invalid parameter sec: invalid sec
+SELECT make_timestamptz(1973, 07, 15, 08, 15, -55.33);
+
+query error Invalid parameter hour, min, sec: invalid time
+SELECT make_timestamptz(1973, 07, 15, 08, -15, 55.33);
+
+query error Invalid parameter year, month, day: invalid date
+SELECT make_timestamptz(1973, -07, 15, 08, 15, 55.33);
+
+query error Invalid parameter year, month, day: invalid date
+SELECT make_timestamptz(1973, 06, 31, 08, 15, 55.33);
+
+statement ok
+set TimeZone to 'America/New_York';
+
+query T
+SELECT make_timestamptz(1973, 07, 15, 08, 15, 55.33);
+----
+1973-07-15 08:15:55.330-04:00
+
+statement ok
+create table ttz(tstz timestamptz);
+
+statement ok
+insert into ttz values(make_timestamptz(1973, 06, 25, 08, 15, 55.33));
+
+query TT
+select * from ttz;
+----
+1973-06-25 08:15:55.330-04:00
+
+statement ok
+drop table ttz;
+
+query error Invalid parameter time_zone: 'Nehwon/Lankhmar' is not a valid timezone
+SELECT make_timestamptz(1910, 12, 24, 0, 0, 0, 'Nehwon/Lankhmar');
+
+query TT
+WITH tzs (tz) AS (VALUES ('Europe/Prague'), ('Europe/Paris'), ('America/New_York'), ('EST'), ('EST5EDT'), ('PST8PDT')) SELECT make_timestamptz(2010, 2, 27, 3, 45, 00, tz), tz FROM tzs;
+----
+2010-02-26 21:45:00-05:00	Europe/Prague
+2010-02-26 21:45:00-05:00	Europe/Paris
+2010-02-27 03:45:00-05:00	America/New_York
+2010-02-27 03:45:00-05:00	EST
+2010-02-27 03:45:00-05:00	EST5EDT
+2010-02-27 06:45:00-05:00	PST8PDT
+
+query TT
+WITH tzs (tz) AS (VALUES ('Europe/Prague'), ('Europe/Paris'), ('America/New_York'), ('EST'), ('EST5EDT'), ('PST8PDT')) SELECT make_timestamptz(2010, 2, 27, 3, 45, 00, tz) AT TIME ZONE 'EST5EDT', tz FROM tzs;
+----
+2010-02-26 21:45:00	Europe/Prague
+2010-02-26 21:45:00	Europe/Paris
+2010-02-27 03:45:00	America/New_York
+2010-02-27 03:45:00	EST
+2010-02-27 03:45:00	EST5EDT
+2010-02-27 06:45:00	PST8PDT
+
+query T
+SELECT make_timestamptz(1973, 07, 15, 08, 15, 55.33, 'Asia/Manila') = '1973-07-14 20:15:55.33'::timestamptz;
+----
+t
+
+statement ok
+set TimeZone to 'Europe/London';
+
+query T
+SELECT make_timestamptz(2013, 7, 15, 8, 15, 23.5);
+----
+2013-07-15 08:15:23.500+01:00
+
+query T
+SELECT make_timestamptz(2013, 7, 15, 8, 15, 23.5, 'America/New_York');
+----
+2013-07-15 13:15:23.500+01:00
+
+statement ok
+set timezone to 'UTC';

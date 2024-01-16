@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,10 +22,15 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
-use risingwave_pb::meta::PbTableFragments;
+use risingwave_pb::meta::table_parallelism::{
+    FixedParallelism, Parallelism, PbAutoParallelism, PbCustomParallelism, PbFixedParallelism,
+    PbParallelism,
+};
+use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
+use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, PbStreamEnvironment, StreamActor, StreamNode, StreamSource,
+    FragmentTypeFlag, PbStreamContext, StreamActor, StreamNode, StreamSource,
 };
 
 use super::{ActorId, FragmentId};
@@ -35,6 +40,43 @@ use crate::stream::{build_actor_connector_splits, build_actor_split_impls, Split
 
 /// Column family name for table fragments.
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum TableParallelism {
+    Auto,
+    Fixed(usize),
+    Custom,
+}
+
+impl From<PbTableParallelism> for TableParallelism {
+    fn from(value: PbTableParallelism) -> Self {
+        use Parallelism::*;
+        match &value.parallelism {
+            Some(Fixed(FixedParallelism { parallelism: n })) => Self::Fixed(*n as usize),
+            Some(Auto(_)) => Self::Auto,
+            Some(Custom(_)) => Self::Custom,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<TableParallelism> for PbTableParallelism {
+    fn from(value: TableParallelism) -> Self {
+        use TableParallelism::*;
+
+        let parallelism = match value {
+            Auto => PbParallelism::Auto(PbAutoParallelism {}),
+            Fixed(n) => PbParallelism::Fixed(PbFixedParallelism {
+                parallelism: n as u32,
+            }),
+            Custom => PbParallelism::Custom(PbCustomParallelism {}),
+        };
+
+        Self {
+            parallelism: Some(parallelism),
+        }
+    }
+}
 
 /// Fragments of a streaming job.
 ///
@@ -57,24 +99,34 @@ pub struct TableFragments {
     /// The splits of actors
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
-    /// The environment associated with this stream plan and its fragments
-    pub env: StreamEnvironment,
+    /// The streaming context associated with this stream plan and its fragments
+    pub ctx: StreamContext,
+
+    /// The parallelism assigned to this table fragments
+    pub assigned_parallelism: TableParallelism,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct StreamEnvironment {
+pub struct StreamContext {
     /// The timezone used to interpret timestamps and dates for conversion
     pub timezone: Option<String>,
 }
 
-impl StreamEnvironment {
-    pub fn to_protobuf(&self) -> PbStreamEnvironment {
-        PbStreamEnvironment {
+impl StreamContext {
+    pub fn to_protobuf(&self) -> PbStreamContext {
+        PbStreamContext {
             timezone: self.timezone.clone().unwrap_or("".into()),
         }
     }
 
-    pub fn from_protobuf(prost: &PbStreamEnvironment) -> Self {
+    pub fn to_expr_context(&self) -> PbExprContext {
+        PbExprContext {
+            // `self.timezone` must always be set; an invalid value is used here for debugging if it's not.
+            time_zone: self.timezone.clone().unwrap_or("Empty Time Zone".into()),
+        }
+    }
+
+    pub fn from_protobuf(prost: &PbStreamContext) -> Self {
         Self {
             timezone: if prost.get_timezone().is_empty() {
                 None
@@ -100,19 +152,26 @@ impl MetadataModel for TableFragments {
             fragments: self.fragments.clone().into_iter().collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
             actor_splits: build_actor_connector_splits(&self.actor_splits),
-            env: Some(self.env.to_protobuf()),
+            ctx: Some(self.ctx.to_protobuf()),
+            parallelism: Some(self.assigned_parallelism.into()),
         }
     }
 
     fn from_protobuf(prost: Self::PbType) -> Self {
-        let env = StreamEnvironment::from_protobuf(prost.get_env().unwrap());
+        let ctx = StreamContext::from_protobuf(prost.get_ctx().unwrap());
+
+        let default_parallelism = PbTableParallelism {
+            parallelism: Some(Parallelism::Custom(PbCustomParallelism {})),
+        };
+
         Self {
             table_id: TableId::new(prost.table_id),
             state: prost.state(),
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
             actor_splits: build_actor_split_impls(&prost.actor_splits),
-            env,
+            ctx,
+            assigned_parallelism: prost.parallelism.unwrap_or(default_parallelism).into(),
         }
     }
 
@@ -128,7 +187,8 @@ impl TableFragments {
             table_id,
             fragments,
             &BTreeMap::new(),
-            StreamEnvironment::default(),
+            StreamContext::default(),
+            TableParallelism::Auto,
         )
     }
 
@@ -138,7 +198,8 @@ impl TableFragments {
         table_id: TableId,
         fragments: BTreeMap<FragmentId, Fragment>,
         actor_locations: &BTreeMap<ActorId, ParallelUnit>,
-        env: StreamEnvironment,
+        ctx: StreamContext,
+        table_parallelism: TableParallelism,
     ) -> Self {
         let actor_status = actor_locations
             .iter()
@@ -159,7 +220,8 @@ impl TableFragments {
             fragments,
             actor_status,
             actor_splits: HashMap::default(),
-            env,
+            ctx,
+            assigned_parallelism: table_parallelism,
         }
     }
 
@@ -183,12 +245,17 @@ impl TableFragments {
 
     /// Returns the timezone of the table
     pub fn timezone(&self) -> Option<String> {
-        self.env.timezone.clone()
+        self.ctx.timezone.clone()
     }
 
     /// Returns whether the table fragments is in `Created` state.
     pub fn is_created(&self) -> bool {
         self.state == State::Created
+    }
+
+    /// Returns whether the table fragments is in `Initial` state.
+    pub fn is_initial(&self) -> bool {
+        self.state == State::Initial
     }
 
     /// Set the table ID.
@@ -313,6 +380,15 @@ impl TableFragments {
             .cloned()
     }
 
+    pub fn sink_fragment(&self) -> Option<Fragment> {
+        self.fragments
+            .values()
+            .find(|fragment| {
+                (fragment.get_fragment_type_mask() & FragmentTypeFlag::Sink as u32) != 0
+            })
+            .cloned()
+    }
+
     /// Returns actors that contains backfill executors.
     pub fn backfill_actor_ids(&self) -> HashSet<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
@@ -364,11 +440,13 @@ impl TableFragments {
 
     /// Resolve dependent table
     fn resolve_dependent_table(stream_node: &StreamNode, table_ids: &mut HashMap<TableId, usize>) {
-        if let Some(NodeBody::StreamScan(stream_scan)) = stream_node.node_body.as_ref() {
-            table_ids
-                .entry(TableId::new(stream_scan.table_id))
-                .or_default()
-                .add_assign(1);
+        let table_id = match stream_node.node_body.as_ref() {
+            Some(NodeBody::StreamScan(stream_scan)) => Some(TableId::new(stream_scan.table_id)),
+            Some(NodeBody::StreamCdcScan(stream_scan)) => Some(TableId::new(stream_scan.table_id)),
+            _ => None,
+        };
+        if let Some(table_id) = table_id {
+            table_ids.entry(table_id).or_default().add_assign(1);
         }
 
         for child in &stream_node.input {
@@ -494,5 +572,17 @@ impl TableFragments {
         self.fragments
             .values()
             .flat_map(|f| f.state_table_ids.clone())
+    }
+
+    /// Fill the `expr_context` in `StreamActor`. Used for compatibility.
+    pub fn fill_expr_context(mut self) -> Self {
+        self.fragments.values_mut().for_each(|fragment| {
+            fragment.actors.iter_mut().for_each(|actor| {
+                if actor.expr_context.is_none() {
+                    actor.expr_context = Some(self.ctx.to_expr_context());
+                }
+            });
+        });
+        self
     }
 }

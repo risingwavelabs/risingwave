@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::mem::swap;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -25,6 +25,7 @@ use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
+use risingwave_pb::plan_common::AdditionalColumnType;
 
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
@@ -73,21 +74,13 @@ impl SplitReader for KafkaSplitReader {
         properties.common.set_security_properties(&mut config);
         properties.set_client(&mut config);
 
-        // rdkafka fetching config
-        properties.rdkafka_properties.set_client(&mut config);
-
-        if config.get("group.id").is_none() {
-            config.set(
-                "group.id",
-                format!(
-                    "consumer-{}",
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_micros()
-                ),
-            );
-        }
+        config.set(
+            "group.id",
+            format!(
+                "rw-consumer-{}-{}",
+                source_ctx.source_info.fragment_id, source_ctx.source_info.actor_id
+            ),
+        );
 
         let client_ctx = PrivateLinkConsumerContext::new(
             broker_rewrite_map,
@@ -202,6 +195,14 @@ impl CommonSplitReader for KafkaSplitReader {
         let mut num_messages = 0;
         let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
         let mut res = Vec::with_capacity(max_chunk_size);
+        // ingest kafka message header can be expensive, do it only when required
+        let require_message_header = self
+            .parser_config
+            .common
+            .rw_columns
+            .iter()
+            .any(|col_desc| col_desc.additional_column_type == AdditionalColumnType::Header);
+
         #[for_await]
         'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(max_chunk_size) {
             let msgs: Vec<_> = msgs
@@ -226,7 +227,8 @@ impl CommonSplitReader for KafkaSplitReader {
                     Some(payload) => payload.len(),
                 };
                 num_messages += 1;
-                let source_message = SourceMessage::from_kafka_message(&msg);
+                let source_message =
+                    SourceMessage::from_kafka_message(&msg, require_message_header);
                 let split_id = source_message.split_id.clone();
                 res.push(source_message);
 

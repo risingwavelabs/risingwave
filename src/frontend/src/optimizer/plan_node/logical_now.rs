@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ use super::{
     ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalFilter, PlanBase, PlanRef,
     PredicatePushdown, RewriteStreamContext, StreamNow, ToBatch, ToStream, ToStreamContext,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMapping;
@@ -65,7 +66,11 @@ impl Distill for LogicalNow {
 }
 
 impl_plan_tree_node_for_leaf! { LogicalNow }
+
 impl ExprRewritable for LogicalNow {}
+
+impl ExprVisitable for LogicalNow {}
+
 impl PredicatePushdown for LogicalNow {
     fn predicate_pushdown(
         &self,

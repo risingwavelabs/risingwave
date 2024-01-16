@@ -23,6 +23,7 @@ rand = "0.8"
 regex = "1"
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
+risingwave_hummock_sdk = { workspace = true }
 risingwave_meta = { workspace = true }
 risingwave_meta_model_v2 = { workspace = true }
 risingwave_pb = { workspace = true }

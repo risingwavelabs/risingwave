@@ -92,7 +92,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 Then you'll be able to compile and start RiseDev!
 
-> **Note**
+> [!NOTE]
 >
 > `.cargo/config.toml` contains `rustflags` configurations like `-Clink-arg` and `-Ctarget-feature`. Since it will be [merged](https://doc.rust-lang.org/cargo/reference/config.html#hierarchical-structure) with `$HOME/.cargo/config.toml`, check the config files and make sure they don't conflict if you have global `rustflags` configurations for e.g. linker there.
 
@@ -145,7 +145,7 @@ To manually add those components into the cluster, you will need to configure Ri
 ./risedev configure enable prometheus-and-grafana # enable Prometheus and Grafana
 ./risedev configure enable minio                  # enable MinIO
 ```
-> **Note**
+> [!NOTE]
 >
 > Enabling a component with the `./risedev configure enable` command will only download the component to your environment. To allow it to function, you must revise the corresponding configuration setting in `risedev.yml` and restart the dev cluster.
 
@@ -165,7 +165,7 @@ For example, you can modify the default section to:
       persist-data: true
 ```
 
-> **Note**
+> [!NOTE]
 >
 > The Kafka service depends on the ZooKeeper service. If you want to enable the Kafka component, enable the ZooKeeper component first.
 
@@ -335,7 +335,7 @@ Then to run the end-to-end tests, you can use one of the following commands acco
 ./risedev slt-all -p 4566 -d dev -j 1
 ```
 
-> **Note**
+> [!NOTE]
 >
 > Use `-j 1` to create a separate database for each test case, which can ensure that previous test case failure won't affect other tests due to table cleanups.
 

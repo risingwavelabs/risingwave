@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod enumerator;
+pub mod external;
 pub mod source;
 pub mod split;
 use std::collections::HashMap;
@@ -23,8 +24,9 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
+use risingwave_pb::plan_common::ExternalTableDesc;
+use simd_json::prelude::ArrayTrait;
 pub use source::*;
-pub use split::*;
 
 use crate::source::{SourceProperties, SplitImpl, TryFromHashmap};
 use crate::{for_all_classified_sources, impl_cdc_source_type};
@@ -70,19 +72,30 @@ impl CdcSourceType {
 #[derive(Clone, Debug, Default)]
 pub struct CdcProperties<T: CdcSourceTypeTrait> {
     /// Properties specified in the WITH clause by user
-    pub props: HashMap<String, String>,
+    pub properties: HashMap<String, String>,
 
     /// Schema of the source specified by users
     pub table_schema: TableSchema,
+
+    /// Whether the properties is shared by multiple tables
+    pub is_multi_table_shared: bool,
 
     pub _phantom: PhantomData<T>,
 }
 
 impl<T: CdcSourceTypeTrait> TryFromHashmap for CdcProperties<T> {
-    fn try_from_hashmap(props: HashMap<String, String>) -> anyhow::Result<Self> {
+    fn try_from_hashmap(
+        properties: HashMap<String, String>,
+        _deny_unknown_fields: bool,
+    ) -> anyhow::Result<Self> {
+        let is_multi_table_shared = properties
+            .get(CDC_SHARING_MODE_KEY)
+            .is_some_and(|v| v == "true");
         Ok(CdcProperties {
-            props,
+            properties,
             table_schema: Default::default(),
+            // TODO(siyuan): use serde to deserialize input hashmap
+            is_multi_table_shared,
             _phantom: PhantomData,
         })
     }
@@ -122,6 +135,31 @@ where
             pk_indices,
         };
         self.table_schema = table_schema;
+        if let Some(info) = source.info.as_ref() {
+            self.is_multi_table_shared = info.cdc_source_job;
+        }
+    }
+
+    fn init_from_pb_cdc_table_desc(&mut self, table_desc: &ExternalTableDesc) {
+        let properties: HashMap<String, String> =
+            table_desc.connect_properties.clone().into_iter().collect();
+
+        let table_schema = TableSchema {
+            columns: table_desc.columns.clone(),
+            pk_indices: table_desc.stream_key.clone(),
+        };
+
+        self.properties = properties;
+        self.table_schema = table_schema;
+        // properties are not shared, so mark it as false
+        self.is_multi_table_shared = false;
+    }
+}
+
+impl<T: CdcSourceTypeTrait> crate::source::UnknownFields for CdcProperties<T> {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        // FIXME: CDC does not handle unknown fields yet
+        HashMap::new()
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -142,9 +142,11 @@ pub(super) fn generate_captured_function(
 
     let sig = &mut user_fn.sig;
 
+    let name = sig.ident.clone();
+
     // Modify the name.
     {
-        let new_name = format!("{}_captured", sig.ident);
+        let new_name = format!("{}_captured", name);
         let new_name = Ident::new(&new_name, sig.ident.span());
         sig.ident = new_name;
     }
@@ -158,6 +160,19 @@ pub(super) fn generate_captured_function(
         ));
     }
 
+    let arg_names: Vec<_> = inputs
+        .iter()
+        .map(|arg| {
+            let FnArg::Typed(arg) = arg else {
+                return Err(syn::Error::new_spanned(
+                    arg,
+                    "receiver is not allowed in captured function",
+                ));
+            };
+            Ok(arg.pat.to_token_stream())
+        })
+        .try_collect()?;
+
     let (captured_inputs, remained_inputs) = {
         let mut inputs = inputs.iter().cloned();
         let inputs = inputs.by_ref();
@@ -167,12 +182,13 @@ pub(super) fn generate_captured_function(
     };
     *inputs = remained_inputs.into_iter().collect();
 
-    // Modify the body
-    let body = &mut user_fn.block;
+    let call_old_fn = quote! {
+        #name(#(#arg_names),*)
+    };
+
     let new_body = {
         let mut scoped = quote! {
-            // TODO: We can call the old function directly here.
-            #body
+            #call_old_fn
         };
 
         #[allow(clippy::disallowed_methods)]
@@ -204,7 +220,6 @@ pub(super) fn generate_captured_function(
     };
 
     Ok(quote! {
-        #[allow(dead_code)]
         #orig_user_fn
         #new_user_fn
     })

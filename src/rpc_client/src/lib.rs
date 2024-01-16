@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 //! response gRPC message structs.
 
 #![feature(trait_alias)]
-#![feature(result_option_inspect)]
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_defaults)]
 #![feature(coroutines)]
@@ -26,6 +25,7 @@
 #![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(error_generic_member_access)]
+#![feature(panic_update_hook)]
 
 use std::any::type_name;
 use std::fmt::{Debug, Formatter};
@@ -69,8 +69,10 @@ pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
 pub trait RpcClient: Send + Sync + 'static + Clone {
     async fn new_client(host_addr: HostAddr) -> Result<Self>;
 
-    async fn new_clients(host_addr: HostAddr, size: usize) -> Result<Vec<Self>> {
-        try_join_all(repeat(host_addr).take(size).map(Self::new_client)).await
+    async fn new_clients(host_addr: HostAddr, size: usize) -> Result<Arc<Vec<Self>>> {
+        try_join_all(repeat(host_addr).take(size).map(Self::new_client))
+            .await
+            .map(Arc::new)
     }
 }
 
@@ -78,7 +80,7 @@ pub trait RpcClient: Send + Sync + 'static + Clone {
 pub struct RpcClientPool<S> {
     connection_pool_size: u16,
 
-    clients: Cache<HostAddr, Vec<S>>,
+    clients: Cache<HostAddr, Arc<Vec<S>>>,
 }
 
 impl<S> Default for RpcClientPool<S>
@@ -177,9 +179,9 @@ pub struct BidiStreamSender<REQ> {
 }
 
 impl<REQ> BidiStreamSender<REQ> {
-    pub async fn send_request(&mut self, request: REQ) -> Result<()> {
+    pub async fn send_request<R: Into<REQ>>(&mut self, request: R) -> Result<()> {
         self.tx
-            .send(request)
+            .send(request.into())
             .await
             .map_err(|_| anyhow!("unable to send request {}", type_name::<REQ>()).into())
     }
@@ -226,15 +228,16 @@ impl<REQ, RSP> BidiStreamHandle<REQ, RSP> {
         F: FnOnce(Receiver<REQ>) -> Fut,
         St: Stream<Item = Result<RSP>> + Send + Unpin + 'static,
         Fut: Future<Output = Result<St>> + Send,
+        R: Into<REQ>,
     >(
-        first_request: REQ,
+        first_request: R,
         init_stream_fn: F,
     ) -> Result<(Self, RSP)> {
         let (request_sender, request_receiver) = channel(DEFAULT_BUFFER_SIZE);
 
         // Send initial request in case of the blocking receive call from creating streaming request
         request_sender
-            .send(first_request)
+            .send(first_request.into())
             .await
             .map_err(|_err| anyhow!("unable to send first request of {}", type_name::<REQ>()))?;
 

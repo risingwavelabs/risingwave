@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use std::rc::Rc;
 
 use itertools::Itertools;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
@@ -24,7 +25,6 @@ use crate::binder::{
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
     LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
@@ -42,7 +42,7 @@ impl Planner {
             Relation::BaseTable(t) => self.plan_base_table(&t),
             Relation::SystemTable(st) => self.plan_sys_table(*st),
             // TODO: order is ignored in the subquery
-            Relation::Subquery(q) => Ok(self.plan_query(q.query)?.into_subplan()),
+            Relation::Subquery(q) => Ok(self.plan_query(q.query)?.into_unordered_subplan()),
             Relation::Join(join) => self.plan_join(*join),
             Relation::Apply(join) => self.plan_apply(*join),
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
@@ -67,18 +67,19 @@ impl Planner {
     }
 
     pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
+        let for_system_time_as_of_proctime = base_table.for_system_time_as_of_proctime;
+        let table_cardinality = base_table.table_catalog.cardinality;
         Ok(LogicalScan::create(
             base_table.table_catalog.name().to_string(),
-            ScanTableType::default(),
-            Rc::new(base_table.table_catalog.table_desc()),
+            base_table.table_catalog.clone(),
             base_table
                 .table_indexes
                 .iter()
                 .map(|x| x.as_ref().clone().into())
                 .collect(),
             self.ctx(),
-            base_table.for_system_time_as_of_proctime,
-            base_table.table_catalog.cardinality,
+            for_system_time_as_of_proctime,
+            table_cardinality,
         )
         .into())
     }
@@ -93,11 +94,7 @@ impl Planner {
         let join_type = join.join_type;
         let on_clause = join.cond;
         if on_clause.has_subquery() {
-            Err(ErrorCode::NotImplemented(
-                "Subquery in join on condition is unsupported".into(),
-                None.into(),
-            )
-            .into())
+            bail_not_implemented!("Subquery in join on condition");
         } else {
             Ok(LogicalJoin::create(left, right, join_type, on_clause))
         }
@@ -107,11 +104,7 @@ impl Planner {
         let join_type = join.join_type;
         let on_clause = join.cond;
         if on_clause.has_subquery() {
-            return Err(ErrorCode::NotImplemented(
-                "Subquery in join on condition is unsupported".into(),
-                None.into(),
-            )
-            .into());
+            bail_not_implemented!("Subquery in join on condition");
         }
 
         let correlated_id = self.ctx.next_correlated_id();

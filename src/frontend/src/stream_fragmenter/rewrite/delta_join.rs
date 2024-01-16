@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -71,7 +71,6 @@ fn dispatch_no_shuffle(output_indices: Vec<u32>) -> DispatchStrategy {
         r#type: DispatcherType::NoShuffle.into(),
         dist_key_indices: vec![],
         output_indices,
-        downstream_table_name: None,
     }
 }
 
@@ -84,7 +83,6 @@ fn dispatch_consistent_hash_shuffle(
         r#type: DispatcherType::Hash.into(),
         dist_key_indices,
         output_indices,
-        downstream_table_name: None,
     }
 }
 

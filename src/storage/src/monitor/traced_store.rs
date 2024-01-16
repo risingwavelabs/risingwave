@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
     init_collector, should_use_trace, ConcurrentId, MayTraceSpan, OperationResult, StorageType,
-    TraceResult, TraceSpan, TracedBytes, LOCAL_ID,
+    TraceResult, TraceSpan, TracedBytes, TracedSealCurrentEpochOptions, LOCAL_ID,
 };
 
 use super::identity;
@@ -208,9 +208,13 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         self.inner.init(options).await
     }
 
-    fn seal_current_epoch(&mut self, next_epoch: u64) {
-        let _span = TraceSpan::new_seal_current_epoch_span(next_epoch, self.storage_type);
-        self.inner.seal_current_epoch(next_epoch)
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
+        let _span = TraceSpan::new_seal_current_epoch_span(
+            next_epoch,
+            TracedSealCurrentEpochOptions::from(opts.clone()),
+            self.storage_type,
+        );
+        self.inner.seal_current_epoch(next_epoch, opts)
     }
 
     async fn try_flush(&mut self) -> StorageResult<()> {

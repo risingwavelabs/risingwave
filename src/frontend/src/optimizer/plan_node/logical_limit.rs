@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ use super::{
     gen_filter_and_pushdown, generic, BatchLimit, ColPrunable, ExprRewritable, Logical, PlanBase,
     PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, LogicalTopN, PredicatePushdownContext, RewriteStreamContext,
     ToStreamContext,
@@ -85,6 +86,8 @@ impl ColPrunable for LogicalLimit {
 }
 
 impl ExprRewritable for LogicalLimit {}
+
+impl ExprVisitable for LogicalLimit {}
 
 impl PredicatePushdown for LogicalLimit {
     fn predicate_pushdown(

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -55,6 +55,8 @@ impl UserDefinedFunction {
             return_type,
             language: udf.get_language().clone(),
             identifier: udf.get_identifier().clone(),
+            // TODO: Ensure if we need `body` here
+            body: None,
             link: udf.get_link().clone(),
         };
 

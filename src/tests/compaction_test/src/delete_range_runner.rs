@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,9 @@ use rand::{RngCore, SeedableRng};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{extract_storage_memory_config, load_config, NoOverride, RwConfig};
+use risingwave_common::config::{
+    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, RwConfig,
+};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_test::get_notification_client_for_test;
@@ -35,8 +37,8 @@ use risingwave_hummock_test::local_state_store_test_utils::LocalStateStoreTestEx
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use risingwave_meta::hummock::test_utils::setup_compute_env_with_config;
 use risingwave_meta::hummock::MockHummockMetaClient;
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
 use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
 use risingwave_pb::meta::SystemParams;
@@ -55,11 +57,12 @@ use risingwave_storage::hummock::{
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
-use risingwave_storage::store::{LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions};
+use risingwave_storage::store::{
+    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, SealCurrentEpochOptions,
+};
 use risingwave_storage::StateStore;
 
 use crate::CompactionTestOpts;
-
 pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
@@ -155,6 +158,9 @@ async fn compaction_test(
         stream_job_status: PbStreamJobStatus::Created.into(),
         create_type: PbCreateType::Foreground.into(),
         description: None,
+        incoming_sinks: vec![],
+        initialized_at_cluster_version: None,
+        created_at_cluster_version: None,
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -198,10 +204,11 @@ async fn compaction_test(
     let state_store_metrics = Arc::new(HummockStateStoreMetrics::unused());
     let compactor_metrics = Arc::new(CompactorMetrics::unused());
     let object_store_metrics = Arc::new(ObjectStoreMetrics::unused());
-    let remote_object_store = parse_remote_object_store(
+    let remote_object_store = build_remote_object_store(
         state_store_type.strip_prefix("hummock+").unwrap(),
         object_store_metrics.clone(),
         "Hummock",
+        ObjectStoreConfig::default(),
     )
     .await;
     let sstable_store = Arc::new(SstableStore::new(
@@ -210,7 +217,8 @@ async fn compaction_test(
         storage_memory_config.block_cache_capacity_mb * (1 << 20),
         storage_memory_config.meta_cache_capacity_mb * (1 << 20),
         0,
-        storage_memory_config.large_query_memory_usage_mb * (1 << 20),
+        storage_memory_config.prefetch_buffer_capacity_mb * (1 << 20),
+        storage_opts.max_prefetch_block_number,
         FileCache::none(),
         FileCache::none(),
         None,
@@ -264,7 +272,7 @@ async fn compaction_test(
     )
     .await
     .unwrap();
-    let version = store.get_pinned_version().version();
+    let version = store.get_pinned_version().version().clone();
     let remote_version = meta_client.get_current_version().await.unwrap();
     println!(
         "version-{}, remote version-{}",
@@ -419,7 +427,8 @@ impl NormalState {
             .flush(delete_ranges)
             .await
             .map_err(|e| format!("{:?}", e))?;
-        self.storage.seal_current_epoch(next_epoch);
+        self.storage
+            .seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
         Ok(())
     }
 
@@ -428,13 +437,10 @@ impl NormalState {
             .get(
                 TableKey(Bytes::copy_from_slice(key)),
                 ReadOptions {
-                    prefix_hint: None,
                     ignore_range_tombstone,
-                    retention_seconds: None,
                     table_id: self.table_id,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -455,13 +461,12 @@ impl NormalState {
                     Bound::Excluded(TableKey(Bytes::copy_from_slice(right))),
                 ),
                 ReadOptions {
-                    prefix_hint: None,
                     ignore_range_tombstone,
-                    retention_seconds: None,
                     table_id: self.table_id,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -487,13 +492,12 @@ impl CheckState for NormalState {
                         Bound::Excluded(Bytes::copy_from_slice(right)).map(TableKey),
                     ),
                     ReadOptions {
-                        prefix_hint: None,
                         ignore_range_tombstone: true,
-                        retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 )
                 .await
@@ -588,6 +592,12 @@ fn run_compactor_thread(
 ) {
     let filter_key_extractor_manager =
         FilterKeyExtractorManager::RpcFilterKeyExtractorManager(filter_key_extractor_manager);
+
+    let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));
+    let max_task_parallelism = Arc::new(AtomicU32::new(
+        (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
+            .ceil() as u32,
+    ));
     let compactor_context = CompactorContext {
         storage_opts,
         sstable_store,
@@ -598,7 +608,8 @@ fn run_compactor_thread(
         memory_limiter: MemoryLimiter::unlimit(),
         task_progress_manager: Default::default(),
         await_tree_reg: None,
-        running_task_count: Arc::new(AtomicU32::new(0)),
+        running_task_parallelism: Arc::new(AtomicU32::new(0)),
+        max_task_parallelism,
     };
 
     start_compactor(

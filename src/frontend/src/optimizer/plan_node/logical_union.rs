@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ use super::{
     ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, InputRef, Literal};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::stream_union::StreamUnion;
 use crate::optimizer::plan_node::{
@@ -98,6 +99,8 @@ impl ColPrunable for LogicalUnion {
 }
 
 impl ExprRewritable for LogicalUnion {}
+
+impl ExprVisitable for LogicalUnion {}
 
 impl PredicatePushdown for LogicalUnion {
     fn predicate_pushdown(

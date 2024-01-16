@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,13 +21,10 @@ use arc_swap::ArcSwap;
 use await_tree::InstrumentAwait;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
-use risingwave_common::util::epoch::MAX_EPOCH;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
-use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::version_update_payload::Payload;
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::refiller::{CacheRefillConfig, CacheRefiller};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
@@ -36,9 +33,9 @@ use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::refiller::CacheRefillerEvent;
 use crate::hummock::event_handler::uploader::{
-    HummockUploader, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
+    HummockUploader, SyncedData, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
 };
-use crate::hummock::event_handler::HummockEvent;
+use crate::hummock::event_handler::{HummockEvent, HummockVersionUpdate};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::store::version::{
     HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
@@ -238,7 +235,7 @@ impl HummockEventHandler {
         epoch: HummockEpoch,
         newly_uploaded_sstables: Vec<StagingSstableInfo>,
     ) {
-        info_in_release!("epoch has been synced: {}.", epoch);
+        debug!("epoch has been synced: {}.", epoch);
         if !newly_uploaded_sstables.is_empty() {
             newly_uploaded_sstables
                 .into_iter()
@@ -311,7 +308,7 @@ impl HummockEventHandler {
         new_sync_epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
     ) {
-        info_in_release!("receive await sync epoch: {}", new_sync_epoch);
+        debug!("receive await sync epoch: {}", new_sync_epoch);
         // The epoch to sync has been committed already.
         if new_sync_epoch <= self.uploader.max_committed_epoch() {
             send_sync_result(
@@ -326,7 +323,7 @@ impl HummockEventHandler {
         }
         // The epoch has been synced
         if new_sync_epoch <= self.uploader.max_synced_epoch() {
-            info_in_release!(
+            debug!(
                 "epoch {} has been synced. Current max_sync_epoch {}",
                 new_sync_epoch,
                 self.uploader.max_synced_epoch()
@@ -345,7 +342,7 @@ impl HummockEventHandler {
             return;
         }
 
-        info_in_release!(
+        debug!(
             "awaiting for epoch to be synced: {}, max_synced_epoch: {}",
             new_sync_epoch,
             self.uploader.max_synced_epoch()
@@ -396,7 +393,7 @@ impl HummockEventHandler {
         }
 
         self.sstable_object_id_manager
-            .remove_watermark_object_id(TrackerId::Epoch(MAX_EPOCH));
+            .remove_watermark_object_id(TrackerId::Epoch(HummockEpoch::MAX));
 
         // Notify completion of the Clear event.
         let _ = notifier.send(()).inspect_err(|e| {
@@ -404,7 +401,7 @@ impl HummockEventHandler {
         });
     }
 
-    fn handle_version_update(&mut self, version_payload: Payload) {
+    fn handle_version_update(&mut self, version_payload: HummockVersionUpdate) {
         let pinned_version = self
             .refiller
             .last_new_pinned_version()
@@ -414,9 +411,9 @@ impl HummockEventHandler {
 
         let mut sst_delta_infos = vec![];
         let newly_pinned_version = match version_payload {
-            Payload::VersionDeltas(version_deltas) => {
-                let mut version_to_apply = pinned_version.version();
-                for version_delta in &version_deltas.version_deltas {
+            HummockVersionUpdate::VersionDeltas(version_deltas) => {
+                let mut version_to_apply = pinned_version.version().clone();
+                for version_delta in &version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
                     if version_to_apply.max_committed_epoch == version_delta.max_committed_epoch {
                         sst_delta_infos = version_to_apply.build_sst_delta_infos(version_delta);
@@ -426,7 +423,7 @@ impl HummockEventHandler {
 
                 version_to_apply
             }
-            Payload::PinnedVersion(version) => version,
+            HummockVersionUpdate::PinnedVersion(version) => version,
         };
 
         validate_table_key_range(&newly_pinned_version);
@@ -473,7 +470,7 @@ impl HummockEventHandler {
                 self.pinned_version.load().max_committed_epoch(),
             ));
 
-        info_in_release!(
+        debug!(
             "update to hummock version: {}, epoch: {}",
             new_pinned_version.id(),
             new_pinned_version.max_committed_epoch()
@@ -578,6 +575,19 @@ impl HummockEventHandler {
                     self.uploader.start_merge_imms(epoch);
                 }
             }
+
+            HummockEvent::LocalSealEpoch {
+                epoch,
+                opts,
+                table_id,
+                ..
+            } => {
+                if let Some((direction, watermarks)) = opts.table_watermarks {
+                    self.uploader
+                        .add_table_watermarks(epoch, table_id, watermarks, direction)
+                }
+            }
+
             #[cfg(any(test, feature = "test"))]
             HummockEvent::FlushEvent(sender) => {
                 let _ = sender.send(()).inspect_err(|e| {
@@ -593,6 +603,7 @@ impl HummockEventHandler {
                 let pinned_version = self.pinned_version.load();
                 let basic_read_version = Arc::new(RwLock::new(
                     HummockReadVersion::new_with_replication_option(
+                        table_id,
                         (**pinned_version).clone(),
                         is_replicated,
                     ),
@@ -600,10 +611,9 @@ impl HummockEventHandler {
 
                 let instance_id = self.generate_instance_id();
 
-                info_in_release!(
+                debug!(
                     "new read version registered: table_id: {}, instance_id: {}",
-                    table_id,
-                    instance_id
+                    table_id, instance_id
                 );
 
                 {
@@ -625,7 +635,7 @@ impl HummockEventHandler {
                 )) {
                     Ok(_) => {}
                     Err(_) => {
-                        panic!(
+                        warn!(
                             "RegisterReadVersion send fail table_id {:?} instance_is {:?}",
                             table_id, instance_id
                         )
@@ -637,10 +647,9 @@ impl HummockEventHandler {
                 table_id,
                 instance_id,
             } => {
-                info_in_release!(
+                debug!(
                     "read version deregister: table_id: {}, instance_id: {}",
-                    table_id,
-                    instance_id
+                    table_id, instance_id
                 );
                 let mut read_version_mapping_guard = self.read_version_mapping.write();
                 let entry = read_version_mapping_guard
@@ -680,21 +689,22 @@ fn send_sync_result(
     });
 }
 
-fn to_sync_result(
-    staging_sstable_infos: &HummockResult<Vec<StagingSstableInfo>>,
-) -> HummockResult<SyncResult> {
-    match staging_sstable_infos {
-        Ok(staging_sstable_infos) => {
-            let sync_size = staging_sstable_infos
+fn to_sync_result(result: &HummockResult<SyncedData>) -> HummockResult<SyncResult> {
+    match result {
+        Ok(sync_data) => {
+            let sync_size = sync_data
+                .staging_ssts
                 .iter()
                 .map(StagingSstableInfo::imm_size)
                 .sum();
             Ok(SyncResult {
                 sync_size,
-                uncommitted_ssts: staging_sstable_infos
+                uncommitted_ssts: sync_data
+                    .staging_ssts
                     .iter()
                     .flat_map(|staging_sstable_info| staging_sstable_info.sstable_infos().clone())
                     .collect(),
+                table_watermarks: sync_data.table_watermarks.clone(),
             })
         }
         Err(e) => Err(HummockError::other(format!("sync task failed for {:?}", e))),

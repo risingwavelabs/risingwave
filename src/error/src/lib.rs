@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,5 +17,8 @@
 //! This will eventually replace the `RwError` in `risingwave_common`.
 
 #![feature(error_generic_member_access)]
+#![feature(lint_reasons)]
+#![feature(register_tool)]
+#![register_tool(rw)]
 
 pub mod tonic;

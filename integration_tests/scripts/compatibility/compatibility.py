@@ -4,28 +4,38 @@ import yaml
 
 
 class DataType:
-    def __init__(self, name: str, zero=None, minimum=None, maximum=None, maximum_gen_py="", null="null", aliases=None,
-                 rw_type=None):
+    def __init__(self, name: str, length=None, zero=None, minimum=None, maximum=None, maximum_gen_py="", null="null",
+                 aliases=None, rw_type=None):
         self.name = name
+        self.length = length
         self.col_name = "c_" + self.name.replace(" ", "_")
+        if self.length is not None:
+            self.col_name = self.col_name + "_" + str(self.length)
         self.array_col_name = self.col_name + "_array"
         self.aliases = aliases
         self.zero = zero
         self.min = minimum
         self.max = maximum
         self.null = null
-        self.rw_type = rw_type
+        self.rw_type = name
+        if rw_type is not None:
+            self.rw_type = rw_type
         if maximum_gen_py != "":
             exec("self.max={}".format(maximum_gen_py))
 
+    def typ(self):
+        if self.length is not None:
+            return "{}({})".format(self.name, self.length)
+        return self.name
+
     def cast(self, value):
-        return '{}::{}'.format(value, self.name)
+        return '{}::{}'.format(value, self.typ())
 
     def array_cast(self, value):
         return '{}::{}'.format(value, self.array_type())
 
     def array_type(self):
-        return self.name + "[]"
+        return self.typ() + "[]"
 
     def array_zero(self):
         return "array[]"
@@ -57,7 +67,7 @@ class DataType:
 
 class MysqlDataType(DataType):
     def cast(self, value):
-        return "CAST({} AS {})".format(value, self.name)
+        return "CAST({} AS {})".format(value, self.typ())
 
 
 class TableSqlGenerator:
@@ -76,14 +86,18 @@ class TableSqlGenerator:
     def struct_values(self, value):
         return 'ROW({})'.format(value)
 
-    def create_table_sql(self):
+    def create_table_sql(self, rw_table=False):
         prefix = "CREATE TABLE IF NOT EXISTS " + self.table_name
         cols = "(\n"
         pk_col_names = []
         for data_type in self.datatypes:
             if cols != "(\n":
                 cols += ",\n"
-            cols += data_type.col_name + " " + data_type.name
+            col = data_type.col_name + " " + data_type.typ()
+            if rw_table:
+                col = data_type.col_name + " " + data_type.rw_type
+            cols += col
+
             if data_type.name in self.pk_types:
                 pk_col_names.append(data_type.col_name)
         if self.enable_array:
@@ -96,6 +110,9 @@ class TableSqlGenerator:
         if self.pk_types:
             cols += ",\nPRIMARY KEY (" + ",".join(pk_col_names) + ")\n);"
         return prefix + cols
+
+    def database_type(self):
+        pass
 
     def drop_table_sql(self):
         return "DROP TABLE IF EXISTS {};".format(self.table_name)
@@ -176,7 +193,7 @@ class RisingwaveTableSqlGenerator(TableSqlGenerator):
         for data_type in self.datatypes:
             if cols != "":
                 cols += ",\n"
-            cols = cols + data_type.col_name + " " + data_type.name
+            cols = cols + data_type.col_name + " " + data_type.typ()
         if self.enable_array:
             for data_type in self.datatypes:
                 cols += ",\n"
@@ -185,12 +202,15 @@ class RisingwaveTableSqlGenerator(TableSqlGenerator):
 
 
 class PostgresTableSqlGenerator(TableSqlGenerator):
+    def database_type(self):
+        return "postgres"
+
     def struct_type(self):
         cols = ""
         for data_type in self.datatypes:
             if cols != "":
                 cols += ",\n"
-            cols = cols + data_type.col_name + " " + data_type.name
+            cols = cols + data_type.col_name + " " + data_type.typ()
         if self.enable_array:
             for data_type in self.datatypes:
                 cols += ",\n"
@@ -198,3 +218,8 @@ class PostgresTableSqlGenerator(TableSqlGenerator):
         print("DROP TYPE IF EXISTS struct;")
         print("CREATE TYPE struct AS (\n{}\n);".format(cols))
         return "struct"
+
+
+class MysqlTableSqlGenerator(TableSqlGenerator):
+    def database_type(self):
+        return "mysql"

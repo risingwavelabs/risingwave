@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::expr::Expr;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
@@ -100,6 +101,7 @@ impl ToBatchPb for BatchInsert {
             },
             row_id_index: self.core.row_id_index.map(|index| index as _),
             returning: self.core.returning,
+            session_id: self.base.ctx().session_ctx().session_id().0 as u32,
         })
     }
 }
@@ -113,3 +115,5 @@ impl ToLocalBatch for BatchInsert {
 }
 
 impl ExprRewritable for BatchInsert {}
+
+impl ExprVisitable for BatchInsert {}

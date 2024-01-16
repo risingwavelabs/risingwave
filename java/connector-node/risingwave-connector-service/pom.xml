@@ -28,26 +28,22 @@
         </dependency>
         <dependency>
             <groupId>com.risingwave</groupId>
+            <artifactId>tracing</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave</groupId>
             <artifactId>java-binding</artifactId>
         </dependency>
         <dependency>
             <groupId>com.risingwave</groupId>
             <artifactId>connector-api</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+        </dependency>
 
-        <!-- logging -->
-        <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-slf4j-impl</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-core</artifactId>
-        </dependency>
+
         <dependency>
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
@@ -88,22 +84,21 @@
         </dependency>
         <dependency>
             <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-iceberg</artifactId>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-deltalake</artifactId>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-sink-es-7</artifactId>
             <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>com.risingwave</groupId>
             <artifactId>risingwave-sink-cassandra</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave</groupId>
+            <artifactId>risingwave-sink-mock-flink-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave</groupId>
+            <artifactId>risingwave-sink-mock-flink-http-sink</artifactId>
             <scope>provided</scope>
         </dependency>
     </dependencies>

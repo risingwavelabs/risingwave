@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ mod project_set;
 
 // utils
 mod prelude {
-    pub use expect_test::{expect, expect_file};
+    pub use expect_test::expect;
     pub use risingwave_stream::executor::test_utils::prelude::*;
 
     pub use crate::snapshot::*;

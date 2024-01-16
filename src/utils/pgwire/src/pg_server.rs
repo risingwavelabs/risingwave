@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ use std::time::Instant;
 use bytes::Bytes;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Statement;
+use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::net::{AddressRef, Listener};
@@ -106,7 +107,7 @@ pub trait Session: Send + Sync {
 
     fn id(&self) -> SessionId;
 
-    fn set_config(&self, key: &str, value: Vec<String>) -> Result<(), BoxedError>;
+    fn set_config(&self, key: &str, value: String) -> Result<(), BoxedError>;
 
     fn transaction_status(&self) -> TransactionStatus;
 
@@ -179,10 +180,7 @@ pub async fn pg_serve(
             }
 
             Err(e) => {
-                tracing::error!(
-                    error = &e as &dyn std::error::Error,
-                    "failed to accept connection",
-                );
+                tracing::error!(error = %e.as_report(), "failed to accept connection",);
             }
         }
     }
@@ -202,10 +200,7 @@ pub async fn handle_connection<S, SM>(
         let msg = match pg_proto.read_message().await {
             Ok(msg) => msg,
             Err(e) => {
-                tracing::error!(
-                    error = &e as &dyn std::error::Error,
-                    "error when reading message"
-                );
+                tracing::error!(error = %e.as_report(), "error when reading message");
                 break;
             }
         };
@@ -351,7 +346,7 @@ mod tests {
             (0, 0)
         }
 
-        fn set_config(&self, _key: &str, _value: Vec<String>) -> Result<(), BoxedError> {
+        fn set_config(&self, _key: &str, _value: String) -> Result<(), BoxedError> {
             Ok(())
         }
 

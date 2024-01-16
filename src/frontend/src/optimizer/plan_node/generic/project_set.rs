@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
-use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter};
+use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanRef;
 use crate::optimizer::plan_node::utils::childless_record;
@@ -45,6 +45,10 @@ impl<PlanRef> ProjectSet<PlanRef> {
             .iter()
             .map(|e| r.rewrite_expr(e.clone()))
             .collect();
+    }
+
+    pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.select_list.iter().for_each(|e| v.visit_expr(e));
     }
 
     pub(crate) fn output_len(&self) -> usize {

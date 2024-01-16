@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,6 +64,29 @@ impl SysCatalogReaderImpl {
                     })
                 });
 
+                let sink_rows = schema
+                    .iter_sink()
+                    .flat_map(|sink| {
+                        sink.full_columns()
+                            .iter()
+                            .enumerate()
+                            .map(|(index, column)| {
+                                OwnedRow::new(vec![
+                                    Some(ScalarImpl::Int32(sink.id.sink_id as i32)),
+                                    Some(ScalarImpl::Utf8(column.name().into())),
+                                    Some(ScalarImpl::Int32(index as i32 + 1)),
+                                    Some(ScalarImpl::Bool(column.is_hidden)),
+                                    Some(ScalarImpl::Bool(sink.downstream_pk.contains(&index))),
+                                    Some(ScalarImpl::Bool(sink.distribution_key.contains(&index))),
+                                    Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
+                                    Some(ScalarImpl::Int32(column.data_type().to_oid())),
+                                    Some(ScalarImpl::Int16(column.data_type().type_len())),
+                                    Some(ScalarImpl::Utf8(column.data_type().pg_name().into())),
+                                ])
+                            })
+                    })
+                    .chain(view_rows);
+
                 let rows = schema
                     .iter_system_tables()
                     .flat_map(|table| {
@@ -86,7 +109,7 @@ impl SysCatalogReaderImpl {
                                 ])
                             })
                     })
-                    .chain(view_rows);
+                    .chain(sink_rows);
 
                 schema
                     .iter_valid_table()

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::error::ErrorCode::InvalidConfigValue;
-use crate::error::{ErrorCode, RwError};
-use crate::session_config::{ConfigEntry, CONFIG_KEYS, SINK_DECOUPLE};
+use std::str::FromStr;
 
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 pub enum SinkDecouple {
@@ -27,35 +25,16 @@ pub enum SinkDecouple {
     Disable,
 }
 
-impl<'a> TryFrom<&'a [&'a str]> for SinkDecouple {
-    type Error = RwError;
+impl FromStr for SinkDecouple {
+    type Err = &'static str;
 
-    fn try_from(value: &'a [&'a str]) -> Result<Self, Self::Error> {
-        if value.len() != 1 {
-            return Err(ErrorCode::InternalError(format!(
-                "SET {} takes only one argument",
-                Self::entry_name()
-            ))
-            .into());
-        }
-
-        let s = value[0];
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_ascii_lowercase().as_str() {
             "true" | "enable" => Ok(Self::Enable),
             "false" | "disable" => Ok(Self::Disable),
             "default" => Ok(Self::Default),
-            _ => Err(InvalidConfigValue {
-                config_entry: Self::entry_name().to_string(),
-                config_value: s.to_string(),
-            }
-            .into()),
+            _ => Err("expect one of [true, enable, false, disable, default]"),
         }
-    }
-}
-
-impl ConfigEntry for SinkDecouple {
-    fn entry_name() -> &'static str {
-        CONFIG_KEYS[SINK_DECOUPLE]
     }
 }
 

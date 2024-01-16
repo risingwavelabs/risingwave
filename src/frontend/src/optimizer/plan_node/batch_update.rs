@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,8 @@ use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
-use crate::expr::{Expr, ExprRewriter};
+use crate::expr::{Expr, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
@@ -83,6 +84,7 @@ impl ToBatchPb for BatchUpdate {
             table_version_id: self.core.table_version_id,
             returning: self.core.returning,
             update_column_indices,
+            session_id: self.base.ctx().session_ctx().session_id().0 as u32,
         })
     }
 }
@@ -104,5 +106,11 @@ impl ExprRewritable for BatchUpdate {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core, self.schema().clone()).into()
+    }
+}
+
+impl ExprVisitable for BatchUpdate {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.exprs.iter().for_each(|e| v.visit_expr(e));
     }
 }

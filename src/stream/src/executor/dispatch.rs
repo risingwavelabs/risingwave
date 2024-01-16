@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,20 +13,20 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::iter::repeat_with;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
-use futures::Stream;
+use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
-use risingwave_common::row::Row;
-use risingwave_common::types::ScalarRefImpl;
+use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::PbDispatcher;
@@ -35,7 +35,7 @@ use tokio::time::Instant;
 use tracing::{event, Instrument};
 
 use super::exchange::output::{new_output, BoxedOutput};
-use super::Watermark;
+use super::{AddMutation, UpdateMutation, Watermark};
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BoxedExecutor, Message, Mutation, StreamConsumer};
@@ -49,91 +49,116 @@ pub struct DispatchExecutor {
     inner: DispatchExecutorInner,
 }
 
-struct DispatchExecutorInner {
-    dispatchers: Vec<DispatcherImpl>,
-    actor_id: u32,
+struct DispatcherWithMetrics {
+    dispatcher: DispatcherImpl,
+    actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter<3>,
+}
+
+impl Debug for DispatcherWithMetrics {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.dispatcher.fmt(f)
+    }
+}
+
+impl Deref for DispatcherWithMetrics {
+    type Target = DispatcherImpl;
+
+    fn deref(&self) -> &Self::Target {
+        &self.dispatcher
+    }
+}
+
+impl DerefMut for DispatcherWithMetrics {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.dispatcher
+    }
+}
+
+struct DispatcherMetrics {
     actor_id_str: String,
     fragment_id_str: String,
-    context: Arc<SharedContext>,
     metrics: Arc<StreamingMetrics>,
+    actor_out_record_cnt: LabelGuardedIntCounter<2>,
+}
+
+impl DispatcherMetrics {
+    fn monitor_dispatcher(&self, dispatcher: DispatcherImpl) -> DispatcherWithMetrics {
+        DispatcherWithMetrics {
+            actor_output_buffer_blocking_duration_ns: self
+                .metrics
+                .actor_output_buffer_blocking_duration_ns
+                .with_guarded_label_values(&[
+                    &self.actor_id_str,
+                    &self.fragment_id_str,
+                    dispatcher.dispatcher_id_str(),
+                ]),
+            dispatcher,
+        }
+    }
+}
+
+struct DispatchExecutorInner {
+    dispatchers: Vec<DispatcherWithMetrics>,
+    actor_id: u32,
+    context: Arc<SharedContext>,
+    metrics: DispatcherMetrics,
 }
 
 impl DispatchExecutorInner {
-    fn single_inner_mut(&mut self) -> &mut DispatcherImpl {
-        assert_eq!(
-            self.dispatchers.len(),
-            1,
-            "only support mutation on one-dispatcher actors"
-        );
-        &mut self.dispatchers[0]
-    }
-
     async fn dispatch(&mut self, msg: Message) -> StreamResult<()> {
+        let limit = (self.context.config.developer).exchange_concurrent_dispatchers;
+
         match msg {
             Message::Watermark(watermark) => {
-                for dispatcher in &mut self.dispatchers {
-                    let start_time = Instant::now();
-                    dispatcher.dispatch_watermark(watermark.clone()).await?;
-                    self.metrics
-                        .actor_output_buffer_blocking_duration_ns
-                        .with_label_values(&[
-                            &self.actor_id_str,
-                            &self.fragment_id_str,
-                            dispatcher.dispatcher_id_str(),
-                        ])
-                        .inc_by(start_time.elapsed().as_nanos() as u64);
-                }
+                futures::stream::iter(self.dispatchers.iter_mut())
+                    .map(Ok)
+                    .try_for_each_concurrent(limit, |dispatcher| async {
+                        let start_time = Instant::now();
+                        dispatcher.dispatch_watermark(watermark.clone()).await?;
+                        dispatcher
+                            .actor_output_buffer_blocking_duration_ns
+                            .inc_by(start_time.elapsed().as_nanos() as u64);
+                        StreamResult::Ok(())
+                    })
+                    .await?;
             }
             Message::Chunk(chunk) => {
-                self.metrics
-                    .actor_out_record_cnt
-                    .with_label_values(&[&self.actor_id_str, &self.fragment_id_str])
-                    .inc_by(chunk.cardinality() as _);
-                if self.dispatchers.len() == 1 {
-                    // special clone optimization when there is only one downstream dispatcher
-                    let start_time = Instant::now();
-                    self.single_inner_mut().dispatch_data(chunk).await?;
-                    self.metrics
-                        .actor_output_buffer_blocking_duration_ns
-                        .with_label_values(&[
-                            &self.actor_id_str,
-                            &self.fragment_id_str,
-                            self.dispatchers[0].dispatcher_id_str(),
-                        ])
-                        .inc_by(start_time.elapsed().as_nanos() as u64);
-                } else {
-                    for dispatcher in &mut self.dispatchers {
+                futures::stream::iter(self.dispatchers.iter_mut())
+                    .map(Ok)
+                    .try_for_each_concurrent(limit, |dispatcher| async {
                         let start_time = Instant::now();
                         dispatcher.dispatch_data(chunk.clone()).await?;
-                        self.metrics
+                        dispatcher
                             .actor_output_buffer_blocking_duration_ns
-                            .with_label_values(&[
-                                &self.actor_id_str,
-                                &self.fragment_id_str,
-                                dispatcher.dispatcher_id_str(),
-                            ])
                             .inc_by(start_time.elapsed().as_nanos() as u64);
-                    }
-                }
+                        StreamResult::Ok(())
+                    })
+                    .await?;
+
+                self.metrics
+                    .actor_out_record_cnt
+                    .inc_by(chunk.cardinality() as _);
             }
             Message::Barrier(barrier) => {
                 let mutation = barrier.mutation.clone();
                 self.pre_mutate_dispatchers(&mutation)?;
-                for dispatcher in &mut self.dispatchers {
-                    let start_time = Instant::now();
-                    dispatcher.dispatch_barrier(barrier.clone()).await?;
-                    self.metrics
-                        .actor_output_buffer_blocking_duration_ns
-                        .with_label_values(&[
-                            &self.actor_id_str,
-                            &self.fragment_id_str,
-                            dispatcher.dispatcher_id_str(),
-                        ])
-                        .inc_by(start_time.elapsed().as_nanos() as u64);
-                }
+
+                futures::stream::iter(self.dispatchers.iter_mut())
+                    .map(Ok)
+                    .try_for_each_concurrent(limit, |dispatcher| async {
+                        let start_time = Instant::now();
+                        dispatcher.dispatch_barrier(barrier.clone()).await?;
+                        dispatcher
+                            .actor_output_buffer_blocking_duration_ns
+                            .inc_by(start_time.elapsed().as_nanos() as u64);
+                        StreamResult::Ok(())
+                    })
+                    .await?;
+
                 self.post_mutate_dispatchers(&mutation)?;
             }
         };
+
         Ok(())
     }
 
@@ -144,7 +169,10 @@ impl DispatchExecutorInner {
     ) -> StreamResult<()> {
         let new_dispatchers: Vec<_> = new_dispatchers
             .into_iter()
-            .map(|d| DispatcherImpl::new(&self.context, self.actor_id, d))
+            .map(|d| {
+                DispatcherImpl::new(&self.context, self.actor_id, d)
+                    .map(|dispatcher| self.metrics.monitor_dispatcher(dispatcher))
+            })
             .try_collect()?;
 
         self.dispatchers.extend(new_dispatchers);
@@ -212,16 +240,38 @@ impl DispatchExecutorInner {
         };
 
         match mutation {
-            Mutation::Add { adds, .. } => {
+            Mutation::Add(AddMutation { adds, .. }) => {
                 if let Some(new_dispatchers) = adds.get(&self.actor_id) {
                     self.add_dispatchers(new_dispatchers)?;
                 }
             }
-            Mutation::Update {
+            Mutation::Update(UpdateMutation {
                 dispatchers,
                 actor_new_dispatchers: actor_dispatchers,
                 ..
-            } => {
+            }) => {
+                if let Some(new_dispatchers) = actor_dispatchers.get(&self.actor_id) {
+                    self.add_dispatchers(new_dispatchers)?;
+                }
+
+                if let Some(updates) = dispatchers.get(&self.actor_id) {
+                    for update in updates {
+                        self.pre_update_dispatcher(update)?;
+                    }
+                }
+            }
+            Mutation::AddAndUpdate(
+                AddMutation { adds, .. },
+                UpdateMutation {
+                    dispatchers,
+                    actor_new_dispatchers: actor_dispatchers,
+                    ..
+                },
+            ) => {
+                if let Some(new_dispatchers) = adds.get(&self.actor_id) {
+                    self.add_dispatchers(new_dispatchers)?;
+                }
+
                 if let Some(new_dispatchers) = actor_dispatchers.get(&self.actor_id) {
                     self.add_dispatchers(new_dispatchers)?;
                 }
@@ -233,7 +283,7 @@ impl DispatchExecutorInner {
                 }
             }
             _ => {}
-        };
+        }
 
         Ok(())
     }
@@ -253,11 +303,19 @@ impl DispatchExecutorInner {
                     }
                 }
             }
-            Mutation::Update {
+            Mutation::Update(UpdateMutation {
                 dispatchers,
                 dropped_actors,
                 ..
-            } => {
+            })
+            | Mutation::AddAndUpdate(
+                _,
+                UpdateMutation {
+                    dispatchers,
+                    dropped_actors,
+                    ..
+                },
+            ) => {
                 if let Some(updates) = dispatchers.get(&self.actor_id) {
                     for update in updates {
                         self.post_update_dispatcher(update)?;
@@ -270,7 +328,6 @@ impl DispatchExecutorInner {
                     }
                 }
             }
-
             _ => {}
         };
 
@@ -291,13 +348,26 @@ impl DispatchExecutor {
         context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
+        let actor_id_str = actor_id.to_string();
+        let fragment_id_str = fragment_id.to_string();
+        let actor_out_record_cnt = metrics
+            .actor_out_record_cnt
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str]);
+        let metrics = DispatcherMetrics {
+            actor_id_str,
+            fragment_id_str,
+            metrics,
+            actor_out_record_cnt,
+        };
+        let dispatchers = dispatchers
+            .into_iter()
+            .map(|dispatcher| metrics.monitor_dispatcher(dispatcher))
+            .collect();
         Self {
             input,
             inner: DispatchExecutorInner {
                 dispatchers,
                 actor_id,
-                actor_id_str: actor_id.to_string(),
-                fragment_id_str: fragment_id.to_string(),
                 context,
                 metrics,
             },
@@ -347,7 +417,6 @@ pub enum DispatcherImpl {
     Broadcast(BroadcastDispatcher),
     Simple(SimpleDispatcher),
     RoundRobin(RoundRobinDataDispatcher),
-    CdcTableName(CdcTableNameDispatcher),
 }
 
 impl DispatcherImpl {
@@ -389,29 +458,6 @@ impl DispatcherImpl {
                     dispatcher.dispatcher_id,
                 ))
             }
-            CdcTablename => {
-                assert!(!outputs.is_empty());
-                assert!(dispatcher.downstream_table_name.is_some());
-                let dist_key_indices: Vec<usize> = dispatcher
-                    .dist_key_indices
-                    .iter()
-                    .map(|i| *i as usize)
-                    .collect_vec();
-
-                assert_eq!(
-                    dist_key_indices.len(),
-                    1,
-                    "expect only one table name column index"
-                );
-                DispatcherImpl::CdcTableName(CdcTableNameDispatcher::new(
-                    outputs,
-                    dist_key_indices[0],
-                    output_indices,
-                    dispatcher.dispatcher_id,
-                    dispatcher.downstream_table_name.clone(),
-                ))
-            }
-
             Broadcast => DispatcherImpl::Broadcast(BroadcastDispatcher::new(
                 outputs,
                 output_indices,
@@ -492,8 +538,7 @@ macro_rules! for_all_dispatcher_variants {
             { Hash },
             { Broadcast },
             { Simple },
-            { RoundRobin },
-            { CdcTableName }
+            { RoundRobin }
         }
     };
 }
@@ -528,6 +573,23 @@ pub trait Dispatcher: Debug + 'static {
     /// Whether the dispatcher has no outputs. If so, it'll be cleaned up from the
     /// [`DispatchExecutor`].
     fn is_empty(&self) -> bool;
+}
+
+/// Concurrently broadcast a message to all outputs.
+///
+/// Note that this does not follow `concurrent_dispatchers` in the config and the concurrency is
+/// always unlimited.
+async fn broadcast_concurrent(
+    outputs: impl IntoIterator<Item = &'_ mut BoxedOutput>,
+    message: Message,
+) -> StreamResult<()> {
+    futures::future::try_join_all(
+        outputs
+            .into_iter()
+            .map(|output| output.send(message.clone())),
+    )
+    .await?;
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -566,18 +628,13 @@ impl Dispatcher for RoundRobinDataDispatcher {
 
     async fn dispatch_barrier(&mut self, barrier: Barrier) -> StreamResult<()> {
         // always broadcast barrier
-        for output in &mut self.outputs {
-            output.send(Message::Barrier(barrier.clone())).await?;
-        }
-        Ok(())
+        broadcast_concurrent(&mut self.outputs, Message::Barrier(barrier)).await
     }
 
     async fn dispatch_watermark(&mut self, watermark: Watermark) -> StreamResult<()> {
         if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
             // always broadcast watermark
-            for output in &mut self.outputs {
-                output.send(Message::Watermark(watermark.clone())).await?;
-            }
+            broadcast_concurrent(&mut self.outputs, Message::Watermark(watermark)).await?;
         }
         Ok(())
     }
@@ -653,18 +710,13 @@ impl Dispatcher for HashDataDispatcher {
 
     async fn dispatch_barrier(&mut self, barrier: Barrier) -> StreamResult<()> {
         // always broadcast barrier
-        for output in &mut self.outputs {
-            output.send(Message::Barrier(barrier.clone())).await?;
-        }
-        Ok(())
+        broadcast_concurrent(&mut self.outputs, Message::Barrier(barrier)).await
     }
 
     async fn dispatch_watermark(&mut self, watermark: Watermark) -> StreamResult<()> {
         if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
             // always broadcast watermark
-            for output in &mut self.outputs {
-                output.send(Message::Watermark(watermark.clone())).await?;
-            }
+            broadcast_concurrent(&mut self.outputs, Message::Watermark(watermark)).await?;
         }
         Ok(())
     }
@@ -726,22 +778,30 @@ impl Dispatcher for HashDataDispatcher {
         let ops = new_ops;
 
         // individually output StreamChunk integrated with vis_map
-        for (vis_map, output) in vis_maps.into_iter().zip_eq_fast(self.outputs.iter_mut()) {
-            let vis_map = vis_map.finish();
-            // columns is not changed in this function
-            let new_stream_chunk =
-                StreamChunk::with_visibility(ops.clone(), chunk.columns().into(), vis_map);
-            if new_stream_chunk.cardinality() > 0 {
-                event!(
-                    tracing::Level::TRACE,
-                    msg = "chunk",
-                    downstream = output.actor_id(),
-                    "send = \n{:#?}",
-                    new_stream_chunk
-                );
-                output.send(Message::Chunk(new_stream_chunk)).await?;
-            }
-        }
+        futures::future::try_join_all(
+            vis_maps
+                .into_iter()
+                .zip_eq_fast(self.outputs.iter_mut())
+                .map(|(vis_map, output)| async {
+                    let vis_map = vis_map.finish();
+                    // columns is not changed in this function
+                    let new_stream_chunk =
+                        StreamChunk::with_visibility(ops.clone(), chunk.columns().into(), vis_map);
+                    if new_stream_chunk.cardinality() > 0 {
+                        event!(
+                            tracing::Level::TRACE,
+                            msg = "chunk",
+                            downstream = output.actor_id(),
+                            "send = \n{:#?}",
+                            new_stream_chunk
+                        );
+                        output.send(Message::Chunk(new_stream_chunk)).await?;
+                    }
+                    StreamResult::Ok(())
+                }),
+        )
+        .await?;
+
         Ok(())
     }
 
@@ -799,25 +859,18 @@ impl BroadcastDispatcher {
 impl Dispatcher for BroadcastDispatcher {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
         let chunk = chunk.project(&self.output_indices);
-        for output in self.outputs.values_mut() {
-            output.send(Message::Chunk(chunk.clone())).await?;
-        }
-        Ok(())
+        broadcast_concurrent(self.outputs.values_mut(), Message::Chunk(chunk)).await
     }
 
     async fn dispatch_barrier(&mut self, barrier: Barrier) -> StreamResult<()> {
-        for output in self.outputs.values_mut() {
-            output.send(Message::Barrier(barrier.clone())).await?;
-        }
-        Ok(())
+        // always broadcast barrier
+        broadcast_concurrent(self.outputs.values_mut(), Message::Barrier(barrier)).await
     }
 
     async fn dispatch_watermark(&mut self, watermark: Watermark) -> StreamResult<()> {
         if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
             // always broadcast watermark
-            for output in self.outputs.values_mut() {
-                output.send(Message::Watermark(watermark.clone())).await?;
-            }
+            broadcast_concurrent(self.outputs.values_mut(), Message::Watermark(watermark)).await?;
         }
         Ok(())
     }
@@ -829,127 +882,6 @@ impl Dispatcher for BroadcastDispatcher {
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
             .extract_if(|actor_id, _| actor_ids.contains(actor_id))
-            .count();
-    }
-
-    fn dispatcher_id(&self) -> DispatcherId {
-        self.dispatcher_id
-    }
-
-    fn dispatcher_id_str(&self) -> &str {
-        &self.dispatcher_id_str
-    }
-
-    fn is_empty(&self) -> bool {
-        self.outputs.is_empty()
-    }
-}
-
-/// Dispatch stream chunk based on table name from upstream DB
-#[derive(Debug)]
-pub struct CdcTableNameDispatcher {
-    outputs: Vec<BoxedOutput>,
-    // column index to the `_rw_table_name` column
-    table_name_col_index: usize,
-    output_indices: Vec<usize>,
-    dispatcher_id: DispatcherId,
-    dispatcher_id_str: String,
-    downstream_table_name: Option<String>,
-}
-
-impl CdcTableNameDispatcher {
-    pub fn new(
-        outputs: Vec<BoxedOutput>,
-        table_name_col_index: usize,
-        output_indices: Vec<usize>,
-        dispatcher_id: DispatcherId,
-        downstream_table_name: Option<String>,
-    ) -> Self {
-        Self {
-            outputs,
-            table_name_col_index,
-            output_indices,
-            dispatcher_id,
-            dispatcher_id_str: dispatcher_id.to_string(),
-            downstream_table_name,
-        }
-    }
-}
-
-impl Dispatcher for CdcTableNameDispatcher {
-    async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
-        let num_outputs = self.outputs.len();
-
-        let mut vis_maps = repeat_with(|| BitmapBuilder::with_capacity(chunk.capacity()))
-            .take(num_outputs)
-            .collect_vec();
-
-        let chunk = chunk.project(&self.output_indices);
-
-        // TODO: use a more efficient way to filter data, e.g. add a Filter node before Chain
-        for (visible, row) in chunk
-            .visibility()
-            .iter()
-            .zip_eq_fast(chunk.data_chunk().rows_with_holes())
-        {
-            // Build visibility map for every output chunk.
-            for vis_map in &mut vis_maps {
-                let should_emit = if let Some(row) = row && let Some(full_table_name) = self.downstream_table_name.as_ref() {
-                    let table_name_datum = row.datum_at(self.table_name_col_index).unwrap();
-                    tracing::trace!(target: "events::stream::dispatch::cdc", "keys: {:?}, table: {}", self.table_name_col_index, full_table_name);
-                    // dispatch based on downstream table name
-                    table_name_datum == ScalarRefImpl::Utf8(full_table_name)
-                } else {
-                    true
-                };
-                vis_map.append(visible && should_emit);
-            }
-        }
-
-        for (vis_map, output) in vis_maps.into_iter().zip_eq_fast(self.outputs.iter_mut()) {
-            let vis_map = vis_map.finish();
-            let new_stream_chunk =
-                StreamChunk::with_visibility(chunk.ops(), chunk.columns().into(), vis_map);
-            if new_stream_chunk.cardinality() > 0 {
-                event!(
-                    tracing::Level::TRACE,
-                    msg = "chunk",
-                    downstream = output.actor_id(),
-                    "send = \n{:#?}",
-                    new_stream_chunk
-                );
-                output.send(Message::Chunk(new_stream_chunk)).await?;
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn dispatch_barrier(&mut self, barrier: Barrier) -> StreamResult<()> {
-        // always broadcast barrier
-        for output in &mut self.outputs {
-            output.send(Message::Barrier(barrier.clone())).await?;
-        }
-        Ok(())
-    }
-
-    async fn dispatch_watermark(&mut self, watermark: Watermark) -> StreamResult<()> {
-        if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
-            // always broadcast watermark
-            for output in &mut self.outputs {
-                output.send(Message::Watermark(watermark.clone())).await?;
-            }
-        }
-        Ok(())
-    }
-
-    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.outputs.extend(outputs);
-    }
-
-    fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
-        self.outputs
-            .extract_if(|output| actor_ids.contains(&output.actor_id()))
             .count();
     }
 
@@ -1269,14 +1201,14 @@ mod tests {
                 hash_mapping: Default::default(),
             }]
         };
-        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
+        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update(UpdateMutation {
             dispatchers: dispatcher_updates,
             merges: Default::default(),
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
             actor_new_dispatchers: Default::default(),
-        });
+        }));
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap().unwrap();
 
@@ -1321,14 +1253,14 @@ mod tests {
                 hash_mapping: Default::default(),
             }]
         };
-        let b3 = Barrier::new_test_barrier(3).with_mutation(Mutation::Update {
+        let b3 = Barrier::new_test_barrier(3).with_mutation(Mutation::Update(UpdateMutation {
             dispatchers: dispatcher_updates,
             merges: Default::default(),
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
             actor_new_dispatchers: Default::default(),
-        });
+        }));
         tx.send(Message::Barrier(b3)).await.unwrap();
         executor.next().await.unwrap().unwrap();
 
@@ -1431,7 +1363,7 @@ mod tests {
             if guard.is_empty() {
                 assert!(output_cols[output_idx].iter().all(|x| { x.is_empty() }));
             } else {
-                let message = guard.get(0).unwrap();
+                let message = guard.first().unwrap();
                 let real_chunk = match message {
                     Message::Chunk(chunk) => chunk,
                     _ => panic!(),

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::ops::Bound::*;
 
 use bytes::Bytes;
-use risingwave_common::util::epoch::{MAX_EPOCH, MAX_SPILL_TIMES};
+use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 
@@ -84,7 +84,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
     /// Create [`UserIterator`] with maximum epoch.
     pub fn for_test(iterator: I, key_range: UserKeyRange) -> Self {
-        let read_epoch = MAX_EPOCH;
+        let read_epoch = HummockEpoch::MAX;
         Self::new(
             iterator,
             key_range,

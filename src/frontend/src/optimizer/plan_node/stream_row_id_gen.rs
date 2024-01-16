@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -88,3 +89,5 @@ impl StreamNode for StreamRowIdGen {
 }
 
 impl ExprRewritable for StreamRowIdGen {}
+
+impl ExprVisitable for StreamRowIdGen {}

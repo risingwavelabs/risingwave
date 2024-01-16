@@ -7,8 +7,7 @@ create table sr_pb_test with (
     connector = 'kafka',
     topic = 'sr_pb_test',
     properties.bootstrap.server = 'message_queue:29092',
-    scan.startup.mode = 'earliest',
-    message = 'test.User')
+    scan.startup.mode = 'earliest')
 FORMAT plain ENCODE protobuf(
         schema.registry = 'http://message_queue:8081',
         message = 'test.User'
@@ -20,8 +19,7 @@ create table sr_pb_test_bk with (
     connector = 'kafka',
     topic = 'sr_pb_test',
     properties.bootstrap.server = 'message_queue:29092',
-    scan.startup.mode = 'earliest',
-    message = 'test.User')
+    scan.startup.mode = 'earliest')
 FORMAT plain ENCODE protobuf(
         schema.registry = 'http://message_queue:8081,http://message_queue:8081',
         message = 'test.User'

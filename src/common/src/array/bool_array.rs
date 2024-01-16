@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -125,7 +125,7 @@ impl Array for BoolArray {
 }
 
 /// `BoolArrayBuilder` constructs a `BoolArray` from `Option<Bool>`.
-#[derive(Debug)]
+#[derive(Debug, Clone, EstimateSize)]
 pub struct BoolArrayBuilder {
     bitmap: BitmapBuilder,
     data: BitmapBuilder,

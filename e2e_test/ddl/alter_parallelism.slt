@@ -1,0 +1,161 @@
+statement ok
+set rw_implicit_flush to true;
+
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+create view table_parallelism as select t.name, tf.parallelism from rw_tables t, rw_table_fragments tf where t.id = tf.table_id;
+
+statement ok
+create view mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;
+
+statement ok
+create view sink_parallelism as select s.name, tf.parallelism from rw_sinks s, rw_table_fragments tf where s.id = tf.table_id;
+
+statement ok
+create view fragment_parallelism as select t.name as table_name, f.fragment_id, f.parallelism from rw_fragments f, rw_tables t where f.table_id = t.id;
+
+statement ok
+create table t (v int);
+
+query T
+select parallelism from table_parallelism where name = 't';
+----
+AUTO
+
+statement ok
+alter table t set parallelism = 2;
+
+query T
+select parallelism from table_parallelism where name = 't';
+----
+FIXED(2)
+
+query I
+select parallelism from fragment_parallelism where table_name = 't';
+----
+2
+2
+
+statement ok
+alter table t set parallelism = auto;
+
+query T
+select parallelism from table_parallelism where name = 't';
+----
+AUTO
+
+statement ok
+create materialized view m_simple as select * from t;
+
+query T
+select parallelism from mview_parallelism where name = 'm_simple';
+----
+AUTO
+
+statement ok
+alter materialized view m_simple set parallelism = 3;
+
+query T
+select parallelism from mview_parallelism where name = 'm_simple';
+----
+FIXED(3)
+
+statement ok
+create materialized view m_join as select t1.v as t1v, t2.v as t2v from t t1, t t2 where t1.v = t2.v;
+
+query T
+select parallelism from mview_parallelism where name = 'm_join';
+----
+AUTO
+
+statement ok
+alter materialized view m_join set parallelism = 3;
+
+query T
+select parallelism from mview_parallelism where name = 'm_join';
+----
+FIXED(3)
+
+statement ok
+create sink s as select t1.v as t1v, t2.v as t2v from t t1, t t2 where t1.v = t2.v with ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');
+
+query T
+select parallelism from sink_parallelism where name = 's';
+----
+AUTO
+
+statement ok
+alter sink s set parallelism = 4;
+
+query T
+select parallelism from sink_parallelism where name = 's';
+----
+FIXED(4)
+
+statement ok
+drop sink s;
+
+statement ok
+drop materialized view m_join;
+
+statement ok
+drop materialized view m_simple;
+
+statement ok
+drop table t;
+
+statement ok
+set streaming_parallelism to 2;
+
+statement ok
+create table t (v1 int);
+
+query T
+select parallelism from table_parallelism where name = 't';
+----
+FIXED(2)
+
+statement ok
+drop table t;
+
+statement ok
+set streaming_parallelism to auto;
+
+statement ok
+create table t (v1 int);
+
+query T
+select parallelism from table_parallelism where name = 't';
+----
+AUTO
+
+statement ok
+drop table t;
+
+statement ok
+set streaming_parallelism to 0;
+
+statement ok
+create table t (v1 int);
+
+query T
+select parallelism from table_parallelism where name = 't';
+----
+AUTO
+
+statement ok
+drop table t;
+
+statement ok
+drop view table_parallelism;
+
+statement ok
+drop view mview_parallelism;
+
+statement ok
+drop view sink_parallelism;
+
+statement ok
+drop view fragment_parallelism;

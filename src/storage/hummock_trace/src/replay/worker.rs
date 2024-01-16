@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -344,10 +344,10 @@ impl ReplayWorker {
                     );
                 }
             }
-            Operation::SealCurrentEpoch(epoch) => {
+            Operation::SealCurrentEpoch { epoch, opts } => {
                 assert_ne!(storage_type, StorageType::Global);
                 let local_storage = local_storages.get_mut(&storage_type).unwrap();
-                local_storage.seal_current_epoch(epoch);
+                local_storage.seal_current_epoch(epoch, opts);
             }
             Operation::ValidateReadEpoch(epoch) => {
                 assert_eq!(storage_type, StorageType::Global);

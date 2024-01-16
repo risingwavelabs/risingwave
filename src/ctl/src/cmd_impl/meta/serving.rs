@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ pub async fn list_serving_fragment_mappings(context: &CtlContext) -> anyhow::Res
     let meta_client = context.meta_client().await?;
     let mappings = meta_client.list_serving_vnode_mappings().await?;
     let workers = meta_client
-        .list_worker_nodes(WorkerType::ComputeNode)
+        .list_worker_nodes(Some(WorkerType::ComputeNode))
         .await?;
     let mut pu_to_worker: HashMap<ParallelUnitId, &WorkerNode> = HashMap::new();
     for w in &workers {

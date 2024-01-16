@@ -184,9 +184,11 @@ create table s11 with (
   connector = 'kafka',
   topic = 'proto_c_bin',
   properties.bootstrap.server = 'message_queue:29092',
-  scan.startup.mode = 'earliest',
-  proto.message = 'test.User'
-) FORMAT PLAIN ENCODE PROTOBUF (message = 'test.User', schema.location = 'file:///risingwave/proto-complex-schema');
+  scan.startup.mode = 'earliest')
+FORMAT PLAIN ENCODE PROTOBUF (
+  message = 'test.User',
+  schema.location = 'file:///risingwave/proto-complex-schema'
+);
 
 statement ok
 CREATE TABLE s12(
@@ -268,9 +270,11 @@ create source s17 with (
   connector = 'kafka',
   topic = 'proto_c_bin',
   properties.bootstrap.server = 'message_queue:29092',
-  scan.startup.mode = 'earliest',
-  proto.message = 'test.User'
-) FORMAT PLAIN ENCODE PROTOBUF (message = 'test.User', schema.location = 'file:///risingwave/proto-complex-schema');
+  scan.startup.mode = 'earliest')
+FORMAT PLAIN ENCODE PROTOBUF (
+  message = 'test.User',
+  schema.location = 'file:///risingwave/proto-complex-schema'
+);
 
 statement ok
 create source s18 with (
@@ -364,17 +368,17 @@ create table s27 with (
 ) FORMAT PLAIN ENCODE JSON (schema.location = 'file:///risingwave/json-complex-schema')
 
 # currently _rw_key can be set as primary key
-statement ok
-create table s28 (id bytea, PRIMARY KEY(_rw_key)) with (
-  connector = 'kafka',
-  topic = 'kafka_source_format_bytes',
-  properties.bootstrap.server = 'message_queue:29092',
-  scan.startup.mode = 'earliest'
-) FORMAT PLAIN ENCODE BYTES
+# statement ok
+# create table s28 (id bytea, PRIMARY KEY(_rw_key)) with (
+#   connector = 'kafka',
+#   topic = 'kafka_source_format_bytes',
+#   properties.bootstrap.server = 'message_queue:29092',
+#   scan.startup.mode = 'earliest'
+# ) FORMAT PLAIN ENCODE BYTES
 
 # throttle option
 statement ok
-create table s29 (id bytea, PRIMARY KEY(_rw_key)) with (
+create table s29 (id bytea) with (
   connector = 'kafka',
   topic = 'kafka_source_format_bytes',
   properties.bootstrap.server = 'message_queue:29092',
@@ -411,8 +415,10 @@ CREATE TABLE upsert_students_default_key (
     "lastName" VARCHAR,
     age INT,
     height REAL,
-    weight REAL
+    weight REAL,
+    primary key (rw_key)
 )
+INCLUDE KEY AS rw_key
 WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
@@ -421,13 +427,15 @@ FORMAT UPSERT ENCODE JSON
 
 statement ok
 CREATE TABLE upsert_students (
-    "ID" INT PRIMARY KEY,
+    "ID" INT,
     "firstName" VARCHAR,
     "lastName" VARCHAR,
     age INT,
     height REAL,
-    weight REAL
+    weight REAL,
+    primary key (rw_key)
 )
+INCLUDE KEY AS rw_key
 WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
@@ -727,7 +735,7 @@ ORDER BY
 
 query II
 SELECT
-	*
+	"ID", "firstName", "lastName", "age", "height", "weight"
 FROM
 	upsert_students
 ORDER BY
@@ -743,7 +751,12 @@ ORDER BY
 
 query II
 SELECT
-	*
+	"ID",
+  "firstName",
+  "lastName",
+  "age",
+  "height",
+  "weight"
 FROM
 	upsert_students_default_key
 ORDER BY
@@ -771,7 +784,7 @@ order by
 56166    2
 
 query I
-SELECT * FROM source_mv3 ORDER BY id;
+SELECT id FROM source_mv3 ORDER BY id;
 ----
 \x6b6b
 \x776561776566776566
@@ -849,8 +862,8 @@ drop source s24
 statement ok
 drop table s27
 
-statement ok
-drop table s28
+# statement ok
+# drop table s28
 
 statement ok
 drop table s29

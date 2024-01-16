@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -27,6 +26,7 @@ use risingwave_expr::window_function::{
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use crate::error::{BatchError, Result};
 use crate::task::{BatchTaskContext, ShutdownToken};
 
 /// [`SortOverWindowExecutor`] accepts input chunks sorted by partition key and order key, and
@@ -137,7 +137,7 @@ impl ExecutorInner {
 }
 
 impl SortOverWindowExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let Self {
             child,
@@ -189,7 +189,7 @@ impl SortOverWindowExecutor {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn gen_output_for_partition<'a>(
         this: &'a ExecutorInner,
         rows: &'a mut Vec<OwnedRow>,

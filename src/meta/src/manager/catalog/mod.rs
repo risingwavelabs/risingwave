@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,14 +32,15 @@ use risingwave_common::catalog::{
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::{bail, ensure};
+use risingwave_connector::source::{should_copy_to_format_encode_options, UPSTREAM_SOURCE_KEY};
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType};
 use risingwave_pb::catalog::{
-    Comment, Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink,
-    Source, StreamJobStatus, Table, View,
+    Comment, Connection, CreateType, Database, Function, Index, PbSource, PbStreamJobStatus,
+    Schema, Sink, Source, StreamJobStatus, Table, View,
 };
-use risingwave_pb::ddl_service::alter_owner_request;
+use risingwave_pb::ddl_service::{alter_owner_request, alter_set_schema_request};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
+use risingwave_pb::user::grant_privilege::{Action, ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use tokio::sync::{Mutex, MutexGuard};
@@ -119,7 +120,6 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::cancel_creating_jobs_request::CreatingJobInfo;
 use risingwave_pb::meta::relation::RelationInfo;
-use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
@@ -166,11 +166,57 @@ impl CatalogManager {
     async fn init(&self) -> MetaResult<()> {
         self.init_user().await?;
         self.init_database().await?;
+        self.source_backward_compat_check().await?;
         Ok(())
     }
 
     pub async fn get_catalog_core_guard(&self) -> MutexGuard<'_, CatalogManagerCore> {
         self.core.lock().await
+    }
+
+    /// This function is for maintaining backward compatibility with older source formats when `format_encode_options` is
+    /// merged into `with_properties`.
+    /// Context: <https://github.com/risingwavelabs/risingwave/pull/13762>.
+    ///
+    /// We identify a 'legacy' source based on two conditions:
+    /// 1. The `format_encode_options` in `source_info` is empty.
+    /// 2. Keys with certain prefixes belonging to `format_encode_options` exist in `with_properties` instead.
+    /// And if the source is identified as 'legacy', we copy the misplaced keys from `with_properties` to `format_encode_options`.
+    async fn source_backward_compat_check(&self) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let mut sources = BTreeMapTransaction::new(&mut core.database.sources);
+        let legacy_sources = sources
+            .tree_ref()
+            .iter()
+            .filter(|(_, source)| {
+                if let Some(source_info) = &source.info
+                    && source_info.format_encode_options.is_empty()
+                {
+                    true
+                } else {
+                    false
+                }
+            })
+            .map(|t| t.1.clone())
+            .collect_vec();
+        for mut source in legacy_sources {
+            let connector = source
+                .with_properties
+                .get(UPSTREAM_SOURCE_KEY)
+                .unwrap_or(&String::default())
+                .to_owned();
+            if let Some(source_info) = source.info.as_mut() {
+                source_info
+                    .format_encode_options
+                    .extend(source.with_properties.iter().filter_map(|(k, v)| {
+                        should_copy_to_format_encode_options(k, &connector)
+                            .then_some((k.to_owned(), v.to_owned()))
+                    }))
+            }
+            sources.insert(source.id, source);
+        }
+        commit_meta!(self, sources)?;
+        Ok(())
     }
 }
 
@@ -260,7 +306,7 @@ impl CatalogManager {
 
         if database_core.has_creation_in_database(database_id) {
             return Err(MetaError::permission_denied(
-                "Some relations are creating in the target database, try again later".into(),
+                "Some relations are creating in the target database, try again later",
             ));
         }
 
@@ -515,12 +561,12 @@ impl CatalogManager {
         }
         if database_core.has_creation_in_schema(schema_id) {
             return Err(MetaError::permission_denied(
-                "Some relations are creating in the target schema, try again later".into(),
+                "Some relations are creating in the target schema, try again later",
             ));
         }
         if !database_core.schema_is_empty(schema_id) {
             return Err(MetaError::permission_denied(
-                "The schema is not empty, try dropping them first".into(),
+                "The schema is not empty, try dropping them first",
             ));
         }
         let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
@@ -583,11 +629,17 @@ impl CatalogManager {
         let user_core = &mut core.user;
         database_core.ensure_database_id(function.database_id)?;
         database_core.ensure_schema_id(function.schema_id)?;
-        database_core.check_function_duplicated(function)?;
+        database_core.check_function_duplicated(&(
+            function.database_id,
+            function.schema_id,
+            function.name.clone(),
+            function.arg_types.clone(),
+        ))?;
 
         #[cfg(not(test))]
         user_core.ensure_user_id(function.owner)?;
 
+        tracing::debug!("create function: {:?}", function);
         let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
         functions.insert(function.id, function.clone());
         commit_meta!(self, functions)?;
@@ -631,6 +683,8 @@ impl CatalogManager {
         Ok(version)
     }
 
+    /// Marks current relation as "creating" and add reference count to dependent relations.
+    /// And persists internal tables for background DDL progress tracking.
     pub async fn start_create_stream_job_procedure(
         &self,
         stream_job: &StreamingJob,
@@ -641,7 +695,7 @@ impl CatalogManager {
                 self.start_create_table_procedure(table, internal_tables)
                     .await
             }
-            StreamingJob::Sink(sink) => self.start_create_sink_procedure(sink).await,
+            StreamingJob::Sink(sink, _) => self.start_create_sink_procedure(sink).await,
             StreamingJob::Index(index, index_table) => {
                 self.start_create_index_procedure(index, index_table).await
             }
@@ -822,8 +876,8 @@ impl CatalogManager {
                     let fragment: TableFragments = fragment;
                     // 3. For those in initial state (i.e. not running / created),
                     // we should purge them.
-                    if fragment.state() == State::Initial {
-                        tracing::debug!("cleaning table_id no initial state: {:#?}", table.id);
+                    if fragment.is_initial() {
+                        tracing::debug!("cleaning table_id with initial state: {:#?}", table.id);
                         tables_to_clean.push(table);
                         continue;
                     } else {
@@ -847,6 +901,27 @@ impl CatalogManager {
             }
         }
 
+        let mut tables_to_update = vec![];
+        for table in database_core.tables.values() {
+            if table.incoming_sinks.is_empty() {
+                continue;
+            }
+
+            if table
+                .incoming_sinks
+                .iter()
+                .all(|sink_id| database_core.sinks.contains_key(sink_id))
+            {
+                continue;
+            }
+
+            let mut table = table.clone();
+            table
+                .incoming_sinks
+                .retain(|sink_id| database_core.sinks.contains_key(sink_id));
+            tables_to_update.push(table);
+        }
+
         let tables = &mut database_core.tables;
         let mut tables = BTreeMapTransaction::new(tables);
         for table in &tables_to_clean {
@@ -855,9 +930,56 @@ impl CatalogManager {
             let table = tables.remove(table_id);
             assert!(table.is_some(), "table_id {} missing", table_id)
         }
+
+        for table in &tables_to_update {
+            let table_id = table.id;
+            if tables.contains_key(&table_id) {
+                tracing::debug!("updating sink target table_id: {}", table_id);
+                tables.insert(table_id, table.clone());
+            }
+        }
+
         commit_meta!(self, tables)?;
 
-        database_core.clear_creating_stream_jobs();
+        if !tables_to_update.is_empty() {
+            let _ = self
+                .notify_frontend(
+                    Operation::Update,
+                    Info::RelationGroup(RelationGroup {
+                        relations: tables_to_update
+                            .into_iter()
+                            .map(|table| Relation {
+                                relation_info: RelationInfo::Table(table).into(),
+                            })
+                            .collect(),
+                    }),
+                )
+                .await;
+        }
+
+        // Note that `tables_to_clean` doesn't include sink/index/table_with_source creation,
+        // because their states are not persisted in the first place, see `start_create_stream_job_procedure`.
+        let event_logs = tables_to_clean
+            .iter()
+            .filter_map(|t| {
+                if t.table_type == TableType::Internal as i32 {
+                    return None;
+                }
+                let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
+                    id: t.id,
+                    name: t.name.to_owned(),
+                    definition: t.definition.to_owned(),
+                    error: "clear during recovery".to_string(),
+                };
+                Some(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
+                    event,
+                ))
+            })
+            .collect_vec();
+        if !event_logs.is_empty() {
+            self.env.event_log_manager_ref().add_event_logs(event_logs);
+        }
+
         let user_core = &mut core.user;
         for table in &tables_to_clean {
             // If table type is internal, no need to update the ref count OR
@@ -921,11 +1043,13 @@ impl CatalogManager {
     /// It is required because failure may not necessarily happen in barrier,
     /// e.g. when cordon nodes.
     /// and we still need some way to cleanup the state.
+    ///
+    /// Returns false if `table_id` is not found.
     pub async fn cancel_create_table_procedure(
         &self,
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<bool> {
         let table = {
             let core = &mut self.core.lock().await;
             let database_core = &mut core.database;
@@ -935,7 +1059,7 @@ impl CatalogManager {
                     "table_id {} missing when attempting to cancel job, could be cleaned on recovery",
                     table_id
                 );
-                return Ok(());
+                return Ok(false);
             };
             // `Unspecified` maps to Created state, due to backwards compatibility.
             // `Created` states should not be cancelled.
@@ -979,7 +1103,7 @@ impl CatalogManager {
             }
         }
 
-        Ok(())
+        Ok(true)
     }
 
     /// return id of streaming jobs in the database which need to be dropped by stream manager.
@@ -1073,6 +1197,13 @@ impl CatalogManager {
             RelationIdEnum::Table(table_id) => {
                 let table = tables.get(&table_id).cloned();
                 if let Some(table) = table {
+                    for incoming_sink in &table.incoming_sinks {
+                        let sink = sinks.get(incoming_sink).cloned();
+                        if let Some(sink) = sink {
+                            deque.push_back(RelationInfo::Sink(sink));
+                        }
+                    }
+
                     deque.push_back(RelationInfo::Table(table));
                 } else {
                     bail!("table doesn't exist");
@@ -1120,6 +1251,7 @@ impl CatalogManager {
                     if !all_table_ids.insert(table_id) {
                         continue;
                     }
+
                     let table_fragments = fragment_manager
                         .select_table_fragments_by_table_id(&table_id.into())
                         .await?;
@@ -1277,7 +1409,9 @@ impl CatalogManager {
                     }
 
                     // cdc source streaming job
-                    if let Some(info) = source.info && info.cdc_source_job {
+                    if let Some(info) = source.info
+                        && info.cdc_source_job
+                    {
                         all_cdc_source_ids.insert(source.id);
                         let source_table_fragments = fragment_manager
                             .select_table_fragments_by_table_id(&source.id.into())
@@ -1312,6 +1446,7 @@ impl CatalogManager {
                     if !all_view_ids.insert(view.id) {
                         continue;
                     }
+
                     if let Some(ref_count) = database_core.relation_ref_count.get(&view.id).cloned()
                     {
                         if ref_count > 0 {
@@ -1391,6 +1526,34 @@ impl CatalogManager {
             .iter()
             .map(|sink_id| sinks.remove(*sink_id).unwrap())
             .collect_vec();
+
+        if !matches!(relation, RelationIdEnum::Sink(_)) {
+            let table_sinks = sinks_removed
+                .iter()
+                .filter(|sink| {
+                    if let Some(target_table) = sink.target_table {
+                        // Table sink but associated with the table
+                        if matches!(relation, RelationIdEnum::Table(table_id) if table_id == target_table) {
+                            false
+                        } else {
+                            // Table sink
+                            true
+                        }
+                    } else {
+                        // Normal sink
+                        false
+                    }
+                })
+                .collect_vec();
+
+            // Since dropping the sink into the table requires the frontend to handle some of the logic (regenerating the plan), it’s not compatible with the current cascade dropping.
+            if !table_sinks.is_empty() {
+                bail!(
+                    "Found {} sink(s) into table in dependency, please drop them manually",
+                    table_sinks.len()
+                );
+            }
+        }
 
         let internal_tables = all_internal_table_ids
             .iter()
@@ -1750,6 +1913,63 @@ impl CatalogManager {
         .await
     }
 
+    pub async fn alter_schema_name(
+        &self,
+        schema_id: SchemaId,
+        schema_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_schema_id(schema_id)?;
+
+        // 1. validate new schema name.
+        let mut schema = database_core.schemas.get(&schema_id).unwrap().clone();
+        database_core.check_schema_duplicated(&(schema.database_id, schema_name.to_string()))?;
+
+        // 2. rename schema.
+        schema.name = schema_name.to_string();
+
+        // 3. update, commit and notify.
+        let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
+        schemas.insert(schema_id, schema.clone());
+        commit_meta!(self, schemas)?;
+
+        let version = self
+            .notify_frontend(Operation::Update, Info::Schema(schema))
+            .await;
+
+        Ok(version)
+    }
+
+    pub async fn alter_database_name(
+        &self,
+        database_id: SchemaId,
+        database_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_database_id(database_id)?;
+
+        // 1. validate new database name.
+        let database_name = database_name.to_string();
+        let mut database = database_core.databases.get(&database_id).unwrap().clone();
+        database_core.check_database_duplicated(&database_name)?;
+
+        // 2. rename database.
+        database.name = database_name;
+
+        // 3. update, commit and notify.
+        let mut databases = BTreeMapTransaction::new(&mut database_core.databases);
+        databases.insert(database_id, database.clone());
+        commit_meta!(self, databases)?;
+
+        let version = self
+            .notify_frontend(Operation::Update, Info::Database(database))
+            .await;
+
+        Ok(version)
+    }
+
     pub async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
         let source_id = source.get_id();
         let core = &mut *self.core.lock().await;
@@ -1782,7 +2002,7 @@ impl CatalogManager {
         let database_core = &mut core.database;
         let user_core = &mut core.user;
 
-        let notify_info;
+        let relation_info;
         match object {
             alter_owner_request::Object::TableId(table_id) => {
                 database_core.ensure_table_id(table_id)?;
@@ -1866,7 +2086,7 @@ impl CatalogManager {
                     + to_update_source_id.map_or(0, |_| 1);
                 user_core.decrease_ref_count(old_owner_id, count);
                 user_core.increase_ref_count(owner_id, count);
-                notify_info = Info::RelationGroup(RelationGroup { relations });
+                relation_info = Info::RelationGroup(RelationGroup { relations });
             }
             alter_owner_request::Object::ViewId(view_id) => {
                 database_core.ensure_view_id(view_id)?;
@@ -1877,7 +2097,7 @@ impl CatalogManager {
                     return Ok(IGNORED_NOTIFICATION_VERSION);
                 }
                 view.owner = owner_id;
-                notify_info = Info::RelationGroup(RelationGroup {
+                relation_info = Info::RelationGroup(RelationGroup {
                     relations: vec![Relation {
                         relation_info: Some(RelationInfo::View(view.clone())),
                     }],
@@ -1895,7 +2115,7 @@ impl CatalogManager {
                     return Ok(IGNORED_NOTIFICATION_VERSION);
                 }
                 source.owner = owner_id;
-                notify_info = Info::RelationGroup(RelationGroup {
+                relation_info = Info::RelationGroup(RelationGroup {
                     relations: vec![Relation {
                         relation_info: Some(RelationInfo::Source(source.clone())),
                     }],
@@ -1933,7 +2153,7 @@ impl CatalogManager {
                     });
                 }
 
-                notify_info = Info::RelationGroup(RelationGroup { relations });
+                relation_info = Info::RelationGroup(RelationGroup { relations });
                 commit_meta!(self, sinks, tables)?;
                 user_core.increase_ref(owner_id);
                 user_core.decrease_ref(old_owner_id);
@@ -1947,10 +2167,35 @@ impl CatalogManager {
                     return Ok(IGNORED_NOTIFICATION_VERSION);
                 }
                 database.owner = owner_id;
-                notify_info = Info::Database(database.clone());
-                commit_meta!(self, databases)?;
+                relation_info = Info::Database(database.clone());
+                let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+                let mut user = users.get_mut(owner_id).unwrap();
+                let new_grant_privilege = GrantPrivilege {
+                    object: Some(Object::DatabaseId(database_id)),
+                    action_with_opts: vec![{
+                        ActionWithGrantOption {
+                            action: Action::Connect as _,
+                            with_grant_option: false,
+                            granted_by: old_owner_id,
+                        }
+                    }],
+                };
+                if let Some(privilege) = user
+                    .grant_privileges
+                    .iter_mut()
+                    .find(|p| p.object == new_grant_privilege.object)
+                {
+                    Self::merge_privilege(privilege, &new_grant_privilege);
+                } else {
+                    user.grant_privileges.push(new_grant_privilege.clone());
+                }
+                let user_info = Info::User(user.clone());
+                commit_meta!(self, databases, users)?;
                 user_core.increase_ref(owner_id);
                 user_core.decrease_ref(old_owner_id);
+                self.notify_frontend(Operation::Update, user_info).await;
+                let version = self.notify_frontend(Operation::Update, relation_info).await;
+                return Ok(version);
             }
             alter_owner_request::Object::SchemaId(schema_id) => {
                 database_core.ensure_schema_id(schema_id)?;
@@ -1961,15 +2206,248 @@ impl CatalogManager {
                     return Ok(IGNORED_NOTIFICATION_VERSION);
                 }
                 schema.owner = owner_id;
-                notify_info = Info::Schema(schema.clone());
+                relation_info = Info::Schema(schema.clone());
                 commit_meta!(self, schemas)?;
                 user_core.increase_ref(owner_id);
                 user_core.decrease_ref(old_owner_id);
             }
         };
 
-        let version = self.notify_frontend(Operation::Update, notify_info).await;
+        let version = self.notify_frontend(Operation::Update, relation_info).await;
 
+        Ok(version)
+    }
+
+    pub async fn alter_set_schema(
+        &self,
+        fragment_manager: FragmentManagerRef,
+        object: alter_set_schema_request::Object,
+        new_schema_id: SchemaId,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+
+        database_core.ensure_schema_id(new_schema_id)?;
+        let database_id = database_core
+            .schemas
+            .get(&new_schema_id)
+            .unwrap()
+            .get_database_id();
+
+        let mut relation_infos = Vec::new();
+        match object {
+            alter_set_schema_request::Object::TableId(table_id) => {
+                database_core.ensure_table_id(table_id)?;
+                let Table {
+                    name,
+                    optional_associated_source_id,
+                    schema_id,
+                    ..
+                } = database_core.tables.get(&table_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                database_core.check_relation_name_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                ))?;
+
+                // associated source id.
+                let to_update_source_id = if let Some(
+                    OptionalAssociatedSourceId::AssociatedSourceId(associated_source_id),
+                ) = optional_associated_source_id
+                {
+                    Some(*associated_source_id)
+                } else {
+                    None
+                };
+
+                let mut to_update_table_ids = vec![table_id];
+                let mut to_update_internal_table_ids = vec![];
+
+                // indexes and index tables.
+                let (to_update_index_ids, index_table_ids): (Vec<_>, Vec<_>) = database_core
+                    .indexes
+                    .iter()
+                    .filter(|(_, index)| index.primary_table_id == table_id)
+                    .map(|(index_id, index)| (*index_id, index.index_table_id))
+                    .unzip();
+                to_update_table_ids.extend(index_table_ids);
+
+                // internal tables.
+                for table_id in &to_update_table_ids {
+                    let table_fragment = fragment_manager
+                        .select_table_fragments_by_table_id(&(table_id.into()))
+                        .await?;
+                    to_update_internal_table_ids.extend(table_fragment.internal_table_ids());
+                }
+
+                let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+                for table_id in to_update_table_ids
+                    .into_iter()
+                    .chain(to_update_internal_table_ids)
+                {
+                    let mut table = tables.get_mut(table_id).unwrap();
+                    table.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Table(table.clone())));
+                }
+
+                let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+                if let Some(source_id) = to_update_source_id {
+                    let mut source = sources.get_mut(source_id).unwrap();
+                    source.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Source(source.clone())));
+                }
+
+                let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+                for index_id in to_update_index_ids {
+                    let mut index = indexes.get_mut(index_id).unwrap();
+                    index.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Index(index.clone())));
+                }
+
+                commit_meta!(self, tables, sources, indexes)?;
+            }
+            alter_set_schema_request::Object::ViewId(view_id) => {
+                database_core.ensure_view_id(view_id)?;
+                let View {
+                    name, schema_id, ..
+                } = database_core.views.get(&view_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                database_core.check_relation_name_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                ))?;
+                let mut views = BTreeMapTransaction::new(&mut database_core.views);
+                let mut view = views.get_mut(view_id).unwrap();
+                view.schema_id = new_schema_id;
+                relation_infos.push(Some(RelationInfo::View(view.clone())));
+                commit_meta!(self, views)?;
+            }
+            alter_set_schema_request::Object::SourceId(source_id) => {
+                database_core.ensure_source_id(source_id)?;
+                let Source {
+                    name, schema_id, ..
+                } = database_core.sources.get(&source_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                database_core.check_relation_name_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                ))?;
+                let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+                let mut source = sources.get_mut(source_id).unwrap();
+                source.schema_id = new_schema_id;
+                relation_infos.push(Some(RelationInfo::Source(source.clone())));
+                commit_meta!(self, sources)?;
+            }
+            alter_set_schema_request::Object::SinkId(sink_id) => {
+                database_core.ensure_sink_id(sink_id)?;
+                let Sink {
+                    name, schema_id, ..
+                } = database_core.sinks.get(&sink_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                // internal tables.
+                let to_update_internal_table_ids = Vec::from_iter(
+                    fragment_manager
+                        .select_table_fragments_by_table_id(&(sink_id.into()))
+                        .await?
+                        .internal_table_ids(),
+                );
+
+                database_core.check_relation_name_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                ))?;
+                let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+                let mut sink = sinks.get_mut(sink_id).unwrap();
+                sink.schema_id = new_schema_id;
+                relation_infos.push(Some(RelationInfo::Sink(sink.clone())));
+
+                let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+                for table_id in to_update_internal_table_ids {
+                    let mut table = tables.get_mut(table_id).unwrap();
+                    table.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Table(table.clone())));
+                }
+
+                commit_meta!(self, sinks, tables)?;
+            }
+            alter_set_schema_request::Object::ConnectionId(connection_id) => {
+                database_core.ensure_connection_id(connection_id)?;
+                let Connection {
+                    name, schema_id, ..
+                } = database_core.connections.get(&connection_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                database_core.check_connection_name_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                ))?;
+
+                let mut connections = BTreeMapTransaction::new(&mut database_core.connections);
+                let mut connection = connections.get_mut(connection_id).unwrap();
+                connection.schema_id = new_schema_id;
+                let notify_info = Info::Connection(connection.clone());
+                commit_meta!(self, connections)?;
+                let version = self.notify_frontend(Operation::Update, notify_info).await;
+                return Ok(version);
+            }
+            alter_set_schema_request::Object::FunctionId(function_id) => {
+                database_core.ensure_function_id(function_id)?;
+                let Function {
+                    name,
+                    arg_types,
+                    schema_id,
+                    ..
+                } = database_core.functions.get(&function_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                database_core.check_function_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                    arg_types.to_owned(),
+                ))?;
+                let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
+                let mut function = functions.get_mut(function_id).unwrap();
+                function.schema_id = new_schema_id;
+                let notify_info = Info::Function(function.clone());
+                commit_meta!(self, functions)?;
+                let version = self.notify_frontend(Operation::Update, notify_info).await;
+                return Ok(version);
+            }
+        }
+
+        let version = self
+            .notify_frontend(
+                Operation::Update,
+                Info::RelationGroup(RelationGroup {
+                    relations: relation_infos
+                        .into_iter()
+                        .map(|relation_info| Relation { relation_info })
+                        .collect_vec(),
+                }),
+            )
+            .await;
         Ok(version)
     }
 
@@ -2429,7 +2907,11 @@ impl CatalogManager {
         Ok(version)
     }
 
-    pub async fn cancel_create_sink_procedure(&self, sink: &Sink) {
+    pub async fn cancel_create_sink_procedure(
+        &self,
+        sink: &Sink,
+        target_table: &Option<(Table, Option<PbSource>)>,
+    ) {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -2446,6 +2928,10 @@ impl CatalogManager {
         }
         user_core.decrease_ref(sink.owner);
         refcnt_dec_connection(database_core, sink.connection_id);
+
+        if let Some((table, source)) = target_table {
+            Self::cancel_replace_table_procedure_inner(source, table, core);
+        }
     }
 
     /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
@@ -2492,7 +2978,9 @@ impl CatalogManager {
         &self,
         source: &Option<Source>,
         table: &Table,
-        table_col_index_mapping: ColIndexMapping,
+        table_col_index_mapping: Option<ColIndexMapping>,
+        creating_sink_id: Option<SinkId>,
+        dropping_sink_id: Option<SinkId>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -2531,17 +3019,19 @@ impl CatalogManager {
 
         let mut updated_indexes = vec![];
 
-        let expr_rewriter = ReplaceTableExprRewriter {
-            table_col_index_mapping: table_col_index_mapping.clone(),
-        };
+        if let Some(table_col_index_mapping) = table_col_index_mapping.clone() {
+            let expr_rewriter = ReplaceTableExprRewriter {
+                table_col_index_mapping,
+            };
 
-        for index_id in &index_ids {
-            let mut index = indexes.get_mut(*index_id).unwrap();
-            index
-                .index_item
-                .iter_mut()
-                .for_each(|x| expr_rewriter.rewrite_expr(x));
-            updated_indexes.push(indexes.get(index_id).cloned().unwrap());
+            for index_id in &index_ids {
+                let mut index = indexes.get_mut(*index_id).unwrap();
+                index
+                    .index_item
+                    .iter_mut()
+                    .for_each(|x| expr_rewriter.rewrite_expr(x));
+                updated_indexes.push(indexes.get(index_id).cloned().unwrap());
+            }
         }
 
         // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
@@ -2549,7 +3039,19 @@ impl CatalogManager {
 
         let mut table = table.clone();
         table.stream_job_status = PbStreamJobStatus::Created.into();
+
+        if let Some(incoming_sink_id) = creating_sink_id {
+            table.incoming_sinks.push(incoming_sink_id);
+        }
+
+        if let Some(dropping_sink_id) = dropping_sink_id {
+            table
+                .incoming_sinks
+                .retain(|sink_id| *sink_id != dropping_sink_id);
+        }
+
         tables.insert(table.id, table.clone());
+
         commit_meta!(self, tables, indexes, sources)?;
 
         // Group notification
@@ -2584,6 +3086,16 @@ impl CatalogManager {
             unreachable!("unexpected job: {stream_job:?}")
         };
         let core = &mut *self.core.lock().await;
+
+        Self::cancel_replace_table_procedure_inner(source, table, core);
+        Ok(())
+    }
+
+    fn cancel_replace_table_procedure_inner(
+        source: &Option<PbSource>,
+        table: &Table,
+        core: &mut CatalogManagerCore,
+    ) {
         let database_core = &mut core.database;
         let key = (table.database_id, table.schema_id, table.name.clone());
 
@@ -2609,7 +3121,6 @@ impl CatalogManager {
         // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
         // occur after it's created. We may need to add a new tracker for `alter` procedure.s
         database_core.unmark_creating(&key);
-        Ok(())
     }
 
     pub async fn comment_on(&self, comment: Comment) -> MetaResult<NotificationVersion> {
@@ -2664,6 +3175,18 @@ impl CatalogManager {
         self.core.lock().await.database.list_tables()
     }
 
+    pub async fn list_tables_by_type(&self, table_type: TableType) -> Vec<Table> {
+        self.core
+            .lock()
+            .await
+            .database
+            .tables
+            .values()
+            .filter(|table| table.table_type == table_type as i32)
+            .cloned()
+            .collect_vec()
+    }
+
     /// Lists table catalogs for mviews, without their internal tables.
     pub async fn list_creating_background_mvs(&self) -> Vec<Table> {
         self.core
@@ -2704,6 +3227,14 @@ impl CatalogManager {
 
     pub async fn list_sources(&self) -> Vec<Source> {
         self.core.lock().await.database.list_sources()
+    }
+
+    pub async fn list_sinks(&self) -> Vec<Sink> {
+        self.core.lock().await.database.list_sinks()
+    }
+
+    pub async fn list_views(&self) -> Vec<View> {
+        self.core.lock().await.database.list_views()
     }
 
     pub async fn list_source_ids(&self, schema_id: SchemaId) -> Vec<SourceId> {
@@ -2796,8 +3327,54 @@ impl CatalogManager {
             .database
             .tables
             .values()
+            .filter(|table| table.get_stream_job_status() != Ok(StreamJobStatus::Creating))
             .map(|table| table.id)
             .collect()
+    }
+
+    // TODO: replace *_count with SQL
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn source_count(&self) -> usize {
+        self.core.lock().await.database.sources.len()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn table_count(&self) -> usize {
+        self.core
+            .lock()
+            .await
+            .database
+            .tables
+            .values()
+            .filter(|t| t.table_type == TableType::Table as i32)
+            .count()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn materialized_view_count(&self) -> usize {
+        self.core
+            .lock()
+            .await
+            .database
+            .tables
+            .values()
+            .filter(|t| t.table_type == TableType::MaterializedView as i32)
+            .count()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn index_count(&self) -> usize {
+        self.core.lock().await.database.indexes.len()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn sink_count(&self) -> usize {
+        self.core.lock().await.database.sinks.len()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn function_count(&self) -> usize {
+        self.core.lock().await.database.functions.len()
     }
 }
 

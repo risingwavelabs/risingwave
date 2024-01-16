@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::types::{JsonbVal, ScalarImpl};
+use risingwave_common::types::{Datum, JsonbVal};
 use risingwave_expr::aggregate::AggStateDyn;
 use risingwave_expr::expr::Context;
 use risingwave_expr::{aggregate, ExprError, Result};
@@ -70,13 +70,13 @@ impl Default for JsonbArrayState {
 }
 
 /// Finishes aggregation and returns the result.
-impl From<&JsonbArrayState> for ScalarImpl {
+impl From<&JsonbArrayState> for Datum {
     fn from(builder: &JsonbArrayState) -> Self {
         // TODO: avoid clone
         let mut builder = builder.0.clone();
         builder.end_array();
         let jsonb: JsonbVal = builder.finish().into();
-        jsonb.into()
+        Some(jsonb.into())
     }
 }
 
@@ -101,12 +101,12 @@ impl Default for JsonbObjectState {
 }
 
 /// Finishes aggregation and returns the result.
-impl From<&JsonbObjectState> for ScalarImpl {
+impl From<&JsonbObjectState> for Datum {
     fn from(builder: &JsonbObjectState) -> Self {
         // TODO: avoid clone
         let mut builder = builder.0.clone();
         builder.end_object();
         let jsonb: JsonbVal = builder.finish().into();
-        jsonb.into()
+        Some(jsonb.into())
     }
 }

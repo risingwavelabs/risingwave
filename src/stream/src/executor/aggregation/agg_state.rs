@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ use super::minput::MaterializedInputState;
 use super::GroupKey;
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
-use crate::executor::StreamExecutorResult;
+use crate::executor::{PkIndices, StreamExecutorResult};
 
 /// Represents the persistent storage of aggregation state.
 pub enum AggStateStorage<S: StateStore> {
@@ -73,6 +73,7 @@ impl AggState {
         agg_func: &BoxedAggregateFunction,
         storage: &AggStateStorage<impl StateStore>,
         encoded_state: Option<&Datum>,
+        pk_indices: &PkIndices,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
@@ -91,6 +92,7 @@ impl AggState {
             } => Self::MaterializedInput(Box::new(MaterializedInputState::new(
                 version,
                 agg_call,
+                pk_indices,
                 order_columns,
                 mapping,
                 extreme_cache_size,

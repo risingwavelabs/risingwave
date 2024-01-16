@@ -2,6 +2,9 @@
 # Input in whatever timezone
 # Output always in UTC (rather than session TimeZone yet)
 
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
 query T
 select '2022-10-01 12:00:00-08:00'::timestamp with time zone;
 ----

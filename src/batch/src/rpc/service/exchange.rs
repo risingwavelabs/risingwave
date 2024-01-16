@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{Result, ToRwResult};
+use anyhow::Context;
 use risingwave_pb::task_service::GetDataResponse;
 use tonic::Status;
+
+use crate::error::Result;
 
 pub type GetDataResponseResult = std::result::Result<GetDataResponse, Status>;
 
@@ -44,11 +46,13 @@ impl GrpcExchangeWriter {
 
 impl ExchangeWriter for GrpcExchangeWriter {
     async fn write(&mut self, data: GetDataResponseResult) -> Result<()> {
-        self.written_chunks += 1;
         self.sender
             .send(data)
             .await
-            .to_rw_result_with(|| "failed to write data to ExchangeWriter".into())
+            .context("failed to write data to ExchangeWriter")?;
+        self.written_chunks += 1;
+
+        Ok(())
     }
 }
 

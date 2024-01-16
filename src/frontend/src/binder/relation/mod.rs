@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,12 +16,14 @@ use std::collections::hash_map::Entry;
 use std::ops::Deref;
 
 use itertools::{EitherOrBoth, Itertools};
+use risingwave_common::bail;
 use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{
     Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor,
 };
 use thiserror::Error;
+use thiserror_ext::AsReport;
 
 use super::bind_context::ColumnBinding;
 use super::statement::RewriteExprsRecursive;
@@ -103,7 +105,7 @@ impl Relation {
         match self {
             Relation::Subquery(subquery) => subquery
                 .query
-                .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
+                .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
             Relation::Join(join) | Relation::Apply(join) => {
                 let mut correlated_indices = vec![];
                 correlated_indices.extend(
@@ -168,7 +170,7 @@ impl ResolveQualifiedNameError {
 
 impl From<ResolveQualifiedNameError> for RwError {
     fn from(e: ResolveQualifiedNameError) -> Self {
-        ErrorCode::InvalidInputSyntax(format!("{}", e)).into()
+        ErrorCode::InvalidInputSyntax(format!("{}", e.as_report())).into()
     }
 }
 
@@ -208,10 +210,7 @@ impl Binder {
     /// return first name in identifiers, must have only one name.
     fn resolve_single_name(mut identifiers: Vec<Ident>, ident_desc: &str) -> Result<String> {
         if identifiers.len() > 1 {
-            return Err(internal_error(format!(
-                "{} must contain 1 argument",
-                ident_desc
-            )));
+            bail!("{} must contain 1 argument", ident_desc);
         }
         let name = identifiers.pop().unwrap().real_value();
 
@@ -435,7 +434,10 @@ impl Binder {
             .to_string()
             .parse::<u32>()
             .map_err(|err| {
-                RwError::from(ErrorCode::BindError(format!("invalid table id: {}", err)))
+                RwError::from(ErrorCode::BindError(format!(
+                    "invalid table id: {}",
+                    err.as_report()
+                )))
             })?
             .into();
 

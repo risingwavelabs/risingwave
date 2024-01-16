@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,15 +16,18 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
+use thiserror_ext::AsReport;
 
 use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::gen_sink_plan;
 use super::create_table::ColumnIdGenerator;
 use super::query::gen_batch_plan_by_statement;
+use super::util::SourceSchemaCompatExt;
 use super::RwPgResponse;
 use crate::handler::create_table::handle_create_table_plan;
 use crate::handler::HandlerArgs;
@@ -60,17 +63,12 @@ async fn do_handle_explain(
                 source_watermarks,
                 append_only,
                 cdc_table_info,
+                include_column_options,
                 ..
             } => {
                 let col_id_gen = ColumnIdGenerator::new_initial();
-                // TODO(st1page): refactor it
-                let (source_schema, notice) = match source_schema {
-                    Some(s) => {
-                        let (s, notice) = s.into_source_schema_v2();
-                        (Some(s), notice)
-                    }
-                    None => (None, None),
-                };
+
+                let source_schema = source_schema.map(|s| s.into_v2_with_warning());
 
                 let (plan, _source, _table, _job_type) = handle_create_table_plan(
                     context,
@@ -82,12 +80,10 @@ async fn do_handle_explain(
                     constraints,
                     source_watermarks,
                     append_only,
+                    include_column_options,
                 )
                 .await?;
                 let context = plan.ctx();
-                if let Some(notice) = notice {
-                    context.warn_to_user(notice);
-                }
                 (Ok(plan), context)
             }
 
@@ -115,9 +111,17 @@ async fn do_handle_explain(
                         emit_mode,
                     )
                     .map(|x| x.0),
-
+                    Statement::CreateView {
+                        materialized: false,
+                        ..
+                    } => {
+                        return Err(ErrorCode::NotSupported(
+                            "EXPLAIN CREATE VIEW".into(),
+                            "A created VIEW is just an alias. Instead, use EXPLAIN on the queries which reference the view.".into()
+                        ).into());
+                    }
                     Statement::CreateSink { stmt } => {
-                        gen_sink_plan(&session, context.clone(), stmt).map(|x| x.1)
+                        gen_sink_plan(&session, context.clone(), stmt).map(|plan| plan.sink_plan)
                     }
 
                     Statement::CreateIndex {
@@ -146,13 +150,7 @@ async fn do_handle_explain(
                         gen_batch_plan_by_statement(&session, context.clone(), stmt).map(|x| x.plan)
                     }
 
-                    _ => {
-                        return Err(ErrorCode::NotImplemented(
-                            format!("unsupported statement {:?}", stmt),
-                            None.into(),
-                        )
-                        .into())
-                    }
+                    _ => bail_not_implemented!("unsupported statement {:?}", stmt),
                 };
 
                 (plan, context)
@@ -181,12 +179,12 @@ async fn do_handle_explain(
                             batch_plan_fragmenter = Some(BatchPlanFragmenter::new(
                                 worker_node_manager_reader,
                                 session.env().catalog_reader().clone(),
-                                session.config().get_batch_parallelism(),
+                                session.config().batch_parallelism().0,
                                 plan.clone(),
                             )?);
                         }
                         Convention::Stream => {
-                            let graph = build_graph(plan.clone());
+                            let graph = build_graph(plan.clone())?;
                             blocks.push(explain_stream_graph(&graph, explain_verbose));
                         }
                     }
@@ -229,7 +227,7 @@ pub async fn handle_explain(
     analyze: bool,
 ) -> Result<RwPgResponse> {
     if analyze {
-        return Err(ErrorCode::NotImplemented("explain analyze".to_string(), 4856.into()).into());
+        bail_not_implemented!(issue = 4856, "explain analyze");
     }
 
     let context = OptimizerContext::new(handler_args.clone(), options.clone());
@@ -241,9 +239,9 @@ pub async fn handle_explain(
         if options.trace {
             // If `trace` is on, we include the error in the output with partial traces.
             blocks.push(if options.verbose {
-                format!("ERROR: {:?}", e)
+                format!("ERROR: {:?}", e.as_report())
             } else {
-                format!("ERROR: {}", e)
+                format!("ERROR: {}", e.as_report())
             });
         } else {
             // Else, directly return the error.

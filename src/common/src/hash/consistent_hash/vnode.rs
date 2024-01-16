@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use parse_display::Display;
 use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::hash::Crc32HashCode;
 use crate::row::{Row, RowExt};
-use crate::types::{DataType, ScalarRefImpl};
+use crate::types::{DataType, DatumRef, ScalarRefImpl};
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::row_id::extract_vnode_id_from_row_id;
 
@@ -87,6 +87,10 @@ impl VirtualNode {
         Self(scalar as _)
     }
 
+    pub fn from_datum(datum: DatumRef<'_>) -> Self {
+        Self::from_scalar(datum.expect("should not be none").into_int16())
+    }
+
     /// Returns the scalar representation of the virtual node. Used by `VNODE` expression.
     pub const fn to_scalar(self) -> i16 {
         self.0 as _
@@ -119,18 +123,22 @@ impl VirtualNode {
         if let Ok(idx) = keys.iter().exactly_one()
             && let ArrayImpl::Serial(serial_array) = &**data_chunk.column_at(*idx)
         {
-            return serial_array.iter().enumerate().map(|(idx, serial)| {
-                if let Some(serial) = serial {
-                    extract_vnode_id_from_row_id(serial.as_row_id())
-                } else {
-                    // NOTE: here it will hash the entire row when the `_row_id` is missing,
-                    // which could result in rows from the same chunk being allocated to different chunks.
-                    // This process doesn’t guarantee the order of rows, producing indeterminate results in some cases,
-                    // such as when `distinct on` is used without an `order by`.
-                    let (row, _) = data_chunk.row_at(idx);
-                    row.hash(Crc32FastBuilder).into()
-                }
-            } ).collect();
+            return serial_array
+                .iter()
+                .enumerate()
+                .map(|(idx, serial)| {
+                    if let Some(serial) = serial {
+                        extract_vnode_id_from_row_id(serial.as_row_id())
+                    } else {
+                        // NOTE: here it will hash the entire row when the `_row_id` is missing,
+                        // which could result in rows from the same chunk being allocated to different chunks.
+                        // This process doesn’t guarantee the order of rows, producing indeterminate results in some cases,
+                        // such as when `distinct on` is used without an `order by`.
+                        let (row, _) = data_chunk.row_at(idx);
+                        row.hash(Crc32FastBuilder).into()
+                    }
+                })
+                .collect();
         }
 
         data_chunk

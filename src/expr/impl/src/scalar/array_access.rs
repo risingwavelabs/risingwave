@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,18 +30,14 @@ fn array_access(list: ListRef<'_>, index: i32) -> Option<ScalarRefImpl<'_>> {
 mod tests {
 
     use risingwave_common::array::ListValue;
-    use risingwave_common::types::ScalarImpl;
+    use risingwave_common::types::Scalar;
 
     use super::*;
 
     #[test]
     fn test_int4_array_access() {
-        let v1 = ListValue::new(vec![
-            Some(ScalarImpl::Int32(1)),
-            Some(ScalarImpl::Int32(2)),
-            Some(ScalarImpl::Int32(3)),
-        ]);
-        let l1 = ListRef::ValueRef { val: &v1 };
+        let v1 = ListValue::from_iter([1, 2, 3]);
+        let l1 = v1.as_scalar_ref();
 
         assert_eq!(array_access(l1, 1), Some(1.into()));
         assert_eq!(array_access(l1, -1), None);
@@ -51,49 +47,24 @@ mod tests {
 
     #[test]
     fn test_utf8_array_access() {
-        let v1 = ListValue::new(vec![
-            Some(ScalarImpl::Utf8("来自".into())),
-            Some(ScalarImpl::Utf8("foo".into())),
-            Some(ScalarImpl::Utf8("bar".into())),
-        ]);
-        let v2 = ListValue::new(vec![
-            Some(ScalarImpl::Utf8("fizz".into())),
-            Some(ScalarImpl::Utf8("荷兰".into())),
-            Some(ScalarImpl::Utf8("buzz".into())),
-        ]);
-        let v3 = ListValue::new(vec![None, None, Some(ScalarImpl::Utf8("的爱".into()))]);
+        let v1 = ListValue::from_iter(["来自", "foo", "bar"]);
+        let v2 = ListValue::from_iter(["fizz", "荷兰", "buzz"]);
+        let v3 = ListValue::from_iter([None, None, Some("的爱")]);
 
-        let l1 = ListRef::ValueRef { val: &v1 };
-        let l2 = ListRef::ValueRef { val: &v2 };
-        let l3 = ListRef::ValueRef { val: &v3 };
-
-        assert_eq!(array_access(l1, 1), Some("来自".into()));
-        assert_eq!(array_access(l2, 2), Some("荷兰".into()));
-        assert_eq!(array_access(l3, 3), Some("的爱".into()));
+        assert_eq!(array_access(v1.as_scalar_ref(), 1), Some("来自".into()));
+        assert_eq!(array_access(v2.as_scalar_ref(), 2), Some("荷兰".into()));
+        assert_eq!(array_access(v3.as_scalar_ref(), 3), Some("的爱".into()));
     }
 
     #[test]
     fn test_nested_array_access() {
-        let v = ListValue::new(vec![
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::Utf8("foo".into())),
-                Some(ScalarImpl::Utf8("bar".into())),
-            ]))),
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::Utf8("fizz".into())),
-                Some(ScalarImpl::Utf8("buzz".into())),
-            ]))),
+        let v = ListValue::from_iter([
+            ListValue::from_iter(["foo", "bar"]),
+            ListValue::from_iter(["fizz", "buzz"]),
         ]);
-        let l = ListRef::ValueRef { val: &v };
         assert_eq!(
-            array_access(l, 1),
-            Some(
-                ListRef::from(&ListValue::new(vec![
-                    Some(ScalarImpl::Utf8("foo".into())),
-                    Some(ScalarImpl::Utf8("bar".into())),
-                ]))
-                .into()
-            )
+            array_access(v.as_scalar_ref(), 1),
+            Some(ListValue::from_iter(["foo", "bar"]).as_scalar_ref().into())
         );
     }
 }

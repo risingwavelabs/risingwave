@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 
 use crate::expr::{
-    ExprRewriter, ExprType, FunctionCall, InequalityInputPair, InputRef, InputRefDisplay,
+    ExprRewriter, ExprType, ExprVisitor, FunctionCall, InequalityInputPair, InputRef,
+    InputRefDisplay,
 };
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -316,6 +317,10 @@ impl EqJoinPredicate {
         let mut new = self.clone();
         new.other_cond = new.other_cond.rewrite_expr(rewriter);
         new
+    }
+
+    pub fn visit_exprs(&self, v: &mut (impl ExprVisitor + ?Sized)) {
+        self.other_cond.visit_expr(v);
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,23 +31,29 @@ use risingwave_common::catalog::{
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
-use risingwave_pb::ddl_service::{create_connection_request, DdlProgress, PbTableJobType};
+use risingwave_pb::ddl_service::{
+    alter_set_schema_request, create_connection_request, DdlProgress, PbTableJobType,
+    ReplaceTablePlan,
+};
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    BranchedObject, CompactionGroupInfo, HummockSnapshot, HummockVersion, HummockVersionDelta,
+    BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
+    HummockSnapshot,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::SystemParams;
+use risingwave_pb::meta::{EventLog, PbTableParallelism, SystemParams};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -306,7 +312,12 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_source_inner(source).map(|_| ())
     }
 
-    async fn create_sink(&self, sink: PbSink, graph: StreamFragmentGraph) -> Result<()> {
+    async fn create_sink(
+        &self,
+        sink: PbSink,
+        graph: StreamFragmentGraph,
+        _affected_table_change: Option<ReplaceTablePlan>,
+    ) -> Result<()> {
         self.create_sink_inner(sink, graph)
     }
 
@@ -425,7 +436,12 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()> {
+    async fn drop_sink(
+        &self,
+        sink_id: u32,
+        cascade: bool,
+        _target_table_change: Option<ReplaceTablePlan>,
+    ) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
                 "drop cascade in MockCatalogWriter is unsupported".to_string(),
@@ -525,6 +541,30 @@ impl CatalogWriter for MockCatalogWriter {
         Err(ErrorCode::ItemNotFound(format!("object not found: {:?}", object)).into())
     }
 
+    async fn alter_set_schema(
+        &self,
+        object: alter_set_schema_request::Object,
+        new_schema_id: u32,
+    ) -> Result<()> {
+        match object {
+            alter_set_schema_request::Object::TableId(table_id) => {
+                let &schema_id = self.table_id_to_schema_id.read().get(&table_id).unwrap();
+                let database_id = self.get_database_id_by_schema(schema_id);
+                let pb_table = {
+                    let reader = self.catalog.read();
+                    let table = reader.get_table_by_id(&table_id.into())?.to_owned();
+                    table.to_prost(new_schema_id, database_id)
+                };
+                self.catalog.write().update_table(&pb_table);
+                self.table_id_to_schema_id
+                    .write()
+                    .insert(table_id, new_schema_id);
+                Ok(())
+            }
+            _ => unreachable!(),
+        }
+    }
+
     async fn alter_view_name(&self, _view_id: u32, _view_name: &str) -> Result<()> {
         unreachable!()
     }
@@ -539,6 +579,22 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_source_name(&self, _source_id: u32, _source_name: &str) -> Result<()> {
         unreachable!()
+    }
+
+    async fn alter_schema_name(&self, _schema_id: u32, _schema_name: &str) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn alter_database_name(&self, _database_id: u32, _database_name: &str) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn alter_parallelism(
+        &self,
+        _table_id: u32,
+        _parallelism: PbTableParallelism,
+    ) -> Result<()> {
+        todo!()
     }
 }
 
@@ -893,6 +949,22 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_hummock_meta_configs(&self) -> RpcResult<HashMap<String, String>> {
+        unimplemented!()
+    }
+
+    async fn list_event_log(&self) -> RpcResult<Vec<EventLog>> {
+        unimplemented!()
+    }
+
+    async fn list_compact_task_assignment(&self) -> RpcResult<Vec<CompactTaskAssignment>> {
+        unimplemented!()
+    }
+
+    async fn list_all_nodes(&self) -> RpcResult<Vec<WorkerNode>> {
+        unimplemented!()
+    }
+
+    async fn list_compact_task_progress(&self) -> RpcResult<Vec<CompactTaskProgress>> {
         unimplemented!()
     }
 }

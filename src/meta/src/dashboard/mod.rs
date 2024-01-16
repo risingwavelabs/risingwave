@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,24 +30,24 @@ use axum::Router;
 use hyper::Request;
 use parking_lot::Mutex;
 use risingwave_rpc_client::ComputeClientPool;
-use tower::ServiceBuilder;
+use tower::{ServiceBuilder, ServiceExt};
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
 use tower_http::services::ServeDir;
 
-use crate::manager::{ClusterManagerRef, FragmentManagerRef};
-use crate::storage::MetaStoreRef;
+use crate::manager::diagnose::DiagnoseCommandRef;
+use crate::manager::MetadataManager;
 
 #[derive(Clone)]
 pub struct DashboardService {
     pub dashboard_addr: SocketAddr,
-    pub prometheus_endpoint: Option<String>,
     pub prometheus_client: Option<prometheus_http_query::Client>,
-    pub cluster_manager: ClusterManagerRef,
-    pub fragment_manager: FragmentManagerRef,
+    pub prometheus_selector: String,
+    pub metadata_manager: MetadataManager,
     pub compute_clients: ComputeClientPool,
     pub ui_path: Option<String>,
-    pub meta_store: MetaStoreRef,
+    pub diagnose_command: Option<DiagnoseCommandRef>,
+    pub trace_state: otlp_embedded::StateRef,
 }
 
 pub type Service = Arc<DashboardService>;
@@ -59,18 +59,18 @@ pub(super) mod handlers {
     use risingwave_common::bail;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_pb::catalog::table::TableType;
-    use risingwave_pb::catalog::{Sink, Source, Table};
+    use risingwave_pb::catalog::{Sink, Source, Table, View};
     use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::meta::{ActorLocation, PbTableFragments};
     use risingwave_pb::monitor_service::{
         HeapProfilingResponse, ListHeapProfilingResponse, StackTraceResponse,
     };
     use serde_json::json;
+    use thiserror_ext::AsReport;
 
     use super::*;
     use crate::manager::WorkerId;
-    use crate::model::TableFragments;
-    use crate::storage::MetaStoreRef;
+    use crate::model::MetadataModel;
 
     pub struct DashboardError(anyhow::Error);
     pub type Result<T> = std::result::Result<T, DashboardError>;
@@ -88,8 +88,7 @@ pub(super) mod handlers {
     impl IntoResponse for DashboardError {
         fn into_response(self) -> axum::response::Response {
             let mut resp = Json(json!({
-                "error": format!("{}", self.0),
-                "info":  format!("{:?}", self.0),
+                "error": self.0.to_report_string(),
             }))
             .into_response();
             *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
@@ -101,77 +100,91 @@ pub(super) mod handlers {
         Path(ty): Path<i32>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<WorkerNode>>> {
+        let worker_type = WorkerType::try_from(ty)
+            .map_err(|_| anyhow!("invalid worker type"))
+            .map_err(err)?;
         let mut result = srv
-            .cluster_manager
-            .list_worker_node(
-                WorkerType::try_from(ty)
-                    .map_err(|_| anyhow!("invalid worker type"))
-                    .map_err(err)?,
-                None,
-            )
-            .await;
+            .metadata_manager
+            .list_worker_node(Some(worker_type), None)
+            .await
+            .map_err(err)?;
         result.sort_unstable_by_key(|n| n.id);
         Ok(result.into())
     }
 
     async fn list_table_catalogs_inner(
-        meta_store: &MetaStoreRef,
+        metadata_manager: &MetadataManager,
         table_type: TableType,
     ) -> Result<Json<Vec<Table>>> {
-        use crate::model::MetadataModel;
+        let tables = match metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_tables_by_type(table_type).await,
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .list_tables_by_type(table_type.into())
+                .await
+                .map_err(err)?,
+        };
 
-        let results = Table::list(meta_store)
-            .await
-            .map_err(err)?
-            .into_iter()
-            .filter(|t| t.table_type() == table_type)
-            .collect();
-
-        Ok(Json(results))
+        Ok(Json(tables))
     }
 
     pub async fn list_materialized_views(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&srv.meta_store, TableType::MaterializedView).await
+        list_table_catalogs_inner(&srv.metadata_manager, TableType::MaterializedView).await
     }
 
     pub async fn list_tables(Extension(srv): Extension<Service>) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&srv.meta_store, TableType::Table).await
+        list_table_catalogs_inner(&srv.metadata_manager, TableType::Table).await
     }
 
     pub async fn list_indexes(Extension(srv): Extension<Service>) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&srv.meta_store, TableType::Index).await
+        list_table_catalogs_inner(&srv.metadata_manager, TableType::Index).await
     }
 
     pub async fn list_internal_tables(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&srv.meta_store, TableType::Internal).await
+        list_table_catalogs_inner(&srv.metadata_manager, TableType::Internal).await
     }
 
     pub async fn list_sources(Extension(srv): Extension<Service>) -> Result<Json<Vec<Source>>> {
-        use crate::model::MetadataModel;
+        let sources = srv.metadata_manager.list_sources().await.map_err(err)?;
 
-        let sources = Source::list(&srv.meta_store).await.map_err(err)?;
         Ok(Json(sources))
     }
 
     pub async fn list_sinks(Extension(srv): Extension<Service>) -> Result<Json<Vec<Sink>>> {
-        use crate::model::MetadataModel;
+        let sinks = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_sinks().await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.list_sinks().await.map_err(err)?,
+        };
 
-        let sinks = Sink::list(&srv.meta_store).await.map_err(err)?;
         Ok(Json(sinks))
+    }
+
+    pub async fn list_views(Extension(srv): Extension<Service>) -> Result<Json<Vec<View>>> {
+        let views = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_views().await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.list_views().await.map_err(err)?,
+        };
+
+        Ok(Json(views))
     }
 
     pub async fn list_actors(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<ActorLocation>>> {
-        let mut node_actors = srv.fragment_manager.all_node_actors(true).await;
+        let mut node_actors = srv
+            .metadata_manager
+            .all_node_actors(true)
+            .await
+            .map_err(err)?;
         let nodes = srv
-            .cluster_manager
+            .metadata_manager
             .list_active_streaming_compute_nodes()
-            .await;
+            .await
+            .map_err(err)?;
         let actors = nodes
             .into_iter()
             .map(|node| ActorLocation {
@@ -186,14 +199,25 @@ pub(super) mod handlers {
     pub async fn list_fragments(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<PbTableFragments>>> {
-        use crate::model::MetadataModel;
+        let table_fragments = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => mgr
+                .fragment_manager
+                .get_fragment_read_guard()
+                .await
+                .table_fragments()
+                .values()
+                .map(|tf| tf.to_protobuf())
+                .collect_vec(),
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .table_fragments()
+                .await
+                .map_err(err)?
+                .values()
+                .cloned()
+                .collect_vec(),
+        };
 
-        let table_fragments = TableFragments::list(&srv.meta_store)
-            .await
-            .map_err(err)?
-            .into_iter()
-            .map(|x| x.to_protobuf())
-            .collect_vec();
         Ok(Json(table_fragments))
     }
 
@@ -223,9 +247,10 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service>,
     ) -> Result<Json<StackTraceResponse>> {
         let worker_nodes = srv
-            .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode, None)
-            .await;
+            .metadata_manager
+            .list_worker_node(Some(WorkerType::ComputeNode), None)
+            .await
+            .map_err(err)?;
 
         dump_await_tree_inner(&worker_nodes, &srv.compute_clients).await
     }
@@ -235,12 +260,12 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service>,
     ) -> Result<Json<StackTraceResponse>> {
         let worker_node = srv
-            .cluster_manager
+            .metadata_manager
             .get_worker_by_id(worker_id)
             .await
-            .context("worker node not found")
             .map_err(err)?
-            .worker_node;
+            .context("worker node not found")
+            .map_err(err)?;
 
         dump_await_tree_inner(std::iter::once(&worker_node), &srv.compute_clients).await
     }
@@ -250,12 +275,12 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service>,
     ) -> Result<Json<HeapProfilingResponse>> {
         let worker_node = srv
-            .cluster_manager
+            .metadata_manager
             .get_worker_by_id(worker_id)
             .await
-            .context("worker node not found")
             .map_err(err)?
-            .worker_node;
+            .context("worker node not found")
+            .map_err(err)?;
 
         let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
 
@@ -269,12 +294,12 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service>,
     ) -> Result<Json<ListHeapProfilingResponse>> {
         let worker_node = srv
-            .cluster_manager
+            .metadata_manager
             .get_worker_by_id(worker_id)
             .await
-            .context("worker node not found")
             .map_err(err)?
-            .worker_node;
+            .context("worker node not found")
+            .map_err(err)?;
 
         let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
 
@@ -302,12 +327,12 @@ pub(super) mod handlers {
         let collapsed_file_name = format!("{}.{}", file_name, COLLAPSED_SUFFIX);
 
         let worker_node = srv
-            .cluster_manager
+            .metadata_manager
             .get_worker_by_id(worker_id)
             .await
-            .context("worker node not found")
             .map_err(err)?
-            .worker_node;
+            .context("worker node not found")
+            .map_err(err)?;
 
         let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
 
@@ -325,6 +350,16 @@ pub(super) mod handlers {
 
         response.map_err(err)
     }
+
+    pub async fn diagnose(Extension(srv): Extension<Service>) -> Result<String> {
+        let report = if let Some(cmd) = &srv.diagnose_command {
+            cmd.report().await
+        } else {
+            "Not supported in sql-backend".to_string()
+        };
+
+        Ok(report)
+    }
 }
 
 impl DashboardService {
@@ -341,6 +376,7 @@ impl DashboardService {
             .route("/clusters/:ty", get(list_clusters))
             .route("/actors", get(list_actors))
             .route("/fragments2", get(list_fragments))
+            .route("/views", get(list_views))
             .route("/materialized_views", get(list_materialized_views))
             .route("/tables", get(list_tables))
             .route("/indexes", get(list_indexes))
@@ -360,6 +396,7 @@ impl DashboardService {
                 get(list_heap_profile),
             )
             .route("/monitor/analyze/:worker_id/*path", get(analyze_heap))
+            .route("/monitor/diagnose/", get(diagnose))
             .layer(
                 ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(srv.clone()))
@@ -367,22 +404,15 @@ impl DashboardService {
             )
             .layer(cors_layer);
 
-        let app = if let Some(ui_path) = ui_path {
-            let static_file_router = Router::new().nest_service(
-                "/",
-                get_service(ServeDir::new(ui_path)).handle_error(|e| async move {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Unhandled internal error: {e}",),
-                    )
-                }),
-            );
-            Router::new()
-                .fallback_service(static_file_router)
-                .nest("/api", api_router)
+        let trace_ui_router = otlp_embedded::ui_app(srv.trace_state.clone(), "/trace/");
+
+        let dashboard_router = if let Some(ui_path) = ui_path {
+            get_service(ServeDir::new(ui_path))
+                .handle_error(|e| async move { match e {} })
+                .boxed_clone()
         } else {
             let cache = Arc::new(Mutex::new(HashMap::new()));
-            let service = tower::service_fn(move |req: Request<Body>| {
+            tower::service_fn(move |req: Request<Body>| {
                 let cache = cache.clone();
                 async move {
                     proxy::proxy(req, cache).await.or_else(|err| {
@@ -393,11 +423,14 @@ impl DashboardService {
                             .into_response())
                     })
                 }
-            });
-            Router::new()
-                .fallback_service(service)
-                .nest("/api", api_router)
+            })
+            .boxed_clone()
         };
+
+        let app = Router::new()
+            .fallback_service(dashboard_router)
+            .nest("/api", api_router)
+            .nest("/trace", trace_ui_router);
 
         axum::Server::bind(&srv.dashboard_addr)
             .serve(app.into_make_service())

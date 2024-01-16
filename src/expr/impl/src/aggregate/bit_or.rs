@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,8 @@
 use std::marker::PhantomData;
 use std::ops::BitOr;
 
-use risingwave_common::types::{ListRef, ListValue, ScalarImpl};
+use risingwave_common::array::I64Array;
+use risingwave_common::types::{ListRef, ListValue};
 use risingwave_expr::aggregate;
 
 use super::bit_and::Bits;
@@ -109,15 +110,13 @@ impl<T: Bits> BitOrUpdatable<T> {
     // state is the number of 1s for each bit.
 
     fn create_state(&self) -> ListValue {
-        ListValue::new(vec![Some(ScalarImpl::Int64(0)); T::BITS])
+        ListValue::new(I64Array::from_iter(std::iter::repeat(0).take(T::BITS)).into())
     }
 
     fn accumulate(&self, mut state: ListValue, input: T) -> ListValue {
-        for i in 0..T::BITS {
+        let counts = state.as_i64_mut_slice().expect("invalid state");
+        for (i, count) in counts.iter_mut().enumerate() {
             if input.get_bit(i) {
-                let Some(ScalarImpl::Int64(count)) = &mut state[i] else {
-                    panic!("invalid state");
-                };
                 *count += 1;
             }
         }
@@ -125,11 +124,9 @@ impl<T: Bits> BitOrUpdatable<T> {
     }
 
     fn retract(&self, mut state: ListValue, input: T) -> ListValue {
-        for i in 0..T::BITS {
+        let counts = state.as_i64_mut_slice().expect("invalid state");
+        for (i, count) in counts.iter_mut().enumerate() {
             if input.get_bit(i) {
-                let Some(ScalarImpl::Int64(count)) = &mut state[i] else {
-                    panic!("invalid state");
-                };
                 *count -= 1;
             }
         }
@@ -137,10 +134,10 @@ impl<T: Bits> BitOrUpdatable<T> {
     }
 
     fn finalize(&self, state: ListRef<'_>) -> T {
+        let counts = state.as_i64_slice().expect("invalid state");
         let mut result = T::default();
-        for i in 0..T::BITS {
-            let count = state.get(i).unwrap().unwrap().into_int64();
-            if count != 0 {
+        for (i, count) in counts.iter().enumerate() {
+            if *count != 0 {
                 result.set_bit(i);
             }
         }

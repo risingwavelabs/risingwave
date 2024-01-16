@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::estimate_size::collections::hashmap::EstimatedHashMap;
+use risingwave_common::estimate_size::collections::EstimatedHashMap;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::ScalarImpl;
@@ -49,7 +49,6 @@ use crate::common::StreamChunkBuilder;
 use crate::error::StreamResult;
 use crate::executor::aggregation::AggGroup as GenericAggGroup;
 use crate::executor::error::StreamExecutorError;
-use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Executor, Message};
 use crate::task::AtomicU64Ref;
 
@@ -87,6 +86,9 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
 
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
+
+    /// Pk indices from input. Only used by `AggNodeVersion` before `ISSUE_13465`.
+    input_pk_indices: Vec<usize>,
 
     /// Schema from input.
     input_schema: Schema,
@@ -135,8 +137,6 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
 
     /// Should emit on window close according to watermark?
     emit_on_window_close: bool,
-
-    metrics: Arc<StreamingMetrics>,
 }
 
 impl<K: HashKey, S: StateStore> ExecutorInner<K, S> {
@@ -232,6 +232,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 version: args.version,
                 actor_ctx: args.actor_ctx,
                 info: args.info,
+                input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 group_key_indices: args.extra.group_key_indices,
                 group_key_table_pk_projection: group_key_table_pk_projection.to_vec().into(),
@@ -246,7 +247,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 chunk_size: args.extra.chunk_size,
                 max_dirty_groups_heap_size: args.extra.max_dirty_groups_heap_size,
                 emit_on_window_close: args.extra.emit_on_window_close,
-                metrics: args.metrics,
             },
         })
     }
@@ -319,6 +319,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 &this.agg_funcs,
                                 &this.storages,
                                 &this.intermediate_state_table,
+                                &this.input_pk_indices,
                                 this.row_count_index,
                                 this.extreme_cache_size,
                                 &this.input_schema,
@@ -394,7 +395,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     visibilities,
                     &mut this.distinct_dedup_tables,
                     agg_group.group_key(),
-                    this.actor_ctx.clone(),
                 )
                 .await?;
             for ((call, storage), visibility) in (this.agg_calls.iter())
@@ -418,11 +418,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let actor_id_str = this.actor_ctx.id.to_string();
         let fragment_id_str = this.actor_ctx.fragment_id.to_string();
         let table_id_str = this.intermediate_state_table.table_id().to_string();
-        this.metrics
+        this.actor_ctx
+            .streaming_metrics
             .agg_dirty_groups_count
             .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(vars.dirty_groups.len() as i64);
-        this.metrics
+        this.actor_ctx
+            .streaming_metrics
             .agg_dirty_groups_heap_size
             .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(vars.dirty_groups.estimated_heap_size() as i64);
@@ -472,6 +474,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         &this.agg_funcs,
                         &this.storages,
                         &states,
+                        &this.input_pk_indices,
                         this.row_count_index,
                         this.extreme_cache_size,
                         &this.input_schema,
@@ -520,8 +523,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         }
 
         // Flush distinct dedup state.
-        vars.distinct_dedup
-            .flush(&mut this.distinct_dedup_tables, this.actor_ctx.clone())?;
+        vars.distinct_dedup.flush(&mut this.distinct_dedup_tables)?;
 
         // Evict cache to target capacity.
         vars.agg_group_cache.evict();
@@ -531,23 +533,28 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let actor_id_str = this.actor_ctx.id.to_string();
         let fragment_id_str = this.actor_ctx.fragment_id.to_string();
         let table_id_str = this.intermediate_state_table.table_id().to_string();
-        this.metrics
+        this.actor_ctx
+            .streaming_metrics
             .agg_lookup_miss_count
             .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(std::mem::take(&mut vars.stats.lookup_miss_count));
-        this.metrics
+        this.actor_ctx
+            .streaming_metrics
             .agg_total_lookup_count
             .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(std::mem::take(&mut vars.stats.total_lookup_count));
-        this.metrics
+        this.actor_ctx
+            .streaming_metrics
             .agg_cached_entry_count
             .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(vars.agg_group_cache.len() as i64);
-        this.metrics
+        this.actor_ctx
+            .streaming_metrics
             .agg_chunk_lookup_miss_count
             .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(std::mem::take(&mut vars.stats.chunk_lookup_miss_count));
-        this.metrics
+        this.actor_ctx
+            .streaming_metrics
             .agg_chunk_total_lookup_count
             .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(std::mem::take(&mut vars.stats.chunk_total_lookup_count));
@@ -565,6 +572,15 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         Ok(())
     }
 
+    async fn try_flush_data(this: &mut ExecutorInner<K, S>) -> StreamExecutorResult<()> {
+        futures::future::try_join_all(
+            this.all_state_tables_mut()
+                .map(|table| async { table.try_flush().await }),
+        )
+        .await?;
+        Ok(())
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let HashAggExecutor {
@@ -576,7 +592,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let window_col_idx = this.group_key_indices[window_col_idx_in_group_key];
 
         let agg_group_cache_metrics_info = MetricsInfo::new(
-            this.metrics.clone(),
+            this.actor_ctx.streaming_metrics.clone(),
             this.intermediate_state_table.table_id(),
             this.actor_ctx.id,
             "agg intermediate state table",
@@ -592,10 +608,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             dirty_groups: Default::default(),
             distinct_dedup: DistinctDeduplicater::new(
                 &this.agg_calls,
-                &this.watermark_epoch,
+                this.watermark_epoch.clone(),
                 &this.distinct_dedup_tables,
-                this.actor_ctx.id,
-                this.metrics.clone(),
+                this.actor_ctx.clone(),
             ),
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,
@@ -650,6 +665,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             yield Message::Chunk(chunk?);
                         }
                     }
+
+                    Self::try_flush_data(&mut this).await?;
                 }
                 Message::Barrier(barrier) => {
                     Self::update_metrics(&this, &mut vars);

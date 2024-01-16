@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,16 +28,15 @@ pub static RW_INDEXES_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = Lazy
         (DataType::Int32, "id"),
         (DataType::Varchar, "name"),
         (DataType::Int32, "primary_table_id"),
-        (
-            DataType::List(Box::new(DataType::Int16)),
-            "original_column_ids",
-        ),
+        (DataType::List(Box::new(DataType::Int16)), "indkey"),
         (DataType::Int32, "schema_id"),
         (DataType::Int32, "owner"),
         (DataType::Varchar, "definition"),
         (DataType::Varchar, "acl"),
         (DataType::Timestamptz, "initialized_at"),
         (DataType::Timestamptz, "created_at"),
+        (DataType::Varchar, "initialized_at_cluster_version"),
+        (DataType::Varchar, "created_at_cluster_version"),
     ]
 });
 
@@ -60,12 +59,19 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Int32(index.id.index_id as i32)),
                         Some(ScalarImpl::Utf8(index.name.clone().into())),
                         Some(ScalarImpl::Int32(index.primary_table.id().table_id as i32)),
-                        Some(ScalarImpl::List(ListValue::new(
+                        Some(ScalarImpl::List(ListValue::from_iter(
                             index
-                                .original_columns
+                                .index_item
                                 .iter()
-                                .map(|index| Some(ScalarImpl::Int16(index.get_id() as i16 + 1)))
-                                .collect_vec(),
+                                .take(index.index_columns_len as usize)
+                                .map(|index| {
+                                    let ind = if let Some(input_ref) = index.as_input_ref() {
+                                        input_ref.index() + 1
+                                    } else {
+                                        0
+                                    };
+                                    ind as i16
+                                }),
                         ))),
                         Some(ScalarImpl::Int32(schema.id() as i32)),
                         Some(ScalarImpl::Int32(index.index_table.owner as i32)),
@@ -73,6 +79,14 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8("".into())),
                         index.initialized_at_epoch.map(|e| e.as_scalar()),
                         index.created_at_epoch.map(|e| e.as_scalar()),
+                        index
+                            .initialized_at_cluster_version
+                            .clone()
+                            .map(|v| ScalarImpl::Utf8(v.into())),
+                        index
+                            .created_at_cluster_version
+                            .clone()
+                            .map(|v| ScalarImpl::Utf8(v.into())),
                     ])
                 })
             })

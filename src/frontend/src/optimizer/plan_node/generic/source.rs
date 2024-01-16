@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -96,7 +96,7 @@ impl Source {
         (lower_bound, upper_bound)
     }
 
-    pub fn infer_internal_table_catalog() -> TableCatalog {
+    pub fn infer_internal_table_catalog(require_dist_key: bool) -> TableCatalog {
         // note that source's internal table is to store partition_id -> offset mapping and its
         // schema is irrelevant to input schema
         // On the premise of ensuring that the materialized_source data can be cleaned up, keep the
@@ -122,6 +122,13 @@ impl Source {
         builder.add_column(&value);
         builder.add_order_column(ordered_col_idx, OrderType::ascending());
 
-        builder.build(vec![], 1)
+        builder.build(
+            if require_dist_key {
+                vec![ordered_col_idx]
+            } else {
+                vec![]
+            },
+            1,
+        )
     }
 }

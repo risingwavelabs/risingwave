@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
 pub use resolve_id::*;
+use risingwave_frontend::handler::util::SourceSchemaCompatExt;
 use risingwave_frontend::handler::{
     create_index, create_mv, create_schema, create_source, create_table, create_view, drop_table,
     explain, variable, HandlerArgs,
@@ -264,7 +265,7 @@ impl TestCase {
 
         if let Some(ref config_map) = self.with_config_map() {
             for (key, val) in config_map {
-                session.set_config(key, vec![val.to_owned()]).unwrap();
+                session.set_config(key, val.to_owned()).unwrap();
             }
         }
 
@@ -423,12 +424,10 @@ impl TestCase {
                     source_watermarks,
                     append_only,
                     cdc_table_info,
+                    include_column_options,
                     ..
                 } => {
-                    // TODO(st1page): refacor it
-                    let notice = Default::default();
-                    let source_schema =
-                        source_schema.map(|schema| schema.into_source_schema_v2().0);
+                    let source_schema = source_schema.map(|schema| schema.into_v2_with_warning());
 
                     create_table::handle_create_table(
                         handler_args,
@@ -439,8 +438,8 @@ impl TestCase {
                         source_schema,
                         source_watermarks,
                         append_only,
-                        notice,
                         cdc_table_info,
+                        include_column_options,
                     )
                     .await?;
                 }
@@ -449,7 +448,7 @@ impl TestCase {
                         create_source::handle_create_source(handler_args, stmt).await
                     {
                         let actual_result = TestCaseResult {
-                            planner_error: Some(error.to_string()),
+                            planner_error: Some(error.to_report_string()),
                             ..Default::default()
                         };
 
@@ -590,7 +589,8 @@ impl TestCase {
         let mut logical_plan = match planner.plan(bound) {
             Ok(logical_plan) => {
                 if self.expected_outputs.contains(&TestType::LogicalPlan) {
-                    ret.logical_plan = Some(explain_plan(&logical_plan.clone().into_subplan()));
+                    ret.logical_plan =
+                        Some(explain_plan(&logical_plan.clone().into_unordered_subplan()));
                 }
                 logical_plan
             }
@@ -678,7 +678,7 @@ impl TestCase {
                 // Only generate batch_plan_proto if it is specified in test case
                 if self.expected_outputs.contains(&TestType::BatchPlanProto) {
                     ret.batch_plan_proto = Some(serde_yaml::to_string(
-                        &batch_plan.to_batch_prost_identity(false),
+                        &batch_plan.to_batch_prost_identity(false)?,
                     )?);
                 }
             }
@@ -772,7 +772,7 @@ impl TestCase {
 
                 // Only generate stream_dist_plan if it is specified in test case
                 if dist_plan {
-                    let graph = build_graph(stream_plan);
+                    let graph = build_graph(stream_plan)?;
                     *ret_dist_plan_str = Some(explain_stream_graph(&graph, false));
                 }
             }
@@ -794,6 +794,8 @@ impl TestCase {
                     "test_db".into(),
                     "test_table".into(),
                     format_desc,
+                    false,
+                    None,
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));
@@ -876,13 +878,14 @@ pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
     let cases: Vec<TestCase> = serde_yaml::from_str(file_content).map_err(|e| {
         if let Some(loc) = e.location() {
             anyhow!(
-                "failed to parse yaml: {e}, at {}:{}:{}",
+                "failed to parse yaml: {}, at {}:{}:{}",
+                e.as_report(),
                 file_path.display(),
                 loc.line(),
                 loc.column()
             )
         } else {
-            anyhow!("failed to parse yaml: {e}")
+            anyhow!("failed to parse yaml: {}", e.as_report())
         }
     })?;
     let cases = resolve_testcase_id(cases).expect("failed to resolve");

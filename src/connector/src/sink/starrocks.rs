@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,7 +44,7 @@ const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";
 const STARROCK_MYSQL_MAX_ALLOWED_PACKET: usize = 1024;
 const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct StarrocksCommon {
     #[serde(rename = "starrocks.host")]
     pub host: String,
@@ -535,7 +535,7 @@ impl StarrocksSchemaClient {
             })
             .await
             .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?
-            .get(0)
+            .first()
             .ok_or_else(|| {
                 SinkError::Starrocks(format!(
                     "Can't find schema with table {:?} and database {:?}",

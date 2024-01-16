@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,10 +26,10 @@ use crate::user::UserId;
 #[derive(Clone, Debug)]
 pub struct DatabaseCatalog {
     id: DatabaseId,
-    name: String,
+    pub name: String,
     schema_by_name: HashMap<String, SchemaCatalog>,
     schema_name_by_id: HashMap<SchemaId, String>,
-    owner: u32,
+    pub owner: u32,
 }
 
 impl DatabaseCatalog {
@@ -75,6 +75,10 @@ impl DatabaseCatalog {
         self.schema_by_name.values()
     }
 
+    pub fn iter_schemas_mut(&mut self) -> impl Iterator<Item = &mut SchemaCatalog> {
+        self.schema_by_name.values_mut()
+    }
+
     pub fn get_schema_by_name(&self, name: &str) -> Option<&SchemaCatalog> {
         self.schema_by_name.get(name)
     }
@@ -95,10 +99,24 @@ impl DatabaseCatalog {
             .find(|schema| schema.get_table_by_id(table_id).is_some())
     }
 
-    pub fn update_self(&mut self, prost: &PbDatabase) {
-        self.id = prost.id;
-        self.name = prost.name.clone();
-        self.owner = prost.owner;
+    pub fn update_schema(&mut self, prost: &PbSchema) {
+        let id = prost.id;
+        let name = prost.name.clone();
+
+        let old_schema_name = self.schema_name_by_id.get(&id).unwrap().to_owned();
+        if old_schema_name != name {
+            let mut schema = self.schema_by_name.remove(&old_schema_name).unwrap();
+            schema.name = name.clone();
+            schema.database_id = prost.database_id;
+            schema.owner = prost.owner;
+            self.schema_by_name.insert(name.clone(), schema);
+            self.schema_name_by_id.insert(id, name);
+        } else {
+            let schema = self.get_schema_mut(id).unwrap();
+            schema.name = name.clone();
+            schema.database_id = prost.database_id;
+            schema.owner = prost.owner;
+        };
     }
 
     pub fn is_empty(&self) -> bool {

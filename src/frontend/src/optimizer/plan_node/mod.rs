@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -155,6 +155,7 @@ pub trait PlanNode:
     + Downcast
     + ColPrunable
     + ExprRewritable
+    + ExprVisitable
     + ToBatch
     + ToStream
     + ToDistributedBatch
@@ -301,6 +302,19 @@ impl RewriteExprsRecursive for PlanRef {
     }
 }
 
+pub(crate) trait VisitExprsRecursive {
+    fn visit_exprs_recursive(&self, r: &mut impl ExprVisitor);
+}
+
+impl VisitExprsRecursive for PlanRef {
+    fn visit_exprs_recursive(&self, r: &mut impl ExprVisitor) {
+        self.visit_exprs(r);
+        self.inputs()
+            .iter()
+            .for_each(|plan_ref| plan_ref.visit_exprs_recursive(r));
+    }
+}
+
 impl PlanRef {
     pub fn expect_stream_key(&self) -> &[usize] {
         self.stream_key().unwrap_or_else(|| {
@@ -423,7 +437,15 @@ impl PlanRef {
                     .map(|mut c| Condition {
                         conjunctions: c
                             .conjunctions
-                            .extract_if(|e| e.count_nows() == 0 && e.is_pure())
+                            .extract_if(|e| {
+                                // If predicates contain now, impure or correlated input ref, don't push through share operator.
+                                // The predicate with now() function is regarded as a temporal filter predicate, which will be transformed to a temporal filter operator and can not do the OR operation with other predicates.
+                                let mut finder = ExprCorrelatedIdFinder::default();
+                                finder.visit_expr(e);
+                                e.count_nows() == 0
+                                    && e.is_pure()
+                                    && !finder.has_correlated_input_ref()
+                            })
                             .collect(),
                     })
                     .reduce(|a, b| a.or(b))
@@ -656,7 +678,10 @@ impl dyn PlanNode {
     ///
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
-    pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanPb {
+    pub fn to_stream_prost(
+        &self,
+        state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<StreamPlanPb> {
         use stream::prelude::*;
 
         if let Some(stream_table_scan) = self.as_stream_table_scan() {
@@ -669,14 +694,14 @@ impl dyn PlanNode {
             return stream_share.adhoc_to_stream_prost(state);
         }
 
-        let node = Some(self.to_stream_prost_body(state));
+        let node = Some(self.try_to_stream_prost_body(state)?);
         let input = self
             .inputs()
             .into_iter()
             .map(|plan| plan.to_stream_prost(state))
-            .collect();
+            .try_collect()?;
         // TODO: support pk_indices and operator_id
-        StreamPlanPb {
+        Ok(StreamPlanPb {
             input,
             identity: self.explain_myself_to_string(),
             node_body: node,
@@ -689,24 +714,24 @@ impl dyn PlanNode {
                 .collect(),
             fields: self.schema().to_prost(),
             append_only: self.plan_base().append_only(),
-        }
+        })
     }
 
     /// Serialize the plan node and its children to a batch plan proto.
-    pub fn to_batch_prost(&self) -> BatchPlanPb {
+    pub fn to_batch_prost(&self) -> SchedulerResult<BatchPlanPb> {
         self.to_batch_prost_identity(true)
     }
 
     /// Serialize the plan node and its children to a batch plan proto without the identity field
     /// (for testing).
-    pub fn to_batch_prost_identity(&self, identity: bool) -> BatchPlanPb {
-        let node_body = Some(self.to_batch_prost_body());
+    pub fn to_batch_prost_identity(&self, identity: bool) -> SchedulerResult<BatchPlanPb> {
+        let node_body = Some(self.try_to_batch_prost_body()?);
         let children = self
             .inputs()
             .into_iter()
             .map(|plan| plan.to_batch_prost_identity(identity))
-            .collect();
-        BatchPlanPb {
+            .try_collect()?;
+        Ok(BatchPlanPb {
             children,
             identity: if identity {
                 self.explain_myself_to_string()
@@ -714,7 +739,7 @@ impl dyn PlanNode {
                 "".into()
             },
             node_body,
-        }
+        })
     }
 
     pub fn explain_myself_to_string(&self) -> String {
@@ -731,6 +756,8 @@ mod col_pruning;
 pub use col_pruning::*;
 mod expr_rewritable;
 pub use expr_rewritable::*;
+mod expr_visitable;
+
 mod convert;
 pub use convert::*;
 mod eq_join_predicate;
@@ -759,6 +786,7 @@ mod batch_hop_window;
 mod batch_insert;
 mod batch_limit;
 mod batch_lookup_join;
+mod batch_max_one_row;
 mod batch_nested_loop_join;
 mod batch_over_window;
 mod batch_project;
@@ -776,6 +804,7 @@ mod batch_update;
 mod batch_values;
 mod logical_agg;
 mod logical_apply;
+mod logical_cdc_scan;
 mod logical_dedup;
 mod logical_delete;
 mod logical_except;
@@ -786,6 +815,7 @@ mod logical_insert;
 mod logical_intersect;
 mod logical_join;
 mod logical_limit;
+mod logical_max_one_row;
 mod logical_multi_join;
 mod logical_now;
 mod logical_over_window;
@@ -847,6 +877,7 @@ pub use batch_hop_window::BatchHopWindow;
 pub use batch_insert::BatchInsert;
 pub use batch_limit::BatchLimit;
 pub use batch_lookup_join::BatchLookupJoin;
+pub use batch_max_one_row::BatchMaxOneRow;
 pub use batch_nested_loop_join::BatchNestedLoopJoin;
 pub use batch_over_window::BatchOverWindow;
 pub use batch_project::BatchProject;
@@ -864,6 +895,7 @@ pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
 pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
+pub use logical_cdc_scan::LogicalCdcScan;
 pub use logical_dedup::LogicalDedup;
 pub use logical_delete::LogicalDelete;
 pub use logical_except::LogicalExcept;
@@ -874,6 +906,7 @@ pub use logical_insert::LogicalInsert;
 pub use logical_intersect::LogicalIntersect;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
+pub use logical_max_one_row::LogicalMaxOneRow;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_now::LogicalNow;
 pub use logical_over_window::LogicalOverWindow;
@@ -921,9 +954,12 @@ pub use stream_union::StreamUnion;
 pub use stream_values::StreamValues;
 pub use stream_watermark_filter::StreamWatermarkFilter;
 
-use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
+use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_rewriter::PlanCloner;
+use crate::optimizer::plan_visitor::ExprCorrelatedIdFinder;
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition, DynEq, DynHash, Endo, Layer, Visit};
 
@@ -948,6 +984,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Filter }
             , { Logical, Project }
             , { Logical, Scan }
+            , { Logical, CdcScan }
             , { Logical, SysScan }
             , { Logical, Source }
             , { Logical, Insert }
@@ -969,6 +1006,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Dedup }
             , { Logical, Intersect }
             , { Logical, Except }
+            , { Logical, MaxOneRow }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -995,6 +1033,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, GroupTopN }
             , { Batch, Source }
             , { Batch, OverWindow }
+            , { Batch, MaxOneRow }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -1041,6 +1080,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Filter }
             , { Logical, Project }
             , { Logical, Scan }
+            , { Logical, CdcScan }
             , { Logical, SysScan }
             , { Logical, Source }
             , { Logical, Insert }
@@ -1062,6 +1102,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Dedup }
             , { Logical, Intersect }
             , { Logical, Except }
+            , { Logical, MaxOneRow }
         }
     };
 }
@@ -1097,6 +1138,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, GroupTopN }
             , { Batch, Source }
             , { Batch, OverWindow }
+            , { Batch, MaxOneRow }
         }
     };
 }

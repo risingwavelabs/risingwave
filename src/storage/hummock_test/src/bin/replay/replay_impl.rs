@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,17 +15,16 @@
 use std::ops::Bound;
 
 use futures::stream::BoxStream;
-use futures::{Stream, StreamExt};
-use futures_async_stream::{for_await, try_stream};
-use risingwave_common::error::Result as RwResult;
+use futures::{Stream, StreamExt, TryStreamExt};
+use futures_async_stream::try_stream;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common_service::observer_manager::{Channel, NotificationClient};
+use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverError};
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
     GlobalReplay, LocalReplay, LocalReplayRead, ReplayItem, ReplayRead, ReplayStateStore,
     ReplayWrite, Result, TraceError, TracedBytes, TracedInitOptions, TracedNewLocalOptions,
-    TracedReadOptions, TracedSubResp,
+    TracedReadOptions, TracedSealCurrentEpochOptions, TracedSubResp,
 };
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_pb::common::WorkerNode;
@@ -69,12 +68,11 @@ pub(crate) struct LocalReplayIter {
 
 impl LocalReplayIter {
     pub(crate) async fn new(stream: impl StateStoreIterItemStream) -> Self {
-        let mut inner: Vec<_> = Vec::new();
-        #[for_await]
-        for value in stream {
-            let value = value.unwrap();
-            inner.push((value.0.user_key.table_key.0.into(), value.1.into()));
-        }
+        let inner = stream
+            .map_ok(|value| (value.0.user_key.table_key.0.into(), value.1.into()))
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
         Self { inner }
     }
 
@@ -207,8 +205,8 @@ impl LocalReplay for LocalReplayImpl {
             .map_err(|_| TraceError::Other("init failed"))
     }
 
-    fn seal_current_epoch(&mut self, next_epoch: u64) {
-        self.0.seal_current_epoch(next_epoch);
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: TracedSealCurrentEpochOptions) {
+        self.0.seal_current_epoch(next_epoch, opts.into());
     }
 
     fn epoch(&self) -> u64 {
@@ -317,7 +315,10 @@ impl ReplayNotificationClient {
 impl NotificationClient for ReplayNotificationClient {
     type Channel = ReplayChannel<SubscribeResponse>;
 
-    async fn subscribe(&self, subscribe_type: SubscribeType) -> RwResult<Self::Channel> {
+    async fn subscribe(
+        &self,
+        subscribe_type: SubscribeType,
+    ) -> std::result::Result<Self::Channel, ObserverError> {
         let (tx, rx) = unbounded_channel();
 
         self.notification_manager

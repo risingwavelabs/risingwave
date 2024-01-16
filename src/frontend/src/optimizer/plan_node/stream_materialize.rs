@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, 
 use crate::catalog::table_catalog::{CreateType, TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::derive::derive_pk;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
@@ -252,6 +253,9 @@ impl StreamMaterialize {
             cleaned_by_watermark: false,
             create_type: CreateType::Foreground, // Will be updated in the handler itself.
             description: None,
+            incoming_sinks: vec![],
+            initialized_at_cluster_version: None,
+            created_at_cluster_version: None,
         })
     }
 
@@ -349,3 +353,5 @@ impl StreamNode for StreamMaterialize {
 }
 
 impl ExprRewritable for StreamMaterialize {}
+
+impl ExprVisitable for StreamMaterialize {}

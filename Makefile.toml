@@ -245,7 +245,7 @@ do
   fi
 done
 
-if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 2000 )) ; then
+if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 3000 )) ; then
     echo "$(tput setaf 1)ERROR: log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
     exit 1
 fi
@@ -877,9 +877,9 @@ dependencies = ["prepare"]
 condition = { env_set = [
   "ENABLE_BUILD_RW_CONNECTOR",
 ], files_modified = { input = [
-  "./java/connector-node/**/*.java",
+  "./java/connector-node/**/*",
 ], output = [
-  "./java/connector-node/assembly/target/*",
+  "./java/connector-node/assembly/target/**/*",
 ] } }
 description = "Build RisingWave Connector from source"
 script = '''
@@ -1221,7 +1221,7 @@ script = """
 scripts/check/check-trailing-spaces.sh --fix
 """
 
-[tasks.check]
+[tasks.check-fast]
 category = "RiseDev - Check"
 dependencies = [
   "warn-on-missing-tools",
@@ -1230,9 +1230,12 @@ dependencies = [
   "check-fmt",
   "check-trailing-spaces",
   "check-typos",
-  "check-clippy",
-  "check-java",
 ]
+description = "Perform part of the pre-CI checks that are fast to run"
+
+[tasks.check]
+category = "RiseDev - Check"
+dependencies = ["check-fast", "check-clippy", "check-java"]
 script = """
 #!/usr/bin/env bash
 
@@ -1248,11 +1251,7 @@ alias = "check"
 category = "RiseDev - Check"
 dependencies = [
   "warn-on-missing-tools",
-  "check-hakari",
-  "check-dep-sort",
-  "check-fmt",
-  "check-trailing-spaces",
-  "check-typos",
+  "check-fast",
   "check-clippy-fix",
   "check-java-fix",
 ]
@@ -1333,7 +1332,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.18.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.19.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ], install_command = "binstall" }
 dependencies = ["check-risedev-env-file"]
@@ -1438,7 +1437,7 @@ private = true
 category = "Misc"
 description = "This command extracts WITH options from the Rust code and maintains them in a single source of truth `with_options.yaml`"
 script = '''
-UPDATE_EXPECT=1 cargo nextest run risingwave_connector tests::test_with_options_yaml_up_to_date
+UPDATE_EXPECT=1 cargo test -p risingwave_connector tests::test_with_options_yaml_up_to_date
 '''
 
 [tasks.backwards-compat-test]

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use std::marker::PhantomData;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 
+use delta_btree_map::{Change, PositionType};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -33,7 +34,6 @@ use risingwave_expr::window_function::{
 };
 use risingwave_storage::StateStore;
 
-use super::delta_btree_map::Change;
 use super::over_partition::{
     new_empty_partition_cache, shrink_partition_cache, CacheKey, OverPartition, PartitionCache,
     PartitionDelta,
@@ -42,7 +42,6 @@ use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::StreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::over_window::delta_btree_map::PositionType;
 use crate::executor::test_utils::prelude::StateTable;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message,
@@ -71,6 +70,7 @@ struct ExecutorInner<S: StateStore> {
     order_key_order_types: Vec<OrderType>,
     input_pk_indices: Vec<usize>,
     input_schema_len: usize,
+    state_key_to_table_sub_pk_proj: Vec<usize>,
 
     state_table: StateTable<S>,
     watermark_epoch: AtomicU64Ref,
@@ -165,7 +165,10 @@ impl<S: StateStore> OverWindowExecutor<S> {
         let input_info = args.input.info();
         let input_schema = &input_info.schema;
 
-        let has_unbounded_frame = args.calls.iter().any(|call| call.frame.is_unbounded());
+        let has_unbounded_frame = args
+            .calls
+            .iter()
+            .any(|call| call.frame.bounds.is_unbounded());
         let cache_policy = if has_unbounded_frame {
             // For unbounded frames, we finally need all entries of the partition in the cache,
             // so for simplicity we just use full cache policy for these cases.
@@ -180,6 +183,12 @@ impl<S: StateStore> OverWindowExecutor<S> {
             .map(|i| input_schema.fields()[*i].data_type.clone())
             .collect();
 
+        let state_key_to_table_sub_pk_proj = RowConverter::calc_state_key_to_table_sub_pk_proj(
+            &args.partition_key_indices,
+            &args.order_key_indices,
+            &input_info.pk_indices,
+        );
+
         Self {
             input: args.input,
             inner: ExecutorInner {
@@ -192,6 +201,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 order_key_order_types: args.order_key_order_types,
                 input_pk_indices: input_info.pk_indices,
                 input_schema_len: input_schema.len(),
+                state_key_to_table_sub_pk_proj,
                 state_table: args.state_table,
                 watermark_epoch: args.watermark_epoch,
                 metrics: args.metrics,
@@ -318,6 +328,11 @@ impl<S: StateStore> OverWindowExecutor<S> {
         let mut chunk_builder =
             StreamChunkBuilder::new(this.chunk_size, this.info.schema.data_types());
 
+        // Prepare things needed by metrics.
+        let actor_id = this.actor_ctx.id.to_string();
+        let fragment_id = this.actor_ctx.fragment_id.to_string();
+        let table_id = this.state_table.table_id().to_string();
+
         // Build final changes partition by partition.
         for (part_key, delta) in deltas {
             vars.stats.cache_lookup += 1;
@@ -332,10 +347,13 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 &mut cache,
                 this.cache_policy,
                 &this.calls,
-                &this.order_key_data_types,
-                &this.order_key_order_types,
-                &this.order_key_indices,
-                &this.input_pk_indices,
+                RowConverter {
+                    state_key_to_table_sub_pk_proj: &this.state_key_to_table_sub_pk_proj,
+                    order_key_indices: &this.order_key_indices,
+                    order_key_data_types: &this.order_key_data_types,
+                    order_key_order_types: &this.order_key_order_types,
+                    input_pk_indices: &this.input_pk_indices,
+                },
             );
 
             // Build changes for current partition.
@@ -374,6 +392,26 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 // Apply the change record.
                 partition.write_record(&mut this.state_table, key, record);
             }
+
+            let cache_len = partition.cache_real_len();
+            let stats = partition.summarize();
+            let metrics = this.actor_ctx.streaming_metrics.clone();
+            metrics
+                .over_window_range_cache_entry_count
+                .with_label_values(&[&table_id, &actor_id, &fragment_id])
+                .set(cache_len as i64);
+            metrics
+                .over_window_range_cache_lookup_count
+                .with_label_values(&[&table_id, &actor_id, &fragment_id])
+                .inc_by(stats.lookup_count);
+            metrics
+                .over_window_range_cache_left_miss_count
+                .with_label_values(&[&table_id, &actor_id, &fragment_id])
+                .inc_by(stats.left_miss_count);
+            metrics
+                .over_window_range_cache_right_miss_count
+                .with_label_values(&[&table_id, &actor_id, &fragment_id])
+                .inc_by(stats.right_miss_count);
 
             // Update recently accessed range for later shrinking cache.
             if !this.cache_policy.is_full()
@@ -419,6 +457,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
         // Find affected ranges, this also ensures that all rows in the affected ranges are loaded
         // into the cache.
+        // TODO(rc): maybe we can find affected ranges for each window function call (each frame) to simplify
+        // the implementation of `find_affected_ranges`
         let (part_with_delta, affected_ranges) = partition
             .find_affected_ranges(&this.state_table, &delta)
             .await?;
@@ -592,6 +632,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     for chunk in Self::apply_chunk(&mut this, &mut vars, chunk) {
                         yield Message::Chunk(chunk?);
                     }
+                    this.state_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
                     this.state_table.commit(barrier.epoch).await?;
@@ -621,6 +662,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                             this.state_table.update_vnode_bitmap(vnode_bitmap);
                         if cache_may_stale {
                             vars.cached_partitions.clear();
+                            vars.recently_accessed_ranges.clear();
                         }
                     }
 
@@ -647,5 +689,84 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 }
             }
         }
+    }
+}
+
+/// A converter that helps convert [`StateKey`] to state table sub-PK and convert executor input/output
+/// row to [`StateKey`].
+///
+/// ## Notes
+///
+/// - [`StateKey`]: Over window range cache key type, containing order key and input pk.
+/// - State table sub-PK: State table PK = PK prefix (partition key) + sub-PK (order key + input pk).
+/// - Input/output row: Input schema is the prefix of output schema.
+///
+/// You can see that the content of [`StateKey`] is very similar to state table sub-PK. There's only
+/// one difference: the state table PK and sub-PK don't have duplicated columns, while in [`StateKey`],
+/// `order_key` and (input)`pk` may contain duplicated columns.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RowConverter<'a> {
+    state_key_to_table_sub_pk_proj: &'a [usize],
+    order_key_indices: &'a [usize],
+    order_key_data_types: &'a [DataType],
+    order_key_order_types: &'a [OrderType],
+    input_pk_indices: &'a [usize],
+}
+
+impl<'a> RowConverter<'a> {
+    /// Calculate the indices needed for projection from [`StateKey`] to state table sub-PK (used to do
+    /// prefixed table scanning). Ideally this function should be called only once by each executor instance.
+    /// The projection indices vec is the *selected column indices* in [`StateKey`].`order_key.chain(input_pk)`.
+    pub(super) fn calc_state_key_to_table_sub_pk_proj(
+        partition_key_indices: &[usize],
+        order_key_indices: &[usize],
+        input_pk_indices: &'a [usize],
+    ) -> Vec<usize> {
+        // This process is corresponding to `StreamOverWindow::infer_state_table`.
+        let mut projection = Vec::with_capacity(order_key_indices.len() + input_pk_indices.len());
+        let mut col_dedup: HashSet<usize> = partition_key_indices.iter().copied().collect();
+        for (proj_idx, key_idx) in order_key_indices
+            .iter()
+            .chain(input_pk_indices.iter())
+            .enumerate()
+        {
+            if col_dedup.insert(*key_idx) {
+                projection.push(proj_idx);
+            }
+        }
+        projection.shrink_to_fit();
+        projection
+    }
+
+    /// Convert [`StateKey`] to sub-PK (table PK without partition key) as [`OwnedRow`].
+    pub(super) fn state_key_to_table_sub_pk(
+        &self,
+        key: &StateKey,
+    ) -> StreamExecutorResult<OwnedRow> {
+        Ok(memcmp_encoding::decode_row(
+            &key.order_key,
+            self.order_key_data_types,
+            self.order_key_order_types,
+        )?
+        .chain(key.pk.as_inner())
+        .project(self.state_key_to_table_sub_pk_proj)
+        .into_owned_row())
+    }
+
+    /// Convert full input/output row to [`StateKey`].
+    pub(super) fn row_to_state_key(
+        &self,
+        full_row: impl Row + Copy,
+    ) -> StreamExecutorResult<StateKey> {
+        Ok(StateKey {
+            order_key: memcmp_encoding::encode_row(
+                full_row.project(self.order_key_indices),
+                self.order_key_order_types,
+            )?,
+            pk: full_row
+                .project(self.input_pk_indices)
+                .into_owned_row()
+                .into(),
+        })
     }
 }

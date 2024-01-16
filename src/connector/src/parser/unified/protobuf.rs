@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::anyhow;
 use prost_reflect::{DescriptorPool, DynamicMessage, ReflectMessage};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::RwError;
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::DataType;
 
 use super::{Access, AccessResult};
@@ -47,7 +48,11 @@ impl Access for ProtobufAccess {
             .get_field_by_name(path[0])
             .ok_or_else(|| {
                 let err_msg = format!("protobuf schema don't have field {}", path[0]);
-                tracing::error!(err_msg);
+                static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                    LazyLock::new(LogSuppresser::default);
+                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    tracing::error!(suppressed_count, err_msg);
+                }
                 RwError::from(ProtocolError(err_msg))
             })
             .map_err(|e| AccessError::Other(anyhow!(e)))?;

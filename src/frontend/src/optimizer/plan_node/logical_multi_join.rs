@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,8 @@ use super::{
     PlanNodeType, PlanRef, PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
     ToStream,
 };
-use crate::expr::{ExprImpl, ExprRewriter, ExprType, FunctionCall};
+use crate::expr::{ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
     ToStreamContext,
@@ -832,6 +833,15 @@ impl ColPrunable for LogicalMultiJoin {
 
 impl ExprRewritable for LogicalMultiJoin {
     fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
+        panic!(
+            "Method not available for `LogicalMultiJoin` which is a placeholder node with \
+             a temporary lifetime. It only facilitates join reordering during logical planning."
+        )
+    }
+}
+
+impl ExprVisitable for LogicalMultiJoin {
+    fn visit_exprs(&self, _v: &mut dyn ExprVisitor) {
         panic!(
             "Method not available for `LogicalMultiJoin` which is a placeholder node with \
              a temporary lifetime. It only facilitates join reordering during logical planning."

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -53,6 +53,8 @@ mod validator;
 pub mod value;
 pub mod write_limiter;
 
+pub mod block_stream;
+
 pub use error::*;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 pub use validator::*;
@@ -93,7 +95,10 @@ pub async fn get_from_sstable_info(
                 full_key.user_key,
             );
             if delete_epoch <= full_key.epoch_with_gap.pure_epoch() {
-                return Ok(Some((HummockValue::Delete, EpochWithGap::new_from_epoch(delete_epoch))));
+                return Ok(Some((
+                    HummockValue::Delete,
+                    EpochWithGap::new_from_epoch(delete_epoch),
+                )));
             }
         }
 

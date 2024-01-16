@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,9 +26,11 @@ use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, SysCatalogReader, TableDesc, TableId, DEFAULT_SUPER_USER_ID,
     NON_RESERVED_SYS_CATALOG_ID,
 };
-use risingwave_common::error::Result;
+use risingwave_common::error::BoxedError;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
+use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
+use risingwave_pb::meta::table_parallelism::{PbFixedParallelism, PbParallelism};
 use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::catalog_service::CatalogReader;
@@ -209,6 +211,22 @@ fn infer_dummy_view_sql(columns: &[SystemCatalogColumnsDef<'_>]) -> String {
     )
 }
 
+fn extract_parallelism_from_table_state(state: &TableFragmentState) -> String {
+    let parallelism = match state
+        .parallelism
+        .as_ref()
+        .and_then(|parallelism| parallelism.parallelism.as_ref())
+    {
+        None => "unknown".to_string(),
+        Some(PbParallelism::Auto(_)) => "auto".to_string(),
+        Some(PbParallelism::Fixed(PbFixedParallelism { parallelism })) => {
+            format!("fixed({parallelism})")
+        }
+        Some(PbParallelism::Custom(_)) => "custom".to_string(),
+    };
+    parallelism
+}
+
 /// get acl items of `object` in string, ignore public.
 fn get_acl_items(
     object: &Object,
@@ -283,45 +301,72 @@ pub fn get_sys_views_in_schema(schema_name: &str) -> Option<Vec<Arc<ViewCatalog>
         .map(Clone::clone)
 }
 
+/// The global registry of all builtin catalogs.
+pub static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
+    // SAFETY: this function is called after all `#[ctor]` functions are called.
+    let mut table_by_schema_name = HashMap::new();
+    let mut table_name_by_id = HashMap::new();
+    let mut view_by_schema_name = HashMap::new();
+    tracing::info!("found {} catalogs", unsafe { SYS_CATALOGS_INIT.len() });
+    for (id, catalog) in unsafe { SYS_CATALOGS_INIT.drain(..) } {
+        match catalog {
+            BuiltinCatalog::Table(table) => {
+                let sys_table: SystemTableCatalog = table.into();
+                table_by_schema_name
+                    .entry(table.schema)
+                    .or_insert(vec![])
+                    .push(Arc::new(sys_table.with_id(id.into())));
+                table_name_by_id.insert(id.into(), table.name);
+            }
+            BuiltinCatalog::View(view) => {
+                let sys_view: ViewCatalog = view.into();
+                view_by_schema_name
+                    .entry(view.schema)
+                    .or_insert(vec![])
+                    .push(Arc::new(sys_view.with_id(id)));
+            }
+        }
+    }
+    SystemCatalog {
+        table_by_schema_name,
+        table_name_by_id,
+        view_by_schema_name,
+    }
+});
+
+pub static mut SYS_CATALOGS_INIT: Vec<(u32, BuiltinCatalog)> = vec![];
+
+/// Register the catalog to global registry.
+///
+/// Note: The function is used by macro generated code. Don't call it directly.
+#[doc(hidden)]
+pub(super) unsafe fn _register(id: u32, builtin_catalog: BuiltinCatalog) {
+    assert!(id < NON_RESERVED_SYS_CATALOG_ID as u32);
+
+    SYS_CATALOGS_INIT.push((id, builtin_catalog));
+}
+
 macro_rules! prepare_sys_catalog {
     ($( { $builtin_catalog:expr $(, $func:ident $($await:ident)?)? } ),* $(,)?) => {
-        pub(crate) static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
-            let mut table_by_schema_name = HashMap::new();
-            let mut table_name_by_id = HashMap::new();
-            let mut view_by_schema_name = HashMap::new();
+        paste::paste! {
             $(
-                let id = (${index()} + 1) as u32;
-                match $builtin_catalog {
-                    BuiltinCatalog::Table(table) => {
-                        let sys_table: SystemTableCatalog = table.into();
-                        table_by_schema_name.entry(table.schema).or_insert(vec![]).push(Arc::new(sys_table.with_id(id.into())));
-                        table_name_by_id.insert(id.into(), table.name);
-                    },
-                    BuiltinCatalog::View(view) => {
-                        let sys_view: ViewCatalog = view.into();
-                        view_by_schema_name.entry(view.schema).or_insert(vec![]).push(Arc::new(sys_view.with_id(id)));
-                    },
+                #[ctor::ctor]
+                unsafe fn [<register_${index()}>]() {
+                    _register((${index()} + 1) as u32, $builtin_catalog);
                 }
             )*
-            assert!(table_name_by_id.len() < NON_RESERVED_SYS_CATALOG_ID as usize, "too many system catalogs");
-
-            SystemCatalog {
-                table_by_schema_name,
-                table_name_by_id,
-                view_by_schema_name,
-            }
-        });
+        }
 
         #[async_trait]
         impl SysCatalogReader for SysCatalogReaderImpl {
-            async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>> {
+            async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>, BoxedError> {
                 let table_name = SYS_CATALOGS.table_name_by_id.get(table_id).unwrap();
                 $(
                     if $builtin_catalog.name() == *table_name {
                         $(
                             let rows = self.$func();
                             $(let rows = rows.$await;)?
-                            return rows;
+                            return Ok(rows?);
                         )?
                     }
                 )*
@@ -352,6 +397,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::View(&PG_KEYWORDS) },
     { BuiltinCatalog::View(&PG_ATTRDEF) },
     { BuiltinCatalog::View(&PG_ROLES) },
+    { BuiltinCatalog::View(&PG_AUTH_MEMBERS) },
     { BuiltinCatalog::View(&PG_SHDESCRIPTION) },
     { BuiltinCatalog::View(&PG_TABLESPACE) },
     { BuiltinCatalog::View(&PG_STAT_ACTIVITY) },
@@ -382,7 +428,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_CONNECTIONS), read_rw_connections_info },
     { BuiltinCatalog::Table(&RW_FUNCTIONS), read_rw_functions_info },
     { BuiltinCatalog::Table(&RW_VIEWS), read_rw_views_info },
-    { BuiltinCatalog::Table(&RW_WORKER_NODES), read_rw_worker_nodes_info },
+    { BuiltinCatalog::Table(&RW_WORKER_NODES), read_rw_worker_nodes_info await },
     { BuiltinCatalog::Table(&RW_PARALLEL_UNITS), read_rw_parallel_units_info },
     { BuiltinCatalog::Table(&RW_TABLE_FRAGMENTS), read_rw_table_fragments_info await },
     { BuiltinCatalog::Table(&RW_FRAGMENTS), read_rw_fragment_distributions_info await },
@@ -393,6 +439,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_RELATION_INFO), read_relation_info await },
     { BuiltinCatalog::Table(&RW_SYSTEM_TABLES), read_system_table_info },
     { BuiltinCatalog::View(&RW_RELATIONS) },
+    { BuiltinCatalog::View(&RW_STREAMING_PARALLELISM) },
     { BuiltinCatalog::Table(&RW_COLUMNS), read_rw_columns_info },
     { BuiltinCatalog::Table(&RW_TYPES), read_rw_types },
     { BuiltinCatalog::Table(&RW_HUMMOCK_PINNED_VERSIONS), read_hummock_pinned_versions await },
@@ -404,6 +451,9 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_HUMMOCK_BRANCHED_OBJECTS), read_hummock_branched_objects await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACTION_GROUP_CONFIGS), read_hummock_compaction_group_configs await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_META_CONFIGS), read_hummock_meta_configs await},
+    { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACT_TASK_ASSIGNMENT), read_hummock_compact_task_assignments await },
+    { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACT_TASK_PROGRESS), read_hummock_compact_task_progress await },
+    { BuiltinCatalog::Table(&RW_EVENT_LOGS), read_event_logs await},
     { BuiltinCatalog::Table(&RW_DESCRIPTION), read_rw_description },
 }
 

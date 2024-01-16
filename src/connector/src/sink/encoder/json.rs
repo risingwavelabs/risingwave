@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,25 +17,27 @@ use std::sync::Arc;
 
 use base64::engine::general_purpose;
 use base64::Engine as _;
-use chrono::{Datelike, Timelike};
+use chrono::{Datelike, NaiveDateTime, Timelike};
 use indexmap::IndexMap;
 use itertools::Itertools;
 use risingwave_common::array::{ArrayError, ArrayResult};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, DatumRef, Decimal, ScalarRefImpl, ToText};
+use risingwave_common::types::{DataType, DatumRef, Decimal, JsonbVal, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_json::{json, Map, Value};
 
 use super::{
-    CustomJsonType, KafkaConnectParams, KafkaConnectParamsRef, Result, RowEncoder, SerTo,
-    TimestampHandlingMode, TimestamptzHandlingMode,
+    CustomJsonType, DateHandlingMode, KafkaConnectParams, KafkaConnectParamsRef, Result,
+    RowEncoder, SerTo, TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
 };
 use crate::sink::SinkError;
 
 pub struct JsonEncoder {
     schema: Schema,
     col_indices: Option<Vec<usize>>,
+    time_handling_mode: TimeHandlingMode,
+    date_handling_mode: DateHandlingMode,
     timestamp_handling_mode: TimestampHandlingMode,
     timestamptz_handling_mode: TimestamptzHandlingMode,
     custom_json_type: CustomJsonType,
@@ -46,15 +48,32 @@ impl JsonEncoder {
     pub fn new(
         schema: Schema,
         col_indices: Option<Vec<usize>>,
+        date_handling_mode: DateHandlingMode,
         timestamp_handling_mode: TimestampHandlingMode,
         timestamptz_handling_mode: TimestamptzHandlingMode,
+        time_handling_mode: TimeHandlingMode,
     ) -> Self {
         Self {
             schema,
             col_indices,
+            time_handling_mode,
+            date_handling_mode,
             timestamp_handling_mode,
             timestamptz_handling_mode,
             custom_json_type: CustomJsonType::None,
+            kafka_connect: None,
+        }
+    }
+
+    pub fn new_with_es(schema: Schema, col_indices: Option<Vec<usize>>) -> Self {
+        Self {
+            schema,
+            col_indices,
+            time_handling_mode: TimeHandlingMode::String,
+            date_handling_mode: DateHandlingMode::String,
+            timestamp_handling_mode: TimestampHandlingMode::String,
+            timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
+            custom_json_type: CustomJsonType::Es,
             kafka_connect: None,
         }
     }
@@ -68,6 +87,8 @@ impl JsonEncoder {
         Self {
             schema,
             col_indices,
+            time_handling_mode: TimeHandlingMode::Milli,
+            date_handling_mode: DateHandlingMode::String,
             timestamp_handling_mode,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
             custom_json_type: CustomJsonType::Doris(map),
@@ -79,21 +100,6 @@ impl JsonEncoder {
         Self {
             kafka_connect: Some(Arc::new(kafka_connect)),
             ..self
-        }
-    }
-
-    pub fn new_with_big_query(
-        schema: Schema,
-        col_indices: Option<Vec<usize>>,
-        timestamp_handling_mode: TimestampHandlingMode,
-    ) -> Self {
-        Self {
-            schema,
-            col_indices,
-            timestamp_handling_mode,
-            timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
-            custom_json_type: CustomJsonType::Bigquery,
-            kafka_connect: None,
         }
     }
 }
@@ -122,8 +128,10 @@ impl RowEncoder for JsonEncoder {
             let value = datum_to_json_object(
                 field,
                 row.datum_at(*idx),
+                self.date_handling_mode,
                 self.timestamp_handling_mode,
                 self.timestamptz_handling_mode,
+                self.time_handling_mode,
                 &self.custom_json_type,
             )
             .map_err(|e| SinkError::Encode(e.to_string()))?;
@@ -157,8 +165,10 @@ impl SerTo<String> for Value {
 fn datum_to_json_object(
     field: &Field,
     datum: DatumRef<'_>,
+    date_handling_mode: DateHandlingMode,
     timestamp_handling_mode: TimestampHandlingMode,
     timestamptz_handling_mode: TimestamptzHandlingMode,
+    time_handling_mode: TimeHandlingMode,
     custom_json_type: &CustomJsonType,
 ) -> ArrayResult<Value> {
     let scalar_ref = match datum {
@@ -209,7 +219,7 @@ fn datum_to_json_object(
                 }
                 json!(v_string)
             }
-            CustomJsonType::None | CustomJsonType::Bigquery => {
+            CustomJsonType::Es | CustomJsonType::None => {
                 json!(v.to_text())
             }
         },
@@ -227,13 +237,23 @@ fn datum_to_json_object(
             TimestamptzHandlingMode::Micro => json!(v.timestamp_micros()),
             TimestamptzHandlingMode::Milli => json!(v.timestamp_millis()),
         },
-        (DataType::Time, ScalarRefImpl::Time(v)) => {
-            // todo: just ignore the nanos part to avoid leap second complex
-            json!(v.0.num_seconds_from_midnight() as i64 * 1000)
-        }
-        (DataType::Date, ScalarRefImpl::Date(v)) => match custom_json_type {
-            CustomJsonType::None => json!(v.0.num_days_from_ce()),
-            CustomJsonType::Bigquery | CustomJsonType::Doris(_) => {
+        (DataType::Time, ScalarRefImpl::Time(v)) => match time_handling_mode {
+            TimeHandlingMode::Milli => {
+                // todo: just ignore the nanos part to avoid leap second complex
+                json!(v.0.num_seconds_from_midnight() as i64 * 1000)
+            }
+            TimeHandlingMode::String => {
+                let a = v.0.format("%H:%M:%S%.6f").to_string();
+                json!(a)
+            }
+        },
+        (DataType::Date, ScalarRefImpl::Date(v)) => match date_handling_mode {
+            DateHandlingMode::FromCe => json!(v.0.num_days_from_ce()),
+            DateHandlingMode::FromEpoch => {
+                let duration = v.0 - NaiveDateTime::UNIX_EPOCH.date();
+                json!(duration.num_days())
+            }
+            DateHandlingMode::String => {
                 let a = v.0.format("%Y-%m-%d").to_string();
                 json!(a)
             }
@@ -249,9 +269,10 @@ fn datum_to_json_object(
         (DataType::Interval, ScalarRefImpl::Interval(v)) => {
             json!(v.as_iso_8601())
         }
-        (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => {
-            json!(jsonb_ref.to_string())
-        }
+        (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => match custom_json_type {
+            CustomJsonType::Es => JsonbVal::from(jsonb_ref).take(),
+            CustomJsonType::Doris(_) | CustomJsonType::None => json!(jsonb_ref.to_string()),
+        },
         (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
             let elems = list_ref.iter();
             let mut vec = Vec::with_capacity(elems.len());
@@ -260,8 +281,10 @@ fn datum_to_json_object(
                 let value = datum_to_json_object(
                     &inner_field,
                     sub_datum_ref,
+                    date_handling_mode,
                     timestamp_handling_mode,
                     timestamptz_handling_mode,
+                    time_handling_mode,
                     custom_json_type,
                 )?;
                 vec.push(value);
@@ -280,8 +303,10 @@ fn datum_to_json_object(
                         let value = datum_to_json_object(
                             &sub_field,
                             sub_datum_ref,
+                            date_handling_mode,
                             timestamp_handling_mode,
                             timestamptz_handling_mode,
+                            time_handling_mode,
                             custom_json_type,
                         )?;
                         map.insert(sub_field.name.clone(), value);
@@ -290,7 +315,7 @@ fn datum_to_json_object(
                         ArrayError::internal(format!("Json to string err{:?}", err))
                     })?)
                 }
-                CustomJsonType::None | CustomJsonType::Bigquery => {
+                CustomJsonType::Es | CustomJsonType::None => {
                     let mut map = Map::with_capacity(st.len());
                     for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
                         st.iter()
@@ -299,8 +324,10 @@ fn datum_to_json_object(
                         let value = datum_to_json_object(
                             &sub_field,
                             sub_datum_ref,
+                            date_handling_mode,
                             timestamp_handling_mode,
                             timestamptz_handling_mode,
+                            time_handling_mode,
                             custom_json_type,
                         )?;
                         map.insert(sub_field.name.clone(), value);
@@ -416,8 +443,10 @@ mod tests {
                 ..mock_field.clone()
             },
             Some(ScalarImpl::Bool(false).as_scalar_ref_impl()),
+            DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -429,8 +458,10 @@ mod tests {
                 ..mock_field.clone()
             },
             Some(ScalarImpl::Int16(16).as_scalar_ref_impl()),
+            DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -442,8 +473,10 @@ mod tests {
                 ..mock_field.clone()
             },
             Some(ScalarImpl::Int64(std::i64::MAX).as_scalar_ref_impl()),
+            DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -460,8 +493,10 @@ mod tests {
                 ..mock_field.clone()
             },
             Some(ScalarImpl::Timestamptz(tstz_inner).as_scalar_ref_impl()),
+            DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -474,8 +509,10 @@ mod tests {
                 ..mock_field.clone()
             },
             Some(ScalarImpl::Timestamptz(tstz_inner).as_scalar_ref_impl()),
+            DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcWithoutSuffix,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -490,8 +527,10 @@ mod tests {
                 ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(1000, 0))
                     .as_scalar_ref_impl(),
             ),
+            DateHandlingMode::FromCe,
             TimestampHandlingMode::Milli,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -506,14 +545,16 @@ mod tests {
                 ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(1000, 0))
                     .as_scalar_ref_impl(),
             ),
+            DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
         assert_eq!(ts_value, json!("1970-01-01 00:16:40.000000".to_string()));
 
-        // Represents the number of microseconds past midnigh, io.debezium.time.Time
+        // Represents the number of milliseconds past midnigh, org.apache.kafka.connect.data.Time
         let time_value = datum_to_json_object(
             &Field {
                 data_type: DataType::Time,
@@ -523,8 +564,10 @@ mod tests {
                 ScalarImpl::Time(Time::from_num_seconds_from_midnight_uncheck(1000, 0))
                     .as_scalar_ref_impl(),
             ),
+            DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -539,8 +582,10 @@ mod tests {
                 ScalarImpl::Interval(Interval::from_month_day_usec(13, 2, 1000000))
                     .as_scalar_ref_impl(),
             ),
+            DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -555,8 +600,10 @@ mod tests {
                 ..mock_field.clone()
             },
             Some(ScalarImpl::Decimal(Decimal::try_from(1.1111111).unwrap()).as_scalar_ref_impl()),
+            DateHandlingMode::String,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::Doris(map),
         )
         .unwrap();
@@ -567,9 +614,41 @@ mod tests {
                 data_type: DataType::Date,
                 ..mock_field.clone()
             },
-            Some(ScalarImpl::Date(Date::from_ymd_uncheck(2010, 10, 10)).as_scalar_ref_impl()),
+            Some(ScalarImpl::Date(Date::from_ymd_uncheck(1970, 1, 1)).as_scalar_ref_impl()),
+            DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
+            &CustomJsonType::None,
+        )
+        .unwrap();
+        assert_eq!(date_value, json!(719163));
+
+        let date_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Date,
+                ..mock_field.clone()
+            },
+            Some(ScalarImpl::Date(Date::from_ymd_uncheck(1970, 1, 1)).as_scalar_ref_impl()),
+            DateHandlingMode::FromEpoch,
+            TimestampHandlingMode::String,
+            TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
+            &CustomJsonType::None,
+        )
+        .unwrap();
+        assert_eq!(date_value, json!(0));
+
+        let date_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Date,
+                ..mock_field.clone()
+            },
+            Some(ScalarImpl::Date(Date::from_ymd_uncheck(2010, 10, 10)).as_scalar_ref_impl()),
+            DateHandlingMode::String,
+            TimestampHandlingMode::String,
+            TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::Doris(HashMap::default()),
         )
         .unwrap();
@@ -591,8 +670,10 @@ mod tests {
                 ..mock_field.clone()
             },
             Some(ScalarRefImpl::Struct(StructRef::ValueRef { val: &value })),
+            DateHandlingMode::String,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::Doris(HashMap::default()),
         )
         .unwrap();

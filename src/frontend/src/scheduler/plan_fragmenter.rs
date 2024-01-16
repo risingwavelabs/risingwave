@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ use anyhow::anyhow;
 use async_recursion::async_recursion;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
+use pgwire::pg_server::SessionId;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::error::RwError;
@@ -100,16 +101,18 @@ impl Serialize for ExecutionPlanNode {
     }
 }
 
-impl From<PlanRef> for ExecutionPlanNode {
-    fn from(plan_node: PlanRef) -> Self {
-        Self {
+impl TryFrom<PlanRef> for ExecutionPlanNode {
+    type Error = SchedulerError;
+
+    fn try_from(plan_node: PlanRef) -> Result<Self, Self::Error> {
+        Ok(Self {
             plan_node_id: plan_node.plan_base().id(),
             plan_node_type: plan_node.node_type(),
-            node: plan_node.to_batch_prost_body(),
+            node: plan_node.try_to_batch_prost_body()?,
             children: vec![],
             schema: plan_node.schema().to_prost(),
             source_stage_id: None,
-        }
+        })
     }
 }
 
@@ -364,6 +367,7 @@ pub struct QueryStage {
     pub source_info: Option<SourceScanInfo>,
     pub has_lookup_join: bool,
     pub dml_table_id: Option<TableId>,
+    pub session_id: SessionId,
 
     /// Used to generate exchange information when complete source scan information.
     children_exchange_distribution: Option<HashMap<StageId, Distribution>>,
@@ -395,6 +399,7 @@ impl QueryStage {
                 source_info: self.source_info.clone(),
                 has_lookup_join: self.has_lookup_join,
                 dml_table_id: self.dml_table_id,
+                session_id: self.session_id,
                 children_exchange_distribution: self.children_exchange_distribution.clone(),
             };
         }
@@ -423,6 +428,7 @@ impl QueryStage {
             source_info: Some(source_info),
             has_lookup_join: self.has_lookup_join,
             dml_table_id: self.dml_table_id,
+            session_id: self.session_id,
             children_exchange_distribution: None,
         }
     }
@@ -467,6 +473,7 @@ struct QueryStageBuilder {
     source_info: Option<SourceScanInfo>,
     has_lookup_join: bool,
     dml_table_id: Option<TableId>,
+    session_id: SessionId,
 
     children_exchange_distribution: HashMap<StageId, Distribution>,
 }
@@ -482,6 +489,7 @@ impl QueryStageBuilder {
         source_info: Option<SourceScanInfo>,
         has_lookup_join: bool,
         dml_table_id: Option<TableId>,
+        session_id: SessionId,
     ) -> Self {
         Self {
             query_id,
@@ -494,6 +502,7 @@ impl QueryStageBuilder {
             source_info,
             has_lookup_join,
             dml_table_id,
+            session_id,
             children_exchange_distribution: HashMap::new(),
         }
     }
@@ -514,6 +523,7 @@ impl QueryStageBuilder {
             source_info: self.source_info,
             has_lookup_join: self.has_lookup_join,
             dml_table_id: self.dml_table_id,
+            session_id: self.session_id,
             children_exchange_distribution,
         });
 
@@ -809,6 +819,7 @@ impl BatchPlanFragmenter {
             source_info,
             has_lookup_join,
             dml_table_id,
+            root.ctx().session_ctx().session_id(),
         );
 
         self.visit_node(root, &mut builder, None)?;
@@ -827,7 +838,7 @@ impl BatchPlanFragmenter {
                 self.visit_exchange(node.clone(), builder, parent_exec_node)?;
             }
             _ => {
-                let mut execution_plan_node = ExecutionPlanNode::from(node.clone());
+                let mut execution_plan_node = ExecutionPlanNode::try_from(node.clone())?;
 
                 for child in node.inputs() {
                     self.visit_node(child, builder, Some(&mut execution_plan_node))?;
@@ -849,7 +860,7 @@ impl BatchPlanFragmenter {
         builder: &mut QueryStageBuilder,
         parent_exec_node: Option<&mut ExecutionPlanNode>,
     ) -> SchedulerResult<()> {
-        let mut execution_plan_node = ExecutionPlanNode::from(node.clone());
+        let mut execution_plan_node = ExecutionPlanNode::try_from(node.clone())?;
         let child_exchange_info = if let Some(parallelism) = builder.parallelism {
             Some(node.distribution().to_prost(
                 parallelism,
@@ -891,7 +902,8 @@ impl BatchPlanFragmenter {
             let source_catalog = source_node.source_catalog();
             if let Some(source_catalog) = source_catalog {
                 let property = ConnectorProperties::extract(
-                    source_catalog.properties.clone().into_iter().collect(),
+                    source_catalog.with_properties.clone().into_iter().collect(),
+                    false,
                 )?;
                 let timestamp_bound = source_node.kafka_timestamp_range_value();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {

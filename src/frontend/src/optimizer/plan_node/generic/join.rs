@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{EqJoinPredicate, GenericPlanNode, GenericPlanRef};
-use crate::expr::ExprRewriter;
+use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::stream;
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
@@ -46,9 +46,20 @@ pub(crate) fn has_repeated_element(slice: &[usize]) -> bool {
     (1..slice.len()).any(|i| slice[i..].contains(&slice[i - 1]))
 }
 
-impl<PlanRef> Join<PlanRef> {
+impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.on = self.on.clone().rewrite_expr(r);
+    }
+
+    pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.on.visit_expr(v);
+    }
+
+    pub fn eq_indexes(&self) -> Vec<(usize, usize)> {
+        let left_len = self.left.schema().len();
+        let right_len = self.right.schema().len();
+        let eq_predicate = EqJoinPredicate::create(left_len, right_len, self.on.clone());
+        eq_predicate.eq_indexes()
     }
 
     pub fn new(
@@ -165,10 +176,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        let left_len = self.left.schema().len();
-        let right_len = self.right.schema().len();
-        let eq_predicate = EqJoinPredicate::create(left_len, right_len, self.on.clone());
-
+        let eq_indexes = self.eq_indexes();
         let left_pk = self.left.stream_key()?;
         let right_pk = self.right.stream_key()?;
         let l2i = self.l2i_col_mapping();
@@ -193,7 +201,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
 
         let either_or_both = self.add_which_join_key_to_pk();
 
-        for (lk, rk) in eq_predicate.eq_indexes() {
+        for (lk, rk) in eq_indexes {
             match either_or_both {
                 EitherOrBoth::Left(_) => {
                     // Remove right-side join-key column it from pk_indices.
@@ -476,6 +484,7 @@ pub fn push_down_into_join(
     left_col_num: usize,
     right_col_num: usize,
     ty: JoinType,
+    push_temporal_predicate: bool,
 ) -> (Condition, Condition, Condition) {
     let (left, right) = push_down_to_inputs(
         predicate,
@@ -483,19 +492,24 @@ pub fn push_down_into_join(
         right_col_num,
         can_push_left_from_filter(ty),
         can_push_right_from_filter(ty),
+        push_temporal_predicate,
     );
 
     let on = if can_push_on_from_filter(ty) {
         let mut conjunctions = std::mem::take(&mut predicate.conjunctions);
 
-        // Do not push now on to the on, it will be pulled up into a filter instead.
-        let on = Condition {
-            conjunctions: conjunctions
-                .extract_if(|expr| expr.count_nows() == 0)
-                .collect(),
-        };
-        predicate.conjunctions = conjunctions;
-        on
+        if push_temporal_predicate {
+            Condition { conjunctions }
+        } else {
+            // Do not push now on to the on, it will be pulled up into a filter instead.
+            let on = Condition {
+                conjunctions: conjunctions
+                    .extract_if(|expr| expr.count_nows() == 0)
+                    .collect(),
+            };
+            predicate.conjunctions = conjunctions;
+            on
+        }
     } else {
         Condition::true_cond()
     };
@@ -512,6 +526,7 @@ pub fn push_down_join_condition(
     left_col_num: usize,
     right_col_num: usize,
     ty: JoinType,
+    push_temporal_predicate: bool,
 ) -> (Condition, Condition) {
     push_down_to_inputs(
         on_condition,
@@ -519,6 +534,7 @@ pub fn push_down_join_condition(
         right_col_num,
         can_push_left_from_on(ty),
         can_push_right_from_on(ty),
+        push_temporal_predicate,
     )
 }
 
@@ -532,11 +548,21 @@ fn push_down_to_inputs(
     right_col_num: usize,
     push_left: bool,
     push_right: bool,
+    push_temporal_predicate: bool,
 ) -> (Condition, Condition) {
-    let conjunctions = std::mem::take(&mut predicate.conjunctions);
+    let mut conjunctions = std::mem::take(&mut predicate.conjunctions);
+    let (mut left, right, mut others) = if push_temporal_predicate {
+        Condition { conjunctions }.split(left_col_num, right_col_num)
+    } else {
+        let temporal_filter_cons = conjunctions
+            .extract_if(|e| e.count_nows() != 0)
+            .collect_vec();
+        let (left, right, mut others) =
+            Condition { conjunctions }.split(left_col_num, right_col_num);
 
-    let (mut left, right, mut others) =
-        Condition { conjunctions }.split(left_col_num, right_col_num);
+        others.conjunctions.extend(temporal_filter_cons);
+        (left, right, others)
+    };
 
     if !push_left {
         others.conjunctions.extend(left);

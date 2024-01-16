@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -87,6 +87,25 @@ pub struct Configuration {
 
     /// Path to etcd data file.
     pub etcd_data_path: Option<PathBuf>,
+
+    /// Queries to run per session.
+    pub per_session_queries: Arc<Vec<String>>,
+}
+
+impl Default for Configuration {
+    fn default() -> Self {
+        Configuration {
+            config_path: ConfigPath::Regular("".into()),
+            frontend_nodes: 1,
+            compute_nodes: 1,
+            meta_nodes: 1,
+            compactor_nodes: 1,
+            compute_node_cores: 1,
+            etcd_timeout_rate: 0.0,
+            etcd_data_path: None,
+            per_session_queries: vec![].into(),
+        }
+    }
 }
 
 impl Configuration {
@@ -109,16 +128,37 @@ impl Configuration {
             meta_nodes: 3,
             compactor_nodes: 2,
             compute_node_cores: 2,
-            etcd_timeout_rate: 0.0,
-            etcd_data_path: None,
+            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL=false".into()]
+                .into(),
+            ..Default::default()
         }
     }
 
-    pub fn for_auto_scale() -> Self {
+    pub fn for_auto_parallelism(
+        max_heartbeat_interval_secs: u64,
+        enable_auto_scale_in: bool,
+        enable_auto_parallelism: bool,
+    ) -> Self {
         let config_path = {
             let mut file =
                 tempfile::NamedTempFile::new().expect("failed to create temp config file");
-            file.write_all(include_bytes!("risingwave-auto-scale.toml"))
+
+            let config_data = format!(
+                r#"[meta]
+max_heartbeat_interval_secs = {max_heartbeat_interval_secs}
+enable_scale_in_when_recovery = {enable_auto_scale_in}
+enable_automatic_parallelism_control = {enable_auto_parallelism}
+
+[system]
+barrier_interval_ms = 250
+checkpoint_frequency = 4
+
+[server]
+telemetry_enabled = false
+metrics_level = "Disabled"
+"#
+            );
+            file.write_all(config_data.as_bytes())
                 .expect("failed to write config file");
             file.into_temp_path()
         };
@@ -130,8 +170,9 @@ impl Configuration {
             meta_nodes: 1,
             compactor_nodes: 1,
             compute_node_cores: 2,
-            etcd_timeout_rate: 0.0,
-            etcd_data_path: None,
+            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL=false".into()]
+                .into(),
+            ..Default::default()
         }
     }
 
@@ -154,8 +195,29 @@ impl Configuration {
             meta_nodes: 1,
             compactor_nodes: 1,
             compute_node_cores: 4,
-            etcd_timeout_rate: 0.0,
-            etcd_data_path: None,
+            ..Default::default()
+        }
+    }
+
+    pub fn for_arrangement_backfill() -> Self {
+        // Embed the config file and create a temporary file at runtime. The file will be deleted
+        // automatically when it's dropped.
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+            file.write_all(include_bytes!("arrangement_backfill.toml"))
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 1,
+            compute_nodes: 3,
+            meta_nodes: 1,
+            compactor_nodes: 1,
+            compute_node_cores: 1,
+            ..Default::default()
         }
     }
 
@@ -172,13 +234,17 @@ impl Configuration {
 
         Configuration {
             config_path: ConfigPath::Temp(config_path.into()),
-            frontend_nodes: 2,
+            // NOTE(kwannoel): The cancel test depends on `processlist`,
+            // which will cancel a stream job within the process.
+            // so we cannot have multiple frontend node, since a new session spawned
+            // to cancel the job could be routed to a different frontend node,
+            // in a different process.
+            frontend_nodes: 1,
             compute_nodes: 3,
             meta_nodes: 3,
             compactor_nodes: 2,
             compute_node_cores: 2,
-            etcd_timeout_rate: 0.0,
-            etcd_data_path: None,
+            ..Default::default()
         }
     }
 }
@@ -414,13 +480,24 @@ impl Cluster {
         })
     }
 
+    #[cfg_or_panic(madsim)]
+    fn per_session_queries(&self) -> Arc<Vec<String>> {
+        self.config.per_session_queries.clone()
+    }
+
     /// Start a SQL session on the client node.
     #[cfg_or_panic(madsim)]
     pub fn start_session(&mut self) -> Session {
         let (query_tx, mut query_rx) = mpsc::channel::<SessionRequest>(0);
+        let per_session_queries = self.per_session_queries();
 
         self.client.spawn(async move {
             let mut client = RisingWave::connect("frontend".into(), "dev".into()).await?;
+
+            for sql in per_session_queries.as_ref() {
+                client.run(sql).await?;
+            }
+            drop(per_session_queries);
 
             while let Some((sql, tx)) = query_rx.next().await {
                 let result = client
@@ -617,6 +694,26 @@ impl Cluster {
             tracing::info!("kill {name}");
             Handle::current().kill(name);
             tokio::time::sleep(Duration::from_secs(restart_delay_secs as u64)).await;
+            tracing::info!("restart {name}");
+            Handle::current().restart(name);
+        }))
+        .await;
+    }
+
+    #[cfg_or_panic(madsim)]
+    pub async fn simple_kill_nodes(&self, nodes: impl IntoIterator<Item = impl AsRef<str>>) {
+        join_all(nodes.into_iter().map(|name| async move {
+            let name = name.as_ref();
+            tracing::info!("kill {name}");
+            Handle::current().kill(name);
+        }))
+        .await;
+    }
+
+    #[cfg_or_panic(madsim)]
+    pub async fn simple_restart_nodes(&self, nodes: impl IntoIterator<Item = impl AsRef<str>>) {
+        join_all(nodes.into_iter().map(|name| async move {
+            let name = name.as_ref();
             tracing::info!("restart {name}");
             Handle::current().restart(name);
         }))

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -480,29 +480,32 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let state_order_key_indices_l = state_table_l.pk_indices();
         let state_order_key_indices_r = state_table_r.pk_indices();
 
-        let join_key_indices_l = params_l.join_key_indices;
-        let join_key_indices_r = params_r.join_key_indices;
+        let state_join_key_indices_l = params_l.join_key_indices;
+        let state_join_key_indices_r = params_r.join_key_indices;
 
-        let degree_pk_indices_l = (join_key_indices_l.len()
-            ..join_key_indices_l.len() + params_l.deduped_pk_indices.len())
+        let degree_join_key_indices_l = (0..state_join_key_indices_l.len()).collect_vec();
+        let degree_join_key_indices_r = (0..state_join_key_indices_r.len()).collect_vec();
+
+        let degree_pk_indices_l = (state_join_key_indices_l.len()
+            ..state_join_key_indices_l.len() + params_l.deduped_pk_indices.len())
             .collect_vec();
-        let degree_pk_indices_r = (join_key_indices_r.len()
-            ..join_key_indices_r.len() + params_r.deduped_pk_indices.len())
+        let degree_pk_indices_r = (state_join_key_indices_r.len()
+            ..state_join_key_indices_r.len() + params_r.deduped_pk_indices.len())
             .collect_vec();
 
         // If pk is contained in join key.
-        let pk_contained_in_jk_l = is_subset(state_pk_indices_l, join_key_indices_l.clone());
-        let pk_contained_in_jk_r = is_subset(state_pk_indices_r, join_key_indices_r.clone());
+        let pk_contained_in_jk_l = is_subset(state_pk_indices_l, state_join_key_indices_l.clone());
+        let pk_contained_in_jk_r = is_subset(state_pk_indices_r, state_join_key_indices_r.clone());
 
         // check whether join key contains pk in both side
         let append_only_optimize = is_append_only && pk_contained_in_jk_l && pk_contained_in_jk_r;
 
-        let join_key_data_types_l = join_key_indices_l
+        let join_key_data_types_l = state_join_key_indices_l
             .iter()
             .map(|idx| state_all_data_types_l[*idx].clone())
             .collect_vec();
 
-        let join_key_data_types_r = join_key_indices_r
+        let join_key_data_types_r = state_join_key_indices_r
             .iter()
             .map(|idx| state_all_data_types_r[*idx].clone())
             .collect_vec();
@@ -609,9 +612,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 ht: JoinHashMap::new(
                     watermark_epoch.clone(),
                     join_key_data_types_l,
+                    state_join_key_indices_l.clone(),
                     state_all_data_types_l.clone(),
                     state_table_l,
                     params_l.deduped_pk_indices,
+                    degree_join_key_indices_l,
                     degree_all_data_types_l,
                     degree_state_table_l,
                     degree_pk_indices_l,
@@ -623,7 +628,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     ctx.fragment_id,
                     "left",
                 ),
-                join_key_indices: join_key_indices_l,
+                join_key_indices: state_join_key_indices_l,
                 all_data_types: state_all_data_types_l,
                 i2o_mapping: left_to_output,
                 i2o_mapping_indexed: l2o_indexed,
@@ -637,9 +642,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 ht: JoinHashMap::new(
                     watermark_epoch,
                     join_key_data_types_r,
+                    state_join_key_indices_r.clone(),
                     state_all_data_types_r.clone(),
                     state_table_r,
                     params_r.deduped_pk_indices,
+                    degree_join_key_indices_r,
                     degree_all_data_types_r,
                     degree_state_table_r,
                     degree_pk_indices_r,
@@ -651,7 +658,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     ctx.fragment_id,
                     "right",
                 ),
-                join_key_indices: join_key_indices_r,
+                join_key_indices: state_join_key_indices_r,
                 all_data_types: state_all_data_types_r,
                 start_pos: side_l_column_n,
                 i2o_mapping: right_to_output,
@@ -693,6 +700,36 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         yield Message::Barrier(barrier);
         let actor_id_str = self.ctx.id.to_string();
         let fragment_id_str = self.ctx.fragment_id.to_string();
+
+        // initialized some metrics
+        let join_actor_input_waiting_duration_ns = self
+            .metrics
+            .join_actor_input_waiting_duration_ns
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str]);
+        let left_join_match_duration_ns = self
+            .metrics
+            .join_match_duration_ns
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "left"]);
+        let right_join_match_duration_ns = self
+            .metrics
+            .join_match_duration_ns
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "right"]);
+
+        let barrier_join_match_duration_ns = self
+            .metrics
+            .join_match_duration_ns
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "barrier"]);
+
+        let left_join_cached_entry_count = self
+            .metrics
+            .join_cached_entry_count
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "left"]);
+
+        let right_join_cached_entry_count = self
+            .metrics
+            .join_cached_entry_count
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "right"]);
+
         let mut start_time = Instant::now();
 
         while let Some(msg) = aligned_stream
@@ -700,10 +737,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .instrument_await("hash_join_barrier_align")
             .await
         {
-            self.metrics
-                .join_actor_input_waiting_duration_ns
-                .with_label_values(&[&actor_id_str, &fragment_id_str])
-                .inc_by(start_time.elapsed().as_nanos() as u64);
+            join_actor_input_waiting_duration_ns.inc_by(start_time.elapsed().as_nanos() as u64);
             match msg? {
                 AlignedMessage::WatermarkLeft(watermark) => {
                     for watermark_to_emit in
@@ -740,10 +774,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         left_start_time = Instant::now();
                     }
                     left_time += left_start_time.elapsed();
-                    self.metrics
-                        .join_match_duration_ns
-                        .with_label_values(&[&actor_id_str, &fragment_id_str, "left"])
-                        .inc_by(left_time.as_nanos() as u64);
+                    left_join_match_duration_ns.inc_by(left_time.as_nanos() as u64);
                     self.try_flush_data().await?;
                 }
                 AlignedMessage::Right(chunk) => {
@@ -767,10 +798,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         right_start_time = Instant::now();
                     }
                     right_time += right_start_time.elapsed();
-                    self.metrics
-                        .join_match_duration_ns
-                        .with_label_values(&[&actor_id_str, &fragment_id_str, "right"])
-                        .inc_by(right_time.as_nanos() as u64);
+                    right_join_match_duration_ns.inc_by(right_time.as_nanos() as u64);
                     self.try_flush_data().await?;
                 }
                 AlignedMessage::Barrier(barrier) => {
@@ -793,16 +821,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     self.side_r.ht.update_epoch(barrier.epoch.curr);
 
                     // Report metrics of cached join rows/entries
-                    for (side, ht) in [("left", &self.side_l.ht), ("right", &self.side_r.ht)] {
-                        self.metrics
-                            .join_cached_entry_count
-                            .with_label_values(&[&actor_id_str, &fragment_id_str, side])
-                            .set(ht.entry_count() as i64);
+                    for (join_cached_entry_count, ht) in [
+                        (&left_join_cached_entry_count, &self.side_l.ht),
+                        (&right_join_cached_entry_count, &self.side_r.ht),
+                    ] {
+                        join_cached_entry_count.set(ht.entry_count() as i64);
                     }
 
-                    self.metrics
-                        .join_match_duration_ns
-                        .with_label_values(&[&actor_id_str, &fragment_id_str, "barrier"])
+                    barrier_join_match_duration_ns
                         .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
                     yield Message::Barrier(barrier);
                 }
@@ -1125,14 +1151,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         side_match.ht.update_state(key, matched_rows);
                         for matched_row in matched_rows_to_clean {
                             if side_match.need_degree_table {
-                                side_match.ht.delete(key, matched_row);
+                                side_match.ht.delete(key, matched_row)?;
                             } else {
-                                side_match.ht.delete_row(key, matched_row.row);
+                                side_match.ht.delete_row(key, matched_row.row)?;
                             }
                         }
 
                         if append_only_optimize && let Some(row) = append_only_matched_row {
-                            side_match.ht.delete(key, row);
+                            side_match.ht.delete(key, row)?;
                         } else if side_update.need_degree_table {
                             side_update
                                 .ht
@@ -1224,18 +1250,18 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         side_match.ht.update_state(key, matched_rows);
                         for matched_row in matched_rows_to_clean {
                             if side_match.need_degree_table {
-                                side_match.ht.delete(key, matched_row);
+                                side_match.ht.delete(key, matched_row)?;
                             } else {
-                                side_match.ht.delete_row(key, matched_row.row);
+                                side_match.ht.delete_row(key, matched_row.row)?;
                             }
                         }
 
                         if append_only_optimize {
                             unreachable!();
                         } else if side_update.need_degree_table {
-                            side_update.ht.delete(key, JoinRow::new(row, degree));
+                            side_update.ht.delete(key, JoinRow::new(row, degree))?;
                         } else {
-                            side_update.ht.delete_row(key, row);
+                            side_update.ht.delete_row(key, row)?;
                         };
                     } else {
                         // We do not store row which violates null-safe bitmap.

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, DateTimeField, Decimal, Interval, ScalarImpl};
 use risingwave_sqlparser::ast::{DateTimeField as AstDateTimeField, Expr, Value};
+use thiserror_ext::AsReport;
 
 use crate::binder::Binder;
 use crate::expr::{align_types, Expr as _, ExprImpl, ExprType, FunctionCall, Literal};
@@ -38,7 +40,7 @@ impl Binder {
                 last_field: None,
                 fractional_seconds_precision: None,
             } => self.bind_interval(value, leading_field),
-            _ => Err(ErrorCode::NotImplemented(format!("value: {:?}", value), None.into()).into()),
+            _ => bail_not_implemented!("value: {:?}", value),
         }
     }
 
@@ -50,12 +52,30 @@ impl Binder {
         Ok(Literal::new(Some(ScalarImpl::Bool(b)), DataType::Boolean))
     }
 
-    fn bind_number(&mut self, s: String) -> Result<Literal> {
-        let (data, data_type) = if let Ok(int_32) = s.parse::<i32>() {
+    fn bind_number(&mut self, mut s: String) -> Result<Literal> {
+        let prefix_start = match s.starts_with('-') {
+            true => 1,
+            false => 0,
+        };
+        let base = match prefix_start + 2 <= s.len() {
+            true => match &s[prefix_start..prefix_start + 2] {
+                // tokenizer already converts them to lowercase
+                "0x" => 16,
+                "0o" => 8,
+                "0b" => 2,
+                _ => 10,
+            },
+            false => 10,
+        };
+        if base != 10 {
+            s.replace_range(prefix_start..prefix_start + 2, "");
+        }
+
+        let (data, data_type) = if let Ok(int_32) = i32::from_str_radix(&s, base) {
             (Some(ScalarImpl::Int32(int_32)), DataType::Int32)
-        } else if let Ok(int_64) = s.parse::<i64>() {
+        } else if let Ok(int_64) = i64::from_str_radix(&s, base) {
             (Some(ScalarImpl::Int64(int_64)), DataType::Int64)
-        } else if let Ok(decimal) = s.parse::<Decimal>() {
+        } else if let Ok(decimal) = Decimal::from_str_radix(&s, base) {
             // Notice: when the length of decimal exceeds 29(>= 30), it will be rounded up.
             (Some(ScalarImpl::Decimal(decimal)), DataType::Decimal)
         } else if let Some(scientific) = Decimal::from_scientific(&s) {
@@ -72,7 +92,8 @@ impl Binder {
         leading_field: Option<AstDateTimeField>,
     ) -> Result<Literal> {
         let interval =
-            Interval::parse_with_fields(&s, leading_field.map(Self::bind_date_time_field))?;
+            Interval::parse_with_fields(&s, leading_field.map(Self::bind_date_time_field))
+                .map_err(|e| ErrorCode::BindError(e.to_report_string()))?;
         let datum = Some(ScalarImpl::Interval(interval));
         let literal = Literal::new(datum, DataType::Interval);
 
@@ -204,14 +225,13 @@ mod tests {
     use risingwave_expr::expr::build_from_prost;
     use risingwave_sqlparser::ast::Value::Number;
 
+    use super::*;
     use crate::binder::test_utils::mock_binder;
     use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall};
 
     #[tokio::test]
     async fn test_bind_value() {
         use std::str::FromStr;
-
-        use super::*;
 
         let mut binder = mock_binder();
         let values = [
@@ -252,10 +272,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_bind_radix() {
+        let mut binder = mock_binder();
+
+        for (input, expected) in [
+            ("0x42e3", ScalarImpl::Int32(0x42e3)),
+            ("-0x40", ScalarImpl::Int32(-0x40)),
+            ("0b1101", ScalarImpl::Int32(0b1101)),
+            ("-0b101", ScalarImpl::Int32(-0b101)),
+            ("0o664", ScalarImpl::Int32(0o664)),
+            ("-0o755", ScalarImpl::Int32(-0o755)),
+            ("2147483647", ScalarImpl::Int32(2147483647)),
+            ("2147483648", ScalarImpl::Int64(2147483648)),
+            ("-2147483648", ScalarImpl::Int32(-2147483648)),
+            ("0x7fffffff", ScalarImpl::Int32(0x7fffffff)),
+            ("0x80000000", ScalarImpl::Int64(0x80000000)),
+            ("-0x80000000", ScalarImpl::Int32(-0x80000000)),
+        ] {
+            let lit = binder.bind_number(input.into()).unwrap();
+            assert_eq!(lit.get_data().as_ref().unwrap(), &expected);
+        }
+    }
+
+    #[tokio::test]
     async fn test_bind_scientific_number() {
         use std::str::FromStr;
-
-        use super::*;
 
         let mut binder = mock_binder();
         let values = [
@@ -333,8 +374,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_bind_interval() {
-        use super::*;
-
         let mut binder = mock_binder();
         let values = [
             "1 hour",

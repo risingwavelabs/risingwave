@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use anyhow::Result;
 use clap::Parser;
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
 use risingwave_frontend::FrontendOpts;
@@ -66,7 +67,27 @@ pub struct ParsedStandaloneOpts {
     pub compactor_opts: Option<CompactorOpts>,
 }
 
-fn parse_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
+impl risingwave_common::opts::Opts for ParsedStandaloneOpts {
+    fn name() -> &'static str {
+        "standalone"
+    }
+
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        if let Some(opts) = self.meta_opts.as_ref() {
+            opts.meta_addr()
+        } else if let Some(opts) = self.compute_opts.as_ref() {
+            opts.meta_addr()
+        } else if let Some(opts) = self.frontend_opts.as_ref() {
+            opts.meta_addr()
+        } else if let Some(opts) = self.compactor_opts.as_ref() {
+            opts.meta_addr()
+        } else {
+            unreachable!("at least one service should be specified as checked during parsing")
+        }
+    }
+}
+
+pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
     let meta_opts = opts.meta_opts.as_ref().map(|s| {
         let mut s = split(s).unwrap();
         s.insert(0, "meta-node".into());
@@ -123,6 +144,15 @@ fn parse_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
             meta_opts.prometheus_host = Some(prometheus_listener_addr.clone());
         }
     }
+
+    if meta_opts.is_none()
+        && compute_opts.is_none()
+        && frontend_opts.is_none()
+        && compactor_opts.is_none()
+    {
+        panic!("No service is specified to start.");
+    }
+
     ParsedStandaloneOpts {
         meta_opts,
         compute_opts,
@@ -131,15 +161,15 @@ fn parse_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
     }
 }
 
-pub async fn standalone(opts: StandaloneOpts) -> Result<()> {
-    tracing::info!("launching Risingwave in standalone mode");
-
-    let ParsedStandaloneOpts {
+pub async fn standalone(
+    ParsedStandaloneOpts {
         meta_opts,
         compute_opts,
         frontend_opts,
         compactor_opts,
-    } = parse_opt_args(&opts);
+    }: ParsedStandaloneOpts,
+) -> Result<()> {
+    tracing::info!("launching Risingwave in standalone mode");
 
     if let Some(opts) = meta_opts {
         tracing::info!("starting meta-node thread with cli args: {:?}", opts);
@@ -215,7 +245,7 @@ mod test {
         assert_eq!(actual, opts);
 
         // Test parsing into node-level opts.
-        let actual = parse_opt_args(&opts);
+        let actual = parse_standalone_opt_args(&opts);
         check(
             actual,
             expect![[r#"
@@ -237,6 +267,7 @@ mod test {
                             sql_endpoint: None,
                             dashboard_ui_path: None,
                             prometheus_endpoint: None,
+                            prometheus_selector: None,
                             connector_rpc_endpoint: None,
                             privatelink_endpoint_default_tags: None,
                             config_path: "src/config/test.toml",
@@ -252,10 +283,6 @@ mod test {
                             do_not_config_object_storage_lifecycle: None,
                             backup_storage_url: None,
                             backup_storage_directory: None,
-                            object_store_streaming_read_timeout_ms: None,
-                            object_store_streaming_upload_timeout_ms: None,
-                            object_store_upload_timeout_ms: None,
-                            object_store_read_timeout_ms: None,
                             heap_profiling_dir: None,
                         },
                     ),
@@ -264,7 +291,11 @@ mod test {
                             listen_addr: "127.0.0.1:8000",
                             advertise_addr: None,
                             prometheus_listener_addr: "127.0.0.1:1234",
-                            meta_address: "http://127.0.0.1:5690",
+                            meta_address: List(
+                                [
+                                    http://127.0.0.1:5690/,
+                                ],
+                            ),
                             connector_rpc_endpoint: None,
                             connector_rpc_sink_payload_format: None,
                             config_path: "src/config/test.toml",
@@ -277,10 +308,6 @@ mod test {
                             meta_file_cache_dir: None,
                             async_stack_trace: None,
                             heap_profiling_dir: None,
-                            object_store_streaming_read_timeout_ms: None,
-                            object_store_streaming_upload_timeout_ms: None,
-                            object_store_upload_timeout_ms: None,
-                            object_store_read_timeout_ms: None,
                         },
                     ),
                     frontend_opts: Some(
@@ -288,7 +315,11 @@ mod test {
                             listen_addr: "127.0.0.1:4566",
                             advertise_addr: None,
                             port: None,
-                            meta_addr: "http://127.0.0.1:5690",
+                            meta_addr: List(
+                                [
+                                    http://127.0.0.1:5690/,
+                                ],
+                            ),
                             prometheus_listener_addr: "127.0.0.1:1234",
                             health_check_listener_addr: "127.0.0.1:6786",
                             config_path: "src/config/test.toml",

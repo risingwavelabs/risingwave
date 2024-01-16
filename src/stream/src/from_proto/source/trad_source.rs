@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{ColumnId, Schema, TableId};
-use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::source::external::{CdcTableType, SchemaTableName};
+use risingwave_common::catalog::{
+    default_key_column_name_version_mapping, ColumnId, TableId, KAFKA_TIMESTAMP_COLUMN_NAME,
+};
 use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
+use risingwave_pb::data::data_type::TypeName as PbTypeName;
+use risingwave_pb::plan_common::{
+    AdditionalColumnType, ColumnDescVersion, FormatType, PbEncodeType,
+};
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::panic_store::PanicStateStore;
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
-use crate::executor::external::ExternalStorageTable;
 use crate::executor::source::{FsListExecutor, StreamSourceCore};
 use crate::executor::source_executor::SourceExecutor;
 use crate::executor::state_table_handler::SourceStateTableHandler;
-use crate::executor::{CdcBackfillExecutor, FlowControlExecutor, FsSourceExecutor};
+use crate::executor::{FlowControlExecutor, FsSourceExecutor};
 
 const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
@@ -43,7 +46,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let (sender, barrier_receiver) = unbounded_channel();
         stream
             .context
-            .lock_barrier_manager()
+            .barrier_manager()
             .register_sender(params.actor_context.id, sender);
         let system_params = params.env.system_params_manager_ref().get_params();
 
@@ -53,11 +56,65 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 let source_name = source.source_name.clone();
                 let source_info = source.get_info()?;
 
+                let mut source_columns = source.columns.clone();
+
+                {
+                    // compatible code: introduced in https://github.com/risingwavelabs/risingwave/pull/13707
+                    // for upsert and (avro | protobuf) overwrite the `_rw_key` column's ColumnDesc.additional_column_type to Key
+                    if source_info.format() == FormatType::Upsert
+                        && (source_info.row_encode() == PbEncodeType::Avro
+                            || source_info.row_encode() == PbEncodeType::Protobuf)
+                    {
+                        let _ = source_columns.iter_mut().map(|c| {
+                            let _ = c.column_desc.as_mut().map(|desc| {
+                                let is_bytea = desc
+                                    .get_column_type()
+                                    .map(|col_type| col_type.type_name == PbTypeName::Bytea as i32)
+                                    .unwrap();
+                                if desc.name == default_key_column_name_version_mapping(
+                                    &desc.version()
+                                )
+                                    && is_bytea
+                                    // the column is from a legacy version
+                                    && desc.version == ColumnDescVersion::Unspecified as i32
+                                {
+                                    desc.additional_column_type = AdditionalColumnType::Key as i32;
+                                }
+                            });
+                        });
+                    }
+                }
+
+                {
+                    // compatible code: handle legacy column `_rw_kafka_timestamp`
+                    // the column is auto added for all kafka source to empower batch query on source
+                    // solution: rewrite the column `additional_column_type` to Timestamp
+
+                    let _ = source_columns.iter_mut().map(|c| {
+                        let _ = c.column_desc.as_mut().map(|desc| {
+                            let is_timestamp = desc
+                                .get_column_type()
+                                .map(|col_type| {
+                                    col_type.type_name == PbTypeName::Timestamptz as i32
+                                })
+                                .unwrap();
+                            if desc.name == KAFKA_TIMESTAMP_COLUMN_NAME
+                                && is_timestamp
+                                // the column is from a legacy version
+                                && desc.version == ColumnDescVersion::Unspecified as i32
+                            {
+                                desc.additional_column_type =
+                                    AdditionalColumnType::Timestamp as i32;
+                            }
+                        });
+                    });
+                }
+
                 let source_desc_builder = SourceDescBuilder::new(
-                    source.columns.clone(),
+                    source_columns.clone(),
                     params.env.source_metrics(),
                     source.row_id_index.map(|x| x as _),
-                    source.properties.clone(),
+                    source.with_properties.clone(),
                     source_info.clone(),
                     params.env.connector_params(),
                     params.env.config().developer.connector_message_buffer_size,
@@ -77,8 +134,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     chunk_size: params.env.config().developer.chunk_size,
                 };
 
-                let source_column_ids: Vec<_> = source
-                    .columns
+                let source_column_ids: Vec<_> = source_columns
                     .iter()
                     .map(|column| ColumnId::from(column.get_column_desc().unwrap().column_id))
                     .collect();
@@ -97,17 +153,17 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 );
 
                 let connector = source
-                    .properties
+                    .with_properties
                     .get("connector")
                     .map(|c| c.to_ascii_lowercase())
                     .unwrap_or_default();
                 let is_fs_connector = FS_CONNECTORS.contains(&connector.as_str());
                 let is_fs_v2_connector =
-                    ConnectorProperties::is_new_fs_connector_hash_map(&source.properties);
+                    ConnectorProperties::is_new_fs_connector_hash_map(&source.with_properties);
 
                 if is_fs_connector {
                     FsSourceExecutor::new(
-                        params.actor_context,
+                        params.actor_context.clone(),
                         params.info,
                         stream_source_core,
                         params.executor_stats,
@@ -129,7 +185,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     )
                     .boxed()
                 } else {
-                    let source_exec = SourceExecutor::new(
+                    SourceExecutor::new(
                         params.actor_context.clone(),
                         params.info.clone(),
                         Some(stream_source_core),
@@ -138,64 +194,12 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         system_params,
                         source_ctrl_opts.clone(),
                         params.env.connector_params(),
-                    );
-
-                    let table_type = CdcTableType::from_properties(&source.properties);
-                    if table_type.can_backfill()
-                        && let Some(table_desc) = source_info.external_table.clone()
-                    {
-                        let table_schema = Schema::new(table_desc.columns.iter().map(Into::into).collect());
-                        let upstream_table_name = SchemaTableName::from_properties(&source.properties);
-                        let table_pk_indices = table_desc
-                            .pk
-                            .iter()
-                            .map(|k| k.column_index as usize)
-                            .collect_vec();
-                        let table_pk_order_types = table_desc
-                            .pk
-                            .iter()
-                            .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
-                            .collect_vec();
-
-                        let table_reader = table_type
-                            .create_table_reader(source.properties.clone(), table_schema.clone()).await?;
-                        let external_table = ExternalStorageTable::new(
-                            TableId::new(source.source_id),
-                            upstream_table_name,
-                            table_reader,
-                            table_schema.clone(),
-                            table_pk_order_types,
-                            table_pk_indices,
-                            (0..table_schema.len()).collect_vec(),
-                        );
-
-                        // use the state table from source to store the backfill state (may refactor in future)
-                        let source_state_handler = SourceStateTableHandler::from_table_catalog(
-                            source.state_table.as_ref().unwrap(),
-                            store.clone(),
-                        ).await;
-                        // use schema from table_desc
-                        let cdc_backfill = CdcBackfillExecutor::new(
-                            params.actor_context.clone(),
-                            params.info.clone(),
-                            external_table,
-                            Box::new(source_exec),
-                            (0..table_schema.len()).collect_vec(),
-                            None,
-                            params.executor_stats,
-                            None,
-                            Some(source_state_handler),
-                            false,
-                            source_ctrl_opts.chunk_size,
-                        );
-                        cdc_backfill.boxed()
-                    } else {
-                        source_exec.boxed()
-                    }
+                    )
+                    .boxed()
                 }
             };
             let rate_limit = source.rate_limit.map(|x| x as _);
-            Ok(FlowControlExecutor::new(executor, rate_limit).boxed())
+            Ok(FlowControlExecutor::new(executor, params.actor_context, rate_limit).boxed())
         } else {
             // If there is no external stream source, then no data should be persisted. We pass a
             // `PanicStateStore` type here for indication.

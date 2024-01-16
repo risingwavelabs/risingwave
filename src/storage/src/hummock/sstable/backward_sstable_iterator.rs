@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Less};
-use std::future::Future;
 use std::sync::Arc;
 
 use risingwave_common::cache::CachePriority;
@@ -90,20 +89,14 @@ impl BackwardSstableIterator {
 impl HummockIterator for BackwardSstableIterator {
     type Direction = Backward;
 
-    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
+    async fn next(&mut self) -> HummockResult<()> {
         self.stats.total_key_count += 1;
-        async move {
-            let block_iter = self.block_iter.as_mut().expect("no block iter");
-            if block_iter.try_prev() {
-                Ok(())
-            } else {
-                // seek to the previous block
-                self.seek_idx(self.cur_idx as isize - 1, None).await
-            }
+        let block_iter = self.block_iter.as_mut().expect("no block iter");
+        if block_iter.try_prev() {
+            Ok(())
+        } else {
+            // seek to the previous block
+            self.seek_idx(self.cur_idx as isize - 1, None).await
         }
     }
 
@@ -123,38 +116,34 @@ impl HummockIterator for BackwardSstableIterator {
 
     /// Instead of setting idx to 0th block, a `BackwardSstableIterator` rewinds to the last block
     /// in the sstable.
-    fn rewind(&mut self) -> Self::RewindFuture<'_> {
-        async move {
-            self.seek_idx(self.sst.value().block_count() as isize - 1, None)
-                .await
-        }
+    async fn rewind(&mut self) -> HummockResult<()> {
+        self.seek_idx(self.sst.value().block_count() as isize - 1, None)
+            .await
     }
 
-    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
-        async move {
-            let block_idx = self
-                .sst
-                .value()
-                .meta
-                .block_metas
-                .partition_point(|block_meta| {
-                    // Compare by version comparator
-                    // Note: we are comparing against the `smallest_key` of the `block`, thus the
-                    // partition point should be `prev(<=)` instead of `<`.
-                    let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
-                    ord == Less || ord == Equal
-                })
-                .saturating_sub(1); // considering the boundary of 0
-            let block_idx = block_idx as isize;
+    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+        let block_idx = self
+            .sst
+            .value()
+            .meta
+            .block_metas
+            .partition_point(|block_meta| {
+                // Compare by version comparator
+                // Note: we are comparing against the `smallest_key` of the `block`, thus the
+                // partition point should be `prev(<=)` instead of `<`.
+                let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
+                ord == Less || ord == Equal
+            })
+            .saturating_sub(1); // considering the boundary of 0
+        let block_idx = block_idx as isize;
 
-            self.seek_idx(block_idx, Some(key)).await?;
-            if !self.is_valid() {
-                // Seek to prev block
-                self.seek_idx(block_idx - 1, None).await?;
-            }
-
-            Ok(())
+        self.seek_idx(block_idx, Some(key)).await?;
+        if !self.is_valid() {
+            // Seek to prev block
+            self.seek_idx(block_idx - 1, None).await?;
         }
+
+        Ok(())
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {

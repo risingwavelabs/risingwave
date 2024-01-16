@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, AlwaysOutput, DistinctDeduplicater,
 };
-use super::monitor::StreamingMetrics;
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
@@ -59,6 +58,9 @@ struct ExecutorInner<S: StateStore> {
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
 
+    /// Pk indices from input. Only used by `AggNodeVersion` before `ISSUE_13465`.
+    input_pk_indices: Vec<usize>,
+
     /// Schema from input.
     input_schema: Schema,
 
@@ -88,8 +90,6 @@ struct ExecutorInner<S: StateStore> {
 
     /// Extreme state cache size
     extreme_cache_size: usize,
-
-    metrics: Arc<StreamingMetrics>,
 }
 
 impl<S: StateStore> ExecutorInner<S> {
@@ -138,6 +138,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 version: args.version,
                 actor_ctx: args.actor_ctx,
                 info: args.info,
+                input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 agg_funcs: args.agg_calls.iter().map(build_retractable).try_collect()?,
                 agg_calls: args.agg_calls,
@@ -147,7 +148,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 distinct_dedup_tables: args.distinct_dedup_tables,
                 watermark_epoch: args.watermark_epoch,
                 extreme_cache_size: args.extreme_cache_size,
-                metrics: args.metrics,
             },
         })
     }
@@ -178,7 +178,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 call_visibilities,
                 &mut this.distinct_dedup_tables,
                 None,
-                this.actor_ctx.clone(),
             )
             .await?;
 
@@ -208,8 +207,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         let chunk = if vars.state_changed || vars.agg_group.is_uninitialized() {
             // Flush distinct dedup state.
-            vars.distinct_dedup
-                .flush(&mut this.distinct_dedup_tables, this.actor_ctx.clone())?;
+            vars.distinct_dedup.flush(&mut this.distinct_dedup_tables)?;
 
             // Flush states into intermediate state table.
             let encoded_states = vars.agg_group.encode_states(&this.agg_funcs)?;
@@ -240,6 +238,13 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         Ok(chunk)
     }
 
+    async fn try_flush_data(this: &mut ExecutorInner<S>) -> StreamExecutorResult<()> {
+        futures::future::try_join_all(this.all_state_tables_mut().map(|table| table.try_flush()))
+            .await?;
+
+        Ok(())
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let Self {
@@ -255,10 +260,9 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
         let mut distinct_dedup = DistinctDeduplicater::new(
             &this.agg_calls,
-            &this.watermark_epoch,
+            this.watermark_epoch.clone(),
             &this.distinct_dedup_tables,
-            this.actor_ctx.id,
-            this.metrics.clone(),
+            this.actor_ctx.clone(),
         );
         distinct_dedup.dedup_caches_mut().for_each(|cache| {
             cache.update_epoch(barrier.epoch.curr);
@@ -275,6 +279,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 &this.agg_funcs,
                 &this.storages,
                 &this.intermediate_state_table,
+                &this.input_pk_indices,
                 this.row_count_index,
                 this.extreme_cache_size,
                 &this.input_schema,
@@ -291,6 +296,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 Message::Watermark(_) => {}
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(&mut this, &mut vars, chunk).await?;
+                    Self::try_flush_data(&mut this).await?;
                 }
                 Message::Barrier(barrier) => {
                     if let Some(chunk) =

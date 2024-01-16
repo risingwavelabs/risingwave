@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,18 +26,21 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::Deserialize;
 use serde_json::Value;
 use serde_with::serde_as;
 use url::Url;
 use with_options::WithOptions;
 use yup_oauth2::ServiceAccountKey;
 
-use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
+use super::encoder::{
+    DateHandlingMode, JsonEncoder, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
+    TimestamptzHandlingMode,
+};
 use super::writer::LogSinkerOf;
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
-use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::load_file_descriptor_from_s3;
+use crate::common::AwsAuthProps;
 use crate::sink::writer::SinkWriterExt;
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriter, SinkWriterParam,
@@ -46,7 +49,7 @@ use crate::sink::{
 pub const BIGQUERY_SINK: &str = "bigquery";
 const BIGQUERY_INSERT_MAX_NUMS: usize = 1024;
 
-#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct BigQueryCommon {
     #[serde(rename = "bigquery.local.path")]
     pub local_path: Option<String>,
@@ -58,13 +61,10 @@ pub struct BigQueryCommon {
     pub dataset: String,
     #[serde(rename = "bigquery.table")]
     pub table: String,
-    #[serde(flatten)]
-    /// required keys refer to [`crate::aws_utils::AWS_DEFAULT_CONFIG`]
-    pub s3_credentials: HashMap<String, String>,
 }
 
 impl BigQueryCommon {
-    pub(crate) async fn build_client(&self) -> Result<Client> {
+    pub(crate) async fn build_client(&self, aws_auth_props: &AwsAuthProps) -> Result<Client> {
         let service_account = if let Some(local_path) = &self.local_path {
             let auth_json = std::fs::read_to_string(local_path)
                 .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
@@ -73,16 +73,9 @@ impl BigQueryCommon {
         } else if let Some(s3_path) = &self.s3_path {
             let url =
                 Url::parse(s3_path).map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
-            let auth_json = load_file_descriptor_from_s3(
-                &url,
-                &AwsAuthProps::from_pairs(
-                    self.s3_credentials
-                        .iter()
-                        .map(|(k, v)| (k.as_str(), v.as_str())),
-                ),
-            )
-            .await
-            .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
+            let auth_json = load_file_descriptor_from_s3(&url, aws_auth_props)
+                .await
+                .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
             serde_json::from_slice::<ServiceAccountKey>(&auth_json)
                 .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?
         } else {
@@ -100,7 +93,8 @@ impl BigQueryCommon {
 pub struct BigQueryConfig {
     #[serde(flatten)]
     pub common: BigQueryCommon,
-
+    #[serde(flatten)]
+    pub aws_auth_props: AwsAuthProps,
     pub r#type: String, // accept "append-only" or "upsert"
 }
 impl BigQueryConfig {
@@ -242,7 +236,11 @@ impl Sink for BigQuerySink {
             )));
         }
 
-        let client = self.config.common.build_client().await?;
+        let client = self
+            .config
+            .common
+            .build_client(&self.config.aws_auth_props)
+            .await?;
         let mut rs = client
         .job()
         .query(
@@ -306,7 +304,7 @@ impl BigQuerySinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        let client = config.common.build_client().await?;
+        let client = config.common.build_client(&config.aws_auth_props).await?;
         Ok(Self {
             config,
             schema: schema.clone(),
@@ -314,10 +312,13 @@ impl BigQuerySinkWriter {
             client,
             is_append_only,
             insert_request: TableDataInsertAllRequest::new(),
-            row_encoder: JsonEncoder::new_with_big_query(
+            row_encoder: JsonEncoder::new(
                 schema,
                 None,
+                DateHandlingMode::String,
                 TimestampHandlingMode::String,
+                TimestamptzHandlingMode::UtcString,
+                TimeHandlingMode::Milli,
             ),
         })
     }

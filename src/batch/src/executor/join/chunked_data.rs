@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use std::ops::{Index, IndexMut};
 
-use risingwave_common::error::{Result, RwError};
+use crate::error::{BatchError, Result};
 
 /// Id of one row in chunked data.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
@@ -151,7 +151,7 @@ impl<V> IndexMut<RowId> for ChunkedData<V> {
 }
 
 impl<V> TryFrom<Vec<Vec<V>>> for ChunkedData<V> {
-    type Error = RwError;
+    type Error = BatchError;
 
     fn try_from(value: Vec<Vec<V>>) -> Result<Self> {
         let chunk_offsets = std::iter::once(Ok(0))

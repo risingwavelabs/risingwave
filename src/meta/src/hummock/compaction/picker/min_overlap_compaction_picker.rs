@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ pub struct MinOverlappingPicker {
     level: usize,
     target_level: usize,
     max_select_bytes: u64,
-    split_by_table: bool,
+    vnode_partition_count: u32,
     overlap_strategy: Arc<dyn OverlapStrategy>,
 }
 
@@ -37,14 +37,14 @@ impl MinOverlappingPicker {
         level: usize,
         target_level: usize,
         max_select_bytes: u64,
-        split_by_table: bool,
+        vnode_partition_count: u32,
         overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> MinOverlappingPicker {
         MinOverlappingPicker {
             level,
             target_level,
             max_select_bytes,
-            split_by_table,
+            vnode_partition_count,
             overlap_strategy,
         }
     }
@@ -55,58 +55,79 @@ impl MinOverlappingPicker {
         target_tables: &[SstableInfo],
         level_handlers: &[LevelHandler],
     ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
-        let mut scores = vec![];
-        for left in 0..select_tables.len() {
-            if level_handlers[self.level].is_pending_compact(&select_tables[left].sst_id) {
+        let mut select_file_ranges = vec![];
+        for (idx, sst) in select_tables.iter().enumerate() {
+            if level_handlers[self.level].is_pending_compact(&sst.sst_id) {
                 continue;
             }
             let mut overlap_info = self.overlap_strategy.create_overlap_info();
+            overlap_info.update(sst);
+            let overlap_files_range = overlap_info.check_multiple_overlap(target_tables);
+
+            if overlap_files_range.is_empty() {
+                return (vec![sst.clone()], vec![]);
+            }
+            select_file_ranges.push((idx, overlap_files_range));
+        }
+        select_file_ranges.retain(|(_, range)| {
+            let mut pending_compact = false;
+            for other in &target_tables[range.clone()] {
+                if level_handlers[self.target_level].is_pending_compact(&other.sst_id) {
+                    pending_compact = true;
+                    break;
+                }
+            }
+            !pending_compact
+        });
+
+        let mut min_score = u64::MAX;
+        let mut min_score_select_range = 0..0;
+        let mut min_score_target_range = 0..0;
+        let mut min_score_select_file_size = 0;
+        for left in 0..select_file_ranges.len() {
             let mut select_file_size = 0;
-            for (right, table) in select_tables.iter().enumerate().skip(left) {
-                if level_handlers[self.level].is_pending_compact(&table.sst_id) {
+            let mut target_level_overlap_range = select_file_ranges[left].1.clone();
+            let mut total_file_size = 0;
+            for other in &target_tables[target_level_overlap_range.clone()] {
+                total_file_size += other.file_size;
+            }
+            let start_idx = select_file_ranges[left].0;
+            let mut end_idx = start_idx + 1;
+            for (idx, range) in select_file_ranges.iter().skip(left) {
+                if select_file_size > self.max_select_bytes
+                    || *idx > end_idx
+                    || range.start >= target_level_overlap_range.end
+                {
                     break;
                 }
-                if self.split_by_table && table.table_ids != select_tables[left].table_ids {
-                    break;
-                }
-                if select_file_size > self.max_select_bytes {
-                    break;
-                }
-                select_file_size += table.file_size;
-                overlap_info.update(table);
-                let overlap_files_range = overlap_info.check_multiple_overlap(target_tables);
-                let mut total_file_size = 0;
-                let mut pending_compact = false;
-                if !overlap_files_range.is_empty() {
-                    for other in &target_tables[overlap_files_range] {
-                        if level_handlers[self.target_level].is_pending_compact(&other.sst_id) {
-                            pending_compact = true;
-                            break;
-                        }
+                select_file_size += select_tables[*idx].file_size;
+                if range.end > target_level_overlap_range.end {
+                    for other in &target_tables[target_level_overlap_range.end..range.end] {
                         total_file_size += other.file_size;
                     }
+                    target_level_overlap_range.end = range.end;
                 }
-                if pending_compact {
-                    break;
+                let score = if select_file_size == 0 {
+                    total_file_size
+                } else {
+                    total_file_size * 100 / select_file_size
+                };
+                end_idx = idx + 1;
+                if score < min_score
+                    || (score == min_score && select_file_size < min_score_select_file_size)
+                {
+                    min_score = score;
+                    min_score_select_range = start_idx..end_idx;
+                    min_score_target_range = target_level_overlap_range.clone();
+                    min_score_select_file_size = select_file_size;
                 }
-                scores.push((total_file_size * 100 / select_file_size, (left, right)));
             }
         }
-        if scores.is_empty() {
+        if min_score == u64::MAX {
             return (vec![], vec![]);
         }
-        let (_, (left, right)) = scores
-            .iter()
-            .min_by(|(score1, x), (score2, y)| {
-                score1
-                    .cmp(score2)
-                    .then_with(|| (x.1 - x.0).cmp(&(y.1 - y.0)))
-            })
-            .unwrap();
-        let select_input_ssts = select_tables[*left..(right + 1)].to_vec();
-        let target_input_ssts = self
-            .overlap_strategy
-            .check_base_level_overlap(&select_input_ssts, target_tables);
+        let select_input_ssts = select_tables[min_score_select_range].to_vec();
+        let target_input_ssts = target_tables[min_score_target_range].to_vec();
         (select_input_ssts, target_input_ssts)
     }
 }
@@ -145,6 +166,7 @@ impl CompactionPicker for MinOverlappingPicker {
                 },
             ],
             target_level: self.target_level,
+            vnode_partition_count: self.vnode_partition_count,
             ..Default::default()
         })
     }
@@ -358,23 +380,44 @@ impl NonOverlapSubLevelPicker {
             return vec![];
         }
 
+        let mut expected = Vec::with_capacity(scores.len());
+        let mut unexpected = vec![];
+
+        for selected_task in scores {
+            if selected_task.sstable_infos.len() > MAX_COMPACT_LEVEL_COUNT {
+                unexpected.push(selected_task);
+            } else {
+                expected.push(selected_task);
+            }
+        }
+
         // The logic of sorting depends on the interval we expect to select.
         // 1. contain as many levels as possible
         // 2. fewer files in the bottom sub level, containing as many smaller intervals as possible.
-        scores.sort_by(|a, b| {
+        expected.sort_by(|a, b| {
             b.sstable_infos
                 .len()
                 .cmp(&a.sstable_infos.len())
                 .then_with(|| a.total_file_count.cmp(&b.total_file_count))
                 .then_with(|| a.total_file_size.cmp(&b.total_file_size))
         });
-        scores
+
+        unexpected.sort_by(|a, b| {
+            b.sstable_infos
+                .len()
+                .cmp(&a.sstable_infos.len())
+                .then_with(|| a.total_file_count.cmp(&b.total_file_count))
+                .then_with(|| a.total_file_size.cmp(&b.total_file_size))
+        });
+        expected.extend(unexpected);
+
+        expected
     }
 }
 
 #[cfg(test)]
 pub mod tests {
-    pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
+    pub use risingwave_pb::hummock::{Level, LevelType};
 
     use super::*;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
@@ -384,13 +427,8 @@ pub mod tests {
 
     #[test]
     fn test_compact_l1() {
-        let mut picker = MinOverlappingPicker::new(
-            1,
-            2,
-            10000,
-            false,
-            Arc::new(RangeOverlapStrategy::default()),
-        );
+        let mut picker =
+            MinOverlappingPicker::new(1, 2, 10000, 0, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
             Level {
                 level_idx: 1,
@@ -400,10 +438,7 @@ pub mod tests {
                     generate_table(1, 1, 101, 200, 1),
                     generate_table(2, 1, 222, 300, 1),
                 ],
-
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -415,9 +450,7 @@ pub mod tests {
                     generate_table(7, 1, 501, 800, 1),
                     generate_table(8, 2, 301, 400, 1),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
         let levels = Levels {
@@ -450,8 +483,8 @@ pub mod tests {
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[1].table_infos.len(), 1);
         assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 0);
+        assert_eq!(ret.input_levels[1].table_infos.len(), 1);
         assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 4);
         ret.add_pending_task(1, &mut level_handlers);
 
@@ -459,20 +492,15 @@ pub mod tests {
             .pick_compaction(&levels, &level_handlers, &mut local_stats)
             .unwrap();
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[1].table_infos.len(), 2);
         assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 1);
+        assert_eq!(ret.input_levels[1].table_infos.len(), 2);
         assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 5);
     }
 
     #[test]
     fn test_expand_l1_files() {
-        let mut picker = MinOverlappingPicker::new(
-            1,
-            2,
-            10000,
-            false,
-            Arc::new(RangeOverlapStrategy::default()),
-        );
+        let mut picker =
+            MinOverlappingPicker::new(1, 2, 10000, 0, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
             Level {
                 level_idx: 1,
@@ -482,9 +510,7 @@ pub mod tests {
                     generate_table(1, 1, 100, 149, 2),
                     generate_table(2, 1, 150, 249, 2),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -493,9 +519,7 @@ pub mod tests {
                     generate_table(4, 1, 50, 199, 1),
                     generate_table(5, 1, 200, 399, 1),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
         let levels = Levels {
@@ -544,8 +568,7 @@ pub mod tests {
                     generate_table(8, 1, 450, 500, 2),
                 ],
                 total_file_size: 800,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -558,8 +581,7 @@ pub mod tests {
                     generate_table(11, 1, 450, 500, 2),
                 ],
                 total_file_size: 250,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 3,
@@ -570,8 +592,7 @@ pub mod tests {
                     generate_table(13, 1, 450, 500, 2),
                 ],
                 total_file_size: 150,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 4,
@@ -582,8 +603,7 @@ pub mod tests {
                     generate_table(16, 1, 450, 500, 2),
                 ],
                 total_file_size: 150,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
 
@@ -648,8 +668,7 @@ pub mod tests {
                     generate_table(8, 1, 450, 500, 2),
                 ],
                 total_file_size: 800,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -662,8 +681,7 @@ pub mod tests {
                     generate_table(11, 1, 450, 500, 2),
                 ],
                 total_file_size: 250,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 3,
@@ -674,8 +692,7 @@ pub mod tests {
                     generate_table(13, 1, 450, 500, 2),
                 ],
                 total_file_size: 150,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 4,
@@ -686,8 +703,7 @@ pub mod tests {
                     generate_table(16, 1, 450, 500, 2),
                 ],
                 total_file_size: 150,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
 
@@ -777,8 +793,7 @@ pub mod tests {
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![generate_table(0, 1, 400, 500, 2)],
                 total_file_size: 100,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -788,8 +803,7 @@ pub mod tests {
                     generate_table(2, 1, 600, 700, 1),
                 ],
                 total_file_size: 200,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 3,
@@ -799,8 +813,7 @@ pub mod tests {
                     generate_table(4, 1, 600, 800, 1),
                 ],
                 total_file_size: 400,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
 
@@ -812,7 +825,7 @@ pub mod tests {
         ];
         // no limit
         let picker =
-            MinOverlappingPicker::new(2, 3, 1000, false, Arc::new(RangeOverlapStrategy::default()));
+            MinOverlappingPicker::new(2, 3, 1000, 0, Arc::new(RangeOverlapStrategy::default()));
         let (select_files, target_files) = picker.pick_tables(
             &levels[1].table_infos,
             &levels[2].table_infos,
