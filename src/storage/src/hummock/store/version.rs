@@ -23,6 +23,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::{Epoch, MAX_SPILL_TIMES};
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, is_empty_key_range, FullKey, TableKey, TableKeyRange, UserKey,
 };
@@ -31,7 +32,7 @@ use risingwave_hummock_sdk::table_watermark::{
     ReadTableWatermark, TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
 use risingwave_hummock_sdk::version::HummockVersionDelta;
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{LevelType, SstableInfo};
 use sync_point::sync_point;
 use tracing::Instrument;
@@ -684,7 +685,11 @@ impl HummockVersionReader {
             Sstable::hash_for_bloom_filter(dist_key.as_ref(), read_options.table_id.table_id())
         });
 
-        let full_key = FullKey::new(read_options.table_id, TableKey(table_key.clone()), epoch);
+        let full_key = FullKey::new_with_gap_epoch(
+            read_options.table_id,
+            TableKey(table_key.clone()),
+            EpochWithGap::new(epoch, MAX_SPILL_TIMES),
+        );
         for local_sst in &uncommitted_ssts {
             local_stats.staging_sst_get_count += 1;
             if let Some((data, data_epoch)) = get_from_sstable_info(

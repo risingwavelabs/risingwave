@@ -28,6 +28,7 @@ use risingwave_hummock_sdk::key::{
     gen_key_from_bytes, prefix_slice_with_vnode, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN,
 };
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
+use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::version::{read_filter_for_batch, read_filter_for_local};
@@ -441,7 +442,7 @@ async fn test_storage_basic() {
     // TODO: add more test cases after sync is supported
 }
 
-// #[tokio::test]
+#[tokio::test]
 async fn test_state_store_sync() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
     let test_env = prepare_hummock_test_env().await;
@@ -634,19 +635,35 @@ async fn test_state_store_sync() {
             .unwrap();
         futures::pin_mut!(iter);
 
-        let kv_map = [
+        let kv_map_batch_1 = [
             (gen_key_from_str(VirtualNode::ZERO, "aaaa"), "1111", epoch1),
             (gen_key_from_str(VirtualNode::ZERO, "bbbb"), "2222", epoch1),
+        ];
+        for (k, v, e) in kv_map_batch_1 {
+            let result = iter.try_next().await.unwrap();
+            println!("result = {:?}", result);
+            assert_eq!(
+                result,
+                Some((
+                    FullKey::new_with_gap_epoch(TEST_TABLE_ID, k, EpochWithGap::new(e, 0)),
+                    Bytes::from(v)
+                ))
+            );
+        }
+        let kv_map_batch_2 = [
             (gen_key_from_str(VirtualNode::ZERO, "cccc"), "3333", epoch1),
             (gen_key_from_str(VirtualNode::ZERO, "dddd"), "4444", epoch1),
             (gen_key_from_str(VirtualNode::ZERO, "eeee"), "5555", epoch1),
         ];
 
-        for (k, v, e) in kv_map {
+        for (k, v, e) in kv_map_batch_2 {
             let result = iter.try_next().await.unwrap();
             assert_eq!(
                 result,
-                Some((FullKey::new(TEST_TABLE_ID, k, e), Bytes::from(v)))
+                Some((
+                    FullKey::new_with_gap_epoch(TEST_TABLE_ID, k, EpochWithGap::new(e, 1)),
+                    Bytes::from(v)
+                ))
             );
         }
 
@@ -673,20 +690,45 @@ async fn test_state_store_sync() {
 
         futures::pin_mut!(iter);
 
-        let kv_map = [
-            ("aaaa", "1111", epoch1),
-            ("bbbb", "2222", epoch1),
-            ("cccc", "3333", epoch1),
-            ("dddd", "4444", epoch1),
-            ("eeee", "6666", epoch2),
-        ];
+        let kv_map_batch_1 = [("aaaa", "1111", epoch1), ("bbbb", "2222", epoch1)];
 
-        for (k, v, e) in kv_map {
+        let kv_map_batch_2 = [("cccc", "3333", epoch1), ("dddd", "4444", epoch1)];
+        let kv_map_batch_3 = [("eeee", "6666", epoch2)];
+        for (k, v, e) in kv_map_batch_1 {
             let result = iter.try_next().await.unwrap();
             assert_eq!(
                 result,
                 Some((
                     FullKey::new(TEST_TABLE_ID, gen_key_from_str(VirtualNode::ZERO, k), e),
+                    Bytes::from(v)
+                ))
+            );
+        }
+
+        for (k, v, e) in kv_map_batch_2 {
+            let result = iter.try_next().await.unwrap();
+            assert_eq!(
+                result,
+                Some((
+                    FullKey::new_with_gap_epoch(
+                        TEST_TABLE_ID,
+                        gen_key_from_str(VirtualNode::ZERO, k),
+                        EpochWithGap::new(e, 1)
+                    ),
+                    Bytes::from(v)
+                ))
+            );
+        }
+        for (k, v, e) in kv_map_batch_3 {
+            let result = iter.try_next().await.unwrap();
+            assert_eq!(
+                result,
+                Some((
+                    FullKey::new_with_gap_epoch(
+                        TEST_TABLE_ID,
+                        gen_key_from_str(VirtualNode::ZERO, k),
+                        EpochWithGap::new(e, 0)
+                    ),
                     Bytes::from(v)
                 ))
             );

@@ -24,7 +24,7 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{
-    HummockEpoch, HummockReadEpoch, HummockSstableObjectId, LocalSstableInfo,
+    EpochWithGap, HummockEpoch, HummockReadEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -714,7 +714,7 @@ async fn test_reload_storage() {
     assert_eq!(len, 3);
 }
 
-// #[tokio::test]
+#[tokio::test]
 async fn test_write_anytime_v2() {
     let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_write_anytime_inner(hummock_storage, meta_client).await;
@@ -925,10 +925,10 @@ async fn test_write_anytime_inner(
             futures::pin_mut!(iter);
             assert_eq!(
                 (
-                    FullKey::new(
+                    FullKey::new_with_gap_epoch(
                         TableId::default(),
                         gen_key_from_str(VirtualNode::ZERO, "aa"),
-                        epoch
+                        EpochWithGap::new(epoch, 1)
                     ),
                     Bytes::from("111_new")
                 ),
@@ -936,10 +936,10 @@ async fn test_write_anytime_inner(
             );
             assert_eq!(
                 (
-                    FullKey::new(
+                    FullKey::new_with_gap_epoch(
                         TableId::default(),
                         gen_key_from_str(VirtualNode::ZERO, "cc"),
-                        epoch
+                        EpochWithGap::new(epoch, 0)
                     ),
                     Bytes::from("333")
                 ),
