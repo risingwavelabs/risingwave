@@ -29,7 +29,6 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::anyhow_error;
 use risingwave_common::types::DataType;
-use rw_futures_util::drop_either_future;
 use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_jni_core::{
     call_static_method, gen_class_name, JniReceiverType, JniSenderType, JniSinkWriterStreamRequest,
@@ -49,6 +48,7 @@ use risingwave_rpc_client::{
     BidiStreamReceiver, BidiStreamSender, SinkCoordinatorStreamHandle, SinkWriterStreamHandle,
     DEFAULT_BUFFER_SIZE,
 };
+use rw_futures_util::drop_either_future;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender};
 use tokio::task::spawn_blocking;

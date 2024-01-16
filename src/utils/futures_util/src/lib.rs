@@ -22,8 +22,8 @@ use futures::TryFuture;
 mod buffered_with_fence;
 mod misc;
 
+use buffered_with_fence::{Fenced, MaybeFence, TryBufferedWithFence};
 pub use misc::*;
-use buffered_with_fence::{MaybeFence, Fenced, TryBufferedWithFence};
 
 pub trait RwTryStreamExt: TryStream {
     /// Similar to [`TryStreamExt::try_buffered`](https://docs.rs/futures/latest/futures/stream/trait.TryStreamExt.html#method.try_buffered), but respect to fence.
