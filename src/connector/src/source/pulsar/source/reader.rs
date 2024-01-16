@@ -37,7 +37,7 @@ use crate::parser::ParserConfig;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
-    into_chunk_stream, BoxChunkedSourceStream, Column, CommonSplitReader, SourceContextRef,
+    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef,
     SourceMessage, SplitId, SplitMetaData, SplitReader,
 };
 
@@ -83,7 +83,7 @@ impl SplitReader for PulsarSplitReader {
         }
     }
 
-    fn into_stream(self) -> BoxChunkedSourceStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         match self {
             Self::Broker(reader) => {
                 let (parser_config, source_context) =
@@ -234,7 +234,7 @@ impl SplitReader for PulsarBrokerReader {
         })
     }
 
-    fn into_stream(self) -> BoxChunkedSourceStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self, parser_config, source_context)

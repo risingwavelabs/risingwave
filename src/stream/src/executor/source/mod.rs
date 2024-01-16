@@ -51,27 +51,27 @@ pub async fn barrier_to_message_stream(mut rx: UnboundedReceiver<Barrier>) {
 
 pub fn get_split_offset_mapping_from_chunk(
     chunk: &StreamChunk,
-    partition_idx: usize,
+    split_idx: usize,
     offset_idx: usize,
 ) -> Option<HashMap<SplitId, String>> {
     let mut split_offset_mapping = HashMap::new();
     for (_, row) in chunk.rows() {
-        let split_id = row.datum_at(partition_idx).unwrap().into_utf8().into();
+        let split_id = row.datum_at(split_idx).unwrap().into_utf8().into();
         let offset = row.datum_at(offset_idx).unwrap().into_utf8();
         split_offset_mapping.insert(split_id, offset.to_string());
     }
     Some(split_offset_mapping)
 }
 
-pub fn get_partition_offset_col_idx(
+pub fn get_split_offset_col_idx(
     column_descs: &[SourceColumnDesc],
 ) -> (Option<usize>, Option<usize>) {
-    let mut partition_idx = None;
+    let mut split_idx = None;
     let mut offset_idx = None;
     for (idx, column) in column_descs.iter().enumerate() {
         match column.additional_column_type {
-            AdditionalColumnType::Partition => {
-                partition_idx = Some(idx);
+            AdditionalColumnType::Partition | AdditionalColumnType::Filename => {
+                split_idx = Some(idx);
             }
             AdditionalColumnType::Offset => {
                 offset_idx = Some(idx);
@@ -79,18 +79,18 @@ pub fn get_partition_offset_col_idx(
             _ => (),
         }
     }
-    (partition_idx, offset_idx)
+    (split_idx, offset_idx)
 }
 
 pub fn prune_additional_cols(
     chunk: &StreamChunk,
-    partition_idx: usize,
+    split_idx: usize,
     offset_idx: usize,
 ) -> StreamChunk {
     // TODO: ignore if it is user defined
     chunk.project(
         &(0..chunk.dimension())
-            .filter(|&idx| idx != partition_idx && idx != offset_idx)
+            .filter(|&idx| idx != split_idx && idx != offset_idx)
             .collect_vec(),
     )
 }

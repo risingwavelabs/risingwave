@@ -31,7 +31,7 @@ use risingwave_connector::source::filesystem::opendal_source::{
 };
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::{
-    BoxChunkedSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
+    BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
 use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::SourceDesc;
@@ -155,7 +155,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
         batch: SplitBatch,
-    ) -> StreamExecutorResult<BoxChunkedSourceStream> {
+    ) -> StreamExecutorResult<BoxChunkSourceStream> {
         source_desc
             .source
             .stream_reader(batch, column_ids, Arc::new(source_ctx))
@@ -191,8 +191,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
-        let (Some(partition_idx), Some(offset_idx)) =
-            get_partition_offset_col_idx(&source_desc.columns)
+        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
         };
@@ -301,12 +300,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                         }
                         // StreamChunk from FsSourceReader, and the reader reads only one file.
                         Either::Right(chunk) => {
-                            let mapping = get_split_offset_mapping_from_chunk(
-                                &chunk,
-                                partition_idx,
-                                offset_idx,
-                            )
-                            .unwrap();
+                            let mapping =
+                                get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx)
+                                    .unwrap();
                             debug_assert_eq!(mapping.len(), 1);
                             if let Some((split_id, offset)) = mapping.into_iter().next() {
                                 let row = state_store_handler
@@ -332,7 +328,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 }
                             }
 
-                            let chunk = prune_additional_cols(&chunk, partition_idx, offset_idx);
+                            let chunk = prune_additional_cols(&chunk, split_idx, offset_idx);
                             yield Message::Chunk(chunk);
                         }
                     }

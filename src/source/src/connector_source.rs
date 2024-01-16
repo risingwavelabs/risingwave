@@ -34,7 +34,7 @@ use risingwave_connector::source::filesystem::opendal_source::{
 };
 use risingwave_connector::source::filesystem::FsPageItem;
 use risingwave_connector::source::{
-    create_split_reader, BoxChunkedSourceStream, BoxTryStream, Column, ConnectorProperties,
+    create_split_reader, BoxChunkSourceStream, BoxTryStream, Column, ConnectorProperties,
     ConnectorState, FsFilterCtrlCtx, SourceColumnDesc, SourceContext, SplitReader,
 };
 use tokio::time;
@@ -117,7 +117,7 @@ impl ConnectorSource {
         state: ConnectorState,
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
-    ) -> Result<BoxChunkedSourceStream> {
+    ) -> Result<BoxChunkSourceStream> {
         let Some(splits) = state else {
             return Ok(pending().boxed());
         };

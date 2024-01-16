@@ -53,8 +53,8 @@ use crate::parser::util::{extract_headers_from_meta, extreact_timestamp_from_met
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
-    extract_source_struct, BoxSourceStream, ChunkedSourceStream, SourceColumnDesc,
-    SourceColumnType, SourceContext, SourceContextRef, SourceEncode, SourceFormat, SourceMeta,
+    extract_source_struct, BoxSourceStream, ChunkSourceStream, SourceColumnDesc, SourceColumnType,
+    SourceContext, SourceContextRef, SourceEncode, SourceFormat, SourceMeta,
 };
 
 pub mod additional_columns;
@@ -550,8 +550,8 @@ impl<P: ByteStreamSourceParser> P {
     ///
     /// # Returns
     ///
-    /// A [`ChunkedSourceStream`] which is a stream of parsed messages.
-    pub fn into_stream(self, data_stream: BoxSourceStream) -> impl ChunkedSourceStream {
+    /// A [`ChunkSourceStream`] which is a stream of parsed messages.
+    pub fn into_stream(self, data_stream: BoxSourceStream) -> impl ChunkSourceStream {
         // Enable tracing to provide more information for parsing failures.
         let source_info = self.source_ctx().source_info;
 
@@ -779,7 +779,7 @@ pub enum ByteStreamSourceParserImpl {
     CanalJson(CanalJsonParser),
 }
 
-pub type ParsedStreamImpl = impl ChunkedSourceStream + Unpin;
+pub type ParsedStreamImpl = impl ChunkSourceStream + Unpin;
 
 impl ByteStreamSourceParserImpl {
     /// Converts this parser into a stream of [`StreamChunk`].

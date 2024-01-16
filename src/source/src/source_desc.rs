@@ -15,16 +15,18 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnDesc, ColumnId, ADDITION_PARTITION_COLUMN_NAME};
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::DataType;
 use risingwave_connector::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use risingwave_connector::source::monitor::SourceMetrics;
-use risingwave_connector::source::{SourceColumnDesc, SourceColumnType};
+use risingwave_connector::source::{
+    get_connector_compatible_additional_columns, SourceColumnDesc, SourceColumnType,
+    UPSTREAM_SOURCE_KEY,
+};
 use risingwave_connector::ConnectorParams;
 use risingwave_pb::catalog::PbStreamSourceInfo;
-use risingwave_pb::plan_common::{AdditionalColumnType, ColumnCatalog, PbColumnCatalog};
+use risingwave_pb::plan_common::{AdditionalColumnType, PbColumnCatalog};
 
 use crate::connector_source::ConnectorSource;
 use crate::fs_connector_source::FsConnectorSource;
@@ -85,38 +87,33 @@ impl SourceDescBuilder {
 
     fn column_catalogs_to_source_column_descs(&self) -> Vec<SourceColumnDesc> {
         let mut columns_exist = [false; 2];
-        let last_column_id = self
+        let mut last_column_id = self
             .columns
             .last()
             .map(|c| c.column_desc.as_ref().unwrap().column_id.into())
             .unwrap_or(ColumnId::new(0));
+        let connector_name = self
+            .with_properties
+            .get(UPSTREAM_SOURCE_KEY)
+            .map(|s| s.to_lowercase())
+            .unwrap();
 
-        let additional_columns = [
-            ColumnCatalog {
-                column_desc: Some(
-                    ColumnDesc::named_with_additional_column(
-                        ADDITION_PARTITION_COLUMN_NAME,
-                        last_column_id.next(),
-                        DataType::Varchar,
-                        AdditionalColumnType::Partition,
-                    )
-                    .to_protobuf(),
-                ),
-                is_hidden: true,
-            },
-            ColumnCatalog {
-                column_desc: Some(
-                    ColumnDesc::named_with_additional_column(
-                        ADDITION_PARTITION_COLUMN_NAME,
-                        last_column_id.next().next(),
-                        DataType::Varchar,
-                        AdditionalColumnType::Offset,
-                    )
-                    .to_protobuf(),
-                ),
-                is_hidden: true,
-            },
-        ];
+        let additional_columns: Vec<_> =
+            match get_connector_compatible_additional_columns(&connector_name) {
+                Some(col_list) => ["partition", "file", "offset"]
+                    .into_iter()
+                    .filter_map(|key_name| {
+                        let col_name = format!("_rw_{}_{}", connector_name, key_name);
+                        last_column_id = last_column_id.next();
+                        col_list.iter().find_map(|(n, f)| {
+                            (key_name == *n).then_some(f(last_column_id, &col_name).to_protobuf())
+                        })
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
+
+        debug_assert_eq!(additional_columns.len(), 2);
 
         let mut columns: Vec<_> = self
             .columns
@@ -125,7 +122,7 @@ impl SourceDescBuilder {
             .filter_map(|c| {
                 let addition_col_existed =
                     match c.column_desc.as_ref().unwrap().get_additional_column_type() {
-                        Ok(AdditionalColumnType::Partition) => {
+                        Ok(AdditionalColumnType::Partition | AdditionalColumnType::Filename) => {
                             std::mem::replace(&mut columns_exist[0], true)
                         }
                         Ok(AdditionalColumnType::Offset) => {

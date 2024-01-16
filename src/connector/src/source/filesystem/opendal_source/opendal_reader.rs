@@ -28,7 +28,7 @@ use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
-    BoxChunkedSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
+    BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
     SplitReader,
 };
 
@@ -63,7 +63,7 @@ impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
         Ok(opendal_reader)
     }
 
-    fn into_stream(self) -> BoxChunkedSourceStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         self.into_chunk_stream()
     }
 }

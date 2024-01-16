@@ -24,7 +24,7 @@ use with_options::WithOptions;
 
 use crate::parser::ParserConfig;
 use crate::source::{
-    BoxChunkedSourceStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
+    BoxChunkSourceStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
     SplitEnumerator, SplitId, SplitMetaData, SplitReader, TryFromHashmap,
 };
 
@@ -44,7 +44,7 @@ pub type BoxIntoSourceStream = Box<
             ParserConfig,
             SourceContextRef,
             Option<Vec<Column>>,
-        ) -> BoxChunkedSourceStream
+        ) -> BoxChunkSourceStream
         + Send
         + 'static,
 >;
@@ -68,7 +68,7 @@ impl BoxSource {
                 ParserConfig,
                 SourceContextRef,
                 Option<Vec<Column>>,
-            ) -> BoxChunkedSourceStream
+            ) -> BoxChunkSourceStream
             + Send
             + 'static,
     ) -> BoxSource {
@@ -218,7 +218,7 @@ impl SplitReader for TestSourceSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxChunkedSourceStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         (get_registry()
             .box_source
             .lock()

@@ -114,10 +114,6 @@ pub fn row_id_column_desc() -> ColumnDesc {
     ColumnDesc::named(ROWID_PREFIX, ROW_ID_COLUMN_ID, DataType::Serial)
 }
 
-/// The additional columns for partition/offset.
-pub const ADDITION_PARTITION_COLUMN_NAME: &str = "_rw_addition_partition";
-pub const ADDITION_OFFSET_COLUMN_NAME: &str = "_rw_addition_offset";
-
 pub const OFFSET_COLUMN_NAME: &str = "_rw_offset";
 
 // The number of columns output by the cdc source job

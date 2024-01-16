@@ -33,8 +33,8 @@ use crate::source::kafka::{
     KafkaProperties, KafkaSplit, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL,
 };
 use crate::source::{
-    into_chunk_stream, BoxChunkedSourceStream, Column, CommonSplitReader, SourceContextRef,
-    SplitId, SplitMetaData, SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef, SplitId,
+    SplitMetaData, SplitReader,
 };
 
 pub struct KafkaSplitReader {
@@ -145,7 +145,7 @@ impl SplitReader for KafkaSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxChunkedSourceStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self, parser_config, source_context)

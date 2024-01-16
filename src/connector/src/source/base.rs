@@ -343,8 +343,8 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
 
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
 
-pub trait ChunkedSourceStream = Stream<Item = Result<StreamChunk, RwError>> + Send + 'static;
-pub type BoxChunkedSourceStream = BoxStream<'static, Result<StreamChunk, RwError>>;
+pub trait ChunkSourceStream = Stream<Item = Result<StreamChunk, RwError>> + Send + 'static;
+pub type BoxChunkSourceStream = BoxStream<'static, Result<StreamChunk, RwError>>;
 pub type BoxTryStream<M> = BoxStream<'static, Result<M, RwError>>;
 
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
@@ -363,7 +363,7 @@ pub trait SplitReader: Sized + Send {
         columns: Option<Vec<Column>>,
     ) -> Result<Self>;
 
-    fn into_stream(self) -> BoxChunkedSourceStream;
+    fn into_stream(self) -> BoxChunkSourceStream;
 }
 
 for_all_sources!(impl_connector_properties);
