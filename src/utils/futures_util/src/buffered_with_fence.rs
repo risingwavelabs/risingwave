@@ -45,6 +45,21 @@ pin_project! {
     }
 }
 
+impl<St> TryBufferedWithFence<St>
+where
+    St: TryStream,
+    St::Ok: TryFuture<Error = St::Error> + MaybeFence,
+{
+    pub(crate) fn new(stream: St, n: usize) -> Self {
+        Self {
+            stream: stream.into_stream().fuse(),
+            in_progress_queue: FuturesOrdered::new(),
+            syncing: false,
+            max: n,
+        }
+    }
+}
+
 impl<St> Stream for TryBufferedWithFence<St>
 where
     St: TryStream,
@@ -100,6 +115,15 @@ pin_project! {
     }
 }
 
+impl<Fut> Fenced<Fut>
+where
+    Fut: Future,
+{
+    pub(crate) fn new(inner: Fut, is_fence: bool) -> Self {
+        Self { inner, is_fence }
+    }
+}
+
 impl<Fut> Future for Fenced<Fut>
 where
     Fut: Future,
@@ -131,51 +155,6 @@ where
     }
 }
 
-pub trait RwFutureExt: Future {
-    fn with_fence(self, is_fence: bool) -> Fenced<Self>
-    where
-        Self: Sized;
-}
-
-impl<Fut: Future> RwFutureExt for Fut {
-    fn with_fence(self, is_fence: bool) -> Fenced<Self> {
-        Fenced {
-            inner: self,
-            is_fence,
-        }
-    }
-}
-
-pub trait RwTryStreamExt: TryStream {
-    /// Similar to [`TryStreamExt::try_buffered`](https://docs.rs/futures/latest/futures/stream/trait.TryStreamExt.html#method.try_buffered), but respect to fence.
-    ///
-    /// Fence is provided by [`Future`] that implements [`MaybeFence`] and returns `true`.
-    /// When the stream receive a fenced future, it'll not do a sync operation. In brief, don't poll later futures until the current
-    /// buffer is cleared.
-    fn try_buffered_with_fence(self, n: usize) -> TryBufferedWithFence<Self>
-    where
-        Self: Sized,
-        Self::Ok: TryFuture<Error = Self::Error> + MaybeFence;
-}
-
-impl<St> RwTryStreamExt for St
-where
-    St: TryStream,
-{
-    fn try_buffered_with_fence(self, n: usize) -> TryBufferedWithFence<Self>
-    where
-        Self: Sized,
-        Self::Ok: TryFuture<Error = Self::Error> + MaybeFence,
-    {
-        TryBufferedWithFence {
-            stream: self.into_stream().fuse(),
-            in_progress_queue: FuturesOrdered::new(),
-            syncing: false,
-            max: n,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
@@ -183,7 +162,7 @@ mod tests {
 
     use futures::stream::StreamExt;
 
-    use super::{RwFutureExt, RwTryStreamExt};
+    use crate::{RwFutureExt, RwTryStreamExt};
 
     #[tokio::test]
     async fn test_buffered_with_fence() {
