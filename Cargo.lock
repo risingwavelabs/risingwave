@@ -198,7 +198,7 @@ dependencies = [
 [[package]]
 name = "apache-avro"
 version = "0.17.0"
-source = "git+https://github.com/icelake-io/avro.git?rev=4866a4ad0ed5d6af7160c9b52af898ab6d0551f9#4866a4ad0ed5d6af7160c9b52af898ab6d0551f9"
+source = "git+https://github.com/icelake-io/avro.git?branch=icelake-dev#4b828e9283e7248fd3ca42f5b590c2160b201785"
 dependencies = [
  "apache-avro-derive",
  "bigdecimal 0.4.2",
@@ -221,7 +221,7 @@ dependencies = [
 [[package]]
 name = "apache-avro-derive"
 version = "0.17.0"
-source = "git+https://github.com/icelake-io/avro.git?rev=4866a4ad0ed5d6af7160c9b52af898ab6d0551f9#4866a4ad0ed5d6af7160c9b52af898ab6d0551f9"
+source = "git+https://github.com/icelake-io/avro.git?branch=icelake-dev#4b828e9283e7248fd3ca42f5b590c2160b201785"
 dependencies = [
  "darling 0.20.3",
  "proc-macro2",
@@ -5051,7 +5051,7 @@ dependencies = [
 [[package]]
 name = "icelake"
 version = "0.0.10"
-source = "git+https://github.com/icelake-io/icelake?rev=b4f4ca3c6d29092bd331925ead0bcceaa38bdd57#b4f4ca3c6d29092bd331925ead0bcceaa38bdd57"
+source = "git+https://github.com/icelake-io/icelake?rev=32c0bbf242f5c47b1e743f10577012fe7436c770#32c0bbf242f5c47b1e743f10577012fe7436c770"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
@@ -7798,7 +7798,7 @@ checksum = "8bdf592881d821b83d471f8af290226c8d51402259e9bb5be7f9f8bdebbb11ac"
 dependencies = [
  "bytes",
  "heck 0.4.1",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "log",
  "multimap 0.8.3",
  "once_cell",
@@ -7832,7 +7832,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "265baba7fabd416cf5078179f7d2cbeca4ce7a9041111900675ea7c4cb8a4c32"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.48",
@@ -8552,6 +8552,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_source",
  "risingwave_storage",
+ "rw_futures_util",
  "scopeguard",
  "serde_json",
  "task_stats_alloc",
@@ -8730,6 +8731,7 @@ dependencies = [
  "risingwave_pb",
  "rust_decimal",
  "rusty-fork",
+ "rw_futures_util",
  "ryu",
  "serde",
  "serde_bytes",
@@ -8974,6 +8976,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "rust_decimal",
+ "rw_futures_util",
  "serde",
  "serde_derive",
  "serde_json",
@@ -9216,6 +9219,7 @@ dependencies = [
  "risingwave_storage",
  "risingwave_udf",
  "risingwave_variables",
+ "rw_futures_util",
  "serde",
  "serde_json",
  "sha2",
@@ -9334,6 +9338,7 @@ dependencies = [
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_storage",
+ "rw_futures_util",
  "serde",
  "serde_json",
  "thiserror",
@@ -9411,6 +9416,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_sqlparser",
  "risingwave_test_runner",
+ "rw_futures_util",
  "scopeguard",
  "sea-orm",
  "serde",
@@ -9616,6 +9622,7 @@ dependencies = [
  "risingwave_error",
  "risingwave_hummock_sdk",
  "risingwave_pb",
+ "rw_futures_util",
  "static_assertions",
  "thiserror",
  "thiserror-ext",
@@ -9723,6 +9730,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_connector",
  "risingwave_pb",
+ "rw_futures_util",
  "tempfile",
  "tracing",
  "workspace-hack",
@@ -9914,6 +9922,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_source",
  "risingwave_storage",
+ "rw_futures_util",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -10228,6 +10237,15 @@ dependencies = [
  "quick-error",
  "tempfile",
  "wait-timeout",
+]
+
+[[package]]
+name = "rw_futures_util"
+version = "0.0.0"
+dependencies = [
+ "futures",
+ "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]
@@ -11009,9 +11027,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.11.1"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "942b4a808e05215192e39f4ab80813e599068285906cc91aa64f923db842bd5a"
+checksum = "2593d31f82ead8df961d8bd23a64c2ccf2eb5dd34b0a34bfb4dd54011c72009e"
 dependencies = [
  "serde",
 ]
@@ -13604,6 +13622,7 @@ dependencies = [
  "futures",
  "futures-channel",
  "futures-core",
+ "futures-executor",
  "futures-io",
  "futures-sink",
  "futures-task",
@@ -13617,7 +13636,7 @@ dependencies = [
  "hyper",
  "indexmap 1.9.3",
  "indexmap 2.0.0",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "jni",
  "lazy_static",
  "lexical-core",

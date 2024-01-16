@@ -18,11 +18,11 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::select_all;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PbExchangeSource;
 use risingwave_pb::plan_common::Field as NodeField;
 use risingwave_rpc_client::ComputeClientPoolRef;
+use rw_futures_util::select_all;
 
 use crate::error::{BatchError, Result};
 use crate::exchange_source::ExchangeSourceImpl;
