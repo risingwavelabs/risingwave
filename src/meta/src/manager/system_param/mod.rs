@@ -90,15 +90,18 @@ impl SystemParamsManager {
         let params = params_guard.deref_mut();
         let mut mem_txn = VarTransaction::new(params);
 
-        set_system_param(mem_txn.deref_mut(), name, value).map_err(MetaError::system_params)?;
+        let Some(_) =
+            set_system_param(mem_txn.deref_mut(), name, value).map_err(MetaError::system_params)?
+        else {
+            // No changes on the parameter.
+            return Ok(params.clone());
+        };
 
         let mut store_txn = Transaction::default();
         mem_txn.apply_to_txn(&mut store_txn).await?;
         self.meta_store.txn(store_txn).await?;
 
         mem_txn.commit();
-
-        // TODO: check if the parameter is actually changed.
 
         // Run common handler.
         self.common_handler.handle_change(params.clone().into());
