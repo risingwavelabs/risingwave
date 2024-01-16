@@ -2,7 +2,7 @@ import json
 import subprocess
 import sys
 
-relations = ['test']
+relations = ['test', 'test_types']
 
 failed_cases = []
 versions = ['7', '8']

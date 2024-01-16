@@ -18,13 +18,6 @@
 import {
   Box,
   Button,
-  Modal,
-  ModalBody,
-  ModalCloseButton,
-  ModalContent,
-  ModalFooter,
-  ModalHeader,
-  ModalOverlay,
   Table,
   TableContainer,
   Tbody,
@@ -37,7 +30,6 @@ import loadable from "@loadable/component"
 import Head from "next/head"
 
 import Link from "next/link"
-import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment } from "react"
 import Title from "../components/Title"
 import extractColumnInfo from "../lib/extractInfo"
@@ -48,8 +40,9 @@ import {
   Source as RwSource,
   Table as RwTable,
 } from "../proto/gen/catalog"
+import { CatalogModal, useCatalogModal } from "./CatalogModal"
 
-const ReactJson = loadable(() => import("react-json-view"))
+export const ReactJson = loadable(() => import("react-json-view"))
 
 export type Column<R> = {
   name: string
@@ -122,40 +115,10 @@ export function Relations<R extends Relation>(
   extraColumns: Column<R>[]
 ) {
   const { response: relationList } = useFetch(getRelations)
+  const [modalData, setModalId] = useCatalogModal(relationList)
 
-  const [modalId, setModalId] = useQueryState("id", parseAsInteger)
-  const modalData = relationList?.find((r) => r.id === modalId)
-
-  const catalogModal = (
-    <Modal
-      isOpen={modalData !== undefined}
-      onClose={() => setModalId(null)}
-      size="3xl"
-    >
-      <ModalOverlay />
-      <ModalContent>
-        <ModalHeader>
-          Catalog of {modalData?.id} - {modalData?.name}
-        </ModalHeader>
-        <ModalCloseButton />
-        <ModalBody>
-          {modalData && (
-            <ReactJson
-              src={modalData}
-              collapsed={1}
-              name={null}
-              displayDataTypes={false}
-            />
-          )}
-        </ModalBody>
-
-        <ModalFooter>
-          <Button colorScheme="blue" mr={3} onClick={() => setModalId(null)}>
-            Close
-          </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+  const modal = (
+    <CatalogModal modalData={modalData} onClose={() => setModalId(null)} />
   )
 
   const table = (
@@ -214,7 +177,7 @@ export function Relations<R extends Relation>(
       <Head>
         <title>{title}</title>
       </Head>
-      {catalogModal}
+      {modal}
       {table}
     </Fragment>
   )

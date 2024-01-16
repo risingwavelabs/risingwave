@@ -53,6 +53,9 @@ pub struct StorageOpts {
     pub high_priority_ratio: usize,
     /// max memory usage for large query.
     pub prefetch_buffer_capacity_mb: usize,
+
+    pub max_prefetch_block_number: usize,
+
     pub disable_remote_compactor: bool,
     /// Number of tasks shared buffer can upload in parallel.
     pub share_buffer_upload_concurrency: usize,
@@ -165,6 +168,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             high_priority_ratio: s.high_priority_ratio_in_percent,
             block_cache_capacity_mb: s.block_cache_capacity_mb,
             prefetch_buffer_capacity_mb: s.prefetch_buffer_capacity_mb,
+            max_prefetch_block_number: c.storage.max_prefetch_block_number,
             meta_cache_capacity_mb: s.meta_cache_capacity_mb,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,

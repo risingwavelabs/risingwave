@@ -208,7 +208,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         *self.data.get_unchecked(idx)
     }
 
-    fn raw_iter(&self) -> impl DoubleEndedIterator<Item = Self::RefItem<'_>> {
+    fn raw_iter(&self) -> impl ExactSizeIterator<Item = Self::RefItem<'_>> {
         self.data.iter().cloned()
     }
 

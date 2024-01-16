@@ -73,6 +73,7 @@ impl HummockJavaBindingIterator {
             1 << 10,
             0,
             1 << 10,
+            16,
             FileCache::none(),
             FileCache::none(),
             None,
