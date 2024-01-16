@@ -685,6 +685,8 @@ impl HummockVersionReader {
             Sstable::hash_for_bloom_filter(dist_key.as_ref(), read_options.table_id.table_id())
         });
 
+        // Here epoch passed in is pure epoch, and we will seek the constructed `full_key` later.
+        // Therefore, it is necessary to construct the `full_key` with `MAX_SPILL_TIMES`, otherwise, the iterator might skip keys with spill offset greater than 0.
         let full_key = FullKey::new_with_gap_epoch(
             read_options.table_id,
             TableKey(table_key.clone()),
