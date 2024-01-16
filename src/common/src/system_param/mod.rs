@@ -59,7 +59,10 @@ impl_param_value!(String => &'a str);
 
 /// Define all system parameters here.
 ///
-/// Macro input is { field identifier, type, default value, is mutable }
+/// To match all these information, write the match arm as follows:
+/// ```text
+/// ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $doc:literal, $($rest:tt)* },)*) => {
+/// ```
 ///
 /// Note:
 /// - Having `None` as default value means the parameter must be initialized.
@@ -107,20 +110,39 @@ macro_rules! def_key {
 
 for_all_params!(def_key);
 
-/// Define default value functions.
-macro_rules! def_default {
+/// Define default value functions returning `Option`.
+macro_rules! def_default_opt {
     ($({ $field:ident, $type:ty, $default: expr, $($rest:tt)* },)*) => {
-        pub mod default {
-            $(
-                pub fn $field() -> Option<$type> {
+        $(
+            paste::paste!(
+                pub fn [<$field _opt>]() -> Option<$type> {
                     $default
                 }
-            )*
+            );
+        )*
+    };
+}
+
+/// Define default value functions for those with `Some` default values.
+macro_rules! def_default {
+    ($({ $field:ident, $type:ty, $default: expr, $($rest:tt)* },)*) => {
+        $(
+            def_default!(@ $field, $type, $default);
+        )*
+    };
+    (@ $field:ident, $type:ty, None) => {};
+    (@ $field:ident, $type:ty, $default: expr) => {
+        pub fn $field() -> $type {
+            $default.unwrap()
         }
     };
 }
 
-for_all_params!(def_default);
+/// Default values for all parameters.
+pub mod default {
+    for_all_params!(def_default_opt);
+    for_all_params!(def_default);
+}
 
 macro_rules! impl_check_missing_fields {
     ($({ $field:ident, $($rest:tt)* },)*) => {

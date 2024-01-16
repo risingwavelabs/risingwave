@@ -28,7 +28,7 @@ macro_rules! define_system_params_read_trait {
         pub trait SystemParamsRead {
             $(
                 #[doc = $doc]
-                fn $field<'a>(&'a self) -> <$type as ParamValue>::Borrowed<'a>;
+                fn $field(&self) -> <$type as ParamValue>::Borrowed<'_>;
             )*
         }
     };
@@ -100,13 +100,13 @@ impl SystemParamsRead for SystemParamsReader {
     fn pause_on_next_bootstrap(&self) -> bool {
         self.prost
             .pause_on_next_bootstrap
-            .unwrap_or_else(|| default::pause_on_next_bootstrap().unwrap())
+            .unwrap_or_else(default::pause_on_next_bootstrap)
     }
 
     fn enable_tracing(&self) -> bool {
         self.prost
             .enable_tracing
-            .unwrap_or_else(|| default::enable_tracing().unwrap())
+            .unwrap_or_else(default::enable_tracing)
     }
 
     fn wasm_storage_url(&self) -> &str {

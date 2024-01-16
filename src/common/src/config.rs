@@ -861,7 +861,7 @@ macro_rules! define_system_config {
             pub struct SystemConfig {
                 $(
                     #[doc = $doc]
-                    #[serde(default = "default::system::" $field)]
+                    #[serde(default = "default::system::" $field "_opt")]
                     pub $field: Option<$type>,
                 )*
             }
