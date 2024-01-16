@@ -373,8 +373,7 @@ impl GlobalBarrierManagerContext {
                         warn!(err = ?err, "reset compute nodes failed");
                     })?;
 
-                    let to_remove_actors = scheduled_barriers.pre_apply_drop_scheduled().await;
-                    if !to_remove_actors.is_empty() {
+                    if scheduled_barriers.pre_apply_drop_scheduled().await {
                         info = self.resolve_actor_info().await;
                     }
 

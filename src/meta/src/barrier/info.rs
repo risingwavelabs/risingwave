@@ -134,9 +134,8 @@ impl InflightActorInfo {
                     .actor_location_map
                     .remove(&actor_id)
                     .expect("actor not found");
-                self.actor_map
-                    .get_mut(&node_id)
-                    .map(|actor_ids| assert!(actor_ids.remove(&actor_id), "actor not found"));
+                let actor_ids = self.actor_map.get_mut(&node_id).expect("node not found");
+                assert!(actor_ids.remove(&actor_id), "actor not found");
                 self.actor_map_to_send
                     .get_mut(&node_id)
                     .map(|actor_ids| actor_ids.remove(&actor_id));

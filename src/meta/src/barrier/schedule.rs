@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::iter::once;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -28,7 +28,6 @@ use tokio::sync::{oneshot, watch, RwLock};
 use super::notifier::{BarrierInfo, Notifier};
 use super::{Command, Scheduled};
 use crate::hummock::HummockManagerRef;
-use crate::model::ActorId;
 use crate::rpc::metrics::MetaMetrics;
 use crate::{MetaError, MetaResult};
 
@@ -396,35 +395,28 @@ impl ScheduledBarriers {
         queue.mark_ready();
     }
 
-    /// Try to pre apply drop scheduled command and return the table ids of dropped streaming jobs.
+    /// Try to pre apply drop scheduled command and return true if any.
     /// It should only be called in recovery.
-    pub(super) async fn pre_apply_drop_scheduled(&self) -> HashSet<ActorId> {
-        let mut to_remove_actors = HashSet::new();
+    pub(super) async fn pre_apply_drop_scheduled(&self) -> bool {
         let mut queue = self.inner.queue.write().await;
         assert_matches!(queue.status, QueueStatus::Blocked(_));
+        let mut found = false;
 
         while let Some(Scheduled {
             notifiers, command, ..
         }) = queue.queue.pop_front()
         {
-            match command {
-                Command::DropStreamingJobs(node_actors) => {
-                    to_remove_actors.extend(node_actors.values().flatten());
-                }
-                Command::CancelStreamingJob(table_fragments) => {
-                    let actor_ids = table_fragments.actor_ids();
-                    to_remove_actors.extend(actor_ids);
-                }
-                _ => {
-                    unreachable!("only drop streaming jobs should be buffered");
-                }
-            }
+            assert_matches!(
+                command,
+                Command::DropStreamingJobs(_) | Command::CancelStreamingJob(_)
+            );
             notifiers.into_iter().for_each(|mut notify| {
                 notify.notify_collected();
                 notify.notify_finished();
             });
+            found = true;
         }
-        to_remove_actors
+        found
     }
 
     /// Whether the barrier(checkpoint = true) should be injected.
