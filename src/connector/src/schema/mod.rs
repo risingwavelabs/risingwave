@@ -26,6 +26,10 @@ const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
 pub enum SchemaFetchError {
     #[error("{0}")]
     InvalidOption(String),
+    #[error(transparent)]
+    InvalidOptionInner(risingwave_common::error::BoxedError),
+    #[error("schema registry client error")]
+    Request(#[source] schema_registry::ConcurrentRequestError),
     #[error("schema compilation error")]
     SchemaCompile(#[source] risingwave_common::error::BoxedError),
     #[error(transparent)]

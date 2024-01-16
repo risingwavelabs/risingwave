@@ -79,8 +79,7 @@ pub async fn fetch_schema(
         key_record_name,
         val_record_name,
     )
-    .await
-    .map_err(SchemaFetchError::YetToMigrate)?;
+    .await?;
 
     Ok((key_schema.try_into()?, val_schema.try_into()?))
 }
@@ -92,15 +91,25 @@ async fn fetch_schema_inner(
     topic: &str,
     key_record_name: Option<&str>,
     val_record_name: Option<&str>,
-) -> Result<(ConfluentSchema, ConfluentSchema), risingwave_common::error::RwError> {
-    let urls = handle_sr_list(schema_location)?;
-    let client = Client::new(urls, client_config)?;
+) -> Result<(ConfluentSchema, ConfluentSchema), SchemaFetchError> {
+    let urls = handle_sr_list(schema_location)
+        .map_err(|e| SchemaFetchError::InvalidOptionInner(e.into()))?;
+    let client = Client::new(urls, client_config)
+        .map_err(|e| SchemaFetchError::InvalidOptionInner(e.into()))?;
 
-    let key_subject = get_subject_by_strategy(name_strategy, topic, key_record_name, true)?;
-    let key_schema = client.get_schema_by_subject(&key_subject).await?;
+    let key_subject = get_subject_by_strategy(name_strategy, topic, key_record_name, true)
+        .map_err(|e| SchemaFetchError::InvalidOptionInner(e.into()))?;
+    let key_schema = client
+        .get_schema_by_subject(&key_subject)
+        .await
+        .map_err(SchemaFetchError::Request)?;
 
-    let val_subject = get_subject_by_strategy(name_strategy, topic, val_record_name, false)?;
-    let val_schema = client.get_schema_by_subject(&val_subject).await?;
+    let val_subject = get_subject_by_strategy(name_strategy, topic, val_record_name, false)
+        .map_err(|e| SchemaFetchError::InvalidOptionInner(e.into()))?;
+    let val_schema = client
+        .get_schema_by_subject(&val_subject)
+        .await
+        .map_err(SchemaFetchError::Request)?;
 
     Ok((key_schema, val_schema))
 }
