@@ -69,25 +69,19 @@ impl BarrierManagerState {
         (prev_epoch, next_epoch)
     }
 
-    pub fn inflight_actor_infos(&self) -> InflightActorInfo {
-        self.inflight_actor_infos.clone()
-    }
-
     // TODO: optimize it as incremental updates.
     pub fn resolve_worker_nodes(&mut self, nodes: Vec<PbWorkerNode>) {
         self.inflight_actor_infos.resolve_worker_nodes(nodes);
     }
 
-    /// Before resolving the actors to be sent or collected, we should first add the newly
-    /// added actors into inflight actor infos, so that these actor can be send and collect.
-    pub fn pre_resolve(&mut self, command: &Command) {
-        self.inflight_actor_infos.pre_apply(command.actor_changes());
-    }
+    /// Returns the inflight actor infos that have included the newly added actors in the given command. The dropped actors
+    /// will be removed from the state after the info get resolved.
+    pub fn apply_command(&mut self, command: &Command) -> InflightActorInfo {
+        let changes = command.actor_changes();
+        self.inflight_actor_infos.pre_apply(changes.clone());
+        let info = self.inflight_actor_infos.clone();
+        self.inflight_actor_infos.post_apply(changes);
 
-    /// After resolving the actors to be sent or collected, we should remove the dropped actors
-    /// from checkpoint control.
-    pub fn post_resolve(&mut self, command: &Command) {
-        self.inflight_actor_infos
-            .post_apply(command.actor_changes());
+        info
     }
 }

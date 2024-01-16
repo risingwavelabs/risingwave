@@ -38,7 +38,7 @@ use uuid::Uuid;
 
 use super::TracedEpoch;
 use crate::barrier::command::CommandContext;
-use crate::barrier::info::{CommandActorChanges, InflightActorInfo};
+use crate::barrier::info::InflightActorInfo;
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::schedule::ScheduledBarriers;
@@ -374,10 +374,9 @@ impl GlobalBarrierManagerContext {
                     })?;
 
                     let to_remove_actors = scheduled_barriers.pre_apply_drop_scheduled().await;
-                    info.post_apply_non_checked(Some(CommandActorChanges {
-                        to_remove: to_remove_actors,
-                        to_add: Default::default(),
-                    }));
+                    if !to_remove_actors.is_empty() {
+                        info = self.resolve_actor_info().await;
+                    }
 
                     // update and build all actors.
                     self.update_actors(&info).await.inspect_err(|err| {

@@ -601,10 +601,7 @@ impl GlobalBarrierManager {
             .await
             .unwrap();
         self.state.resolve_worker_nodes(all_nodes);
-
-        self.state.pre_resolve(&command);
-        let info = self.state.inflight_actor_infos();
-        self.state.post_resolve(&command);
+        let info = self.state.apply_command(&command);
 
         let (prev_epoch, curr_epoch) = self.state.next_epoch_pair();
         let kind = if checkpoint {

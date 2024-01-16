@@ -147,25 +147,6 @@ impl InflightActorInfo {
         }
     }
 
-    /// Apply some actor changes without check. Remove the actors in the remove list of the command changes.
-    pub fn post_apply_non_checked(&mut self, changes: Option<CommandActorChanges>) {
-        if let Some(CommandActorChanges { to_remove, .. }) = changes {
-            for actor_id in to_remove {
-                if let Some(node_id) = self.actor_location_map.remove(&actor_id) {
-                    self.actor_map
-                        .get_mut(&node_id)
-                        .map(|actor_ids| actor_ids.remove(&actor_id));
-                    self.actor_map_to_send
-                        .get_mut(&node_id)
-                        .map(|actor_ids| actor_ids.remove(&actor_id));
-                }
-            }
-            self.actor_map.retain(|_, actor_ids| !actor_ids.is_empty());
-            self.actor_map_to_send
-                .retain(|_, actor_ids| !actor_ids.is_empty());
-        }
-    }
-
     /// Returns actor list to collect in the target worker node.
     pub fn actor_ids_to_collect(&self, node_id: &WorkerId) -> impl Iterator<Item = ActorId> {
         self.actor_map
