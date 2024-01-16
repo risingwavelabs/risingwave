@@ -23,6 +23,9 @@ use risingwave_rpc_client::{ConnectorClient, StreamClientPool, StreamClientPoolR
 use sea_orm::EntityTrait;
 
 use super::{SystemParamsManager, SystemParamsManagerRef};
+use crate::controller::id::{
+    IdGeneratorManager as SqlIdGeneratorManager, IdGeneratorManagerRef as SqlIdGeneratorManagerRef,
+};
 use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
 use crate::controller::SqlMetaStore;
 use crate::hummock::sequence::SequenceGenerator;
@@ -43,6 +46,9 @@ use crate::MetaResult;
 pub struct MetaSrvEnv {
     /// id generator manager.
     id_gen_manager: IdGeneratorManagerRef,
+
+    /// sql id generator manager.
+    sql_id_gen_manager: Option<SqlIdGeneratorManagerRef>,
 
     /// meta store.
     meta_store: MetaStoreRef,
@@ -181,6 +187,7 @@ pub struct MetaOpts {
     pub min_table_split_write_throughput: u64,
 
     pub compaction_task_max_heartbeat_interval_secs: u64,
+    pub compaction_task_max_progress_interval_secs: u64,
     pub compaction_config: Option<CompactionConfig>,
 
     /// The size limit to split a state-table to independent sstable.
@@ -246,6 +253,7 @@ impl MetaOpts {
             do_not_config_object_storage_lifecycle: true,
             partition_vnode_count: 32,
             compaction_task_max_heartbeat_interval_secs: 0,
+            compaction_task_max_progress_interval_secs: 1,
             compaction_config: None,
             cut_table_size_limit: 1024 * 1024 * 1024,
             hybird_partition_vnode_count: 4,
@@ -315,8 +323,15 @@ impl MetaSrvEnv {
             .clone()
             .map(|m| Arc::new(SequenceGenerator::new(m.conn)));
 
+        let sql_id_gen_manager = if let Some(store) = &meta_store_sql {
+            Some(Arc::new(SqlIdGeneratorManager::new(&store.conn).await?))
+        } else {
+            None
+        };
+
         Ok(Self {
             id_gen_manager,
+            sql_id_gen_manager,
             meta_store,
             meta_store_sql,
             notification_manager,
@@ -351,6 +366,10 @@ impl MetaSrvEnv {
 
     pub fn id_gen_manager(&self) -> &IdGeneratorManager {
         self.id_gen_manager.deref()
+    }
+
+    pub fn sql_id_gen_manager_ref(&self) -> Option<SqlIdGeneratorManagerRef> {
+        self.sql_id_gen_manager.clone()
     }
 
     pub fn notification_manager_ref(&self) -> NotificationManagerRef {
@@ -464,12 +483,20 @@ impl MetaSrvEnv {
         };
 
         let event_log_manager = Arc::new(EventLogManger::for_test());
+        let sql_id_gen_manager = if let Some(store) = &meta_store_sql {
+            Some(Arc::new(
+                SqlIdGeneratorManager::new(&store.conn).await.unwrap(),
+            ))
+        } else {
+            None
+        };
         let hummock_seq = meta_store_sql
             .clone()
             .map(|m| Arc::new(SequenceGenerator::new(m.conn)));
 
         Self {
             id_gen_manager,
+            sql_id_gen_manager,
             meta_store,
             meta_store_sql,
             notification_manager,

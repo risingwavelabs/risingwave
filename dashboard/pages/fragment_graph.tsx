@@ -31,7 +31,7 @@ import * as d3 from "d3"
 import { dagStratify } from "d3-dag"
 import _ from "lodash"
 import Head from "next/head"
-import { useRouter } from "next/router"
+import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import FragmentDependencyGraph from "../components/FragmentDependencyGraph"
 import FragmentGraph from "../components/FragmentGraph"
@@ -64,28 +64,34 @@ function buildPlanNodeDependency(
 
   const hierarchyActorNode = (node: StreamNode): PlanNodeDatum => {
     return {
-      name: node.nodeBody?.$case.toString() || "unknown",
+      name: node.nodeBody?.$case?.toString() || "unknown",
       children: (node.input || []).map(hierarchyActorNode),
       operatorId: node.operatorId,
       node,
     }
   }
 
-  let dispatcherName = "noDispatcher"
-  if (firstActor.dispatcher.length > 1) {
-    if (
-      firstActor.dispatcher.every(
-        (d) => d.type === firstActor.dispatcher[0].type
-      )
-    ) {
-      dispatcherName = `${_.camelCase(
-        firstActor.dispatcher[0].type
-      )}Dispatchers`
+  let dispatcherName: string
+
+  if (firstActor.dispatcher.length > 0) {
+    const firstDispatcherName = _.camelCase(
+      firstActor.dispatcher[0].type.replace(/^DISPATCHER_TYPE_/, "")
+    )
+    if (firstActor.dispatcher.length > 1) {
+      if (
+        firstActor.dispatcher.every(
+          (d) => d.type === firstActor.dispatcher[0].type
+        )
+      ) {
+        dispatcherName = `${firstDispatcherName}Dispatchers`
+      } else {
+        dispatcherName = "multipleDispatchers"
+      }
     } else {
-      dispatcherName = "multipleDispatchers"
+      dispatcherName = `${firstDispatcherName}Dispatcher`
     }
-  } else if (firstActor.dispatcher.length === 1) {
-    dispatcherName = `${_.camelCase(firstActor.dispatcher[0].type)}Dispatcher`
+  } else {
+    dispatcherName = "noDispatcher"
   }
 
   const dispatcherNode = fragment.actors.reduce((obj, actor) => {
@@ -169,21 +175,20 @@ export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
   const { response: fragmentList } = useFetch(getFragments)
 
+  const [relationId, setRelationId] = useQueryState("id", parseAsInteger)
+  const [backPressureAlgo, setBackPressureAlgo] = useQueryState("backPressure")
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
-  const [backPressureAlgo, setBackPressureAlgo] = useState<BackPressureAlgo>()
-  const router = useRouter()
 
   const { response: actorBackPressures } = useFetch(
     getActorBackPressures,
     5000,
-    backPressureAlgo !== undefined
+    backPressureAlgo !== null
   )
 
   const fragmentDependencyCallback = useCallback(() => {
     if (fragmentList) {
-      if (router.query.id) {
-        const id = parseInt(router.query.id as string)
-        const fragments = fragmentList.find((x) => x.tableId === id)
+      if (relationId) {
+        const fragments = fragmentList.find((x) => x.tableId === relationId)
         if (fragments) {
           const fragmentDep = buildFragmentDependencyAsEdges(fragments)
           return {
@@ -195,23 +200,18 @@ export default function Streaming() {
       }
     }
     return undefined
-  }, [fragmentList, router.query.id])
-
-  const setRelationId = useCallback(
-    (id: number) => router.replace(`?id=${id}`, undefined, { shallow: true }),
-    [router]
-  )
+  }, [fragmentList, relationId])
 
   useEffect(() => {
     if (relationList) {
-      if (!router.query.id) {
+      if (!relationId) {
         if (relationList.length > 0) {
           setRelationId(relationList[0].id)
         }
       }
     }
     return () => {}
-  }, [router, router.query.id, relationList, setRelationId])
+  }, [relationId, relationList, setRelationId])
 
   const fragmentDependency = fragmentDependencyCallback()?.fragmentDep
   const fragmentDependencyDag = fragmentDependencyCallback()?.fragmentDepDag
@@ -235,18 +235,6 @@ export default function Streaming() {
   }, [fragments?.fragments])
 
   const planNodeDependencies = planNodeDependenciesCallback()
-
-  const relationInfoCallback = useCallback(() => {
-    const id = router.query.id
-    if (id) {
-      if (relationList) {
-        return relationList.find((x) => x.id == parseInt(id as string))
-      }
-    }
-    return undefined
-  }, [relationList, router.query.id])
-
-  const relationInfo = relationInfoCallback()
 
   const [searchActorId, setSearchActorId] = useState<string>("")
   const [searchFragId, setSearchFragId] = useState<string>("")
@@ -360,7 +348,7 @@ export default function Streaming() {
                 ))}
             </datalist>
             <Select
-              value={router.query.id}
+              value={relationId ?? undefined}
               onChange={(event) => setRelationId(parseInt(event.target.value))}
             >
               {relationList &&
@@ -395,11 +383,11 @@ export default function Streaming() {
           <FormControl>
             <FormLabel>Back Pressure</FormLabel>
             <Select
-              value={backPressureAlgo}
+              value={backPressureAlgo ?? undefined}
               onChange={(event) =>
                 setBackPressureAlgo(
                   event.target.value === "disabled"
-                    ? undefined
+                    ? null
                     : (event.target.value as BackPressureAlgo)
                 )
               }
@@ -418,7 +406,7 @@ export default function Streaming() {
               <Box flex="1" overflowY="scroll">
                 <FragmentDependencyGraph
                   svgWidth={SIDEBAR_WIDTH}
-                  mvDependency={fragmentDependencyDag}
+                  fragmentDependency={fragmentDependencyDag}
                   onSelectedIdChange={(id) =>
                     setSelectedFragmentId(parseInt(id))
                   }

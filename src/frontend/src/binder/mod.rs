@@ -116,9 +116,53 @@ pub struct Binder {
 
     param_types: ParameterTypes,
 
-    /// The mapping from sql udf parameters to ast expressions
+    /// The sql udf context that will be used during binding phase
+    udf_context: UdfContext,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct UdfContext {
+    /// The mapping from `sql udf parameters` to `ast expressions`
     /// Note: The expressions are constructed during runtime, correspond to the actual users' input
-    udf_context: HashMap<String, AstExpr>,
+    udf_param_context: HashMap<String, AstExpr>,
+
+    /// The global counter that records the calling stack depth
+    /// of the current binding sql udf chain
+    udf_global_counter: u32,
+}
+
+impl UdfContext {
+    pub fn new() -> Self {
+        Self {
+            udf_param_context: HashMap::new(),
+            udf_global_counter: 0,
+        }
+    }
+
+    pub fn global_count(&self) -> u32 {
+        self.udf_global_counter
+    }
+
+    pub fn incr_global_count(&mut self) {
+        self.udf_global_counter += 1;
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.udf_param_context.is_empty()
+    }
+
+    pub fn update_context(&mut self, context: HashMap<String, AstExpr>) {
+        self.udf_param_context = context;
+    }
+
+    pub fn clear(&mut self) {
+        self.udf_global_counter = 0;
+        self.udf_param_context.clear();
+    }
+
+    pub fn get_expr(&self, name: &str) -> Option<&AstExpr> {
+        self.udf_param_context.get(name)
+    }
 }
 
 /// `ParameterTypes` is used to record the types of the parameters during binding. It works
@@ -220,7 +264,7 @@ impl Binder {
             shared_views: HashMap::new(),
             included_relations: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
-            udf_context: HashMap::new(),
+            udf_context: UdfContext::new(),
         }
     }
 

@@ -14,6 +14,7 @@
 
 #![cfg(madsim)]
 
+use std::default;
 use std::io::Write;
 use std::time::Duration;
 
@@ -44,8 +45,7 @@ event_log_flush_interval_ms = 10\
         meta_nodes: 1,
         compactor_nodes: 0,
         compute_node_cores: 2,
-        etcd_timeout_rate: 0.0,
-        etcd_data_path: None,
+        ..Default::default()
     }
 }
 

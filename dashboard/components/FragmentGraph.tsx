@@ -17,13 +17,15 @@ import { cloneDeep } from "lodash"
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import {
   Edge,
+  Enter,
   FragmentBox,
   FragmentBoxPosition,
   Position,
-  generateBoxEdges,
-  layout,
+  generateFragmentEdges,
+  layoutItem,
 } from "../lib/layout"
 import { PlanNodeDatum } from "../pages/fragment_graph"
+import { StreamNode } from "../proto/gen/stream_plan"
 
 const ReactJson = loadable(() => import("react-json-view"))
 
@@ -34,10 +36,6 @@ type FragmentLayout = {
   height: number
   actorIds: string[]
 } & Position
-
-type Enter<Type> = Type extends d3.Selection<any, infer B, infer C, infer D>
-  ? d3.Selection<d3.EnterElement, B, C, D>
-  : never
 
 function treeLayoutFlip<Datum>(
   root: d3.HierarchyNode<Datum>,
@@ -144,7 +142,7 @@ export default function FragmentGraph({
       includedFragmentIds.add(fragmentId)
     }
 
-    const fragmentLayout = layout(
+    const fragmentLayout = layoutItem(
       fragmentDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
         const { width, height } = layoutFragmentResult.get(id)!
         return { width, height, id, ...data }
@@ -169,7 +167,7 @@ export default function FragmentGraph({
       svgHeight = Math.max(svgHeight, y + height + 50)
       svgWidth = Math.max(svgWidth, x + width)
     })
-    const edges = generateBoxEdges(fragmentLayout)
+    const edges = generateFragmentEdges(fragmentLayout)
 
     return {
       layoutResult,
@@ -318,6 +316,14 @@ export default function FragmentGraph({
             .attr("fill", "black")
             .attr("font-size", 12)
             .attr("transform", "rotate(-8)")
+
+          // Node tooltip
+          let title = g.select<SVGTitleElement>("title")
+          if (title.empty()) {
+            title = g.append<SVGTitleElement>("title")
+          }
+
+          title.text((d) => (d.data.node as StreamNode).identity ?? d.data.name)
 
           return g
         }
