@@ -44,9 +44,6 @@ impl Valve {
     /// Pause the stream controlled by the valve.
     pub fn pause(&self) {
         self.paused.store(true, Ordering::Relaxed);
-        if let Some(waker) = self.waker.lock().unwrap().as_ref() {
-            waker.wake_by_ref()
-        }
     }
 
     /// Resume the stream controlled by the valve.
