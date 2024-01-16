@@ -39,7 +39,7 @@ output = subprocess.check_output(
     ["docker", "compose", "exec", "mysql", "bash", "-c", command])
 id = int(output.decode('utf-8').split('\n')[1])
 if id != 30:
-    print(f"target_id expected 30, get {rows}")
+    print(f"target_id expected 30, get {id}")
     failed_cases.append("update demo.upsert_table")
 
 if len(failed_cases) != 0:
