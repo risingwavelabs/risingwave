@@ -33,7 +33,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::select_all;
+use rw_futures_util::select_all;
 use risingwave_connector::source::SplitMetaData;
 use risingwave_expr::expr_context::expr_context_scope;
 use risingwave_pb::batch_plan::plan_node::NodeBody;

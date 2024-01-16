@@ -17,7 +17,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::util::select_all;
+use rw_futures_util::select_all;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};

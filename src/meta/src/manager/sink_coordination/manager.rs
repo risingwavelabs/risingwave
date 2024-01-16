@@ -20,7 +20,7 @@ use futures::future::{select, BoxFuture, Either};
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::util::pending_on_none;
+use rw_futures_util::pending_on_none;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::SinkParam;
 use risingwave_pb::connector_service::coordinate_request::Msg;

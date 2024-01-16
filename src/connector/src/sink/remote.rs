@@ -29,7 +29,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::anyhow_error;
 use risingwave_common::types::DataType;
-use risingwave_common::util::drop_either_future;
+use rw_futures_util::drop_either_future;
 use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_jni_core::{
     call_static_method, gen_class_name, JniReceiverType, JniSenderType, JniSinkWriterStreamRequest,

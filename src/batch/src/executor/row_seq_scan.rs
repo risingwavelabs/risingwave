@@ -24,7 +24,7 @@ use risingwave_common::catalog::{ColumnId, Schema};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::select_all;
+use rw_futures_util::select_all;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, PbScanRange};

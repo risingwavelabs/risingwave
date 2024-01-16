@@ -22,7 +22,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::{RwFutureExt, RwTryStreamExt};
+use rw_futures_util::{RwFutureExt, RwTryStreamExt};
 use risingwave_expr::expr::NonStrictExpression;
 
 use super::*;

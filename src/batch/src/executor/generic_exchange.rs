@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::select_all;
+use rw_futures_util::select_all;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PbExchangeSource;
 use risingwave_pb::plan_common::Field as NodeField;

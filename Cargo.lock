@@ -8552,6 +8552,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_source",
  "risingwave_storage",
+ "rw_futures_util",
  "scopeguard",
  "serde_json",
  "task_stats_alloc",
@@ -8730,6 +8731,7 @@ dependencies = [
  "risingwave_pb",
  "rust_decimal",
  "rusty-fork",
+ "rw_futures_util",
  "ryu",
  "serde",
  "serde_bytes",
@@ -8974,6 +8976,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "rust_decimal",
+ "rw_futures_util",
  "serde",
  "serde_derive",
  "serde_json",
@@ -9216,6 +9219,7 @@ dependencies = [
  "risingwave_storage",
  "risingwave_udf",
  "risingwave_variables",
+ "rw_futures_util",
  "serde",
  "serde_json",
  "sha2",
@@ -9334,6 +9338,7 @@ dependencies = [
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_storage",
+ "rw_futures_util",
  "serde",
  "serde_json",
  "thiserror",
@@ -9411,6 +9416,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_sqlparser",
  "risingwave_test_runner",
+ "rw_futures_util",
  "scopeguard",
  "sea-orm",
  "serde",
@@ -9616,6 +9622,7 @@ dependencies = [
  "risingwave_error",
  "risingwave_hummock_sdk",
  "risingwave_pb",
+ "rw_futures_util",
  "static_assertions",
  "thiserror",
  "thiserror-ext",
@@ -9723,6 +9730,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_connector",
  "risingwave_pb",
+ "rw_futures_util",
  "tempfile",
  "tracing",
  "workspace-hack",
@@ -9914,6 +9922,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_source",
  "risingwave_storage",
+ "rw_futures_util",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -10228,6 +10237,15 @@ dependencies = [
  "quick-error",
  "tempfile",
  "wait-timeout",
+]
+
+[[package]]
+name = "rw_futures_util"
+version = "0.0.0"
+dependencies = [
+ "futures",
+ "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]
