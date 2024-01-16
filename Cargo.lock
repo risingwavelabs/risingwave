@@ -3798,6 +3798,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "escape8259"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba4f4911e3666fcd7826997b4745c8224295a6f3072f1418c3067b97a67557ee"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "etcd-client"
 version = "0.12.1"
 source = "git+https://github.com/risingwavelabs/etcd-client.git?rev=4e84d40#4e84d40a84b35718d814cc2afccc9274c9d78e1e"
@@ -5616,6 +5625,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d8de370f98a6cb8a4606618e53e802f93b094ddec0f96988eaec2c27e6e9ce7"
 dependencies = [
  "clap",
+ "termcolor",
+ "threadpool",
+]
+
+[[package]]
+name = "libtest-mimic"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f0f4c6f44ecfd52e8b443f2ad18f2b996540135771561283c2352ce56a1c70b"
+dependencies = [
+ "clap",
+ "escape8259",
  "termcolor",
  "threadpool",
 ]
@@ -9573,7 +9594,7 @@ dependencies = [
  "anyhow",
  "expect-test",
  "itertools 0.12.0",
- "libtest-mimic",
+ "libtest-mimic 0.7.0",
  "madsim-tokio",
  "paste",
  "risingwave_expr_impl",
@@ -9773,7 +9794,7 @@ dependencies = [
  "clap",
  "expect-test",
  "itertools 0.12.0",
- "libtest-mimic",
+ "libtest-mimic 0.7.0",
  "madsim-tokio",
  "rand",
  "rand_chacha",
@@ -11171,7 +11192,7 @@ dependencies = [
  "glob",
  "humantime",
  "itertools 0.11.0",
- "libtest-mimic",
+ "libtest-mimic 0.6.1",
  "md-5",
  "owo-colors",
  "regex",
