@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_meta_model_v2::SourceId;
-use risingwave_pb::catalog::PbSource;
+use risingwave_pb::catalog::{PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerType};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
-use risingwave_pb::meta::table_fragments::Fragment;
-use risingwave_pb::stream_plan::PbStreamActor;
+use risingwave_pb::meta::table_fragments::{Fragment, PbFragment};
+use risingwave_pb::stream_plan::{PbDispatchStrategy, PbStreamActor};
 
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, WorkerExtraInfo};
@@ -29,6 +29,7 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, StreamingClusterInfo, WorkerId,
 };
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments};
+use crate::stream::SplitAssignment;
 use crate::MetaResult;
 
 #[derive(Clone)]
@@ -259,6 +260,59 @@ impl MetadataManager {
         }
     }
 
+    pub async fn get_table_catalog_by_ids(&self, ids: Vec<u32>) -> MetaResult<Vec<PbTable>> {
+        match &self {
+            MetadataManager::V1(mgr) => Ok(mgr.catalog_manager.get_tables(&ids).await),
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .get_table_by_ids(ids.into_iter().map(|id| id as _).collect())
+                    .await
+            }
+        }
+    }
+
+    pub async fn get_downstream_chain_fragments(
+        &self,
+        job_id: u32,
+    ) -> MetaResult<Vec<(PbDispatchStrategy, PbFragment)>> {
+        match &self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .get_downstream_fragments(job_id.into())
+                    .await
+            }
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .get_downstream_chain_fragments(job_id as _)
+                    .await
+            }
+        }
+    }
+
+    pub async fn get_worker_actor_ids(
+        &self,
+        job_ids: HashSet<TableId>,
+    ) -> MetaResult<BTreeMap<WorkerId, Vec<ActorId>>> {
+        match &self {
+            MetadataManager::V1(mgr) => mgr.fragment_manager.table_node_actors(&job_ids).await,
+            MetadataManager::V2(mgr) => {
+                let worker_actors = mgr
+                    .catalog_controller
+                    .get_worker_actor_ids(job_ids.into_iter().map(|id| id.table_id as _).collect())
+                    .await?;
+                Ok(worker_actors
+                    .into_iter()
+                    .map(|(id, actors)| {
+                        (
+                            id as WorkerId,
+                            actors.into_iter().map(|id| id as ActorId).collect(),
+                        )
+                    })
+                    .collect())
+            }
+        }
+    }
+
     pub async fn get_job_id_to_internal_table_ids_mapping(&self) -> Option<Vec<(u32, Vec<u32>)>> {
         match &self {
             MetadataManager::V1(mgr) => mgr
@@ -423,6 +477,24 @@ impl MetadataManager {
                     .into_iter()
                     .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
                     .collect())
+            }
+        }
+    }
+
+    pub async fn update_actor_splits_by_split_assignment(
+        &self,
+        split_assignment: &SplitAssignment,
+    ) -> MetaResult<()> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .update_actor_splits_by_split_assignment(split_assignment)
+                    .await
+            }
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .update_actor_splits(split_assignment)
+                    .await
             }
         }
     }

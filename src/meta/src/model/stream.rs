@@ -41,10 +41,20 @@ use crate::stream::{build_actor_connector_splits, build_actor_split_impls, Split
 /// Column family name for table fragments.
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 
+/// The parallelism for a `TableFragments`.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum TableParallelism {
+    /// This is when the system decides the parallelism, based on the available parallel units.
     Auto,
+    /// We set this when the `TableFragments` parallelism is changed.
+    /// All fragments which are part of the `TableFragment` will have the same parallelism as this.
     Fixed(usize),
+    /// We set this when the individual parallelisms of the `Fragments`
+    /// can differ within a `TableFragments`.
+    /// This is set for `risectl`, since it has a low-level interface,
+    /// scale individual `Fragments` within `TableFragments`.
+    /// When that happens, the `TableFragments` no longer has a consistent
+    /// parallelism, so we set this to indicate that.
     Custom,
 }
 

@@ -56,7 +56,7 @@ use crate::controller::utils::{
 };
 use crate::manager::{ActorInfos, LocalNotification};
 use crate::stream::SplitAssignment;
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 impl CatalogControllerInner {
     /// List all fragment vnode mapping info for all CREATED streaming jobs.
@@ -980,15 +980,58 @@ impl CatalogController {
         Ok(node_actors)
     }
 
+    pub async fn get_worker_actor_ids(
+        &self,
+        job_ids: Vec<ObjectId>,
+    ) -> MetaResult<BTreeMap<WorkerId, Vec<ActorId>>> {
+        let inner = self.inner.read().await;
+        let parallel_units_map = get_parallel_unit_mapping(&inner.db).await?;
+        let actor_pu: Vec<(ActorId, i32)> = Actor::find()
+            .select_only()
+            .columns([actor::Column::ActorId, actor::Column::ParallelUnitId])
+            .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
+            .filter(fragment::Column::JobId.is_in(job_ids))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        let mut worker_actors = BTreeMap::new();
+        for (actor_id, pu_id) in actor_pu {
+            let worker_id = parallel_units_map
+                .get(&(pu_id as _))
+                .unwrap()
+                .worker_node_id as WorkerId;
+            worker_actors
+                .entry(worker_id)
+                .or_insert_with(Vec::new)
+                .push(actor_id);
+        }
+
+        Ok(worker_actors)
+    }
+
     pub async fn update_actor_splits(&self, split_assignment: &SplitAssignment) -> MetaResult<()> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
         for assignments in split_assignment.values() {
             for (actor_id, splits) in assignments {
+                let actor_splits: Option<ConnectorSplits> = Actor::find_by_id(*actor_id as ActorId)
+                    .select_only()
+                    .column(actor::Column::Splits)
+                    .into_tuple()
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("actor_id", actor_id))?;
+
+                let mut actor_splits = actor_splits
+                    .map(|splits| splits.0.splits)
+                    .unwrap_or_default();
+                actor_splits.extend(splits.iter().map(Into::into));
+
                 Actor::update(actor::ActiveModel {
                     actor_id: Set(*actor_id as _),
                     splits: Set(Some(ConnectorSplits(PbConnectorSplits {
-                        splits: splits.iter().map(Into::into).collect(),
+                        splits: actor_splits,
                     }))),
                     ..Default::default()
                 })
