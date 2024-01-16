@@ -64,7 +64,8 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> SinkWriter for Coordi
                 SinkError::Coordinator(anyhow!("should get metadata on checkpoint barrier"))
             })?;
             // TODO: add metrics to measure time to commit
-            self.coordinator_stream_handle.commit(self.epoch, metadata)
+            self.coordinator_stream_handle
+                .commit(self.epoch, metadata)
                 .await?;
             Ok(())
         } else {
