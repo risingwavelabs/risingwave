@@ -534,6 +534,7 @@ impl From<TracedInitOptions> for InitOptions {
 #[derive(Clone, Debug)]
 pub struct SealCurrentEpochOptions {
     pub table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>)>,
+    pub is_checkpoint: bool,
 }
 
 impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
@@ -548,6 +549,7 @@ impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
                         .collect(),
                 )
             }),
+            is_checkpoint: value.is_checkpoint,
         }
     }
 }
@@ -572,24 +574,35 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
                         .collect(),
                 )
             }),
+            is_checkpoint: value.is_checkpoint,
         }
     }
 }
 
 impl SealCurrentEpochOptions {
-    pub fn new(watermarks: Vec<VnodeWatermark>, direction: WatermarkDirection) -> Self {
+    pub fn new(
+        watermarks: Vec<VnodeWatermark>,
+        direction: WatermarkDirection,
+        is_checkpoint: bool,
+    ) -> Self {
         Self {
             table_watermarks: Some((direction, watermarks)),
+            is_checkpoint,
         }
     }
 
-    pub fn no_watermark() -> Self {
+    pub fn no_watermark(is_checkpoint: bool) -> Self {
         Self {
             table_watermarks: None,
+            is_checkpoint,
         }
     }
 
     pub fn for_test() -> Self {
-        Self::no_watermark()
+        Self::no_watermark(true)
+    }
+
+    pub fn for_test_non_checkpoint() -> Self {
+        Self::no_watermark(false)
     }
 }

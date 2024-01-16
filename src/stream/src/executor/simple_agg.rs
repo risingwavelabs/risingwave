@@ -203,7 +203,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
     async fn flush_data(
         this: &mut ExecutorInner<S>,
         vars: &mut ExecutionVars<S>,
-        epoch: EpochPair,
+        barrier: &Barrier,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         let chunk = if vars.state_changed || vars.agg_group.is_uninitialized() {
             // Flush distinct dedup state.
@@ -216,7 +216,8 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
             // Commit all state tables.
             futures::future::try_join_all(
-                this.all_state_tables_mut().map(|table| table.commit(epoch)),
+                this.all_state_tables_mut()
+                    .map(|table| table.barrier(barrier)),
             )
             .await?;
 
@@ -229,7 +230,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             // No state is changed.
             // Call commit on state table to increment the epoch.
             this.all_state_tables_mut().for_each(|table| {
-                table.commit_no_data_expected(epoch);
+                table.empty_barrier_expected(barrier);
             });
             None
         };
@@ -299,9 +300,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                     Self::try_flush_data(&mut this).await?;
                 }
                 Message::Barrier(barrier) => {
-                    if let Some(chunk) =
-                        Self::flush_data(&mut this, &mut vars, barrier.epoch).await?
-                    {
+                    if let Some(chunk) = Self::flush_data(&mut this, &mut vars, &barrier).await? {
                         yield Message::Chunk(chunk);
                     }
                     vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {

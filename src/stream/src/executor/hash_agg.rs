@@ -26,7 +26,6 @@ use risingwave_common::estimate_size::collections::EstimatedHashMap;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::ScalarImpl;
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
@@ -49,7 +48,7 @@ use crate::common::StreamChunkBuilder;
 use crate::error::StreamResult;
 use crate::executor::aggregation::AggGroup as GenericAggGroup;
 use crate::executor::error::StreamExecutorError;
-use crate::executor::{BoxedMessageStream, Executor, Message};
+use crate::executor::{Barrier, BoxedMessageStream, Executor, Message};
 use crate::task::AtomicU64Ref;
 
 type AggGroup<S> = GenericAggGroup<S, OnlyOutputIfHasInput>;
@@ -562,11 +561,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
     async fn commit_state_tables(
         this: &mut ExecutorInner<K, S>,
-        epoch: EpochPair,
+        barrier: &Barrier,
     ) -> StreamExecutorResult<()> {
         futures::future::try_join_all(
             this.all_state_tables_mut()
-                .map(|table| async { table.commit(epoch).await }),
+                .map(|table| async { table.barrier(barrier).await }),
         )
         .await?;
         Ok(())
@@ -675,7 +674,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     for chunk in Self::flush_data(&mut this, &mut vars) {
                         yield Message::Chunk(chunk?);
                     }
-                    Self::commit_state_tables(&mut this, barrier.epoch).await?;
+                    Self::commit_state_tables(&mut this, &barrier).await?;
 
                     if this.emit_on_window_close {
                         // ignore watermarks on other columns

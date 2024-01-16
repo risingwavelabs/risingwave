@@ -137,10 +137,10 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                 Message::Barrier(barrier) => {
                     if commit_data {
                         // Only commit when we have new data in this epoch.
-                        self.state_table.commit(barrier.epoch).await?;
+                        self.state_table.barrier(&barrier).await?;
                         commit_data = false;
                     } else {
-                        self.state_table.commit_no_data_expected(barrier.epoch);
+                        self.state_table.empty_barrier_expected(&barrier);
                     }
 
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {

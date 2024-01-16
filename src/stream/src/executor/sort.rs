@@ -146,9 +146,9 @@ impl<S: StateStore> SortExecutor<S> {
                 }
                 Message::Barrier(barrier) => {
                     if vars.buffer_changed {
-                        this.buffer_table.commit(barrier.epoch).await?;
+                        this.buffer_table.barrier(&barrier).await?;
                     } else {
-                        this.buffer_table.commit_no_data_expected(barrier.epoch);
+                        this.buffer_table.empty_barrier_expected(&barrier);
                     }
                     vars.buffer_changed = false;
 

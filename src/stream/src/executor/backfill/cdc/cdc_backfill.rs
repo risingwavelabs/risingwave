@@ -196,7 +196,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 match msg? {
                     Message::Barrier(barrier) => {
                         // commit state just to bump the epoch of state table
-                        state_impl.commit_state(barrier.epoch).await?;
+                        state_impl.commit_state(&barrier).await?;
                         yield Message::Barrier(barrier);
                         break;
                     }
@@ -297,7 +297,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             false,
                                         )
                                         .await?;
-                                    state_impl.commit_state(barrier.epoch).await?;
+                                    state_impl.commit_state(&barrier).await?;
 
                                     snapshot_read_epoch = barrier.epoch.prev;
                                     if let Some(progress) = self.progress.as_mut() {
@@ -428,7 +428,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 // If not finished then we need to update state, otherwise no need.
                 if let Message::Barrier(barrier) = &msg {
                     // persist the backfill state
-                    state_impl.commit_state(barrier.epoch).await?;
+                    state_impl.commit_state(barrier).await?;
 
                     // mark progress as finished
                     if let Some(progress) = self.progress.as_mut() {
@@ -452,7 +452,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
                 if let Message::Barrier(barrier) = &msg {
                     // commit state just to bump the epoch of state table
-                    state_impl.commit_state(barrier.epoch).await?;
+                    state_impl.commit_state(barrier).await?;
                 }
                 yield msg;
             }

@@ -32,7 +32,7 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
+use crate::executor::{ActorContextRef, Barrier, Executor, ExecutorInfo, PkIndices, Watermark};
 use crate::task::AtomicU64Ref;
 
 pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
@@ -230,8 +230,8 @@ where
         generate_output(res_rows, res_ops, &self.info().schema)
     }
 
-    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.managed_state.flush(epoch).await
+    async fn flush_data(&mut self, barrier: &Barrier) -> StreamExecutorResult<()> {
+        self.managed_state.flush(barrier).await
     }
 
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {

@@ -28,7 +28,7 @@ use tracing::{warn, Instrument};
 
 use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use crate::error::StorageResult;
-use crate::hummock::event_handler::{HummockEvent, LocalInstanceGuard};
+use crate::hummock::event_handler::{HummockEvent, LocalInstanceGuard, LocalInstanceId};
 use crate::hummock::iterator::{
     ConcatIteratorInner, Forward, HummockIteratorUnion, OrderedMergeIteratorInner,
     SkipWatermarkIterator, UnorderedMergeIteratorInner, UserIterator,
@@ -563,7 +563,7 @@ impl LocalHummockStorage {
         self.instance_guard.table_id
     }
 
-    pub fn instance_id(&self) -> u64 {
+    pub fn instance_id(&self) -> LocalInstanceId {
         self.instance_guard.instance_id
     }
 }

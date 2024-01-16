@@ -164,7 +164,7 @@ async fn test_storage_basic() {
     assert_eq!(value, None);
 
     let epoch2 = epoch1 + 1;
-    hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+    hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test_non_checkpoint());
     hummock_storage
         .ingest_batch(
             batch2,
@@ -197,7 +197,7 @@ async fn test_storage_basic() {
 
     // Write the third batch.
     let epoch3 = epoch2 + 1;
-    hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
+    hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test_non_checkpoint());
     hummock_storage
         .ingest_batch(
             batch3,
@@ -530,6 +530,8 @@ async fn test_state_store_sync() {
         .await
         .unwrap();
 
+    hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
+
     let res = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
     test_env
         .meta_client
@@ -734,6 +736,8 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
+    let epoch2 = initial_epoch + 2;
+    hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
 
     let res = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
     test_env
@@ -741,8 +745,6 @@ async fn test_delete_get() {
         .commit_epoch(epoch1, res.uncommitted_ssts)
         .await
         .unwrap();
-    let epoch2 = initial_epoch + 2;
-    hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
@@ -758,6 +760,7 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
+    hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     let res = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
     test_env
         .meta_client
@@ -822,7 +825,7 @@ async fn test_multiple_epoch_sync() {
         .unwrap();
 
     let epoch2 = initial_epoch + 2;
-    hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+    hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test_non_checkpoint());
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
@@ -862,6 +865,7 @@ async fn test_multiple_epoch_sync() {
         )
         .await
         .unwrap();
+    hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     let test_get = || {
         let hummock_storage_clone = &test_env.storage;
         async move {
@@ -990,6 +994,8 @@ async fn test_iter_with_min_epoch() {
         )
         .await
         .unwrap();
+
+    hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
     {
         // test before sync
@@ -1219,6 +1225,7 @@ async fn test_hummock_version_reader() {
             )
             .await
             .unwrap();
+        hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
         {
             // test before sync
@@ -1602,6 +1609,7 @@ async fn test_get_with_min_epoch() {
         )
         .await
         .unwrap();
+    hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
     {
         // test before sync
@@ -1916,6 +1924,7 @@ async fn test_table_watermark() {
                     gen_inner_key(watermark1),
                 )],
                 WatermarkDirection::Ascending,
+                true,
             ),
         );
     }
@@ -2009,7 +2018,7 @@ async fn test_table_watermark() {
             local.insert(key, value, None).unwrap();
         }
         local.flush(vec![]).await.unwrap();
-        local.seal_current_epoch(epoch3, SealCurrentEpochOptions::no_watermark());
+        local.seal_current_epoch(epoch3, SealCurrentEpochOptions::no_watermark(true));
     }
 
     let indexes_after_epoch2 = || gen_range().filter(|index| index % 3 == 0 || index % 3 == 1);
@@ -2256,6 +2265,7 @@ async fn test_table_watermark() {
                     gen_inner_key(5),
                 )],
                 WatermarkDirection::Ascending,
+                true,
             ),
         );
     }

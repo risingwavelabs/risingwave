@@ -43,6 +43,7 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::Barrier;
 use crate::task::{ActorId, AtomicU64Ref, FragmentId};
 
 type DegreeType = u64;
@@ -499,10 +500,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         Ok(entry_state)
     }
 
-    pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+    pub async fn flush(&mut self, barrier: &Barrier) -> StreamExecutorResult<()> {
         self.metrics.flush();
-        self.state.table.commit(epoch).await?;
-        self.degree_state.table.commit(epoch).await?;
+        self.state.table.barrier(barrier).await?;
+        self.degree_state.table.barrier(barrier).await?;
         Ok(())
     }
 

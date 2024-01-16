@@ -462,17 +462,17 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                             if let Some(row) = &current_epoch_row {
                                 self.right_table.insert(row);
                             }
-                            self.right_table.commit(barrier.epoch).await?;
+                            self.right_table.barrier(&barrier).await?;
                         } else {
-                            self.right_table.commit_no_data_expected(barrier.epoch);
+                            self.right_table.empty_barrier_expected(&barrier);
                         }
                         // Update the last committed row since it has changed
                         last_committed_epoch_row = current_epoch_row.clone();
                     } else {
-                        self.right_table.commit_no_data_expected(barrier.epoch);
+                        self.right_table.empty_barrier_expected(&barrier);
                     }
 
-                    self.left_table.commit(barrier.epoch).await?;
+                    self.left_table.barrier(&barrier).await?;
 
                     prev_epoch_value = Some(curr);
 

@@ -45,8 +45,8 @@ use super::{
 };
 use crate::common::table::state_table::StateTable;
 use crate::common::JoinStreamChunkBuilder;
-use crate::executor::expect_first_barrier_from_aligned_stream;
 use crate::executor::JoinType::LeftAnti;
+use crate::executor::{expect_first_barrier_from_aligned_stream, Barrier};
 use crate::task::AtomicU64Ref;
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
@@ -803,7 +803,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 }
                 AlignedMessage::Barrier(barrier) => {
                     let barrier_start_time = Instant::now();
-                    self.flush_data(barrier.epoch).await?;
+                    self.flush_data(&barrier).await?;
 
                     // Update the vnode bitmap for state tables of both sides if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
@@ -837,11 +837,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         }
     }
 
-    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+    async fn flush_data(&mut self, barrier: &Barrier) -> StreamExecutorResult<()> {
         // All changes to the state has been buffered in the mem-table of the state table. Just
         // `commit` them here.
-        self.side_l.ht.flush(epoch).await?;
-        self.side_r.ht.flush(epoch).await?;
+        self.side_l.ht.flush(barrier).await?;
+        self.side_r.ht.flush(barrier).await?;
         Ok(())
     }
 
