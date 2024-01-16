@@ -57,6 +57,7 @@ pub fn mock_sstable_store() -> SstableStoreRef {
         128 << 20,
         0,
         64 << 20,
+        16,
         FileCache::none(),
         FileCache::none(),
         None,
@@ -203,7 +204,6 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         Arc::new(CompactorMetrics::unused()),
         iter,
         DummyCompactionFilter,
-        None,
     )
     .await
     .unwrap();

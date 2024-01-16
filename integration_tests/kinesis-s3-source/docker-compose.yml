@@ -23,7 +23,7 @@ services:
       service: prometheus-0
   localstack:
     container_name: localstack
-    image: localstack/localstack:2.2
+    image: localstack/localstack:3.0
     networks:
       default:
         aliases:

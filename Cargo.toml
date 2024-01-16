@@ -59,11 +59,11 @@ members = [
   "src/utils/workspace-config",
   "src/workspace-hack",
 ]
-exclude = ["lints"]
+exclude = ["e2e_test/udf/wasm", "lints"]
 resolver = "2"
 
 [workspace.package]
-version = "1.5.0-alpha"
+version = "1.7.0-alpha"
 edition = "2021"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -120,7 +120,7 @@ tonic = { package = "madsim-tonic", version = "0.4.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "58c1f003484449d7c6dd693b348bf19dd44889cb" }
 prost = { version = "0.12" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "3f7b53ba5b563524212c25810345d1314678e7fc", features = [
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "32c0bbf242f5c47b1e743f10577012fe7436c770", features = [
   "prometheus",
 ] }
 arrow-array = "49"
@@ -132,6 +132,7 @@ arrow-flight = "49"
 arrow-select = "49"
 arrow-ord = "49"
 arrow-row = "49"
+arrow-udf-wasm = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "f9a9e0d" }
 arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
 arrow-buffer-deltalake = { package = "arrow-buffer", version = "48.0.1" }
 arrow-cast-deltalake = { package = "arrow-cast", version = "48.0.1" }

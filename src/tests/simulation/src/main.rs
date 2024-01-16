@@ -173,6 +173,7 @@ async fn main() {
         meta_nodes: args.meta_nodes,
         etcd_timeout_rate: args.etcd_timeout_rate,
         etcd_data_path: args.etcd_data,
+        ..Default::default()
     };
     let kill_opts = KillOpts {
         kill_meta: args.kill_meta || args.kill,

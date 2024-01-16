@@ -14,7 +14,7 @@
 
 use risingwave_pb::meta::PbSystemParams;
 
-use super::system_params_to_kv;
+use super::{default, system_params_to_kv};
 
 /// A wrapper for [`risingwave_pb::meta::SystemParams`] for 2 purposes:
 /// - Avoid misuse of deprecated fields by hiding their getters.
@@ -77,7 +77,19 @@ impl SystemParamsReader {
     }
 
     pub fn pause_on_next_bootstrap(&self) -> bool {
-        self.prost.pause_on_next_bootstrap.unwrap_or(false)
+        self.prost
+            .pause_on_next_bootstrap
+            .unwrap_or_else(|| default::pause_on_next_bootstrap().unwrap())
+    }
+
+    pub fn enable_tracing(&self) -> bool {
+        self.prost
+            .enable_tracing
+            .unwrap_or_else(|| default::enable_tracing().unwrap())
+    }
+
+    pub fn wasm_storage_url(&self) -> &str {
+        self.prost.wasm_storage_url.as_ref().unwrap()
     }
 
     pub fn to_kv(&self) -> Vec<(String, String)> {

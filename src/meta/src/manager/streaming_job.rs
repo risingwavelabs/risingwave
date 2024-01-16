@@ -26,8 +26,6 @@ use crate::model::FragmentId;
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
 #[derive(Debug, Clone, EnumDiscriminants)]
-#[strum_discriminants(name(DdlType))]
-#[strum_discriminants(vis(pub))]
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink, Option<(Table, Option<PbSource>)>),
@@ -36,13 +34,34 @@ pub enum StreamingJob {
     Source(PbSource),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DdlType {
+    MaterializedView,
+    Sink,
+    Table(TableJobType),
+    Index,
+    Source,
+}
+
+impl From<&StreamingJob> for DdlType {
+    fn from(job: &StreamingJob) -> Self {
+        match job {
+            StreamingJob::MaterializedView(_) => DdlType::MaterializedView,
+            StreamingJob::Sink(_, _) => DdlType::Sink,
+            StreamingJob::Table(_, _, ty) => DdlType::Table(*ty),
+            StreamingJob::Index(_, _) => DdlType::Index,
+            StreamingJob::Source(_) => DdlType::Source,
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::derivable_impls)]
 impl Default for DdlType {
     fn default() -> Self {
         // This should not be used by mock services,
         // so we can just pick an arbitrary default variant.
-        DdlType::Table
+        DdlType::MaterializedView
     }
 }
 
@@ -256,14 +275,6 @@ impl StreamingJob {
                 table.get_create_type().unwrap_or(CreateType::Foreground)
             }
             _ => CreateType::Foreground,
-        }
-    }
-
-    pub fn table_job_type(&self) -> Option<TableJobType> {
-        if let Self::Table(.., sub_type) = self {
-            Some(*sub_type)
-        } else {
-            None
         }
     }
 

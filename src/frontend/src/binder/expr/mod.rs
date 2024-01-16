@@ -382,7 +382,7 @@ impl Binder {
         // Note: This is specific to anonymous sql udf, since the
         // parameters will be parsed and treated as `Parameter`.
         // For detailed explanation, consider checking `bind_column`.
-        if let Some(expr) = self.udf_context.get(&format!("${index}")) {
+        if let Some(expr) = self.udf_context.get_expr(&format!("${index}")) {
             return self.bind_expr(expr.clone());
         }
 

@@ -28,6 +28,7 @@ use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use risingwave_common::types::DataType;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::query_log::*;
+use risingwave_common::{PG_VERSION, SERVER_ENCODING, STANDARD_CONFORMING_STRINGS};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
@@ -53,7 +54,7 @@ static RW_QUERY_LOG_TRUNCATE_LEN: LazyLock<usize> =
         Ok(len) if len.parse::<usize>().is_ok() => len.parse::<usize>().unwrap(),
         _ => {
             if cfg!(debug_assertions) {
-                usize::MAX
+                65536
             } else {
                 1024
             }
@@ -973,13 +974,13 @@ where
 
     fn write_parameter_status_msg_no_flush(&mut self, status: &ParameterStatus) -> io::Result<()> {
         self.write_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::ClientEncoding("UTF8"),
+            BeParameterStatusMessage::ClientEncoding(SERVER_ENCODING),
         ))?;
         self.write_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::StandardConformingString("on"),
+            BeParameterStatusMessage::StandardConformingString(STANDARD_CONFORMING_STRINGS),
         ))?;
         self.write_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::ServerVersion("9.5.0"),
+            BeParameterStatusMessage::ServerVersion(PG_VERSION),
         ))?;
         if let Some(application_name) = &status.application_name {
             self.write_no_flush(&BeMessage::ParameterStatus(
