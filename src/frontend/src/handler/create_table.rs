@@ -1005,7 +1005,7 @@ pub async fn handle_create_table(
         )
         .await?;
 
-        let mut graph = build_graph(plan);
+        let mut graph = build_graph(plan)?;
         graph.parallelism =
             session
                 .config()
@@ -1106,7 +1106,7 @@ pub async fn generate_stream_graph_for_table(
             .map(|parallelism| Parallelism {
                 parallelism: parallelism.get(),
             }),
-        ..build_graph(plan)
+        ..build_graph(plan)?
     };
 
     // Fill the original table ID.

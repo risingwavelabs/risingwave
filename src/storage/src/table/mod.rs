@@ -276,10 +276,9 @@ pub fn compute_vnode(row: impl Row, indices: &[usize], vnodes: &Bitmap) -> Virtu
     vnode
 }
 
-pub fn get_vnode_from_row(row: impl Row, index: usize, _vnodes: &Bitmap) -> VirtualNode {
+pub fn get_vnode_from_row(row: impl Row, index: usize, vnodes: &Bitmap) -> VirtualNode {
     let vnode = VirtualNode::from_datum(row.datum_at(index));
-    // TODO: enable this check when `WatermarkFilterExecutor` use `StorageTable` to read global max watermark
-    // check_vnode_is_set(vnode, vnodes);
+    check_vnode_is_set(vnode, vnodes);
 
     tracing::debug!(target: "events::storage::storage_table", "get vnode from row: {:?} vnode column index {:?} => {}", row, index, vnode);
 

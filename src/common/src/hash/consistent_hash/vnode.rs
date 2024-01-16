@@ -91,13 +91,13 @@ impl VirtualNode {
         Self::from_scalar(datum.expect("should not be none").into_int16())
     }
 
-    pub const fn to_datum(self) -> Datum {
-        Some(ScalarImpl::Int16(self.to_scalar()))
-    }
-
     /// Returns the scalar representation of the virtual node. Used by `VNODE` expression.
     pub const fn to_scalar(self) -> i16 {
         self.0 as _
+    }
+
+    pub const fn to_datum(self) -> Datum {
+        Some(ScalarImpl::Int16(self.to_scalar()))
     }
 
     /// Creates a virtual node from the given big-endian bytes representation.
