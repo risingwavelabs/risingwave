@@ -46,9 +46,20 @@ pub struct SystemParamsReader<I = PbSystemParams> {
     inner: I,
 }
 
-impl From<PbSystemParams> for SystemParamsReader {
-    fn from(prost: PbSystemParams) -> Self {
-        Self { inner: prost }
+impl Default for SystemParamsReader {
+    fn default() -> Self {
+        Self {
+            inner: PbSystemParams::default(),
+        }
+    }
+}
+
+impl<I> From<I> for SystemParamsReader<I>
+where
+    I: Borrow<PbSystemParams>,
+{
+    fn from(inner: I) -> Self {
+        Self { inner }
     }
 }
 
@@ -58,6 +69,12 @@ where
 {
     pub fn new(inner: I) -> Self {
         Self { inner }
+    }
+
+    pub fn as_ref(&self) -> SystemParamsReader<&PbSystemParams> {
+        SystemParamsReader {
+            inner: self.inner(),
+        }
     }
 
     fn inner(&self) -> &PbSystemParams {

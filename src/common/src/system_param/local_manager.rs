@@ -20,6 +20,7 @@ use risingwave_pb::meta::SystemParams;
 use tokio::sync::watch::{channel, Receiver, Sender};
 
 use super::common::CommonHandler;
+use super::diff::SystemParamsDiff;
 use super::reader::SystemParamsReader;
 use super::system_params_for_test;
 
@@ -49,11 +50,15 @@ impl LocalSystemParamsManager {
         tokio::spawn({
             let mut rx = tx.subscribe();
             async move {
+                let mut old_params = initial_params.clone();
                 let handler = CommonHandler::new(initial_params);
 
+                // TODO: receive the diff instead of the snapshot.
                 while rx.changed().await.is_ok() {
                     let new_params = (**rx.borrow_and_update().load()).clone();
-                    handler.handle_change(new_params);
+                    let diff = SystemParamsDiff::diff(old_params.as_ref(), new_params.as_ref());
+                    handler.handle_change(&diff);
+                    old_params = new_params;
                 }
             }
         });

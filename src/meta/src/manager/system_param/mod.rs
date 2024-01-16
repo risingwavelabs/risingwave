@@ -90,7 +90,7 @@ impl SystemParamsManager {
         let params = params_guard.deref_mut();
         let mut mem_txn = VarTransaction::new(params);
 
-        let Some(_) =
+        let Some((_new_value, diff)) =
             set_system_param(mem_txn.deref_mut(), name, value).map_err(MetaError::system_params)?
         else {
             // No changes on the parameter.
@@ -104,7 +104,9 @@ impl SystemParamsManager {
         mem_txn.commit();
 
         // Run common handler.
-        self.common_handler.handle_change(params.clone().into());
+        self.common_handler.handle_change(&diff);
+
+        // TODO: notify the diff instead of the snapshot.
 
         // Sync params to other managers on the meta node only once, since it's infallible.
         self.notification_manager

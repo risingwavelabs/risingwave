@@ -195,19 +195,21 @@ impl SystemParamsController {
         };
         let mut params = params_guard.clone();
         let mut param: system_parameter::ActiveModel = param.into();
-        let Some(value) = set_system_param(&mut params, name, value.as_ref())
-            .map_err(MetaError::system_params)?
+        let Some((new_value, diff)) =
+            set_system_param(&mut params, name, value).map_err(MetaError::system_params)?
         else {
             // No changes on the parameter.
             return Ok(params);
         };
 
-        param.value = Set(value);
+        param.value = Set(new_value);
         param.update(&self.db).await?;
         *params_guard = params.clone();
 
         // Run common handler.
-        self.common_handler.handle_change(params.clone().into());
+        self.common_handler.handle_change(&diff);
+
+        // TODO: notify the diff instead of the snapshot.
 
         // Sync params to other managers on the meta node only once, since it's infallible.
         self.notification_manager

@@ -21,6 +21,7 @@
 //! - Add a new method to [`reader::SystemParamsReader`].
 
 pub mod common;
+pub mod diff;
 pub mod local_manager;
 pub mod reader;
 
@@ -30,6 +31,8 @@ use std::str::FromStr;
 
 use paste::paste;
 use risingwave_pb::meta::PbSystemParams;
+
+use self::diff::SystemParamsDiff;
 
 pub type SystemParamsError = String;
 
@@ -302,7 +305,11 @@ macro_rules! impl_set_system_param {
     ($({ $field:ident, $type:ty, $default:expr, $($rest:tt)* },)*) => {
         /// Set a system parameter with the given value or default one.
         /// Returns the new value if changed.
-        pub fn set_system_param(params: &mut PbSystemParams, key: &str, value: Option<impl AsRef<str>>) -> Result<Option<String>> {
+        pub fn set_system_param(
+            params: &mut PbSystemParams,
+            key: &str,
+            value: Option<impl AsRef<str>>,
+        ) -> Result<Option<(String, SystemParamsDiff)>> {
             use crate::system_param::reader::{SystemParamsReader, SystemParamsRead};
 
             match key {
@@ -318,8 +325,12 @@ macro_rules! impl_set_system_param {
                         let changed = SystemParamsReader::new(&*params).$field() != v;
                         if changed {
                             let new_value = v.to_string();
+                            let diff = SystemParamsDiff::new(PbSystemParams {
+                                $field: Some(v.clone()),
+                                ..Default::default()
+                            });
                             params.$field = Some(v);
-                            Ok(Some(new_value))
+                            Ok(Some((new_value, diff)))
                         } else {
                             Ok(None)
                         }
