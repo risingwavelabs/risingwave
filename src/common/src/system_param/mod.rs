@@ -20,6 +20,7 @@
 //! - Add a new entry to `for_all_undeprecated_params` in this file.
 //! - Add a new method to [`reader::SystemParamsReader`].
 
+pub mod common;
 pub mod local_manager;
 pub mod reader;
 
@@ -56,6 +57,7 @@ macro_rules! for_all_params {
             { max_concurrent_creating_streaming_jobs, u32, Some(1_u32), true },
             { pause_on_next_bootstrap, bool, Some(false), true },
             { wasm_storage_url, String, Some("fs://.risingwave/data".to_string()), false },
+            { enable_tracing, bool, Some(false), true },
         }
     };
 }
@@ -359,6 +361,7 @@ mod tests {
             (MAX_CONCURRENT_CREATING_STREAMING_JOBS_KEY, "1"),
             (PAUSE_ON_NEXT_BOOTSTRAP_KEY, "false"),
             (WASM_STORAGE_URL_KEY, "a"),
+            (ENABLE_TRACING_KEY, "true"),
             ("a_deprecated_param", "foo"),
         ];
 

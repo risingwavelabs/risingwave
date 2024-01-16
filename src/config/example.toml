@@ -43,7 +43,8 @@ do_not_config_object_storage_lifecycle = false
 partition_vnode_count = 16
 table_write_throughput_threshold = 16777216
 min_table_split_write_throughput = 4194304
-compaction_task_max_heartbeat_interval_secs = 60
+compaction_task_max_heartbeat_interval_secs = 30
+compaction_task_max_progress_interval_secs = 600
 hybird_partition_vnode_count = 4
 event_log_enabled = true
 event_log_channel_max_size = 10
@@ -164,10 +165,10 @@ recent_filter_layers = 6
 recent_filter_rotate_interval_ms = 10000
 
 [storage.object_store]
-object_store_streaming_read_timeout_ms = 600000
-object_store_streaming_upload_timeout_ms = 600000
-object_store_upload_timeout_ms = 3600000
-object_store_read_timeout_ms = 3600000
+object_store_streaming_read_timeout_ms = 480000
+object_store_streaming_upload_timeout_ms = 480000
+object_store_upload_timeout_ms = 480000
+object_store_read_timeout_ms = 480000
 
 [storage.object_store.s3]
 object_store_keepalive_ms = 600000
@@ -189,3 +190,4 @@ backup_storage_directory = "backup"
 max_concurrent_creating_streaming_jobs = 1
 pause_on_next_bootstrap = false
 wasm_storage_url = "fs://.risingwave/data"
+enable_tracing = false

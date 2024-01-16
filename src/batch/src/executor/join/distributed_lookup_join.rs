@@ -30,7 +30,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::{Distribution, TableIter};
+use risingwave_storage::table::{TableDistribution, TableIter};
 use risingwave_storage::{dispatch_state_store, StateStore};
 
 use crate::error::Result;
@@ -176,7 +176,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             .collect();
 
         // Lookup Join always contains distribution key, so we don't need vnode bitmap
-        let vnodes = Some(Distribution::all_vnodes());
+        let vnodes = Some(TableDistribution::all_vnodes());
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
 

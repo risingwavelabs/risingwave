@@ -20,15 +20,17 @@ import { reverse, sortBy } from "lodash"
 import Head from "next/head"
 import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback } from "react"
-import RelationDependencyGraph from "../components/RelationDependencyGraph"
+import RelationDependencyGraph, {
+  nodeRadius,
+} from "../components/RelationDependencyGraph"
 import Title from "../components/Title"
-import { FragmentPoint } from "../lib/layout"
+import { RelationPoint } from "../lib/layout"
 import useFetch from "./api/fetch"
 import { Relation, getRelations, relationIsStreamingJob } from "./api/streaming"
 
 const SIDEBAR_WIDTH = "200px"
 
-function buildDependencyAsEdges(list: Relation[]): FragmentPoint[] {
+function buildDependencyAsEdges(list: Relation[]): RelationPoint[] {
   const edges = []
   const relationSet = new Set(list.map((r) => r.id))
   for (const r of reverse(sortBy(list, "id"))) {
@@ -41,24 +43,27 @@ function buildDependencyAsEdges(list: Relation[]): FragmentPoint[] {
             .map((r) => r.toString())
         : [],
       order: r.id,
+      width: nodeRadius * 2,
+      height: nodeRadius * 2,
+      relation: r,
     })
   }
   return edges
 }
 
 export default function StreamingGraph() {
-  const { response: streamingJobList } = useFetch(getRelations)
+  const { response: relationList } = useFetch(getRelations)
   const [selectedId, setSelectedId] = useQueryState("id", parseAsInteger)
 
-  const mvDependencyCallback = useCallback(() => {
-    if (streamingJobList) {
-      return buildDependencyAsEdges(streamingJobList)
+  const relationDependencyCallback = useCallback(() => {
+    if (relationList) {
+      return buildDependencyAsEdges(relationList)
     } else {
       return undefined
     }
-  }, [streamingJobList])
+  }, [relationList])
 
-  const mvDependency = mvDependencyCallback()
+  const relationDependency = relationDependencyCallback()
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
@@ -77,7 +82,7 @@ export default function StreamingGraph() {
           </Text>
           <Box flex={1} overflowY="scroll">
             <VStack width={SIDEBAR_WIDTH} align="start" spacing={1}>
-              {streamingJobList?.map((r) => {
+              {relationList?.map((r) => {
                 const match = selectedId === r.id
                 return (
                   <Button
@@ -104,11 +109,12 @@ export default function StreamingGraph() {
           overflowX="scroll"
           overflowY="scroll"
         >
-          <Text fontWeight="semibold">Graph</Text>
-          {mvDependency && (
+          <Text fontWeight="semibold">Dependency Graph</Text>
+          {relationDependency && (
             <RelationDependencyGraph
-              nodes={mvDependency}
+              nodes={relationDependency}
               selectedId={selectedId?.toString()}
+              setSelectedId={(id) => setSelectedId(parseInt(id))}
             />
           )}
         </Box>
