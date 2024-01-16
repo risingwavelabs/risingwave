@@ -17,7 +17,6 @@
 #![feature(let_chains)]
 
 use core::str::FromStr;
-use core::sync::atomic::{AtomicU64, Ordering};
 use std::collections::HashMap;
 
 use clap::Parser;
@@ -52,8 +51,7 @@ use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_stream::executor::test_utils::prelude::ColumnDesc;
 use risingwave_stream::executor::{Barrier, Message, MessageStreamItem, StreamExecutorError};
 use serde::{Deserialize, Deserializer};
-use tokio::sync::oneshot::{Receiver, Sender};
-use tokio::sync::RwLock;
+use tokio::sync::oneshot::Sender;
 use tokio::time::{sleep, Instant};
 
 const CHECKPOINT_INTERVAL: u64 = 1000;
@@ -65,48 +63,53 @@ pub struct MockRangeLogReader {
     upstreams: BoxStream<'static, MessageStreamItem>,
     current_epoch: u64,
     chunk_id: usize,
-    throughput_metric: ThroughputMetric,
-    stop_rx: Receiver<()>,
-    result_tx: Option<Sender<Vec<String>>>,
+    throughput_metric: Option<ThroughputMetric>,
+    stop_rx: tokio::sync::mpsc::Receiver<()>,
+    result_tx: Option<Sender<ThroughputMetric>>,
 }
 
 impl LogReader for MockRangeLogReader {
     async fn init(&mut self) -> LogStoreResult<()> {
-        self.throughput_metric.add_metric(0);
+        self.throughput_metric.as_mut().unwrap().add_metric(0);
         Ok(())
     }
 
     async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
-        if let Ok(()) = self.stop_rx.try_recv() {
-            self.result_tx
-                .take()
-                .unwrap()
-                .send(self.throughput_metric.get_throughput())
-                .unwrap();
-        }
-        match self.upstreams.next().await.unwrap().unwrap() {
-            Message::Barrier(barrier) => {
-                let prev_epoch = self.current_epoch;
-                self.current_epoch = barrier.epoch.curr;
-                Ok((
-                    prev_epoch,
-                    LogStoreReadItem::Barrier {
-                        is_checkpoint: true,
-                    },
-                ))
+        tokio::select! {
+            _ = self.stop_rx.recv() => {
+                self.result_tx
+                        .take()
+                        .unwrap()
+                        .send(self.throughput_metric.take().unwrap())
+                        .map_err(|_| anyhow_error!("Can't send throughput_metric"))?;
+                    futures::future::pending().await
+                },
+            item = self.upstreams.next() => {
+                match item.unwrap().unwrap() {
+                    Message::Barrier(barrier) => {
+                        let prev_epoch = self.current_epoch;
+                        self.current_epoch = barrier.epoch.curr;
+                        Ok((
+                            prev_epoch,
+                            LogStoreReadItem::Barrier {
+                                is_checkpoint: true,
+                            },
+                        ))
+                    }
+                    Message::Chunk(chunk) => {
+                        self.throughput_metric.as_mut().unwrap().add_metric(chunk.capacity());
+                        self.chunk_id += 1;
+                        Ok((
+                            self.current_epoch,
+                            LogStoreReadItem::StreamChunk {
+                                chunk,
+                                chunk_id: self.chunk_id,
+                            },
+                        ))
+                    }
+                    _ => Err(anyhow_error!("Can't assert message type".to_string())),
+                }
             }
-            Message::Chunk(chunk) => {
-                self.throughput_metric.add_metric(chunk.capacity());
-                self.chunk_id += 1;
-                Ok((
-                    self.current_epoch,
-                    LogStoreReadItem::StreamChunk {
-                        chunk,
-                        chunk_id: self.chunk_id,
-                    },
-                ))
-            }
-            _ => Err(anyhow_error!("Can't assert message type".to_string())),
         }
     }
 
@@ -123,14 +126,14 @@ impl MockRangeLogReader {
     fn new(
         mock_source: MockDatagenSource,
         throughput_metric: ThroughputMetric,
-        stop_rx: Receiver<()>,
-        result_tx: Sender<Vec<String>>,
+        stop_rx: tokio::sync::mpsc::Receiver<()>,
+        result_tx: Sender<ThroughputMetric>,
     ) -> MockRangeLogReader {
         MockRangeLogReader {
             upstreams: mock_source.into_stream().boxed(),
             current_epoch: 0,
             chunk_id: 0,
-            throughput_metric,
+            throughput_metric: Some(throughput_metric),
             stop_rx,
             result_tx: Some(result_tx),
         }
@@ -183,8 +186,7 @@ impl ThroughputMetric {
 }
 
 pub struct MockDatagenSource {
-    datagen_split_readers: RwLock<Vec<DatagenSplitReader>>,
-    epoch: AtomicU64,
+    datagen_split_readers: Vec<DatagenSplitReader>,
 }
 impl MockDatagenSource {
     pub async fn new(
@@ -225,15 +227,14 @@ impl MockDatagenSource {
             );
         }
         MockDatagenSource {
-            epoch: AtomicU64::new(0),
-            datagen_split_readers: RwLock::new(datagen_split_readers),
+            datagen_split_readers,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    pub async fn source_to_data_stream(&self) {
+    pub async fn source_to_data_stream(mut self) {
         let mut readers = vec![];
-        while let Some(reader) = self.datagen_split_readers.write().await.pop() {
+        while let Some(reader) = self.datagen_split_readers.pop() {
             readers.push(reader.into_stream());
         }
         loop {
@@ -247,7 +248,7 @@ impl MockDatagenSource {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub async fn into_stream(self) {
         let stream = select_with_strategy(
-            self.barrier_to_message_stream().map_ok(Either::Left),
+            Self::barrier_to_message_stream().map_ok(Either::Left),
             self.source_to_data_stream().map_ok(Either::Right),
             |_: &mut PollNext| PollNext::Left,
         );
@@ -268,11 +269,12 @@ impl MockDatagenSource {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    pub async fn barrier_to_message_stream(&self) {
+    pub async fn barrier_to_message_stream() {
+        let mut epoch = 0_u64;
         loop {
-            let prev_epoch = self.epoch.fetch_add(1, Ordering::Relaxed);
-            let barrier =
-                Barrier::with_prev_epoch_for_test(self.epoch.load(Ordering::Relaxed), prev_epoch);
+            let prev_epoch = epoch;
+            epoch += 1;
+            let barrier = Barrier::with_prev_epoch_for_test(epoch, prev_epoch);
             yield Message::Barrier(barrier);
             sleep(tokio::time::Duration::from_millis(CHECKPOINT_INTERVAL)).await;
         }
@@ -403,7 +405,8 @@ fn mock_from_legacy_type(
     }
 }
 
-fn print_throughput_result(throughput_result: Vec<String>) {
+fn print_throughput_result(throughput_metric: ThroughputMetric) {
+    let throughput_result = throughput_metric.get_throughput();
     if throughput_result.is_empty() {
         println!("Throughput Sink: Don't get Throughput, please check");
     } else {
@@ -421,8 +424,8 @@ async fn main() {
         cfg.split_num,
     )
     .await;
-    let (data_size_tx, data_size_rx) = tokio::sync::oneshot::channel::<Vec<String>>();
-    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let (data_size_tx, data_size_rx) = tokio::sync::oneshot::channel::<ThroughputMetric>();
+    let (stop_tx, stop_rx) = tokio::sync::mpsc::channel::<()>(5);
     let throughput_metric = ThroughputMetric::new();
 
     let mut mock_range_log_reader = MockRangeLogReader::new(
@@ -475,6 +478,6 @@ async fn main() {
     }
     sleep(tokio::time::Duration::from_secs(BENCH_TIME)).await;
     println!("Bench Over!");
-    stop_tx.send(()).unwrap();
+    stop_tx.send(()).await.unwrap();
     print_throughput_result(data_size_rx.await.unwrap());
 }
