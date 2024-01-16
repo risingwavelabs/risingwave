@@ -72,7 +72,8 @@ pub struct Reschedule {
     /// Reassigned splits for source actors
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
-    /// Whether this fragment is injectable.
+    /// Whether this fragment is injectable. The injectable means whether the fragment contains
+    /// any executors that are able to receive barrier.
     pub injectable: bool,
 }
 
@@ -103,7 +104,7 @@ impl ReplaceTablePlan {
                 })
             })
             .collect_vec();
-        CommandActorChanges::Actor {
+        CommandActorChanges {
             to_add,
             to_remove: self.old_table_fragments.actor_ids().into_iter().collect(),
         }
@@ -203,15 +204,15 @@ impl Command {
         Self::Resume(reason)
     }
 
-    pub fn actor_changes(&self) -> CommandActorChanges {
+    pub fn actor_changes(&self) -> Option<CommandActorChanges> {
         match self {
-            Command::Plain(_) => CommandActorChanges::None,
-            Command::Pause(_) => CommandActorChanges::None,
-            Command::Resume(_) => CommandActorChanges::None,
-            Command::DropStreamingJobs(node_actors) => CommandActorChanges::Actor {
+            Command::Plain(_) => None,
+            Command::Pause(_) => None,
+            Command::Resume(_) => None,
+            Command::DropStreamingJobs(node_actors) => Some(CommandActorChanges {
                 to_add: Default::default(),
                 to_remove: node_actors.values().flatten().cloned().collect(),
-            },
+            }),
             Command::CreateStreamingJob {
                 table_fragments,
                 replace_table,
@@ -234,27 +235,23 @@ impl Command {
                     .collect_vec();
 
                 if let Some(plan) = replace_table {
-                    let changes = plan.actor_changes();
-                    let CommandActorChanges::Actor {
+                    let CommandActorChanges {
                         to_add: to_add_plan,
                         to_remove,
-                    } = changes
-                    else {
-                        unreachable!("replace plan should have actor changes")
-                    };
+                    } = plan.actor_changes();
                     to_add.extend(to_add_plan);
-                    CommandActorChanges::Actor { to_add, to_remove }
+                    Some(CommandActorChanges { to_add, to_remove })
                 } else {
-                    CommandActorChanges::Actor {
+                    Some(CommandActorChanges {
                         to_add,
                         to_remove: Default::default(),
-                    }
+                    })
                 }
             }
-            Command::CancelStreamingJob(table_fragments) => CommandActorChanges::Actor {
+            Command::CancelStreamingJob(table_fragments) => Some(CommandActorChanges {
                 to_add: Default::default(),
                 to_remove: table_fragments.actor_ids().into_iter().collect(),
-            },
+            }),
             Command::RescheduleFragment { reschedules, .. } => {
                 let mut to_add = vec![];
                 let mut to_remove = HashSet::new();
@@ -271,11 +268,11 @@ impl Command {
                     to_remove.extend(reschedule.removed_actors.iter().copied());
                 }
 
-                CommandActorChanges::Actor { to_add, to_remove }
+                Some(CommandActorChanges { to_add, to_remove })
             }
-            Command::ReplaceTable(plan) => plan.actor_changes(),
-            Command::SourceSplitAssignment(_) => CommandActorChanges::None,
-            Command::Throttle(_) => CommandActorChanges::None,
+            Command::ReplaceTable(plan) => Some(plan.actor_changes()),
+            Command::SourceSplitAssignment(_) => None,
+            Command::Throttle(_) => None,
         }
     }
 

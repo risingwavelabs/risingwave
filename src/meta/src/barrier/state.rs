@@ -79,16 +79,15 @@ impl BarrierManagerState {
     }
 
     /// Before resolving the actors to be sent or collected, we should first add the newly
-    /// added actors into checkpoint control, so that these actor can be send and collect.
+    /// added actors into inflight actor infos, so that these actor can be send and collect.
     pub fn pre_resolve(&mut self, command: &Command) {
-        self.inflight_actor_infos
-            .pre_apply(&command.actor_changes());
+        self.inflight_actor_infos.pre_apply(command.actor_changes());
     }
 
     /// After resolving the actors to be sent or collected, we should remove the dropped actors
     /// from checkpoint control.
     pub fn post_resolve(&mut self, command: &Command) {
         self.inflight_actor_infos
-            .post_apply(&command.actor_changes());
+            .post_apply(command.actor_changes());
     }
 }

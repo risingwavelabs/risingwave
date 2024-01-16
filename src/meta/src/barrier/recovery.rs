@@ -64,11 +64,6 @@ impl GlobalBarrierManagerContext {
             .map(jitter)
     }
 
-    async fn resolve_actor_info_for_recovery(&self) -> InflightActorInfo {
-        // TODO: use it directly
-        self.resolve_actor_info().await
-    }
-
     /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
     async fn clean_dirty_streaming_jobs(&self) -> MetaResult<()> {
         match &self.metadata_manager {
@@ -357,12 +352,12 @@ impl GlobalBarrierManagerContext {
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
                     let mut info = if self.env.opts.enable_scale_in_when_recovery {
-                        let info = self.resolve_actor_info_for_recovery().await;
+                        let info = self.resolve_actor_info().await;
                         let scaled = self.scale_actors(&info).await.inspect_err(|err| {
                             warn!(err = ?err, "scale actors failed");
                         })?;
                         if scaled {
-                            self.resolve_actor_info_for_recovery().await
+                            self.resolve_actor_info().await
                         } else {
                             info
                         }
@@ -379,10 +374,10 @@ impl GlobalBarrierManagerContext {
                     })?;
 
                     let to_remove_actors = scheduled_barriers.pre_apply_drop_scheduled().await;
-                    info.post_apply(&CommandActorChanges::Actor {
+                    info.post_apply(Some(CommandActorChanges {
                         to_remove: to_remove_actors,
                         to_add: Default::default(),
-                    });
+                    }));
 
                     // update and build all actors.
                     self.update_actors(&info).await.inspect_err(|err| {
@@ -501,7 +496,7 @@ impl GlobalBarrierManagerContext {
             .collect();
         if expired_parallel_units.is_empty() {
             debug!("no expired parallel units, skipping.");
-            let info = self.resolve_actor_info_for_recovery().await;
+            let info = self.resolve_actor_info().await;
             return Ok(info);
         }
 
@@ -553,7 +548,7 @@ impl GlobalBarrierManagerContext {
         mgr.catalog_controller.migrate_actors(plan).await?;
 
         debug!("migrate actors succeed.");
-        let info = self.resolve_actor_info_for_recovery().await;
+        let info = self.resolve_actor_info().await;
         Ok(info)
     }
 
@@ -563,7 +558,7 @@ impl GlobalBarrierManagerContext {
             unreachable!()
         };
 
-        let info = self.resolve_actor_info_for_recovery().await;
+        let info = self.resolve_actor_info().await;
 
         // 1. get expired workers.
         let expired_workers: HashSet<WorkerId> = info
@@ -587,7 +582,7 @@ impl GlobalBarrierManagerContext {
         migration_plan.delete(self.env.meta_store()).await?;
         debug!("migrate actors succeed.");
 
-        let info = self.resolve_actor_info_for_recovery().await;
+        let info = self.resolve_actor_info().await;
         Ok(info)
     }
 

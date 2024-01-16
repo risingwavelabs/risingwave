@@ -27,12 +27,9 @@ pub struct ActorDesc {
 }
 
 #[derive(Debug, Clone)]
-pub enum CommandActorChanges {
-    Actor {
-        to_add: Vec<ActorDesc>,
-        to_remove: HashSet<ActorId>,
-    },
-    None,
+pub struct CommandActorChanges {
+    pub(crate) to_add: Vec<ActorDesc>,
+    pub(crate) to_remove: HashSet<ActorId>,
 }
 
 /// [`InflightActorInfo`] resolves the actor info read from meta store for
@@ -53,6 +50,7 @@ pub struct InflightActorInfo {
 }
 
 impl InflightActorInfo {
+    /// Resolve inflight actor info from given nodes and actors that are loaded from meta store. It will be used during recovery to rebuild all streaming actors.
     pub fn resolve(
         all_nodes: impl IntoIterator<Item = PbWorkerNode>,
         actor_infos: ActorInfos,
@@ -87,6 +85,7 @@ impl InflightActorInfo {
         }
     }
 
+    /// Update worker nodes snapshot. We need to support incremental updates for it in the future.
     pub fn resolve_worker_nodes(&mut self, all_nodes: impl IntoIterator<Item = PbWorkerNode>) {
         self.node_map = all_nodes
             .into_iter()
@@ -94,8 +93,10 @@ impl InflightActorInfo {
             .collect::<HashMap<_, _>>();
     }
 
-    pub fn pre_apply(&mut self, changes: &CommandActorChanges) {
-        if let CommandActorChanges::Actor { to_add, .. } = changes {
+    /// Apply some actor changes before issuing a barrier command, if the command contains any new added actors, we should update
+    /// the info correspondingly.
+    pub fn pre_apply(&mut self, changes: Option<CommandActorChanges>) {
+        if let Some(CommandActorChanges { to_add, .. }) = changes {
             for actor_desc in to_add {
                 assert!(self.node_map.contains_key(&actor_desc.node_id));
                 self.actor_map
@@ -114,16 +115,18 @@ impl InflightActorInfo {
         };
     }
 
-    pub fn post_apply(&mut self, changes: &CommandActorChanges) {
-        if let CommandActorChanges::Actor { to_remove, .. } = changes {
+    /// Apply some actor changes after the barrier command is collected, if the command contains any actors that are dropped, we should
+    /// remove that from the snapshot correspondingly.
+    pub fn post_apply(&mut self, changes: Option<CommandActorChanges>) {
+        if let Some(CommandActorChanges { to_remove, .. }) = changes {
             for actor_id in to_remove {
-                if let Some(node_id) = self.actor_location_map.remove(actor_id) {
+                if let Some(node_id) = self.actor_location_map.remove(&actor_id) {
                     self.actor_map
                         .get_mut(&node_id)
-                        .map(|actor_ids| actor_ids.remove(actor_id));
+                        .map(|actor_ids| actor_ids.remove(&actor_id));
                     self.actor_map_to_send
                         .get_mut(&node_id)
-                        .map(|actor_ids| actor_ids.remove(actor_id));
+                        .map(|actor_ids| actor_ids.remove(&actor_id));
                 }
             }
             self.actor_map.retain(|_, actor_ids| !actor_ids.is_empty());
@@ -132,6 +135,7 @@ impl InflightActorInfo {
         }
     }
 
+    /// Returns actor list to collect in the target worker node.
     pub fn actor_ids_to_collect(&self, node_id: &WorkerId) -> impl Iterator<Item = ActorId> {
         self.actor_map
             .get(node_id)
@@ -140,6 +144,7 @@ impl InflightActorInfo {
             .into_iter()
     }
 
+    /// Returns actor list to send in the target worker node.
     pub fn actor_ids_to_send(&self, node_id: &WorkerId) -> impl Iterator<Item = ActorId> {
         self.actor_map_to_send
             .get(node_id)
