@@ -184,7 +184,7 @@ async fn do_handle_explain(
                             )?);
                         }
                         Convention::Stream => {
-                            let graph = build_graph(plan.clone());
+                            let graph = build_graph(plan.clone())?;
                             blocks.push(explain_stream_graph(&graph, explain_verbose));
                         }
                     }

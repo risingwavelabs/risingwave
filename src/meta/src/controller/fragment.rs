@@ -27,7 +27,6 @@ use risingwave_meta_model_v2::{
     StreamNode, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
-use risingwave_pb::ddl_service::PbTableJobType;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
@@ -1037,31 +1036,30 @@ impl CatalogController {
         Ok(actors)
     }
 
-    /// Get and filter the upstream `Materialize` or `Source` fragments of the specified relations.
     pub async fn get_upstream_root_fragments(
         &self,
         upstream_job_ids: Vec<ObjectId>,
-        job_type: Option<PbTableJobType>,
     ) -> MetaResult<HashMap<ObjectId, PbFragment>> {
         let inner = self.inner.read().await;
 
-        let mut fragments = Fragment::find()
+        let all_upstream_fragments = Fragment::find()
             .filter(fragment::Column::JobId.is_in(upstream_job_ids))
             .all(&inner.db)
             .await?;
-        fragments.retain(|f| match job_type {
-            Some(PbTableJobType::SharedCdcSource) => {
-                f.fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0
+        // job_id -> fragment
+        let mut fragments = HashMap::<ObjectId, fragment::Model>::new();
+        for fragment in all_upstream_fragments {
+            if fragment.fragment_type_mask & PbFragmentTypeFlag::Mview as i32 != 0 {
+                _ = fragments.insert(fragment.job_id, fragment);
+            } else if fragment.fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0 {
+                // look for Source fragment if there's no MView fragment
+                _ = fragments.try_insert(fragment.job_id, fragment);
             }
-            // MV on MV, and other kinds of table job
-            None | Some(PbTableJobType::General) | Some(PbTableJobType::Unspecified) => {
-                f.fragment_type_mask & PbFragmentTypeFlag::Mview as i32 != 0
-            }
-        });
+        }
 
         let parallel_units_map = get_parallel_unit_mapping(&inner.db).await?;
         let mut root_fragments = HashMap::new();
-        for fragment in fragments {
+        for (_, fragment) in fragments {
             let actors = fragment.find_related(Actor).all(&inner.db).await?;
             let actor_dispatchers = get_actor_dispatchers(
                 &inner.db,

@@ -453,7 +453,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     if last_committed_epoch_row != current_epoch_row {
                         // Only write the RHS value if this actor is in charge of vnode 0 on LHS
                         // Otherwise, we only actively replicate the changes.
-                        if self.left_table.vnode_bitmap().is_set(0) {
+                        if self.left_table.vnodes().is_set(0) {
                             // If both `None`, then this branch is inactive.
                             // Hence, at least one is `Some`, hence at least one update.
                             if let Some(old_row) = last_committed_epoch_row.take() {

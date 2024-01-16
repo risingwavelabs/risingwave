@@ -47,7 +47,7 @@ use risingwave_storage::error::StorageError;
 use risingwave_storage::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::StateStoreReadIterStream;
-use risingwave_storage::table::{compute_vnode, Distribution};
+use risingwave_storage::table::{compute_vnode, TableDistribution, SINGLETON_VNODE};
 
 use crate::common::log_store_impl::kv_log_store::{
     KvLogStoreReadMetrics, ReaderTruncationOffsetType, RowOpCodeType, SeqIdType,
@@ -106,7 +106,7 @@ pub(crate) struct LogStoreRowSerde {
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
     // FIXME: revisit constructions and usages.
-    dist_key_indices: Vec<usize>,
+    dist_key_indices: Option<Vec<usize>>,
 
     /// Virtual nodes that the table is partitioned into.
     ///
@@ -156,7 +156,7 @@ impl LogStoreRowSerde {
         let vnodes = match vnodes {
             Some(vnodes) => vnodes,
 
-            None => Distribution::fallback_vnodes(),
+            None => TableDistribution::singleton_vnode_bitmap(),
         };
 
         // epoch and seq_id. The seq_id of barrier is set null, and therefore the second order type
@@ -168,6 +168,18 @@ impl LogStoreRowSerde {
 
         let epoch_serde =
             OrderedRowSerde::new(vec![EPOCH_COLUMN_TYPE], vec![OrderType::ascending()]);
+
+        let dist_key_indices = if dist_key_indices.is_empty() {
+            if &vnodes != TableDistribution::singleton_vnode_bitmap_ref() {
+                warn!(
+                    ?vnodes,
+                    "singleton log store gets non-singleton vnode bitmap"
+                );
+            }
+            None
+        } else {
+            Some(dist_key_indices)
+        };
 
         Self {
             pk_serde,
@@ -197,6 +209,14 @@ impl LogStoreRowSerde {
 }
 
 impl LogStoreRowSerde {
+    fn compute_vnode(&self, row: impl Row) -> VirtualNode {
+        if let Some(dist_key_indices) = &self.dist_key_indices {
+            compute_vnode(row, dist_key_indices, &self.vnodes)
+        } else {
+            SINGLETON_VNODE
+        }
+    }
+
     pub(crate) fn serialize_data_row(
         &self,
         epoch: u64,
@@ -218,7 +238,7 @@ impl LogStoreRowSerde {
             .clone()
             .chain([Some(ScalarImpl::Int16(op_code))])
             .chain(row);
-        let vnode = compute_vnode(&extended_row, &self.dist_key_indices, &self.vnodes);
+        let vnode = self.compute_vnode(&extended_row);
         let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serde, vnode);
         let value_bytes = self.row_serde.serialize(extended_row).into();
         (vnode, key_bytes, value_bytes)

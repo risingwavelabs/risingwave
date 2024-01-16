@@ -21,7 +21,7 @@ use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::Distribution;
+use risingwave_storage::table::TableDistribution;
 use risingwave_storage::StateStore;
 use risingwave_stream::common::table::state_table::StateTable;
 
@@ -63,24 +63,27 @@ pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -
             .collect(),
         table.pk().iter().map(|x| x.order_type).collect(),
         table.pk().iter().map(|x| x.column_index).collect(),
-        Distribution::all(table.distribution_key().to_vec()), // scan all vnodes
+        TableDistribution::all(table.distribution_key().to_vec()), // scan all vnodes
         Some(table.value_indices.clone()),
     )
     .await
 }
 
-pub fn make_storage_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StorageTable<S> {
+pub fn make_storage_table<S: StateStore>(
+    hummock: S,
+    table: &TableCatalog,
+) -> Result<StorageTable<S>> {
     let output_columns_ids = table
         .columns()
         .iter()
         .map(|x| x.column_desc.column_id)
         .collect();
-    StorageTable::new_partial(
+    Ok(StorageTable::new_partial(
         hummock,
         output_columns_ids,
-        Some(Distribution::all_vnodes()),
-        &table.table_desc().to_protobuf(),
-    )
+        Some(TableDistribution::all_vnodes()),
+        &table.table_desc().try_to_protobuf()?,
+    ))
 }
 
 pub async fn scan(context: &CtlContext, mv_name: String, data_dir: Option<String>) -> Result<()> {
@@ -106,7 +109,7 @@ async fn do_scan(table: TableCatalog, hummock: MonitoredStateStore<HummockStorag
 
     println!("Rows:");
     let read_epoch = hummock.inner().get_pinned_version().max_committed_epoch();
-    let storage_table = make_storage_table(hummock, &table);
+    let storage_table = make_storage_table(hummock, &table)?;
     let stream = storage_table
         .batch_iter(
             HummockReadEpoch::Committed(read_epoch),

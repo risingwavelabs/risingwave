@@ -678,7 +678,7 @@ impl TestCase {
                 // Only generate batch_plan_proto if it is specified in test case
                 if self.expected_outputs.contains(&TestType::BatchPlanProto) {
                     ret.batch_plan_proto = Some(serde_yaml::to_string(
-                        &batch_plan.to_batch_prost_identity(false),
+                        &batch_plan.to_batch_prost_identity(false)?,
                     )?);
                 }
             }
@@ -772,7 +772,7 @@ impl TestCase {
 
                 // Only generate stream_dist_plan if it is specified in test case
                 if dist_plan {
-                    let graph = build_graph(stream_plan);
+                    let graph = build_graph(stream_plan)?;
                     *ret_dist_plan_str = Some(explain_stream_graph(&graph, false));
                 }
             }
