@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::iter::once;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -395,35 +395,28 @@ impl ScheduledBarriers {
         queue.mark_ready();
     }
 
-    /// Try to pre apply drop scheduled command and return the table ids of dropped streaming jobs.
+    /// Try to pre apply drop scheduled command and return true if any.
     /// It should only be called in recovery.
-    pub(super) async fn pre_apply_drop_scheduled(&self) -> HashSet<TableId> {
-        let mut to_drop_tables = HashSet::new();
+    pub(super) async fn pre_apply_drop_scheduled(&self) -> bool {
         let mut queue = self.inner.queue.write().await;
         assert_matches!(queue.status, QueueStatus::Blocked(_));
+        let mut found = false;
 
         while let Some(Scheduled {
             notifiers, command, ..
         }) = queue.queue.pop_front()
         {
-            match command {
-                Command::DropStreamingJobs(table_ids) => {
-                    to_drop_tables.extend(table_ids);
-                }
-                Command::CancelStreamingJob(table_fragments) => {
-                    let table_id = table_fragments.table_id();
-                    to_drop_tables.insert(table_id);
-                }
-                _ => {
-                    unreachable!("only drop streaming jobs should be buffered");
-                }
-            }
+            assert_matches!(
+                command,
+                Command::DropStreamingJobs(_) | Command::CancelStreamingJob(_)
+            );
             notifiers.into_iter().for_each(|mut notify| {
                 notify.notify_collected();
                 notify.notify_finished();
             });
+            found = true;
         }
-        to_drop_tables
+        found
     }
 
     /// Whether the barrier(checkpoint = true) should be injected.
