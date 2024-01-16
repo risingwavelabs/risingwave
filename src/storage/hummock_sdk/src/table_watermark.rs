@@ -617,7 +617,7 @@ mod tests {
 
     #[test]
     fn test_apply_new_table_watermark() {
-        let epoch1 = 233;
+        let epoch1 = 65536;
         let direction = WatermarkDirection::Ascending;
         let watermark1 = Bytes::from("watermark1");
         let watermark2 = Bytes::from("watermark2");
@@ -631,7 +631,7 @@ mod tests {
             )],
             direction,
         );
-        let epoch2 = epoch1 + 1;
+        let epoch2 = epoch1 + 65536;
         table_watermarks.add_new_epoch_watermarks(
             epoch2,
             vec![VnodeWatermark::new(
@@ -643,7 +643,7 @@ mod tests {
 
         let mut table_watermark_checkpoint = table_watermarks.clone();
 
-        let epoch3 = epoch2 + 1;
+        let epoch3 = epoch2 + 65536;
         let mut second_table_watermark = TableWatermarks::single_epoch(
             epoch3,
             vec![VnodeWatermark::new(
@@ -660,8 +660,8 @@ mod tests {
             )],
             direction,
         );
-        let epoch4 = epoch3 + 1;
-        let epoch5 = epoch4 + 1;
+        let epoch4 = epoch3 + 65536;
+        let epoch5 = epoch4 + 65536;
         table_watermarks.add_new_epoch_watermarks(
             epoch5,
             vec![VnodeWatermark::new(
@@ -685,7 +685,7 @@ mod tests {
 
     #[test]
     fn test_clear_stale_epoch_watmermark() {
-        let epoch1 = 233;
+        let epoch1 = 65536;
         let direction = WatermarkDirection::Ascending;
         let watermark1 = Bytes::from("watermark1");
         let watermark2 = Bytes::from("watermark2");
@@ -699,7 +699,7 @@ mod tests {
             )],
             direction,
         );
-        let epoch2 = epoch1 + 1;
+        let epoch2 = epoch1 + 65536;
         table_watermarks.add_new_epoch_watermarks(
             epoch2,
             vec![VnodeWatermark::new(
@@ -708,7 +708,7 @@ mod tests {
             )],
             direction,
         );
-        let epoch3 = epoch2 + 1;
+        let epoch3 = epoch2 + 65536;
         table_watermarks.add_new_epoch_watermarks(
             epoch3,
             vec![VnodeWatermark::new(
@@ -717,8 +717,8 @@ mod tests {
             )],
             direction,
         );
-        let epoch4 = epoch3 + 1;
-        let epoch5 = epoch4 + 1;
+        let epoch4 = epoch3 + 65536;
+        let epoch5 = epoch4 + 65536;
         table_watermarks.add_new_epoch_watermarks(
             epoch5,
             vec![VnodeWatermark::new(
@@ -886,9 +886,9 @@ mod tests {
         assert_eq!(result, expected);
     }
 
-    const COMMITTED_EPOCH: u64 = 233;
-    const EPOCH1: u64 = COMMITTED_EPOCH + 1;
-    const EPOCH2: u64 = EPOCH1 + 1;
+    const COMMITTED_EPOCH: u64 = 65536;
+    const EPOCH1: u64 = COMMITTED_EPOCH + 65536;
+    const EPOCH2: u64 = EPOCH1 + 65536;
     const TEST_SINGLE_VNODE: VirtualNode = VirtualNode::from_index(1);
 
     fn build_watermark_range(

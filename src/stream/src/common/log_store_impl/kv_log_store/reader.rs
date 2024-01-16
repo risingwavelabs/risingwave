@@ -187,7 +187,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
     {
         let range_start = if let Some(last_persisted_epoch) = last_persisted_epoch {
             // start from the next epoch of last_persisted_epoch
-            Included(self.serde.serialize_epoch(last_persisted_epoch + 1))
+            Included(self.serde.serialize_epoch(last_persisted_epoch + 65536))
         } else {
             Unbounded
         };
@@ -474,7 +474,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
             let persisted_epoch =
                 self.truncate_offset
                     .map(|truncate_offset| match truncate_offset {
-                        TruncateOffset::Chunk { epoch, .. } => epoch - 1,
+                        TruncateOffset::Chunk { epoch, .. } => epoch - 65536,
                         TruncateOffset::Barrier { epoch } => epoch,
                     });
             self.state_store_stream = Some(self.read_persisted_log_store(persisted_epoch).await?);

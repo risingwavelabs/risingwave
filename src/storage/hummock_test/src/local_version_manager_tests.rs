@@ -92,10 +92,10 @@ async fn test_update_pinned_version() {
     let initial_max_commit_epoch = pinned_version.max_committed_epoch();
 
     let epochs: Vec<u64> = vec![
-        initial_max_commit_epoch + 1,
-        initial_max_commit_epoch + 2,
-        initial_max_commit_epoch + 3,
-        initial_max_commit_epoch + 4,
+        initial_max_commit_epoch + 1*65536,
+        initial_max_commit_epoch + 2*65536,
+        initial_max_commit_epoch + 3*65536,
+        initial_max_commit_epoch + 4*65536,
     ];
     let batches: Vec<Vec<(Bytes, StorageValue)>> =
         epochs.iter().map(|e| gen_dummy_batch(*e)).collect();

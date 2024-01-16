@@ -132,8 +132,12 @@ impl LogReader for BoundedInMemLogStoreReader {
         let epoch = init_epoch_rx.await.context("unable to get init epoch")?;
         assert_eq!(self.epoch_progress, UNINITIALIZED);
         self.epoch_progress = LogReaderEpochProgress::Consuming(epoch);
-        self.latest_offset = TruncateOffset::Barrier { epoch: epoch - 1 };
-        self.truncate_offset = TruncateOffset::Barrier { epoch: epoch - 1 };
+        self.latest_offset = TruncateOffset::Barrier {
+            epoch: epoch - 65536,
+        };
+        self.truncate_offset = TruncateOffset::Barrier {
+            epoch: epoch - 65536,
+        };
         Ok(())
     }
 

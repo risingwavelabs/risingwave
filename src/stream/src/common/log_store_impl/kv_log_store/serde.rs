@@ -818,7 +818,7 @@ mod tests {
         serialized_keys.push(key);
 
         seq_id = 1;
-        epoch += 1;
+        epoch += 65536;
 
         let delete_range_right2 = serde.serialize_truncation_offset_watermark((epoch, None));
 

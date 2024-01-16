@@ -473,7 +473,7 @@ mod tests {
         StreamChunk::new(ops, vec![])
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn test_merger() {
         const CHANNEL_NUMBER: usize = 10;
         let mut txs = Vec::with_capacity(CHANNEL_NUMBER);
@@ -486,16 +486,14 @@ mod tests {
         let merger = MergeExecutor::for_test(rxs, Schema::default());
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
-        let mut epochs = (10..1000u64).step_by(10).collect_vec();
-        for epoch in epochs.iter_mut() {
-            *epoch *= 65536;
-        }
+        let epochs = (10..1000u64).step_by(10).collect_vec();
+
         for (tx_id, tx) in txs.into_iter().enumerate() {
             let epochs = epochs.clone();
             let handle = tokio::spawn(async move {
                 for epoch in epochs {
                     if epoch % 20 == 0 {
-                        tx.send(Message::Chunk(build_test_chunk(epoch)))
+                        tx.send(Message::Chunk(build_test_chunk(epoch * 65536)))
                             .await
                             .unwrap();
                     } else {
@@ -507,7 +505,7 @@ mod tests {
                         .await
                         .unwrap();
                     }
-                    tx.send(Message::Barrier(Barrier::new_test_barrier(epoch)))
+                    tx.send(Message::Barrier(Barrier::new_test_barrier(epoch * 65536)))
                         .await
                         .unwrap();
                     sleep(Duration::from_millis(1)).await;
@@ -528,7 +526,7 @@ mod tests {
             if epoch % 20 == 0 {
                 for _ in 0..CHANNEL_NUMBER {
                     assert_matches!(merger.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
-                        assert_eq!(chunk.ops().len() as u64, epoch);
+                        assert_eq!(chunk.ops().len() as u64, epoch*65536);
                     });
                 }
             } else if epoch as usize / 20 >= CHANNEL_NUMBER - 1 {
@@ -540,7 +538,7 @@ mod tests {
             }
             // expect a barrier
             assert_matches!(merger.next().await.unwrap().unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_,..}) => {
-                assert_eq!(barrier_epoch.curr, epoch);
+                assert_eq!(barrier_epoch.curr, epoch*65536);
             });
         }
         assert_matches!(
