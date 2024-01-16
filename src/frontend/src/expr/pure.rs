@@ -14,7 +14,7 @@
 
 use risingwave_pb::expr::expr_node;
 
-use super::{ExprImpl, ExprVisitor};
+use super::{ExprImpl, ExprVisitor, TimestamptzExprFinder};
 use crate::expr::FunctionCall;
 
 #[derive(Default)]
@@ -235,9 +235,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::CastRegclass
             | expr_node::Type::PgGetIndexdef
             | expr_node::Type::ColDescription
-            | expr_node::Type::PgGetViewdef
+            | expr_node::Type::PgGetViewdef => self.impure = true,
             // functions that may rely on session timezone
-            | expr_node::Type::AtTimeZone
+            expr_node::Type::AtTimeZone
             | expr_node::Type::CastWithTimeZone
             | expr_node::Type::AddWithTimeZone
             | expr_node::Type::SubtractWithTimeZone
@@ -246,7 +246,13 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::DatePart
             | expr_node::Type::ToTimestamp1
             | expr_node::Type::ToChar
-            | expr_node::Type::MakeTimestamptz => self.impure = true,
+            | expr_node::Type::MakeTimestamptz => {
+                let mut v = TimestamptzExprFinder::default();
+                v.visit_function_call(func_call);
+                if v.has() {
+                    self.impure = true;
+                }
+            },
         }
     }
 }
