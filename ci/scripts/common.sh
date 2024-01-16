@@ -89,5 +89,5 @@ function download_and_prepare_rw() {
 }
 
 function filter_stack_trace() {
-  sed -i -E '/[1-9][0-9]+:/d' "$1"
+  sed -i -E '/^  [1-9][0-9]+:/d' "$1"
 }
