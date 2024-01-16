@@ -15,9 +15,8 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use byteorder::{BigEndian, ByteOrder};
 use reqwest::Method;
-use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
+use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result as RwResult, RwError};
 use serde::de::DeserializeOwned;
 use serde_derive::Deserialize;
@@ -56,30 +55,38 @@ pub fn handle_sr_list(addr: &str) -> Result<Vec<Url>, SrUrlError> {
     Ok(urls)
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum WireFormatError {
+    #[error("fail to match a magic byte of 0")]
+    NoMagic,
+    #[error("fail to read 4-byte schema ID")]
+    NoSchemaId,
+}
+
+impl From<WireFormatError> for risingwave_common::error::RwError {
+    fn from(value: WireFormatError) -> Self {
+        anyhow::anyhow!(value).into()
+    }
+}
+
 /// extract the magic number and `schema_id` at the front of payload
 ///
 /// 0 -> magic number
 /// 1-4 -> schema id
 /// 5-... -> message payload
-pub(crate) fn extract_schema_id(payload: &[u8]) -> RwResult<(i32, &[u8])> {
-    let header_len = 5;
+pub(crate) fn extract_schema_id(payload: &[u8]) -> Result<(i32, &[u8]), WireFormatError> {
+    use byteorder::{BigEndian, ReadBytesExt as _};
 
-    if payload.len() < header_len {
-        return Err(RwError::from(InternalError(format!(
-            "confluent kafka message need 5 bytes header, but payload len is {}",
-            payload.len()
-        ))));
-    }
-    let magic = payload[0];
-    let schema_id = BigEndian::read_i32(&payload[1..5]);
-
-    if magic != 0 {
-        return Err(RwError::from(InternalError(
-            "confluent kafka message must have a zero magic byte".to_owned(),
-        )));
+    let mut cursor = payload;
+    if !cursor.read_u8().is_ok_and(|magic| magic == 0) {
+        return Err(WireFormatError::NoMagic);
     }
 
-    Ok((schema_id, &payload[header_len..]))
+    let schema_id = cursor
+        .read_i32::<BigEndian>()
+        .map_err(|_| WireFormatError::NoSchemaId)?;
+
+    Ok((schema_id, cursor))
 }
 
 pub(crate) struct SchemaRegistryCtx {
