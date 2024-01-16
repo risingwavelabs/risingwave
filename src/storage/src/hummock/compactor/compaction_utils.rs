@@ -480,7 +480,6 @@ async fn check_result<
     while left_iter.is_valid() {
         left_count += 1;
         left_iter.next().await?;
-        return Ok(false);
     }
     while right_iter.is_valid() {
         right_count += 1;
