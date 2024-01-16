@@ -27,15 +27,17 @@ pub async fn fetch_descriptor(
 ) -> Result<MessageDescriptor, SchemaFetchError> {
     let row_schema_location = format_options
         .get(SCHEMA_LOCATION_KEY)
-        .ok_or_else(|| SchemaFetchError(format!("{SCHEMA_LOCATION_KEY} required")))?
+        .ok_or_else(|| SchemaFetchError::InvalidOption(format!("{SCHEMA_LOCATION_KEY} required")))?
         .clone();
     let message_name = format_options
         .get(MESSAGE_NAME_KEY)
-        .ok_or_else(|| SchemaFetchError(format!("{MESSAGE_NAME_KEY} required")))?
+        .ok_or_else(|| SchemaFetchError::InvalidOption(format!("{MESSAGE_NAME_KEY} required")))?
         .clone();
 
     if row_schema_location.starts_with("s3") && aws_auth_props.is_none() {
-        return Err(SchemaFetchError("s3 URL not supported yet".into()));
+        return Err(SchemaFetchError::InvalidOption(
+            "s3 URL not supported yet".into(),
+        ));
     }
 
     let enc = EncodingProperties::Protobuf(ProtobufProperties {
@@ -52,6 +54,6 @@ pub async fn fetch_descriptor(
     // This reversed dependency will be fixed when we support schema registry.
     let conf = ProtobufParserConfig::new(enc)
         .await
-        .map_err(|e| SchemaFetchError(e.to_string()))?;
+        .map_err(SchemaFetchError::YetToMigrate)?;
     Ok(conf.message_descriptor)
 }

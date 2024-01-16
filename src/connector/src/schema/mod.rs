@@ -22,5 +22,12 @@ const SCHEMA_LOCATION_KEY: &str = "schema.location";
 const SCHEMA_REGISTRY_KEY: &str = "schema.registry";
 const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
 
-#[derive(Debug)]
-pub struct SchemaFetchError(pub String);
+#[derive(Debug, thiserror::Error)]
+pub enum SchemaFetchError {
+    #[error("{0}")]
+    InvalidOption(String),
+    #[error("schema compilation error")]
+    SchemaCompile(#[source] risingwave_common::error::BoxedError),
+    #[error(transparent)]
+    YetToMigrate(risingwave_common::error::RwError),
+}

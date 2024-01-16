@@ -36,8 +36,8 @@ impl TryFrom<ConfluentSchema> for SchemaWithId {
     type Error = SchemaFetchError;
 
     fn try_from(fetched: ConfluentSchema) -> Result<Self, Self::Error> {
-        let parsed =
-            AvroSchema::parse_str(&fetched.content).map_err(|e| SchemaFetchError(e.to_string()))?;
+        let parsed = AvroSchema::parse_str(&fetched.content)
+            .map_err(|e| SchemaFetchError::SchemaCompile(e.into()))?;
         Ok(Self {
             schema: Arc::new(parsed),
             id: fetched.id,
@@ -52,14 +52,15 @@ pub async fn fetch_schema(
 ) -> Result<(SchemaWithId, SchemaWithId), SchemaFetchError> {
     let schema_location = format_options
         .get(SCHEMA_REGISTRY_KEY)
-        .ok_or_else(|| SchemaFetchError(format!("{SCHEMA_REGISTRY_KEY} required")))?
+        .ok_or_else(|| SchemaFetchError::InvalidOption(format!("{SCHEMA_REGISTRY_KEY} required")))?
         .clone();
     let client_config = format_options.into();
     let name_strategy = format_options
         .get(NAME_STRATEGY_KEY)
         .map(|s| {
-            name_strategy_from_str(s)
-                .ok_or_else(|| SchemaFetchError(format!("unrecognized strategy {s}")))
+            name_strategy_from_str(s).ok_or_else(|| {
+                SchemaFetchError::InvalidOption(format!("unrecognized strategy {s}"))
+            })
         })
         .transpose()?
         .unwrap_or_default();
@@ -79,7 +80,7 @@ pub async fn fetch_schema(
         val_record_name,
     )
     .await
-    .map_err(|e| SchemaFetchError(e.to_string()))?;
+    .map_err(SchemaFetchError::YetToMigrate)?;
 
     Ok((key_schema.try_into()?, val_schema.try_into()?))
 }
