@@ -103,6 +103,8 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     ///   (may reach to the end and thus not valid)
     /// - if `Err(_) ` is returned, it means that some error happened.
     pub async fn next(&mut self) -> HummockResult<()> {
+        // Reset the valid flag to make sure if error happens, `is_valid` should return false.
+        self.is_current_pos_valid = false;
         // Move the iterator to the next step if it is currently potined to a ready entry.
         self.iterator.next().await?;
 
