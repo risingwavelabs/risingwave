@@ -18,7 +18,10 @@ use std::collections::{BTreeMap, HashMap};
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, ConnectionId, DatabaseId, Field, OBJECT_ID_PLACEHOLDER, Schema, SchemaId, TableId, UserId};
+use risingwave_common::catalog::{
+    ColumnCatalog, ConnectionId, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
+    OBJECT_ID_PLACEHOLDER,
+};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus};

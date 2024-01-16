@@ -19,11 +19,13 @@ use std::vec;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, OBJECT_ID_PLACEHOLDER, Schema};
+use risingwave_common::catalog::{
+    ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, Schema, OBJECT_ID_PLACEHOLDER,
+};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::{CreateType, TableType};
-use crate::catalog::{ColumnId, FragmentId, TableCatalog, TableId};
+use crate::catalog::{ColumnId, TableCatalog, TableId};
 use crate::optimizer::property::Cardinality;
 use crate::utils::WithOptions;
 
