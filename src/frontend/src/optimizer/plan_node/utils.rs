@@ -19,9 +19,7 @@ use std::vec;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
-use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, Schema,
-};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, OBJECT_ID_PLACEHOLDER, Schema};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::{CreateType, TableType};
@@ -160,8 +158,7 @@ impl TableCatalogBuilder {
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: self.properties,
-            // TODO(zehua): replace it with FragmentId::placeholder()
-            fragment_id: FragmentId::MAX - 1,
+            fragment_id: OBJECT_ID_PLACEHOLDER,
             dml_fragment_id: None,
             vnode_col_index: self.vnode_col_idx,
             row_id_index: None,

@@ -1675,6 +1675,9 @@ impl DdlController {
 
     /// `build_replace_table` builds a table replacement and returns the context and new table
     /// fragments.
+    ///
+    /// Note that we use a dummy ID for the new table fragments and replace it with the real one after
+    /// replacement is finished.
     pub(crate) async fn build_replace_table(
         &self,
         stream_ctx: StreamContext,
@@ -1746,18 +1749,12 @@ impl DdlController {
             .await?;
         assert!(dispatchers.is_empty());
 
-        // 3. Assign a new dummy ID for the new table fragments.
-        //
-        // FIXME: we use a dummy table ID for new table fragments, so we can drop the old fragments
-        // with the real table ID, then replace the dummy table ID with the real table ID. This is a
-        // workaround for not having the version info in the fragment manager.
-
         let table_parallelism = match default_parallelism {
             None => TableParallelism::Auto,
             Some(parallelism) => TableParallelism::Fixed(parallelism.get()),
         };
 
-        // 4. Build the table fragments structure that will be persisted in the stream manager, and
+        // 3. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute
         // nodes.
         let table_fragments = TableFragments::new(

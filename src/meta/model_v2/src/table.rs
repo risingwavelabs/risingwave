@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType};
+use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable};
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
@@ -187,7 +188,7 @@ impl From<PbTable> for ActiveModel {
         let table_type = pb_table.table_type();
         let handle_pk_conflict_behavior = pb_table.handle_pk_conflict_behavior();
 
-        let fragment_id = if pb_table.fragment_id == u32::MAX - 1 {
+        let fragment_id = if pb_table.fragment_id == OBJECT_ID_PLACEHOLDER {
             NotSet
         } else {
             Set(Some(pb_table.fragment_id as FragmentId))

@@ -17,7 +17,7 @@ use std::assert_matches::assert_matches;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, TableId};
+use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, OBJECT_ID_PLACEHOLDER, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
@@ -235,8 +235,7 @@ impl StreamMaterialize {
             append_only,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties,
-            // TODO(zehua): replace it with FragmentId::placeholder()
-            fragment_id: FragmentId::MAX - 1,
+            fragment_id: OBJECT_ID_PLACEHOLDER,
             dml_fragment_id: None,
             vnode_col_index: None,
             row_id_index,
