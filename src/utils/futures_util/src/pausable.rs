@@ -33,6 +33,7 @@ pin_project! {
     }
 }
 
+/// A valve is a handle that can control the [`Pausable`] stream.
 #[derive(Clone)]
 pub struct Valve {
     paused: Arc<AtomicBool>,
