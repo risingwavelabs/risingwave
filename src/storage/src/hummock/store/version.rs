@@ -39,8 +39,8 @@ use tracing::Instrument;
 use super::StagingDataIterator;
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
-    ConcatIterator, ForwardMergeRangeIterator, HummockIteratorUnion, OrderedMergeIteratorInner,
-    SkipWatermarkIterator, UnorderedMergeIteratorInner, UserIterator,
+    ConcatIterator, ForwardMergeRangeIterator, HummockIteratorUnion, MergeIterator,
+    SkipWatermarkIterator, UserIterator,
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -904,7 +904,7 @@ impl HummockVersionReader {
             )));
         }
         local_stats.staging_sst_iter_count = staging_sst_iter_count;
-        let staging_iter: StagingDataIterator = OrderedMergeIteratorInner::new(staging_iters);
+        let staging_iter: StagingDataIterator = MergeIterator::new(staging_iters);
 
         let mut non_overlapping_iters = Vec::new();
         let mut overlapping_iters = Vec::new();
@@ -1038,7 +1038,7 @@ impl HummockVersionReader {
         }
 
         // 3. build user_iterator
-        let merge_iter = UnorderedMergeIteratorInner::new(
+        let merge_iter = MergeIterator::new(
             once(HummockIteratorUnion::First(staging_iter))
                 .chain(
                     overlapping_iters
