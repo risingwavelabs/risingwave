@@ -50,7 +50,7 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
 
         // TODO: may use consistent op for watermark filter after we have upsert.
         let [table]: [_; 1] = node.get_tables().clone().try_into().unwrap();
-        let desc = TableDesc::from_pb_table(&table).to_protobuf();
+        let desc = TableDesc::from_pb_table(&table).try_to_protobuf()?;
         let column_ids = desc
             .value_indices
             .iter()

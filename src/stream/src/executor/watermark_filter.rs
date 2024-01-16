@@ -444,7 +444,7 @@ mod tests {
         )
         .await;
 
-        let desc = TableDesc::from_pb_table(&table).to_protobuf();
+        let desc = TableDesc::from_pb_table(&table).try_to_protobuf().unwrap();
 
         let storage_table = StorageTable::new_partial(
             mem_state,
