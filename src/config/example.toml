@@ -83,6 +83,8 @@ batch_chunk_size = 1024
 in_flight_barrier_nums = 10000
 async_stack_trace = "ReleaseVerbose"
 unique_user_stream_errors = 10
+compute_runtime_worker_threads = 4
+compute_runtime_worker_name = "rw-batch-local"
 
 [streaming.developer]
 stream_enable_executor_row_count = false
