@@ -27,6 +27,7 @@ use buffered_with_fence::{Fenced, MaybeFence, TryBufferedWithFence};
 pub use misc::*;
 pub use pausable::{Pausable, Valve};
 
+/// Create a pausable stream, which can be paused or resumed by a valve.
 pub fn pausable<St>(stream: St) -> (Pausable<St>, Valve)
 where
     St: Stream,
