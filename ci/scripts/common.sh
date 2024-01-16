@@ -87,3 +87,7 @@ function download_and_prepare_rw() {
   cargo make pre-start-dev
   cargo make --allow-private link-all-in-one-binaries
 }
+
+function filter_stack_trace() {
+  sed -i -E '/[1-9][0-9]+:/d' "$1"
+}
