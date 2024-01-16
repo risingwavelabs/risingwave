@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
 use std::iter::once;
@@ -24,11 +25,12 @@ use await_tree::InstrumentAwait;
 use futures::stream::FuturesOrdered;
 use futures::{FutureExt, StreamExt};
 use prometheus::HistogramTimer;
-use risingwave_common::util::pending_on_none;
+use risingwave_common::must_match;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_storage::store::SyncResult;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
 
 use super::progress::BackfillState;
@@ -190,15 +192,12 @@ impl ManagedBarrierState {
                 ManagedBarrierStateInner::AllCollected,
             );
 
-            match prev_state {
-                ManagedBarrierStateInner::Issued {
-                    barrier_inflight_latency: timer,
-                    ..
-                } => {
-                    timer.observe_duration();
-                }
-                _ => unreachable!(),
-            }
+            must_match!(prev_state, ManagedBarrierStateInner::Issued {
+                barrier_inflight_latency: timer,
+                ..
+            } => {
+                timer.observe_duration();
+            });
 
             let create_mview_progress = self
                 .create_mview_progress
@@ -399,10 +398,7 @@ impl ManagedBarrierState {
                 .get_mut(&prev_epoch)
                 .expect("should exist");
             // sanity check on barrier state
-            match &state.inner {
-                ManagedBarrierStateInner::AllCollected => {}
-                _ => unreachable!(),
-            };
+            assert_matches!(&state.inner, ManagedBarrierStateInner::AllCollected);
             state.inner = ManagedBarrierStateInner::Completed(result);
             prev_epoch
         })
