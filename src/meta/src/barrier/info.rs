@@ -99,18 +99,28 @@ impl InflightActorInfo {
         if let Some(CommandActorChanges { to_add, .. }) = changes {
             for actor_desc in to_add {
                 assert!(self.node_map.contains_key(&actor_desc.node_id));
-                self.actor_map
-                    .entry(actor_desc.node_id)
-                    .or_default()
-                    .insert(actor_desc.id);
-                if actor_desc.is_injectable {
-                    self.actor_map_to_send
+                assert!(
+                    self.actor_map
                         .entry(actor_desc.node_id)
                         .or_default()
-                        .insert(actor_desc.id);
+                        .insert(actor_desc.id),
+                    "duplicate actor in command changes"
+                );
+                if actor_desc.is_injectable {
+                    assert!(
+                        self.actor_map_to_send
+                            .entry(actor_desc.node_id)
+                            .or_default()
+                            .insert(actor_desc.id),
+                        "duplicate actor in command changes"
+                    );
                 }
-                self.actor_location_map
-                    .insert(actor_desc.id, actor_desc.node_id);
+                assert!(
+                    self.actor_location_map
+                        .insert(actor_desc.id, actor_desc.node_id)
+                        .is_none(),
+                    "duplicate actor in command changes"
+                );
             }
         };
     }
@@ -118,6 +128,27 @@ impl InflightActorInfo {
     /// Apply some actor changes after the barrier command is collected, if the command contains any actors that are dropped, we should
     /// remove that from the snapshot correspondingly.
     pub fn post_apply(&mut self, changes: Option<CommandActorChanges>) {
+        if let Some(CommandActorChanges { to_remove, .. }) = changes {
+            for actor_id in to_remove {
+                let node_id = self
+                    .actor_location_map
+                    .remove(&actor_id)
+                    .expect("actor not found");
+                self.actor_map
+                    .get_mut(&node_id)
+                    .map(|actor_ids| assert!(actor_ids.remove(&actor_id), "actor not found"));
+                self.actor_map_to_send
+                    .get_mut(&node_id)
+                    .map(|actor_ids| actor_ids.remove(&actor_id));
+            }
+            self.actor_map.retain(|_, actor_ids| !actor_ids.is_empty());
+            self.actor_map_to_send
+                .retain(|_, actor_ids| !actor_ids.is_empty());
+        }
+    }
+
+    /// Apply some actor changes without check. Remove the actors in the remove list of the command changes.
+    pub fn post_apply_non_checked(&mut self, changes: Option<CommandActorChanges>) {
         if let Some(CommandActorChanges { to_remove, .. }) = changes {
             for actor_id in to_remove {
                 if let Some(node_id) = self.actor_location_map.remove(&actor_id) {

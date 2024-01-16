@@ -374,7 +374,7 @@ impl GlobalBarrierManagerContext {
                     })?;
 
                     let to_remove_actors = scheduled_barriers.pre_apply_drop_scheduled().await;
-                    info.post_apply(Some(CommandActorChanges {
+                    info.post_apply_non_checked(Some(CommandActorChanges {
                         to_remove: to_remove_actors,
                         to_add: Default::default(),
                     }));
