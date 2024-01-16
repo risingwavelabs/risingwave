@@ -65,6 +65,8 @@ pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 pub const NON_RESERVED_USER_ID: i32 = 11;
 pub const NON_RESERVED_SYS_CATALOG_ID: i32 = 1001;
 
+pub const OBJECT_ID_PLACEHOLDER: u32 = u32::MAX - 1;
+
 pub const SYSTEM_SCHEMAS: [&str; 3] = [
     PG_CATALOG_SCHEMA_NAME,
     INFORMATION_SCHEMA_SCHEMA_NAME,
@@ -164,7 +166,7 @@ impl DatabaseId {
 
     pub fn placeholder() -> Self {
         DatabaseId {
-            database_id: u32::MAX - 1,
+            database_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 }
@@ -200,7 +202,7 @@ impl SchemaId {
 
     pub fn placeholder() -> Self {
         SchemaId {
-            schema_id: u32::MAX - 1,
+            schema_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 }
@@ -237,7 +239,7 @@ impl TableId {
     /// Sometimes the id field is filled later, we use this value for better debugging.
     pub const fn placeholder() -> Self {
         TableId {
-            table_id: u32::MAX - 1,
+            table_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 
@@ -328,7 +330,7 @@ impl IndexId {
     /// Sometimes the id field is filled later, we use this value for better debugging.
     pub const fn placeholder() -> Self {
         IndexId {
-            index_id: u32::MAX - 1,
+            index_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 
@@ -357,7 +359,7 @@ impl FunctionId {
     }
 
     pub const fn placeholder() -> Self {
-        FunctionId(u32::MAX - 1)
+        FunctionId(OBJECT_ID_PLACEHOLDER)
     }
 
     pub fn function_id(&self) -> u32 {
@@ -396,7 +398,7 @@ impl UserId {
 
     pub const fn placeholder() -> Self {
         UserId {
-            user_id: u32::MAX - 1,
+            user_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 }
@@ -428,7 +430,7 @@ impl ConnectionId {
     }
 
     pub const fn placeholder() -> Self {
-        ConnectionId(u32::MAX - 1)
+        ConnectionId(OBJECT_ID_PLACEHOLDER)
     }
 
     pub fn connection_id(&self) -> u32 {
