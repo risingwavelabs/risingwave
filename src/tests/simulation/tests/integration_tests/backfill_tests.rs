@@ -199,7 +199,7 @@ async fn test_backfill_backpressure() -> Result<()> {
     // Create dimension table
     session.run("CREATE TABLE dim (v1 int);").await?;
     // Ingest
-    // Amplification of 1000 records
+    // Amplification of 200 records
     session
         .run("INSERT INTO dim SELECT 1 FROM generate_series(1, 200);")
         .await?;
