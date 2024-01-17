@@ -23,8 +23,12 @@ BACKGROUND_DDL_DIR=$TEST_DIR/background_ddl
 COMMON_DIR=$BACKGROUND_DDL_DIR/common
 
 CLUSTER_PROFILE='ci-1cn-1fe-kafka-with-recovery'
-# Can change to 'ci-3cn-1fe-with-monitoring` when investigating perf
-RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe'
+# If running in buildkite disable monitoring.
+if [[ -n "${BUILDKITE:-}" ]]; then
+  RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe-with-monitoring'
+else
+  RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe'
+fi
 export RUST_LOG="info,risingwave_meta::barrier::progress=debug,risingwave_meta::rpc::ddl_controller=debug"
 
 run_sql_file() {
