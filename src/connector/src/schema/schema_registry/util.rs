@@ -20,19 +20,9 @@ use serde::de::DeserializeOwned;
 use serde_derive::Deserialize;
 use url::{ParseError, Url};
 
-#[derive(Debug, thiserror::Error)]
-#[error("no valid url provided, got {errs:?}")]
-pub struct SrUrlError {
-    errs: Vec<ParseError>,
-}
+use crate::schema::{bail_invalid_option_error, InvalidOptionError};
 
-impl From<SrUrlError> for risingwave_common::error::RwError {
-    fn from(value: SrUrlError) -> Self {
-        anyhow::anyhow!(value).into()
-    }
-}
-
-pub fn handle_sr_list(addr: &str) -> Result<Vec<Url>, SrUrlError> {
+pub fn handle_sr_list(addr: &str) -> Result<Vec<Url>, InvalidOptionError> {
     let segment = addr.split(',').collect::<Vec<&str>>();
     let mut errs: Vec<ParseError> = Vec::with_capacity(segment.len());
     let mut urls = Vec::with_capacity(segment.len());
@@ -43,7 +33,7 @@ pub fn handle_sr_list(addr: &str) -> Result<Vec<Url>, SrUrlError> {
         }
     }
     if urls.is_empty() {
-        return Err(SrUrlError { errs });
+        bail_invalid_option_error!("no valid url provided, got {errs:?}");
     }
     tracing::debug!(
         "schema registry client will use url {:?} to connect, the rest failed because: {:?}",

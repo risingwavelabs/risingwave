@@ -120,6 +120,7 @@ strum = "0.25"
 strum_macros = "0.25"
 tempfile = "3"
 thiserror = "1"
+thiserror-ext = { workspace = true }
 time = "0.3.30"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

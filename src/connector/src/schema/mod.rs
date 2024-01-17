@@ -22,12 +22,23 @@ const SCHEMA_LOCATION_KEY: &str = "schema.location";
 const SCHEMA_REGISTRY_KEY: &str = "schema.registry";
 const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
 
+#[derive(Debug, thiserror::Error, thiserror_ext::Macro)]
+#[error("Invalid option: {message}")]
+pub struct InvalidOptionError {
+    message: String,
+    // source: Option<risingwave_common::error::BoxedError>,
+}
+
+impl From<InvalidOptionError> for risingwave_common::error::RwError {
+    fn from(value: InvalidOptionError) -> Self {
+        anyhow::anyhow!(value).into()
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SchemaFetchError {
-    #[error("{0}")]
-    InvalidOption(String),
     #[error(transparent)]
-    InvalidOptionInner(risingwave_common::error::BoxedError),
+    InvalidOption(#[from] InvalidOptionError),
     #[error("schema registry client error")]
     Request(#[source] schema_registry::ConcurrentRequestError),
     #[error("schema compilation error")]

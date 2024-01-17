@@ -23,8 +23,8 @@ use super::schema_registry::{
     SchemaRegistryAuth,
 };
 use super::{
-    SchemaFetchError, KEY_MESSAGE_NAME_KEY, MESSAGE_NAME_KEY, NAME_STRATEGY_KEY,
-    SCHEMA_REGISTRY_KEY,
+    invalid_option_error, InvalidOptionError, SchemaFetchError, KEY_MESSAGE_NAME_KEY,
+    MESSAGE_NAME_KEY, NAME_STRATEGY_KEY, SCHEMA_REGISTRY_KEY,
 };
 
 pub struct SchemaWithId {
@@ -52,15 +52,14 @@ pub async fn fetch_schema(
 ) -> Result<(SchemaWithId, SchemaWithId), SchemaFetchError> {
     let schema_location = format_options
         .get(SCHEMA_REGISTRY_KEY)
-        .ok_or_else(|| SchemaFetchError::InvalidOption(format!("{SCHEMA_REGISTRY_KEY} required")))?
+        .ok_or_else(|| invalid_option_error!("{SCHEMA_REGISTRY_KEY} required"))?
         .clone();
     let client_config = format_options.into();
     let name_strategy = format_options
         .get(NAME_STRATEGY_KEY)
         .map(|s| {
-            name_strategy_from_str(s).ok_or_else(|| {
-                SchemaFetchError::InvalidOption(format!("unrecognized strategy {s}"))
-            })
+            name_strategy_from_str(s)
+                .ok_or_else(|| invalid_option_error!("unrecognized strategy {s}"))
         })
         .transpose()?
         .unwrap_or_default();
@@ -92,20 +91,16 @@ async fn fetch_schema_inner(
     key_record_name: Option<&str>,
     val_record_name: Option<&str>,
 ) -> Result<(ConfluentSchema, ConfluentSchema), SchemaFetchError> {
-    let urls = handle_sr_list(schema_location)
-        .map_err(|e| SchemaFetchError::InvalidOptionInner(e.into()))?;
-    let client = Client::new(urls, client_config)
-        .map_err(|e| SchemaFetchError::InvalidOptionInner(e.into()))?;
+    let urls = handle_sr_list(schema_location)?;
+    let client = Client::new(urls, client_config)?;
 
-    let key_subject = get_subject_by_strategy(name_strategy, topic, key_record_name, true)
-        .map_err(|e| SchemaFetchError::InvalidOptionInner(e.into()))?;
+    let key_subject = get_subject_by_strategy(name_strategy, topic, key_record_name, true)?;
     let key_schema = client
         .get_schema_by_subject(&key_subject)
         .await
         .map_err(SchemaFetchError::Request)?;
 
-    let val_subject = get_subject_by_strategy(name_strategy, topic, val_record_name, false)
-        .map_err(|e| SchemaFetchError::InvalidOptionInner(e.into()))?;
+    let val_subject = get_subject_by_strategy(name_strategy, topic, val_record_name, false)?;
     let val_schema = client
         .get_schema_by_subject(&val_subject)
         .await

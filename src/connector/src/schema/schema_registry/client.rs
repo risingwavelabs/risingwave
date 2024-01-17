@@ -20,8 +20,10 @@ use futures::future::select_all;
 use itertools::Itertools;
 use reqwest::{Method, Url};
 use serde::de::DeserializeOwned;
+use thiserror_ext::AsReport as _;
 
 use super::util::*;
+use crate::schema::{invalid_option_error, InvalidOptionError};
 
 pub const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
 pub const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
@@ -60,20 +62,6 @@ pub struct Client {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ClientInitError {
-    #[error("no valid url provided, got {0:?}")]
-    InvalidUrls(Vec<Url>),
-    #[error("build reqwest client failed")]
-    Builder(#[source] reqwest::Error),
-}
-
-impl From<ClientInitError> for risingwave_common::error::RwError {
-    fn from(value: ClientInitError) -> Self {
-        anyhow::anyhow!(value).into()
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
 #[error("{context}, errs: {errs:?}")]
 pub struct ConcurrentRequestError {
     errs: Vec<itertools::Either<RequestError, tokio::task::JoinError>>,
@@ -92,7 +80,7 @@ impl Client {
     pub(crate) fn new(
         url: Vec<Url>,
         client_config: &SchemaRegistryAuth,
-    ) -> Result<Self, ClientInitError> {
+    ) -> Result<Self, InvalidOptionError> {
         let valid_urls = url
             .iter()
             .map(|url| (url.cannot_be_a_base(), url))
@@ -100,7 +88,7 @@ impl Client {
             .map(|(_, url)| url.clone())
             .collect_vec();
         if valid_urls.is_empty() {
-            return Err(ClientInitError::InvalidUrls(url));
+            return Err(invalid_option_error!("no valid url provided, got {url:?}"));
         } else {
             tracing::debug!(
                 "schema registry client will use url {:?} to connect",
@@ -110,7 +98,7 @@ impl Client {
 
         let inner = reqwest::Client::builder()
             .build()
-            .map_err(ClientInitError::Builder)?;
+            .map_err(|e| invalid_option_error!("build reqwest client failed {}", e.as_report()))?;
 
         Ok(Client {
             inner,

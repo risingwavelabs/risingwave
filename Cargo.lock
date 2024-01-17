@@ -8988,6 +8988,7 @@ dependencies = [
  "syn 1.0.109",
  "tempfile",
  "thiserror",
+ "thiserror-ext",
  "time",
  "tokio-postgres",
  "tokio-retry",

@@ -18,6 +18,8 @@ pub use client::*;
 use risingwave_pb::catalog::SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy;
 pub(crate) use util::*;
 
+use super::{invalid_option_error, InvalidOptionError};
+
 pub fn name_strategy_from_str(value: &str) -> Option<PbSchemaRegistryNameStrategy> {
     match value {
         "topic_name_strategy" => Some(PbSchemaRegistryNameStrategy::Unspecified),
@@ -27,29 +29,19 @@ pub fn name_strategy_from_str(value: &str) -> Option<PbSchemaRegistryNameStrateg
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("{name_strategy} expect non-empty field {record_option}")]
-pub struct SubjectError {
-    name_strategy: &'static str,
-    record_option: &'static str,
-}
-
-impl From<SubjectError> for risingwave_common::error::RwError {
-    fn from(value: SubjectError) -> Self {
-        anyhow::anyhow!(value).into()
-    }
-}
-
 pub fn get_subject_by_strategy(
     name_strategy: &PbSchemaRegistryNameStrategy,
     topic: &str,
     record: Option<&str>,
     is_key: bool,
-) -> Result<String, SubjectError> {
+) -> Result<String, InvalidOptionError> {
     let record_option_name = if is_key { "key.message" } else { "message" };
-    let build_error_lack_field = || SubjectError {
-        name_strategy: name_strategy.as_str_name(),
-        record_option: record_option_name,
+    let build_error_lack_field = || {
+        invalid_option_error!(
+            "{} expect non-empty field {}",
+            name_strategy.as_str_name(),
+            record_option_name,
+        )
     };
     match name_strategy {
         PbSchemaRegistryNameStrategy::Unspecified => {
