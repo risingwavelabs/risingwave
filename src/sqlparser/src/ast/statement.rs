@@ -26,7 +26,7 @@ use crate::ast::{
     display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
 };
 use crate::keywords::Keyword;
-use crate::parser::{IsOptional, Parser, ParserError, UPSTREAM_SOURCE_KEY};
+use crate::parser::{IncludeOption, IsOptional, Parser, ParserError, UPSTREAM_SOURCE_KEY};
 use crate::tokenizer::Token;
 
 /// Consumes token from the parser into an AST node.
@@ -85,7 +85,7 @@ pub struct CreateSourceStatement {
     pub with_properties: WithProperties,
     pub source_schema: CompatibleSourceSchema,
     pub source_watermarks: Vec<SourceWatermark>,
-    pub include_column_options: Vec<(Ident, Option<Ident>)>,
+    pub include_column_options: IncludeOption,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

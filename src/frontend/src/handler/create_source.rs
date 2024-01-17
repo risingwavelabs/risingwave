@@ -54,8 +54,9 @@ use risingwave_pb::plan_common::{AdditionalColumnType, EncodeType, FormatType};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     get_delimiter, AstString, ColumnDef, ConnectorSchema, CreateSourceStatement, Encode, Format,
-    Ident, ProtobufSchema, SourceWatermark,
+    ProtobufSchema, SourceWatermark,
 };
+use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
@@ -494,7 +495,7 @@ fn bind_columns_from_source_for_cdc(
 /// add connector-spec columns to the end of column catalog
 pub fn handle_addition_columns(
     with_properties: &HashMap<String, String>,
-    mut additional_columns: Vec<(Ident, Option<Ident>)>,
+    mut additional_columns: IncludeOption,
     columns: &mut Vec<ColumnCatalog>,
 ) -> Result<()> {
     let connector_name = get_connector(with_properties).unwrap(); // there must be a connector in source
@@ -514,9 +515,14 @@ pub fn handle_addition_columns(
                 }
             }
         };
-    let gen_default_column_name = |connector_name: &str, addi_column_name: &str| {
-        format!("_rw_{}_{}", connector_name, addi_column_name)
-    };
+    let gen_default_column_name =
+        |connector_name: &str, addi_column_name: &str, inner_field: Option<&String>| {
+            if let Some(inner) = inner_field {
+                format!("_rw_{}_{}_{}", connector_name, addi_column_name, inner)
+            } else {
+                format!("_rw_{}_{}", connector_name, addi_column_name)
+            }
+        };
 
     let latest_col_id: ColumnId = columns
         .iter()
@@ -526,16 +532,28 @@ pub fn handle_addition_columns(
 
     for (col_name, gen_column_catalog_fn) in addition_col_list {
         // always insert in spec order
-        if let Some(idx) = additional_columns
-            .iter()
-            .position(|(col, _)| col.real_value().eq_ignore_ascii_case(col_name))
+        if let Some(idx) =
+            additional_columns
+                .iter()
+                .position(|include_option_item: &IncludeOptionItem| {
+                    include_option_item
+                        .column_type
+                        .real_value()
+                        .eq_ignore_ascii_case(col_name)
+                })
         {
-            let (_, alias) = additional_columns.remove(idx);
+            let item: IncludeOptionItem = additional_columns.remove(idx);
             columns.push(gen_column_catalog_fn(
                 latest_col_id.next(),
-                alias
+                item.column_alias
                     .map(|alias| alias.real_value())
-                    .unwrap_or_else(|| gen_default_column_name(connector_name.as_str(), col_name))
+                    .unwrap_or_else(|| {
+                        gen_default_column_name(
+                            connector_name.as_str(),
+                            col_name,
+                            item.inner_field.as_ref(),
+                        )
+                    })
                     .as_str(),
             ))
         }
