@@ -15,10 +15,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, ADDITION_SPLIT_OFFSET_COLUMN_PREFIX};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::parser::additional_columns::common_compatible_column_vec;
 use risingwave_connector::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{
@@ -99,20 +100,20 @@ impl SourceDescBuilder {
             .map(|s| s.to_lowercase())
             .unwrap();
 
-        let additional_columns: Vec<_> =
-            match get_connector_compatible_additional_columns(&connector_name) {
-                Some(col_list) => ["partition", "file", "offset"]
-                    .into_iter()
-                    .filter_map(|key_name| {
-                        let col_name = format!("_rw_{}_{}", connector_name, key_name);
-                        last_column_id = last_column_id.next();
-                        col_list.iter().find_map(|(n, f)| {
-                            (key_name == *n).then_some(f(last_column_id, &col_name).to_protobuf())
-                        })
+        let additional_columns: Vec<_> = {
+            let col_list = get_connector_compatible_additional_columns(&connector_name)
+                .unwrap_or(common_compatible_column_vec());
+            ["partition", "file", "offset"]
+                .into_iter()
+                .filter_map(|key_name| {
+                    let col_name = format!("{}{}", ADDITION_SPLIT_OFFSET_COLUMN_PREFIX, key_name);
+                    last_column_id = last_column_id.next();
+                    col_list.iter().find_map(|(n, f)| {
+                        (key_name == *n).then_some(f(last_column_id, &col_name).to_protobuf())
                     })
-                    .collect(),
-                _ => Vec::new(),
-            };
+                })
+                .collect()
+        };
 
         debug_assert_eq!(additional_columns.len(), 2);
 

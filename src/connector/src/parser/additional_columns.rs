@@ -31,7 +31,7 @@ pub fn get_connector_compatible_additional_columns(
         KAFKA_CONNECTOR => kafka_compatible_column_vec(),
         PULSAR_CONNECTOR => pulsar_compatible_column_vec(),
         KINESIS_CONNECTOR => kinesis_compatible_column_vec(),
-        OPENDAL_S3_CONNECTOR | S3_CONNECTOR | GCS_CONNECTOR => s3_compatible_column_column_vec(),
+        OPENDAL_S3_CONNECTOR | S3_CONNECTOR | GCS_CONNECTOR => s3_compatible_column_vec(),
         _ => return None,
     };
     Some(compatible_columns)
@@ -225,7 +225,7 @@ fn kinesis_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalCol
     ]
 }
 
-fn s3_compatible_column_column_vec() -> Vec<(&'static str, CompatibleAdditionalColumnsFn)> {
+fn s3_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColumnsFn)> {
     vec![
         (
             "file",
@@ -236,6 +236,39 @@ fn s3_compatible_column_column_vec() -> Vec<(&'static str, CompatibleAdditionalC
                         id,
                         DataType::Varchar,
                         AdditionalColumnType::Filename,
+                    ),
+                    is_hidden: false,
+                }
+            }),
+        ),
+        (
+            "offset",
+            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                ColumnCatalog {
+                    column_desc: ColumnDesc::named_with_additional_column(
+                        name,
+                        id,
+                        DataType::Varchar,
+                        AdditionalColumnType::Offset,
+                    ),
+                    is_hidden: false,
+                }
+            }),
+        ),
+    ]
+}
+
+pub fn common_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColumnsFn)> {
+    vec![
+        (
+            "partition",
+            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                ColumnCatalog {
+                    column_desc: ColumnDesc::named_with_additional_column(
+                        name,
+                        id,
+                        DataType::Varchar,
+                        AdditionalColumnType::Partition,
                     ),
                     is_hidden: false,
                 }
