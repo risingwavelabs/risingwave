@@ -204,7 +204,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                     || is_max_epoch(last.new_epoch)
             })
         {
-            // This range would never delete any key so we can merge it with last range.
+            // There are two case we shall skip the right end of delete-range.
+            //   1, it belongs the same table-id with the last event, and the last event is also right-end of some delete-range so we can merge them into one point.
+            //   2, this point does not belong the same table-id with the last event. It means that the left end of this delete-range may be dropped, so we can not add it.
             return;
         }
         if !is_max_epoch(event.new_epoch) {
