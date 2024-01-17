@@ -242,7 +242,7 @@ pub struct ConfigMap {
     bytea_output: String,
 
     /// Enable timezone rewrite. Defaults to false.
-    #[parameter(default = true, rename = "rw_enable_timezone_rewriting")]
+    #[parameter(default = false, rename = "rw_enable_timezone_rewriting")]
     enable_timezone_rewriting: bool,
 }
 
