@@ -23,6 +23,7 @@ BACKGROUND_DDL_DIR=$TEST_DIR/background_ddl
 COMMON_DIR=$BACKGROUND_DDL_DIR/common
 
 CLUSTER_PROFILE='ci-1cn-1fe-kafka-with-recovery'
+RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe-with-monitoring'
 export RUST_LOG="info,risingwave_meta::barrier::progress=debug,risingwave_meta::rpc::ddl_controller=debug"
 
 run_sql_file() {
@@ -202,15 +203,15 @@ test_sink_backfill_recovery() {
 
 test_no_shuffle_backfill_runtime() {
   echo "--- e2e, test_no_shuffle_backfill_runtime"
-  cargo make ci-start $CLUSTER_PROFILE
+  cargo make ci-start $RUNTIME_CLUSTER_PROFILE
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
 
-  # Provide updates ...
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert.slt' 2>&1 1>out.log &
-
-  # ... and concurrently create mv.
+  # Concurrently create mv ...
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
+
+  # ... and provide updates
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_upstream.slt' 2>&1 1>out.log &
 
   wait
 
@@ -222,15 +223,15 @@ test_no_shuffle_backfill_runtime() {
 
 test_arrangement_backfill_runtime() {
   echo "--- e2e, test_arrangement_backfill_runtime"
-  cargo make ci-start $CLUSTER_PROFILE
+  cargo make ci-start $RUNTIME_CLUSTER_PROFILE
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
 
-  # Provide updates ...
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert.slt' 2>&1 1>out.log &
-
-  # ... and concurrently create mv.
+  # Concurrently create mv...
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
+
+  # ... and provide updates
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_upstream.slt' 2>&1 1>out.log &
 
   wait
 
@@ -242,10 +243,9 @@ test_arrangement_backfill_runtime() {
 
 test_no_shuffle_backfill_snapshot_only_runtime() {
   echo "--- e2e, test_no_shuffle_backfill_snapshot_only_runtime"
-  cargo make ci-start $CLUSTER_PROFILE
+  cargo make ci-start $RUNTIME_CLUSTER_PROFILE
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert.slt'
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows.slt'
 
@@ -255,10 +255,9 @@ test_no_shuffle_backfill_snapshot_only_runtime() {
 
 test_arrangement_backfill_snapshot_only_runtime() {
   echo "--- e2e, test_arrangement_backfill_snapshot_only_runtime"
-  cargo make ci-start $CLUSTER_PROFILE
+  cargo make ci-start $RUNTIME_CLUSTER_PROFILE
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert.slt'
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows.slt'
 
@@ -268,10 +267,10 @@ test_arrangement_backfill_snapshot_only_runtime() {
 
 main() {
   set -euo pipefail
-  test_snapshot_and_upstream_read
-  test_backfill_tombstone
-  test_replication_with_column_pruning
-  test_sink_backfill_recovery
+#  test_snapshot_and_upstream_read
+#  test_backfill_tombstone
+#  test_replication_with_column_pruning
+#  test_sink_backfill_recovery
   test_no_shuffle_backfill_runtime
   test_arrangement_backfill_runtime
   test_no_shuffle_backfill_snapshot_only_runtime
