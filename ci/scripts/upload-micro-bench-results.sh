@@ -24,7 +24,7 @@ get_branch() {
 get_date() {
   curl -H "Authorization: Bearer $BUILDKITE_TOKEN" \
    "https://api.buildkite.com/v2/organizations/risingwavelabs/pipelines/main-cron/builds/$BUILDKITE_BUILD_NUMBER" \
-  | jq '.jobs | .[] | select ( .name | contains("micro benchmark")) | .finished_at' \
+  | jq '.jobs | .[] | select(.name != null) | select(.name | contains("micro benchmark")) | .finished_at' \
   | sed 's/\.[0-9]*Z/Z/' \
   | sed 's/\"//g'
 }

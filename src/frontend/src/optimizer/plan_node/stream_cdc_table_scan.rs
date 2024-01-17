@@ -29,6 +29,7 @@ use crate::handler::create_source::debezium_cdc_source_schema;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{Explain, TableCatalog};
 
@@ -131,7 +132,10 @@ impl StreamNode for StreamCdcTableScan {
 }
 
 impl StreamCdcTableScan {
-    pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> PbStreamNode {
+    pub fn adhoc_to_stream_prost(
+        &self,
+        state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<PbStreamNode> {
         use risingwave_pb::stream_plan::*;
 
         let stream_key = self
@@ -254,7 +258,7 @@ impl StreamCdcTableScan {
         });
 
         // plan: merge -> filter -> exchange(simple) -> stream_scan
-        PbStreamNode {
+        Ok(PbStreamNode {
             fields: self.schema().to_prost(),
             input: vec![exchange_stream_node],
             node_body: Some(stream_scan_body),
@@ -262,7 +266,7 @@ impl StreamCdcTableScan {
             operator_id: self.base.id().0 as u64,
             identity: self.distill_to_string(),
             append_only: self.append_only(),
-        }
+        })
     }
 
     pub fn build_cdc_filter_expr(cdc_table_name: &str) -> ExprImpl {

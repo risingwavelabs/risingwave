@@ -405,7 +405,7 @@ pub(crate) fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Optio
 pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
     state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
 ) -> StreamExecutorResult<Vec<(VirtualNode, BackfillStatePerVnode)>> {
-    debug_assert!(!state_table.vnode_bitmap().is_empty());
+    debug_assert!(!state_table.vnodes().is_empty());
     let vnodes = state_table.vnodes().iter_vnodes();
     let mut result = Vec::with_capacity(state_table.vnodes().len());
     let vnode_keys = vnodes.map(|vnode| {

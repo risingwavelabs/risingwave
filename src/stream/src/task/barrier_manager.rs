@@ -18,9 +18,9 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 use thiserror_ext::AsReport;
+use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
-use tokio::sync::oneshot::Receiver;
 
 use self::managed_state::ManagedBarrierState;
 use crate::error::{IntoUnexpectedExit, StreamError, StreamResult};
@@ -32,7 +32,7 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
-use risingwave_pb::stream_plan::barrier::BarrierKind;
+use risingwave_storage::store::SyncResult;
 use risingwave_storage::StateStoreImpl;
 
 use crate::executor::monitor::StreamingMetrics;
@@ -46,12 +46,12 @@ pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 
 /// Collect result of some barrier on current compute node. Will be reported to the meta service.
 #[derive(Debug)]
-pub struct CollectResult {
+pub struct BarrierCompleteResult {
+    /// The result returned from `sync` of `StateStore`.
+    pub sync_result: Option<SyncResult>,
+
     /// The updated creation progress of materialized view after this barrier.
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
-
-    /// The kind of barrier.
-    pub kind: BarrierKind,
 }
 
 enum LocalBarrierEvent {
@@ -74,9 +74,9 @@ enum LocalBarrierEvent {
         actor_id: ActorId,
         err: StreamError,
     },
-    CollectEpoch {
+    AwaitEpochCompleted {
         epoch: u64,
-        result_sender: oneshot::Sender<StreamResult<CompleteReceiver>>,
+        result_sender: oneshot::Sender<StreamResult<BarrierCompleteResult>>,
     },
     ReportCreateProgress {
         current_epoch: u64,
@@ -97,19 +97,10 @@ struct LocalBarrierWorker {
     /// Current barrier collection state.
     state: ManagedBarrierState,
 
-    /// Save collect `CompleteReceiver`.
-    collect_complete_receiver: HashMap<u64, CompleteReceiver>,
-
     /// Record all unexpected exited actors.
     failure_actors: HashMap<ActorId, StreamError>,
-}
 
-/// Information used after collection.
-pub struct CompleteReceiver {
-    /// Notify all actors of completion of collection.
-    pub complete_receiver: Option<Receiver<StreamResult<CollectResult>>>,
-    /// The kind of barrier.
-    pub kind: BarrierKind,
+    epoch_result_sender: HashMap<u64, oneshot::Sender<StreamResult<BarrierCompleteResult>>>,
 }
 
 impl LocalBarrierWorker {
@@ -118,60 +109,85 @@ impl LocalBarrierWorker {
             barrier_senders: HashMap::new(),
             failure_actors: HashMap::default(),
             state: ManagedBarrierState::new(state_store, streaming_metrics),
-            collect_complete_receiver: HashMap::default(),
+            epoch_result_sender: HashMap::default(),
         }
     }
 
     async fn run(mut self, mut event_rx: UnboundedReceiver<LocalBarrierEvent>) {
-        while let Some(event) = event_rx.recv().await {
-            match event {
-                LocalBarrierEvent::RegisterSender { actor_id, sender } => {
-                    self.register_sender(actor_id, sender);
+        loop {
+            select! {
+                completed_epoch = self.state.next_completed_epoch() => {
+                    self.on_epoch_completed(completed_epoch);
+                },
+                event = event_rx.recv() => {
+                    if let Some(event) = event {
+                        self.handle_event(event);
+                    }
+                    else {
+                        break;
+                    }
                 }
-                LocalBarrierEvent::InjectBarrier {
-                    barrier,
-                    actor_ids_to_send,
-                    actor_ids_to_collect,
-                    result_sender,
-                } => {
-                    let result =
-                        self.send_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect);
-                    let _ = result_sender.send(result).inspect_err(|e| {
-                        warn!(err=?e, "fail to send inject barrier result");
-                    });
-                }
-                LocalBarrierEvent::Reset => {
-                    self.reset();
-                }
-                ReportActorCollected { actor_id, barrier } => self.collect(actor_id, &barrier),
-                ReportActorFailure { actor_id, err } => {
-                    self.notify_failure(actor_id, err);
-                }
-                LocalBarrierEvent::CollectEpoch {
-                    epoch,
-                    result_sender,
-                } => {
-                    let result = self.remove_collect_rx(epoch);
-                    let _ = result_sender.send(result).inspect_err(|e| {
-                        warn!(err=?e.as_ref().map(|_|()), "fail to send collect epoch result");
-                    });
-                }
-                LocalBarrierEvent::ReportCreateProgress {
-                    current_epoch,
-                    actor,
-                    state,
-                } => {
-                    self.update_create_mview_progress(current_epoch, actor, state);
-                }
-                #[cfg(test)]
-                LocalBarrierEvent::Flush(sender) => sender.send(()).unwrap(),
             }
+        }
+    }
+
+    fn handle_event(&mut self, event: LocalBarrierEvent) {
+        match event {
+            LocalBarrierEvent::RegisterSender { actor_id, sender } => {
+                self.register_sender(actor_id, sender);
+            }
+            LocalBarrierEvent::InjectBarrier {
+                barrier,
+                actor_ids_to_send,
+                actor_ids_to_collect,
+                result_sender,
+            } => {
+                let result = self.send_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect);
+                let _ = result_sender.send(result).inspect_err(|e| {
+                    warn!(err=?e, "fail to send inject barrier result");
+                });
+            }
+            LocalBarrierEvent::Reset => {
+                self.reset();
+            }
+            ReportActorCollected { actor_id, barrier } => self.collect(actor_id, &barrier),
+            ReportActorFailure { actor_id, err } => {
+                self.notify_failure(actor_id, err);
+            }
+            LocalBarrierEvent::AwaitEpochCompleted {
+                epoch,
+                result_sender,
+            } => {
+                self.await_epoch_completed(epoch, result_sender);
+            }
+            LocalBarrierEvent::ReportCreateProgress {
+                current_epoch,
+                actor,
+                state,
+            } => {
+                self.update_create_mview_progress(current_epoch, actor, state);
+            }
+            #[cfg(test)]
+            LocalBarrierEvent::Flush(sender) => sender.send(()).unwrap(),
         }
     }
 }
 
 // event handler
 impl LocalBarrierWorker {
+    fn on_epoch_completed(&mut self, epoch: u64) {
+        if let Some(sender) = self.epoch_result_sender.remove(&epoch) {
+            let result = self
+                .state
+                .pop_completed_epoch(epoch)
+                .expect("should exist")
+                .expect("should have completed");
+            if sender.send(result).is_err() {
+                warn!(epoch, "fail to send epoch complete result");
+            }
+        }
+    }
+
     /// Register sender for source actors, used to send barriers.
     fn register_sender(&mut self, actor_id: ActorId, sender: UnboundedSender<Barrier>) {
         tracing::debug!(
@@ -213,8 +229,7 @@ impl LocalBarrierWorker {
             }
         }
 
-        let (tx, rx) = oneshot::channel();
-        self.state.transform_to_issued(barrier, to_collect, tx);
+        self.state.transform_to_issued(barrier, to_collect);
 
         for actor_id in to_send {
             match self.barrier_senders.get(&actor_id) {
@@ -251,31 +266,37 @@ impl LocalBarrierWorker {
                 self.barrier_senders.remove(actor);
             }
         }
-
-        self.collect_complete_receiver.insert(
-            barrier.epoch.prev,
-            CompleteReceiver {
-                complete_receiver: Some(rx),
-                kind: barrier.kind,
-            },
-        );
         Ok(())
     }
 
     /// Use `prev_epoch` to remove collect rx and return rx.
-    fn remove_collect_rx(&mut self, prev_epoch: u64) -> StreamResult<CompleteReceiver> {
-        // It's still possible that `collect_complete_receiver` does not contain the target epoch
-        // when receiving collect_barrier request. Because `collect_complete_receiver` could
-        // be cleared when CN is under recovering. We should return error rather than panic.
-        self.collect_complete_receiver
-            .remove(&prev_epoch)
-            .ok_or_else(|| {
-                anyhow!(
-                    "barrier collect complete receiver for prev epoch {} not exists",
-                    prev_epoch
-                )
-                .into()
-            })
+    fn await_epoch_completed(
+        &mut self,
+        prev_epoch: u64,
+        result_sender: oneshot::Sender<StreamResult<BarrierCompleteResult>>,
+    ) {
+        match self.state.pop_completed_epoch(prev_epoch) {
+            Err(e) => {
+                let _ = result_sender.send(Err(e));
+            }
+            Ok(Some(result)) => {
+                if result_sender.send(result).is_err() {
+                    warn!(prev_epoch, "failed to send completed epoch result");
+                }
+            }
+            Ok(None) => {
+                if let Some(prev_sender) =
+                    self.epoch_result_sender.insert(prev_epoch, result_sender)
+                {
+                    warn!(?prev_epoch, "duplicate await_collect_barrier on epoch");
+                    let _ = prev_sender.send(Err(anyhow!(
+                        "duplicate await_collect_barrier on epoch {}",
+                        prev_epoch
+                    )
+                    .into()));
+                }
+            }
+        }
     }
 
     /// Reset all internal states.
@@ -303,14 +324,11 @@ impl LocalBarrierWorker {
                 "actor error overwritten"
             );
         }
-        for (fail_epoch, notifier) in self.state.notifiers_await_on_actor(actor_id) {
-            if notifier.send(Err(err.clone())).is_err() {
-                warn!(
-                    fail_epoch,
-                    actor_id,
-                    err = %err.as_report(),
-                    "fail to notify actor failure"
-                );
+        for fail_epoch in self.state.epochs_await_on_actor(actor_id) {
+            if let Some(result_sender) = self.epoch_result_sender.remove(&fail_epoch) {
+                if result_sender.send(Err(err.clone())).is_err() {
+                    warn!(fail_epoch, actor_id, err = %err.as_report(), "fail to notify actor failure");
+                }
             }
         }
     }
@@ -365,9 +383,12 @@ impl LocalBarrierManager {
     }
 
     /// Use `prev_epoch` to remove collect rx and return rx.
-    pub async fn remove_collect_rx(&self, prev_epoch: u64) -> StreamResult<CompleteReceiver> {
+    pub async fn await_epoch_completed(
+        &self,
+        prev_epoch: u64,
+    ) -> StreamResult<BarrierCompleteResult> {
         let (tx, rx) = oneshot::channel();
-        self.send_event(LocalBarrierEvent::CollectEpoch {
+        self.send_event(LocalBarrierEvent::AwaitEpochCompleted {
             epoch: prev_epoch,
             result_sender: tx,
         });

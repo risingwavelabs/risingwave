@@ -59,6 +59,7 @@ risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_sqlparser = { workspace = true }
+rw_futures_util = { workspace = true }
 scopeguard = "1.2.0"
 sea-orm = { version = "0.12.0", features = [
     "sqlx-mysql",

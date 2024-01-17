@@ -35,7 +35,7 @@ mod forward_merge;
 pub mod forward_user;
 mod merge_inner;
 pub use forward_user::*;
-pub use merge_inner::{OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
+pub use merge_inner::MergeIterator;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};

@@ -218,6 +218,7 @@ async fn compaction_test(
         storage_memory_config.meta_cache_capacity_mb * (1 << 20),
         0,
         storage_memory_config.prefetch_buffer_capacity_mb * (1 << 20),
+        storage_opts.max_prefetch_block_number,
         FileCache::none(),
         FileCache::none(),
         None,

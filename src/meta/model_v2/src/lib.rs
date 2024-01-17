@@ -75,7 +75,6 @@ pub type CompactionTaskId = i64;
 pub type HummockSstableObjectId = i64;
 
 pub type FragmentId = i32;
-
 pub type ActorId = i32;
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
