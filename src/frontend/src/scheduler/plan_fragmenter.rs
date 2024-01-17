@@ -804,7 +804,7 @@ impl BatchPlanFragmenter {
                     )
                 } else {
                     // can be 0 if no available serving worker
-                    self.worker_node_manager.worker_node_count()
+                    self.worker_node_manager.schedule_unit_count()
                 }
             }
         };
