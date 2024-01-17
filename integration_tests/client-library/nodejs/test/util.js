@@ -62,7 +62,6 @@ export async function checkInsertedData(client, name, age, salary, tripIDs, birt
     assert.deepStrictEqual(retrievedSalary, salary)
 
     let retrievedTripIDs = row.trip_id
-    console.log(retrievedTripIDs)
     assert.deepStrictEqual(retrievedTripIDs, tripIDs)
 
     let retrievedBirthdate = row.birthdate

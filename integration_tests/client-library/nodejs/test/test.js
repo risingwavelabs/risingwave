@@ -11,8 +11,8 @@ afterEach(async function () {
     await client.end()
 })
 
-describe('crud', function () {
-    it('sql test', async function () {
+describe('nodejs client test', function () {
+    it('crud test', async function () {
         await test_crud(client)
     })
 });
