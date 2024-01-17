@@ -452,6 +452,10 @@ pub struct BatchConfig {
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
+
+    #[serde(default = "default::batch::frontend_compute_runtime_worker_threads")]
+    /// frontend compute runtime worker threads
+    pub frontend_compute_runtime_worker_threads: usize,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -1382,6 +1386,10 @@ pub mod default {
         pub fn statement_timeout_in_sec() -> u32 {
             // 1 hour
             60 * 60
+        }
+
+        pub fn frontend_compute_runtime_worker_threads() -> usize {
+            4
         }
     }
 

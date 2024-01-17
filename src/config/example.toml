@@ -73,6 +73,7 @@ meta_cached_traces_memory_limit_bytes = 134217728
 [batch]
 enable_barrier_read = false
 statement_timeout_in_sec = 3600
+frontend_compute_runtime_worker_threads = 4
 
 [batch.developer]
 batch_connector_message_buffer_size = 16
