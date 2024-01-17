@@ -16,24 +16,48 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{ColumnCatalog, Schema};
-use risingwave_common::constants::log_store::v1::KvLogStoreV1Pk;
-use risingwave_common::constants::log_store::v2::KvLogStoreV2Pk;
-use risingwave_common::constants::log_store::KvLogStorePk;
 use risingwave_common::types::DataType;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkType};
 use risingwave_connector::sink::{
     SinkError, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
 };
+use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
 
 use super::*;
 use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
-use crate::common::log_store_impl::kv_log_store::{KvLogStoreFactory, KvLogStoreMetrics};
+use crate::common::log_store_impl::kv_log_store::{
+    KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo, KV_LOG_STORE_V1_INFO,
+    KV_LOG_STORE_V2_INFO,
+};
 use crate::executor::SinkExecutor;
 
 pub struct SinkExecutorBuilder;
+
+fn resolve_pk_info(
+    input_schema: &Schema,
+    log_store_table: &Table,
+) -> StreamResult<&'static KvLogStorePkInfo> {
+    let predefined_column_len = log_store_table.columns.len() - input_schema.fields.len();
+
+    let info = match predefined_column_len {
+        len if len == KV_LOG_STORE_V1_INFO.predefined_column_len() => Ok(&KV_LOG_STORE_V1_INFO),
+        len if len == KV_LOG_STORE_V2_INFO.predefined_column_len() => Ok(&KV_LOG_STORE_V2_INFO),
+        other_len => Err(anyhow!(
+            "invalid log store predefined len {}. log store table: {:?}, input_schema: {:?}",
+            other_len,
+            log_store_table,
+            input_schema
+        )),
+    }?;
+    validate_payload_schema(
+        &log_store_table.columns[predefined_column_len..],
+        input_schema,
+    )?;
+    Ok(info)
+}
 
 fn validate_payload_schema(
     log_store_payload_schema: &[PbColumnCatalog],
@@ -185,58 +209,34 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     &sink_param,
                     connector,
                 );
+
                 let table = node.table.as_ref().unwrap().clone();
                 let input_schema = input_executor.schema();
+                let pk_info = resolve_pk_info(input_schema, &table)?;
 
-                macro_rules! create_sink_executor {
-                    ($pk_type:ty) => {{
-                        use risingwave_common::constants::log_store::KvLogStorePk;
-                        validate_payload_schema(
-                            &table.columns[<$pk_type>::predefined_column_len()..],
-                            input_schema,
-                        )?;
+                // TODO: support setting max row count in config
+                let factory = KvLogStoreFactory::new(
+                    state_store,
+                    table,
+                    params.vnode_bitmap.clone().map(Arc::new),
+                    65536,
+                    metrics,
+                    log_store_identity,
+                    pk_info,
+                );
 
-                        // TODO: support setting max row count in config
-                        let factory = KvLogStoreFactory::<_, $pk_type>::new(
-                            state_store,
-                            table,
-                            params.vnode_bitmap.clone().map(Arc::new),
-                            65536,
-                            metrics,
-                            log_store_identity,
-                        );
-
-                        Ok(Box::new(
-                            SinkExecutor::new(
-                                params.actor_context,
-                                params.info,
-                                input_executor,
-                                sink_write_param,
-                                sink_param,
-                                columns,
-                                factory,
-                            )
-                            .await?,
-                        ))
-                    }};
-                }
-
-                let predefined_column_len = table.columns.len() - input_schema.fields.len();
-
-                match predefined_column_len {
-                    len if len == KvLogStoreV2Pk::predefined_column_len() => {
-                        create_sink_executor!(KvLogStoreV2Pk)
-                    }
-                    len if len == KvLogStoreV1Pk::predefined_column_len() => {
-                        create_sink_executor!(KvLogStoreV1Pk)
-                    }
-                    other_len => Err(anyhow!(
-                        "invalid log store predefined len {}. log store table: {:?}, input_schema: {:?}",
-                        other_len,
-                        table,
-                        input_schema
-                    ).into()),
-                }
+                Ok(Box::new(
+                    SinkExecutor::new(
+                        params.actor_context,
+                        params.info,
+                        input_executor,
+                        sink_write_param,
+                        sink_param,
+                        columns,
+                        factory,
+                    )
+                    .await?,
+                ))
             }
         }
     }

@@ -322,7 +322,6 @@ impl MetaSrvEnv {
         let hummock_seq = meta_store_sql
             .clone()
             .map(|m| Arc::new(SequenceGenerator::new(m.conn)));
-
         let sql_id_gen_manager = if let Some(store) = &meta_store_sql {
             Some(Arc::new(SqlIdGeneratorManager::new(&store.conn).await?))
         } else {

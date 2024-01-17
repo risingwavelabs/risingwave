@@ -17,20 +17,17 @@ use rand::RngCore;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::constants::log_store::v2::KvLogStoreV2Pk;
-use risingwave_common::constants::log_store::KvLogStorePk;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl, ScalarRef};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::catalog::PbTable;
 
+use crate::common::log_store_impl::kv_log_store::KvLogStorePkInfo;
 use crate::common::table::test_utils::gen_prost_table_with_dist_key;
 
 pub(crate) const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
 pub(crate) const TEST_DATA_SIZE: usize = 10;
-
-pub(crate) type TestKvLogStorePk = KvLogStoreV2Pk;
 
 pub(crate) fn gen_test_data(base: i64) -> (Vec<Op>, Vec<OwnedRow>) {
     gen_sized_test_data(base, TEST_DATA_SIZE)
@@ -82,28 +79,37 @@ pub(crate) fn gen_sized_test_data(base: i64, max_count: usize) -> (Vec<Op>, Vec<
     (ops, rows)
 }
 
-pub(crate) fn test_payload_schema() -> Vec<ColumnDesc> {
+pub(crate) fn test_payload_schema(pk_info: &'static KvLogStorePkInfo) -> Vec<ColumnDesc> {
     vec![
-        ColumnDesc::unnamed(ColumnId::from(4), DataType::Int64), // id
-        ColumnDesc::unnamed(ColumnId::from(5), DataType::Varchar), // name
+        ColumnDesc::unnamed(
+            ColumnId::from(pk_info.predefined_column_len() as i32),
+            DataType::Int64,
+        ), // id
+        ColumnDesc::unnamed(
+            ColumnId::from((pk_info.predefined_column_len() + 1) as i32),
+            DataType::Varchar,
+        ), // name
     ]
 }
 
-pub(crate) fn test_log_store_table_schema() -> Vec<ColumnDesc> {
-    let mut column_descs = vec![
-        ColumnDesc::unnamed(ColumnId::from(0), DataType::Int64), // epoch
-        ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32), // Seq id
-        ColumnDesc::unnamed(ColumnId::from(2), DataType::Int16), // vnode
-        ColumnDesc::unnamed(ColumnId::from(3), DataType::Int16), // op code
-    ];
-    column_descs.extend(test_payload_schema());
+pub(crate) fn test_log_store_table_schema(pk_info: &'static KvLogStorePkInfo) -> Vec<ColumnDesc> {
+    let mut column_descs = pk_info
+        .predefined_columns
+        .iter()
+        .enumerate()
+        .map(|(i, (_, data_type))| ColumnDesc::unnamed(ColumnId::from(i as i32), data_type.clone()))
+        .collect_vec();
+    column_descs.extend(test_payload_schema(pk_info));
     column_descs
 }
 
-pub(crate) fn gen_stream_chunk(base: i64) -> StreamChunk {
+pub(crate) fn gen_stream_chunk_with_info(
+    base: i64,
+    pk_info: &'static KvLogStorePkInfo,
+) -> StreamChunk {
     let (ops, rows) = gen_test_data(base);
     let mut builder = DataChunkBuilder::new(
-        test_payload_schema()
+        test_payload_schema(pk_info)
             .iter()
             .map(|col| col.data_type.clone())
             .collect_vec(),
@@ -119,13 +125,14 @@ pub(crate) fn gen_stream_chunk(base: i64) -> StreamChunk {
 pub(crate) fn gen_multi_vnode_stream_chunks<const MOD_COUNT: usize>(
     base: i64,
     max_count: usize,
+    pk_info: &'static KvLogStorePkInfo,
 ) -> [StreamChunk; MOD_COUNT] {
     let mut data_builder = (0..MOD_COUNT)
         .map(|_| {
             (
                 Vec::new() as Vec<Op>,
                 DataChunkBuilder::new(
-                    test_payload_schema()
+                    test_payload_schema(pk_info)
                         .iter()
                         .map(|col| col.data_type.clone())
                         .collect_vec(),
@@ -152,10 +159,10 @@ pub(crate) fn gen_multi_vnode_stream_chunks<const MOD_COUNT: usize>(
 
 pub(crate) const TEST_SCHEMA_DIST_KEY_INDEX: usize = 0;
 
-pub(crate) fn gen_test_log_store_table() -> PbTable {
-    let schema = test_log_store_table_schema();
-    let order_types = TestKvLogStorePk::pk_ordering().to_vec();
-    let pk_index = (0..TestKvLogStorePk::LEN).collect();
+pub(crate) fn gen_test_log_store_table(pk_info: &'static KvLogStorePkInfo) -> PbTable {
+    let schema = test_log_store_table_schema(pk_info);
+    let order_types = pk_info.pk_orderings.to_vec();
+    let pk_index = (0..pk_info.pk_len()).collect();
     let read_prefix_len_hint = 0;
     gen_prost_table_with_dist_key(
         TEST_TABLE_ID,
@@ -163,7 +170,7 @@ pub(crate) fn gen_test_log_store_table() -> PbTable {
         order_types,
         pk_index,
         read_prefix_len_hint,
-        vec![TestKvLogStorePk::predefined_column_len()], // id field
+        vec![pk_info.predefined_column_len()],
     )
 }
 
