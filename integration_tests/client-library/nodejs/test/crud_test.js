@@ -1,7 +1,6 @@
 import {checkInsertedData, createTable, deleteDataByName, dropTable, insertData, updateSalaryData} from './util.js'
 
 export async function test_crud(client) {
-    await dropTable(client)
     await createTable(client)
 
     let name = "John Doe"
@@ -41,5 +40,5 @@ export async function test_crud(client) {
 
     await updateSalaryData(client, name, BigInt(60000))
     await deleteDataByName(client, name)
-    // await dropTable(client)
+    await dropTable(client)
 }

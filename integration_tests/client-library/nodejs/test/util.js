@@ -27,7 +27,7 @@ export async function createTable(client) {
 }
 
 export async function dropTable(client) {
-    let query = "drop table IF EXISTS sample_table_nodejs;"
+    let query = "drop table sample_table_nodejs;"
     await client.query(query)
     console.log("Table dropped successfully.")
 }
