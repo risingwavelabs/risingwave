@@ -15,8 +15,8 @@
 use std::fmt::Debug;
 
 use risingwave_common::catalog::{
-    ColumnDesc, ColumnId, ADDITION_SPLIT_OFFSET_COLUMN_PREFIX, KAFKA_TIMESTAMP_COLUMN_NAME,
-    OFFSET_COLUMN_NAME, ROWID_PREFIX, TABLE_NAME_COLUMN_NAME,
+    ColumnDesc, ColumnId, KAFKA_TIMESTAMP_COLUMN_NAME, OFFSET_COLUMN_NAME, ROWID_PREFIX,
+    TABLE_NAME_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::{AdditionalColumnType, ColumnDescVersion};
@@ -58,9 +58,7 @@ pub enum SourceColumnType {
 
 impl SourceColumnType {
     pub fn from_name(name: &str) -> Self {
-        if name.starts_with(KAFKA_TIMESTAMP_COLUMN_NAME)
-            || name.starts_with(TABLE_NAME_COLUMN_NAME)
-            || name.starts_with(ADDITION_SPLIT_OFFSET_COLUMN_PREFIX)
+        if name.starts_with(KAFKA_TIMESTAMP_COLUMN_NAME) || name.starts_with(TABLE_NAME_COLUMN_NAME)
         {
             Self::Meta
         } else if name == (ROWID_PREFIX) {
@@ -108,6 +106,7 @@ impl SourceColumnDesc {
     #[inline]
     pub fn is_visible(&self) -> bool {
         self.column_type == SourceColumnType::Normal
+            && self.additional_column_type == AdditionalColumnType::Normal
     }
 }
 
