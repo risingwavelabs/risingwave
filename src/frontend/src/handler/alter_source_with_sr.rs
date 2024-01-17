@@ -146,7 +146,7 @@ pub async fn handle_alter_source_with_sr(
         bind_columns_from_source(&session, &connector_schema, &with_properties).await?
     else {
         // Source without schema registry is rejected.
-        unreachable!()
+        unreachable!("source without schema registry is rejected")
     };
 
     let added_columns = columns_diff(&columns_from_resolve_source, &source.columns);
