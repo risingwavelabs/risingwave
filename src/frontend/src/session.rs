@@ -169,7 +169,11 @@ impl FrontendEnv {
         let creating_streaming_tracker = StreamingJobTracker::new(meta_client.clone());
         let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
             Builder::new_multi_thread()
-                .worker_threads(load_config("", FrontendOpts::default()).batch.compute_runtime_worker_threads)
+                .worker_threads(
+                    load_config("", FrontendOpts::default())
+                        .batch
+                        .compute_runtime_worker_threads,
+                )
                 .thread_name("rw-batch-local")
                 .enable_all()
                 .build()
