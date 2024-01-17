@@ -272,6 +272,25 @@ impl Binder {
                         "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
                     )
                     .into());
+                };
+
+                let mut udf_context = HashMap::new();
+                for (c, e) in context {
+                    // Note that we need to bind the args before actual delve in the function body
+                    // This will update the context in the subsequent inner calling function
+                    // e.g.,
+                    // - create function print(INT) returns int language sql as 'select $1';
+                    // - create function print_add_one(INT) returns int language sql as 'select print($1 + 1)';
+                    // - select print_add_one(1); # The result should be 2 instead of 1.
+                    // Without the pre-binding here, the ($1 + 1) will not be correctly populated,
+                    // causing the result to always be 1.
+                    let Ok(e) = self.bind_expr(e) else {
+                        return Err(ErrorCode::BindError(
+                            "failed to bind the argument, please recheck the syntax".to_string(),
+                        )
+                        .into());
+                    };
+                    udf_context.insert(c, e);
                 }
                 self.udf_context.update_context(udf_context);
 
