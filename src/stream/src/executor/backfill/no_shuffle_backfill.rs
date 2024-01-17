@@ -137,12 +137,15 @@ where
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        // The primary key columns, in the output columns of the upstream_table scan.
-        let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
+        // The primary key columns.
+        // We receive a pruned chunk from the upstream table,
+        // which will only contain output columns of the scan on the upstream table.
+        // The pk indices specify the pk columns of the pruned chunk.
+        let pk_indices = self.upstream_table.pk_in_output_indices().unwrap();
 
         let mut rate_limit = self.rate_limit;
 
-        let state_len = pk_in_output_indices.len() + METADATA_STATE_LEN;
+        let state_len = pk_indices.len() + METADATA_STATE_LEN;
 
         let pk_order = self.upstream_table.pk_serializer().get_order_types();
 
@@ -162,8 +165,7 @@ where
             is_finished,
             row_count,
             mut old_state,
-        } = Self::recover_backfill_state(self.state_table.as_ref(), pk_in_output_indices.len())
-            .await?;
+        } = Self::recover_backfill_state(self.state_table.as_ref(), pk_indices.len()).await?;
         tracing::trace!(is_finished, row_count, "backfill state recovered");
 
         let data_types = self.upstream_table.schema().data_types();
@@ -277,19 +279,14 @@ where
                                     None => {
                                         // Consume remaining rows in the builder.
                                         if let Some(data_chunk) = builder.consume_all() {
-                                            let ops = vec![Op::Insert; data_chunk.capacity()];
-                                            let chunk = StreamChunk::from_parts(ops, data_chunk);
-
-                                            current_pos =
-                                                Some(get_new_pos(&chunk, &pk_in_output_indices));
-
-                                            let chunk_cardinality = chunk.cardinality() as u64;
-                                            total_snapshot_processed_rows += chunk_cardinality;
-
-                                            yield Message::Chunk(mapping_chunk(
-                                                chunk,
+                                            yield Self::handle_snapshot_chunk(
+                                                data_chunk,
+                                                &mut current_pos,
+                                                &mut cur_barrier_snapshot_processed_rows,
+                                                &mut total_snapshot_processed_rows,
+                                                &pk_indices,
                                                 &self.output_indices,
-                                            ));
+                                            );
                                         }
 
                                         // End of the snapshot read stream.
@@ -313,23 +310,14 @@ where
                                     Some(record) => {
                                         // Buffer the snapshot read row.
                                         if let Some(data_chunk) = builder.append_one_row(record) {
-                                            let ops = vec![Op::Insert; data_chunk.capacity()];
-                                            let chunk = StreamChunk::from_parts(ops, data_chunk);
-                                            // Raise the current position.
-                                            // As snapshot read streams are ordered by pk, so we can
-                                            // just use the last row to update `current_pos`.
-                                            current_pos =
-                                                Some(get_new_pos(&chunk, &pk_in_output_indices));
-
-                                            let chunk_cardinality = chunk.cardinality() as u64;
-                                            cur_barrier_snapshot_processed_rows +=
-                                                chunk_cardinality;
-                                            total_snapshot_processed_rows += chunk_cardinality;
-
-                                            yield Message::Chunk(mapping_chunk(
-                                                chunk,
+                                            yield Self::handle_snapshot_chunk(
+                                                data_chunk,
+                                                &mut current_pos,
+                                                &mut cur_barrier_snapshot_processed_rows,
+                                                &mut total_snapshot_processed_rows,
+                                                &pk_indices,
                                                 &self.output_indices,
-                                            ));
+                                            );
                                         }
                                     }
                                 }
@@ -358,20 +346,14 @@ where
                                 }
                                 Some(row) => {
                                     let chunk = DataChunk::from_rows(&[row], &data_types);
-                                    let ops = vec![Op::Insert; 1];
-                                    let chunk = StreamChunk::from_parts(ops, chunk);
-                                    // Raise the current position.
-                                    // As snapshot read streams are ordered by pk, so we can
-                                    // just use the last row to update `current_pos`.
-                                    current_pos = Some(get_new_pos(&chunk, &pk_in_output_indices));
-
-                                    let chunk_cardinality = chunk.cardinality() as u64;
-                                    cur_barrier_snapshot_processed_rows += chunk_cardinality;
-                                    total_snapshot_processed_rows += chunk_cardinality;
-                                    yield Message::Chunk(mapping_chunk(
+                                    yield Self::handle_snapshot_chunk(
                                         chunk,
+                                        &mut current_pos,
+                                        &mut cur_barrier_snapshot_processed_rows,
+                                        &mut total_snapshot_processed_rows,
+                                        &pk_indices,
                                         &self.output_indices,
-                                    ));
+                                    );
                                     break;
                                 }
                             }
@@ -394,14 +376,14 @@ where
                 // Consume snapshot rows left in builder
                 let chunk = builder.consume_all();
                 if let Some(chunk) = chunk {
-                    let chunk_cardinality = chunk.cardinality() as u64;
-                    let ops = vec![Op::Insert; chunk.capacity()];
-                    let chunk = StreamChunk::from_parts(ops, chunk);
-                    current_pos = Some(get_new_pos(&chunk, &pk_in_output_indices));
-
-                    cur_barrier_snapshot_processed_rows += chunk_cardinality;
-                    total_snapshot_processed_rows += chunk_cardinality;
-                    yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
+                    yield Self::handle_snapshot_chunk(
+                        chunk,
+                        &mut current_pos,
+                        &mut cur_barrier_snapshot_processed_rows,
+                        &mut total_snapshot_processed_rows,
+                        &pk_indices,
+                        &self.output_indices,
+                    );
                 }
 
                 // Consume upstream buffer chunk
@@ -412,7 +394,7 @@ where
                     for chunk in upstream_chunk_buffer.drain(..) {
                         cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
                         yield Message::Chunk(mapping_chunk(
-                            mark_chunk(chunk, current_pos, &pk_in_output_indices, pk_order),
+                            mark_chunk(chunk, current_pos, &pk_indices, pk_order),
                             &self.output_indices,
                         ));
                     }
@@ -513,8 +495,7 @@ where
                         // since it expects to have been initialized in previous epoch
                         // (there's no epoch before the first epoch).
                         if current_pos.is_none() {
-                            current_pos =
-                                Some(construct_initial_finished_state(pk_in_output_indices.len()))
+                            current_pos = Some(construct_initial_finished_state(pk_indices.len()))
                         }
 
                         // We will update current_pos at least once,
@@ -693,6 +674,33 @@ where
             current_state,
         )
         .await
+    }
+
+    /// 1. Converts from data chunk to stream chunk.
+    /// 2. Update the current position.
+    /// 3. Update Metrics
+    /// 4. Map the chunk according to output indices, return
+    ///    the stream message to be yielded downstream.
+    fn handle_snapshot_chunk(
+        data_chunk: DataChunk,
+        current_pos: &mut Option<OwnedRow>,
+        cur_barrier_snapshot_processed_rows: &mut u64,
+        total_snapshot_processed_rows: &mut u64,
+        pk_indices: &[usize],
+        output_indices: &[usize],
+    ) -> Message {
+        let ops = vec![Op::Insert; data_chunk.capacity()];
+        let chunk = StreamChunk::from_parts(ops, data_chunk);
+        // Raise the current position.
+        // As snapshot read streams are ordered by pk, so we can
+        // just use the last row to update `current_pos`.
+        *current_pos = Some(get_new_pos(&chunk, pk_indices));
+
+        let chunk_cardinality = chunk.cardinality() as u64;
+        *cur_barrier_snapshot_processed_rows += chunk_cardinality;
+        *total_snapshot_processed_rows += chunk_cardinality;
+
+        Message::Chunk(mapping_chunk(chunk, output_indices))
     }
 }
 

@@ -18,6 +18,7 @@ use std::time::Duration;
 use anyhow::Result;
 use itertools::Itertools;
 use risingwave_simulation::cluster::{Cluster, Configuration};
+use tokio::time::timeout;
 
 const SET_PARALLELISM: &str = "SET STREAMING_PARALLELISM=1;";
 const ROOT_TABLE_CREATE: &str = "create table t1 (_id int, data jsonb);";
@@ -224,7 +225,7 @@ async fn test_backfill_backpressure() -> Result<()> {
     // There will be some latency for the initial barrier.
     session.run("FLUSH;").await?;
     // But after that flush should be processed timely.
-    session.run("FLUSH;").await?;
+    timeout(Duration::from_secs(1), session.run("FLUSH;")).await??;
     Ok(())
 }
 
