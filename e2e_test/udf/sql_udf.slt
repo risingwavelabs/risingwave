@@ -81,19 +81,6 @@ create function print_add_two(INT) returns int language sql as 'select print($1 
 statement error failed to conduct semantic check, please see if you are calling non-existence functions
 create function non_exist(INT) returns int language sql as 'select yo(114514)';
 
-statement ok
-create function regexp_replace_wrapper(varchar) returns varchar language sql as $$select regexp_replace($1, 'baz(...)', '这是🥵', 'ic')$$;
-
-statement ok
-create function print(INT) returns int language sql as 'select $1';
-
-# Adjust the input value of the calling function (i.e., `print` here) with the actual input parameter
-statement ok
-create function print_add_one(INT) returns int language sql as 'select print($1 + 1)';
-
-statement ok
-create function print_add_two(INT) returns int language sql as 'select print($1 + $1)';
-
 # Call the defined sql udf
 query I
 select add(1, -1);
@@ -290,18 +277,6 @@ drop function add_sub_types;
 
 # statement ok
 # drop function fib;
-
-statement ok
-drop function print;
-
-statement ok
-drop function print_add_one;
-
-statement ok
-drop function print_add_two;
-
-statement ok
-drop function regexp_replace_wrapper;
 
 statement ok
 drop function print;

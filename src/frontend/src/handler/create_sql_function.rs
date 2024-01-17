@@ -205,7 +205,7 @@ pub async fn handle_create_sql_function(
 
         // Conduct semantic check (e.g., see if the inner calling functions exist, etc.)
         let ast = parse_result.unwrap();
-        let mut binder = Binder::new_for_system(&session);
+        let mut binder = Binder::new_for_system(session);
 
         binder
             .get_udf_context()
@@ -214,7 +214,7 @@ pub async fn handle_create_sql_function(
         if let Ok(expr) = extract_udf_expression(ast) {
             if let Err(e) = binder.bind_expr(expr) {
                 return Err(ErrorCode::InvalidInputSyntax(
-                    format!("failed to conduct semantic check, please see if you are calling non-existence functions.\nDetailed error: {}", e.to_string())
+                    format!("failed to conduct semantic check, please see if you are calling non-existence functions.\nDetailed error: {e}")
                 )
                 .into());
             }
