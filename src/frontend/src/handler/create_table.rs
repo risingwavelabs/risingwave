@@ -755,11 +755,11 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
 
     // cdc table cannot be append-only
     let append_only = false;
-    let source_name = source_name.real_value();
+    let (source_schema, source_name) = Binder::resolve_schema_qualified_name(db_name, source_name)?;
 
     let source = {
         let catalog_reader = session.env().catalog_reader().read_guard();
-        let schema_name = schema_name
+        let schema_name = source_schema
             .clone()
             .unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
         let (source, _) = catalog_reader.get_source_by_name(
@@ -1005,7 +1005,7 @@ pub async fn handle_create_table(
         )
         .await?;
 
-        let mut graph = build_graph(plan);
+        let mut graph = build_graph(plan)?;
         graph.parallelism =
             session
                 .config()
@@ -1106,7 +1106,7 @@ pub async fn generate_stream_graph_for_table(
             .map(|parallelism| Parallelism {
                 parallelism: parallelism.get(),
             }),
-        ..build_graph(plan)
+        ..build_graph(plan)?
     };
 
     // Fill the original table ID.

@@ -1,0 +1,2 @@
+statement ok
+CREATE TABLE t (v1 int, v2 varchar, v3 bigint);

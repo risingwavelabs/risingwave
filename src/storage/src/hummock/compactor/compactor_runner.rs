@@ -32,8 +32,9 @@ use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType};
 use tokio::sync::oneshot::Receiver;
 
+use super::iterator::MonitoredCompactorIterator;
 use super::task_progress::TaskProgress;
-use super::{check_compaction_result, CompactionStatistics, TaskConfig};
+use super::{CompactionStatistics, TaskConfig};
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
@@ -44,8 +45,7 @@ use crate::hummock::compactor::{
     fast_compactor_runner, CompactOutput, CompactionFilter, Compactor, CompactorContext,
 };
 use crate::hummock::iterator::{
-    Forward, ForwardMergeRangeIterator, HummockIterator, SkipWatermarkIterator,
-    UnorderedMergeIteratorInner,
+    Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator, SkipWatermarkIterator,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::value::HummockValue;
@@ -231,7 +231,10 @@ impl CompactorRunner {
         // in https://github.com/risingwavelabs/risingwave/issues/13148
         Ok((
             SkipWatermarkIterator::from_safe_epoch_watermarks(
-                UnorderedMergeIteratorInner::for_compactor(table_iters),
+                MonitoredCompactorIterator::new(
+                    MergeIterator::for_compactor(table_iters),
+                    task_progress.clone(),
+                ),
                 &self.compact_task.table_watermarks,
             ),
             CompactionDeleteRangeIterator::new(del_iter),
@@ -542,16 +545,6 @@ pub async fn compact(
             cost_time,
             compact_task_to_string(&compact_task)
         );
-        // TODO: remove this method after we have running risingwave cluster with fast compact algorithm stably for a long time.
-        if context.storage_opts.check_fast_compaction_result
-            && let Err(e) = check_compaction_result(&compact_task, context.clone()).await
-        {
-            tracing::error!(
-                "Failed to check fast compaction task {} because: {:?}",
-                compact_task.task_id,
-                e
-            );
-        }
         return (compact_task, table_stats);
     }
     for (split_index, _) in compact_task.splits.iter().enumerate() {
@@ -647,11 +640,6 @@ pub async fn compact(
         cost_time,
         compact_task_to_string(&compact_task)
     );
-    for level in &compact_task.input_ssts {
-        for table in &level.table_infos {
-            context.sstable_store.delete_cache(table.get_object_id());
-        }
-    }
     (compact_task, table_stats)
 }
 
@@ -706,7 +694,6 @@ pub async fn compact_and_build_sst<F>(
     compactor_metrics: Arc<CompactorMetrics>,
     mut iter: impl HummockIterator<Direction = Forward>,
     mut compaction_filter: impl CompactionFilter,
-    task_progress: Option<Arc<TaskProgress>>,
 ) -> HummockResult<CompactionStatistics>
 where
     F: TableBuilderFactory,
@@ -750,18 +737,7 @@ where
     let mut last_table_stats = TableStats::default();
     let mut last_table_id = None;
     let mut compaction_statistics = CompactionStatistics::default();
-    let mut progress_key_num: u64 = 0;
-    const PROGRESS_KEY_INTERVAL: u64 = 100;
     while iter.is_valid() {
-        progress_key_num += 1;
-
-        if let Some(task_progress) = task_progress.as_ref()
-            && progress_key_num >= PROGRESS_KEY_INTERVAL
-        {
-            task_progress.inc_progress_key(progress_key_num);
-            progress_key_num = 0;
-        }
-
         let mut iter_key = iter.key();
         compaction_statistics.iter_total_key_counts += 1;
 
@@ -806,14 +782,6 @@ where
                         event_key,
                     })
                     .await?;
-            }
-
-            progress_key_num += 1;
-            if let Some(task_progress) = task_progress.as_ref()
-                && progress_key_num >= PROGRESS_KEY_INTERVAL
-            {
-                task_progress.inc_progress_key(progress_key_num);
-                progress_key_num = 0;
             }
         }
 
@@ -918,23 +886,8 @@ where
                     event_key,
                 })
                 .await?;
-            progress_key_num += 1;
-            if let Some(task_progress) = task_progress.as_ref()
-                && progress_key_num >= PROGRESS_KEY_INTERVAL
-            {
-                task_progress.inc_progress_key(progress_key_num);
-                progress_key_num = 0;
-            }
         }
     }
-
-    if let Some(task_progress) = task_progress.as_ref()
-        && progress_key_num > 0
-    {
-        // Avoid losing the progress_key_num in the last Interval
-        task_progress.inc_progress_key(progress_key_num);
-    }
-
     if let Some(last_table_id) = last_table_id.take() {
         table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
     }

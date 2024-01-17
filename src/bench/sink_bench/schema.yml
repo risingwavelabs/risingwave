@@ -1,0 +1,12 @@
+table_name: "sink_bench"
+pk_indices:
+  - 0
+columns:
+  - name: "v1"
+    type: "int"
+  - name: "v2"
+    type: "bigint"
+  - name: "v3"
+    type: "varchar"
+  - name: "v4"
+    type: "varchar"

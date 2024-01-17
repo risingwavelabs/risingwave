@@ -552,6 +552,7 @@ message SystemParams {
   optional uint32 max_concurrent_creating_streaming_jobs = 12;
   optional bool pause_on_next_bootstrap = 13;
   optional string wasm_storage_url = 14;
+  optional bool enable_tracing = 15;
 }
 
 message GetSystemParamsRequest {}

@@ -647,7 +647,7 @@ pub(crate) fn bind_all_columns(
 }
 
 /// Bind column from source. Add key column to table columns if necessary.
-/// Return (columns, pks)
+/// Return `pk_names`.
 pub(crate) async fn bind_source_pk(
     source_schema: &ConnectorSchema,
     source_info: &StreamSourceInfo,
@@ -1249,7 +1249,7 @@ pub async fn handle_create_source(
 
             // generate stream graph for cdc source job
             let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
-            let mut graph = build_graph(stream_plan);
+            let mut graph = build_graph(stream_plan)?;
             graph.parallelism =
                 session
                     .config()

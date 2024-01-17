@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::pending;
+use std::future::Future;
 use std::pin::{pin, Pin};
 
-use futures::future::{select, Either};
+use futures::future::{pending, select, Either};
 use futures::stream::Peekable;
-use futures::{Future, FutureExt, Stream, StreamExt};
+use futures::{FutureExt, Stream, StreamExt};
 
 /// Convert a list of streams into a [`Stream`] of results from the streams.
 pub fn select_all<S: Stream + Unpin>(

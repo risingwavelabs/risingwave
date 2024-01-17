@@ -23,6 +23,7 @@ rand = "0.8"
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_pb = { workspace = true }
+rw_futures_util = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tracing = { version = "0.1" }
 

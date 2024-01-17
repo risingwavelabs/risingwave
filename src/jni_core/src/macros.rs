@@ -484,13 +484,15 @@ macro_rules! for_all_plain_native_methods {
 
                 static native String iteratorGetStringValue(long pointer, int index);
 
-                static native java.sql.Timestamp iteratorGetTimestampValue(long pointer, int index);
+                static native java.time.LocalDateTime iteratorGetTimestampValue(long pointer, int index);
+
+                static native java.time.OffsetDateTime iteratorGetTimestamptzValue(long pointer, int index);
 
                 static native java.math.BigDecimal iteratorGetDecimalValue(long pointer, int index);
 
-                static native java.sql.Time iteratorGetTimeValue(long pointer, int index);
+                static native java.time.LocalTime iteratorGetTimeValue(long pointer, int index);
 
-                static native java.sql.Date iteratorGetDateValue(long pointer, int index);
+                static native java.time.LocalDate iteratorGetDateValue(long pointer, int index);
 
                 static native String iteratorGetIntervalValue(long pointer, int index);
 
@@ -904,10 +906,11 @@ mod tests {
                 iteratorGetDoubleValue                   (JI)D,
                 iteratorGetBooleanValue                  (JI)Z,
                 iteratorGetStringValue                   (JI)Ljava/lang/String;,
-                iteratorGetTimestampValue                (JI)Ljava/sql/Timestamp;,
+                iteratorGetTimestampValue                (JI)Ljava/time/LocalDateTime;,
+                iteratorGetTimestamptzValue              (JI)Ljava/time/OffsetDateTime;,
                 iteratorGetDecimalValue                  (JI)Ljava/math/BigDecimal;,
-                iteratorGetTimeValue                     (JI)Ljava/sql/Time;,
-                iteratorGetDateValue                     (JI)Ljava/sql/Date;,
+                iteratorGetTimeValue                     (JI)Ljava/time/LocalTime;,
+                iteratorGetDateValue                     (JI)Ljava/time/LocalDate;,
                 iteratorGetIntervalValue                 (JI)Ljava/lang/String;,
                 iteratorGetJsonbValue                    (JI)Ljava/lang/String;,
                 iteratorGetByteaValue                    (JI)[B,

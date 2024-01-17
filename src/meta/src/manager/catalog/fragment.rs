@@ -722,12 +722,9 @@ impl FragmentManager {
         Ok(())
     }
 
-    /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
+    /// Used in [`crate::barrier::GlobalBarrierManager`], load all running actor that need to be sent or
     /// collected
-    pub async fn load_all_actors(
-        &self,
-        check_state: impl Fn(ActorState, TableId, ActorId) -> bool,
-    ) -> ActorInfos {
+    pub async fn load_all_actors(&self) -> ActorInfos {
         let mut actor_maps = HashMap::new();
         let mut barrier_inject_actor_maps = HashMap::new();
 
@@ -735,7 +732,7 @@ impl FragmentManager {
         for fragments in map.values() {
             for (worker_id, actor_states) in fragments.worker_actor_states() {
                 for (actor_id, actor_state) in actor_states {
-                    if check_state(actor_state, fragments.table_id(), actor_id) {
+                    if actor_state == ActorState::Running {
                         actor_maps
                             .entry(worker_id)
                             .or_insert_with(Vec::new)
@@ -747,7 +744,7 @@ impl FragmentManager {
             let barrier_inject_actors = fragments.worker_barrier_inject_actor_states();
             for (worker_id, actor_states) in barrier_inject_actors {
                 for (actor_id, actor_state) in actor_states {
-                    if check_state(actor_state, fragments.table_id(), actor_id) {
+                    if actor_state == ActorState::Running {
                         barrier_inject_actor_maps
                             .entry(worker_id)
                             .or_insert_with(Vec::new)
@@ -1111,7 +1108,7 @@ impl FragmentManager {
 
         let new_created_actors: HashSet<_> = reschedules
             .values()
-            .flat_map(|reschedule| reschedule.added_actors.clone())
+            .flat_map(|reschedule| reschedule.added_actors.values().flatten().cloned())
             .collect();
 
         let to_update_table_fragments = map
@@ -1157,7 +1154,7 @@ impl FragmentManager {
                 } = reschedule;
 
                 // Add actors to this fragment: set the state to `Running`.
-                for actor_id in added_actors {
+                for actor_id in added_actors.values().flatten() {
                     table_fragment
                         .actor_status
                         .get_mut(actor_id)
@@ -1240,6 +1237,7 @@ impl FragmentManager {
                 } = reschedule;
 
                 let removed_actor_ids: HashSet<_> = removed_actors.iter().cloned().collect();
+                let added_actor_ids = added_actors.values().flatten().cloned().collect_vec();
 
                 // Update the dispatcher of the upstream fragments.
                 for (upstream_fragment_id, dispatcher_id) in upstream_fragment_dispatcher_ids {
@@ -1272,7 +1270,7 @@ impl FragmentManager {
                                 update_actors(
                                     dispatcher.downstream_actor_id.as_mut(),
                                     &removed_actor_ids,
-                                    added_actors,
+                                    &added_actor_ids,
                                 );
                             }
                         }
@@ -1301,7 +1299,7 @@ impl FragmentManager {
                         update_actors(
                             downstream_actor.upstream_actor_id.as_mut(),
                             &removed_actor_ids,
-                            added_actors,
+                            &added_actor_ids,
                         );
 
                         if let Some(node) = downstream_actor.nodes.as_mut() {
@@ -1309,7 +1307,7 @@ impl FragmentManager {
                                 node,
                                 fragment_id,
                                 &removed_actor_ids,
-                                added_actors,
+                                &added_actor_ids,
                             );
                         }
                     }
