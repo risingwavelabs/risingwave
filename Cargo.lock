@@ -6165,9 +6165,9 @@ checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
 
 [[package]]
 name = "multimap"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70db9248a93dc36a36d9a47898caa007a32755c7ad140ec64eeeb50d5a730631"
+checksum = "defc4c55412d89136f966bbb339008b474350e5e6e78d2714439c386b3137a03"
 dependencies = [
  "serde",
 ]
@@ -9933,7 +9933,7 @@ dependencies = [
  "madsim-tonic",
  "maplit",
  "memcomparable",
- "multimap 0.9.0",
+ "multimap 0.10.0",
  "parking_lot 0.12.1",
  "pin-project",
  "prometheus",
