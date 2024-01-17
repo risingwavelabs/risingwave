@@ -22,6 +22,7 @@ use itertools::Itertools;
 use otlp_embedded::TraceServiceServer;
 use regex::Regex;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;

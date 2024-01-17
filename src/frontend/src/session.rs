@@ -167,6 +167,18 @@ impl FrontendEnv {
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
         let client_pool = Arc::new(ComputeClientPool::default());
         let creating_streaming_tracker = StreamingJobTracker::new(meta_client.clone());
+        let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
+            Builder::new_multi_thread()
+                .worker_threads(
+                    load_config("", FrontendOpts::default())
+                        .batch
+                        .frontend_compute_runtime_worker_threads,
+                )
+                .thread_name("rw-batch-local")
+                .enable_all()
+                .build()
+                .unwrap(),
+        ));
         Self {
             meta_client,
             catalog_writer,
@@ -184,7 +196,7 @@ impl FrontendEnv {
             meta_config: MetaConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
-            compute_runtime: Self::create_compute_runtime(),
+            compute_runtime,
         }
     }
 
@@ -325,6 +337,15 @@ impl FrontendEnv {
         let creating_streaming_job_tracker =
             Arc::new(StreamingJobTracker::new(frontend_meta_client.clone()));
 
+        let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
+            Builder::new_multi_thread()
+                .worker_threads(batch_config.frontend_compute_runtime_worker_threads)
+                .thread_name("rw-batch-local")
+                .enable_all()
+                .build()
+                .unwrap(),
+        ));
+
         Ok((
             Self {
                 catalog_reader,
@@ -343,7 +364,7 @@ impl FrontendEnv {
                 meta_config,
                 source_metrics,
                 creating_streaming_job_tracker,
-                compute_runtime: Self::create_compute_runtime(),
+                compute_runtime,
             },
             join_handles,
             shutdown_senders,
@@ -430,17 +451,6 @@ impl FrontendEnv {
 
     pub fn compute_runtime(&self) -> Arc<BackgroundShutdownRuntime> {
         self.compute_runtime.clone()
-    }
-
-    fn create_compute_runtime() -> Arc<BackgroundShutdownRuntime> {
-        Arc::new(BackgroundShutdownRuntime::from(
-            Builder::new_multi_thread()
-                .worker_threads(4)
-                .thread_name("rw-batch-local")
-                .enable_all()
-                .build()
-                .unwrap(),
-        ))
     }
 
     /// Cancel queries (i.e. batch queries) in session.

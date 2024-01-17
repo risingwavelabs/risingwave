@@ -53,11 +53,15 @@ public class BaseRow {
         return Binding.iteratorGetStringValue(pointer, index);
     }
 
-    public java.sql.Timestamp getTimestamp(int index) {
+    public java.time.LocalDateTime getTimestamp(int index) {
         return Binding.iteratorGetTimestampValue(pointer, index);
     }
 
-    public java.sql.Time getTime(int index) {
+    public java.time.OffsetDateTime getTimestamptz(int index) {
+        return Binding.iteratorGetTimestamptzValue(pointer, index);
+    }
+
+    public java.time.LocalTime getTime(int index) {
         return Binding.iteratorGetTimeValue(pointer, index);
     }
 
@@ -65,7 +69,7 @@ public class BaseRow {
         return Binding.iteratorGetDecimalValue(pointer, index);
     }
 
-    public java.sql.Date getDate(int index) {
+    public java.time.LocalDate getDate(int index) {
         return Binding.iteratorGetDateValue(pointer, index);
     }
 

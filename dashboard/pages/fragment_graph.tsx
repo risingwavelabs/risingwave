@@ -64,7 +64,7 @@ function buildPlanNodeDependency(
 
   const hierarchyActorNode = (node: StreamNode): PlanNodeDatum => {
     return {
-      name: node.nodeBody?.$case.toString() || "unknown",
+      name: node.nodeBody?.$case?.toString() || "unknown",
       children: (node.input || []).map(hierarchyActorNode),
       operatorId: node.operatorId,
       node,
@@ -406,7 +406,7 @@ export default function Streaming() {
               <Box flex="1" overflowY="scroll">
                 <FragmentDependencyGraph
                   svgWidth={SIDEBAR_WIDTH}
-                  mvDependency={fragmentDependencyDag}
+                  fragmentDependency={fragmentDependencyDag}
                   onSelectedIdChange={(id) =>
                     setSelectedFragmentId(parseInt(id))
                   }

@@ -397,7 +397,7 @@ mod utils;
 /// | anyarray               | `any[]`              | `ListValue`   | `ListRef<'_>`      |
 /// | struct                 | `record`             | `StructValue` | `StructRef<'_>`    |
 /// | T[^1][]                | `T[]`                | `ListValue`   | `ListRef<'_>`      |
-/// | struct<name T[^1], ..> | `struct<name T, ..>` | `(T, ..)`     | `(&T, ..)`         |
+/// | struct<`name_T`[^1], ..> | `struct<name T, ..>` | `(T, ..)`     | `(&T, ..)`         |
 ///
 /// [^1]: `T` could be any base type
 ///

@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
+    OBJECT_ID_PLACEHOLDER,
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -43,7 +44,7 @@ impl SinkId {
     /// Sometimes the id field is filled later, we use this value for better debugging.
     pub const fn placeholder() -> Self {
         SinkId {
-            sink_id: u32::MAX - 1,
+            sink_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 
