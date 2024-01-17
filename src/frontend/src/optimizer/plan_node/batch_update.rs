@@ -42,9 +42,9 @@ pub struct BatchUpdate {
 
 impl BatchUpdate {
     pub fn new(core: generic::Update<PlanRef>, schema: Schema) -> Self {
-        assert_eq!(core.input.distribution(), &Distribution::Single);
         let ctx = core.input.ctx();
-        let base = PlanBase::new_batch(ctx, schema, Distribution::Single, Order::any());
+        let base =
+            PlanBase::new_batch(ctx, schema, core.input.distribution().clone(), Order::any());
         Self { base, core }
     }
 }

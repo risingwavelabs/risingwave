@@ -39,7 +39,6 @@ pub struct BatchDelete {
 
 impl BatchDelete {
     pub fn new(core: generic::Delete<PlanRef>) -> Self {
-        assert_eq!(core.input.distribution(), &Distribution::Single);
         let base =
             PlanBase::new_batch_with_core(&core, core.input.distribution().clone(), Order::any());
         Self { base, core }
