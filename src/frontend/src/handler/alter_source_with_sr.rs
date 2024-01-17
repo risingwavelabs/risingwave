@@ -192,7 +192,7 @@ pub fn alter_definition_format_encode(
     let mut stmt = ast
         .into_iter()
         .exactly_one()
-        .expect("should contains only one statement");
+        .expect("should contain only one statement");
 
     match &mut stmt {
         Statement::CreateSource {
