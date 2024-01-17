@@ -20,7 +20,7 @@ use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
 use super::expr_some_all::SomeAllExpression;
-use super::expr_udf::UdfExpression;
+use super::expr_udf::UserDefinedFunction;
 use super::strict::Strict;
 use super::wrapper::checked::Checked;
 use super::wrapper::non_strict::NonStrict;
@@ -104,7 +104,7 @@ where
         match prost.get_rex_node()? {
             RexNode::InputRef(_) => InputRefExpression::build_boxed(prost, build_child),
             RexNode::Constant(_) => LiteralExpression::build_boxed(prost, build_child),
-            RexNode::Udf(_) => UdfExpression::build_boxed(prost, build_child),
+            RexNode::Udf(_) => UserDefinedFunction::build_boxed(prost, build_child),
 
             RexNode::FuncCall(_) => match prost.function_type() {
                 // Dedicated types
@@ -288,9 +288,7 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
                 let ty = self.parse_type();
                 let value = match value.as_str() {
                     "null" | "NULL" => None,
-                    _ => Some(
-                        ScalarImpl::from_text(value.as_bytes(), &ty).expect_str("value", &value),
-                    ),
+                    _ => Some(ScalarImpl::from_text(&value, &ty).expect_str("value", &value)),
                 };
                 LiteralExpression::new(ty, value).boxed()
             }

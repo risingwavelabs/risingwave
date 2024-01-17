@@ -294,10 +294,15 @@ pub struct MetaConfig {
     /// split it to an single group.
     pub min_table_split_write_throughput: u64,
 
+    // If the compaction task does not report heartbeat beyond the
+    // `compaction_task_max_heartbeat_interval_secs` interval, we will cancel the task
     #[serde(default = "default::meta::compaction_task_max_heartbeat_interval_secs")]
+    pub compaction_task_max_heartbeat_interval_secs: u64,
+
     // If the compaction task does not change in progress beyond the
     // `compaction_task_max_heartbeat_interval_secs` interval, we will cancel the task
-    pub compaction_task_max_heartbeat_interval_secs: u64,
+    #[serde(default = "default::meta::compaction_task_max_progress_interval_secs")]
+    pub compaction_task_max_progress_interval_secs: u64,
 
     #[serde(default)]
     pub compaction_config: CompactionConfig,
@@ -556,6 +561,10 @@ pub struct StorageConfig {
     #[serde(default)]
     pub prefetch_buffer_capacity_mb: Option<usize>,
 
+    /// max prefetch block number
+    #[serde(default = "default::storage::max_prefetch_block_number")]
+    pub max_prefetch_block_number: usize,
+
     #[serde(default = "default::storage::disable_remote_compactor")]
     pub disable_remote_compactor: bool,
 
@@ -615,8 +624,8 @@ pub struct StorageConfig {
     pub compactor_max_sst_size: u64,
     #[serde(default = "default::storage::enable_fast_compaction")]
     pub enable_fast_compaction: bool,
-    #[serde(default = "default::storage::check_fast_compaction_result")]
-    pub check_fast_compaction_result: bool,
+    #[serde(default = "default::storage::check_compaction_result")]
+    pub check_compaction_result: bool,
     #[serde(default = "default::storage::max_preload_io_retry_times")]
     pub max_preload_io_retry_times: usize,
 
@@ -895,6 +904,13 @@ pub struct SystemConfig {
     /// Whether to pause all data sources on next bootstrap.
     #[serde(default = "default::system::pause_on_next_bootstrap")]
     pub pause_on_next_bootstrap: Option<bool>,
+
+    #[serde(default = "default::system::wasm_storage_url")]
+    pub wasm_storage_url: Option<String>,
+
+    /// Whether to enable distributed tracing.
+    #[serde(default = "default::system::enable_tracing")]
+    pub enable_tracing: Option<bool>,
 }
 
 /// The subsections `[storage.object_store]`.
@@ -930,6 +946,9 @@ pub struct S3ObjectStoreConfig {
     pub object_store_req_retry_max_delay_ms: u64,
     #[serde(default = "default::object_store_config::s3::object_store_req_retry_max_attempts")]
     pub object_store_req_retry_max_attempts: usize,
+    /// Whether to retry s3 sdk error from which no error metadata is provided.
+    #[serde(default = "default::object_store_config::s3::retry_unknown_service_error")]
+    pub retry_unknown_service_error: bool,
 }
 
 impl SystemConfig {
@@ -948,6 +967,8 @@ impl SystemConfig {
             backup_storage_directory: self.backup_storage_directory,
             max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
             pause_on_next_bootstrap: self.pause_on_next_bootstrap,
+            wasm_storage_url: self.wasm_storage_url,
+            enable_tracing: self.enable_tracing,
             telemetry_enabled: None, // deprecated
         }
     }
@@ -1034,7 +1055,7 @@ pub mod default {
         }
 
         pub fn partition_vnode_count() -> u32 {
-            64
+            16
         }
 
         pub fn table_write_throughput_threshold() -> u64 {
@@ -1046,7 +1067,11 @@ pub mod default {
         }
 
         pub fn compaction_task_max_heartbeat_interval_secs() -> u64 {
-            60 // 1min
+            30 // 30s
+        }
+
+        pub fn compaction_task_max_progress_interval_secs() -> u64 {
+            60 * 10 // 10min
         }
 
         pub fn cut_table_size_limit() -> u64 {
@@ -1108,7 +1133,7 @@ pub mod default {
         }
 
         pub fn imm_merge_threshold() -> usize {
-            4
+            0 // disable
         }
 
         pub fn write_conflict_detection_enabled() -> bool {
@@ -1188,7 +1213,7 @@ pub mod default {
             false
         }
 
-        pub fn check_fast_compaction_result() -> bool {
+        pub fn check_compaction_result() -> bool {
             false
         }
 
@@ -1196,7 +1221,7 @@ pub mod default {
             3
         }
         pub fn mem_table_spill_threshold() -> usize {
-            4 << 20
+            0 // disable
         }
 
         pub fn compactor_fast_max_compact_delete_ratio() -> u32 {
@@ -1205,6 +1230,10 @@ pub mod default {
 
         pub fn compactor_fast_max_compact_task_size() -> u64 {
             2 * 1024 * 1024 * 1024 // 2g
+        }
+
+        pub fn max_prefetch_block_number() -> usize {
+            16
         }
     }
 
@@ -1472,19 +1501,19 @@ pub mod default {
 
     pub mod object_store_config {
         pub fn object_store_streaming_read_timeout_ms() -> u64 {
-            10 * 60 * 1000
+            8 * 60 * 1000
         }
 
         pub fn object_store_streaming_upload_timeout_ms() -> u64 {
-            10 * 60 * 1000
+            8 * 60 * 1000
         }
 
         pub fn object_store_upload_timeout_ms() -> u64 {
-            60 * 60 * 1000
+            8 * 60 * 1000
         }
 
         pub fn object_store_read_timeout_ms() -> u64 {
-            60 * 60 * 1000
+            8 * 60 * 1000
         }
 
         pub mod s3 {
@@ -1521,6 +1550,10 @@ pub mod default {
 
             pub fn object_store_req_retry_max_attempts() -> usize {
                 DEFAULT_RETRY_MAX_ATTEMPTS
+            }
+
+            pub fn retry_unknown_service_error() -> bool {
+                false
             }
         }
     }

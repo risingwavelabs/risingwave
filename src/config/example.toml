@@ -40,10 +40,11 @@ move_table_size_limit = 10737418240
 split_group_size_limit = 68719476736
 cut_table_size_limit = 1073741824
 do_not_config_object_storage_lifecycle = false
-partition_vnode_count = 64
+partition_vnode_count = 16
 table_write_throughput_threshold = 16777216
 min_table_split_write_throughput = 4194304
-compaction_task_max_heartbeat_interval_secs = 60
+compaction_task_max_heartbeat_interval_secs = 30
+compaction_task_max_progress_interval_secs = 600
 hybird_partition_vnode_count = 4
 event_log_enabled = true
 event_log_channel_max_size = 10
@@ -99,8 +100,9 @@ stream_hash_agg_max_dirty_groups_heap_size = 67108864
 share_buffers_sync_parallelism = 1
 share_buffer_compaction_worker_threads_number = 4
 shared_buffer_flush_ratio = 0.800000011920929
-imm_merge_threshold = 4
+imm_merge_threshold = 0
 write_conflict_detection_enabled = true
+max_prefetch_block_number = 16
 disable_remote_compactor = false
 share_buffer_upload_concurrency = 8
 compactor_max_task_multiplier = 2.5
@@ -115,11 +117,11 @@ compactor_max_sst_key_count = 2097152
 compact_iter_recreate_timeout_ms = 600000
 compactor_max_sst_size = 536870912
 enable_fast_compaction = false
-check_fast_compaction_result = false
+check_compaction_result = false
 max_preload_io_retry_times = 3
 compactor_fast_max_compact_delete_ratio = 40
 compactor_fast_max_compact_task_size = 2147483648
-mem_table_spill_threshold = 4194304
+mem_table_spill_threshold = 0
 
 [storage.data_file_cache]
 dir = ""
@@ -163,10 +165,10 @@ recent_filter_layers = 6
 recent_filter_rotate_interval_ms = 10000
 
 [storage.object_store]
-object_store_streaming_read_timeout_ms = 600000
-object_store_streaming_upload_timeout_ms = 600000
-object_store_upload_timeout_ms = 3600000
-object_store_read_timeout_ms = 3600000
+object_store_streaming_read_timeout_ms = 480000
+object_store_streaming_upload_timeout_ms = 480000
+object_store_upload_timeout_ms = 480000
+object_store_read_timeout_ms = 480000
 
 [storage.object_store.s3]
 object_store_keepalive_ms = 600000
@@ -175,6 +177,7 @@ object_store_nodelay = true
 object_store_req_retry_interval_ms = 20
 object_store_req_retry_max_delay_ms = 10000
 object_store_req_retry_max_attempts = 8
+retry_unknown_service_error = false
 
 [system]
 barrier_interval_ms = 1000
@@ -187,3 +190,5 @@ backup_storage_url = "memory"
 backup_storage_directory = "backup"
 max_concurrent_creating_streaming_jobs = 1
 pause_on_next_bootstrap = false
+wasm_storage_url = "fs://.risingwave/data"
+enable_tracing = false

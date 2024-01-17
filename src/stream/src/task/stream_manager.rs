@@ -19,7 +19,7 @@ use std::io::Write;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use async_recursion::async_recursion;
 use futures::FutureExt;
 use hytra::TrAdder;
@@ -36,13 +36,12 @@ use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_storage::monitor::HummockTraceFutureExt;
-use risingwave_storage::store::SyncResult;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use thiserror_ext::AsReport;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
-use super::{unique_executor_id, unique_operator_id, CollectResult};
+use super::{unique_executor_id, unique_operator_id, BarrierCompleteResult};
 use crate::error::StreamResult;
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
@@ -259,41 +258,11 @@ impl LocalStreamManager {
 
     /// Use `epoch` to find collect rx. And wait for all actor to be collected before
     /// returning.
-    pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<CollectResult> {
-        let complete_receiver = {
-            let barrier_manager = self.context.barrier_manager();
-            barrier_manager.remove_collect_rx(epoch).await?
-        };
-        // Wait for all actors finishing this barrier.
-        let result = complete_receiver
-            .complete_receiver
-            .expect("no rx for local mode")
+    pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<BarrierCompleteResult> {
+        self.context
+            .barrier_manager()
+            .await_epoch_completed(epoch)
             .await
-            .context("failed to collect barrier")??;
-        complete_receiver.barrier_inflight_timer.observe_duration();
-        Ok(result)
-    }
-
-    pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<SyncResult> {
-        let timer = self
-            .core
-            .lock()
-            .await
-            .streaming_metrics
-            .barrier_sync_latency
-            .start_timer();
-        let res = dispatch_state_store!(self.state_store.clone(), store, {
-            store.sync(epoch).await.map_err(|e| {
-                tracing::error!(
-                    epoch,
-                    error = %e.as_report(),
-                    "Failed to sync state store",
-                );
-                e.into()
-            })
-        });
-        timer.observe_duration();
-        res
     }
 
     pub async fn clear_storage_buffer(&self) {

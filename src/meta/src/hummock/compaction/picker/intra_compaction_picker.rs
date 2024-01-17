@@ -57,7 +57,16 @@ impl CompactionPicker for IntraCompactionPicker {
             return None;
         }
 
-        if let Some(ret) = self.pick_l0_intra(l0, &level_handlers[0], stats) {
+        let vnode_partition_count = self.config.split_weight_by_vnode;
+
+        if let Some(ret) =
+            self.pick_whole_level(l0, &level_handlers[0], vnode_partition_count, stats)
+        {
+            return Some(ret);
+        }
+
+        if let Some(ret) = self.pick_l0_intra(l0, &level_handlers[0], vnode_partition_count, stats)
+        {
             return Some(ret);
         }
 
@@ -84,19 +93,112 @@ impl IntraCompactionPicker {
         }
     }
 
+    fn pick_whole_level(
+        &self,
+        l0: &OverlappingLevel,
+        level_handler: &LevelHandler,
+        partition_count: u32,
+        stats: &mut LocalPickerStatistic,
+    ) -> Option<CompactionInput> {
+        if partition_count == 0 {
+            return None;
+        }
+        for (idx, level) in l0.sub_levels.iter().enumerate() {
+            if level.level_type() != LevelType::Nonoverlapping
+                || level.vnode_partition_count == partition_count
+            {
+                continue;
+            }
+
+            let max_compaction_bytes = std::cmp::max(
+                self.config.max_bytes_for_level_base,
+                self.config.sub_level_max_compaction_bytes
+                    * (self.config.level0_sub_level_compact_level_count as u64),
+            );
+
+            let mut select_input_size = 0;
+
+            let mut select_level_inputs = vec![];
+            let mut total_file_count = 0;
+            let mut wait_enough = false;
+            for next_level in l0.sub_levels.iter().skip(idx) {
+                if select_input_size > max_compaction_bytes
+                    || total_file_count > self.config.level0_max_compact_file_number
+                    || (next_level.vnode_partition_count == partition_count
+                        && select_level_inputs.len() > 1)
+                {
+                    wait_enough = true;
+                    break;
+                }
+
+                if level_handler.is_level_pending_compact(next_level) {
+                    break;
+                }
+
+                select_input_size += next_level.total_file_size;
+                total_file_count += next_level.table_infos.len() as u64;
+
+                select_level_inputs.push(InputLevel {
+                    level_idx: 0,
+                    level_type: next_level.level_type,
+                    table_infos: next_level.table_infos.clone(),
+                });
+            }
+            if !select_level_inputs.is_empty() {
+                let vnode_partition_count =
+                    if select_input_size > self.config.sub_level_max_compaction_bytes / 2 {
+                        partition_count
+                    } else {
+                        0
+                    };
+                let result = CompactionInput {
+                    input_levels: select_level_inputs,
+                    target_sub_level_id: level.sub_level_id,
+                    select_input_size,
+                    total_file_count,
+                    vnode_partition_count,
+                    ..Default::default()
+                };
+                if wait_enough
+                    || self.compaction_task_validator.valid_compact_task(
+                        &result,
+                        ValidationRuleType::Intra,
+                        stats,
+                    )
+                {
+                    return Some(result);
+                }
+            }
+        }
+
+        None
+    }
+
     fn pick_l0_intra(
         &self,
         l0: &OverlappingLevel,
         level_handler: &LevelHandler,
+        vnode_partition_count: u32,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
+        let mut max_vnode_partition_idx = 0;
+        for (idx, level) in l0.sub_levels.iter().enumerate() {
+            if level.vnode_partition_count < vnode_partition_count {
+                break;
+            }
+            max_vnode_partition_idx = idx;
+        }
 
         for (idx, level) in l0.sub_levels.iter().enumerate() {
             if level.level_type() != LevelType::Nonoverlapping
                 || level.total_file_size > self.config.sub_level_max_compaction_bytes
             {
                 continue;
+            }
+
+            if idx > max_vnode_partition_idx {
+                break;
             }
 
             if level_handler.is_level_all_pending_compact(level) {
@@ -117,7 +219,10 @@ impl IntraCompactionPicker {
             );
 
             let l0_select_tables_vec = non_overlap_sub_level_picker
-                .pick_l0_multi_non_overlap_level(&l0.sub_levels[idx..], level_handler);
+                .pick_l0_multi_non_overlap_level(
+                    &l0.sub_levels[idx..=max_vnode_partition_idx],
+                    level_handler,
+                );
 
             if l0_select_tables_vec.is_empty() {
                 continue;
@@ -189,6 +294,12 @@ impl IntraCompactionPicker {
             }
 
             if l0.sub_levels[idx + 1].level_type == LevelType::Overlapping as i32 {
+                continue;
+            }
+
+            if l0.sub_levels[idx + 1].vnode_partition_count
+                != l0.sub_levels[idx].vnode_partition_count
+            {
                 continue;
             }
 
@@ -281,14 +392,11 @@ pub mod tests {
     fn test_l0_to_l1_compact_conflict() {
         // When picking L0->L1, L0's selecting_key_range should not be overlapped with L0's
         // compacting_key_range.
-        let mut picker = create_compaction_picker_for_test();
         let levels = vec![Level {
             level_idx: 1,
             level_type: LevelType::Nonoverlapping as i32,
             table_infos: vec![],
-            total_file_size: 0,
-            sub_level_id: 0,
-            uncompressed_file_size: 0,
+            ..Default::default()
         }];
         let mut levels = Levels {
             levels,
@@ -307,14 +415,9 @@ pub mod tests {
                 generate_table(2, 1, 350, 500, 2),
             ],
         );
-        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
 
         let mut local_stats = LocalPickerStatistic::default();
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        // trivial_move
-        ret.add_pending_task(0, &mut levels_handler); // pending only for test
         push_tables_level0_nonoverlapping(&mut levels, vec![generate_table(3, 1, 250, 300, 3)]);
         let config: CompactionConfig = CompactionConfigBuilder::new()
             .level0_tier_compact_file_number(2)
@@ -341,9 +444,7 @@ pub mod tests {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![generate_table(3, 1, 200, 300, 2)],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![
                 generate_table(1, 1, 100, 210, 2),
