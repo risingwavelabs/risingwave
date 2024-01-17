@@ -22,21 +22,26 @@ services:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
 
-  go-lang:
-    image: golang:bullseye
+#  go-lang:
+#    image: golang:bullseye
+#    command: tail -f /dev/null
+#    volumes:
+#      - ./go:/go-client
+#  python:
+#    image: python:3.9.18-slim-bullseye
+#    command: tail -f /dev/null
+#    volumes:
+#      - ./python:/python-client
+#  java:
+#    image: eclipse-temurin:11.0.21_9-jdk-jammy
+#    command: tail -f /dev/null
+#    volumes:
+#      - ./java:/java-client
+  nodejs:
+    image: node:21.6.0-bullseye-slim
     command: tail -f /dev/null
     volumes:
-      - ./go:/go-client
-  python:
-    image: python:3.9.18-slim-bullseye
-    command: tail -f /dev/null
-    volumes:
-      - ./python:/python-client
-  java:
-    image: eclipse-temurin:11.0.21_9-jdk-jammy
-    command: tail -f /dev/null
-    volumes:
-      - ./java:/java-client
+     - ./nodejs:/nodejs-client
 
 volumes:
   risingwave-standalone:
