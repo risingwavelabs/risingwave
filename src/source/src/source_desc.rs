@@ -18,6 +18,7 @@ use std::sync::Arc;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{
@@ -115,30 +116,37 @@ impl SourceDescBuilder {
 
         debug_assert_eq!(additional_columns.len(), 2);
 
+        for col in &self.columns {
+            match col
+                .column_desc
+                .as_ref()
+                .unwrap()
+                .get_additional_column_type()
+            {
+                Ok(AdditionalColumnType::Partition | AdditionalColumnType::Filename) => {
+                    columns_exist[0] = true;
+                }
+                Ok(AdditionalColumnType::Offset) => {
+                    columns_exist[1] = true;
+                }
+                _ => (),
+            }
+        }
+
         let mut columns: Vec<_> = self
             .columns
             .iter()
-            .chain(additional_columns.iter())
-            .filter_map(|c| {
-                let addition_col_existed =
-                    match c.column_desc.as_ref().unwrap().get_additional_column_type() {
-                        Ok(AdditionalColumnType::Partition | AdditionalColumnType::Filename) => {
-                            std::mem::replace(&mut columns_exist[0], true)
-                        }
-                        Ok(AdditionalColumnType::Offset) => {
-                            std::mem::replace(&mut columns_exist[1], true)
-                        }
-                        _ => false,
-                    };
-                if !addition_col_existed {
-                    Some(SourceColumnDesc::from(&ColumnDesc::from(
-                        c.column_desc.as_ref().unwrap(),
-                    )))
-                } else {
-                    None
-                }
-            })
+            .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
+
+        for (existed, c) in columns_exist.iter().zip_eq_fast(&additional_columns) {
+            if !existed {
+                columns.push(SourceColumnDesc::from(&ColumnDesc::from(
+                    c.column_desc.as_ref().unwrap(),
+                )));
+            }
+        }
+
         if let Some(row_id_index) = self.row_id_index {
             columns[row_id_index].column_type = SourceColumnType::RowId;
         }
