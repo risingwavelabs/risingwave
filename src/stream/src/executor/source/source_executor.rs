@@ -609,7 +609,12 @@ impl<S: StateStore> SourceExecutor<S> {
                                         .collect::<Vec<&str>>(),
                                 )
                                 .inc_by(chunk.cardinality() as u64);
-                            let chunk = prune_additional_cols(&chunk, split_idx, offset_idx);
+                            let chunk = prune_additional_cols(
+                                &chunk,
+                                split_idx,
+                                offset_idx,
+                                &source_desc.columns,
+                            );
                             yield Message::Chunk(chunk);
                             self.try_flush_data().await?;
                         }

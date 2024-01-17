@@ -328,7 +328,12 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 }
                             }
 
-                            let chunk = prune_additional_cols(&chunk, split_idx, offset_idx);
+                            let chunk = prune_additional_cols(
+                                &chunk,
+                                split_idx,
+                                offset_idx,
+                                &source_desc.columns,
+                            );
                             yield Message::Chunk(chunk);
                         }
                     }
