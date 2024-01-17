@@ -104,12 +104,6 @@ pub enum RequestError {
     Unsuccessful(ErrorResp),
 }
 
-impl From<RequestError> for risingwave_common::error::RwError {
-    fn from(value: RequestError) -> Self {
-        anyhow::anyhow!(value).into()
-    }
-}
-
 pub(crate) async fn req_inner<T>(
     ctx: Arc<SchemaRegistryCtx>,
     mut url: Url,
