@@ -954,21 +954,21 @@ impl<T: AsRef<[u8]> + Ord + Eq + CopyFromSlice> FullKeyTracker<T> {
     ///
     /// // Panic on non-decreasing epoch observed for the same user key.
     /// // let full_key_with_larger_epoch = FullKey::new(table_id, TableKey(Bytes::from("c")), 6);
-    /// // a.observe(full_key_with_larger_epoch.as_ref());
+    /// // a.observe(full_key_with_larger_epoch);
     ///
     /// // Panic on non-increasing user key observed.
     /// // let full_key_with_smaller_user_key = FullKey::new(table_id, TableKey(Bytes::from("b")), 3);
-    /// // a.observe(full_key_with_smaller_user_key.as_ref());
+    /// // a.observe(full_key_with_smaller_user_key);
     ///
     /// let full_key2 = FullKey::new(table_id, TableKey(Bytes::from("c")), 3);
-    /// assert_eq!(a.observe(full_key.as_ref()), None);
+    /// assert_eq!(a.observe(full_key), None);
     ///
     /// let full_key3 = FullKey::new(table_id, TableKey(Bytes::from("f")), 4);
-    /// assert_eq!(a.observe(full_key.as_ref()), Some(full_key1));
+    /// assert_eq!(a.observe(full_key), Some(full_key1));
     /// ```
     ///
     /// Return:
-    /// - If the provided `key` is a new user key. return the first full key observed for the previous user key.
+    /// - If the provided `key` contains a new user key, return the latest full key observed for the previous user key.
     /// - Otherwise: return None
     pub fn observe<F>(&mut self, key: FullKey<F>) -> Option<FullKey<T>>
     where

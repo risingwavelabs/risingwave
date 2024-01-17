@@ -16,7 +16,7 @@ use std::ops::Bound::*;
 
 use bytes::Bytes;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
-use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange, FullKeyTracker};
+use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey, UserKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 
 use super::DeleteRangeIterator;
@@ -31,8 +31,11 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     /// Inner table iterator.
     iterator: I,
 
+    // Track the last seen full key
+    full_key_tracker: FullKeyTracker<Bytes>,
+
     /// Last user value
-    last_val: Bytes,
+    latest_val: Bytes,
 
     /// Start and end bounds of user key.
     key_range: UserKeyRange,
@@ -52,9 +55,6 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
 
     /// Whether the iterator is pointing to a valid position
     is_current_pos_valid: bool,
-
-    // Track the last seen full key
-    full_key_tracker: FullKeyTracker<Bytes>
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
@@ -71,14 +71,14 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         Self {
             iterator,
             key_range,
-            last_val: Bytes::new(),
+            latest_val: Bytes::new(),
             read_epoch,
             min_epoch,
             stats: StoreLocalStatistic::default(),
             delete_range_iter,
             _version: version,
             is_current_pos_valid: false,
-            full_key_tracker: FullKeyTracker::new(FullKey::default())
+            full_key_tracker: FullKeyTracker::new(FullKey::default()),
         }
     }
 
@@ -129,7 +129,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Note: before call the function you need to ensure that the iterator is valid.
     pub fn value(&self) -> &Bytes {
         assert!(self.is_valid());
-        &self.last_val
+        &self.latest_val
     }
 
     /// Resets the iterating position to the beginning.
@@ -270,7 +270,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                     if self.delete_range_iter.current_epoch() >= epoch {
                         self.stats.skip_delete_key_count += 1;
                     } else {
-                        self.last_val = Bytes::copy_from_slice(val);
+                        self.latest_val = Bytes::copy_from_slice(val);
                         self.stats.processed_key_count += 1;
                         self.is_current_pos_valid = true;
                         return Ok(());
