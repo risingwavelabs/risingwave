@@ -2712,25 +2712,22 @@ impl HummockManager {
 
             let mut event_loop_iteration_now = Instant::now();
             let shutdown_rx_shared = shutdown_rx_shared.clone();
-
-            // report
-            hummock_manager
-                .metrics
-                .compaction_event_loop_iteration_latency
-                .observe(event_loop_iteration_now.elapsed().as_millis() as _);
-            event_loop_iteration_now = Instant::now();
-
             let (tx, mut rx) = unbounded_channel();
 
             tokio::select! {
-                _ = shutdown_rx_shared => {
-                    return;
-                },
+                _ = shutdown_rx_shared => {},
 
                 _ = async {
                     loop {
+                        hummock_manager
+                            .metrics
+                            .compaction_event_loop_iteration_latency
+                            .observe(event_loop_iteration_now.elapsed().as_millis() as _);
+                        event_loop_iteration_now = Instant::now();
+
                         tokio::select! {
                             result = pending_on_none(compactor_request_streams.next()) => {
+                                            // report
                                 let (context_id, compactor_stream_req): (_, (std::option::Option<std::result::Result<SubscribeCompactionEventRequest, _>>, _)) = result;
                                 let (event, create_at, stream) = match compactor_stream_req {
                                     (Some(Ok(req)), stream) => {
@@ -2823,9 +2820,7 @@ impl HummockManager {
                             },
                         }
                     }
-                } => {
-                    return;
-                },
+                } => {},
 
                 _ = async {
                         while let Some((context_id, event)) = rx.recv().await {
