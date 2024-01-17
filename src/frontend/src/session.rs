@@ -1163,19 +1163,29 @@ impl Session for SessionImpl {
             last_idle_instant: self.last_idle_instant.clone(),
         });
         *self.exec_context.lock() = Some(Arc::downgrade(&exec_context));
+        // unset idle state, since there is a sql running
+        *self.last_idle_instant.lock() = None;
         ExecContextGuard::new(exec_context)
     }
 
     /// Check whether idle transaction timeout.
     /// If yes, unpin snapshot and return an `IdleInTxnTimeout` error.
     fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()> {
+        // In transaction.
         if matches!(self.transaction_status(), TransactionStatus::InTransaction) {
-            if let Some(elapse_since_last_idle_instant) = self.elapse_since_last_idle_instant() {
-                if elapse_since_last_idle_instant
-                    > self.config().idle_in_transaction_session_timeout() as u128
+            // Hold the `exec_context` lock to ensure no new sql coming when unpin_snapshot.
+            let guard = self.exec_context.lock();
+            // No running sql i.e. idle
+            if guard.is_none() {
+                // Idle timeout.
+                if let Some(elapse_since_last_idle_instant) = self.elapse_since_last_idle_instant()
                 {
-                    self.unpin_snapshot();
-                    return Err(PsqlError::IdleInTxnTimeout);
+                    if elapse_since_last_idle_instant
+                        > self.config().idle_in_transaction_session_timeout() as u128
+                    {
+                        self.unpin_snapshot();
+                        return Err(PsqlError::IdleInTxnTimeout);
+                    }
                 }
             }
         }
