@@ -877,7 +877,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceErrorTo
         match channel.as_ref().blocking_send(Err(anyhow!(err_msg))) {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {
-                tracing::info!(error = ?e.as_report(), "send error");
+                tracing::error!(error = ?e.as_report(), "send error");
                 Ok(JNI_FALSE)
             }
         }

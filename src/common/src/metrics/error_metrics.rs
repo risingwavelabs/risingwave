@@ -86,7 +86,7 @@ pub struct ErrorMetrics {
     pub user_compute_error: ErrorMetricRef<4>,
     pub user_source_reader_error: ErrorMetricRef<5>,
     pub user_source_error: ErrorMetricRef<5>,
-    pub user_cdc_source_error: ErrorMetricRef<3>,
+    pub cdc_connector_error: ErrorMetricRef<3>,
 }
 
 impl ErrorMetrics {
@@ -124,9 +124,9 @@ impl ErrorMetrics {
                     "table_id",
                 ],
             )),
-            // cdc source is singleton, so we use source_id to identify it
-            user_cdc_source_error: Arc::new(ErrorMetric::new(
-                "user_cdc_source_error",
+            // cdc source is singleton, so we use source_id to identify the connector
+            cdc_connector_error: Arc::new(ErrorMetric::new(
+                "cdc_connector_error",
                 "CDC source errors in the system, queryable by tags",
                 &["connector_name", "source_id", "error_msg"],
             )),
@@ -139,7 +139,7 @@ impl ErrorMetrics {
             &self.user_compute_error.desc,
             &self.user_source_reader_error.desc,
             &self.user_source_error.desc,
-            &self.user_cdc_source_error.desc,
+            &self.cdc_connector_error.desc,
         ]
     }
 
@@ -149,7 +149,7 @@ impl ErrorMetrics {
             self.user_compute_error.collect(),
             self.user_source_reader_error.collect(),
             self.user_source_error.collect(),
-            self.user_cdc_source_error.collect(),
+            self.cdc_connector_error.collect(),
         ]
     }
 }

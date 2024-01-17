@@ -991,6 +991,16 @@ def section_streaming_cdc(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Connector Errors",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('cdc_connector_error')}) by (connector_name, source_id, error_msg)",
+                            "{{connector_name}}: {{error_msg}} ({{source_id}})",
+                        ),
+                    ],
+                ),
             ],
         ),
     ]
@@ -1706,16 +1716,6 @@ def section_streaming_errors(outer_panels):
                         panels.target(
                             f"sum({metric('user_sink_error')}) by (connector_name, executor_id, error_msg)",
                             "{{connector_name}}: {{error_msg}} ({{executor_id}})",
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "CDC Source Errors",
-                    "",
-                    [
-                        panels.target(
-                            f"sum({metric('user_cdc_source_error')}) by (connector_name, source_id, error_msg)",
-                            "{{connector_name}}: {{error_msg}} ({{source_id}})",
                         ),
                     ],
                 ),
