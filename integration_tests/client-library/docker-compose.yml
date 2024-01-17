@@ -28,7 +28,7 @@ services:
     volumes:
       - ./go:/go-client
   python:
-    image: python:2.9.18-slim-bullseye
+    image: python:3.9.18-slim-bullseye
     command: tail -f /dev/null
     volumes:
       - ./python:/python-client

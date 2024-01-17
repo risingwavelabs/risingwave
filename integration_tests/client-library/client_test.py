@@ -19,7 +19,9 @@ def check_java():
 
 
 def check_nodejs():
-    subprocess.run(["docker", "compose", "exec", "nodejs", "bash", "-c", "cd /nodejs-client && npm install && npm test"], check=True)
+    subprocess.run(
+        ["docker", "compose", "exec", "nodejs", "bash", "-c", "cd /nodejs-client && npm install && npm test"],
+        check=True)
 
 
 subprocess.run(["docker", "compose", "up", "-d"], check=True)
