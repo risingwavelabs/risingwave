@@ -21,7 +21,7 @@ use risingwave_common::error::Result;
 use risingwave_common::session_config::{ConfigMap, SearchPath};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_sqlparser::ast::{Expr as AstExpr, Statement};
+use risingwave_sqlparser::ast::Statement;
 
 mod bind_context;
 mod bind_param;
@@ -59,6 +59,7 @@ pub use values::BoundValues;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, TableId, ViewId};
+use crate::expr::ExprImpl;
 use crate::session::{AuthContext, SessionImpl};
 
 pub type ShareId = usize;
@@ -122,9 +123,9 @@ pub struct Binder {
 
 #[derive(Clone, Debug, Default)]
 pub struct UdfContext {
-    /// The mapping from `sql udf parameters` to `ast expressions`
+    /// The mapping from `sql udf parameters` to a bound `ExprImpl` generated from `ast expressions`
     /// Note: The expressions are constructed during runtime, correspond to the actual users' input
-    udf_param_context: HashMap<String, AstExpr>,
+    udf_param_context: HashMap<String, ExprImpl>,
 
     /// The global counter that records the calling stack depth
     /// of the current binding sql udf chain
@@ -147,21 +148,25 @@ impl UdfContext {
         self.udf_global_counter += 1;
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub fn _is_empty(&self) -> bool {
         self.udf_param_context.is_empty()
     }
 
-    pub fn update_context(&mut self, context: HashMap<String, AstExpr>) {
+    pub fn update_context(&mut self, context: HashMap<String, ExprImpl>) {
         self.udf_param_context = context;
     }
 
-    pub fn clear(&mut self) {
+    pub fn _clear(&mut self) {
         self.udf_global_counter = 0;
         self.udf_param_context.clear();
     }
 
-    pub fn get_expr(&self, name: &str) -> Option<&AstExpr> {
+    pub fn get_expr(&self, name: &str) -> Option<&ExprImpl> {
         self.udf_param_context.get(name)
+    }
+
+    pub fn get_context(&self) -> HashMap<String, ExprImpl> {
+        self.udf_param_context.clone()
     }
 }
 

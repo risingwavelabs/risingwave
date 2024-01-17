@@ -38,8 +38,8 @@ use crate::hummock::compactor::{
     TtlCompactionFilter,
 };
 use crate::hummock::iterator::{
-    Forward, ForwardMergeRangeIterator, HummockIterator, SkipWatermarkIterator,
-    UnorderedMergeIteratorInner, UserIterator,
+    Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator, SkipWatermarkIterator,
+    UserIterator,
 };
 use crate::hummock::multi_builder::TableBuilderFactory;
 use crate::hummock::sstable::DEFAULT_ENTRY_SIZE;
@@ -382,8 +382,9 @@ pub async fn check_compaction_result(
             }
         }
     }
+
     let iter = UnorderedMergeIteratorInner::for_compactor(table_iters);
-    let left_iter = UserIterator::new(
+    let mut left_iter = UserIterator::new(
         SkipWatermarkIterator::from_safe_epoch_watermarks(iter, &compact_task.table_watermarks),
         (Bound::Unbounded, Bound::Unbounded),
         u64::MAX,

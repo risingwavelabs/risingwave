@@ -37,7 +37,7 @@ use crate::hummock::compactor::{check_flush_result, CompactOutput, Compactor};
 use crate::hummock::event_handler::uploader::UploadTaskPayload;
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::iterator::{
-    Forward, ForwardMergeRangeIterator, HummockIterator, OrderedMergeIteratorInner, UserIterator,
+    Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator, UserIterator,
 };
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchInner, SharedBufferVersionedEntry,
@@ -258,7 +258,7 @@ async fn compact_shared_buffer(
         let handle = compaction_executor.spawn(async move {
             compactor
                 .run(
-                    OrderedMergeIteratorInner::new(forward_iters),
+                    MergeIterator::new(forward_iters),
                     multi_filter_key_extractor,
                     CompactionDeleteRangeIterator::new(del_iter),
                 )
@@ -417,7 +417,7 @@ pub async fn merge_imms_in_memory(
     epochs.sort();
 
     // use merge iterator to merge input imms
-    let mut mi = OrderedMergeIteratorInner::new(imm_iters);
+    let mut mi = MergeIterator::new(imm_iters);
     mi.rewind().await?;
     let mut items = Vec::with_capacity(kv_count);
     while mi.is_valid() {
