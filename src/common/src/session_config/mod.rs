@@ -211,6 +211,10 @@ pub struct ConfigMap {
     #[parameter(default = 0u32)]
     statement_timeout: u32,
 
+    /// Terminate any session that has been idle (that is, waiting for a client query) within an open transaction for longer than the specified amount of time in milliseconds.
+    #[parameter(default = 60000u32)]
+    idle_in_transaction_session_timeout: u32,
+
     /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-LOCK-TIMEOUT>
     /// Unused in RisingWave, support for compatibility.
     #[parameter(default = 0)]

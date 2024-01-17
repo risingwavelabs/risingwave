@@ -347,15 +347,16 @@ where
                         self.ready_for_query().ok()?;
                     }
 
-                    PsqlError::Panic(_) => {
+                    PsqlError::IdleInTxnTimeout | PsqlError::Panic(_) => {
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
                             .ok()?;
                         let _ = self.stream.flush().await;
 
-                        // Catching the panic during message processing may leave the session in an
+                        // 1. Catching the panic during message processing may leave the session in an
                         // inconsistent state. We forcefully close the connection (then end the
                         // session) here for safety.
+                        // 2. Idle in transaction timeout should also close the connection.
                         return None;
                     }
 
@@ -550,6 +551,7 @@ where
         record_sql_in_span(&sql);
         let session = self.session.clone().unwrap();
 
+        session.check_idle_in_transaction_timeout()?;
         let _exec_context_guard = session.init_exec_context(sql.clone());
         self.inner_process_query_msg(sql.clone(), session.clone())
             .await
@@ -585,6 +587,7 @@ where
         session: Arc<SM::Session>,
     ) -> PsqlResult<()> {
         let session = session.clone();
+
         // execute query
         let res = session
             .clone()
@@ -792,6 +795,7 @@ where
             let sql: Arc<str> = Arc::from(format!("{}", portal));
             record_sql_in_span(&sql);
 
+            session.check_idle_in_transaction_timeout()?;
             let _exec_context_guard = session.init_exec_context(sql.clone());
             let result = session.clone().execute(portal).await;
 
