@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalGcs, OpendalPosixFs, OpendalS3,
 };
@@ -26,7 +26,7 @@ use risingwave_storage::StateStore;
 use crate::error::StreamResult;
 use crate::executor::{
     BoxedExecutor, Executor, FlowControlExecutor, FsFetchExecutor, SourceStateTableHandler,
-    StreamSourceCore,
+    StreamExecutorError, StreamSourceCore,
 };
 use crate::from_proto::ExecutorBuilder;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
@@ -64,10 +64,15 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             chunk_size: params.env.config().developer.chunk_size,
         };
 
-        let source_column_ids: Vec<_> = source
+        let source_desc = source_desc_builder
+            .clone()
+            .build()
+            .map_err(StreamExecutorError::connector_error)?;
+
+        let source_column_ids: Vec<_> = source_desc
             .columns
             .iter()
-            .map(|column| ColumnId::from(column.get_column_desc().unwrap().column_id))
+            .map(|column| column.column_id)
             .collect();
 
         let vnodes = Some(Arc::new(

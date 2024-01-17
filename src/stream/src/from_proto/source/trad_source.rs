@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{
-    default_key_column_name_version_mapping, ColumnId, TableId, KAFKA_TIMESTAMP_COLUMN_NAME,
+    default_key_column_name_version_mapping, TableId, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
@@ -29,7 +29,7 @@ use super::*;
 use crate::executor::source::{FsListExecutor, StreamSourceCore};
 use crate::executor::source_executor::SourceExecutor;
 use crate::executor::state_table_handler::SourceStateTableHandler;
-use crate::executor::{FlowControlExecutor, FsSourceExecutor};
+use crate::executor::{FlowControlExecutor, FsSourceExecutor, StreamExecutorError};
 
 const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
@@ -134,9 +134,15 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     chunk_size: params.env.config().developer.chunk_size,
                 };
 
-                let source_column_ids: Vec<_> = source_columns
+                let source_desc = source_desc_builder
+                    .clone()
+                    .build()
+                    .map_err(StreamExecutorError::connector_error)?;
+
+                let source_column_ids: Vec<_> = source_desc
+                    .columns
                     .iter()
-                    .map(|column| ColumnId::from(column.get_column_desc().unwrap().column_id))
+                    .map(|column| column.column_id)
                     .collect();
 
                 let state_table_handler = SourceStateTableHandler::from_table_catalog(

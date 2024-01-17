@@ -91,9 +91,10 @@ impl SourceDescBuilder {
         let mut columns_exist = [false; 2];
         let mut last_column_id = self
             .columns
-            .last()
+            .iter()
             .map(|c| c.column_desc.as_ref().unwrap().column_id.into())
-            .unwrap_or(ColumnId::new(0));
+            .max()
+            .unwrap_or(ColumnId::placeholder());
         let connector_name = self
             .with_properties
             .get(UPSTREAM_SOURCE_KEY)
@@ -107,9 +108,13 @@ impl SourceDescBuilder {
                 .into_iter()
                 .filter_map(|key_name| {
                     let col_name = format!("{}{}", ADDITION_SPLIT_OFFSET_COLUMN_PREFIX, key_name);
-                    last_column_id = last_column_id.next();
                     col_list.iter().find_map(|(n, f)| {
-                        (key_name == *n).then_some(f(last_column_id, &col_name).to_protobuf())
+                        if key_name == *n {
+                            last_column_id = last_column_id.next();
+                            Some(f(last_column_id, &col_name).to_protobuf())
+                        } else {
+                            None
+                        }
                     })
                 })
                 .collect()

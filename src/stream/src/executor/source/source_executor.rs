@@ -547,13 +547,6 @@ impl<S: StateStore> SourceExecutor<S> {
 
                         Either::Right(chunk) => {
                             // TODO: confirm when split_offset_mapping is None
-                            tracing::debug!(
-                                "source executor({}-{}): colums: {:?} chunk: {:?}",
-                                split_idx,
-                                offset_idx,
-                                source_desc.columns,
-                                chunk
-                            );
                             let split_offset_mapping =
                                 get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx);
                             if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
