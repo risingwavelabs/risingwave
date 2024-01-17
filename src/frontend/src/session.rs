@@ -1176,7 +1176,7 @@ impl Session for SessionImpl {
             // Hold the `exec_context` lock to ensure no new sql coming when unpin_snapshot.
             let guard = self.exec_context.lock();
             // No running sql i.e. idle
-            if guard.is_none() {
+            if guard.as_ref().and_then(|weak| weak.upgrade()).is_none() {
                 // Idle timeout.
                 if let Some(elapse_since_last_idle_instant) = self.elapse_since_last_idle_instant()
                 {
