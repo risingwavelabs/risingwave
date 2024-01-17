@@ -34,10 +34,11 @@ use crate::{bind_data_type, Binder};
 fn create_mock_udf_context(arg_types: Vec<DataType>) -> HashMap<String, ExprImpl> {
     (1..=arg_types.len())
         .map(|i| {
-            let mock_expr = ExprImpl::Literal(Box::new(Literal::new(None, arg_types[i - 1].clone())));
+            let mock_expr =
+                ExprImpl::Literal(Box::new(Literal::new(None, arg_types[i - 1].clone())));
             (format!("${i}"), mock_expr.clone())
-    })
-    .collect()
+        })
+        .collect()
 }
 
 fn extract_udf_expression(ast: Vec<Statement>) -> Result<Expr> {
