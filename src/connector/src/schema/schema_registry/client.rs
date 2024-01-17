@@ -62,7 +62,7 @@ pub struct Client {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("{context}, errs: {errs:?}")]
+#[error("all request confluent registry all timeout, {context}, errs: {errs:?}")]
 pub struct ConcurrentRequestError {
     errs: Vec<itertools::Either<RequestError, tokio::task::JoinError>>,
     context: String,
@@ -147,10 +147,7 @@ impl Client {
 
         Err(ConcurrentRequestError {
             errs,
-            context: format!(
-                "all request confluent registry all timeout, req path {:?}, urls {:?}",
-                path, self.url
-            ),
+            context: format!("req path {:?}, urls {:?}", path, self.url),
         })
     }
 

@@ -39,8 +39,8 @@ impl From<InvalidOptionError> for risingwave_common::error::RwError {
 pub enum SchemaFetchError {
     #[error(transparent)]
     InvalidOption(#[from] InvalidOptionError),
-    #[error("schema registry client error")]
-    Request(#[source] schema_registry::ConcurrentRequestError),
+    #[error(transparent)]
+    Request(#[from] schema_registry::ConcurrentRequestError),
     #[error("schema compilation error")]
     SchemaCompile(#[source] risingwave_common::error::BoxedError),
     #[error(transparent)]

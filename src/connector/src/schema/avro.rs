@@ -95,16 +95,10 @@ async fn fetch_schema_inner(
     let client = Client::new(urls, client_config)?;
 
     let key_subject = get_subject_by_strategy(name_strategy, topic, key_record_name, true)?;
-    let key_schema = client
-        .get_schema_by_subject(&key_subject)
-        .await
-        .map_err(SchemaFetchError::Request)?;
+    let key_schema = client.get_schema_by_subject(&key_subject).await?;
 
     let val_subject = get_subject_by_strategy(name_strategy, topic, val_record_name, false)?;
-    let val_schema = client
-        .get_schema_by_subject(&val_subject)
-        .await
-        .map_err(SchemaFetchError::Request)?;
+    let val_schema = client.get_schema_by_subject(&val_subject).await?;
 
     Ok((key_schema, val_schema))
 }
