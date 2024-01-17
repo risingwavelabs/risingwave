@@ -71,7 +71,7 @@ where
     }
 
     pub fn to_kv(&self) -> Vec<(String, String)> {
-        system_params_to_kv(&self.inner()).unwrap()
+        system_params_to_kv(self.inner()).unwrap()
     }
 
     fn inner(&self) -> &PbSystemParams {
@@ -144,7 +144,7 @@ where
     }
 
     fn wasm_storage_url(&self) -> &str {
-        self.prost
+        self.inner()
             .wasm_storage_url
             .as_ref()
             .unwrap_or(&default::WASM_STORAGE_URL)
