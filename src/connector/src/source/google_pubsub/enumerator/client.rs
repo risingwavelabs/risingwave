@@ -37,12 +37,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
     ) -> anyhow::Result<PubsubSplitEnumerator> {
-        let split_count = properties.split_count;
         let subscription = properties.subscription.to_owned();
-
-        if split_count < 1 {
-            bail!("split_count must be >= 1")
-        }
 
         if properties.credentials.is_none() && properties.emulator_host.is_none() {
             bail!("credentials must be set if not using the pubsub emulator")
@@ -87,7 +82,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
             }
             (None, Some(snapshot)) => Some(SeekTo::Snapshot(snapshot)),
             (Some(_), Some(_)) => {
-                bail!("specify atmost one of start_offset or start_snapshot")
+                bail!("specify at most one of start_offset or start_snapshot")
             }
         };
 
@@ -99,7 +94,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
 
         Ok(Self {
             subscription,
-            split_count,
+            split_count: 1,
         })
     }
 

@@ -187,6 +187,7 @@ pub struct MetaOpts {
     pub min_table_split_write_throughput: u64,
 
     pub compaction_task_max_heartbeat_interval_secs: u64,
+    pub compaction_task_max_progress_interval_secs: u64,
     pub compaction_config: Option<CompactionConfig>,
 
     /// The size limit to split a state-table to independent sstable.
@@ -252,6 +253,7 @@ impl MetaOpts {
             do_not_config_object_storage_lifecycle: true,
             partition_vnode_count: 32,
             compaction_task_max_heartbeat_interval_secs: 0,
+            compaction_task_max_progress_interval_secs: 1,
             compaction_config: None,
             cut_table_size_limit: 1024 * 1024 * 1024,
             hybird_partition_vnode_count: 4,
@@ -320,7 +322,6 @@ impl MetaSrvEnv {
         let hummock_seq = meta_store_sql
             .clone()
             .map(|m| Arc::new(SequenceGenerator::new(m.conn)));
-
         let sql_id_gen_manager = if let Some(store) = &meta_store_sql {
             Some(Arc::new(SqlIdGeneratorManager::new(&store.conn).await?))
         } else {

@@ -110,6 +110,7 @@ risingwave_jni_core = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 rust_decimal = "1"
+rw_futures_util = { workspace = true }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
