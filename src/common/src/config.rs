@@ -452,9 +452,9 @@ pub struct BatchConfig {
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 
-    #[serde(default = "default::batch::compute_runtime_worker_threads")]
-    /// compute runtime worker threads
-    pub compute_runtime_worker_threads: usize,
+    #[serde(default = "default::batch::frontend_compute_runtime_worker_threads")]
+    /// frontend compute runtime worker threads
+    pub frontend_compute_runtime_worker_threads: usize,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -1431,7 +1431,7 @@ pub mod default {
             60 * 60
         }
 
-        pub fn compute_runtime_worker_threads() -> usize {
+        pub fn frontend_compute_runtime_worker_threads() -> usize {
             4
         }
     }

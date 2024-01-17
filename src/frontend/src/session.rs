@@ -172,7 +172,7 @@ impl FrontendEnv {
                 .worker_threads(
                     load_config("", FrontendOpts::default())
                         .batch
-                        .compute_runtime_worker_threads,
+                        .frontend_compute_runtime_worker_threads,
                 )
                 .thread_name("rw-batch-local")
                 .enable_all()
@@ -339,7 +339,7 @@ impl FrontendEnv {
 
         let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
             Builder::new_multi_thread()
-                .worker_threads(batch_config.compute_runtime_worker_threads)
+                .worker_threads(batch_config.frontend_compute_runtime_worker_threads)
                 .thread_name("rw-batch-local")
                 .enable_all()
                 .build()
