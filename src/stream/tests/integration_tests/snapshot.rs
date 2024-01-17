@@ -98,6 +98,19 @@ pub async fn check_with_script<F, Fut>(
     expect.assert_eq(&output);
 }
 
+pub async fn check_with_script_v2<F, Fut>(
+    create_executor: F,
+    test_script: &str,
+    expect: expect_test::Expect,
+    options: SnapshotOptions,
+) where
+    F: Fn() -> Fut,
+    Fut: Future<Output = (MessageSender, BoxedMessageStream)>,
+{
+    let output = executor_snapshot_v2(create_executor, test_script, options).await;
+    expect.assert_eq(&output);
+}
+
 /// This is a DSL for the input and output of executor snapshot tests.
 ///
 /// It imitates [`Message`], but more ser/de friendly.
@@ -147,6 +160,52 @@ where
         match &mut event {
             SnapshotEvent::Barrier(epoch) => {
                 tx.push_barrier(*epoch, false);
+            }
+            SnapshotEvent::Noop => unreachable!(),
+            SnapshotEvent::Recovery => {
+                (tx, executor) = create_executor().await;
+            }
+            SnapshotEvent::Chunk(chunk_str) => {
+                let chunk = StreamChunk::from_pretty(chunk_str);
+                *chunk_str = chunk.to_pretty().to_string();
+                tx.push_chunk(chunk);
+            }
+            SnapshotEvent::Watermark { col_idx, val } => tx.push_watermark(
+                *col_idx,
+                DataType::Int64, // TODO(rc): support timestamp data type
+                val.parse::<i64>().unwrap().into(),
+            ),
+        }
+
+        snapshot.push(Snapshot {
+            input: event,
+            output: run_until_pending(&mut executor, &mut store, options.clone()),
+        });
+    }
+
+    serde_yaml::to_string(&snapshot).unwrap()
+}
+
+async fn executor_snapshot_v2<F, Fut>(
+    create_executor: F,
+    inputs: &str,
+    options: SnapshotOptions,
+) -> String
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = (MessageSender, BoxedMessageStream)>,
+{
+    let inputs = SnapshotEvent::parse(inputs);
+
+    let (mut tx, mut executor) = create_executor().await;
+
+    let mut store = Store::default();
+    let mut snapshot = Vec::with_capacity(inputs.len());
+
+    for mut event in inputs {
+        match &mut event {
+            SnapshotEvent::Barrier(epoch) => {
+                tx.push_barrier(*epoch * 65536, false);
             }
             SnapshotEvent::Noop => unreachable!(),
             SnapshotEvent::Recovery => {

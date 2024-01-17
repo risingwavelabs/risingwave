@@ -251,7 +251,7 @@ async fn test_hash_agg_min_append_only() {
     );
 }
 
-// #[tokio::test]
+#[tokio::test]
 async fn test_hash_agg_emit_on_window_close() {
     let store = MemoryStateStore::new();
 
@@ -283,17 +283,17 @@ async fn test_hash_agg_emit_on_window_close() {
         (tx, hash_agg.execute())
     };
 
-    check_with_script(
+    check_with_script_v2(
         create_executor,
         &format!(
             r###"
-            - !barrier 65536
+            - !barrier 1
             - !chunk |2
                 T I
                 + _ 1
                 + _ 2
                 + _ 3
-            - !barrier 131072
+            - !barrier 2
             - !chunk |2
                 T I
                 - _ 2
@@ -301,23 +301,23 @@ async fn test_hash_agg_emit_on_window_close() {
             - !watermark
                 col_idx: {input_window_col}
                 val: 3
-            - !barrier 196608
+            - !barrier 3
             - !watermark
                 col_idx: {input_window_col}
                 val: 4
-            - !barrier 262114
+            - !barrier 4
             - !watermark
                 col_idx: {input_window_col}
                 val: 10
-            - !barrier 327680
+            - !barrier 5
             - !watermark
                 col_idx: {input_window_col}
                 val: 20
-            - !barrier 393216
+            - !barrier 6
             "###
         ),
         expect![[r#"
-            - input: !barrier 65536
+            - input: !barrier 1
               output:
               - !barrier 65536
             - input: !chunk |-
@@ -327,7 +327,7 @@ async fn test_hash_agg_emit_on_window_close() {
                 | + | _ | 3 |
                 +---+---+---+
               output: []
-            - input: !barrier 131072
+            - input: !barrier 2
               output:
               - !barrier 131072
             - input: !chunk |-
@@ -340,7 +340,7 @@ async fn test_hash_agg_emit_on_window_close() {
                 col_idx: 1
                 val: '3'
               output: []
-            - input: !barrier 196608
+            - input: !barrier 3
               output:
               - !chunk |-
                 +---+---+---+
@@ -354,7 +354,7 @@ async fn test_hash_agg_emit_on_window_close() {
                 col_idx: 1
                 val: '4'
               output: []
-            - input: !barrier 262114
+            - input: !barrier 4
               output:
               - !chunk |-
                 +---+---+---+
@@ -363,12 +363,12 @@ async fn test_hash_agg_emit_on_window_close() {
               - !watermark
                 col_idx: 0
                 val: '4'
-              - !barrier 262114
+              - !barrier 262144
             - input: !watermark
                 col_idx: 1
                 val: '10'
               output: []
-            - input: !barrier 327680
+            - input: !barrier 5
               output:
               - !chunk |-
                 +---+---+---+
@@ -382,7 +382,7 @@ async fn test_hash_agg_emit_on_window_close() {
                 col_idx: 1
                 val: '20'
               output: []
-            - input: !barrier 393216
+            - input: !barrier 6
               output:
               - !watermark
                 col_idx: 0

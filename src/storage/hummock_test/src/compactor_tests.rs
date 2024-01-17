@@ -151,7 +151,7 @@ pub(crate) mod tests {
         for (i, &e) in epochs.iter().enumerate() {
             let epoch = e * 65536;
             let mut new_val = val.clone();
-            new_val.extend_from_slice(&epoch.to_be_bytes());
+            new_val.extend_from_slice(&e.to_be_bytes());
             local
                 .ingest_batch(
                     vec![(
@@ -274,7 +274,7 @@ pub(crate) mod tests {
             &storage,
             &hummock_meta_client,
             &key,
-            1 << 10,
+            10,
             (1..SST_COUNT + 1).map(|v| (v * 1000)).collect_vec(),
         )
         .await;
@@ -320,8 +320,8 @@ pub(crate) mod tests {
                 .unwrap();
         }
 
-        let mut val = b"0"[..].repeat(1 << 10);
-        val.extend_from_slice(&((TEST_WATERMARK * 1000) << 16).to_be_bytes());
+        let mut val = b"0"[..].repeat(10);
+        val.extend_from_slice(&(TEST_WATERMARK * 1000).to_be_bytes());
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         let _recv = compactor_manager.add_compactor(worker_node.id);
@@ -389,7 +389,7 @@ pub(crate) mod tests {
         assert!(ret.is_err());
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn test_compaction_same_key_not_split() {
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
