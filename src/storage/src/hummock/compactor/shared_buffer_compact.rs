@@ -355,19 +355,14 @@ pub async fn merge_imms_in_memory(
     }
 
     let mut merged_payload: Vec<SharedBufferVersionedEntry> = Vec::new();
-    let first_full_key = items
+    let first_item_key = items
         .first()
-        .map(|((k, _), epoch_with_gap)| {
-            FullKey::new_with_gap_epoch(table_id, k.clone(), *epoch_with_gap)
-        })
+        .map(|((k, _), _)| k.clone())
         .unwrap_or_default();
 
     let mut monotonic_tombstone_events = vec![];
     let target_extended_user_key = PointRange::from_user_key(
-        UserKey::new(
-            table_id,
-            TableKey(first_full_key.user_key.table_key.as_ref()),
-        ),
+        UserKey::new(table_id, TableKey(first_item_key.as_ref())),
         false,
     );
     while del_iter.is_valid() && del_iter.key().le(&target_extended_user_key) {
@@ -379,13 +374,15 @@ pub async fn merge_imms_in_memory(
         });
     }
 
-    let mut full_key_tracker = FullKeyTracker::<Bytes>::new(first_full_key);
+    let mut full_key_tracker = FullKeyTracker::<Bytes>::new(FullKey::default());
     let mut table_key_versions: Vec<(EpochWithGap, HummockValue<Bytes>)> = Vec::new();
     let mut table_key_last_delete_epoch = HummockEpoch::MAX;
 
     for ((key, value), epoch_with_gap) in items {
         let full_key = FullKey::new_with_gap_epoch(table_id, key, epoch_with_gap);
-        if let Some(last_full_key) = full_key_tracker.observe(full_key) {
+        if let Some(last_full_key) = full_key_tracker.observe(full_key)
+            && !last_full_key.is_empty()
+        {
             // Record range tombstones if any
             let target_extended_user_key =
                 PointRange::from_user_key(last_full_key.user_key.as_ref(), false);

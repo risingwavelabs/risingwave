@@ -930,12 +930,12 @@ pub fn bound_table_key_range<T: AsRef<[u8]> + EmptySliceRef>(
     (start, end)
 }
 
-pub struct FullKeyTracker<T: AsRef<[u8]> + Ord + Eq + CopyFromSlice> {
+pub struct FullKeyTracker<T: AsRef<[u8]> + Ord + Eq> {
     pub latest_full_key: FullKey<T>,
     last_observed_epoch_with_gap: EpochWithGap,
 }
 
-impl<T: AsRef<[u8]> + Ord + Eq + CopyFromSlice> FullKeyTracker<T> {
+impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
     pub fn new(init_full_key: FullKey<T>) -> Self {
         let epoch_with_gap = init_full_key.epoch_with_gap;
         Self {
