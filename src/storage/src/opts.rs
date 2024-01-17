@@ -15,7 +15,7 @@
 use risingwave_common::config::{
     extract_storage_memory_config, ObjectStoreConfig, RwConfig, StorageMemoryConfig,
 };
-use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::system_param::reader::{SystemParamsRead, SystemParamsReader};
 use risingwave_common::system_param::system_params_for_test;
 
 #[derive(Clone, Debug)]
