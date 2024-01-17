@@ -62,7 +62,7 @@ level0_stop_write_threshold_sub_level_number = 300
 level0_sub_level_compact_level_count = 3
 level0_overlapping_sub_level_compact_level_count = 12
 max_space_reclaim_bytes = 536870912
-level0_max_compact_file_number = 200
+level0_max_compact_file_number = 100
 tombstone_reclaim_ratio = 40
 enable_emergency_picker = true
 
