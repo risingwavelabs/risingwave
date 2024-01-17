@@ -18,13 +18,18 @@ create function gcd(a int, b int) returns int language javascript as $$
 $$;
 
 statement ok
-create function to_string(a boolean, b smallint, c int, d bigint, e real, f float, g varchar, h bytea, i jsonb) returns varchar language javascript as $$
-    return a.toString() + b.toString() + c.toString() + d.toString() + e.toString() + f.toString() + g.toString() + h.toString() + JSON.stringify(i);
+create function decimal_add(a decimal, b decimal) returns decimal language javascript as $$
+    return a + b;
+$$;
+
+statement ok
+create function to_string(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb) returns varchar language javascript as $$
+    return a.toString() + b.toString() + c.toString() + d.toString() + e.toString() + f.toString() + g.toString() + h.toString() + i.toString() + JSON.stringify(j);
 $$;
 
 # show data types in javascript
 statement ok
-create function js_typeof(a boolean, b smallint, c int, d bigint, e real, f float, g varchar, h bytea, i jsonb) returns jsonb language javascript as $$
+create function js_typeof(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb) returns jsonb language javascript as $$
     return {
         boolean: typeof a,
         smallint: typeof b,
@@ -32,9 +37,10 @@ create function js_typeof(a boolean, b smallint, c int, d bigint, e real, f floa
         bigint: typeof d,
         real: typeof e,
         float: typeof f,
-        varchar: typeof g,
-        bytea: typeof h,
-        jsonb: typeof i,
+        decimal: typeof g,
+        varchar: typeof h,
+        bytea: typeof i,
+        jsonb: typeof j,
     };
 $$;
 
@@ -55,15 +61,20 @@ select gcd(25, 15);
 ----
 5
 
-query T
-select to_string(false, 1::smallint, 2, 3, 4.5, 6.7, 'abc', '\x010203', '{"key": 1}');
+query R
+select decimal_add(1.11, 2.22);
 ----
-false1234.56.7abc1,2,3{"key":1}
+3.33
 
 query T
-select js_typeof(false, 1::smallint, 2, 3, 4.5, 6.7, 'abc', '\x010203', '{"key": 1}');
+select to_string(false, 1::smallint, 2, 3, 4.5, 6.7, 8.9, 'abc', '\x010203', '{"key": 1}');
 ----
-{"bigint": "number", "boolean": "boolean", "bytea": "object", "float": "number", "int": "number", "jsonb": "object", "real": "number", "smallint": "number", "varchar": "string"}
+false1234.56.78.9abc1,2,3{"key":1}
+
+query T
+select js_typeof(false, 1::smallint, 2, 3, 4.5, 6.7, 8.9, 'abc', '\x010203', '{"key": 1}');
+----
+{"bigint": "number", "boolean": "boolean", "bytea": "object", "decimal": "bigdecimal", "float": "number", "int": "number", "jsonb": "object", "real": "number", "smallint": "number", "varchar": "string"}
 
 query I
 select series(5);
@@ -79,6 +90,9 @@ drop function int_42;
 
 statement ok
 drop function gcd;
+
+statement ok
+drop function decimal_add;
 
 statement ok
 drop function to_string;
