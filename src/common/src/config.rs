@@ -624,8 +624,8 @@ pub struct StorageConfig {
     pub compactor_max_sst_size: u64,
     #[serde(default = "default::storage::enable_fast_compaction")]
     pub enable_fast_compaction: bool,
-    #[serde(default = "default::storage::check_fast_compaction_result")]
-    pub check_fast_compaction_result: bool,
+    #[serde(default = "default::storage::check_compaction_result")]
+    pub check_compaction_result: bool,
     #[serde(default = "default::storage::max_preload_io_retry_times")]
     pub max_preload_io_retry_times: usize,
 
@@ -946,6 +946,9 @@ pub struct S3ObjectStoreConfig {
     pub object_store_req_retry_max_delay_ms: u64,
     #[serde(default = "default::object_store_config::s3::object_store_req_retry_max_attempts")]
     pub object_store_req_retry_max_attempts: usize,
+    /// Whether to retry s3 sdk error from which no error metadata is provided.
+    #[serde(default = "default::object_store_config::s3::retry_unknown_service_error")]
+    pub retry_unknown_service_error: bool,
 }
 
 impl SystemConfig {
@@ -1210,7 +1213,7 @@ pub mod default {
             false
         }
 
-        pub fn check_fast_compaction_result() -> bool {
+        pub fn check_compaction_result() -> bool {
             false
         }
 
@@ -1547,6 +1550,10 @@ pub mod default {
 
             pub fn object_store_req_retry_max_attempts() -> usize {
                 DEFAULT_RETRY_MAX_ATTEMPTS
+            }
+
+            pub fn retry_unknown_service_error() -> bool {
+                false
             }
         }
     }

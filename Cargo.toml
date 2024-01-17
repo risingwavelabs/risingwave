@@ -51,6 +51,7 @@ members = [
   "src/tests/sqlsmith",
   "src/tests/state_cleaning_test",
   "src/utils/delta_btree_map",
+  "src/utils/futures_util",
   "src/utils/local_stats_alloc",
   "src/utils/pgwire",
   "src/utils/runtime",
@@ -187,6 +188,7 @@ risingwave_udf = { path = "./src/expr/udf" }
 risingwave_variables = { path = "./src/utils/variables" }
 risingwave_java_binding = { path = "./src/java_binding" }
 risingwave_jni_core = { path = "src/jni_core" }
+rw_futures_util = { path = "src/utils/futures_util" }
 tokio-util = "0.7"
 
 [workspace.lints.rust]
