@@ -937,8 +937,9 @@ pub struct S3ObjectStoreConfig {
     pub object_store_req_retry_max_delay_ms: u64,
     #[serde(default = "default::object_store_config::s3::object_store_req_retry_max_attempts")]
     pub object_store_req_retry_max_attempts: usize,
-    #[serde(default = "default::object_store_config::s3::retry_unhandled_503_error")]
-    pub retry_unhandled_503_error: bool,
+    /// Whether to retry s3 sdk error from which no error metadata is provided.
+    #[serde(default = "default::object_store_config::s3::retry_unknown_service_error")]
+    pub retry_unknown_service_error: bool,
 }
 
 impl SystemConfig {
@@ -1537,7 +1538,7 @@ pub mod default {
                 DEFAULT_RETRY_MAX_ATTEMPTS
             }
 
-            pub fn retry_unhandled_503_error() -> bool {
+            pub fn retry_unknown_service_error() -> bool {
                 false
             }
         }

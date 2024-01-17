@@ -933,13 +933,13 @@ impl From<RetryError> for ObjectError {
 }
 
 struct RetryCondition {
-    retry_unhandled_503_error: bool,
+    retry_unknown_service_error: bool,
 }
 
 impl RetryCondition {
     fn new(config: &S3ObjectStoreConfig) -> Self {
         Self {
-            retry_unhandled_503_error: config.retry_unhandled_503_error,
+            retry_unknown_service_error: config.retry_unknown_service_error,
         }
     }
 }
@@ -955,8 +955,8 @@ impl tokio_retry::Condition<RetryError> for RetryCondition {
                     }
                 }
                 SdkError::ServiceError(e) => {
-                    if self.retry_unhandled_503_error && e.err().code().is_none() {
-                        tracing::warn!(target: "unhandled_503_retry", "{e:?} occurs, retry S3 get_object request.");
+                    if self.retry_unknown_service_error && e.err().code().is_none() {
+                        tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
                         return true;
                     }
                 }
