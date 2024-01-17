@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan::StreamCdcScanNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{CdcBackfillExecutor, ExternalStorageTable};
+use crate::executor::{CdcBackfillExecutor, ExternalStorageTable, FlowControlExecutor};
 
 pub struct StreamCdcScanExecutorBuilder;
 
@@ -88,8 +88,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         let state_table =
             StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
 
-        // TODO(kwannoel): Should we apply flow control here as well?
-        Ok(CdcBackfillExecutor::new(
+        let executor = CdcBackfillExecutor::new(
             params.actor_context.clone(),
             params.info,
             external_table,
@@ -99,6 +98,13 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             params.executor_stats,
             state_table,
             params.env.config().developer.chunk_size,
+        )
+        .boxed();
+
+        Ok(FlowControlExecutor::new(
+            executor,
+            params.actor_context,
+            node.rate_limit.map(|x| x as _),
         )
         .boxed())
     }
