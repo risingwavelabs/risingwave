@@ -715,7 +715,9 @@ impl TestCase {
         }
 
         'distributed_batch: {
-            if self.expected_outputs.contains(&TestType::BatchDistributedPlan)
+            if self
+                .expected_outputs
+                .contains(&TestType::BatchDistributedPlan)
                 || self.expected_outputs.contains(&TestType::BatchError)
             {
                 let batch_plan = match logical_plan.gen_batch_plan() {
@@ -733,7 +735,10 @@ impl TestCase {
                 };
 
                 // Only generate batch_plan if it is specified in test case
-                if self.expected_outputs.contains(&TestType::BatchDistributedPlan) {
+                if self
+                    .expected_outputs
+                    .contains(&TestType::BatchDistributedPlan)
+                {
                     ret.batch_distributed_plan = Some(explain_plan(&batch_plan));
                 }
             }
