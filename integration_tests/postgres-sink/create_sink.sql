@@ -19,7 +19,7 @@ FROM
     primary_key = 'id'
 );
 
-CREATE SINK data_types_postgres_sink
+CREATE SINK pg_all_data_types_sink
 FROM
     pg_all_data_types WITH (
     connector = 'jdbc',
