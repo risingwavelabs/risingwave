@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Mutex;
-
 use super::diff::SystemParamsDiff;
 use super::reader::SystemParamsReader;
 use crate::util::tracing::layer::toggle_otel_layer;
@@ -21,25 +19,19 @@ use crate::util::tracing::layer::toggle_otel_layer;
 /// Node-independent handler for system parameter changes.
 ///
 /// Currently, it is only used to enable or disable the distributed tracing layer.
-pub struct CommonHandler {
-    // TODO: this is bad
-    sync: Mutex<()>,
-}
+#[derive(Debug)]
+pub struct CommonHandler;
 
 impl CommonHandler {
     /// Create a new handler with the initial parameters.
     pub fn new(initial: SystemParamsReader) -> Self {
-        let this = Self {
-            sync: Default::default(),
-        };
+        let this = Self;
         this.handle_change(&SystemParamsDiff::from_initial(initial));
         this
     }
 
     /// Handle the change of system parameters.
     pub fn handle_change(&self, diff: &SystemParamsDiff) {
-        let mut _sync_guard = self.sync.lock().unwrap();
-
         if let Some(enabled) = diff.enable_tracing {
             toggle_otel_layer(enabled)
         }

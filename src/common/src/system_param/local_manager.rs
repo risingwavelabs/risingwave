@@ -50,15 +50,15 @@ impl LocalSystemParamsManager {
         tokio::spawn({
             let mut rx = tx.subscribe();
             async move {
-                let mut old_params = initial_params.clone();
+                let mut params = initial_params.clone();
                 let handler = CommonHandler::new(initial_params);
 
-                // TODO: receive the diff instead of the snapshot.
                 while rx.changed().await.is_ok() {
+                    // TODO: directly watch the changes instead of diffing ourselves.
                     let new_params = (**rx.borrow_and_update().load()).clone();
-                    let diff = SystemParamsDiff::diff(old_params.as_ref(), new_params.as_ref());
+                    let diff = SystemParamsDiff::diff(params.as_ref(), new_params.as_ref());
                     handler.handle_change(&diff);
-                    old_params = new_params;
+                    params = new_params;
                 }
             }
         });

@@ -304,7 +304,9 @@ macro_rules! impl_default_from_other_params {
 macro_rules! impl_set_system_param {
     ($({ $field:ident, $type:ty, $default:expr, $($rest:tt)* },)*) => {
         /// Set a system parameter with the given value or default one.
-        /// Returns the new value if changed.
+        ///
+        /// Returns the new value if changed, or an error if the parameter is unrecognized
+        /// or the value is invalid.
         pub fn set_system_param(
             params: &mut PbSystemParams,
             key: &str,
