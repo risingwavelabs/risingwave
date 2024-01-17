@@ -83,7 +83,7 @@ where
         let this = self.project();
         if this.paused.load(Ordering::Relaxed) {
             let mut waker = this.waker.lock().unwrap();
-            waker.get_or_insert(cx.waker().clone());
+            waker.insert(cx.waker().clone());
             Poll::Pending
         } else {
             this.stream.poll_next(cx)
