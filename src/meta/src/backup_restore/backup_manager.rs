@@ -22,6 +22,7 @@ use risingwave_backup::storage::{MetaSnapshotStorage, ObjectStoreMetaSnapshotSto
 use risingwave_backup::{MetaBackupJobId, MetaSnapshotId, MetaSnapshotManifest};
 use risingwave_common::bail;
 use risingwave_common::config::ObjectStoreConfig;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;

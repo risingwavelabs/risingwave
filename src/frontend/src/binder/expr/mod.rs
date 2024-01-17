@@ -385,7 +385,7 @@ impl Binder {
         // parameters will be parsed and treated as `Parameter`.
         // For detailed explanation, consider checking `bind_column`.
         if let Some(expr) = self.udf_context.get_expr(&format!("${index}")) {
-            return self.bind_expr(expr.clone());
+            return Ok(expr.clone());
         }
 
         Ok(Parameter::new(index, self.param_types.clone()).into())

@@ -64,6 +64,19 @@ select fib(100);
 statement error function fib calling stack depth limit exceeded
 create materialized view foo_mv as select fib(100);
 
+statement ok
+create function regexp_replace_wrapper(varchar) returns varchar language sql as $$select regexp_replace($1, 'baz(...)', '这是🥵', 'ic')$$;
+
+statement ok
+create function print(INT) returns int language sql as 'select $1';
+
+# Adjust the input value of the calling function (i.e., `print` here) with the actual input parameter
+statement ok
+create function print_add_one(INT) returns int language sql as 'select print($1 + 1)';
+
+statement ok
+create function print_add_two(INT) returns int language sql as 'select print($1 + $1)';
+
 # Call the defined sql udf
 query I
 select add(1, -1);
@@ -101,6 +114,11 @@ select call_regexp_replace();
 💩💩💩💩💩foo🤔️bar亲爱的😭这是🥵爱情❤️‍🔥
 
 query T
+select regexp_replace_wrapper('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥');
+----
+💩💩💩💩💩foo🤔️bar亲爱的😭这是🥵爱情❤️‍🔥
+
+query T
 select foo(114514);
 ----
 foo(INT)
@@ -117,6 +135,11 @@ query I
 select add_sub_wrapper(1, 1);
 ----
 114514
+
+query III
+select print_add_one(1), print_add_one(114513), print_add_two(2);
+----
+2 114514 4
 
 # Create a mock table
 statement ok
@@ -250,6 +273,18 @@ drop function add_sub_types;
 
 statement ok
 drop function fib;
+
+statement ok
+drop function print;
+
+statement ok
+drop function print_add_one;
+
+statement ok
+drop function print_add_two;
+
+statement ok
+drop function regexp_replace_wrapper;
 
 # Drop the mock table
 statement ok
