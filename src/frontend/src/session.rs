@@ -332,7 +332,7 @@ impl FrontendEnv {
         // Idle transaction background monitor
         let join_handle = tokio::spawn(async move {
             let mut check_idle_txn_interval =
-                tokio::time::interval(core::time::Duration::from_secs(5));
+                tokio::time::interval(core::time::Duration::from_secs(10));
             check_idle_txn_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             check_idle_txn_interval.reset();
             loop {
@@ -1173,18 +1173,22 @@ impl Session for SessionImpl {
     fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()> {
         // In transaction.
         if matches!(self.transaction_status(), TransactionStatus::InTransaction) {
-            // Hold the `exec_context` lock to ensure no new sql coming when unpin_snapshot.
-            let guard = self.exec_context.lock();
-            // No running sql i.e. idle
-            if guard.as_ref().and_then(|weak| weak.upgrade()).is_none() {
-                // Idle timeout.
-                if let Some(elapse_since_last_idle_instant) = self.elapse_since_last_idle_instant()
-                {
-                    if elapse_since_last_idle_instant
-                        > self.config().idle_in_transaction_session_timeout() as u128
+            let idle_in_transaction_session_timeout =
+                self.config().idle_in_transaction_session_timeout() as u128;
+            // Idle transaction timeout has been enabled.
+            if idle_in_transaction_session_timeout != 0 {
+                // Hold the `exec_context` lock to ensure no new sql coming when unpin_snapshot.
+                let guard = self.exec_context.lock();
+                // No running sql i.e. idle
+                if guard.as_ref().and_then(|weak| weak.upgrade()).is_none() {
+                    // Idle timeout.
+                    if let Some(elapse_since_last_idle_instant) =
+                        self.elapse_since_last_idle_instant()
                     {
-                        self.unpin_snapshot();
-                        return Err(PsqlError::IdleInTxnTimeout);
+                        if elapse_since_last_idle_instant > idle_in_transaction_session_timeout {
+                            self.unpin_snapshot();
+                            return Err(PsqlError::IdleInTxnTimeout);
+                        }
                     }
                 }
             }
