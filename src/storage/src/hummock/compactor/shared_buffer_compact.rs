@@ -319,7 +319,7 @@ async fn compact_shared_buffer(
                 forward_iters.push(imm.clone().into_forward_iter());
                 del_iter.add_batch_iter(imm.delete_range_iter());
             }
-            let iter = OrderedMergeIteratorInner::new(forward_iters);
+            let iter = MergeIterator::new(forward_iters);
             let left_iter = UserIterator::new(
                 iter,
                 (Bound::Unbounded, Bound::Unbounded),
