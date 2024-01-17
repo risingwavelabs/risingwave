@@ -369,7 +369,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         }
     }
 
-    //// Find all ranges in the partition that are affected by the given delta.
+    /// Find all ranges in the partition that are affected by the given delta.
     /// The returned ranges are guaranteed to be sorted and non-overlapping. All keys in the ranges
     /// are guaranteed to be cached, which means they should be [`Sentinelled::Normal`]s.
     pub async fn find_affected_ranges<'s, 'cache>(
@@ -404,7 +404,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             // TERMINATEABILITY: `extend_cache_leftward_by_n` and `extend_cache_rightward_by_n` keep
             // pushing the cache to the boundary of current partition. In these two methods, when
             // any side of boundary is reached, the sentinel key will be removed, so finally
-            // `Self::find_affected_ranges_readonly` will return ranges without any sentinels.
+            // `Self::find_affected_ranges_readonly` will return `Ok`.
 
             // SAFETY: Here we shortly borrow the range cache and turn the reference into a
             // `'cache` one to bypass the borrow checker. This is safe because we only return
