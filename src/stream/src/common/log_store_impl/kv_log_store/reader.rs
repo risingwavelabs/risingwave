@@ -25,7 +25,6 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
-use risingwave_common::constants::log_store::KvLogStorePk;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_connector::sink::log_store::{
@@ -100,12 +99,12 @@ impl RewindDelay {
     }
 }
 
-pub struct KvLogStoreReader<S: StateStore, PK: KvLogStorePk> {
+pub struct KvLogStoreReader<S: StateStore> {
     table_id: TableId,
 
     state_store: S,
 
-    serde: LogStoreRowSerde<PK>,
+    serde: LogStoreRowSerde,
 
     rx: LogStoreBufferReceiver,
 
@@ -113,8 +112,7 @@ pub struct KvLogStoreReader<S: StateStore, PK: KvLogStorePk> {
     first_write_epoch: Option<u64>,
 
     /// `Some` means consuming historical log data
-    #[expect(clippy::type_complexity)]
-    state_store_stream: Option<Pin<Box<LogStoreItemMergeStream<S::IterStream, PK>>>>,
+    state_store_stream: Option<Pin<Box<LogStoreItemMergeStream<S::IterStream>>>>,
 
     /// Store the future that attempts to read a flushed stream chunk.
     /// This is for cancellation safety. Since it is possible that the future of `next_item`
@@ -137,11 +135,11 @@ pub struct KvLogStoreReader<S: StateStore, PK: KvLogStorePk> {
     rewind_delay: RewindDelay,
 }
 
-impl<S: StateStore, PK: KvLogStorePk> KvLogStoreReader<S, PK> {
+impl<S: StateStore> KvLogStoreReader<S> {
     pub(crate) fn new(
         table_id: TableId,
         state_store: S,
-        serde: LogStoreRowSerde<PK>,
+        serde: LogStoreRowSerde,
         rx: LogStoreBufferReceiver,
         metrics: KvLogStoreMetrics,
         is_paused: watch::Receiver<bool>,
@@ -181,11 +179,11 @@ impl<S: StateStore, PK: KvLogStorePk> KvLogStoreReader<S, PK> {
     }
 }
 
-impl<S: StateStore, PK: KvLogStorePk> KvLogStoreReader<S, PK> {
+impl<S: StateStore> KvLogStoreReader<S> {
     fn read_persisted_log_store(
         &self,
         last_persisted_epoch: Option<u64>,
-    ) -> impl Future<Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<S::IterStream, PK>>>>> + Send
+    ) -> impl Future<Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<S::IterStream>>>>> + Send
     {
         let range_start = if let Some(last_persisted_epoch) = last_persisted_epoch {
             // start from the next epoch of last_persisted_epoch
@@ -239,7 +237,7 @@ impl<S: StateStore, PK: KvLogStorePk> KvLogStoreReader<S, PK> {
     }
 }
 
-impl<S: StateStore, PK: KvLogStorePk> LogReader for KvLogStoreReader<S, PK> {
+impl<S: StateStore> LogReader for KvLogStoreReader<S> {
     async fn init(&mut self) -> LogStoreResult<()> {
         let first_write_epoch = self.rx.init().await;
 

@@ -19,6 +19,7 @@ use std::ops::RangeBounds;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use itertools::Itertools;
+use tinyvec::ArrayVec;
 
 use self::empty::EMPTY;
 use crate::hash::HashCode;
@@ -319,6 +320,10 @@ impl<D: ToDatumRef> Row for &[D] {
 }
 
 impl<D: ToDatumRef, const N: usize> Row for [D; N] {
+    impl_slice_row!();
+}
+
+impl<D: ToDatumRef + Default, const N: usize> Row for ArrayVec<[D; N]> {
     impl_slice_row!();
 }
 

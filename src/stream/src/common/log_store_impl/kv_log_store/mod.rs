@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use risingwave_common::buffer::Bitmap;
@@ -39,7 +38,7 @@ mod test_utils;
 mod writer;
 
 pub(crate) use reader::{REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY};
-use risingwave_common::constants::log_store::{KvLogStorePk, SeqIdType};
+use risingwave_common::constants::log_store::{KvLogStorePkInfo, SeqIdType};
 
 const FIRST_SEQ_ID: SeqIdType = 0;
 
@@ -188,7 +187,7 @@ impl FlushInfo {
     }
 }
 
-pub struct KvLogStoreFactory<S: StateStore, PK: KvLogStorePk> {
+pub struct KvLogStoreFactory<S: StateStore> {
     state_store: S,
 
     table_catalog: Table,
@@ -201,10 +200,10 @@ pub struct KvLogStoreFactory<S: StateStore, PK: KvLogStorePk> {
 
     identity: String,
 
-    _phantom: PhantomData<PK>,
+    pk_info: &'static KvLogStorePkInfo,
 }
 
-impl<S: StateStore, PK: KvLogStorePk> KvLogStoreFactory<S, PK> {
+impl<S: StateStore> KvLogStoreFactory<S> {
     pub(crate) fn new(
         state_store: S,
         table_catalog: Table,
@@ -212,6 +211,7 @@ impl<S: StateStore, PK: KvLogStorePk> KvLogStoreFactory<S, PK> {
         max_row_count: usize,
         metrics: KvLogStoreMetrics,
         identity: impl Into<String>,
+        pk_info: &'static KvLogStorePkInfo,
     ) -> Self {
         Self {
             state_store,
@@ -220,19 +220,19 @@ impl<S: StateStore, PK: KvLogStorePk> KvLogStoreFactory<S, PK> {
             max_row_count,
             metrics,
             identity: identity.into(),
-            _phantom: PhantomData,
+            pk_info,
         }
     }
 }
 
-impl<S: StateStore, PK: KvLogStorePk> LogStoreFactory for KvLogStoreFactory<S, PK> {
-    type Reader = KvLogStoreReader<S, PK>;
-    type Writer = KvLogStoreWriter<S::Local, PK>;
+impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
+    type Reader = KvLogStoreReader<S>;
+    type Writer = KvLogStoreWriter<S::Local>;
 
     async fn build(self) -> (Self::Reader, Self::Writer) {
         let table_id = TableId::new(self.table_catalog.id);
         let (pause_tx, pause_rx) = watch::channel(false);
-        let serde = LogStoreRowSerde::new(&self.table_catalog, self.vnodes);
+        let serde = LogStoreRowSerde::new(&self.table_catalog, self.vnodes, self.pk_info);
         let local_state_store = self
             .state_store
             .new_local(NewLocalOptions {
@@ -284,6 +284,8 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+    use risingwave_common::constants::log_store::v1::KV_LOG_STORE_V1_INFO;
+    use risingwave_common::constants::log_store::KvLogStorePkInfo;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_connector::sink::log_store::{
@@ -298,8 +300,7 @@ mod tests {
     use crate::common::log_store_impl::kv_log_store::reader::KvLogStoreReader;
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         calculate_vnode_bitmap, check_rows_eq, check_stream_chunk_eq,
-        gen_multi_vnode_stream_chunks, gen_stream_chunk, gen_test_log_store_table,
-        TestKvLogStorePk, TEST_DATA_SIZE,
+        gen_multi_vnode_stream_chunks, gen_stream_chunk, gen_test_log_store_table, TEST_DATA_SIZE,
     };
     use crate::common::log_store_impl::kv_log_store::{KvLogStoreFactory, KvLogStoreMetrics};
 
@@ -311,9 +312,10 @@ mod tests {
     }
 
     async fn test_basic_inner(max_row_count: usize) {
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V1_INFO;
         let test_env = prepare_hummock_test_env().await;
 
-        let table = gen_test_log_store_table();
+        let table = gen_test_log_store_table(pk_info);
 
         test_env.register_table(table.clone()).await;
 
@@ -321,13 +323,14 @@ mod tests {
         let stream_chunk2 = gen_stream_chunk(10);
         let bitmap = calculate_vnode_bitmap(stream_chunk1.rows().chain(stream_chunk2.rows()));
 
-        let factory = KvLogStoreFactory::<_, TestKvLogStorePk>::new(
+        let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
             Some(Arc::new(bitmap)),
             max_row_count,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -404,9 +407,10 @@ mod tests {
     }
 
     async fn test_recovery_inner(max_row_count: usize) {
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V1_INFO;
         let test_env = prepare_hummock_test_env().await;
 
-        let table = gen_test_log_store_table();
+        let table = gen_test_log_store_table(pk_info);
 
         test_env.register_table(table.clone()).await;
 
@@ -415,13 +419,14 @@ mod tests {
         let bitmap = calculate_vnode_bitmap(stream_chunk1.rows().chain(stream_chunk2.rows()));
         let bitmap = Arc::new(bitmap);
 
-        let factory = KvLogStoreFactory::<_, TestKvLogStorePk>::new(
+        let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
             Some(bitmap.clone()),
             max_row_count,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -502,13 +507,14 @@ mod tests {
         test_env.storage.clear_shared_buffer().await.unwrap();
 
         // Rebuild log reader and writer in recovery
-        let factory = KvLogStoreFactory::<_, TestKvLogStorePk>::new(
+        let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
             Some(bitmap),
             max_row_count,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
         writer
@@ -566,9 +572,10 @@ mod tests {
     }
 
     async fn test_truncate_inner(max_row_count: usize) {
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V1_INFO;
         let test_env = prepare_hummock_test_env().await;
 
-        let table = gen_test_log_store_table();
+        let table = gen_test_log_store_table(pk_info);
 
         test_env.register_table(table.clone()).await;
 
@@ -585,13 +592,14 @@ mod tests {
         );
         let bitmap = Arc::new(bitmap);
 
-        let factory = KvLogStoreFactory::<_, TestKvLogStorePk>::new(
+        let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
             Some(bitmap.clone()),
             max_row_count,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -696,13 +704,14 @@ mod tests {
         test_env.storage.clear_shared_buffer().await.unwrap();
 
         // Rebuild log reader and writer in recovery
-        let factory = KvLogStoreFactory::<_, TestKvLogStorePk>::new(
+        let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
             Some(bitmap),
             max_row_count,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -771,9 +780,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_vnode_recover() {
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V1_INFO;
         let test_env = prepare_hummock_test_env().await;
 
-        let table = gen_test_log_store_table();
+        let table = gen_test_log_store_table(pk_info);
 
         test_env.register_table(table.clone()).await;
 
@@ -788,21 +798,23 @@ mod tests {
         let vnodes1 = build_bitmap((0..VirtualNode::COUNT).filter(|i| i % 2 == 0));
         let vnodes2 = build_bitmap((0..VirtualNode::COUNT).filter(|i| i % 2 == 1));
 
-        let factory1 = KvLogStoreFactory::<_, TestKvLogStorePk>::new(
+        let factory1 = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
             Some(vnodes1),
             10 * TEST_DATA_SIZE,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
-        let factory2 = KvLogStoreFactory::<_, TestKvLogStorePk>::new(
+        let factory2 = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
             Some(vnodes2),
             10 * TEST_DATA_SIZE,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader1, mut writer1) = factory1.build().await;
         let (mut reader2, mut writer2) = factory2.build().await;
@@ -916,13 +928,14 @@ mod tests {
         test_env.storage.clear_shared_buffer().await.unwrap();
 
         let vnodes = build_bitmap(0..VirtualNode::COUNT);
-        let factory = KvLogStoreFactory::<_, TestKvLogStorePk>::new(
+        let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
             Some(vnodes),
             10 * TEST_DATA_SIZE,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
         writer
@@ -965,9 +978,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_cancellation_safe() {
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V1_INFO;
         let test_env = prepare_hummock_test_env().await;
 
-        let table = gen_test_log_store_table();
+        let table = gen_test_log_store_table(pk_info);
 
         test_env.register_table(table.clone()).await;
 
@@ -975,13 +989,14 @@ mod tests {
         let stream_chunk2 = gen_stream_chunk(10);
         let bitmap = calculate_vnode_bitmap(stream_chunk1.rows().chain(stream_chunk2.rows()));
 
-        let factory = KvLogStoreFactory::<_, TestKvLogStorePk>::new(
+        let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
             Some(Arc::new(bitmap)),
             0,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1032,9 +1047,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_rewind_on_consuming_persisted_log() {
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V1_INFO;
         let test_env = prepare_hummock_test_env().await;
 
-        let table = gen_test_log_store_table();
+        let table = gen_test_log_store_table(pk_info);
 
         test_env.register_table(table.clone()).await;
 
@@ -1054,21 +1070,21 @@ mod tests {
         let bitmap = Arc::new(bitmap);
 
         async fn check_reader<'a, 'b>(
-            reader: &'a mut KvLogStoreReader<HummockStorage, TestKvLogStorePk>,
+            reader: &'a mut KvLogStoreReader<HummockStorage>,
             data: impl Iterator<Item = &'b (u64, Option<&'b StreamChunk>)>,
         ) -> Vec<ChunkId> {
             check_reader_inner(reader, data, true).await
         }
 
         async fn check_reader_last_unsealed<'a, 'b>(
-            reader: &'a mut KvLogStoreReader<HummockStorage, TestKvLogStorePk>,
+            reader: &'a mut KvLogStoreReader<HummockStorage>,
             data: impl Iterator<Item = &'b (u64, Option<&'b StreamChunk>)>,
         ) -> Vec<ChunkId> {
             check_reader_inner(reader, data, false).await
         }
 
         async fn check_reader_inner<'a, 'b>(
-            reader: &'a mut KvLogStoreReader<HummockStorage, TestKvLogStorePk>,
+            reader: &'a mut KvLogStoreReader<HummockStorage>,
             data: impl Iterator<Item = &'b (u64, Option<&'b StreamChunk>)>,
             last_sealed: bool,
         ) -> Vec<ChunkId> {
@@ -1109,13 +1125,14 @@ mod tests {
             chunk_ids
         }
 
-        let factory = KvLogStoreFactory::<_, TestKvLogStorePk>::new(
+        let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
             Some(bitmap.clone()),
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1211,13 +1228,14 @@ mod tests {
 
         // Recovery happens. Test rewind while consuming persisted log. No new data written
 
-        let factory = KvLogStoreFactory::<_, TestKvLogStorePk>::new(
+        let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
             Some(bitmap.clone()),
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1266,13 +1284,14 @@ mod tests {
 
         // Recovery happens again. Test rewind with some new data written and flushed.
 
-        let factory = KvLogStoreFactory::<_, TestKvLogStorePk>::new(
+        let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
             Some(bitmap.clone()),
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
 

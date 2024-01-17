@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
-use risingwave_common::constants::log_store::{KvLogStorePk, SeqIdType};
+use risingwave_common::constants::log_store::SeqIdType;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::epoch::EpochPair;
@@ -32,14 +32,14 @@ use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender;
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
 use crate::common::log_store_impl::kv_log_store::{FlushInfo, KvLogStoreMetrics, FIRST_SEQ_ID};
 
-pub struct KvLogStoreWriter<LS: LocalStateStore, PK: KvLogStorePk> {
+pub struct KvLogStoreWriter<LS: LocalStateStore> {
     _table_id: TableId,
 
     seq_id: SeqIdType,
 
     state_store: LS,
 
-    serde: LogStoreRowSerde<PK>,
+    serde: LogStoreRowSerde,
 
     tx: LogStoreBufferSender,
 
@@ -50,11 +50,11 @@ pub struct KvLogStoreWriter<LS: LocalStateStore, PK: KvLogStorePk> {
     identity: String,
 }
 
-impl<LS: LocalStateStore, PK: KvLogStorePk> KvLogStoreWriter<LS, PK> {
+impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
     pub(crate) fn new(
         table_id: TableId,
         state_store: LS,
-        serde: LogStoreRowSerde<PK>,
+        serde: LogStoreRowSerde,
         tx: LogStoreBufferSender,
         metrics: KvLogStoreMetrics,
         is_paused: watch::Sender<bool>,
@@ -73,7 +73,7 @@ impl<LS: LocalStateStore, PK: KvLogStorePk> KvLogStoreWriter<LS, PK> {
     }
 }
 
-impl<LS: LocalStateStore, PK: KvLogStorePk> LogWriter for KvLogStoreWriter<LS, PK> {
+impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
     async fn init(
         &mut self,
         epoch: EpochPair,

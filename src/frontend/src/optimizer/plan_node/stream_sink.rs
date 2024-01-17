@@ -20,9 +20,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, Field, TableId};
-use risingwave_common::constants::log_store::{
-    KvLogStorePk, KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS,
-};
+use risingwave_common::constants::log_store::v1::KV_LOG_STORE_V1_INFO;
+use risingwave_common::constants::log_store::KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_connector::match_sink_name_str;
@@ -341,18 +340,18 @@ impl StreamSink {
     /// The table schema is: | epoch | seq id | row op | sink columns |
     /// Pk is: | epoch | seq id |
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
-        type Pk = risingwave_common::constants::log_store::v1::KvLogStoreV1Pk;
+        let pk_info = &KV_LOG_STORE_V1_INFO;
 
         let mut table_catalog_builder =
             TableCatalogBuilder::new(self.input.ctx().with_options().internal_table_subset());
 
         let mut value_indices =
-            Vec::with_capacity(Pk::predefined_column_len() + self.sink_desc.columns.len());
+            Vec::with_capacity(pk_info.predefined_column_len() + self.sink_desc.columns.len());
 
-        let pk_column_names = Pk::pk_names();
-        let pk_types = Pk::pk_types();
+        let pk_column_names = pk_info.names;
+        let pk_types = pk_info.types;
 
-        for i in 0..Pk::LEN {
+        for i in 0..pk_info.len {
             let (name, data_type) = (pk_column_names[i], pk_types[i].clone());
             let indice = table_catalog_builder.add_column(&Field::with_name(data_type, name));
             value_indices.push(indice);
@@ -363,7 +362,7 @@ impl StreamSink {
             value_indices.push(indice);
         }
 
-        for (i, ordering) in Pk::pk_ordering().iter().enumerate() {
+        for (i, ordering) in pk_info.orderings.iter().enumerate() {
             table_catalog_builder.add_order_column(i, *ordering);
         }
 
@@ -380,7 +379,7 @@ impl StreamSink {
             .distribution()
             .dist_column_indices()
             .iter()
-            .map(|idx| idx + Pk::predefined_column_len())
+            .map(|idx| idx + pk_info.predefined_column_len())
             .collect_vec();
 
         table_catalog_builder.build(dist_key, read_prefix_len_hint)
