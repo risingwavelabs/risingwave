@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_default::DefaultFromSerde;
 use serde_json::Value;
 
+use crate::for_all_params;
 use crate::hash::VirtualNode;
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
@@ -451,6 +452,10 @@ pub struct BatchConfig {
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
+
+    #[serde(default = "default::batch::frontend_compute_runtime_worker_threads")]
+    /// frontend compute runtime worker threads
+    pub frontend_compute_runtime_worker_threads: usize,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -854,64 +859,26 @@ pub struct BatchDeveloperConfig {
     #[serde(default = "default::developer::batch_chunk_size")]
     pub chunk_size: usize,
 }
-/// The section `[system]` in `risingwave.toml`. All these fields are used to initialize the system
-/// parameters persisted in Meta store. Most fields are for testing purpose only and should not be
-/// documented.
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
-pub struct SystemConfig {
-    /// The interval of periodic barrier.
-    #[serde(default = "default::system::barrier_interval_ms")]
-    pub barrier_interval_ms: Option<u32>,
 
-    /// There will be a checkpoint for every n barriers
-    #[serde(default = "default::system::checkpoint_frequency")]
-    pub checkpoint_frequency: Option<u64>,
-
-    /// Target size of the Sstable.
-    #[serde(default = "default::system::sstable_size_mb")]
-    pub sstable_size_mb: Option<u32>,
-
-    #[serde(default = "default::system::parallel_compact_size_mb")]
-    pub parallel_compact_size_mb: Option<u32>,
-
-    /// Size of each block in bytes in SST.
-    #[serde(default = "default::system::block_size_kb")]
-    pub block_size_kb: Option<u32>,
-
-    /// False positive probability of bloom filter.
-    #[serde(default = "default::system::bloom_false_positive")]
-    pub bloom_false_positive: Option<f64>,
-
-    #[serde(default = "default::system::state_store")]
-    pub state_store: Option<String>,
-
-    /// Remote directory for storing data and metadata objects.
-    #[serde(default = "default::system::data_directory")]
-    pub data_directory: Option<String>,
-
-    /// Remote storage url for storing snapshots.
-    #[serde(default = "default::system::backup_storage_url")]
-    pub backup_storage_url: Option<String>,
-
-    /// Remote directory for storing snapshots.
-    #[serde(default = "default::system::backup_storage_directory")]
-    pub backup_storage_directory: Option<String>,
-
-    /// Max number of concurrent creating streaming jobs.
-    #[serde(default = "default::system::max_concurrent_creating_streaming_jobs")]
-    pub max_concurrent_creating_streaming_jobs: Option<u32>,
-
-    /// Whether to pause all data sources on next bootstrap.
-    #[serde(default = "default::system::pause_on_next_bootstrap")]
-    pub pause_on_next_bootstrap: Option<bool>,
-
-    #[serde(default = "default::system::wasm_storage_url")]
-    pub wasm_storage_url: Option<String>,
-
-    /// Whether to enable distributed tracing.
-    #[serde(default = "default::system::enable_tracing")]
-    pub enable_tracing: Option<bool>,
+macro_rules! define_system_config {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $doc:literal, $($rest:tt)* },)*) => {
+        paste::paste!(
+            /// The section `[system]` in `risingwave.toml`. All these fields are used to initialize the system
+            /// parameters persisted in Meta store. Most fields are for testing purpose only and should not be
+            /// documented.
+            #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+            pub struct SystemConfig {
+                $(
+                    #[doc = $doc]
+                    #[serde(default = "default::system::" $field "_opt")]
+                    pub $field: Option<$type>,
+                )*
+            }
+        );
+    };
 }
+
+for_all_params!(define_system_config);
 
 /// The subsections `[storage.object_store]`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
@@ -954,23 +921,16 @@ pub struct S3ObjectStoreConfig {
 impl SystemConfig {
     #![allow(deprecated)]
     pub fn into_init_system_params(self) -> SystemParams {
-        SystemParams {
-            barrier_interval_ms: self.barrier_interval_ms,
-            checkpoint_frequency: self.checkpoint_frequency,
-            sstable_size_mb: self.sstable_size_mb,
-            parallel_compact_size_mb: self.parallel_compact_size_mb,
-            block_size_kb: self.block_size_kb,
-            bloom_false_positive: self.bloom_false_positive,
-            state_store: self.state_store,
-            data_directory: self.data_directory,
-            backup_storage_url: self.backup_storage_url,
-            backup_storage_directory: self.backup_storage_directory,
-            max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
-            pause_on_next_bootstrap: self.pause_on_next_bootstrap,
-            wasm_storage_url: self.wasm_storage_url,
-            enable_tracing: self.enable_tracing,
-            telemetry_enabled: None, // deprecated
+        macro_rules! fields {
+            ($({ $field:ident, $($rest:tt)* },)*) => {
+                SystemParams {
+                    $($field: self.$field,)*
+                    ..Default::default() // deprecated fields
+                }
+            };
         }
+
+        for_all_params!(fields)
     }
 }
 
@@ -1416,9 +1376,7 @@ pub mod default {
         }
     }
 
-    pub mod system {
-        pub use crate::system_param::default::*;
-    }
+    pub use crate::system_param::default as system;
 
     pub mod batch {
         pub fn enable_barrier_read() -> bool {
@@ -1428,6 +1386,10 @@ pub mod default {
         pub fn statement_timeout_in_sec() -> u32 {
             // 1 hour
             60 * 60
+        }
+
+        pub fn frontend_compute_runtime_worker_threads() -> usize {
+            4
         }
     }
 
