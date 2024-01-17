@@ -783,7 +783,7 @@ mod tests {
     };
     use crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO;
     use crate::common::log_store_impl::kv_log_store::{
-        KvLogStorePkInfo, KvLogStoreReadMetrics, SeqIdType,
+        KvLogStorePkInfo, KvLogStoreReadMetrics, SeqIdType, KV_LOG_STORE_V2_INFO,
     };
 
     const EPOCH0: u64 = 233;
@@ -791,8 +791,16 @@ mod tests {
     const EPOCH2: u64 = EPOCH1 + 1;
 
     #[test]
-    fn test_serde() {
-        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V1_INFO;
+    fn test_serde_v1() {
+        test_serde_inner(&KV_LOG_STORE_V1_INFO);
+    }
+
+    #[test]
+    fn test_serde_v2() {
+        test_serde_inner(&KV_LOG_STORE_V2_INFO);
+    }
+
+    fn test_serde_inner(pk_info: &'static KvLogStorePkInfo) {
         let table = gen_test_log_store_table(pk_info);
 
         let serde = LogStoreRowSerde::new(
@@ -923,8 +931,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_deserialize_stream_chunk() {
-        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V1_INFO;
+    async fn test_deserialize_stream_chunk_v1() {
+        test_deserialize_stream_chunk_inner(&KV_LOG_STORE_V1_INFO).await
+    }
+
+    #[tokio::test]
+    async fn test_deserialize_stream_chunk_v2() {
+        test_deserialize_stream_chunk_inner(&KV_LOG_STORE_V2_INFO).await
+    }
+
+    async fn test_deserialize_stream_chunk_inner(pk_info: &'static KvLogStorePkInfo) {
         let table = gen_test_log_store_table(pk_info);
         let serde = LogStoreRowSerde::new(
             &table,
@@ -1065,8 +1081,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_row_stream_basic() {
-        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V1_INFO;
+    async fn test_row_stream_basic_v1() {
+        test_row_stream_basic_inner(&KV_LOG_STORE_V1_INFO).await
+    }
+
+    #[tokio::test]
+    async fn test_row_stream_basic_v2() {
+        test_row_stream_basic_inner(&KV_LOG_STORE_V2_INFO).await
+    }
+
+    async fn test_row_stream_basic_inner(pk_info: &'static KvLogStorePkInfo) {
         let table = gen_test_log_store_table(pk_info);
 
         let serde = LogStoreRowSerde::new(
@@ -1162,8 +1186,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_log_store_stream_basic() {
-        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V1_INFO;
+    async fn test_log_store_stream_basic_v1() {
+        test_log_store_stream_basic_inner(&KV_LOG_STORE_V1_INFO).await
+    }
+
+    #[tokio::test]
+    async fn test_log_store_stream_basic_v2() {
+        test_log_store_stream_basic_inner(&KV_LOG_STORE_V2_INFO).await
+    }
+
+    async fn test_log_store_stream_basic_inner(pk_info: &'static KvLogStorePkInfo) {
         let table = gen_test_log_store_table(pk_info);
 
         let serde = LogStoreRowSerde::new(
@@ -1272,7 +1304,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_stream() {
-        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V1_INFO;
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
         let table = gen_test_log_store_table(pk_info);
 
         let serde = LogStoreRowSerde::new(

@@ -416,13 +416,14 @@ mod tests {
     };
     use crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO;
     use crate::common::log_store_impl::kv_log_store::{
-        KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo,
+        KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo, KV_LOG_STORE_V2_INFO,
     };
 
     #[tokio::test]
     async fn test_basic() {
-        for count in 0..20 {
-            test_basic_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V1_INFO).await
+        for count in (0..20).step_by(5) {
+            test_basic_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V1_INFO).await;
+            test_basic_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V2_INFO).await;
         }
     }
 
@@ -516,8 +517,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_recovery() {
-        for count in 0..20 {
-            test_recovery_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V1_INFO).await
+        for count in (0..20).step_by(5) {
+            test_recovery_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V1_INFO).await;
+            test_recovery_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V2_INFO).await;
         }
     }
 
@@ -681,8 +683,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_truncate() {
-        for count in 2..10 {
-            test_truncate_inner(count, &KV_LOG_STORE_V1_INFO).await
+        for count in (2..10).step_by(3) {
+            test_truncate_inner(count, &KV_LOG_STORE_V1_INFO).await;
+            test_truncate_inner(count, &KV_LOG_STORE_V2_INFO).await;
         }
     }
 
@@ -895,7 +898,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_vnode_recover() {
-        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V1_INFO;
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
         let test_env = prepare_hummock_test_env().await;
 
         let table = gen_test_log_store_table(pk_info);
@@ -1093,7 +1096,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cancellation_safe() {
-        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V1_INFO;
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
         let gen_stream_chunk = |base| gen_stream_chunk_with_info(base, pk_info);
         let test_env = prepare_hummock_test_env().await;
 
@@ -1163,7 +1166,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rewind_on_consuming_persisted_log() {
-        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V1_INFO;
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
         let gen_stream_chunk = |base| gen_stream_chunk_with_info(base, pk_info);
         let test_env = prepare_hummock_test_env().await;
 
