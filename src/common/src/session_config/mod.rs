@@ -94,6 +94,10 @@ pub struct ConfigMap {
     #[parameter(default = true, rename = "rw_batch_enable_sort_agg")]
     batch_enable_sort_agg: bool,
 
+    /// Enable distributed dml, so a insert, delete and update statement could be executed in distributed way (e.g. running in multiple compute nodes).
+    #[parameter(default = false, rename = "batch_enable_distributed_dml")]
+    batch_enable_distributed_dml: bool,
+
     /// The max gap allowed to transform small range scan into multi point lookup.
     #[parameter(default = 8)]
     max_split_range_gap: i32,

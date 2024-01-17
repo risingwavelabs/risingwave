@@ -26,8 +26,8 @@ use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::expr::{Expr, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall, PlanBase, ToLocalBatch};
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanNode};
+use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall, PlanBase, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{Condition, IndexSet};
 
@@ -73,17 +73,25 @@ impl_plan_tree_node_for_unary! { BatchInsert }
 
 impl ToDistributedBatch for BatchInsert {
     fn to_distributed(&self) -> Result<PlanRef> {
-        if self.core.ctx().session_ctx().is_barrier_read() {
-            let new_input = RequiredDist::single()
-                .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
-            Ok(self.clone_with_input(new_input).into())
-        } else {
-            let new_input = RequiredDist::Any
-                .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
-            let new_input: PlanRef = self.clone_with_input(new_input).into();
-            if !self.core.returning {
-                let new_input = RequiredDist::single()
-                    .enforce_if_not_satisfies(new_input, &Order::any())?;
+        if self
+            .core
+            .ctx()
+            .session_ctx()
+            .config()
+            .batch_enable_distributed_dml()
+        {
+            // Add an hash shuffle between the insert and its input.
+            let new_input = RequiredDist::PhysicalDist(Distribution::HashShard(
+                (0..self.input().schema().len()).collect(),
+            ))
+            .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
+            let new_insert: PlanRef = self.clone_with_input(new_input).into();
+            if self.core.returning {
+                Ok(new_insert)
+            } else {
+                let new_insert =
+                    RequiredDist::single().enforce_if_not_satisfies(new_insert, &Order::any())?;
+                // Accumulate the affected rows.
                 let sum_agg = PlanAggCall {
                     agg_kind: AggKind::Sum,
                     return_type: DataType::Int64,
@@ -93,12 +101,14 @@ impl ToDistributedBatch for BatchInsert {
                     filter: Condition::true_cond(),
                     direct_args: vec![],
                 };
-                let agg = Agg::new(vec![sum_agg], IndexSet::empty(),  new_input);
+                let agg = Agg::new(vec![sum_agg], IndexSet::empty(), new_insert);
                 let batch_agg = BatchSimpleAgg::new(agg);
                 Ok(batch_agg.into())
-            } else {
-                Ok(new_input)
             }
+        } else {
+            let new_input = RequiredDist::single()
+                .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
+            Ok(self.clone_with_input(new_input).into())
         }
     }
 }

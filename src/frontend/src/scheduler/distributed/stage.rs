@@ -708,9 +708,12 @@ impl StageRunner {
             if candidates.is_empty() {
                 return Err(SchedulerError::EmptyWorkerNodes);
             }
-            return Ok(Some(
-                candidates[self.stage.session_id.0 as usize % candidates.len()].clone(),
-            ));
+            let candidate = if self.stage.batch_enable_distributed_dml {
+                candidates[task_id as usize % candidates.len()].clone()
+            } else {
+                candidates[self.stage.session_id.0 as usize % candidates.len()].clone()
+            };
+            return Ok(Some(candidate));
         };
 
         if let Some(distributed_lookup_join_node) =
