@@ -46,14 +46,6 @@ pub struct SystemParamsReader<I = PbSystemParams> {
     inner: I,
 }
 
-impl Default for SystemParamsReader {
-    fn default() -> Self {
-        Self {
-            inner: PbSystemParams::default(),
-        }
-    }
-}
-
 impl<I> From<I> for SystemParamsReader<I>
 where
     I: Borrow<PbSystemParams>,
@@ -71,18 +63,19 @@ where
         Self { inner }
     }
 
+    /// Return a new reader with the reference to the inner system params.
     pub fn as_ref(&self) -> SystemParamsReader<&PbSystemParams> {
         SystemParamsReader {
             inner: self.inner(),
         }
     }
 
-    fn inner(&self) -> &PbSystemParams {
-        self.inner.borrow()
-    }
-
     pub fn to_kv(&self) -> Vec<(String, String)> {
         system_params_to_kv(&self.inner()).unwrap()
+    }
+
+    fn inner(&self) -> &PbSystemParams {
+        self.inner.borrow()
     }
 }
 

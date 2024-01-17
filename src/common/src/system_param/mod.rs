@@ -325,10 +325,10 @@ macro_rules! impl_set_system_param {
                         let changed = SystemParamsReader::new(&*params).$field() != v;
                         if changed {
                             let new_value = v.to_string();
-                            let diff = SystemParamsDiff::new(PbSystemParams {
-                                $field: Some(v.clone()),
+                            let diff = SystemParamsDiff {
+                                $field: Some(v.to_owned()),
                                 ..Default::default()
-                            });
+                            };
                             params.$field = Some(v);
                             Ok(Some((new_value, diff)))
                         } else {
