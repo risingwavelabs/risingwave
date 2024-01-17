@@ -4,6 +4,9 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
+# Otherwise when listing the logs, and there are none,
+# the glob will be taken as a literal string, rather than expanded.
+shopt -s nullglob
 
 echo "--- Download artifacts"
 download-and-decompress-artifact risingwave_simulation .
@@ -21,7 +24,6 @@ mkdir -p $LOGDIR
 echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, background_ddl"
 seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation --kill --kill-rate=${KILL_RATE} ./e2e_test/background_ddl/sim/basic.slt 2> $LOGDIR/recovery-background-ddl-{}.log && rm $LOGDIR/recovery-background-ddl-{}.log'
 for log in $LOGDIR/recovery-background-ddl-*.log; do
-  echo $log
   filter_stack_trace $log
 done
 
