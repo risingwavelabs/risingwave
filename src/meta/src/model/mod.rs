@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod barrier;
 mod catalog;
 mod cluster;
 mod error;
@@ -28,7 +27,6 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
-pub use barrier::*;
 pub use cluster::*;
 pub use error::*;
 pub use migration_plan::*;
