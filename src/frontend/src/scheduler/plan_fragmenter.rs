@@ -1144,7 +1144,7 @@ mod tests {
 
         let join_node = query.stage_graph.stages.get(&1).unwrap();
         assert_eq!(join_node.root.node_type(), PlanNodeType::BatchHashJoin);
-        assert_eq!(join_node.parallelism, Some(3));
+        assert_eq!(join_node.parallelism, Some(24));
 
         assert!(matches!(join_node.root.node, NodeBody::HashJoin(_)));
         assert_eq!(join_node.root.source_stage_id, None);
