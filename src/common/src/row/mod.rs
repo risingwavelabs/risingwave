@@ -19,7 +19,6 @@ use std::ops::RangeBounds;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use itertools::Itertools;
-use tinyvec::ArrayVec;
 
 use self::empty::EMPTY;
 use crate::hash::HashCode;
@@ -456,6 +455,7 @@ mod owned_row;
 mod project;
 mod repeat_n;
 mod slice;
+pub use ::tinyvec::ArrayVec;
 pub use chain::Chain;
 pub use compacted_row::CompactedRow;
 pub use empty::{empty, Empty};

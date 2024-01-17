@@ -19,7 +19,6 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
-use risingwave_common::constants::log_store::SeqIdType;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::epoch::EpochPair;
@@ -30,7 +29,9 @@ use tokio::sync::watch;
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender;
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
-use crate::common::log_store_impl::kv_log_store::{FlushInfo, KvLogStoreMetrics, FIRST_SEQ_ID};
+use crate::common::log_store_impl::kv_log_store::{
+    FlushInfo, KvLogStoreMetrics, SeqIdType, FIRST_SEQ_ID,
+};
 
 pub struct KvLogStoreWriter<LS: LocalStateStore> {
     _table_id: TableId,

@@ -25,17 +25,12 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::constants::log_store::{
-    KvLogStorePkInfo, RowOpCodeType, SeqIdType, EPOCH_COLUMN_TYPE,
-    KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS,
-};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::row_serde::OrderedRowSerde;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::{
     BasicSerde, ValueRowDeserializer, ValueRowSerializer,
 };
@@ -50,7 +45,7 @@ use risingwave_storage::store::StateStoreReadIterStream;
 use risingwave_storage::table::{compute_vnode, TableDistribution, SINGLETON_VNODE};
 
 use crate::common::log_store_impl::kv_log_store::{
-    KvLogStoreReadMetrics, ReaderTruncationOffsetType,
+    KvLogStorePkInfo, KvLogStoreReadMetrics, ReaderTruncationOffsetType, RowOpCodeType, SeqIdType,
 };
 
 const INSERT_OP_CODE: RowOpCodeType = 1;
@@ -154,17 +149,12 @@ impl LogStoreRowSerde {
             .map(|idx| table_columns[*idx].data_type.clone())
             .collect_vec();
 
-        let pk_types = pk_info.types;
-
-        assert!(data_types.len() >= predefined_column_len);
-        for i in 0..pk_info.len {
-            assert_eq!(data_types[i], pk_types[i]);
-        }
-        for i in pk_info.len..predefined_column_len {
-            assert_eq!(
-                data_types[i],
-                KV_LOG_STORE_PREDEFINED_EXTRA_NON_PK_COLUMNS[i - pk_info.len].1
-            );
+        for (schema_data_type, (_, log_store_data_type)) in data_types
+            .iter()
+            .take(predefined_column_len)
+            .zip_eq(pk_info.predefined_columns.iter())
+        {
+            assert_eq!(schema_data_type, log_store_data_type);
         }
 
         let payload_schema = data_types[predefined_column_len..].to_vec();
@@ -179,10 +169,13 @@ impl LogStoreRowSerde {
 
         // epoch and seq_id. The seq_id of barrier is set null, and therefore the second order type
         // is nulls last
-        let pk_serde = OrderedRowSerde::new(Vec::from(pk_types), Vec::from(pk_info.orderings));
+        let pk_serde = OrderedRowSerde::new(pk_info.pk_types(), Vec::from(pk_info.pk_orderings));
 
-        let epoch_serde =
-            OrderedRowSerde::new(vec![EPOCH_COLUMN_TYPE], vec![OrderType::ascending()]);
+        let epoch_col_idx = pk_info.epoch_column_index;
+        let epoch_serde = OrderedRowSerde::new(
+            vec![pk_info.predefined_columns[epoch_col_idx].1.clone()],
+            vec![pk_info.pk_orderings[epoch_col_idx]],
+        );
 
         let dist_key_indices = if dist_key_indices.is_empty() {
             if &vnodes != TableDistribution::singleton_vnode_bitmap_ref() {
@@ -322,7 +315,7 @@ impl LogStoreRowSerde {
                 .unwrap()
                 .as_int64(),
         );
-        let row_op_code = *row_data[self.pk_info.seq_id_column_index]
+        let row_op_code = *row_data[self.pk_info.row_op_column_index]
             .as_ref()
             .unwrap()
             .as_int16();
@@ -771,8 +764,6 @@ mod tests {
     use rand::thread_rng;
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::buffer::Bitmap;
-    use risingwave_common::constants::log_store::v1::KV_LOG_STORE_V1_INFO;
-    use risingwave_common::constants::log_store::KvLogStorePkInfo;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::DataType;
@@ -790,7 +781,10 @@ mod tests {
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         check_rows_eq, gen_test_data, gen_test_log_store_table, TEST_TABLE_ID,
     };
-    use crate::common::log_store_impl::kv_log_store::{KvLogStoreReadMetrics, SeqIdType};
+    use crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO;
+    use crate::common::log_store_impl::kv_log_store::{
+        KvLogStorePkInfo, KvLogStoreReadMetrics, SeqIdType,
+    };
 
     const EPOCH0: u64 = 233;
     const EPOCH1: u64 = EPOCH0 + 1;
