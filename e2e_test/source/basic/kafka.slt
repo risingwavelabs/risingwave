@@ -293,8 +293,8 @@ with (
   properties.bootstrap.server = 'message_queue:29092'
 ) FORMAT PLAIN ENCODE AVRO (schema.registry = 'http://127.0.0.1:8081');
 
-# we cannot create debezium source with generated column
-statement error
+# create debezium source with generated column
+statement ok
 create table s20 (
   id integer primary key,
   first_name varchar,
