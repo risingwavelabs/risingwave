@@ -195,6 +195,8 @@ message AdditionalColumnPartition {}
 
 message AdditionalColumnOffset {}
 
+message AdditionalColumnFilename {}
+
 message AdditionalColumnHeader {
     optional string inner_field = 1;
 }
@@ -207,6 +209,7 @@ message AdditionalColumn {
         AdditionalColumnPartition partition = 4;
         AdditionalColumnOffset offset = 5;
         AdditionalColumnHeader header = 6;
+        AdditionalColumnFilename filename = 7;
     }
 }
 
