@@ -19,7 +19,7 @@ use risingwave_common::catalog::ColumnCatalog;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkType};
 use risingwave_connector::sink::{
-    SinkError, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
+    SinkError, SinkMetaClient, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
 };
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
 
@@ -116,7 +116,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             connector_params: params.env.connector_params(),
             executor_id: params.executor_id,
             vnode_bitmap: params.vnode_bitmap.clone(),
-            meta_client: params.env.meta_client(),
+            meta_client: params.env.meta_client().map(SinkMetaClient::MetaClient),
             sink_metrics,
         };
 

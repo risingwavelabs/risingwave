@@ -200,12 +200,82 @@ test_sink_backfill_recovery() {
   wait
 }
 
+test_no_shuffle_backfill_runtime() {
+  echo "--- e2e, test_no_shuffle_backfill_runtime"
+  cargo make ci-start $CLUSTER_PROFILE
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert.slt'
+
+  # Provide updates ...
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert.slt' 2>&1 1>out.log &
+
+  # ... and concurrently create mv.
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
+
+  wait
+
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows.slt'
+
+  cargo make kill
+  cargo make wait-processes-exit
+}
+
+test_arrangement_backfill_runtime() {
+  echo "--- e2e, test_arrangement_backfill_runtime"
+  cargo make ci-start $CLUSTER_PROFILE
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert.slt'
+
+  # Provide updates ...
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert.slt' 2>&1 1>out.log &
+
+  # ... and concurrently create mv.
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
+
+  wait
+
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows.slt'
+
+  cargo make kill
+  cargo make wait-processes-exit
+}
+
+test_no_shuffle_backfill_snapshot_only_runtime() {
+  echo "--- e2e, test_no_shuffle_backfill_snapshot_only_runtime"
+  cargo make ci-start $CLUSTER_PROFILE
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows.slt'
+
+  cargo make kill
+  cargo make wait-processes-exit
+}
+
+test_arrangement_backfill_snapshot_only_runtime() {
+  echo "--- e2e, test_arrangement_backfill_snapshot_only_runtime"
+  cargo make ci-start $CLUSTER_PROFILE
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows.slt'
+
+  cargo make kill
+  cargo make wait-processes-exit
+}
+
 main() {
   set -euo pipefail
   test_snapshot_and_upstream_read
   test_backfill_tombstone
   test_replication_with_column_pruning
   test_sink_backfill_recovery
+  test_no_shuffle_backfill_runtime
+  test_arrangement_backfill_runtime
+  test_no_shuffle_backfill_snapshot_only_runtime
+  test_arrangement_backfill_snapshot_only_runtime
 }
 
 main
