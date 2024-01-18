@@ -33,7 +33,7 @@ pub fn handle_sr_list(addr: &str) -> Result<Vec<Url>, InvalidOptionError> {
         }
     }
     if urls.is_empty() {
-        bail_invalid_option_error!("no valid url provided, got {errs:?}");
+        bail_invalid_option_error!("no valid url provided, errs: {errs:?}");
     }
     tracing::debug!(
         "schema registry client will use url {:?} to connect, the rest failed because: {:?}",

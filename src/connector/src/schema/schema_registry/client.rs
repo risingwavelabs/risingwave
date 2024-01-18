@@ -62,7 +62,7 @@ pub struct Client {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("all request confluent registry all timeout, {context}, errs: {errs:?}")]
+#[error("all request confluent registry all timeout, {context}\n{}", errs.iter().map(|e| format!("\t{}", e.as_report())).join("\n"))]
 pub struct ConcurrentRequestError {
     errs: Vec<itertools::Either<RequestError, tokio::task::JoinError>>,
     context: String,
@@ -88,7 +88,7 @@ impl Client {
             .map(|(_, url)| url.clone())
             .collect_vec();
         if valid_urls.is_empty() {
-            return Err(invalid_option_error!("no valid url provided, got {url:?}"));
+            return Err(invalid_option_error!("non-base: {}", url.iter().join(" ")));
         } else {
             tracing::debug!(
                 "schema registry client will use url {:?} to connect",
@@ -98,7 +98,7 @@ impl Client {
 
         let inner = reqwest::Client::builder()
             .build()
-            .map_err(|e| invalid_option_error!("build reqwest client failed {}", e.as_report()))?;
+            .map_err(|e| invalid_option_error!("build reqwest client failed: {}", e.as_report()))?;
 
         Ok(Client {
             inner,
@@ -147,7 +147,7 @@ impl Client {
 
         Err(ConcurrentRequestError {
             errs,
-            context: format!("req path {:?}, urls {:?}", path, self.url),
+            context: format!("req path {:?}, urls {}", path, self.url.iter().join(" ")),
         })
     }
 
