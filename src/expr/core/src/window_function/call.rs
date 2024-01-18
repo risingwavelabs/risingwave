@@ -17,7 +17,7 @@ use std::fmt::Display;
 use enum_as_inner::EnumAsInner;
 use parse_display::Display;
 use risingwave_common::bail;
-use risingwave_common::types::{DataType, ScalarImpl, ScalarRefImpl, ToText};
+use risingwave_common::types::{DataType, IsNegative, ScalarImpl, ScalarRefImpl, ToText};
 use risingwave_pb::expr::window_frame::{PbBound, PbExclusion};
 use risingwave_pb::expr::{PbWindowFrame, PbWindowFunction};
 use FrameBound::{CurrentRow, Following, Preceding, UnboundedFollowing, UnboundedPreceding};
@@ -234,25 +234,33 @@ impl Display for RangeFrameBounds {
 
 impl FrameBoundsImpl for RangeFrameBounds {
     fn validate(&self) -> Result<()> {
+        fn validate_non_negative(val: impl IsNegative + Display) -> Result<()> {
+            if val.is_negative() {
+                bail!(
+                    "frame bound offset should be non-negative, but {} is given",
+                    val
+                );
+            }
+            Ok(())
+        }
+
         FrameBound::validate_bounds(&self.start, &self.end, |offset| {
             match offset.as_scalar_ref_impl() {
-                // TODO(): use decl macro to merge with the following
-                ScalarRefImpl::Int16(val) => {
-                    if val < 0 {
-                        bail!("frame bound offset should be non-negative, but {} is given", val);
+                // TODO(rc): use decl macro?
+                ScalarRefImpl::Int16(val) => validate_non_negative(val)?,
+                ScalarRefImpl::Int32(val) => validate_non_negative(val)?,
+                ScalarRefImpl::Int64(val) => validate_non_negative(val)?,
+                ScalarRefImpl::Float32(val) => validate_non_negative(val)?,
+                ScalarRefImpl::Float64(val) => validate_non_negative(val)?,
+                ScalarRefImpl::Decimal(val) => validate_non_negative(val)?,
+                ScalarRefImpl::Interval(val) => {
+                    if !val.is_never_negative() {
+                        bail!(
+                            "for frame bound offset of type `interval`, each field should be non-negative, but {} is given",
+                            val
+                        );
                     }
-                }
-                ScalarRefImpl::Int32(val) => {
-                    if val < 0 {
-                        bail!("frame bound offset should be non-negative, but {} is given", val);
-                    }
-                }
-                ScalarRefImpl::Int64(val) => {
-                    if val < 0 {
-                        bail!("frame bound offset should be non-negative, but {} is given", val);
-                    }
-                }
-                // TODO(): datetime types
+                },
                 _ => unreachable!("other order column data types are not supported and should be banned in frontend"),
             }
             Ok(())

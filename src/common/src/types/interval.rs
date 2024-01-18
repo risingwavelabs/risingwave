@@ -384,6 +384,11 @@ impl Interval {
         self > &Self::from_month_day_usec(0, 0, 0)
     }
 
+    /// Checks if all fields of [`Interval`] are all non-negative.
+    pub fn is_never_negative(&self) -> bool {
+        self.months >= 0 && self.days >= 0 && self.usecs >= 0
+    }
+
     /// Truncate the interval to the precision of milliseconds.
     ///
     /// # Example
