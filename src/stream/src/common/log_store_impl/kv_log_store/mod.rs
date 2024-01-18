@@ -264,6 +264,12 @@ mod v1 {
 
 pub(crate) use v2::KV_LOG_STORE_V2_INFO;
 
+/// A new version of log store schema. Compared to v1, the v2 added a new vnode column to the log store pk,
+/// becomes `epoch`, `seq_id` and `vnode`. In this way, providing a log store pk, we can get exactly one single row.
+///
+/// In v1, dist key is not in pk, and we will get an error in batch query when we try to compute dist key in pk indices.
+/// Now in v2, since we add a vnode column in pk, we can set the vnode index in pk correctly, and the batch query can be
+/// correctly executed. See https://github.com/risingwavelabs/risingwave/issues/14503 for details.
 mod v2 {
     use std::sync::LazyLock;
 
