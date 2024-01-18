@@ -215,7 +215,7 @@ test_arrangement_backfill_snapshot_and_upstream_runtime() {
 
   wait
 
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_arrangement.slt'
 
   cargo make kill
   cargo make wait-processes-exit
@@ -232,7 +232,6 @@ test_no_shuffle_backfill_snapshot_and_upstream_runtime() {
   wait
 
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_no_shuffle.slt'
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_arrangement.slt'
 
   cargo make kill
   cargo make wait-processes-exit
@@ -245,7 +244,8 @@ test_backfill_snapshot_runtime() {
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_no_shuffle.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_arrangement.slt'
 
   cargo make kill
   cargo make wait-processes-exit
