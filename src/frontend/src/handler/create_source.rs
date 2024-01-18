@@ -562,7 +562,7 @@ pub(crate) fn bind_all_columns(
         if cols_from_sql.is_empty() {
             Ok(cols_from_source)
         } else if let Some(wildcard_idx) = wildcard_idx {
-            if cols_from_sql.iter().any(|c| !c.is_generated()) {
+            if col_defs_from_sql.iter().any(|c| !c.is_generated()) {
                 Err(RwError::from(NotSupported(
                     "Only generated columns are allowed in user-defined schema from SQL"
                         .to_string(),
