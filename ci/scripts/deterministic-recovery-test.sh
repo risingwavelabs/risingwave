@@ -35,8 +35,8 @@ done
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, streaming"
 seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation --kill --kill-rate=${KILL_RATE} --background-ddl-rate=${BACKGROUND_DDL_RATE} ./e2e_test/streaming/\*\*/\*.slt 2> $LOGDIR/recovery-streaming-{}.log && rm $LOGDIR/recovery-streaming-{}.log'
-for log in $LOGDIR/recovery-streaming-*.log; do
-  filter_stack_trace $log
+for log in "${LOGDIR}"/recovery-streaming-*.log; do
+  filter_stack_trace "$log"
 done
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, batch"
