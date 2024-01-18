@@ -9155,6 +9155,7 @@ dependencies = [
  "ctor",
  "downcast-rs",
  "easy-ext",
+ "educe 0.5.7",
  "either",
  "enum-as-inner",
  "expect-test",

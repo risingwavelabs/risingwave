@@ -143,6 +143,10 @@ impl FrameBounds {
     }
 }
 
+pub trait FrameBoundsImpl {
+    fn validate(&self) -> Result<()>;
+}
+
 #[derive(Display, Debug, Clone, Eq, PartialEq, Hash)]
 #[display("ROWS BETWEEN {start} AND {end}")]
 pub struct RowsFrameBounds {
@@ -150,7 +154,7 @@ pub struct RowsFrameBounds {
     pub end: FrameBound<usize>,
 }
 
-impl RowsFrameBounds {
+impl FrameBoundsImpl for RowsFrameBounds {
     fn validate(&self) -> Result<()> {
         FrameBound::validate_bounds(&self.start, &self.end)
     }
