@@ -216,7 +216,7 @@ impl<const N: usize> Hitmap<N> {
         Self::bits() - self.ones()
     }
 
-    pub fn ratio(self) -> f64 {
+    pub fn ratio(&self) -> f64 {
         self.ones() as f64 / Self::bits() as f64
     }
 
@@ -427,6 +427,10 @@ impl Block {
 
     pub fn raw(&self) -> &[u8] {
         &self.data[..]
+    }
+
+    pub fn efficiency(&self) -> f64 {
+        self.hitmap.ratio()
     }
 }
 

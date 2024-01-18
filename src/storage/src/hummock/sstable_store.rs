@@ -50,7 +50,9 @@ use crate::hummock::multi_builder::UploadJoinHandle;
 use crate::hummock::{
     BlockHolder, CacheableEntry, HummockError, HummockResult, LruCache, MemoryLimiter,
 };
-use crate::monitor::{MemoryCollector, StoreLocalStatistic};
+use crate::monitor::{
+    HummockMetrics, MemoryCollector, StoreLocalStatistic, GLOBAL_HUMMOCK_METRICS,
+};
 
 const MAX_META_CACHE_SHARD_BITS: usize = 2;
 const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
@@ -101,6 +103,7 @@ impl From<CachePolicy> for TracedCachePolicy {
 
 struct BlockCacheEventListener {
     data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
+    metrics: HummockMetrics,
 }
 
 impl LruCacheEventListener for BlockCacheEventListener {
@@ -112,6 +115,9 @@ impl LruCacheEventListener for BlockCacheEventListener {
             sst_id: key.0,
             block_idx: key.1,
         };
+        self.metrics
+            .block_efficiency_histogram
+            .observe(value.efficiency());
         // temporarily avoid spawn task while task drop with madsim
         // FYI: https://github.com/madsim-rs/madsim/issues/182
         #[cfg(not(madsim))]
@@ -194,8 +200,10 @@ impl SstableStore {
         while (meta_cache_capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
             shard_bits -= 1;
         }
+        let metrics = GLOBAL_HUMMOCK_METRICS.clone();
         let block_cache_listener = Arc::new(BlockCacheEventListener {
             data_file_cache: data_file_cache.clone(),
+            metrics,
         });
         let meta_cache_listener = Arc::new(MetaCacheEventListener(meta_file_cache.clone()));
         Self {

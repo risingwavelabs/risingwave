@@ -28,6 +28,9 @@ pub struct HummockMetrics {
     pub report_compaction_task_counts: GenericCounter<AtomicU64>,
     pub get_new_sst_ids_latency: Histogram,
     pub report_compaction_task_latency: Histogram,
+
+    // block statistics
+    pub block_efficiency_histogram: Histogram,
 }
 
 pub static GLOBAL_HUMMOCK_METRICS: LazyLock<HummockMetrics> =
@@ -72,11 +75,21 @@ impl HummockMetrics {
             register_histogram_with_registry!(report_compaction_task_latency_opts, registry)
                 .unwrap();
 
+        let block_efficiency_histogram = register_histogram_with_registry!(
+            "block_efficiency_histogram",
+            "block efficiency histogram",
+            exponential_buckets(0.001, 2.0, 11).unwrap(),
+            registry,
+        )
+        .unwrap();
+
         Self {
             get_new_sst_ids_counts,
             report_compaction_task_counts,
             get_new_sst_ids_latency,
             report_compaction_task_latency,
+
+            block_efficiency_histogram,
         }
     }
 
