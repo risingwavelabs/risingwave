@@ -180,6 +180,7 @@ mod tests {
     use super::*;
 
     const TEST_TRANSACTION_ID: TxnId = 0;
+    const TEST_SESSION_ID: u32 = 0;
 
     #[tokio::test]
     async fn test_register_and_drop() {
@@ -206,7 +207,9 @@ mod tests {
         let table_dml_handle = dml_manager
             .table_dml_handle(table_id, table_version_id)
             .unwrap();
-        let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        let mut write_handle = table_dml_handle
+            .write_handle(TEST_SESSION_ID, TEST_TRANSACTION_ID)
+            .unwrap();
         write_handle.begin().unwrap();
 
         // Should be able to write to the table.
@@ -219,7 +222,9 @@ mod tests {
         write_handle.write_chunk(chunk()).await.unwrap_err();
 
         // Unless we create a new write handle.
-        let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        let mut write_handle = table_dml_handle
+            .write_handle(TEST_SESSION_ID, TEST_TRANSACTION_ID)
+            .unwrap();
         write_handle.begin().unwrap();
         write_handle.write_chunk(chunk()).await.unwrap();
 
@@ -254,7 +259,9 @@ mod tests {
         let table_dml_handle = dml_manager
             .table_dml_handle(table_id, old_version_id)
             .unwrap();
-        let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        let mut write_handle = table_dml_handle
+            .write_handle(TEST_SESSION_ID, TEST_TRANSACTION_ID)
+            .unwrap();
         write_handle.begin().unwrap();
 
         // Should be able to write to the table.
@@ -278,7 +285,9 @@ mod tests {
         let table_dml_handle = dml_manager
             .table_dml_handle(table_id, new_version_id)
             .unwrap();
-        let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        let mut write_handle = table_dml_handle
+            .write_handle(TEST_SESSION_ID, TEST_TRANSACTION_ID)
+            .unwrap();
         write_handle.begin().unwrap();
         write_handle.write_chunk(new_chunk()).await.unwrap();
     }

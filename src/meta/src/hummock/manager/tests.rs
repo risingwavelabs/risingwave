@@ -47,7 +47,7 @@ use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
 use crate::hummock::{CommitEpochInfo, HummockManager, HummockManagerRef};
-use crate::manager::WorkerId;
+use crate::manager::{MetaSrvEnv, WorkerId};
 use crate::model::MetadataModel;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -99,6 +99,40 @@ fn get_compaction_group_object_ids(
         .collect_vec()
 }
 
+async fn list_pinned_snapshot_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedSnapshot> {
+    match env.sql_meta_store() {
+        None => HummockPinnedSnapshot::list(env.meta_store()).await.unwrap(),
+        Some(sql_meta_store) => {
+            use risingwave_meta_model_v2::hummock_pinned_snapshot;
+            use sea_orm::EntityTrait;
+            hummock_pinned_snapshot::Entity::find()
+                .all(&sql_meta_store.conn)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(Into::into)
+                .collect()
+        }
+    }
+}
+
+async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedVersion> {
+    match env.sql_meta_store() {
+        None => HummockPinnedVersion::list(env.meta_store()).await.unwrap(),
+        Some(sql_meta_store) => {
+            use risingwave_meta_model_v2::hummock_pinned_version;
+            use sea_orm::EntityTrait;
+            hummock_pinned_version::Entity::find()
+                .all(&sql_meta_store.conn)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(Into::into)
+                .collect()
+        }
+    }
+}
+
 #[tokio::test]
 async fn test_unpin_snapshot_before() {
     let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
@@ -108,7 +142,7 @@ async fn test_unpin_snapshot_before() {
     for _ in 0..2 {
         let pin_result = hummock_manager.pin_snapshot(context_id).await.unwrap();
         assert_eq!(pin_result.committed_epoch, epoch);
-        let pinned_snapshots = HummockPinnedSnapshot::list(env.meta_store()).await.unwrap();
+        let pinned_snapshots = list_pinned_snapshot_from_meta_store(&env).await;
         assert_eq!(pinned_snapshots[0].context_id, context_id);
         assert_eq!(
             pinned_snapshots[0].minimal_pinned_snapshot,
@@ -129,7 +163,7 @@ async fn test_unpin_snapshot_before() {
             .await
             .unwrap();
         assert_eq!(
-            pin_snapshots_epoch(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
+            pin_snapshots_epoch(&list_pinned_snapshot_from_meta_store(&env).await),
             vec![epoch]
         );
     }
@@ -147,7 +181,7 @@ async fn test_unpin_snapshot_before() {
             .await
             .unwrap();
         assert_eq!(
-            pin_snapshots_epoch(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
+            pin_snapshots_epoch(&list_pinned_snapshot_from_meta_store(&env).await),
             vec![epoch]
         );
     }
@@ -389,7 +423,7 @@ async fn test_release_context_resource() {
     let context_id_2 = worker_node_2.id;
 
     assert_eq!(
-        pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await.unwrap()),
+        pin_versions_sum(&list_pinned_version_from_meta_store(&env).await),
         0
     );
     hummock_manager.pin_version(context_id_1).await.unwrap();
@@ -397,24 +431,18 @@ async fn test_release_context_resource() {
     hummock_manager.pin_snapshot(context_id_1).await.unwrap();
     hummock_manager.pin_snapshot(context_id_2).await.unwrap();
     assert_eq!(
-        pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await.unwrap()),
+        pin_versions_sum(&list_pinned_version_from_meta_store(&env).await),
         2
     );
-    assert_eq!(
-        HummockPinnedSnapshot::list(env.meta_store())
-            .await
-            .unwrap()
-            .len(),
-        2
-    );
+    assert_eq!(list_pinned_version_from_meta_store(&env).await.len(), 2);
     hummock_manager
         .release_contexts(&vec![context_id_1])
         .await
         .unwrap();
-    let pinned_versions = HummockPinnedVersion::list(env.meta_store()).await.unwrap();
+    let pinned_versions = list_pinned_version_from_meta_store(&env).await;
     assert_eq!(pin_versions_sum(&pinned_versions), 1);
     assert_eq!(pinned_versions[0].context_id, context_id_2);
-    let pinned_snapshots = HummockPinnedSnapshot::list(env.meta_store()).await.unwrap();
+    let pinned_snapshots = list_pinned_snapshot_from_meta_store(&env).await;
     assert_eq!(pinned_snapshots[0].context_id, context_id_2);
     // it's OK to call again
     hummock_manager
@@ -426,7 +454,7 @@ async fn test_release_context_resource() {
         .await
         .unwrap();
     assert_eq!(
-        pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await.unwrap()),
+        pin_versions_sum(&list_pinned_version_from_meta_store(&env).await),
         0
     );
 }
@@ -738,7 +766,7 @@ async fn test_print_compact_task() {
     );
 
     let s = compact_task_to_string(&compact_task);
-    assert!(s.contains("Compaction task id: 1, group-id: 2, target level: 0"));
+    assert!(s.contains("Compaction task id: 1, group-id: 2, task type: Dynamic, target level: 0"));
 }
 
 #[tokio::test]

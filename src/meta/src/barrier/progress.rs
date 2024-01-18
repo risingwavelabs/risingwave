@@ -161,7 +161,7 @@ pub enum TrackingJob {
 impl TrackingJob {
     fn metadata_manager(&self) -> &MetadataManager {
         match self {
-            TrackingJob::New(command) => &command.context.metadata_manager,
+            TrackingJob::New(command) => command.context.metadata_manager(),
             TrackingJob::Recovered(recovered) => &recovered.metadata_manager,
         }
     }
@@ -223,13 +223,6 @@ impl TrackingJob {
             TrackingJob::Recovered(recovered) => Some(recovered.fragments.table_id()),
         }
     }
-
-    pub(crate) fn tracks_sink(&self) -> bool {
-        match self {
-            TrackingJob::New(command) => command.tracks_sink(),
-            TrackingJob::Recovered(_) => false,
-        }
-    }
 }
 
 pub struct RecoveredTrackingJob {
@@ -245,15 +238,6 @@ pub(super) struct TrackingCommand {
 
     /// Should be called when the command is finished.
     pub notifiers: Vec<Notifier>,
-}
-
-impl TrackingCommand {
-    pub fn tracks_sink(&self) -> bool {
-        match &self.context.command {
-            Command::CreateStreamingJob { ddl_type, .. } => *ddl_type == DdlType::Sink,
-            _ => false,
-        }
-    }
 }
 
 /// Track the progress of all creating mviews. When creation is done, `notify_finished` will be
@@ -443,20 +427,6 @@ impl CreateMviewProgressTracker {
             definition,
         );
         if *ddl_type == DdlType::Sink {
-            // First we duplicate a separate tracking job for sink.
-            // This does not need notifiers, it is solely used for
-            // tracking the backfill progress of sink.
-            // It will still be removed from progress map when
-            // backfill completes.
-            let tracking_job = TrackingJob::New(TrackingCommand {
-                context: command.context.clone(),
-                notifiers: vec![],
-            });
-            let old = self
-                .progress_map
-                .insert(creating_mv_id, (progress, tracking_job));
-            assert!(old.is_none());
-
             // We return the original tracking job immediately.
             // This is because sink can be decoupled with backfill progress.
             // We don't need to wait for sink to finish backfill.

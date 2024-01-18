@@ -23,7 +23,7 @@ use crate::planner::Planner;
 
 impl Planner {
     pub(super) fn plan_insert(&mut self, insert: BoundInsert) -> Result<PlanRoot> {
-        let mut input = self.plan_query(insert.source)?.into_subplan();
+        let mut input = self.plan_query(insert.source)?.into_unordered_subplan();
         if !insert.cast_exprs.is_empty() {
             input = LogicalProject::create(input, insert.cast_exprs);
         }

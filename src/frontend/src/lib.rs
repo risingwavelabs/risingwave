@@ -33,6 +33,7 @@
 #![feature(result_flattening)]
 #![feature(error_generic_member_access)]
 #![feature(round_ties_even)]
+#![feature(iterator_try_collect)]
 #![recursion_limit = "256"]
 
 #[cfg(test)]
@@ -137,6 +138,16 @@ pub struct FrontendOpts {
     #[clap(long, env = "RW_ENABLE_BARRIER_READ")]
     #[override_opts(path = batch.enable_barrier_read)]
     pub enable_barrier_read: Option<bool>,
+}
+
+impl risingwave_common::opts::Opts for FrontendOpts {
+    fn name() -> &'static str {
+        "frontend"
+    }
+
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        self.meta_addr.clone()
+    }
 }
 
 impl Default for FrontendOpts {

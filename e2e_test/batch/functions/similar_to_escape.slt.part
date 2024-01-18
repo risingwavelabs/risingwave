@@ -68,11 +68,21 @@ select 'foobar' similar to '%#"o_b#"%' escape '\';
 ----
 f
 
-# fallback to default escape string
+# disable escape
 query B
-select 'foobar' similar to '%#"o_b#"%' escape '';
+select 'foo\bar' similar to 'foo\%bar' escape '';
+----
+t
+
+query B
+select 'foo\bar' similar to 'foo\%bar' escape '\';
 ----
 f
+
+query B
+select 'foo%bar' similar to 'foo\%bar' escape '\';
+----
+t
 
 query B
 select 'foobar' similar to '%#"o_b#"%' escape '#';

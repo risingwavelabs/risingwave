@@ -173,6 +173,7 @@ async fn main() {
         meta_nodes: args.meta_nodes,
         etcd_timeout_rate: args.etcd_timeout_rate,
         etcd_data_path: args.etcd_data,
+        ..Default::default()
     };
     let kill_opts = KillOpts {
         kill_meta: args.kill_meta || args.kill,
@@ -201,7 +202,7 @@ async fn main() {
                     .await
                     .unwrap();
                 if let Some(outdir) = args.generate_sqlsmith_queries {
-                    risingwave_sqlsmith::runner::generate(
+                    risingwave_sqlsmith::test_runners::generate(
                         rw.pg_client(),
                         &args.files,
                         count,
@@ -212,7 +213,7 @@ async fn main() {
                     return;
                 }
                 if args.run_differential_tests {
-                    risingwave_sqlsmith::runner::run_differential_testing(
+                    risingwave_sqlsmith::test_runners::run_differential_testing(
                         rw.pg_client(),
                         &args.files,
                         count,
@@ -223,8 +224,13 @@ async fn main() {
                     return;
                 }
 
-                risingwave_sqlsmith::runner::run(rw.pg_client(), &args.files, count, Some(seed))
-                    .await;
+                risingwave_sqlsmith::test_runners::run(
+                    rw.pg_client(),
+                    &args.files,
+                    count,
+                    Some(seed),
+                )
+                .await;
             })
             .await;
         return;
@@ -237,7 +243,7 @@ async fn main() {
                 let rw = RisingWave::connect("frontend".into(), "dev".into())
                     .await
                     .unwrap();
-                risingwave_sqlsmith::runner::run_pre_generated(rw.pg_client(), &outdir).await;
+                risingwave_sqlsmith::test_runners::run_pre_generated(rw.pg_client(), &outdir).await;
             })
             .await;
         return;

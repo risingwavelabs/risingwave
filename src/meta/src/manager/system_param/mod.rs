@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use risingwave_common::system_param::common::CommonHandler;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::{check_missing_params, set_system_param};
 use risingwave_common::{for_all_params, key_of};
@@ -43,6 +44,8 @@ pub struct SystemParamsManager {
     notification_manager: NotificationManagerRef,
     // Cached parameters.
     params: RwLock<SystemParams>,
+    /// Common handler for system params.
+    common_handler: CommonHandler,
 }
 
 impl SystemParamsManager {
@@ -69,7 +72,8 @@ impl SystemParamsManager {
         Ok(Self {
             meta_store,
             notification_manager,
-            params: RwLock::new(params),
+            params: RwLock::new(params.clone()),
+            common_handler: CommonHandler::new(params.into()),
         })
     }
 
@@ -93,6 +97,11 @@ impl SystemParamsManager {
         self.meta_store.txn(store_txn).await?;
 
         mem_txn.commit();
+
+        // TODO: check if the parameter is actually changed.
+
+        // Run common handler.
+        self.common_handler.handle_change(params.clone().into());
 
         // Sync params to other managers on the meta node only once, since it's infallible.
         self.notification_manager
@@ -159,7 +168,7 @@ impl SystemParamsManager {
 // 4. None, None: A new version of RW cluster is launched for the first time and newly introduced
 // params are not set. The new field is not initialized either, just leave it as `None`.
 macro_rules! impl_merge_params {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $($rest:tt)* },)*) => {
         fn merge_params(mut persisted: SystemParams, init: SystemParams) -> SystemParams {
             $(
                 match (persisted.$field.as_ref(), init.$field) {

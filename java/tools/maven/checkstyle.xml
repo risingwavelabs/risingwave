@@ -191,9 +191,23 @@ This file is based on the checkstyle file of Apache Beam.
             <property name="illegalPkgs" value="io.netty"/>
             <message key="import.illegal" value="{0}; Use flink-shaded-netty instead."/>
         </module>
+        <!--
         <module name="IllegalImport">
             <property name="illegalPkgs" value="com.google.common"/>
             <message key="import.illegal" value="{0}; Use flink-shaded-guava instead."/>
+        </module>
+        -->
+        <module name="IllegalImport">
+            <property name="illegalClasses" value="java.util.Date, java.sql.Date, java.sql.Timestamp, java.sql.Time"/>
+            <message key="import.illegal" value="{0}; Use java.time.* instead."/>
+        </module>
+        <module name="IllegalImport">
+            <property name="illegalClasses" value="java.text.DateFormat, java.text.SimpleDateFormat"/>
+            <message key="import.illegal" value="{0}; Use java.time.* instead."/>
+        </module>
+        <module name="IllegalImport">
+            <property name="illegalClasses" value="java.util.Calendar, java.util.GregorianCalendar"/>
+            <message key="import.illegal" value="{0}; Use java.time.* instead."/>
         </module>
 
         <module name="RedundantModifier">

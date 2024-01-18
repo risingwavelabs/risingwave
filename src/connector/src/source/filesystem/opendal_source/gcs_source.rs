@@ -32,9 +32,13 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         builder.bucket(&gcs_properties.bucket_name);
 
         // if credential env is set, use it. Otherwise, ADC will be used.
-        let cred = gcs_properties.credential;
-        if let Some(cred) = cred {
+        if let Some(cred) = gcs_properties.credential {
             builder.credential(&cred);
+        } else {
+            let cred = std::env::var("GOOGLE_APPLICATION_CREDENTIALS");
+            if let Ok(cred) = cred {
+                builder.credential(&cred);
+            }
         }
 
         if let Some(service_account) = gcs_properties.service_account {

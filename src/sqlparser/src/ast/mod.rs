@@ -1643,12 +1643,12 @@ impl fmt::Display for Statement {
                     write!(f, " APPEND ONLY")?;
                 }
                 if !include_column_options.is_empty() { // (Ident, Option<Ident>)
-                    write!(f, " INCLUDE {}", display_comma_separated(
+                    write!(f, "{}", display_comma_separated(
                         include_column_options.iter().map(|(a, b)| {
                             if let Some(b) = b {
-                                format!("{} AS {}", a, b)
+                                format!("INCLUDE {} AS {}", a, b)
                             } else {
-                                a.to_string()
+                                format!("INCLUDE {}", a)
                             }
                         }).collect_vec().as_slice()
                     ))?;
@@ -2712,6 +2712,7 @@ impl fmt::Display for CreateFunctionBody {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CreateFunctionUsing {
     Link(String),
+    Base64(String),
 }
 
 impl fmt::Display for CreateFunctionUsing {
@@ -2719,6 +2720,9 @@ impl fmt::Display for CreateFunctionUsing {
         write!(f, "USING ")?;
         match self {
             CreateFunctionUsing::Link(uri) => write!(f, "LINK '{uri}'"),
+            CreateFunctionUsing::Base64(s) => {
+                write!(f, "BASE64 '{s}'")
+            }
         }
     }
 }

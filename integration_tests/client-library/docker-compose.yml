@@ -37,6 +37,17 @@ services:
     command: tail -f /dev/null
     volumes:
       - ./java:/java-client
+  nodejs:
+    image: node:21.6.0-bullseye-slim
+    command: tail -f /dev/null
+    volumes:
+      - ./nodejs:/nodejs-client
+  php:
+    image: php-library
+    build: ./php
+    command: tail -f /dev/null
+    volumes:
+      - ./php:/php-client
 
 volumes:
   risingwave-standalone:

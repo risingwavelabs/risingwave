@@ -87,10 +87,44 @@ pub struct Configuration {
 
     /// Path to etcd data file.
     pub etcd_data_path: Option<PathBuf>,
+
+    /// Queries to run per session.
+    pub per_session_queries: Arc<Vec<String>>,
+}
+
+impl Default for Configuration {
+    fn default() -> Self {
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+
+            let config_data = r#"
+[server]
+telemetry_enabled = false
+metrics_level = "Disabled"
+"#
+            .to_string();
+            file.write_all(config_data.as_bytes())
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 1,
+            compute_nodes: 1,
+            meta_nodes: 1,
+            compactor_nodes: 1,
+            compute_node_cores: 1,
+            etcd_timeout_rate: 0.0,
+            etcd_data_path: None,
+            per_session_queries: vec![].into(),
+        }
+    }
 }
 
 impl Configuration {
-    /// Returns the config for scale test.
+    /// Returns the configuration for scale test.
     pub fn for_scale() -> Self {
         // Embed the config file and create a temporary file at runtime. The file will be deleted
         // automatically when it's dropped.
@@ -109,8 +143,33 @@ impl Configuration {
             meta_nodes: 3,
             compactor_nodes: 2,
             compute_node_cores: 2,
-            etcd_timeout_rate: 0.0,
-            etcd_data_path: None,
+            ..Default::default()
+        }
+    }
+
+    /// Provides a configuration for scale test which ensures that the arrangement backfill is disabled,
+    /// so table scan will use `no_shuffle`.
+    pub fn for_scale_no_shuffle() -> Self {
+        // Embed the config file and create a temporary file at runtime. The file will be deleted
+        // automatically when it's dropped.
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+            file.write_all(include_bytes!("risingwave-scale.toml"))
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 2,
+            compute_nodes: 3,
+            meta_nodes: 3,
+            compactor_nodes: 2,
+            compute_node_cores: 2,
+            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL = false;".into()]
+                .into(),
+            ..Default::default()
         }
     }
 
@@ -150,8 +209,12 @@ metrics_level = "Disabled"
             meta_nodes: 1,
             compactor_nodes: 1,
             compute_node_cores: 2,
-            etcd_timeout_rate: 0.0,
-            etcd_data_path: None,
+            per_session_queries: vec![
+                "create view if not exists table_parallelism as select t.name, tf.parallelism from rw_tables t, rw_table_fragments tf where t.id = tf.table_id;".into(),
+                "create view if not exists mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;".into(),
+            ]
+                .into(),
+            ..Default::default()
         }
     }
 
@@ -174,8 +237,29 @@ metrics_level = "Disabled"
             meta_nodes: 1,
             compactor_nodes: 1,
             compute_node_cores: 4,
-            etcd_timeout_rate: 0.0,
-            etcd_data_path: None,
+            ..Default::default()
+        }
+    }
+
+    pub fn for_arrangement_backfill() -> Self {
+        // Embed the config file and create a temporary file at runtime. The file will be deleted
+        // automatically when it's dropped.
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+            file.write_all(include_bytes!("arrangement_backfill.toml"))
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 1,
+            compute_nodes: 3,
+            meta_nodes: 1,
+            compactor_nodes: 1,
+            compute_node_cores: 1,
+            ..Default::default()
         }
     }
 
@@ -202,8 +286,7 @@ metrics_level = "Disabled"
             meta_nodes: 3,
             compactor_nodes: 2,
             compute_node_cores: 2,
-            etcd_timeout_rate: 0.0,
-            etcd_data_path: None,
+            ..Default::default()
         }
     }
 }
@@ -439,13 +522,24 @@ impl Cluster {
         })
     }
 
+    #[cfg_or_panic(madsim)]
+    fn per_session_queries(&self) -> Arc<Vec<String>> {
+        self.config.per_session_queries.clone()
+    }
+
     /// Start a SQL session on the client node.
     #[cfg_or_panic(madsim)]
     pub fn start_session(&mut self) -> Session {
         let (query_tx, mut query_rx) = mpsc::channel::<SessionRequest>(0);
+        let per_session_queries = self.per_session_queries();
 
         self.client.spawn(async move {
             let mut client = RisingWave::connect("frontend".into(), "dev".into()).await?;
+
+            for sql in per_session_queries.as_ref() {
+                client.run(sql).await?;
+            }
+            drop(per_session_queries);
 
             while let Some((sql, tx)) = query_rx.next().await {
                 let result = client
@@ -766,6 +860,13 @@ impl Session {
     pub async fn flush(&mut self) -> Result<()> {
         self.run("FLUSH").await?;
         Ok(())
+    }
+
+    pub async fn is_arrangement_backfill_enabled(&mut self) -> Result<bool> {
+        let result = self
+            .run("show streaming_enable_arrangement_backfill")
+            .await?;
+        Ok(result == "true")
     }
 }
 

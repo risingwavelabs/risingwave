@@ -18,8 +18,8 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
+use risingwave_common::{bail, current_cluster_version};
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::table::TableType;
@@ -27,7 +27,7 @@ use risingwave_meta_model_v2::{
     connection, database, function, index, object, object_dependency, schema, sink, source,
     streaming_job, table, user_privilege, view, ColumnCatalogArray, ConnectionId, CreateType,
     DatabaseId, FunctionId, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
-    SourceId, TableId, UserId,
+    SourceId, StreamSourceInfo, TableId, UserId,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
@@ -39,7 +39,7 @@ use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::{PbRelation, PbRelationGroup, PbTableFragments, Relation, RelationGroup};
+use risingwave_pb::meta::{PbRelation, PbRelationGroup};
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::sea_query::{Expr, SimpleExpr};
 use sea_orm::ActiveValue::Set;
@@ -145,8 +145,8 @@ impl CatalogController {
             database_id: Set(database_id),
             initialized_at: Default::default(),
             created_at: Default::default(),
-            initialized_at_cluster_version: Default::default(),
-            created_at_cluster_version: Default::default(),
+            initialized_at_cluster_version: Set(Some(current_cluster_version())),
+            created_at_cluster_version: Set(Some(current_cluster_version())),
         };
         Ok(active_db.insert(txn).await?)
     }
@@ -407,16 +407,19 @@ impl CatalogController {
         Ok(count > 0)
     }
 
-    pub async fn clean_foreground_creating_jobs(&self) -> MetaResult<ReleaseContext> {
+    /// `clean_dirty_creating_jobs` cleans up creating jobs that are creating in Foreground mode or in Initial status.
+    pub async fn clean_dirty_creating_jobs(&self) -> MetaResult<ReleaseContext> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let creating_job_ids: Vec<ObjectId> = streaming_job::Entity::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .filter(
-                streaming_job::Column::CreateType
-                    .eq(CreateType::Foreground)
-                    .and(streaming_job::Column::JobStatus.eq(JobStatus::Creating)),
+                streaming_job::Column::JobStatus.eq(JobStatus::Initial).or(
+                    streaming_job::Column::JobStatus
+                        .eq(JobStatus::Creating)
+                        .and(streaming_job::Column::CreateType.eq(CreateType::Foreground)),
+                ),
             )
             .into_tuple()
             .all(&txn)
@@ -449,23 +452,12 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        // get all fragment mappings.
-        let mut fragment_mappings = vec![];
-        for job_id in &creating_job_ids {
-            let mappings = get_fragment_mappings(&txn, *job_id).await?;
-            fragment_mappings.extend(mappings);
-        }
-
         let res = Object::delete_many()
             .filter(object::Column::Oid.is_in(creating_job_ids.clone()))
             .exec(&txn)
             .await?;
         assert!(res.rows_affected > 0);
         txn.commit().await?;
-
-        // notify delete of fragment mappings.
-        self.notify_fragment_mapping(NotificationOperation::Delete, fragment_mappings)
-            .await;
 
         Ok(ReleaseContext {
             streaming_jobs: creating_job_ids,
@@ -488,9 +480,13 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
 
-        // update `created_at` as now().
+        // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
         let res = Object::update_many()
             .col_expr(object::Column::CreatedAt, Expr::current_timestamp().into())
+            .col_expr(
+                object::Column::CreatedAtClusterVersion,
+                current_cluster_version().into(),
+            )
             .filter(object::Column::Oid.eq(job_id))
             .exec(&txn)
             .await?;
@@ -587,8 +583,11 @@ impl CatalogController {
             _ => unreachable!("invalid job type: {:?}", job_type),
         }
 
+        let fragment_mapping = get_fragment_mappings(&txn, job_id).await?;
         txn.commit().await?;
 
+        self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
+            .await;
         let version = self
             .notify_frontend(
                 NotificationOperation::Add,
@@ -597,15 +596,6 @@ impl CatalogController {
             .await;
 
         Ok(version)
-    }
-
-    pub fn create_stream_job(
-        &self,
-        _stream_job: &StreamingJob,
-        _table_fragments: &PbTableFragments,
-        _internal_tables: Vec<PbTable>,
-    ) -> MetaResult<()> {
-        todo!()
     }
 
     pub async fn create_source(
@@ -1320,10 +1310,10 @@ impl CatalogController {
         let version = self
             .notify_frontend(
                 Operation::Update,
-                Info::RelationGroup(RelationGroup {
+                Info::RelationGroup(PbRelationGroup {
                     relations: relations
                         .into_iter()
-                        .map(|relation_info| Relation {
+                        .map(|relation_info| PbRelation {
                             relation_info: Some(relation_info),
                         })
                         .collect_vec(),
@@ -1431,8 +1421,24 @@ impl CatalogController {
             .filter(|obj| obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Sink)
             .map(|obj| obj.oid)
             .collect_vec();
+
+        // cdc source streaming job.
+        if object_type == ObjectType::Source {
+            let source_info: Option<StreamSourceInfo> = Source::find_by_id(object_id)
+                .select_only()
+                .column(source::Column::SourceInfo)
+                .into_tuple()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
+            if let Some(source_info) = source_info
+                && source_info.into_inner().cdc_source_job
+            {
+                to_drop_streaming_jobs.push(object_id);
+            }
+        }
+
         let mut to_drop_state_table_ids = to_drop_table_ids.clone().collect_vec();
-        // todo: record index dependency info in the object dependency table.
         let to_drop_index_ids = to_drop_objects
             .iter()
             .filter(|obj| obj.obj_type == ObjectType::Index)

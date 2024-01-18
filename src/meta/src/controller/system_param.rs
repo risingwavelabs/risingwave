@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use risingwave_common::system_param::common::CommonHandler;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::{
     check_missing_params, derive_missing_fields, set_system_param,
@@ -44,11 +45,13 @@ pub struct SystemParamsController {
     notification_manager: NotificationManagerRef,
     // Cached parameters.
     params: RwLock<PbSystemParams>,
+    /// Common handler for system params.
+    common_handler: CommonHandler,
 }
 
 /// Derive system params from db models.
 macro_rules! impl_system_params_from_db {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $type:ty, $($rest:tt)* },)*) => {
         /// Try to deserialize deprecated fields as well.
         /// Warn if there are unrecognized fields.
         pub fn system_params_from_db(mut models: Vec<system_parameter::Model>) -> MetaResult<PbSystemParams> {
@@ -76,7 +79,7 @@ macro_rules! impl_system_params_from_db {
 
 /// Derive serialization to db models.
 macro_rules! impl_system_params_to_models {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $($rest:tt)* },)*) => {
         #[allow(clippy::vec_init_then_push)]
         pub fn system_params_to_model(params: &PbSystemParams) -> MetaResult<Vec<system_parameter::ActiveModel>> {
             check_missing_params(params).map_err(|e| anyhow!(e))?;
@@ -103,7 +106,7 @@ macro_rules! impl_system_params_to_models {
 // 4. None, None: A new version of RW cluster is launched for the first time and newly introduced
 // params are not set. The new field is not initialized either, just leave it as `None`.
 macro_rules! impl_merge_params {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $($rest:tt)* },)*) => {
         fn merge_params(mut persisted: PbSystemParams, init: PbSystemParams) -> PbSystemParams {
             $(
                 match (persisted.$field.as_ref(), init.$field) {
@@ -146,7 +149,8 @@ impl SystemParamsController {
         let ctl = Self {
             db,
             notification_manager,
-            params: RwLock::new(params),
+            params: RwLock::new(params.clone()),
+            common_handler: CommonHandler::new(params.into()),
         };
         // flush to db.
         ctl.flush_params().await?;
@@ -195,6 +199,11 @@ impl SystemParamsController {
             Set(set_system_param(&mut params, name, value).map_err(MetaError::system_params)?);
         param.update(&self.db).await?;
         *params_guard = params.clone();
+
+        // TODO: check if the parameter is actually changed.
+
+        // Run common handler.
+        self.common_handler.handle_change(params.clone().into());
 
         // Sync params to other managers on the meta node only once, since it's infallible.
         self.notification_manager

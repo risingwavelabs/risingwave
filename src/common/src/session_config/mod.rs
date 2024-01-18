@@ -31,6 +31,7 @@ use self::non_zero64::ConfigNonZeroU64;
 use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 pub use crate::session_config::visibility_mode::VisibilityMode;
+use crate::{PG_VERSION, SERVER_ENCODING, SERVER_VERSION_NUM, STANDARD_CONFORMING_STRINGS};
 
 pub const SESSION_CONFIG_LIST_SEP: &str = ", ";
 
@@ -93,7 +94,7 @@ pub struct ConfigMap {
     #[parameter(default = true, rename = "rw_batch_enable_sort_agg")]
     batch_enable_sort_agg: bool,
 
-    /// The max gap allowed to transform small range scan scan into multi point lookup.
+    /// The max gap allowed to transform small range scan into multi point lookup.
     #[parameter(default = 8)]
     max_split_range_gap: i32,
 
@@ -137,6 +138,10 @@ pub struct ConfigMap {
     #[parameter(default = false)]
     streaming_enable_arrangement_backfill: bool,
 
+    /// Allow `jsonb` in stream key
+    #[parameter(default = false, rename = "rw_streaming_allow_jsonb_in_stream_key")]
+    streaming_allow_jsonb_in_stream_key: bool,
+
     /// Enable join ordering for streaming and batch queries. Defaults to true.
     #[parameter(default = true, rename = "rw_enable_join_ordering")]
     enable_join_ordering: bool,
@@ -171,11 +176,11 @@ pub struct ConfigMap {
     batch_parallelism: ConfigNonZeroU64,
 
     /// The version of PostgreSQL that Risingwave claims to be.
-    #[parameter(default = "9.5.0")]
+    #[parameter(default = PG_VERSION)]
     server_version: String,
 
     /// The version of PostgreSQL that Risingwave claims to be.
-    #[parameter(default = 90500)]
+    #[parameter(default = SERVER_VERSION_NUM)]
     server_version_num: i32,
 
     /// see <https://www.postgresql.org/docs/15/runtime-config-client.html#GUC-CLIENT-MIN-MESSAGES>
@@ -183,7 +188,7 @@ pub struct ConfigMap {
     client_min_messages: String,
 
     /// see <https://www.postgresql.org/docs/15/runtime-config-client.html#GUC-CLIENT-ENCODING>
-    #[parameter(default = "UTF8", check_hook = check_client_encoding)]
+    #[parameter(default = SERVER_ENCODING, check_hook = check_client_encoding)]
     client_encoding: String,
 
     /// Enable decoupling sink and internal streaming graph or not
@@ -202,6 +207,10 @@ pub struct ConfigMap {
     #[parameter(default = 0u32)]
     statement_timeout: u32,
 
+    /// Terminate any session that has been idle (that is, waiting for a client query) within an open transaction for longer than the specified amount of time in milliseconds.
+    #[parameter(default = 60000u32)]
+    idle_in_transaction_session_timeout: u32,
+
     /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-LOCK-TIMEOUT>
     /// Unused in RisingWave, support for compatibility.
     #[parameter(default = 0)]
@@ -213,7 +222,7 @@ pub struct ConfigMap {
     row_security: bool,
 
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-STANDARD-CONFORMING-STRINGS>
-    #[parameter(default = "on")]
+    #[parameter(default = STANDARD_CONFORMING_STRINGS)]
     standard_conforming_strings: String,
 
     /// Set streaming rate limit (rows per second) for each parallelism for mv backfilling
@@ -230,7 +239,7 @@ pub struct ConfigMap {
     background_ddl: bool,
 
     /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
-    #[parameter(default = "UTF8")]
+    #[parameter(default = SERVER_ENCODING)]
     server_encoding: String,
 
     #[parameter(default = "hex", check_hook = check_bytea_output)]

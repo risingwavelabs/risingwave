@@ -31,8 +31,7 @@ use risingwave_storage::hummock::compactor::{
     ConcatSstableIterator, DummyCompactionFilter, TaskConfig, TaskProgress,
 };
 use risingwave_storage::hummock::iterator::{
-    ConcatIterator, Forward, ForwardMergeRangeIterator, HummockIterator,
-    UnorderedMergeIteratorInner,
+    ConcatIterator, Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator,
 };
 use risingwave_storage::hummock::multi_builder::{
     CapacitySplitTableBuilder, LocalTableBuilderFactory,
@@ -57,6 +56,7 @@ pub fn mock_sstable_store() -> SstableStoreRef {
         128 << 20,
         0,
         64 << 20,
+        16,
         FileCache::none(),
         FileCache::none(),
         None,
@@ -203,7 +203,6 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         Arc::new(CompactorMetrics::unused()),
         iter,
         DummyCompactionFilter,
-        None,
     )
     .await
     .unwrap();
@@ -239,7 +238,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                 ConcatIterator::new(level1.clone(), sstable_store.clone(), read_options.clone()),
                 ConcatIterator::new(level2.clone(), sstable_store.clone(), read_options.clone()),
             ];
-            let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters);
+            let iter = MergeIterator::for_compactor(sub_iters);
             async move { compact(iter, sstable_store1).await }
         });
     });
@@ -263,7 +262,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     0,
                 ),
             ];
-            let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters);
+            let iter = MergeIterator::for_compactor(sub_iters);
             let sstable_store1 = sstable_store.clone();
             async move { compact(iter, sstable_store1).await }
         });

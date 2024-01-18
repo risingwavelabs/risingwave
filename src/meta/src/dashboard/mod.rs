@@ -30,7 +30,7 @@ use axum::Router;
 use hyper::Request;
 use parking_lot::Mutex;
 use risingwave_rpc_client::ComputeClientPool;
-use tower::ServiceBuilder;
+use tower::{ServiceBuilder, ServiceExt};
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
 use tower_http::services::ServeDir;
@@ -47,6 +47,7 @@ pub struct DashboardService {
     pub compute_clients: ComputeClientPool,
     pub ui_path: Option<String>,
     pub diagnose_command: Option<DiagnoseCommandRef>,
+    pub trace_state: otlp_embedded::StateRef,
 }
 
 pub type Service = Arc<DashboardService>;
@@ -65,6 +66,7 @@ pub(super) mod handlers {
         HeapProfilingResponse, ListHeapProfilingResponse, StackTraceResponse,
     };
     use serde_json::json;
+    use thiserror_ext::AsReport;
 
     use super::*;
     use crate::manager::WorkerId;
@@ -86,8 +88,7 @@ pub(super) mod handlers {
     impl IntoResponse for DashboardError {
         fn into_response(self) -> axum::response::Response {
             let mut resp = Json(json!({
-                "error": format!("{}", self.0),
-                "info":  format!("{:?}", self.0),
+                "error": self.0.to_report_string(),
             }))
             .into_response();
             *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
@@ -403,22 +404,15 @@ impl DashboardService {
             )
             .layer(cors_layer);
 
-        let app = if let Some(ui_path) = ui_path {
-            let static_file_router = Router::new().nest_service(
-                "/",
-                get_service(ServeDir::new(ui_path)).handle_error(|e| async move {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Unhandled internal error: {e}",),
-                    )
-                }),
-            );
-            Router::new()
-                .fallback_service(static_file_router)
-                .nest("/api", api_router)
+        let trace_ui_router = otlp_embedded::ui_app(srv.trace_state.clone(), "/trace/");
+
+        let dashboard_router = if let Some(ui_path) = ui_path {
+            get_service(ServeDir::new(ui_path))
+                .handle_error(|e| async move { match e {} })
+                .boxed_clone()
         } else {
             let cache = Arc::new(Mutex::new(HashMap::new()));
-            let service = tower::service_fn(move |req: Request<Body>| {
+            tower::service_fn(move |req: Request<Body>| {
                 let cache = cache.clone();
                 async move {
                     proxy::proxy(req, cache).await.or_else(|err| {
@@ -429,11 +423,14 @@ impl DashboardService {
                             .into_response())
                     })
                 }
-            });
-            Router::new()
-                .fallback_service(service)
-                .nest("/api", api_router)
+            })
+            .boxed_clone()
         };
+
+        let app = Router::new()
+            .fallback_service(dashboard_router)
+            .nest("/api", api_router)
+            .nest("/trace", trace_ui_router);
 
         axum::Server::bind(&srv.dashboard_addr)
             .serve(app.into_make_service())

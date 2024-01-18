@@ -1,0 +1,74 @@
+# Before running this test, seed data into kafka:
+#   python3 e2e_test/schema_registry/pb.py <brokerlist> <schema-registry-url> <topic> <num-records>
+
+statement ok
+CREATE SOURCE src_user WITH (
+    connector = 'kafka',
+    topic = 'sr_pb_test',
+    properties.bootstrap.server = 'message_queue:29092',
+    scan.startup.mode = 'earliest'
+)
+FORMAT PLAIN ENCODE PROTOBUF(
+    schema.registry = 'http://message_queue:8081',
+    message = 'test.User'
+);
+
+statement ok
+CREATE MATERIALIZED VIEW mv_user AS SELECT * FROM src_user;
+
+# Changing type is not allowed
+statement error Feature is not yet implemented: this altering statement will drop columns, which is not supported yet: \(city: character varying\)
+ALTER SOURCE src_user FORMAT PLAIN ENCODE PROTOBUF(
+    schema.registry = 'http://message_queue:8081',
+    message = 'test.UserWithNewType'
+);
+
+# Changing format/encode is not allowed
+statement error Feature is not yet implemented: the original definition is FORMAT Plain ENCODE Protobuf, and altering them is not supported yet
+ALTER SOURCE src_user FORMAT NATIVE ENCODE PROTOBUF(
+    schema.registry = 'http://message_queue:8081',
+    message = 'test.User'
+);
+
+statement ok
+ALTER SOURCE src_user FORMAT PLAIN ENCODE PROTOBUF(
+    schema.registry = 'http://message_queue:8081',
+    message = 'test.UserWithMoreFields'
+);
+
+# Dropping columns is not allowed
+statement error Feature is not yet implemented: this altering statement will drop columns, which is not supported yet: \(age: integer\)
+ALTER SOURCE src_user FORMAT PLAIN ENCODE PROTOBUF(
+    schema.registry = 'http://message_queue:8081',
+    message = 'test.User'
+);
+
+statement ok
+CREATE MATERIALIZED VIEW mv_more_fields AS SELECT * FROM src_user;
+
+system ok
+python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test" 5 user_with_more_fields
+
+sleep 10s
+
+query I
+SELECT COUNT(*) FROM mv_user;
+----
+25
+
+statement error
+SELECT SUM(age) FROM mv_user;
+
+query III
+SELECT COUNT(*), MAX(age), MIN(age) FROM mv_more_fields;
+----
+25 4 0
+
+statement ok
+DROP MATERIALIZED VIEW mv_user;
+
+statement ok
+DROP MATERIALIZED VIEW mv_more_fields;
+
+statement ok
+DROP SOURCE src_user;

@@ -14,14 +14,12 @@
 
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::{StreamScanNode, StreamScanType};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::Distribution;
 
 use super::*;
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
@@ -64,62 +62,14 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
 
             StreamScanType::Backfill => {
                 let table_desc: &StorageTableDesc = node.get_table_desc()?;
-                let table_id = TableId {
-                    table_id: table_desc.table_id,
-                };
 
-                let column_descs = table_desc
-                    .columns
-                    .iter()
-                    .map(ColumnDesc::from)
-                    .collect_vec();
                 let column_ids = node
                     .upstream_column_ids
                     .iter()
                     .map(ColumnId::from)
                     .collect_vec();
 
-                let table_pk_order_types = table_desc
-                    .pk
-                    .iter()
-                    .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
-                    .collect_vec();
-                // Use indices based on full table instead of streaming executor output.
-                let table_pk_indices = table_desc
-                    .pk
-                    .iter()
-                    .map(|k| k.column_index as usize)
-                    .collect_vec();
-
-                let dist_key_in_pk_indices = table_desc
-                    .dist_key_in_pk_indices
-                    .iter()
-                    .map(|&k| k as usize)
-                    .collect_vec();
-
                 let vnodes = params.vnode_bitmap.map(Arc::new);
-                let distribution = match &vnodes {
-                    Some(vnodes) => Distribution {
-                        dist_key_in_pk_indices,
-                        vnodes: vnodes.clone(),
-                    },
-                    None => Distribution::fallback(),
-                };
-
-                let table_option = TableOption {
-                    retention_seconds: if table_desc.retention_seconds > 0 {
-                        Some(table_desc.retention_seconds)
-                    } else {
-                        None
-                    },
-                };
-                let value_indices = table_desc
-                    .get_value_indices()
-                    .iter()
-                    .map(|&k| k as usize)
-                    .collect_vec();
-                let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
-                let versioned = table_desc.versioned;
 
                 let state_table = if let Ok(table) = node.get_state_table() {
                     Some(
@@ -130,20 +80,8 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     None
                 };
 
-                // TODO: refactor it with from_table_catalog in the future.
-                let upstream_table = StorageTable::new_partial(
-                    state_store.clone(),
-                    table_id,
-                    column_descs,
-                    column_ids,
-                    table_pk_order_types,
-                    table_pk_indices,
-                    distribution,
-                    table_option,
-                    value_indices,
-                    prefix_hint_len,
-                    versioned,
-                );
+                let upstream_table =
+                    StorageTable::new_partial(state_store.clone(), column_ids, vnodes, table_desc);
 
                 BackfillExecutor::new(
                     params.info,

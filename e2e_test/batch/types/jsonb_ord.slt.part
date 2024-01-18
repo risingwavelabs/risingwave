@@ -6,6 +6,9 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
+SET rw_streaming_allow_jsonb_in_stream_key TO true;
+
+statement ok
 values ('{"a":[2, true, "", {}]}'::jsonb), ('1'), ('true'), ('null'), (null), ('[1, true]') order by 1;
 
 statement ok

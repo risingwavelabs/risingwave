@@ -30,7 +30,7 @@ impl Planner {
         match set_expr {
             BoundSetExpr::Select(s) => self.plan_select(*s, extra_order_exprs, order),
             BoundSetExpr::Values(v) => self.plan_values(*v),
-            BoundSetExpr::Query(q) => Ok(self.plan_query(*q)?.into_subplan()),
+            BoundSetExpr::Query(q) => Ok(self.plan_query(*q)?.into_unordered_subplan()),
             BoundSetExpr::SetOperation {
                 op,
                 all,

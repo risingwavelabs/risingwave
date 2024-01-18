@@ -51,6 +51,9 @@ This is a bug. We would appreciate a bug report at:
 
     #[error("Unable to setup an SSL connection")]
     SslError(#[from] openssl::ssl::Error),
+
+    #[error("terminating connection due to idle-in-transaction timeout")]
+    IdleInTxnTimeout,
 }
 
 impl PsqlError {

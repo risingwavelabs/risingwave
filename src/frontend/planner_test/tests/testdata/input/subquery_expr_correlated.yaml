@@ -472,3 +472,14 @@
     ORDER BY 1;
   expected_outputs:
     - batch_plan
+- name: correlated array subquery (issue 14423)
+  sql: |
+    CREATE TABLE array_types ( x BIGINT[] );
+    SELECT array(
+      ((((((
+        select t0.x
+      ))))))
+    )
+    FROM array_types AS t0;
+  expected_outputs:
+    - batch_plan

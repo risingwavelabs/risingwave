@@ -2,16 +2,14 @@
 statement error
 CREATE TABLE s1 (v1 int, v2 varchar) WITH (
     pubsub.subscription = 'test-subscription-1',
-    pubsub.emulator_host = 'localhost:5981',
-    pubsub.split_count = 3
+    pubsub.emulator_host = 'invalid_host:5981'
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
 CREATE TABLE s1 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-1',
-    pubsub.emulator_host = 'localhost:5980',
-    pubsub.split_count = 3
+    pubsub.emulator_host = 'localhost:5980'
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
@@ -25,25 +23,14 @@ statement error
 CREATE TABLE s2 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-not-2',
-    pubsub.emulator_host = 'localhost:5980',
-    pubsub.split_count = 3
+    pubsub.emulator_host = 'localhost:5980'
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
 CREATE TABLE s2 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-2',
-    pubsub.emulator_host = 'localhost:5980',
-    pubsub.split_count = 3
-) FORMAT PLAIN ENCODE JSON;
-
-# fail with invalid split count
-statement error
-CREATE TABLE s3 (v1 int, v2 varchar) WITH (
-    connector = 'google_pubsub',
-    pubsub.subscription = 'test-subscription-3',
-    pubsub.emulator_host = 'localhost:5980',
-    pubsub.split_count = 0
+    pubsub.emulator_host = 'localhost:5980'
 ) FORMAT PLAIN ENCODE JSON;
 
 # fail if both start_offset and start_snapshot are provided
@@ -52,7 +39,6 @@ CREATE TABLE s3 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-3',
     pubsub.emulator_host = 'localhost:5980',
-    pubsub.split_count = 2,
     pubsub.start_offset = "121212",
     pubsub.start_snapshot = "snapshot-that-doesnt-exist"
 ) FORMAT PLAIN ENCODE JSON;

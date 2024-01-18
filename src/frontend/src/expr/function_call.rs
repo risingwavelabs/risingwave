@@ -135,7 +135,7 @@ impl FunctionCall {
             let datum = literal
                 .get_data()
                 .as_ref()
-                .map(|scalar| ScalarImpl::from_literal(scalar.as_utf8(), &target))
+                .map(|scalar| ScalarImpl::from_text(scalar.as_utf8(), &target))
                 .transpose();
             if let Ok(datum) = datum {
                 *child = Literal::new(datum, target).into();

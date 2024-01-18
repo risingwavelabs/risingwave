@@ -18,18 +18,19 @@
 import { Box, Button, Flex, Text, VStack } from "@chakra-ui/react"
 import { reverse, sortBy } from "lodash"
 import Head from "next/head"
-import Link from "next/link"
-import { useRouter } from "next/router"
-import { Fragment, useCallback, useEffect, useState } from "react"
-import { StreamGraph } from "../components/StreamGraph"
+import { parseAsInteger, useQueryState } from "nuqs"
+import { Fragment, useCallback } from "react"
+import RelationDependencyGraph, {
+  nodeRadius,
+} from "../components/RelationDependencyGraph"
 import Title from "../components/Title"
-import useErrorToast from "../hook/useErrorToast"
-import { ActorPoint } from "../lib/layout"
+import { RelationPoint } from "../lib/layout"
+import useFetch from "./api/fetch"
 import { Relation, getRelations, relationIsStreamingJob } from "./api/streaming"
 
 const SIDEBAR_WIDTH = "200px"
 
-function buildDependencyAsEdges(list: Relation[]): ActorPoint[] {
+function buildDependencyAsEdges(list: Relation[]): RelationPoint[] {
   const edges = []
   const relationSet = new Set(list.map((r) => r.id))
   for (const r of reverse(sortBy(list, "id"))) {
@@ -42,38 +43,27 @@ function buildDependencyAsEdges(list: Relation[]): ActorPoint[] {
             .map((r) => r.toString())
         : [],
       order: r.id,
+      width: nodeRadius * 2,
+      height: nodeRadius * 2,
+      relation: r,
     })
   }
   return edges
 }
 
 export default function StreamingGraph() {
-  const toast = useErrorToast()
-  const [streamingJobList, setStreamingJobList] = useState<Relation[]>()
+  const { response: relationList } = useFetch(getRelations)
+  const [selectedId, setSelectedId] = useQueryState("id", parseAsInteger)
 
-  useEffect(() => {
-    async function doFetch() {
-      try {
-        setStreamingJobList(await getRelations())
-      } catch (e: any) {
-        toast(e)
-      }
-    }
-    doFetch()
-    return () => {}
-  }, [toast])
-
-  const mvDependencyCallback = useCallback(() => {
-    if (streamingJobList) {
-      return buildDependencyAsEdges(streamingJobList)
+  const relationDependencyCallback = useCallback(() => {
+    if (relationList) {
+      return buildDependencyAsEdges(relationList)
     } else {
       return undefined
     }
-  }, [streamingJobList])
+  }, [relationList])
 
-  const mvDependency = mvDependencyCallback()
-
-  const router = useRouter()
+  const relationDependency = relationDependencyCallback()
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
@@ -92,22 +82,21 @@ export default function StreamingGraph() {
           </Text>
           <Box flex={1} overflowY="scroll">
             <VStack width={SIDEBAR_WIDTH} align="start" spacing={1}>
-              {streamingJobList?.map((r) => {
-                const match = router.query.id === r.id.toString()
+              {relationList?.map((r) => {
+                const match = selectedId === r.id
                 return (
-                  <Link href={`?id=${r.id}`} key={r.id} shallow>
-                    <Button
-                      colorScheme={match ? "blue" : "gray"}
-                      color={match ? "blue.600" : "gray.500"}
-                      variant={match ? "outline" : "ghost"}
-                      width="full"
-                      py={0}
-                      height={8}
-                      justifyContent="flex-start"
-                    >
-                      {r.name}
-                    </Button>
-                  </Link>
+                  <Button
+                    key={r.id}
+                    colorScheme={match ? "blue" : "gray"}
+                    color={match ? "blue.600" : "gray.500"}
+                    variant={match ? "outline" : "ghost"}
+                    py={0}
+                    height={8}
+                    justifyContent="flex-start"
+                    onClick={() => setSelectedId(r.id)}
+                  >
+                    {r.name}
+                  </Button>
                 )
               })}
             </VStack>
@@ -120,11 +109,12 @@ export default function StreamingGraph() {
           overflowX="scroll"
           overflowY="scroll"
         >
-          <Text fontWeight="semibold">Graph</Text>
-          {mvDependency && (
-            <StreamGraph
-              nodes={mvDependency}
-              selectedId={router.query.id as string}
+          <Text fontWeight="semibold">Dependency Graph</Text>
+          {relationDependency && (
+            <RelationDependencyGraph
+              nodes={relationDependency}
+              selectedId={selectedId?.toString()}
+              setSelectedId={(id) => setSelectedId(parseInt(id))}
             />
           )}
         </Box>
