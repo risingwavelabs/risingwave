@@ -50,7 +50,8 @@ use risingwave_connector::source::{
 use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
 };
-use risingwave_pb::plan_common::{AdditionalColumnType, EncodeType, FormatType};
+use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
+use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     get_delimiter, AstString, ColumnDef, ConnectorSchema, CreateSourceStatement, Encode, Format,
@@ -568,6 +569,7 @@ pub fn handle_addition_columns(
                         )
                     })
                     .as_str(),
+                item.inner_field.as_deref(),
             ))
         }
     }
@@ -691,7 +693,10 @@ pub(crate) async fn bind_source_pk(
         // iter columns to check if contains additional columns from key part
         // return the key column names if exists
         columns.iter().find_map(|catalog| {
-            if catalog.column_desc.additional_column_type == AdditionalColumnType::Key {
+            if matches!(
+                catalog.column_desc.additional_column_type.column_type,
+                Some(AdditionalColumnType::Key(_))
+            ) {
                 Some(catalog.name().to_string())
             } else {
                 None
@@ -701,8 +706,11 @@ pub(crate) async fn bind_source_pk(
     let additional_column_names = columns
         .iter()
         .filter_map(|col| {
-            if (col.column_desc.additional_column_type != AdditionalColumnType::Unspecified)
-                && (col.column_desc.additional_column_type != AdditionalColumnType::Normal)
+            if (col.column_desc.additional_column_type.column_type.is_some())
+                && (!matches!(
+                    col.column_desc.additional_column_type.column_type,
+                    Some(AdditionalColumnType::Normal(_))
+                ))
             {
                 Some(col.name().to_string())
             } else {
@@ -852,10 +860,12 @@ fn check_and_add_timestamp_column(
     columns: &mut Vec<ColumnCatalog>,
 ) {
     if is_kafka_connector(with_properties) {
-        if columns
-            .iter()
-            .any(|col| col.column_desc.additional_column_type == AdditionalColumnType::Timestamp)
-        {
+        if columns.iter().any(|col| {
+            matches!(
+                col.column_desc.additional_column_type.column_type,
+                Some(AdditionalColumnType::Timestamp(_))
+            )
+        }) {
             // already has timestamp column, no need to add a new one
             return;
         }
@@ -866,7 +876,7 @@ fn check_and_add_timestamp_column(
             .iter()
             .find(|(col_name, _)| col_name.eq(&"timestamp"))
             .unwrap()
-            .1(ColumnId::placeholder(), KAFKA_TIMESTAMP_COLUMN_NAME);
+            .1(ColumnId::placeholder(), KAFKA_TIMESTAMP_COLUMN_NAME, None);
         catalog.is_hidden = true;
 
         columns.push(catalog);

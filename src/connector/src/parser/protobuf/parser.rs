@@ -24,7 +24,10 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Datum, Decimal, JsonbVal, ScalarImpl, F32, F64};
-use risingwave_pb::plan_common::{AdditionalColumnType, ColumnDesc, ColumnDescVersion};
+use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
+use risingwave_pb::plan_common::{
+    AdditionalColumn, AdditionalColumnNormal, ColumnDesc, ColumnDescVersion,
+};
 
 use super::schema_resolver::*;
 use crate::parser::unified::protobuf::ProtobufAccess;
@@ -175,7 +178,9 @@ impl ProtobufParserConfig {
                 type_name: m.full_name().to_string(),
                 generated_or_default_column: None,
                 description: None,
-                additional_column_type: AdditionalColumnType::Normal as i32,
+                additional_column_type: Some(AdditionalColumn {
+                    column_type: Some(AdditionalColumnType::Normal(AdditionalColumnNormal {})),
+                }),
                 version: ColumnDescVersion::Pr13707 as i32,
             })
         } else {
@@ -184,7 +189,9 @@ impl ProtobufParserConfig {
                 column_id: *index,
                 name: field_descriptor.name().to_string(),
                 column_type: Some(field_type.to_protobuf()),
-                additional_column_type: AdditionalColumnType::Normal as i32,
+                additional_column_type: Some(AdditionalColumn {
+                    column_type: Some(AdditionalColumnType::Normal(AdditionalColumnNormal {})),
+                }),
                 version: ColumnDescVersion::Pr13707 as i32,
                 ..Default::default()
             })

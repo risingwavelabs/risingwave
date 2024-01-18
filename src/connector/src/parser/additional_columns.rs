@@ -14,7 +14,11 @@
 
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::{DataType, StructType};
-use risingwave_pb::plan_common::AdditionalColumnType;
+use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
+use risingwave_pb::plan_common::{
+    AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader, AdditionalColumnKey,
+    AdditionalColumnOffset, AdditionalColumnPartition, AdditionalColumnTimestamp,
+};
 
 use crate::source::{
     GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, OPENDAL_S3_CONNECTOR, PULSAR_CONNECTOR,
@@ -22,7 +26,7 @@ use crate::source::{
 };
 
 pub type CompatibleAdditionalColumnsFn =
-    Box<dyn Fn(ColumnId, &str) -> ColumnCatalog + Send + Sync + 'static>;
+    Box<dyn Fn(ColumnId, &str, Option<&str>) -> ColumnCatalog + Send + Sync + 'static>;
 
 pub fn get_connector_compatible_additional_columns(
     connector_name: &str,
@@ -41,87 +45,121 @@ fn kafka_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColum
     vec![
         (
             "key",
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named_with_additional_column(
-                        name,
-                        id,
-                        DataType::Bytea,
-                        AdditionalColumnType::Key,
-                    ),
-                    is_hidden: false,
-                }
-            }),
+            Box::new(
+                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named_with_additional_column(
+                            name,
+                            id,
+                            DataType::Bytea,
+                            AdditionalColumn {
+                                column_type: Some(AdditionalColumnType::Key(
+                                    AdditionalColumnKey {},
+                                )),
+                            },
+                        ),
+                        is_hidden: false,
+                    }
+                },
+            ),
         ),
         (
             "timestamp",
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named_with_additional_column(
-                        name,
-                        id,
-                        DataType::Timestamptz,
-                        AdditionalColumnType::Timestamp,
-                    ),
-                    is_hidden: false,
-                }
-            }),
+            Box::new(
+                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named_with_additional_column(
+                            name,
+                            id,
+                            DataType::Timestamptz,
+                            AdditionalColumn {
+                                column_type: Some(AdditionalColumnType::Timestamp(
+                                    AdditionalColumnTimestamp {},
+                                )),
+                            },
+                        ),
+                        is_hidden: false,
+                    }
+                },
+            ),
         ),
         (
             "partition",
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named_with_additional_column(
-                        name,
-                        id,
-                        DataType::Varchar,
-                        AdditionalColumnType::Partition,
-                    ),
-                    is_hidden: false,
-                }
-            }),
+            Box::new(
+                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named_with_additional_column(
+                            name,
+                            id,
+                            DataType::Varchar,
+                            AdditionalColumn {
+                                column_type: Some(AdditionalColumnType::Partition(
+                                    AdditionalColumnPartition {},
+                                )),
+                            },
+                        ),
+                        is_hidden: false,
+                    }
+                },
+            ),
         ),
         (
             "offset",
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named_with_additional_column(
-                        name,
-                        id,
-                        DataType::Varchar,
-                        AdditionalColumnType::Offset,
-                    ),
-                    is_hidden: false,
-                }
-            }),
+            Box::new(
+                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named_with_additional_column(
+                            name,
+                            id,
+                            DataType::Varchar,
+                            AdditionalColumn {
+                                column_type: Some(AdditionalColumnType::Offset(
+                                    AdditionalColumnOffset {},
+                                )),
+                            },
+                        ),
+                        is_hidden: false,
+                    }
+                },
+            ),
         ),
         (
             "header", // type: struct<key varchar, value bytea>[]
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named_with_additional_column(
-                        name,
-                        id,
-                        DataType::List(get_kafka_header_item_datatype().into()),
-                        AdditionalColumnType::Header,
-                    ),
-                    is_hidden: false,
-                }
-            }),
-        ),
-        (
-            "header-inner", // type: bytea
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named_with_additional_column(
-                        name,
-                        id,
-                        DataType::Bytea,
-                        AdditionalColumnType::Header,
-                    ),
-                    is_hidden: false,
-                }
-            }),
+            Box::new(
+                |id: ColumnId, name: &str, inner_field: Option<&str>| -> ColumnCatalog {
+                    if let Some(inner) = inner_field {
+                        ColumnCatalog {
+                            column_desc: ColumnDesc::named_with_additional_column(
+                                name,
+                                id,
+                                DataType::Bytea,
+                                AdditionalColumn {
+                                    column_type: Some(AdditionalColumnType::Header(
+                                        AdditionalColumnHeader {
+                                            inner_field: Some(inner.to_string()),
+                                        },
+                                    )),
+                                },
+                            ),
+                            is_hidden: false,
+                        }
+                    } else {
+                        ColumnCatalog {
+                            column_desc: ColumnDesc::named_with_additional_column(
+                                name,
+                                id,
+                                DataType::List(get_kafka_header_item_datatype().into()),
+                                AdditionalColumn {
+                                    column_type: Some(AdditionalColumnType::Header(
+                                        AdditionalColumnHeader { inner_field: None },
+                                    )),
+                                },
+                            ),
+                            is_hidden: false,
+                        }
+                    }
+                },
+            ),
         ),
     ]
 }
@@ -135,45 +173,63 @@ fn pulsar_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColu
     vec![
         (
             "key",
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named_with_additional_column(
-                        name,
-                        id,
-                        DataType::Bytea,
-                        AdditionalColumnType::Key,
-                    ),
-                    is_hidden: false,
-                }
-            }),
+            Box::new(
+                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named_with_additional_column(
+                            name,
+                            id,
+                            DataType::Bytea,
+                            AdditionalColumn {
+                                column_type: Some(AdditionalColumnType::Key(
+                                    AdditionalColumnKey {},
+                                )),
+                            },
+                        ),
+                        is_hidden: false,
+                    }
+                },
+            ),
         ),
         (
             "partition",
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named_with_additional_column(
-                        name,
-                        id,
-                        DataType::Varchar,
-                        AdditionalColumnType::Partition,
-                    ),
-                    is_hidden: false,
-                }
-            }),
+            Box::new(
+                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named_with_additional_column(
+                            name,
+                            id,
+                            DataType::Varchar,
+                            AdditionalColumn {
+                                column_type: Some(AdditionalColumnType::Partition(
+                                    AdditionalColumnPartition {},
+                                )),
+                            },
+                        ),
+                        is_hidden: false,
+                    }
+                },
+            ),
         ),
         (
             "offset",
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named_with_additional_column(
-                        name,
-                        id,
-                        DataType::Varchar,
-                        AdditionalColumnType::Offset,
-                    ),
-                    is_hidden: false,
-                }
-            }),
+            Box::new(
+                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named_with_additional_column(
+                            name,
+                            id,
+                            DataType::Varchar,
+                            AdditionalColumn {
+                                column_type: Some(AdditionalColumnType::Offset(
+                                    AdditionalColumnOffset {},
+                                )),
+                            },
+                        ),
+                        is_hidden: false,
+                    }
+                },
+            ),
         ),
     ]
 }
@@ -182,59 +238,83 @@ fn kinesis_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalCol
     vec![
         (
             "key",
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named_with_additional_column(
-                        name,
-                        id,
-                        DataType::Bytea,
-                        AdditionalColumnType::Key,
-                    ),
-                    is_hidden: false,
-                }
-            }),
+            Box::new(
+                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named_with_additional_column(
+                            name,
+                            id,
+                            DataType::Bytea,
+                            AdditionalColumn {
+                                column_type: Some(AdditionalColumnType::Key(
+                                    AdditionalColumnKey {},
+                                )),
+                            },
+                        ),
+                        is_hidden: false,
+                    }
+                },
+            ),
         ),
         (
             "partition",
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named_with_additional_column(
-                        name,
-                        id,
-                        DataType::Varchar,
-                        AdditionalColumnType::Partition,
-                    ),
-                    is_hidden: false,
-                }
-            }),
+            Box::new(
+                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named_with_additional_column(
+                            name,
+                            id,
+                            DataType::Varchar,
+                            AdditionalColumn {
+                                column_type: Some(AdditionalColumnType::Partition(
+                                    AdditionalColumnPartition {},
+                                )),
+                            },
+                        ),
+                        is_hidden: false,
+                    }
+                },
+            ),
         ),
         (
             "offset",
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named_with_additional_column(
-                        name,
-                        id,
-                        DataType::Varchar,
-                        AdditionalColumnType::Offset,
-                    ),
-                    is_hidden: false,
-                }
-            }),
+            Box::new(
+                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named_with_additional_column(
+                            name,
+                            id,
+                            DataType::Varchar,
+                            AdditionalColumn {
+                                column_type: Some(AdditionalColumnType::Offset(
+                                    AdditionalColumnOffset {},
+                                )),
+                            },
+                        ),
+                        is_hidden: false,
+                    }
+                },
+            ),
         ),
         (
             "timestamp",
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named_with_additional_column(
-                        name,
-                        id,
-                        DataType::Timestamptz,
-                        AdditionalColumnType::Timestamp,
-                    ),
-                    is_hidden: false,
-                }
-            }),
+            Box::new(
+                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named_with_additional_column(
+                            name,
+                            id,
+                            DataType::Timestamptz,
+                            AdditionalColumn {
+                                column_type: Some(AdditionalColumnType::Timestamp(
+                                    AdditionalColumnTimestamp {},
+                                )),
+                            },
+                        ),
+                        is_hidden: false,
+                    }
+                },
+            ),
         ),
     ]
 }
@@ -243,31 +323,43 @@ fn s3_compatible_column_column_vec() -> Vec<(&'static str, CompatibleAdditionalC
     vec![
         (
             "file",
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named_with_additional_column(
-                        name,
-                        id,
-                        DataType::Varchar,
-                        AdditionalColumnType::Filename,
-                    ),
-                    is_hidden: false,
-                }
-            }),
+            Box::new(
+                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named_with_additional_column(
+                            name,
+                            id,
+                            DataType::Varchar,
+                            AdditionalColumn {
+                                column_type: Some(AdditionalColumnType::Filename(
+                                    AdditionalColumnFilename {},
+                                )),
+                            },
+                        ),
+                        is_hidden: false,
+                    }
+                },
+            ),
         ),
         (
             "offset",
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named_with_additional_column(
-                        name,
-                        id,
-                        DataType::Varchar,
-                        AdditionalColumnType::Offset,
-                    ),
-                    is_hidden: false,
-                }
-            }),
+            Box::new(
+                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named_with_additional_column(
+                            name,
+                            id,
+                            DataType::Varchar,
+                            AdditionalColumn {
+                                column_type: Some(AdditionalColumnType::Offset(
+                                    AdditionalColumnOffset {},
+                                )),
+                            },
+                        ),
+                        is_hidden: false,
+                    }
+                },
+            ),
         ),
     ]
 }

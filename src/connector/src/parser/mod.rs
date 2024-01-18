@@ -36,7 +36,7 @@ use risingwave_common::util::tracing::InstrumentStream;
 use risingwave_pb::catalog::{
     SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
 };
-use risingwave_pb::plan_common::AdditionalColumnType;
+use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
@@ -317,7 +317,7 @@ impl SourceStreamChunkRowWriter<'_> {
         mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output>,
     ) -> AccessResult<()> {
         let mut wrapped_f = |desc: &SourceColumnDesc| {
-            match (&desc.column_type, &desc.additional_column_type) {
+            match (&desc.column_type, &desc.additional_column_type.column_type) {
                 (&SourceColumnType::Offset | &SourceColumnType::RowId, _) => {
                     // SourceColumnType is for CDC source only.
                     Ok(A::output_for(
@@ -341,7 +341,7 @@ impl SourceStreamChunkRowWriter<'_> {
                             .unwrap(), // handled all match cases in internal match, unwrap is safe
                     ));
                 }
-                (_, &AdditionalColumnType::Timestamp) => {
+                (_, &Some(AdditionalColumnType::Timestamp(_))) => {
                     return Ok(A::output_for(
                         self.row_meta
                             .as_ref()
@@ -349,7 +349,7 @@ impl SourceStreamChunkRowWriter<'_> {
                             .unwrap_or(None),
                     ))
                 }
-                (_, &AdditionalColumnType::Partition) => {
+                (_, &Some(AdditionalColumnType::Partition(_))) => {
                     // the meta info does not involve spec connector
                     return Ok(A::output_for(
                         self.row_meta
@@ -357,7 +357,7 @@ impl SourceStreamChunkRowWriter<'_> {
                             .map(|ele| ScalarImpl::Utf8(ele.split_id.to_string().into())),
                     ));
                 }
-                (_, &AdditionalColumnType::Offset) => {
+                (_, &Some(AdditionalColumnType::Offset(_))) => {
                     // the meta info does not involve spec connector
                     return Ok(A::output_for(
                         self.row_meta
@@ -365,7 +365,7 @@ impl SourceStreamChunkRowWriter<'_> {
                             .map(|ele| ScalarImpl::Utf8(ele.offset.to_string().into())),
                     ));
                 }
-                (_, &AdditionalColumnType::Header) => {
+                (_, &Some(AdditionalColumnType::Header(_))) => {
                     return Ok(A::output_for(
                         self.row_meta
                             .as_ref()
@@ -373,7 +373,7 @@ impl SourceStreamChunkRowWriter<'_> {
                             .unwrap_or(None),
                     ))
                 }
-                (_, &AdditionalColumnType::Filename) => {
+                (_, &Some(AdditionalColumnType::Filename(_))) => {
                     // Filename is used as partition in FS connectors
                     return Ok(A::output_for(
                         self.row_meta

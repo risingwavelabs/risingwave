@@ -17,8 +17,10 @@ use risingwave_common::catalog::{
 };
 use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
+use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{
-    AdditionalColumnType, ColumnDescVersion, FormatType, PbEncodeType,
+    AdditionalColumn, AdditionalColumnKey, AdditionalColumnTimestamp, ColumnDescVersion,
+    FormatType, PbEncodeType,
 };
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::source_desc::SourceDescBuilder;
@@ -78,7 +80,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                                     // the column is from a legacy version
                                     && desc.version == ColumnDescVersion::Unspecified as i32
                                 {
-                                    desc.additional_column_type = AdditionalColumnType::Key as i32;
+                                    desc.additional_column_type = Some(AdditionalColumn {
+                                        column_type: Some(AdditionalColumnType::Key(
+                                            AdditionalColumnKey {},
+                                        )),
+                                    });
                                 }
                             });
                         });
@@ -103,8 +109,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                                 // the column is from a legacy version
                                 && desc.version == ColumnDescVersion::Unspecified as i32
                             {
-                                desc.additional_column_type =
-                                    AdditionalColumnType::Timestamp as i32;
+                                desc.additional_column_type = Some(AdditionalColumn {
+                                    column_type: Some(AdditionalColumnType::Timestamp(
+                                        AdditionalColumnTimestamp {},
+                                    )),
+                                });
                             }
                         });
                     });

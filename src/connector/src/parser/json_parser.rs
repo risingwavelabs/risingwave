@@ -203,7 +203,8 @@ mod tests {
     use risingwave_common::row::Row;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
-    use risingwave_pb::plan_common::AdditionalColumnType;
+    use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
+    use risingwave_pb::plan_common::{AdditionalColumn, AdditionalColumnKey};
 
     use super::JsonParser;
     use crate::parser::upsert_parser::UpsertParser;
@@ -580,7 +581,9 @@ mod tests {
             fields: vec![],
             column_type: SourceColumnType::Normal,
             is_pk: true,
-            additional_column_type: AdditionalColumnType::Key,
+            additional_column_type: AdditionalColumn {
+                column_type: Some(AdditionalColumnType::Key(AdditionalColumnKey {})),
+            },
         };
         let descs = vec![
             SourceColumnDesc::simple("a", DataType::Int32, 0.into()),
