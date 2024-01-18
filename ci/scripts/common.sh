@@ -89,11 +89,12 @@ function download_and_prepare_rw() {
 }
 
 function filter_stack_trace() {
+  echo "filtering stack trace for $1"
   touch tmp
   cat "$1" \
   | sed -E '/  [1-9][0-9]+:/d' \
   | sed -E '/  at .rustc/d' \
-  | sed -i -E '/  at ...cargo/d' > tmp
+  | sed -E '/  at ...cargo/d' > tmp
   cp tmp "$1"
   rm tmp
 }
