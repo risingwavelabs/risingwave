@@ -95,6 +95,7 @@ pub struct ConfigMap {
     batch_enable_sort_agg: bool,
 
     /// Enable distributed dml, so a insert, delete and update statement could be executed in distributed way (e.g. running in multiple compute nodes).
+    /// No atomicity guarantee in this mode. Its goal is to gain the best ingestion performance for initial batch ingestion where users always can drop their table when failure happens.
     #[parameter(default = false, rename = "batch_enable_distributed_dml")]
     batch_enable_distributed_dml: bool,
 

@@ -14,8 +14,6 @@
 
 use pretty_xmlish::XmlNode;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
-use risingwave_expr::aggregate::AggKind;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::InsertNode;
 use risingwave_pb::plan_common::{DefaultColumns, IndexAndExpr};
@@ -24,12 +22,11 @@ use super::batch::prelude::*;
 use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
-use crate::expr::{Expr, InputRef};
+use crate::expr::Expr;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::{Agg, GenericPlanNode};
-use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall, PlanBase, ToLocalBatch};
+use crate::optimizer::plan_node::generic::GenericPlanNode;
+use crate::optimizer::plan_node::{utils, PlanBase, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
-use crate::utils::{Condition, IndexSet};
 
 /// `BatchInsert` implements [`super::LogicalInsert`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -88,21 +85,7 @@ impl ToDistributedBatch for BatchInsert {
             if self.core.returning {
                 Ok(new_insert)
             } else {
-                let new_insert =
-                    RequiredDist::single().enforce_if_not_satisfies(new_insert, &Order::any())?;
-                // Accumulate the affected rows.
-                let sum_agg = PlanAggCall {
-                    agg_kind: AggKind::Sum,
-                    return_type: DataType::Int64,
-                    inputs: vec![InputRef::new(0, DataType::Int64)],
-                    distinct: false,
-                    order_by: vec![],
-                    filter: Condition::true_cond(),
-                    direct_args: vec![],
-                };
-                let agg = Agg::new(vec![sum_agg], IndexSet::empty(), new_insert);
-                let batch_agg = BatchSimpleAgg::new(agg);
-                Ok(batch_agg.into())
+                utils::sum_affected_row(new_insert)
             }
         } else {
             let new_input = RequiredDist::single()

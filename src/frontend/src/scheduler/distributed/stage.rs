@@ -709,8 +709,11 @@ impl StageRunner {
                 return Err(SchedulerError::EmptyWorkerNodes);
             }
             let candidate = if self.stage.batch_enable_distributed_dml {
+                // If distributed dml is enabled, we need to try our best to distribute dml tasks evenly to each worker.
+                // Using a `task_id` could be helpful in this case.
                 candidates[task_id as usize % candidates.len()].clone()
             } else {
+                // If distributed dml is disabled, we need to guarantee that dml from the same session would be sent to a fixed worker/channel to provide a order guarantee.
                 candidates[self.stage.session_id.0 as usize % candidates.len()].clone()
             };
             return Ok(Some(candidate));

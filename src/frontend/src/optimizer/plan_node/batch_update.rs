@@ -15,8 +15,6 @@
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
-use risingwave_expr::aggregate::AggKind;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::UpdateNode;
 
@@ -26,12 +24,11 @@ use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
-use crate::expr::{Expr, ExprRewriter, ExprVisitor, InputRef};
+use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::{Agg, GenericPlanNode};
-use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall, ToLocalBatch};
+use crate::optimizer::plan_node::generic::GenericPlanNode;
+use crate::optimizer::plan_node::{utils, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
-use crate::utils::{Condition, IndexSet};
 
 /// `BatchUpdate` implements [`super::LogicalUpdate`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -82,21 +79,7 @@ impl ToDistributedBatch for BatchUpdate {
             if self.core.returning {
                 Ok(new_update)
             } else {
-                let new_insert =
-                    RequiredDist::single().enforce_if_not_satisfies(new_update, &Order::any())?;
-                // Accumulate the affected rows.
-                let sum_agg = PlanAggCall {
-                    agg_kind: AggKind::Sum,
-                    return_type: DataType::Int64,
-                    inputs: vec![InputRef::new(0, DataType::Int64)],
-                    distinct: false,
-                    order_by: vec![],
-                    filter: Condition::true_cond(),
-                    direct_args: vec![],
-                };
-                let agg = Agg::new(vec![sum_agg], IndexSet::empty(), new_insert);
-                let batch_agg = BatchSimpleAgg::new(agg);
-                Ok(batch_agg.into())
+                utils::sum_affected_row(new_update)
             }
         } else {
             let new_input = RequiredDist::single()

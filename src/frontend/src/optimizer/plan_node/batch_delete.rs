@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
-use risingwave_expr::aggregate::AggKind;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::DeleteNode;
 
@@ -23,12 +21,10 @@ use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
-use crate::expr::InputRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::{Agg, GenericPlanNode, PhysicalPlanRef};
-use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall, ToLocalBatch};
+use crate::optimizer::plan_node::generic::{GenericPlanNode, PhysicalPlanRef};
+use crate::optimizer::plan_node::{utils, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
-use crate::utils::{Condition, IndexSet};
 
 /// `BatchDelete` implements [`super::LogicalDelete`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -78,21 +74,7 @@ impl ToDistributedBatch for BatchDelete {
             if self.core.returning {
                 Ok(new_delete)
             } else {
-                let new_delete =
-                    RequiredDist::single().enforce_if_not_satisfies(new_delete, &Order::any())?;
-                // Accumulate the affected rows.
-                let sum_agg = PlanAggCall {
-                    agg_kind: AggKind::Sum,
-                    return_type: DataType::Int64,
-                    inputs: vec![InputRef::new(0, DataType::Int64)],
-                    distinct: false,
-                    order_by: vec![],
-                    filter: Condition::true_cond(),
-                    direct_args: vec![],
-                };
-                let agg = Agg::new(vec![sum_agg], IndexSet::empty(), new_delete);
-                let batch_agg = BatchSimpleAgg::new(agg);
-                Ok(batch_agg.into())
+                utils::sum_affected_row(new_delete)
             }
         } else {
             let new_input = RequiredDist::single()
