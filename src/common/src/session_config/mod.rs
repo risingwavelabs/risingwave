@@ -94,6 +94,11 @@ pub struct ConfigMap {
     #[parameter(default = true, rename = "rw_batch_enable_sort_agg")]
     batch_enable_sort_agg: bool,
 
+    /// Enable distributed DML, so an insert, delete, and update statement can be executed in a distributed way (e.g. running in multiple compute nodes).
+    /// No atomicity guarantee in this mode. Its goal is to gain the best ingestion performance for initial batch ingestion where users always can drop their table when failure happens.
+    #[parameter(default = false, rename = "batch_enable_distributed_dml")]
+    batch_enable_distributed_dml: bool,
+
     /// The max gap allowed to transform small range scan into multi point lookup.
     #[parameter(default = 8)]
     max_split_range_gap: i32,
