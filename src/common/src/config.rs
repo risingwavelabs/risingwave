@@ -1459,6 +1459,10 @@ pub mod default {
         pub fn enable_emergency_picker() -> bool {
             DEFAULT_EMERGENCY_PICKER
         }
+
+        pub fn min_keep_alive_time_secs() -> u64 {
+            1200 // 20min
+        }
     }
 
     pub mod object_store_config {

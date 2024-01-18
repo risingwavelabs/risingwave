@@ -28,6 +28,7 @@ message SstableInfo {
   uint64 uncompressed_file_size = 11;
   uint64 range_tombstone_count = 12;
   BloomFilterType bloom_filter_kind = 13;
+  uint64 create_time = 14;
 }
 
 enum LevelType {
@@ -831,6 +832,7 @@ message CompactionConfig {
   uint32 level0_overlapping_sub_level_compact_level_count = 18;
   uint32 tombstone_reclaim_ratio = 19;
   bool enable_emergency_picker = 20;
+  uint64 min_keep_alive_time_secs = 21;
 }
 
 message TableStats {

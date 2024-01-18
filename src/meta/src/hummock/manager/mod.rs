@@ -1341,10 +1341,14 @@ impl HummockManager {
             }
         };
 
+        let task_end_time = Epoch::physical_now() / 1000;
         {
             // apply result
             compact_task.set_task_status(task_status);
             compact_task.sorted_output_ssts = sorted_output_ssts;
+            for sst in &mut compact_task.sorted_output_ssts {
+                sst.create_time = task_end_time;
+            }
         }
 
         let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
