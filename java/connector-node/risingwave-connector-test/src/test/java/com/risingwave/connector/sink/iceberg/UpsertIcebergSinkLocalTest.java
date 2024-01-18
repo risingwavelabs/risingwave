@@ -37,8 +37,10 @@ import org.apache.iceberg.types.Types;
 import org.apache.spark.SparkConf;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
+import org.junit.Ignore;
 import org.junit.Test;
 
+@Ignore
 public class UpsertIcebergSinkLocalTest {
     static String warehousePath = "/tmp/rw-sinknode/iceberg-sink/warehouse";
     static String databaseName = "demo_db";

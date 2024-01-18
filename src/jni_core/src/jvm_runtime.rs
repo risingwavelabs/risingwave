@@ -19,8 +19,9 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use anyhow::{anyhow, bail, Context};
+use jni::objects::{JObject, JString};
 use jni::strings::JNIString;
-use jni::{InitArgsBuilder, JNIVersion, JavaVM, NativeMethod};
+use jni::{InitArgsBuilder, JNIEnv, JNIVersion, JavaVM, NativeMethod};
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use thiserror_ext::AsReport;
 use tracing::error;
@@ -200,4 +201,44 @@ pub fn load_jvm_memory_stats() -> (usize, usize) {
         }
         _ => (0, 0),
     }
+}
+
+pub fn execute_with_jni_env<T>(
+    jvm: &JavaVM,
+    f: impl FnOnce(&mut JNIEnv<'_>) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let _guard = jvm
+        .attach_current_thread()
+        .with_context(|| "Failed to attach current rust thread to jvm")?;
+
+    let mut env = jvm.get_env().with_context(|| "Failed to get jni env")?;
+
+    let ret = f(&mut env);
+
+    match env.exception_check() {
+        Ok(true) => env
+            .exception_clear()
+            .inspect_err(|e| {
+                tracing::warn!("Exception occurred but failed to clear: {:?}", e);
+            })
+            .unwrap(),
+        Ok(false) => {
+            // No exception, do nothing
+        }
+        Err(e) => {
+            tracing::warn!("Failed to check exception: {:?}", e);
+        }
+    }
+
+    ret
+}
+
+/// A helper method to convert an java object to rust string.
+pub fn jobj_to_str(env: &mut JNIEnv<'_>, obj: JObject<'_>) -> anyhow::Result<String> {
+    if !env.is_instance_of(&obj, "java/lang/String")? {
+        bail!("Input object is not a java string and can't be converted!")
+    }
+    let jstr = JString::from(obj);
+    let java_str = env.get_string(&jstr)?;
+    Ok(java_str.to_str()?.to_string())
 }
