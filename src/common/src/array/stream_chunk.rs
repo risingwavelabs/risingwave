@@ -280,6 +280,33 @@ impl StreamChunk {
         }
     }
 
+    /// Remove the adjacent delete-insert if their row value are the same.
+    pub fn eliminate_adjacent_noop_update(self) -> Self {
+        let len = self.data_chunk().capacity();
+        let mut c: StreamChunkMut = self.into();
+        let mut prev_r = None;
+        for curr in 0..len {
+            if !c.vis(curr) {
+                continue;
+            }
+            if let Some(prev) = prev_r {
+                if matches!(c.op(prev), Op::UpdateDelete | Op::Delete)
+                    && matches!(c.op(curr), Op::UpdateInsert | Op::Insert)
+                    && c.row_ref(prev) == c.row_ref(curr)
+                {
+                    c.set_vis(prev, false);
+                    c.set_vis(curr, false);
+                    prev_r = None;
+                } else {
+                    prev_r = Some(curr)
+                }
+            } else {
+                prev_r = Some(curr);
+            }
+        }
+        c.into()
+    }
+
     /// Reorder columns and set visibility.
     pub fn project_with_vis(&self, indices: &[usize], vis: Bitmap) -> Self {
         Self {
@@ -469,6 +496,18 @@ impl OpRowMutRef<'_> {
 }
 
 impl StreamChunkMut {
+    pub fn vis(&self, i: usize) -> bool {
+        self.vis.is_set(i)
+    }
+
+    pub fn op(&self, i: usize) -> Op {
+        self.ops.get(i)
+    }
+
+    pub fn row_ref(&self, i: usize) -> RowRef<'_> {
+        RowRef::with_columns(self.columns(), i)
+    }
+
     pub fn set_vis(&mut self, n: usize, val: bool) {
         self.vis.set(n, val);
     }
