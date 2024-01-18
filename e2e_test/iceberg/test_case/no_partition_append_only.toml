@@ -13,7 +13,7 @@ init_sqls = [
     v_date date,
     v_timestamp timestamp,
     v_ts_ntz timestamp_ntz
-    ) TBLPROPERTIES ('format-version'='2');
+    ) USING iceberg TBLPROPERTIES ('format-version'='2');
     '''
 ]
 
