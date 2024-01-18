@@ -20,12 +20,9 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, Field, TableId};
-use risingwave_common::constants::log_store::{
-    EPOCH_COLUMN_INDEX, KV_LOG_STORE_PREDEFINED_COLUMNS, SEQ_ID_COLUMN_INDEX,
-};
+use risingwave_common::constants::log_store::v1::{KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
@@ -354,10 +351,10 @@ impl StreamSink {
             value_indices.push(indice);
         }
 
-        // The table's pk is composed of `epoch` and `seq_id`.
-        table_catalog_builder.add_order_column(EPOCH_COLUMN_INDEX, OrderType::ascending());
-        table_catalog_builder
-            .add_order_column(SEQ_ID_COLUMN_INDEX, OrderType::ascending_nulls_last());
+        for (i, ordering) in PK_ORDERING.iter().enumerate() {
+            table_catalog_builder.add_order_column(i, *ordering);
+        }
+
         let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
 
         let payload_indices = table_catalog_builder.extend_columns(&self.sink_desc().columns);

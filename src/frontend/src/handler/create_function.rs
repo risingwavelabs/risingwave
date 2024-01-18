@@ -18,6 +18,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::get_or_create_wasm_runtime;
 use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
