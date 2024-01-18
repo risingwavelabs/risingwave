@@ -67,6 +67,8 @@ pub enum TestType {
     BatchPlanProto,
     /// Batch plan for local execution `.gen_batch_local_plan()`
     BatchLocalPlan,
+    /// Batch plan for local execution `.gen_batch_distributed_plan()`
+    BatchDistributedPlan,
 
     /// Create MV plan `.gen_create_mv_plan()`
     StreamPlan,
@@ -200,6 +202,9 @@ pub struct TestCaseResult {
 
     /// Batch plan for local execution `.gen_batch_local_plan()`
     pub batch_local_plan: Option<String>,
+
+    /// Batch plan for distributed execution `.gen_batch_distributed_plan()`
+    pub batch_distributed_plan: Option<String>,
 
     /// Generate sink plan
     pub sink_plan: Option<String>,
@@ -705,6 +710,36 @@ impl TestCase {
                 // Only generate batch_plan if it is specified in test case
                 if self.expected_outputs.contains(&TestType::BatchLocalPlan) {
                     ret.batch_local_plan = Some(explain_plan(&batch_plan));
+                }
+            }
+        }
+
+        'distributed_batch: {
+            if self
+                .expected_outputs
+                .contains(&TestType::BatchDistributedPlan)
+                || self.expected_outputs.contains(&TestType::BatchError)
+            {
+                let batch_plan = match logical_plan.gen_batch_plan() {
+                    Ok(batch_plan) => match logical_plan.gen_batch_distributed_plan(batch_plan) {
+                        Ok(batch_plan) => batch_plan,
+                        Err(err) => {
+                            ret.batch_error = Some(err.to_report_string_pretty());
+                            break 'distributed_batch;
+                        }
+                    },
+                    Err(err) => {
+                        ret.batch_error = Some(err.to_report_string_pretty());
+                        break 'distributed_batch;
+                    }
+                };
+
+                // Only generate batch_plan if it is specified in test case
+                if self
+                    .expected_outputs
+                    .contains(&TestType::BatchDistributedPlan)
+                {
+                    ret.batch_distributed_plan = Some(explain_plan(&batch_plan));
                 }
             }
         }
