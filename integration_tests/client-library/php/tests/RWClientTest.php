@@ -27,17 +27,17 @@ class RWClientTest extends TestCase {
     $this->checkData($rw, $name, $age, $salary, $tripIDs, $birthdate, $deci, $fareData, $starttime, $timest, $timestz, $timegap);
 
     // Insert data with null values
-	  $nullName = "Null Person";
-	  $nullAge = 0;
-	  $nullSalary = 0;
-	  $nullTripIDs = [];
-	  $nullFareData = [];
-	  $nullBirthdate = new DateTime('0001-01-01');
-	  $nullStarttime = new DateTime('00:00:00');
-	  $nullTimest = new DateTime('0001-01-01 00:00:00');
-	  $nullTimestz = new DateTime('1970-01-01 00:00:00', timezone: new DateTimeZone('UTC'));
+    $nullName = "Null Person";
+    $nullAge = 0;
+    $nullSalary = 0;
+    $nullTripIDs = [];
+    $nullFareData = [];
+    $nullBirthdate = new DateTime('0001-01-01');
+    $nullStarttime = new DateTime('00:00:00');
+    $nullTimest = new DateTime('0001-01-01 00:00:00');
+    $nullTimestz = new DateTime('1970-01-01 00:00:00', timezone: new DateTimeZone('UTC'));
     $nullTimegap = DateInterval::createFromDateString('0 seconds');
-	  $nullDeci = 0.0;
+    $nullDeci = 0.0;
     insertData($rw, $nullName, $nullAge, $nullSalary, $nullTripIDs, $nullBirthdate, $nullDeci, $nullFareData, $nullStarttime, $nullTimest, $nullTimestz, $nullTimegap);
     $this->checkData($rw, $nullName, $nullAge, $nullSalary, $nullTripIDs, $nullBirthdate, $nullDeci, $nullFareData, $nullStarttime, $nullTimest, $nullTimestz, $nullTimegap);
 
