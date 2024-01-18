@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use either::Either;
 use futures::stream::{select_all, select_with_strategy};
-use futures::{pin_mut, stream, StreamExt, TryStreamExt};
+use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
@@ -27,6 +27,7 @@ use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
@@ -43,7 +44,6 @@ use crate::executor::{
     Message, PkIndicesRef, StreamExecutorError,
 };
 use crate::task::{ActorId, CreateMviewProgress};
-use risingwave_storage::store::PrefetchOptions;
 
 /// Similar to [`super::no_shuffle_backfill::BackfillExecutor`].
 /// Main differences:
@@ -560,7 +560,11 @@ where
                 "iter_with_vnode_and_output_indices"
             );
             let vnode_row_iter = upstream_table
-                .iter_with_vnode_and_output_indices(vnode, &range_bounds, PrefetchOptions::prefetch_for_small_range_scan())
+                .iter_with_vnode_and_output_indices(
+                    vnode,
+                    &range_bounds,
+                    PrefetchOptions::prefetch_for_small_range_scan(),
+                )
                 .await?;
 
             let vnode_row_iter = Box::pin(owned_row_iter(vnode_row_iter));
