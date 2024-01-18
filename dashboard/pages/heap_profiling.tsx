@@ -80,7 +80,7 @@ export default function HeapProfiling() {
         setProfileList(list)
       } catch (e: any) {
         console.error(e)
-        let result = `Getting Profiling File List\n$Error: ${e.message}]`
+        let result = `Getting Profiling File List\n\nError: ${e.message}\n${e.cause}`
         setDisplayInfo(result)
       }
     }
@@ -119,8 +119,12 @@ export default function HeapProfiling() {
   }, [selectedProfileList])
 
   async function dumpProfile() {
-    api.get(`/monitor/dump_heap_profile/${computeNodeId}`)
-    getProfileList(computeNodes, computeNodeId)
+    try {
+      await api.get(`/monitor/dump_heap_profile/${computeNodeId}`)
+      getProfileList(computeNodes, computeNodeId)
+    } catch (e: any) {
+      setDisplayInfo(`Dumping heap profile.\n\nError: ${e.message}\n${e.cause}`)
+    }
   }
 
   async function analyzeHeapFile() {

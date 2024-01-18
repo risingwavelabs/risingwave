@@ -18,6 +18,7 @@ use std::time::Duration;
 use anyhow::Result;
 use itertools::Itertools;
 use risingwave_simulation::cluster::{Cluster, Configuration};
+use tokio::time::timeout;
 
 const SET_PARALLELISM: &str = "SET STREAMING_PARALLELISM=1;";
 const ROOT_TABLE_CREATE: &str = "create table t1 (_id int, data jsonb);";
@@ -187,6 +188,44 @@ async fn test_arrangement_backfill_replication() -> Result<()> {
     assert_eq!(result, "");
     let result = session.run("select count(*) from m1").await?;
     assert_eq!(result.parse::<usize>().unwrap(), 300);
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_backfill_backpressure() -> Result<()> {
+    let mut cluster = Cluster::start(Configuration::default()).await?;
+    let mut session = cluster.start_session();
+
+    // Create dimension table
+    session.run("CREATE TABLE dim (v1 int);").await?;
+    // Ingest
+    // Amplification of 200 records
+    session
+        .run("INSERT INTO dim SELECT 1 FROM generate_series(1, 200);")
+        .await?;
+    // Create fact table
+    session.run("CREATE TABLE fact (v1 int);").await?;
+    // Create sink
+    session
+        .run("CREATE SINK s1 AS SELECT fact.v1 FROM fact JOIN dim ON fact.v1 = dim.v1 with (connector='blackhole');")
+        .await?;
+    session.run("FLUSH").await?;
+
+    // Ingest
+    tokio::spawn(async move {
+        session
+            .run("INSERT INTO fact SELECT 1 FROM generate_series(1, 100000);")
+            .await
+            .unwrap();
+    })
+    .await?;
+    let mut session = cluster.start_session();
+    session.run("FLUSH").await?;
+    // Run flush to check if barrier can go through. It should be able to.
+    // There will be some latency for the initial barrier.
+    session.run("FLUSH;").await?;
+    // But after that flush should be processed timely.
+    timeout(Duration::from_secs(1), session.run("FLUSH;")).await??;
     Ok(())
 }
 

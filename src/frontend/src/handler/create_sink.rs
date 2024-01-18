@@ -323,7 +323,7 @@ pub async fn handle_create_sink(
             );
         }
 
-        let mut graph = build_graph(plan);
+        let mut graph = build_graph(plan)?;
 
         graph.parallelism =
             session

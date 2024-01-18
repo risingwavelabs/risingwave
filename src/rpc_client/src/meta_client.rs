@@ -457,6 +457,14 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn alter_source_with_sr(&self, source: PbSource) -> Result<CatalogVersion> {
+        let request = AlterSourceRequest {
+            source: Some(source),
+        };
+        let resp = self.inner.alter_source(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn alter_parallelism(
         &self,
         table_id: u32,

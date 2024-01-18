@@ -101,16 +101,18 @@ impl Serialize for ExecutionPlanNode {
     }
 }
 
-impl From<PlanRef> for ExecutionPlanNode {
-    fn from(plan_node: PlanRef) -> Self {
-        Self {
+impl TryFrom<PlanRef> for ExecutionPlanNode {
+    type Error = SchedulerError;
+
+    fn try_from(plan_node: PlanRef) -> Result<Self, Self::Error> {
+        Ok(Self {
             plan_node_id: plan_node.plan_base().id(),
             plan_node_type: plan_node.node_type(),
-            node: plan_node.to_batch_prost_body(),
+            node: plan_node.try_to_batch_prost_body()?,
             children: vec![],
             schema: plan_node.schema().to_prost(),
             source_stage_id: None,
-        }
+        })
     }
 }
 
@@ -795,7 +797,7 @@ impl BatchPlanFragmenter {
                     )
                 } else {
                     // can be 0 if no available serving worker
-                    self.worker_node_manager.worker_node_count()
+                    self.worker_node_manager.schedule_unit_count()
                 }
             }
         };
@@ -836,7 +838,7 @@ impl BatchPlanFragmenter {
                 self.visit_exchange(node.clone(), builder, parent_exec_node)?;
             }
             _ => {
-                let mut execution_plan_node = ExecutionPlanNode::from(node.clone());
+                let mut execution_plan_node = ExecutionPlanNode::try_from(node.clone())?;
 
                 for child in node.inputs() {
                     self.visit_node(child, builder, Some(&mut execution_plan_node))?;
@@ -858,7 +860,7 @@ impl BatchPlanFragmenter {
         builder: &mut QueryStageBuilder,
         parent_exec_node: Option<&mut ExecutionPlanNode>,
     ) -> SchedulerResult<()> {
-        let mut execution_plan_node = ExecutionPlanNode::from(node.clone());
+        let mut execution_plan_node = ExecutionPlanNode::try_from(node.clone())?;
         let child_exchange_info = if let Some(parallelism) = builder.parallelism {
             Some(node.distribution().to_prost(
                 parallelism,
@@ -1131,7 +1133,7 @@ mod tests {
 
         let join_node = query.stage_graph.stages.get(&1).unwrap();
         assert_eq!(join_node.root.node_type(), PlanNodeType::BatchHashJoin);
-        assert_eq!(join_node.parallelism, Some(3));
+        assert_eq!(join_node.parallelism, Some(24));
 
         assert!(matches!(join_node.root.node, NodeBody::HashJoin(_)));
         assert_eq!(join_node.root.source_stage_id, None);

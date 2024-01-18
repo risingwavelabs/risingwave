@@ -23,6 +23,7 @@ use itertools::Itertools;
 use rand::Rng;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::stream_graph_visitor::{
@@ -860,9 +861,14 @@ impl DdlController {
                 fragment_graph,
             )
             .await?;
+        let dummy_id = self
+            .env
+            .id_gen_manager()
+            .generate::<{ IdCategory::Table }>()
+            .await? as u32;
 
         let (mut replace_table_ctx, mut table_fragments) = self
-            .build_replace_table(mgr, stream_ctx, &streaming_job, fragment_graph, None)
+            .build_replace_table(stream_ctx, &streaming_job, fragment_graph, None, dummy_id)
             .await?;
 
         let mut union_fragment_id = None;
@@ -1259,6 +1265,7 @@ impl DdlController {
     }
 
     /// Builds the actor graph:
+    /// - Add the upstream fragments to the fragment graph
     /// - Schedule the fragments based on their distribution
     /// - Expand each fragment into one or several actors
     pub(crate) async fn build_stream_job(
@@ -1278,10 +1285,7 @@ impl DdlController {
 
         let upstream_root_fragments = self
             .metadata_manager
-            .get_upstream_root_fragments(
-                fragment_graph.dependent_table_ids(),
-                stream_job.table_job_type(),
-            )
+            .get_upstream_root_fragments(fragment_graph.dependent_table_ids())
             .await?;
 
         let upstream_actors: HashMap<_, _> = upstream_root_fragments
@@ -1297,7 +1301,7 @@ impl DdlController {
         let complete_graph = CompleteStreamFragmentGraph::with_upstreams(
             fragment_graph,
             upstream_root_fragments,
-            stream_job.table_job_type(),
+            stream_job.into(),
         )?;
 
         // 2. Build the actor graph.
@@ -1588,7 +1592,9 @@ impl DdlController {
         table_col_index_mapping: Option<ColIndexMapping>,
     ) -> MetaResult<NotificationVersion> {
         let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unimplemented!("support replace table in v2");
+            return self
+                .replace_table_v2(stream_job, fragment_graph, table_col_index_mapping)
+                .await;
         };
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
         let stream_ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
@@ -1596,15 +1602,20 @@ impl DdlController {
         let fragment_graph = self
             .prepare_replace_table(mgr.catalog_manager.clone(), &mut stream_job, fragment_graph)
             .await?;
+        let dummy_id = self
+            .env
+            .id_gen_manager()
+            .generate::<{ IdCategory::Table }>()
+            .await? as u32;
 
         let result = try {
             let (ctx, table_fragments) = self
                 .build_replace_table(
-                    mgr,
                     stream_ctx,
                     &stream_job,
                     fragment_graph,
                     table_col_index_mapping.clone(),
+                    dummy_id,
                 )
                 .await?;
 
@@ -1665,39 +1676,41 @@ impl DdlController {
 
     /// `build_replace_table` builds a table replacement and returns the context and new table
     /// fragments.
-    async fn build_replace_table(
+    ///
+    /// Note that we use a dummy ID for the new table fragments and replace it with the real one after
+    /// replacement is finished.
+    pub(crate) async fn build_replace_table(
         &self,
-        mgr: &MetadataManagerV1,
         stream_ctx: StreamContext,
         stream_job: &StreamingJob,
         mut fragment_graph: StreamFragmentGraph,
         table_col_index_mapping: Option<ColIndexMapping>,
+        dummy_table_id: TableId,
     ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
         let id = stream_job.id();
         let default_parallelism = fragment_graph.default_parallelism();
         let expr_context = stream_ctx.to_expr_context();
 
-        let old_table_fragments = mgr
-            .fragment_manager
-            .select_table_fragments_by_table_id(&id.into())
+        let old_table_fragments = self
+            .metadata_manager
+            .get_job_fragments_by_id(&id.into())
             .await?;
         let old_internal_table_ids = old_table_fragments.internal_table_ids();
-        let old_internal_tables = mgr
-            .catalog_manager
-            .get_tables(&old_internal_table_ids)
-            .await;
+        let old_internal_tables = self
+            .metadata_manager
+            .get_table_catalog_by_ids(old_internal_table_ids)
+            .await?;
 
         fragment_graph.fit_internal_table_ids(old_internal_tables)?;
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
         // graph that contains all information needed for building the actor graph.
-        let original_table_fragment = mgr.fragment_manager.get_mview_fragment(id.into()).await?;
+        let original_table_fragment = old_table_fragments
+            .mview_fragment()
+            .expect("mview fragment not found");
 
         // Map the column indices in the dispatchers with the given mapping.
-        let downstream_fragments = mgr
-                .fragment_manager
-                .get_downstream_fragments(id.into())
-                .await?
+        let downstream_fragments = self.metadata_manager.get_downstream_chain_fragments(id).await?
                 .into_iter()
                 .map(|(d, f)|
                     if let Some(mapping) = &table_col_index_mapping {
@@ -1717,10 +1730,11 @@ impl DdlController {
             fragment_graph,
             original_table_fragment.fragment_id,
             downstream_fragments,
+            stream_job.into(),
         )?;
 
         // 2. Build the actor graph.
-        let cluster_info = mgr.cluster_manager.get_streaming_cluster_info().await;
+        let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
         let parallelism = self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
         let actor_graph_builder =
@@ -1737,27 +1751,16 @@ impl DdlController {
             .await?;
         assert!(dispatchers.is_empty());
 
-        // 3. Assign a new dummy ID for the new table fragments.
-        //
-        // FIXME: we use a dummy table ID for new table fragments, so we can drop the old fragments
-        // with the real table ID, then replace the dummy table ID with the real table ID. This is a
-        // workaround for not having the version info in the fragment manager.
-        let dummy_id = self
-            .env
-            .id_gen_manager()
-            .generate::<{ IdCategory::Table }>()
-            .await? as u32;
-
         let table_parallelism = match default_parallelism {
             None => TableParallelism::Auto,
             Some(parallelism) => TableParallelism::Fixed(parallelism.get()),
         };
 
-        // 4. Build the table fragments structure that will be persisted in the stream manager, and
+        // 3. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute
         // nodes.
         let table_fragments = TableFragments::new(
-            dummy_id.into(),
+            dummy_table_id.into(),
             graph,
             &building_locations.actor_locations,
             stream_ctx,
@@ -1979,7 +1982,8 @@ impl DdlController {
     }
 }
 
-/// Fill in necessary information for table stream graph.
+/// Fill in necessary information for `Table` stream graph.
+/// e.g., fill source id for table with connector, fill external table id for CDC table.
 pub fn fill_table_stream_graph_info(
     source: &mut Option<PbSource>,
     table: &mut PbTable,
