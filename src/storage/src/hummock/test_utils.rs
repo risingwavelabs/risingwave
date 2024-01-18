@@ -116,8 +116,10 @@ pub fn gen_dummy_sst_info(
             right_exclusive: false,
         }),
         file_size,
-        table_ids: vec![],
+        table_ids: vec![table_id.table_id],
         uncompressed_file_size: file_size,
+        min_epoch: epoch,
+        max_epoch: epoch,
         ..Default::default()
     }
 }
