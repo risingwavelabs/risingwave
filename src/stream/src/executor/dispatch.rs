@@ -1178,7 +1178,7 @@ mod tests {
         // 2. Take downstream receivers.
         let mut rxs = [untouched, old, new, old_simple, new_simple]
             .into_iter()
-            .map(|id| (id, ctx.take_receiver(&(actor_id, id)).unwrap()))
+            .map(|id| (id, ctx.take_receiver((actor_id, id)).unwrap()))
             .collect::<HashMap<_, _>>();
         macro_rules! try_recv {
             ($down_id:expr) => {

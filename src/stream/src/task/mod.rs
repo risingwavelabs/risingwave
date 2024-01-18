@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use anyhow::anyhow;
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard, RwLock};
@@ -31,10 +30,7 @@ mod stream_manager;
 
 pub use barrier_manager::*;
 pub use env::*;
-use risingwave_storage::StateStoreImpl;
 pub use stream_manager::*;
-
-use crate::executor::monitor::StreamingMetrics;
 
 pub type ConsumableChannelPair = (Option<Sender>, Option<Receiver>);
 pub type ActorId = u32;
@@ -95,16 +91,15 @@ impl std::fmt::Debug for SharedContext {
 impl SharedContext {
     pub fn new(
         addr: HostAddr,
-        state_store: StateStoreImpl,
         config: &StreamingConfig,
-        streaming_metrics: Arc<StreamingMetrics>,
+        barrier_manager: LocalBarrierManager,
     ) -> Self {
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr,
             compute_client_pool: ComputeClientPool::default(),
-            barrier_manager: LocalBarrierManager::new(state_store, streaming_metrics),
+            barrier_manager,
             config: config.clone(),
         }
     }
@@ -160,8 +155,8 @@ impl SharedContext {
             .ok_or_else(|| anyhow!("sender for {ids:?} has already been taken").into())
     }
 
-    pub fn take_receiver(&self, ids: &UpDownActorIds) -> StreamResult<Receiver> {
-        self.get_or_insert_channels(*ids)
+    pub fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver> {
+        self.get_or_insert_channels(ids)
             .1
             .take()
             .ok_or_else(|| anyhow!("receiver for {ids:?} has already been taken").into())
@@ -186,6 +181,10 @@ impl SharedContext {
             .get(actor_id)
             .cloned()
             .ok_or_else(|| anyhow!("actor {} not found in info table", actor_id).into())
+    }
+
+    pub fn config(&self) -> &StreamingConfig {
+        &self.config
     }
 }
 
