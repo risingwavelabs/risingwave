@@ -42,7 +42,7 @@ use crate::task::{ActorId, SharedContext};
 pub struct ActorContext {
     pub id: ActorId,
     pub fragment_id: u32,
-    pub stream_actor: PbStreamActor,
+    pub mview_definition: String,
 
     // TODO(eric): these seem to be useless now?
     last_mem_val: Arc<AtomicUsize>,
@@ -60,10 +60,7 @@ impl ActorContext {
         Arc::new(Self {
             id,
             fragment_id: 0,
-            stream_actor: PbStreamActor {
-                actor_id: id,
-                ..Default::default()
-            },
+            mview_definition: "".to_string(),
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             total_mem_val: Arc::new(TrAdder::new()),
@@ -81,7 +78,7 @@ impl ActorContext {
         Arc::new(Self {
             id: stream_actor.actor_id,
             fragment_id: stream_actor.fragment_id,
-            stream_actor,
+            mview_definition: stream_actor.mview_definition,
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             total_mem_val,

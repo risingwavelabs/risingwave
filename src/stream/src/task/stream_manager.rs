@@ -601,13 +601,10 @@ impl LocalStreamManagerCore {
         for actor in actors {
             let monitor = tokio_metrics::TaskMonitor::new();
             let actor_context = actor.actor_context.clone();
-            let actor_id = actor_context.stream_actor.actor_id;
+            let actor_id = actor_context.id;
 
             let handle = {
-                let trace_span = format!(
-                    "Actor {actor_id}: `{}`",
-                    actor_context.stream_actor.mview_definition
-                );
+                let trace_span = format!("Actor {actor_id}: `{}`", actor_context.mview_definition);
                 let barrier_manager = self.context.barrier_manager.clone();
                 let actor = actor.run().map(move |result| {
                     if let Err(err) = result {
