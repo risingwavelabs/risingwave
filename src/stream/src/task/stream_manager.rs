@@ -602,6 +602,7 @@ impl LocalStreamManagerCore {
                 self.total_mem_val.clone(),
                 self.streaming_metrics.clone(),
                 self.config.unique_user_stream_errors,
+                actor.dispatcher.len(),
             );
             let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
             let expr_context = actor.expr_context.clone().unwrap();
