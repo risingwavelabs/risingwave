@@ -37,11 +37,10 @@ impl ExecutorBuilder for ValuesExecutorBuilder {
     ) -> StreamResult<BoxedExecutor> {
         let (sender, barrier_receiver) = unbounded_channel();
         params
-            .shared_context
-            .barrier_manager()
+            .local_barrier_manager
             .register_sender(params.actor_context.id, sender);
         let progress = params
-            .shared_context
+            .local_barrier_manager
             .register_create_mview_progress(params.actor_context.id);
         let rows = node
             .get_tuples()

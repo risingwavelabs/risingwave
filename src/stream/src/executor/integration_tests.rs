@@ -36,7 +36,7 @@ use crate::executor::test_utils::agg_executor::{
     generate_agg_schema, new_boxed_simple_agg_executor,
 };
 use crate::executor::{Executor, MergeExecutor, ProjectExecutor, StatelessSimpleAggExecutor};
-use crate::task::SharedContext;
+use crate::task::{LocalBarrierManager, SharedContext};
 
 /// This test creates a merger-dispatcher pair, and run a sum. Each chunk
 /// has 0~9 elements. We first insert the 10 chunks, then delete them,
@@ -84,6 +84,7 @@ async fn test_merger_sum_aggr() {
             StreamingMetrics::unused().into(),
             actor_ctx.clone(),
             expr_context.clone(),
+            LocalBarrierManager::for_test(),
         );
         (actor, rx)
     };
@@ -136,6 +137,7 @@ async fn test_merger_sum_aggr() {
         StreamingMetrics::unused().into(),
         actor_ctx.clone(),
         expr_context.clone(),
+        LocalBarrierManager::for_test(),
     );
     handles.push(tokio::spawn(actor.run()));
 
@@ -192,6 +194,7 @@ async fn test_merger_sum_aggr() {
         StreamingMetrics::unused().into(),
         actor_ctx.clone(),
         expr_context.clone(),
+        LocalBarrierManager::for_test(),
     );
     handles.push(tokio::spawn(actor.run()));
 

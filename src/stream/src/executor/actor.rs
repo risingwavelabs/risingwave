@@ -36,7 +36,7 @@ use super::monitor::StreamingMetrics;
 use super::subtask::SubtaskHandle;
 use super::StreamConsumer;
 use crate::error::StreamResult;
-use crate::task::{ActorId, SharedContext};
+use crate::task::{ActorId, LocalBarrierManager, SharedContext};
 
 /// Shared by all operators of an actor.
 pub struct ActorContext {
@@ -135,10 +135,11 @@ pub struct Actor<C> {
     /// The subtasks to execute concurrently.
     subtasks: Vec<SubtaskHandle>,
 
-    context: Arc<SharedContext>,
+    _context: Arc<SharedContext>,
     _metrics: Arc<StreamingMetrics>,
     pub actor_context: ActorContextRef,
     expr_context: ExprContext,
+    barrier_manager: LocalBarrierManager,
 }
 
 impl<C> Actor<C>
@@ -152,14 +153,16 @@ where
         metrics: Arc<StreamingMetrics>,
         actor_context: ActorContextRef,
         expr_context: ExprContext,
+        barrier_manager: LocalBarrierManager,
     ) -> Self {
         Self {
             consumer,
             subtasks,
-            context,
+            _context: context,
             _metrics: metrics,
             actor_context,
             expr_context,
+            barrier_manager,
         }
     }
 
@@ -222,7 +225,7 @@ where
             .into()));
 
             // Collect barriers to local barrier manager
-            self.context.barrier_manager().collect(id, &barrier);
+            self.barrier_manager.collect(id, &barrier);
 
             // Then stop this actor if asked
             if barrier.is_stop(id) {

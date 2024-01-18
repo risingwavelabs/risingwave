@@ -41,7 +41,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
         let [upstream, snapshot]: [_; 2] = params.input.try_into().unwrap();
         // For reporting the progress.
         let progress = params
-            .shared_context
+            .local_barrier_manager
             .register_create_mview_progress(params.actor_context.id);
 
         let output_indices = node

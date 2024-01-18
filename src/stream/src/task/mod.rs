@@ -75,8 +75,6 @@ pub struct SharedContext {
     // disconnected.
     pub(crate) compute_client_pool: ComputeClientPool,
 
-    pub(crate) barrier_manager: LocalBarrierManager,
-
     pub(crate) config: StreamingConfig,
 }
 
@@ -89,17 +87,12 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(
-        addr: HostAddr,
-        config: &StreamingConfig,
-        barrier_manager: LocalBarrierManager,
-    ) -> Self {
+    pub fn new(addr: HostAddr, config: &StreamingConfig) -> Self {
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr,
             compute_client_pool: ComputeClientPool::default(),
-            barrier_manager,
             config: config.clone(),
         }
     }
@@ -113,7 +106,6 @@ impl SharedContext {
             actor_infos: Default::default(),
             addr: LOCAL_TEST_ADDR.clone(),
             compute_client_pool: ComputeClientPool::default(),
-            barrier_manager: LocalBarrierManager::for_test(),
             config: StreamingConfig {
                 developer: StreamingDeveloperConfig {
                     exchange_initial_permits: permit::for_test::INITIAL_PERMITS,
@@ -124,10 +116,6 @@ impl SharedContext {
                 ..Default::default()
             },
         }
-    }
-
-    pub fn barrier_manager(&self) -> &LocalBarrierManager {
-        &self.barrier_manager
     }
 
     /// Get the channel pair for the given actor ids. If the channel pair does not exist, create one

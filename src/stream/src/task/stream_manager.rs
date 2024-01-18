@@ -91,6 +91,8 @@ pub struct LocalStreamManager {
 
     /// Watermark epoch number.
     watermark_epoch: AtomicU64Ref,
+
+    local_barrier_manager: LocalBarrierManager,
 }
 
 /// Report expression evaluation errors to the actor context.
@@ -146,6 +148,8 @@ pub struct ExecutorParams {
     pub watermark_epoch: AtomicU64Ref,
 
     pub shared_context: Arc<SharedContext>,
+
+    pub local_barrier_manager: LocalBarrierManager,
 }
 
 impl Debug for ExecutorParams {
@@ -172,7 +176,7 @@ impl LocalStreamManager {
     ) -> Self {
         let local_barrier_manager =
             LocalBarrierManager::new(state_store.clone(), streaming_metrics.clone());
-        let context = Arc::new(SharedContext::new(addr, &config, local_barrier_manager));
+        let context = Arc::new(SharedContext::new(addr, &config));
         let core = LocalStreamManagerCore::new(await_tree_config, context.clone());
         Self {
             state_store,
@@ -181,6 +185,7 @@ impl LocalStreamManager {
             core: Mutex::new(core),
             streaming_metrics,
             watermark_epoch,
+            local_barrier_manager,
         }
     }
 
@@ -229,8 +234,7 @@ impl LocalStreamManager {
             self.watermark_epoch
                 .store(barrier.epoch.curr, std::sync::atomic::Ordering::SeqCst);
         }
-        let barrier_manager = self.context.barrier_manager();
-        barrier_manager
+        self.local_barrier_manager
             .send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)
             .await?;
         Ok(())
@@ -238,14 +242,13 @@ impl LocalStreamManager {
 
     /// Reset the state of the barrier manager.
     pub fn reset_barrier_manager(&self) {
-        self.context.barrier_manager().reset();
+        self.local_barrier_manager.reset();
     }
 
     /// Use `epoch` to find collect rx. And wait for all actor to be collected before
     /// returning.
     pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<BarrierCompleteResult> {
-        self.context
-            .barrier_manager()
+        self.local_barrier_manager
             .await_epoch_completed(epoch)
             .await
     }
@@ -319,7 +322,7 @@ impl LocalStreamManager {
         let actors = self.build_actors_impl(actors, env).await?;
         self.core
             .lock()
-            .spawn_actors(actors, &self.streaming_metrics);
+            .spawn_actors(actors, &self.streaming_metrics, &self.local_barrier_manager);
         Ok(())
     }
 
@@ -478,6 +481,7 @@ impl LocalStreamManager {
             eval_error_report,
             watermark_epoch: self.watermark_epoch.clone(),
             shared_context: self.context.clone(),
+            local_barrier_manager: self.local_barrier_manager.clone(),
         };
 
         let executor = create_executor(executor_params, node, store).await?;
@@ -584,6 +588,7 @@ impl LocalStreamManager {
                 self.streaming_metrics.clone(),
                 actor_context.clone(),
                 expr_context,
+                self.local_barrier_manager.clone(),
             );
 
             ret.push(actor);
@@ -597,6 +602,7 @@ impl LocalStreamManagerCore {
         &mut self,
         actors: Vec<Actor<DispatchExecutor>>,
         streaming_metrics: &Arc<StreamingMetrics>,
+        barrier_manager: &LocalBarrierManager,
     ) {
         for actor in actors {
             let monitor = tokio_metrics::TaskMonitor::new();
@@ -605,7 +611,7 @@ impl LocalStreamManagerCore {
 
             let handle = {
                 let trace_span = format!("Actor {actor_id}: `{}`", actor_context.mview_definition);
-                let barrier_manager = self.context.barrier_manager.clone();
+                let barrier_manager = barrier_manager.clone();
                 let actor = actor.run().map(move |result| {
                     if let Err(err) = result {
                         // TODO: check error type and panic if it's unexpected.
