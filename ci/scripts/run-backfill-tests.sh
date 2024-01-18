@@ -211,6 +211,7 @@ test_arrangement_backfill_snapshot_and_upstream_runtime() {
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_upstream.slt' 2>&1 1>out.log &
+  echo "[INFO] Upstream is ingesting in background"
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
 
   wait
@@ -227,6 +228,7 @@ test_no_shuffle_backfill_snapshot_and_upstream_runtime() {
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_upstream.slt' 2>&1 1>out.log &
+  echo "[INFO] Upstream is ingesting in background"
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
 
   wait
