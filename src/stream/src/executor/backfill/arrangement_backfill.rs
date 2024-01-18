@@ -16,8 +16,8 @@ use std::pin::pin;
 use std::sync::Arc;
 
 use either::Either;
-use futures::stream::select_with_strategy;
-use futures::{stream, StreamExt, TryStreamExt};
+use futures::stream::{select_all, select_with_strategy};
+use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
@@ -533,6 +533,7 @@ where
         backfill_state: BackfillState,
         builders: &'a mut [DataChunkBuilder],
     ) {
+        let mut iterators = vec![];
         for (vnode, builder) in upstream_table
             .vnodes()
             .iter_vnodes()
@@ -566,11 +567,17 @@ where
             let vnode_chunk_iter =
                 iter_chunks(vnode_row_iter, builder).map_ok(move |chunk| (vnode, chunk));
 
-            // This means we iterate serially rather than in parallel across vnodes.
-            #[for_await]
-            for chunk in vnode_chunk_iter {
-                yield Some(chunk?);
-            }
+            let vnode_chunk_iter = Box::pin(vnode_chunk_iter);
+
+            iterators.push(vnode_chunk_iter);
+        }
+
+        let vnode_chunk_iter = select_all(iterators);
+
+        // This means we iterate serially rather than in parallel across vnodes.
+        #[for_await]
+        for chunk in vnode_chunk_iter {
+            yield Some(chunk?);
         }
         yield None;
         return Ok(());
