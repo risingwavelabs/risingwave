@@ -76,6 +76,9 @@ pub struct HummockStateStoreMetrics {
 
     // memory
     pub mem_table_spill_counts: RelabeledCounterVec,
+
+    // block statistics
+    pub block_efficiency_histogram: RelabeledHistogramVec,
 }
 
 pub static GLOBAL_HUMMOCK_STATE_STORE_METRICS: OnceLock<HummockStateStoreMetrics> = OnceLock::new();
@@ -371,6 +374,19 @@ impl HummockStateStoreMetrics {
             metric_level,
         );
 
+        let opts = histogram_opts!(
+            "block_efficiency_histogram",
+            "Access ratio of in-memory block.",
+            exponential_buckets(0.001, 2.0, 11).unwrap(),
+        );
+        let block_efficiency_histogram =
+            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let block_efficiency_histogram = RelabeledHistogramVec::with_metric_level(
+            MetricLevel::Debug,
+            block_efficiency_histogram,
+            metric_level,
+        );
+
         Self {
             bloom_filter_true_negative_counts,
             bloom_filter_check_counts,
@@ -396,6 +412,8 @@ impl HummockStateStoreMetrics {
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
             mem_table_spill_counts,
+
+            block_efficiency_histogram,
         }
     }
 
