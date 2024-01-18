@@ -293,6 +293,33 @@ impl From<DataTypeName> for PbTypeName {
     }
 }
 
+/// Convenient macros to generate match arms for [`DataType`](crate::types::DataType).
+pub mod data_types {
+    /// Numeric [`DataType`](crate::types::DataType)s.
+    #[macro_export]
+    macro_rules! numeric {
+        () => {
+            DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::Serial
+                | DataType::Float32
+                | DataType::Float64
+                | DataType::Decimal
+        };
+    }
+    pub use numeric;
+
+    /// Integer [`DataType`](crate::types::DataType)s.
+    #[macro_export]
+    macro_rules! integer {
+        () => {
+            DataType::Int16 | DataType::Int32 | DataType::Int64
+        };
+    }
+    pub use integer;
+}
+
 impl DataType {
     pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         use crate::array::*;
@@ -346,16 +373,7 @@ impl DataType {
     }
 
     pub fn is_numeric(&self) -> bool {
-        matches!(
-            self,
-            DataType::Int16
-                | DataType::Int32
-                | DataType::Int64
-                | DataType::Serial
-                | DataType::Float32
-                | DataType::Float64
-                | DataType::Decimal
-        )
+        matches!(self, data_types::numeric!())
     }
 
     pub fn is_scalar(&self) -> bool {
@@ -371,10 +389,10 @@ impl DataType {
     }
 
     pub fn is_int(&self) -> bool {
-        matches!(self, DataType::Int16 | DataType::Int32 | DataType::Int64)
+        matches!(self, data_types::integer!())
     }
 
-    /// Returns the output type of window function on a given input type.
+    /// Returns the output type of time window function on a given input type.
     pub fn window_of(input: &DataType) -> Option<DataType> {
         match input {
             DataType::Timestamptz => Some(DataType::Timestamptz),

@@ -90,7 +90,9 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
             ),
             buffer_heap_size: KvSize::new(),
         }) as BoxedWindowState,
-        FrameBounds::Range(_) => todo!("now should be banned in frontend"),
+        FrameBounds::Range(_) => {
+            todo!("`RANGE` frame should be temporarily banned in `LogicalOverWindow`")
+        }
     };
     Ok(this)
 }

@@ -107,7 +107,9 @@ impl Frame {
                 end: Some(end.to_protobuf()),
                 exclusion,
             },
-            FrameBounds::Range(_) => todo!("now should be banned in frontend"),
+            FrameBounds::Range(_) => {
+                todo!("`RANGE` frame should be temporarily banned in `LogicalOverWindow`")
+            }
         }
     }
 }
