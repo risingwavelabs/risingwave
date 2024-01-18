@@ -15,11 +15,13 @@
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::io::{Read, Write};
-use std::mem::size_of;
-use std::ops::Range;
+use std::mem::{size_of, MaybeUninit};
+use std::ops::{Range, RangeBounds};
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
+use risingwave_common::range::RangeBoundsExt;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::KeyComparator;
 use {lz4, zstd};
@@ -139,7 +141,96 @@ impl RestartPoint {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug)]
+pub struct Hitmap<const N: usize> {
+    /// For [`Block`] is rarely access in multi-thread pattern,
+    /// the cons of false-sharing can be ignored.
+    data: [AtomicU64; N],
+}
+
+impl<const N: usize> Default for Hitmap<N> {
+    fn default() -> Self {
+        let mut data: [MaybeUninit<AtomicU64>; N] = MaybeUninit::uninit_array();
+        for elem in &mut data[..] {
+            elem.write(AtomicU64::new(0));
+        }
+        let data = unsafe { MaybeUninit::array_assume_init(data) };
+        Self { data }
+    }
+}
+
+impl<const N: usize> Hitmap<N> {
+    pub const fn bits() -> usize {
+        N * 64
+    }
+
+    pub const fn bytes() -> usize {
+        N * 8
+    }
+
+    pub fn reset(&self) {
+        for elem in &self.data {
+            elem.store(0, AtomicOrdering::Relaxed);
+        }
+    }
+
+    pub fn fill(&self, start_bit: usize, end_bit: usize) {
+        const MASK: usize = (1 << 6) - 1;
+
+        let end_bit = std::cmp::min(end_bit, Self::bits());
+
+        let head_bits = start_bit & MASK;
+        let tail_bits_rev = end_bit & MASK;
+
+        let head_elem = start_bit >> 6;
+        let tail_elem = end_bit >> 6;
+
+        for i in head_elem..=std::cmp::min(tail_elem, N - 1) {
+            let elem = &self.data[i];
+            let mut umask = 0u64;
+            if i == head_elem {
+                umask |= (1u64 << head_bits) - 1;
+            }
+            if i == tail_elem {
+                umask |= !((1u64 << tail_bits_rev) - 1);
+            }
+            elem.fetch_or(!umask, AtomicOrdering::Relaxed);
+        }
+    }
+
+    pub fn fill_with_ratio(&self, start: f64, end: f64) {
+        let start_bit = (Self::bits() as f64 * start) as usize;
+        let end_bit = (Self::bits() as f64 * end) as usize;
+        self.fill(start_bit, end_bit)
+    }
+
+    pub fn ones(&self) -> usize {
+        let mut res = 0;
+        for elem in &self.data {
+            res += elem.load(AtomicOrdering::Relaxed).count_ones() as usize;
+        }
+        res
+    }
+
+    pub fn zeros(&self) -> usize {
+        Self::bits() - self.ones()
+    }
+
+    pub fn ratio(self) -> f64 {
+        self.ones() as f64 / Self::bits() as f64
+    }
+
+    #[cfg(test)]
+    pub fn to_hex_vec(&self) -> Vec<String> {
+        use itertools::Itertools;
+        self.data
+            .iter()
+            .map(|elem| elem.load(AtomicOrdering::Relaxed))
+            .map(|v| format!("{v:016x}"))
+            .collect_vec()
+    }
+}
+
 pub struct Block {
     /// Uncompressed entries data, with restart encoded restart points info.
     data: Bytes,
@@ -151,6 +242,20 @@ pub struct Block {
 
     /// Restart points.
     restart_points: Vec<RestartPoint>,
+
+    hitmap: Hitmap<4>,
+}
+
+impl Clone for Block {
+    fn clone(&self) -> Self {
+        Self {
+            data: self.data.clone(),
+            data_len: self.data_len,
+            table_id: self.table_id,
+            restart_points: self.restart_points.clone(),
+            hitmap: Hitmap::default(),
+        }
+    }
 }
 
 impl Debug for Block {
@@ -272,6 +377,7 @@ impl Block {
             data_len,
             restart_points,
             table_id: TableId::new(table_id),
+            hitmap: Hitmap::default(),
         }
     }
 
@@ -310,8 +416,13 @@ impl Block {
         self.restart_points.partition_point(pred)
     }
 
-    pub fn data(&self) -> &[u8] {
-        &self.data[..self.data_len]
+    pub fn slice(&self, range: impl RangeBounds<usize>) -> &[u8] {
+        let range = range.bounds(0, self.data.len());
+        self.hitmap.fill_with_ratio(
+            range.start as f64 / self.data_len as f64,
+            range.end as f64 / self.data_len as f64,
+        );
+        &self.data[range]
     }
 
     pub fn raw(&self) -> &[u8] {
@@ -928,5 +1039,66 @@ mod tests {
             assert!(!bi.is_valid());
             builder.clear();
         }
+    }
+
+    #[test]
+    fn test_hitmap() {
+        // hex: high <== low
+        let h = Hitmap::<4>::default();
+        assert_eq!(
+            h.to_hex_vec(),
+            vec![
+                "0000000000000000",
+                "0000000000000000",
+                "0000000000000000",
+                "0000000000000000",
+            ]
+        );
+        assert_eq!(h.ones(), 0);
+        h.fill(16, 24);
+        assert_eq!(
+            h.to_hex_vec(),
+            vec![
+                "0000000000ff0000",
+                "0000000000000000",
+                "0000000000000000",
+                "0000000000000000",
+            ]
+        );
+        assert_eq!(h.ones(), 8);
+        h.fill(32, 64);
+        assert_eq!(
+            h.to_hex_vec(),
+            vec![
+                "ffffffff00ff0000",
+                "0000000000000000",
+                "0000000000000000",
+                "0000000000000000",
+            ]
+        );
+        assert_eq!(h.ones(), 40);
+        h.fill(96, 224);
+        assert_eq!(
+            h.to_hex_vec(),
+            vec![
+                "ffffffff00ff0000",
+                "ffffffff00000000",
+                "ffffffffffffffff",
+                "00000000ffffffff",
+            ]
+        );
+        assert_eq!(h.ones(), 168);
+        h.fill(0, 256);
+        assert_eq!(
+            h.to_hex_vec(),
+            vec![
+                "ffffffffffffffff",
+                "ffffffffffffffff",
+                "ffffffffffffffff",
+                "ffffffffffffffff",
+            ]
+        );
+        assert_eq!(h.ones(), 256);
+        h.reset();
     }
 }

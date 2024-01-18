@@ -87,7 +87,7 @@ impl BlockIterator {
 
     pub fn value(&self) -> &[u8] {
         assert!(self.is_valid());
-        &self.block.data()[self.value_range.clone()]
+        self.block.slice(self.value_range.clone())
     }
 
     pub fn is_valid(&self) -> bool {
@@ -166,7 +166,7 @@ impl BlockIterator {
             self.decode_prefix_at(offset, self.last_key_len_type, self.last_value_len_type);
         self.key.truncate(prefix.overlap_len());
         self.key
-            .extend_from_slice(&self.block.data()[prefix.diff_key_range()]);
+            .extend_from_slice(self.block.slice(prefix.diff_key_range()));
 
         self.value_range = prefix.value_range();
         self.offset = offset;
@@ -233,7 +233,7 @@ impl BlockIterator {
         value_len_type: LenType,
     ) -> KeyPrefix {
         KeyPrefix::decode(
-            &mut &self.block.data()[offset..],
+            &mut self.block.slice(offset..),
             offset,
             key_len_type,
             value_len_type,
@@ -252,7 +252,7 @@ impl BlockIterator {
                  }| {
                     let prefix =
                         self.decode_prefix_at(probe as usize, key_len_type, value_len_type);
-                    let probe_key = &self.block.data()[prefix.diff_key_range()];
+                    let probe_key = self.block.slice(prefix.diff_key_range());
                     let full_probe_key =
                         FullKey::from_slice_without_table_id(self.block.table_id(), probe_key);
                     match full_probe_key.cmp(&key) {
@@ -280,7 +280,7 @@ impl BlockIterator {
             restart_point.value_len_type,
         );
 
-        self.key = BytesMut::from(&self.block.data()[prefix.diff_key_range()]);
+        self.key = BytesMut::from(self.block.slice(prefix.diff_key_range()));
         self.value_range = prefix.value_range();
         self.offset = offset;
         self.entry_len = prefix.entry_len();
