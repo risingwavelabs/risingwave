@@ -27,6 +27,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr_context::expr_context_scope;
 use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::ExprContext;
+use risingwave_pb::stream_plan::PbStreamActor;
 use thiserror_ext::AsReport;
 use tokio_stream::StreamExt;
 use tracing::Instrument;
@@ -132,6 +133,9 @@ pub struct Actor<C> {
     /// The subtasks to execute concurrently.
     subtasks: Vec<SubtaskHandle>,
 
+    /// pb definition of actor
+    pub stream_actor: PbStreamActor,
+
     context: Arc<SharedContext>,
     _metrics: Arc<StreamingMetrics>,
     actor_context: ActorContextRef,
@@ -145,6 +149,7 @@ where
     pub fn new(
         consumer: C,
         subtasks: Vec<SubtaskHandle>,
+        stream_actor: PbStreamActor,
         context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
         actor_context: ActorContextRef,
@@ -153,6 +158,7 @@ where
         Self {
             consumer,
             subtasks,
+            stream_actor,
             context,
             _metrics: metrics,
             actor_context,

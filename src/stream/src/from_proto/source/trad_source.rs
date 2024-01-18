@@ -41,11 +41,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let (sender, barrier_receiver) = unbounded_channel();
-        stream
-            .context
+        params
+            .shared_context
             .barrier_manager()
             .register_sender(params.actor_context.id, sender);
         let system_params = params.env.system_params_manager_ref().get_params();

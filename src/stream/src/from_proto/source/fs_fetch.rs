@@ -29,7 +29,7 @@ use crate::executor::{
     StreamSourceCore,
 };
 use crate::from_proto::ExecutorBuilder;
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::task::ExecutorParams;
 
 pub struct FsFetchExecutorBuilder;
 
@@ -40,7 +40,6 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
 
