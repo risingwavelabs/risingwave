@@ -260,20 +260,20 @@ main() {
   test_replication_with_column_pruning
   test_sink_backfill_recovery
 
-  if [[ $profile == "ci-dev" ]]; then
-    echo "Skipping backfill runtime performance tests for ci-dev"
-    exit 0
+  # Only if profile is "ci-release", run it.
+  if [[ ${profile:-} == "ci-release" ]]; then
+    echo "--- Using release profile, running backfill performance tests."
+    # Need separate tests, we don't want to backfill concurrently.
+    # It's difficult to measure the time taken for each backfill if we do so.
+    test_no_shuffle_backfill_snapshot_and_upstream_runtime
+    test_arrangement_backfill_snapshot_and_upstream_runtime
+
+    # Backfill will happen in sequence here.
+    test_backfill_snapshot_runtime
+
+    # No upstream only tests, because if there's no snapshot,
+    # Backfill will complete almost immediately.
   fi
-  # Need separate tests, we don't want to backfill concurrently.
-  # It's difficult to measure the time taken for each backfill if we do so.
-  test_no_shuffle_backfill_snapshot_and_upstream_runtime
-  test_arrangement_backfill_snapshot_and_upstream_runtime
-
-  # Backfill will happen in sequence here.
-  test_backfill_snapshot_runtime
-
-  # No upstream only tests, because if there's no snapshot,
-  # Backfill will complete almost immediately.
 }
 
 main
