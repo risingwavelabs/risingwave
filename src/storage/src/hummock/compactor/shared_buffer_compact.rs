@@ -20,6 +20,7 @@ use bytes::{Bytes, BytesMut};
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 use itertools::Itertools;
+use more_asserts::debug_assert_lt;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
@@ -383,9 +384,18 @@ pub async fn merge_imms_in_memory(
         if let Some(last_full_key) = full_key_tracker.observe(full_key)
             && !last_full_key.is_empty()
         {
+            // Record kv entries
+            merged_payload.push((last_full_key.user_key.table_key, table_key_versions));
+
+            // Reset state before moving onto the new table key
+            table_key_versions = vec![];
+            table_key_last_delete_epoch = HummockEpoch::MAX;
+
             // Record range tombstones if any
-            let target_extended_user_key =
-                PointRange::from_user_key(last_full_key.user_key.as_ref(), false);
+            let target_extended_user_key = PointRange::from_user_key(
+                full_key_tracker.latest_full_key.user_key.as_ref(),
+                false,
+            );
             while del_iter.is_valid() && del_iter.key().le(&target_extended_user_key) {
                 let event_key = del_iter.key().to_vec();
                 del_iter.next().await?;
@@ -394,23 +404,21 @@ pub async fn merge_imms_in_memory(
                     new_epoch: del_iter.earliest_epoch(),
                 });
             }
-
-            // Record kv entries
-            merged_payload.push((last_full_key.user_key.table_key, table_key_versions));
-
-            // Reset state before moving onto the new table key
-            table_key_versions = vec![];
-            table_key_last_delete_epoch = HummockEpoch::MAX;
         }
         let earliest_range_delete_which_can_see_key =
             del_iter.earliest_delete_since(epoch_with_gap.pure_epoch());
         if value.is_delete() {
             table_key_last_delete_epoch = epoch_with_gap.pure_epoch();
         } else if earliest_range_delete_which_can_see_key < table_key_last_delete_epoch {
-            debug_assert!(
-                epoch_with_gap.pure_epoch() < earliest_range_delete_which_can_see_key
-                    && earliest_range_delete_which_can_see_key < table_key_last_delete_epoch
+            debug_assert_lt!(
+                epoch_with_gap.pure_epoch(),
+                earliest_range_delete_which_can_see_key
             );
+            debug_assert_lt!(
+                earliest_range_delete_which_can_see_key,
+                table_key_last_delete_epoch
+            );
+
             table_key_last_delete_epoch = earliest_range_delete_which_can_see_key;
             // In each merged immutable memtable, since a union set of delete ranges is constructed
             // and thus original delete ranges are replaced with the union set and not
