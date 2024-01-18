@@ -41,6 +41,10 @@ pub struct SourceColumnDesc {
     /// `additional_column` is used to indicate the column is from which part of the message
     /// `column_type` is used to indicate the type of the column, only used in cdc scenario
     pub additional_column: AdditionalColumn,
+    /// `additional_column_type` and `column_type` are orthogonal
+    /// - `additional_column_type` is used to indicate the column is from which part of the message
+    /// - `column_type` is used to indicate the type of the column, only used in cdc scenario
+    pub additional_column_type: AdditionalColumnType,
 }
 
 /// `SourceColumnType` is used to indicate the type of a column emitted by the Source.
@@ -61,6 +65,7 @@ pub enum SourceColumnType {
 
 impl SourceColumnType {
     pub fn from_name(name: &str) -> Self {
+        // FIXME: should use additional_column_type for kafka timestamp
         if name.starts_with(KAFKA_TIMESTAMP_COLUMN_NAME) || name.starts_with(TABLE_NAME_COLUMN_NAME)
         {
             Self::Meta
