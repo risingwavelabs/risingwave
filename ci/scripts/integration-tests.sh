@@ -77,15 +77,6 @@ echo "--- run docker ps"
 docker ps
 
 echo "--- check if the ingestion is successful"
-# extract the type of upstream source,e.g. mysql,postgres,etc
-upstream=$(echo ${case} | cut -d'-' -f 1)
-if [ "${upstream}" == "mysql" ]; then
-  echo "install mysql"
-  sudo rpm -Uvh https://dev.mysql.com/get/mysql80-community-release-el9-1.noarch.rpm
-  sudo dnf -y install mysql-community-server
-fi
-
-export PGPASSWORD=123456
 python3 check_data.py ${case} ${upstream}
 
 echo "--- clean Demos"
