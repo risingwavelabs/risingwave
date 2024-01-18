@@ -43,6 +43,7 @@ use crate::executor::{
     Message, PkIndicesRef, StreamExecutorError,
 };
 use crate::task::{ActorId, CreateMviewProgress};
+use risingwave_storage::store::PrefetchOptions;
 
 /// Similar to [`super::no_shuffle_backfill::BackfillExecutor`].
 /// Main differences:
@@ -559,7 +560,7 @@ where
                 "iter_with_vnode_and_output_indices"
             );
             let vnode_row_iter = upstream_table
-                .iter_with_vnode_and_output_indices(vnode, &range_bounds, Default::default())
+                .iter_with_vnode_and_output_indices(vnode, &range_bounds, PrefetchOptions::prefetch_for_small_range_scan())
                 .await?;
 
             let vnode_row_iter = Box::pin(owned_row_iter(vnode_row_iter));
