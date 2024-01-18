@@ -4,7 +4,7 @@
 
 # USAGE:
 # ```sh
-# ./ci/scripts/run-backfill-tests.sh
+# profile=(ci-release|ci-dev) ./ci/scripts/run-backfill-tests.sh
 # ```
 # Example progress:
 # dev=> select * from rw_catalog.rw_ddl_progress;
@@ -260,6 +260,10 @@ main() {
   test_replication_with_column_pruning
   test_sink_backfill_recovery
 
+  if [[ $profile == "ci-dev" ]]; then
+    echo "Skipping backfill runtime performance tests for ci-dev"
+    exit 0
+  fi
   # Need separate tests, we don't want to backfill concurrently.
   # It's difficult to measure the time taken for each backfill if we do so.
   test_no_shuffle_backfill_snapshot_and_upstream_runtime
