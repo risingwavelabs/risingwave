@@ -737,7 +737,7 @@ statement ok
 drop source s18
 
 statement ok
-drop source s20
+drop table s20
 
 statement ok
 drop table s21
