@@ -142,7 +142,7 @@ impl RestartPoint {
 #[derive(Clone)]
 pub struct Block {
     /// Uncompressed entries data, with restart encoded restart points info.
-    pub data: Bytes,
+    data: Bytes,
     /// Uncompressed entried data length.
     data_len: usize,
 
