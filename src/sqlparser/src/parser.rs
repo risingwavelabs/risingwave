@@ -2559,8 +2559,7 @@ impl Parser {
                         "At most 1 wildcard is allowed in source definetion".to_string(),
                     ));
                 }
-            }
-            if let Some(constraint) = self.parse_optional_table_constraint()? {
+            } else if let Some(constraint) = self.parse_optional_table_constraint()? {
                 constraints.push(constraint);
             } else if let Some(watermark) = self.parse_optional_watermark()? {
                 watermarks.push(watermark);
