@@ -308,7 +308,7 @@ impl StreamChunk {
         let len = self.data_chunk().capacity();
         let mut c: StreamChunkMut = self.into();
         let mut prev_r = None;
-        for curr in 1..len {
+        for curr in 0..len {
             if !c.vis(curr) {
                 continue;
             }
