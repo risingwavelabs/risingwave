@@ -629,18 +629,14 @@ impl Binder {
                     let offset_data_type = match order_data_type {
                         // for numeric ordering columns, `offset` should be the same type
                         // NOTE: actually in PG it can be a larger type, but we don't support this here
-                        t @ data_types::numeric!() => t,
+                        t @ data_types::range_frame_numeric!() => t,
                         // for datetime ordering columns, `offset` should be interval
-                        DataType::Date
-                        | DataType::Time
-                        | DataType::Timestamp
-                        | DataType::Timestamptz
-                        | DataType::Interval => DataType::Interval,
+                        data_types::range_frame_datetime!() => DataType::Interval,
                         // other types are not supported
                         t => {
                             return Err(ErrorCode::NotSupported(
                                 format!(
-                                    "`RANGE` frame with offset of `{}` type is not supported",
+                                    "`RANGE` frame with offset of type `{}` is not supported",
                                     t
                                 ),
                                 "Please re-consider the `ORDER BY` column".to_string(),

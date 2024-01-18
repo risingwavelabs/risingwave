@@ -295,29 +295,32 @@ impl From<DataTypeName> for PbTypeName {
 
 /// Convenient macros to generate match arms for [`DataType`](crate::types::DataType).
 pub mod data_types {
-    /// Numeric [`DataType`](crate::types::DataType)s.
+    /// Numeric [`DataType`](crate::types::DataType)s supported to be `offset` of `RANGE` frame.
     #[macro_export]
-    macro_rules! numeric {
+    macro_rules! range_frame_numeric {
         () => {
             DataType::Int16
                 | DataType::Int32
                 | DataType::Int64
-                | DataType::Serial
                 | DataType::Float32
                 | DataType::Float64
                 | DataType::Decimal
         };
     }
-    pub use numeric;
+    pub use range_frame_numeric;
 
-    /// Integer [`DataType`](crate::types::DataType)s.
+    /// Integer [`DataType`](crate::types::DataType)s supported to be `offset` of `RANGE` frame.
     #[macro_export]
-    macro_rules! integer {
+    macro_rules! range_frame_datetime {
         () => {
-            DataType::Int16 | DataType::Int32 | DataType::Int64
+            DataType::Date
+                | DataType::Time
+                | DataType::Timestamp
+                | DataType::Timestamptz
+                | DataType::Interval
         };
     }
-    pub use integer;
+    pub use range_frame_datetime;
 }
 
 impl DataType {
@@ -373,7 +376,16 @@ impl DataType {
     }
 
     pub fn is_numeric(&self) -> bool {
-        matches!(self, data_types::numeric!())
+        matches!(
+            self,
+            DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::Serial
+                | DataType::Float32
+                | DataType::Float64
+                | DataType::Decimal
+        )
     }
 
     pub fn is_scalar(&self) -> bool {
@@ -389,7 +401,7 @@ impl DataType {
     }
 
     pub fn is_int(&self) -> bool {
-        matches!(self, data_types::integer!())
+        matches!(self, DataType::Int16 | DataType::Int32 | DataType::Int64)
     }
 
     /// Returns the output type of time window function on a given input type.
