@@ -23,6 +23,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, is_empty_key_range, FullKey, TableKey, TableKeyRange, UserKey,
 };
@@ -31,7 +32,7 @@ use risingwave_hummock_sdk::table_watermark::{
     ReadTableWatermark, TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
 use risingwave_hummock_sdk::version::HummockVersionDelta;
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{LevelType, SstableInfo};
 use sync_point::sync_point;
 use tracing::Instrument;
@@ -39,8 +40,8 @@ use tracing::Instrument;
 use super::StagingDataIterator;
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
-    ConcatIterator, ForwardMergeRangeIterator, HummockIteratorUnion, OrderedMergeIteratorInner,
-    SkipWatermarkIterator, UnorderedMergeIteratorInner, UserIterator,
+    ConcatIterator, ForwardMergeRangeIterator, HummockIteratorUnion, MergeIterator,
+    SkipWatermarkIterator, UserIterator,
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -684,7 +685,13 @@ impl HummockVersionReader {
             Sstable::hash_for_bloom_filter(dist_key.as_ref(), read_options.table_id.table_id())
         });
 
-        let full_key = FullKey::new(read_options.table_id, TableKey(table_key.clone()), epoch);
+        // Here epoch passed in is pure epoch, and we will seek the constructed `full_key` later.
+        // Therefore, it is necessary to construct the `full_key` with `MAX_SPILL_TIMES`, otherwise, the iterator might skip keys with spill offset greater than 0.
+        let full_key = FullKey::new_with_gap_epoch(
+            read_options.table_id,
+            TableKey(table_key.clone()),
+            EpochWithGap::new(epoch, MAX_SPILL_TIMES),
+        );
         for local_sst in &uncommitted_ssts {
             local_stats.staging_sst_get_count += 1;
             if let Some((data, data_epoch)) = get_from_sstable_info(
@@ -904,7 +911,7 @@ impl HummockVersionReader {
             )));
         }
         local_stats.staging_sst_iter_count = staging_sst_iter_count;
-        let staging_iter: StagingDataIterator = OrderedMergeIteratorInner::new(staging_iters);
+        let staging_iter: StagingDataIterator = MergeIterator::new(staging_iters);
 
         let mut non_overlapping_iters = Vec::new();
         let mut overlapping_iters = Vec::new();
@@ -1038,7 +1045,7 @@ impl HummockVersionReader {
         }
 
         // 3. build user_iterator
-        let merge_iter = UnorderedMergeIteratorInner::new(
+        let merge_iter = MergeIterator::new(
             once(HummockIteratorUnion::First(staging_iter))
                 .chain(
                     overlapping_iters

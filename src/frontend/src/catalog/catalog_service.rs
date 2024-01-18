@@ -176,6 +176,8 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()>;
 
+    async fn alter_source_with_sr(&self, source: PbSource) -> Result<()>;
+
     async fn alter_parallelism(&self, table_id: u32, parallelism: PbTableParallelism)
         -> Result<()>;
 
@@ -492,6 +494,11 @@ impl CatalogWriter for CatalogWriterImpl {
             .meta_client
             .alter_set_schema(object, new_schema_id)
             .await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_source_with_sr(&self, source: PbSource) -> Result<()> {
+        let version = self.meta_client.alter_source_with_sr(source).await?;
         self.wait_version(version).await
     }
 

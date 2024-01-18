@@ -40,6 +40,7 @@ mod alter_parallelism;
 mod alter_rename;
 mod alter_set_schema;
 mod alter_source_column;
+mod alter_source_with_sr;
 mod alter_system;
 mod alter_table_column;
 pub mod alter_user;
@@ -716,6 +717,13 @@ pub async fn handle(
                 None,
             )
             .await
+        }
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::FormatEncode { connector_schema },
+        } => {
+            alter_source_with_sr::handle_alter_source_with_sr(handler_args, name, connector_schema)
+                .await
         }
         Statement::AlterFunction {
             name,

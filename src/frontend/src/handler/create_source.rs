@@ -647,7 +647,7 @@ pub(crate) fn bind_all_columns(
 }
 
 /// Bind column from source. Add key column to table columns if necessary.
-/// Return (columns, pks)
+/// Return `pk_names`.
 pub(crate) async fn bind_source_pk(
     source_schema: &ConnectorSchema,
     source_info: &StreamSourceInfo,
