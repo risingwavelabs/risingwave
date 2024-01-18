@@ -848,6 +848,9 @@ statement ok
 drop source s18
 
 statement ok
+drop table s20
+
+statement ok
 drop table s21
 
 statement ok
