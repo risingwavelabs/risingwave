@@ -89,5 +89,11 @@ function download_and_prepare_rw() {
 }
 
 function filter_stack_trace() {
-  sed -i -E '/  [1-9][0-9]+:/d' "$1"
+  touch tmp
+  cat "$1" \
+  | sed -E '/  [1-9][0-9]+:/d' \
+  | sed -E '/  at .rustc/d' \
+  | sed -i -E '/  at ...cargo/d' > tmp
+  cp tmp "$1"
+  rm tmp
 }
