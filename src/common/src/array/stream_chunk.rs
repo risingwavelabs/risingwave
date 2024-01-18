@@ -303,6 +303,33 @@ impl StreamChunk {
         }
     }
 
+    /// Remove the adjacent delete-insert if their row value are the same.
+    pub fn eliminate_adjacent_noop_update(self) -> Self {
+        let len = self.data_chunk().capacity();
+        let mut c: StreamChunkMut = self.into();
+        let mut prev_r = None;
+        for curr in 1..len {
+            if !c.vis(curr) {
+                continue;
+            }
+            if let Some(prev) = prev_r {
+                if matches!(c.op(prev), Op::UpdateDelete | Op::Delete)
+                    && matches!(c.op(curr), Op::UpdateInsert | Op::Insert)
+                    && c.row_ref(prev) == c.row_ref(curr)
+                {
+                    c.set_vis(prev, false);
+                    c.set_vis(curr, false);
+                    prev_r = None;
+                } else {
+                    prev_r = Some(curr)
+                }
+            } else {
+                prev_r = Some(curr);
+            }
+        }
+        c.into()
+    }
+
     /// Reorder columns and set visibility.
     pub fn project_with_vis(&self, indices: &[usize], vis: Bitmap) -> Self {
         Self {
@@ -492,6 +519,18 @@ impl OpRowMutRef<'_> {
 }
 
 impl StreamChunkMut {
+    pub fn vis(&self, i: usize) -> bool {
+        self.vis.is_set(i)
+    }
+
+    pub fn op(&self, i: usize) -> Op {
+        self.ops.get(i)
+    }
+
+    pub fn row_ref(&self, i: usize) -> RowRef<'_> {
+        RowRef::with_columns(self.columns(), i)
+    }
+
     pub fn set_vis(&mut self, n: usize, val: bool) {
         self.vis.set(n, val);
     }
@@ -788,6 +827,36 @@ mod tests {
             "\
 +---+---+---+
 | - | 2 |   |
++---+---+---+"
+        );
+    }
+
+    #[test]
+    fn test_eliminate_adjacent_noop_update() {
+        let c = StreamChunk::from_pretty(
+            "  I I
+            - 1 6 D
+            - 2 2
+            + 2 3
+            - 2 3
+            + 1 6
+            - 1 7
+            + 1 10 D
+            + 1 7
+            U- 3 7
+            U+ 3 7
+            + 2 3",
+        );
+        let c = c.eliminate_adjacent_noop_update();
+        assert_eq!(
+            c.to_pretty().to_string(),
+            "\
++---+---+---+
+| - | 2 | 2 |
+| + | 2 | 3 |
+| - | 2 | 3 |
+| + | 1 | 6 |
+| + | 2 | 3 |
 +---+---+---+"
         );
     }
