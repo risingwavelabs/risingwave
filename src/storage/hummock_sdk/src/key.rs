@@ -950,8 +950,8 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
     /// ```
     /// use bytes::Bytes;
     /// use risingwave_common::catalog::TableId;
-    /// use risingwave_hummock_sdk::key::{FullKey, TableKey};
-    ///
+    /// use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, TableKey};
+    /// 
     /// let table_id = TableId { table_id: 1 };
     /// let full_key1 = FullKey::new(table_id, TableKey(Bytes::from("c")), 5);
     /// let a = FullKeyTracker::<Bytes>::new(full_key1);
