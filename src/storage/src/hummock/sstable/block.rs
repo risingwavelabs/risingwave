@@ -314,7 +314,7 @@ impl Block {
         &self.data[..self.data_len]
     }
 
-    pub fn raw_data(&self) -> &[u8] {
+    pub fn raw(&self) -> &[u8] {
         &self.data[..]
     }
 }
