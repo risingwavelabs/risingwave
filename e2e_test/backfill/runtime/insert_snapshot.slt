@@ -1,5 +1,5 @@
 statement ok
-INSERT INTO t select generate_series, 'jakbj2khbe2', 22222222222 from generate_series(500001, 2000000);
+INSERT INTO t select generate_series, 'jakbj2khbe2', 22222222222 from generate_series(1000001, 2000000);
 
 statement ok
 flush;

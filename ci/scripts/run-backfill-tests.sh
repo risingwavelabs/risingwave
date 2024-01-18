@@ -23,7 +23,6 @@ BACKGROUND_DDL_DIR=$TEST_DIR/background_ddl
 COMMON_DIR=$BACKGROUND_DDL_DIR/common
 
 CLUSTER_PROFILE='ci-1cn-1fe-kafka-with-recovery'
-# If running in buildkite disable monitoring.
 if [[ -n "${BUILDKITE:-}" ]]; then
   RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe-with-monitoring'
 else
@@ -206,17 +205,13 @@ test_sink_backfill_recovery() {
   wait
 }
 
-test_no_shuffle_backfill_runtime() {
-  echo "--- e2e, test_no_shuffle_backfill_runtime"
+test_arrangement_backfill_snapshot_and_upstream_runtime() {
+  echo "--- e2e, test_backfill_snapshot_and_upstream_runtime"
   cargo make ci-start $RUNTIME_CLUSTER_PROFILE
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
-
-  # Concurrently create mv ...
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
-
-  # ... and provide updates
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_upstream.slt' 2>&1 1>out.log &
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
 
   wait
 
@@ -226,44 +221,30 @@ test_no_shuffle_backfill_runtime() {
   cargo make wait-processes-exit
 }
 
-test_arrangement_backfill_runtime() {
-  echo "--- e2e, test_arrangement_backfill_runtime"
+test_no_shuffle_backfill_snapshot_and_upstream_runtime() {
+  echo "--- e2e, test_backfill_snapshot_and_upstream_runtime"
   cargo make ci-start $RUNTIME_CLUSTER_PROFILE
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
-
-  # Concurrently create mv...
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
-
-  # ... and provide updates
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_upstream.slt' 2>&1 1>out.log &
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
 
   wait
 
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_no_shuffle.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_arrangement.slt'
 
   cargo make kill
   cargo make wait-processes-exit
 }
 
-test_no_shuffle_backfill_snapshot_only_runtime() {
-  echo "--- e2e, test_no_shuffle_backfill_snapshot_only_runtime"
-  cargo make ci-start $RUNTIME_CLUSTER_PROFILE
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows.slt'
-
-  cargo make kill
-  cargo make wait-processes-exit
-}
-
-test_arrangement_backfill_snapshot_only_runtime() {
-  echo "--- e2e, test_arrangement_backfill_snapshot_only_runtime"
+test_backfill_snapshot_runtime() {
+  echo "--- e2e, test_backfill_snapshot_runtime"
   cargo make ci-start $RUNTIME_CLUSTER_PROFILE
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows.slt'
 
   cargo make kill
@@ -272,14 +253,21 @@ test_arrangement_backfill_snapshot_only_runtime() {
 
 main() {
   set -euo pipefail
-#  test_snapshot_and_upstream_read
-#  test_backfill_tombstone
-#  test_replication_with_column_pruning
-#  test_sink_backfill_recovery
-  test_no_shuffle_backfill_runtime
-  test_arrangement_backfill_runtime
-  test_no_shuffle_backfill_snapshot_only_runtime
-  test_arrangement_backfill_snapshot_only_runtime
+  test_snapshot_and_upstream_read
+  test_backfill_tombstone
+  test_replication_with_column_pruning
+  test_sink_backfill_recovery
+
+  # Need separate tests, we don't want to backfill concurrently.
+  # It's difficult to measure the time taken for each backfill if we do so.
+  test_no_shuffle_backfill_snapshot_and_upstream_runtime
+  test_arrangement_backfill_snapshot_and_upstream_runtime
+
+  # Backfill will happen in sequence here.
+  test_backfill_snapshot_runtime
+
+  # No upstream only tests, because if there's no snapshot,
+  # Backfill will complete almost immediately.
 }
 
 main
