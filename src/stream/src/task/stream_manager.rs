@@ -332,7 +332,8 @@ impl LocalStreamManager {
             })
             .try_collect()?;
         let actors = core.build_actors(actors, env).await?;
-        core.spawn_actors(actors)
+        core.spawn_actors(actors);
+        Ok(())
     }
 
     pub async fn config(&self) -> StreamingConfig {
@@ -647,7 +648,7 @@ impl LocalStreamManagerCore {
         Ok(ret)
     }
 
-    fn spawn_actors(&mut self, actors: Vec<Actor<DispatchExecutor>>) -> StreamResult<()> {
+    fn spawn_actors(&mut self, actors: Vec<Actor<DispatchExecutor>>) {
         for actor in actors {
             let monitor = tokio_metrics::TaskMonitor::new();
             let actor_id = actor.stream_actor.actor_id;
@@ -758,8 +759,6 @@ impl LocalStreamManagerCore {
                     .insert(actor_id, actor_monitor_task);
             }
         }
-
-        Ok(())
     }
 
     pub fn take_all_handles(&mut self) -> StreamResult<HashMap<ActorId, ActorHandle>> {
