@@ -915,6 +915,7 @@ mod tests {
                 iteratorGetByteaValue                    (JI)[B,
                 iteratorGetArrayValue                    (JILjava/lang/Class;)Ljava/lang/Object;,
                 sendCdcSourceMsgToChannel                (J[B)Z,
+                sendCdcSourceErrorToChannel              (JLjava/lang/String;)Z,
                 recvSinkWriterRequestFromChannel         (J)Lcom/risingwave/java/binding/JniSinkWriterStreamRequest;,
                 sendSinkWriterResponseToChannel          (J[B)Z,
                 sendSinkWriterErrorToChannel             (JLjava/lang/String;)Z,
