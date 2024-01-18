@@ -260,9 +260,9 @@ impl ClickHouseSink {
     ) -> Result<()> {
         let is_match = match fields_type {
             risingwave_common::types::DataType::Boolean => Ok(ck_column.r#type.contains("Bool")),
-            risingwave_common::types::DataType::Int16 => {
-                Ok(ck_column.r#type.contains("UInt16") | ck_column.r#type.contains("Int16"))
-            }
+            risingwave_common::types::DataType::Int16 => Ok(ck_column.r#type.contains("UInt16")
+                | ck_column.r#type.contains("Int16")
+                | ck_column.r#type.contains("Enum16")),
             risingwave_common::types::DataType::Int32 => {
                 Ok(ck_column.r#type.contains("UInt32") | ck_column.r#type.contains("Int32"))
             }
