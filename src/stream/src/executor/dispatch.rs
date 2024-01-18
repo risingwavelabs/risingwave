@@ -557,7 +557,14 @@ impl RoundRobinDataDispatcher {
 
 impl Dispatcher for RoundRobinDataDispatcher {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
-        let chunk = chunk.project(&self.output_indices);
+        let chunk = if self.output_indices.len() < chunk.columns().len() {
+            chunk
+                .project(&self.output_indices)
+                .eliminate_adjacent_noop_update()
+        } else {
+            chunk.project(&self.output_indices)
+        };
+
         self.outputs[self.cur].send(Message::Chunk(chunk)).await?;
         self.cur += 1;
         self.cur %= self.outputs.len();
@@ -687,7 +694,13 @@ impl Dispatcher for HashDataDispatcher {
         let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
         // Apply output indices after calculating the vnode.
-        let chunk = chunk.project(&self.output_indices);
+        let chunk = if self.output_indices.len() < chunk.columns().len() {
+            chunk
+                .project(&self.output_indices)
+                .eliminate_adjacent_noop_update()
+        } else {
+            chunk.project(&self.output_indices)
+        };
 
         for ((vnode, &op), visible) in vnodes
             .iter()
@@ -798,7 +811,13 @@ impl BroadcastDispatcher {
 
 impl Dispatcher for BroadcastDispatcher {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
-        let chunk = chunk.project(&self.output_indices);
+        let chunk = if self.output_indices.len() < chunk.columns().len() {
+            chunk
+                .project(&self.output_indices)
+                .eliminate_adjacent_noop_update()
+        } else {
+            chunk.project(&self.output_indices)
+        };
         for output in self.outputs.values_mut() {
             output.send(Message::Chunk(chunk.clone())).await?;
         }
@@ -1026,7 +1045,13 @@ impl Dispatcher for SimpleDispatcher {
             .exactly_one()
             .expect("expect exactly one output");
 
-        let chunk = chunk.project(&self.output_indices);
+        let chunk = if self.output_indices.len() < chunk.columns().len() {
+            chunk
+                .project(&self.output_indices)
+                .eliminate_adjacent_noop_update()
+        } else {
+            chunk.project(&self.output_indices)
+        };
         output.send(Message::Chunk(chunk)).await
     }
 
