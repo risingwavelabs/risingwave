@@ -41,7 +41,12 @@ struct Entry<K: Ord, V> {
 /// Note: A window frame can be pure preceding, pure following, or acrossing the _current row_.
 pub(super) struct CurrWindow<'a, K> {
     pub key: Option<&'a K>,
+
+    // XXX(rc): Maybe will be used in the future, let's keep it for now.
+    #[cfg_attr(not(test), expect(dead_code))]
+    /// The preceding half, if any, of the current window is saturated.
     pub preceding_saturated: bool,
+    /// The following half, if any, of the current window is saturated.
     pub following_saturated: bool,
 }
 
