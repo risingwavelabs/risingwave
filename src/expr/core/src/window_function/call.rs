@@ -17,7 +17,7 @@ use std::fmt::Display;
 use enum_as_inner::EnumAsInner;
 use parse_display::Display;
 use risingwave_common::bail;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl, ScalarRefImpl, ToText};
 use risingwave_pb::expr::window_frame::{PbBound, PbExclusion};
 use risingwave_pb::expr::{PbWindowFrame, PbWindowFunction};
 use FrameBound::{CurrentRow, Following, Preceding, UnboundedFollowing, UnboundedPreceding};
@@ -107,6 +107,7 @@ impl Frame {
                 end: Some(end.to_protobuf()),
                 exclusion,
             },
+            FrameBounds::Range(_) => todo!("now should be banned in frontend"),
         }
     }
 }
@@ -116,25 +117,28 @@ impl Frame {
 pub enum FrameBounds {
     Rows(RowsFrameBounds),
     // Groups(GroupsFrameBounds),
-    // Range(RangeFrameBounds),
+    Range(RangeFrameBounds),
 }
 
 impl FrameBounds {
     pub fn validate(&self) -> Result<()> {
         match self {
             Self::Rows(bounds) => bounds.validate(),
+            Self::Range(bounds) => bounds.validate(),
         }
     }
 
     pub fn start_is_unbounded(&self) -> bool {
         match self {
             Self::Rows(RowsFrameBounds { start, .. }) => start.is_unbounded_preceding(),
+            Self::Range(RangeFrameBounds { start, .. }) => start.is_unbounded_preceding(),
         }
     }
 
     pub fn end_is_unbounded(&self) -> bool {
         match self {
             Self::Rows(RowsFrameBounds { end, .. }) => end.is_unbounded_following(),
+            Self::Range(RangeFrameBounds { end, .. }) => end.is_unbounded_following(),
         }
     }
 
@@ -188,11 +192,70 @@ pub enum FrameBound<T> {
     UnboundedFollowing,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct RangeFrameBounds {
+    pub start: FrameBound<ScalarImpl>,
+    pub end: FrameBound<ScalarImpl>,
+}
+
+impl Display for RangeFrameBounds {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "RANGE BETWEEN {} AND {}",
+            self.start.for_display(),
+            self.end.for_display()
+        )?;
+        Ok(())
+    }
+}
+
+impl FrameBoundsImpl for RangeFrameBounds {
+    fn validate(&self) -> Result<()> {
+        FrameBound::validate_bounds(&self.start, &self.end, |offset| {
+            match offset.as_scalar_ref_impl() {
+                // TODO(): use decl macro to merge with the following
+                ScalarRefImpl::Int16(val) => {
+                    if val < 0 {
+                        bail!("frame bound offset should be non-negative, but {} is given", val);
+                    }
+                }
+                ScalarRefImpl::Int32(val) => {
+                    if val < 0 {
+                        bail!("frame bound offset should be non-negative, but {} is given", val);
+                    }
+                }
+                ScalarRefImpl::Int64(val) => {
+                    if val < 0 {
+                        bail!("frame bound offset should be non-negative, but {} is given", val);
+                    }
+                }
+                // TODO(): datetime types
+                _ => unreachable!("other order column data types are not supported and should be banned in frontend"),
+            }
+            Ok(())
+        })
+    }
+}
+
 impl<T> FrameBound<T> {
-    fn validate_bounds(start: &Self, end: &Self) -> Result<()> {
+    fn offset_value(&self) -> Option<&T> {
+        match self {
+            UnboundedPreceding | UnboundedFollowing | CurrentRow => None,
+            Preceding(offset) | Following(offset) => Some(offset),
+        }
+    }
+
+    fn validate_bounds(
+        start: &Self,
+        end: &Self,
+        offset_checker: impl Fn(&T) -> Result<()>,
+    ) -> Result<()> {
         match (start, end) {
             (_, UnboundedPreceding) => bail!("frame end cannot be UNBOUNDED PRECEDING"),
-            (UnboundedFollowing, _) => bail!("frame start cannot be UNBOUNDED FOLLOWING"),
+            (UnboundedFollowing, _) => {
+                bail!("frame start cannot be UNBOUNDED FOLLOWING")
+            }
             (Following(_), CurrentRow) | (Following(_), Preceding(_)) => {
                 bail!("frame starting from following row cannot have preceding rows")
             }
@@ -201,6 +264,13 @@ impl<T> FrameBound<T> {
             }
             _ => {}
         }
+
+        for bound in [start, end] {
+            if let Some(offset) = bound.offset_value() {
+                offset_checker(offset)?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -269,6 +339,18 @@ impl FrameBound<usize> {
             UnboundedFollowing => None,
             Following(n) => Some(*n),
             CurrentRow | Preceding(_) | UnboundedPreceding => Some(0),
+        }
+    }
+}
+
+impl FrameBound<ScalarImpl> {
+    fn for_display(&self) -> FrameBound<String> {
+        match self {
+            UnboundedPreceding => UnboundedPreceding,
+            Preceding(offset) => Preceding(offset.as_scalar_ref_impl().to_text()),
+            CurrentRow => CurrentRow,
+            Following(offset) => Following(offset.as_scalar_ref_impl().to_text()),
+            UnboundedFollowing => UnboundedFollowing,
         }
     }
 }
