@@ -109,6 +109,20 @@ fn kafka_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColum
                 }
             }),
         ),
+        (
+            "header-inner", // type: bytea
+            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                ColumnCatalog {
+                    column_desc: ColumnDesc::named_with_additional_column(
+                        name,
+                        id,
+                        DataType::Bytea,
+                        AdditionalColumnType::Header,
+                    ),
+                    is_hidden: false,
+                }
+            }),
+        ),
     ]
 }
 

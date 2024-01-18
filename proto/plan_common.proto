@@ -15,17 +15,6 @@ message Field {
   string name = 2;
 }
 
-enum AdditionalColumnType {
-  UNSPECIFIED = 0;
-  KEY = 1;
-  TIMESTAMP = 2;
-  PARTITION = 3;
-  OFFSET = 4;
-  HEADER = 5;
-  FILENAME = 6;
-  NORMAL = 7;
-}
-
 enum ColumnDescVersion {
   COLUMN_DESC_VERSION_UNSPECIFIED = 0;
   // Introduced in https://github.com/risingwavelabs/risingwave/pull/13707#discussion_r1429947537,
@@ -64,9 +53,14 @@ message ColumnDesc {
 
   // This field is used to represent the connector-spec additional column type.
   // UNSPECIFIED or unset for normal column.
-  AdditionalColumnType additional_column_type = 9;
+
+  // deprecated, use AdditionalColumn instead
+  // AdditionalColumnType additional_column_type = 9;
+  reserved 9;
 
   ColumnDescVersion version = 10;
+
+  AdditionalColumn additional_column_type = 11;
 }
 
 message ColumnCatalog {
@@ -190,3 +184,29 @@ message Cardinality {
 message ExprContext {
   string time_zone = 1;
 }
+
+message AdditionalColumnNormal {}
+
+message AdditionalColumnKey {}
+
+message AdditionalColumnTimestamp {}
+
+message AdditionalColumnPartition {}
+
+message AdditionalColumnOffset {}
+
+message AdditionalColumnHeader {
+    optional string inner_field = 1;
+}
+
+message AdditionalColumn {
+    oneof column_type {
+        AdditionalColumnNormal normal = 1;
+        AdditionalColumnKey key = 2;
+        AdditionalColumnTimestamp timestamp = 3;
+        AdditionalColumnPartition partition = 4;
+        AdditionalColumnOffset offset = 5;
+        AdditionalColumnHeader header = 6;
+    }
+}
+
