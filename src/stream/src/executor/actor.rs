@@ -42,6 +42,7 @@ use crate::task::{ActorId, SharedContext};
 pub struct ActorContext {
     pub id: ActorId,
     pub fragment_id: u32,
+    pub stream_actor: PbStreamActor,
 
     // TODO(eric): these seem to be useless now?
     last_mem_val: Arc<AtomicUsize>,
@@ -59,6 +60,10 @@ impl ActorContext {
         Arc::new(Self {
             id,
             fragment_id: 0,
+            stream_actor: PbStreamActor {
+                actor_id: id,
+                ..Default::default()
+            },
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             total_mem_val: Arc::new(TrAdder::new()),
@@ -68,15 +73,15 @@ impl ActorContext {
     }
 
     pub fn create_with_metrics(
-        id: ActorId,
-        fragment_id: u32,
+        stream_actor: PbStreamActor,
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
         unique_user_errors: usize,
     ) -> ActorContextRef {
         Arc::new(Self {
-            id,
-            fragment_id,
+            id: stream_actor.actor_id,
+            fragment_id: stream_actor.fragment_id,
+            stream_actor,
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             total_mem_val,
@@ -133,12 +138,9 @@ pub struct Actor<C> {
     /// The subtasks to execute concurrently.
     subtasks: Vec<SubtaskHandle>,
 
-    /// pb definition of actor
-    pub stream_actor: PbStreamActor,
-
     context: Arc<SharedContext>,
     _metrics: Arc<StreamingMetrics>,
-    actor_context: ActorContextRef,
+    pub actor_context: ActorContextRef,
     expr_context: ExprContext,
 }
 
@@ -149,7 +151,6 @@ where
     pub fn new(
         consumer: C,
         subtasks: Vec<SubtaskHandle>,
-        stream_actor: PbStreamActor,
         context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
         actor_context: ActorContextRef,
@@ -158,7 +159,6 @@ where
         Self {
             consumer,
             subtasks,
-            stream_actor,
             context,
             _metrics: metrics,
             actor_context,

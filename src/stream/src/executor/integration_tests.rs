@@ -23,7 +23,6 @@ use risingwave_common::types::*;
 use risingwave_expr::aggregate::AggCall;
 use risingwave_expr::expr::*;
 use risingwave_pb::plan_common::ExprContext;
-use risingwave_pb::stream_plan::PbStreamActor;
 use risingwave_storage::memory::MemoryStateStore;
 
 use super::exchange::permit::channel_for_test;
@@ -81,7 +80,6 @@ async fn test_merger_sum_aggr() {
         let actor = Actor::new(
             consumer,
             vec![],
-            PbStreamActor::default(),
             context,
             StreamingMetrics::unused().into(),
             actor_ctx.clone(),
@@ -134,7 +132,6 @@ async fn test_merger_sum_aggr() {
     let actor = Actor::new(
         dispatcher,
         vec![],
-        PbStreamActor::default(),
         context,
         StreamingMetrics::unused().into(),
         actor_ctx.clone(),
@@ -191,7 +188,6 @@ async fn test_merger_sum_aggr() {
     let actor = Actor::new(
         consumer,
         vec![],
-        PbStreamActor::default(),
         context,
         StreamingMetrics::unused().into(),
         actor_ctx.clone(),
