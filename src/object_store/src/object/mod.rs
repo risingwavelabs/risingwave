@@ -922,7 +922,6 @@ pub async fn build_remote_object_store(
         sim if sim.starts_with("sim://") => {
             ObjectStoreImpl::Sim(SimObjectStore::new(url).monitored(metrics))
         }
-
         other => {
             unimplemented!(
                 "{} remote object store only supports s3, minio, gcs, oss, cos, azure blob, hdfs, disk, memory, and memory-shared.",

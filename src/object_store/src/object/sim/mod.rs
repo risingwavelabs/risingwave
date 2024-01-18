@@ -22,7 +22,7 @@ pub use rpc_server::SimServer;
 mod service;
 
 use std::net::SocketAddr;
-use std::ops::Range;
+use std::ops::{Range, RangeBounds};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -54,9 +54,7 @@ impl SimStreamingUploader {
 #[async_trait::async_trait]
 impl StreamingUploader for SimStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
-        let data_len = data.len();
         self.buf.put(data);
-
         Ok(())
     }
 
@@ -188,7 +186,7 @@ impl ObjectStore for SimObjectStore {
             return Err(SimError::other("expect Response::Read").into());
         };
 
-        Ok(Box::pin(SimDataIterator::new(body)))
+        Ok(Box::pin(SimDataIterator::new(body.slice(range))))
     }
 
     async fn delete(&self, path: &str) -> ObjectResult<()> {
@@ -237,11 +235,15 @@ impl ObjectStore for SimObjectStore {
 impl SimObjectStore {
     pub fn new(addr: &str) -> Self {
         let addr = addr.strip_prefix("sim://").unwrap();
-        let (addr, _bucket) = addr.split_once('/').unwrap();
+        let (_access_key_id, rest) = addr.split_once(':').unwrap();
+        let (_secret_access_key, rest) = rest.split_once('@').unwrap();
+        let (address, _bucket) = rest.split_once('/').unwrap();
+
         Self {
             client: Client::new(
-                addr.parse::<SocketAddr>()
-                    .expect(&format!("parse SockAddr failed: {}", addr)),
+                address
+                    .parse::<SocketAddr>()
+                    .expect(&format!("parse SockAddr failed: {}", address)),
             ),
         }
     }

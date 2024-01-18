@@ -386,7 +386,6 @@ impl Cluster {
             .build();
 
         // object_store_sim
-        #[cfg(madsim)]
         handle
             .create_node()
             .name("object_store_sim")
@@ -422,8 +421,7 @@ impl Cluster {
                 "--etcd-endpoints",
                 "etcd:2388",
                 "--state-store",
-                // "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
-                "hummock+sim://192.168.12.1:9301/hummock001",
+                "hummock+sim://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
                 "--data-directory",
                 "hummock_001",
             ]);
