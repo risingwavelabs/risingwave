@@ -86,9 +86,9 @@ pub(crate) struct SchemaRegistryCtx {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RequestError {
-    #[error("confluent registry send req error")]
+    #[error("confluent registry send req error: {0}")]
     Send(#[source] reqwest::Error),
-    #[error("confluent registry parse resp error")]
+    #[error("confluent registry parse resp error: {0}")]
     Json(#[source] reqwest::Error),
     #[error(transparent)]
     Unsuccessful(ErrorResp),

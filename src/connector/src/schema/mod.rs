@@ -41,7 +41,7 @@ pub enum SchemaFetchError {
     InvalidOption(#[from] InvalidOptionError),
     #[error(transparent)]
     Request(#[from] schema_registry::ConcurrentRequestError),
-    #[error("schema compilation error")]
+    #[error("schema compilation error: {0}")]
     SchemaCompile(#[source] risingwave_common::error::BoxedError),
     #[error(transparent)]
     YetToMigrate(risingwave_common::error::RwError),
