@@ -401,12 +401,9 @@ impl LocalStateStore for LocalHummockStorage {
 
     fn seal_current_epoch(&mut self, next_epoch: u64, mut opts: SealCurrentEpochOptions) {
         assert!(!self.is_dirty());
-        if let Some(value_checker) = &opts.enable_consistent_op {
-            self.mem_table
-                .op_consistency_level
-                .enable_consistent_old_value(value_checker.clone());
-            self.op_consistency_level
-                .enable_consistent_old_value(value_checker.clone());
+        if let Some(new_level) = &opts.switch_op_consistency_level {
+            self.mem_table.op_consistency_level.update(new_level);
+            self.op_consistency_level.update(new_level);
         }
         let prev_epoch = self
             .epoch

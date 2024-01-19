@@ -1918,8 +1918,7 @@ async fn test_table_watermark() {
                         gen_inner_key(watermark1),
                     )],
                 )),
-
-                enable_consistent_op: None,
+                switch_op_consistency_level: None,
             },
         );
     }
@@ -2017,7 +2016,7 @@ async fn test_table_watermark() {
             epoch3,
             SealCurrentEpochOptions {
                 table_watermarks: None,
-                enable_consistent_op: None,
+                switch_op_consistency_level: None,
             },
         );
     }
@@ -2268,7 +2267,7 @@ async fn test_table_watermark() {
                         gen_inner_key(5),
                     )],
                 )),
-                enable_consistent_op: None,
+                switch_op_consistency_level: None,
             },
         );
     }

@@ -164,7 +164,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
             next_epoch,
             SealCurrentEpochOptions {
                 table_watermarks: Some((WatermarkDirection::Ascending, watermark)),
-                enable_consistent_op: None,
+                switch_op_consistency_level: None,
             },
         );
         self.tx.barrier(epoch, is_checkpoint, next_epoch);

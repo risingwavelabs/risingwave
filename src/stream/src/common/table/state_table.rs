@@ -54,8 +54,8 @@ use risingwave_storage::row_serde::row_serde_util::{
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
-    CheckOldValueEquality, InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel,
-    PrefetchOptions, ReadOptions, SealCurrentEpochOptions, StateStoreIterItemStream,
+    InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, PrefetchOptions,
+    ReadOptions, SealCurrentEpochOptions, StateStoreIterItemStream,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{KeyedRow, TableDistribution};
@@ -201,8 +201,8 @@ where
     }
 }
 
-fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> Arc<dyn CheckOldValueEquality> {
-    Arc::new(move |first: &Bytes, second: &Bytes| {
+fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> OpConsistencyLevel {
+    OpConsistencyLevel::ConsistentOldValue(Arc::new(move |first: &Bytes, second: &Bytes| {
         if first == second {
             return true;
         }
@@ -226,7 +226,7 @@ fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> Arc<dyn CheckOldVal
         } else {
             true
         }
-    })
+    }))
 }
 
 // initialize
@@ -351,7 +351,7 @@ where
 
         let op_consistency_level = if is_consistent_op {
             let row_serde = make_row_serde();
-            OpConsistencyLevel::ConsistentOldValue(consistent_old_value_op(row_serde))
+            consistent_old_value_op(row_serde)
         } else {
             OpConsistencyLevel::Inconsistent
         };
@@ -563,7 +563,7 @@ where
         };
         let op_consistency_level = if is_consistent_op {
             let row_serde = make_row_serde();
-            OpConsistencyLevel::ConsistentOldValue(consistent_old_value_op(row_serde))
+            consistent_old_value_op(row_serde)
         } else {
             OpConsistencyLevel::Inconsistent
         };
@@ -1029,29 +1029,24 @@ where
     }
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.commit_inner(new_epoch, false).await
+        self.commit_with_switch_consistent_op(new_epoch, None).await
     }
 
-    pub async fn commit_with_enable_consistent_op(
+    pub async fn commit_with_switch_consistent_op(
         &mut self,
         new_epoch: EpochPair,
-    ) -> StreamExecutorResult<()> {
-        self.commit_inner(new_epoch, true).await
-    }
-
-    pub async fn commit_inner(
-        &mut self,
-        new_epoch: EpochPair,
-        enable_consistent_op: bool,
+        switch_consistent_op: Option<bool>,
     ) -> StreamExecutorResult<()> {
         assert_eq!(self.epoch(), new_epoch.prev);
-        let enable_consistent_op = if enable_consistent_op {
-            assert!(!self.is_consistent_op);
-            self.is_consistent_op = true;
-            Some(consistent_old_value_op(self.row_serde.clone()))
-        } else {
-            None
-        };
+        let switch_op_consistency_level = switch_consistent_op.map(|enable_consistent_op| {
+            assert_ne!(self.is_consistent_op, enable_consistent_op);
+            self.is_consistent_op = enable_consistent_op;
+            if enable_consistent_op {
+                consistent_old_value_op(self.row_serde.clone())
+            } else {
+                OpConsistencyLevel::Inconsistent
+            }
+        });
         trace!(
             table_id = %self.table_id,
             epoch = ?self.epoch(),
@@ -1066,12 +1061,12 @@ where
                 new_epoch.curr,
                 SealCurrentEpochOptions {
                     table_watermarks: None,
-                    enable_consistent_op,
+                    switch_op_consistency_level,
                 },
             );
             return Ok(());
         } else {
-            self.seal_current_epoch(new_epoch.curr, enable_consistent_op)
+            self.seal_current_epoch(new_epoch.curr, switch_op_consistency_level)
                 .instrument(tracing::info_span!("state_table_commit"))
                 .await?;
         }
@@ -1140,7 +1135,7 @@ where
             new_epoch.curr,
             SealCurrentEpochOptions {
                 table_watermarks: None,
-                enable_consistent_op: None,
+                switch_op_consistency_level: None,
             },
         );
     }
@@ -1149,7 +1144,7 @@ where
     async fn seal_current_epoch(
         &mut self,
         next_epoch: u64,
-        enable_consistent_op: Option<Arc<dyn CheckOldValueEquality>>,
+        switch_op_consistency_level: Option<OpConsistencyLevel>,
     ) -> StreamExecutorResult<()> {
         let watermark = self.state_clean_watermark.take();
         watermark.as_ref().inspect(|watermark| {
@@ -1244,7 +1239,7 @@ where
             next_epoch,
             SealCurrentEpochOptions {
                 table_watermarks,
-                enable_consistent_op,
+                switch_op_consistency_level,
             },
         );
         Ok(())

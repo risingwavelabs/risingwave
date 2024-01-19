@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::default::Default;
-use std::fmt::Formatter;
+use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::ops::Bound;
 use std::sync::{Arc, LazyLock};
@@ -410,19 +410,38 @@ pub enum OpConsistencyLevel {
     ConsistentOldValue(Arc<dyn CheckOldValueEquality>),
 }
 
-impl OpConsistencyLevel {
-    pub fn enable_consistent_old_value(
-        &mut self,
-        old_value_checker: Arc<dyn CheckOldValueEquality>,
-    ) {
+impl Debug for OpConsistencyLevel {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            OpConsistencyLevel::Inconsistent => {
-                *self = OpConsistencyLevel::ConsistentOldValue(old_value_checker)
-            }
+            OpConsistencyLevel::Inconsistent => f.write_str("OpConsistencyLevel::Inconsistent"),
             OpConsistencyLevel::ConsistentOldValue(_) => {
-                panic!("should not enable consistent old value again")
+                f.write_str("OpConsistencyLevel::ConsistentOldValue")
             }
         }
+    }
+}
+
+impl PartialEq<Self> for OpConsistencyLevel {
+    fn eq(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (
+                OpConsistencyLevel::Inconsistent,
+                OpConsistencyLevel::Inconsistent
+            ) | (
+                OpConsistencyLevel::ConsistentOldValue(_),
+                OpConsistencyLevel::ConsistentOldValue(_),
+            )
+        )
+    }
+}
+
+impl Eq for OpConsistencyLevel {}
+
+impl OpConsistencyLevel {
+    pub fn update(&mut self, new_level: &OpConsistencyLevel) {
+        assert_ne!(self, new_level);
+        *self = new_level.clone()
     }
 }
 
@@ -548,18 +567,10 @@ impl From<TracedInitOptions> for InitOptions {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SealCurrentEpochOptions {
     pub table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>)>,
-    pub enable_consistent_op: Option<Arc<dyn CheckOldValueEquality>>,
-}
-
-impl std::fmt::Debug for SealCurrentEpochOptions {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SealCurrentEpochOptions")
-            .field("table_watermarks", &self.table_watermarks)
-            .finish()
-    }
+    pub switch_op_consistency_level: Option<OpConsistencyLevel>,
 }
 
 impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
@@ -574,7 +585,9 @@ impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
                         .collect(),
                 )
             }),
-            enable_consistent_op: value.enable_consistent_op.is_some(),
+            switch_op_consistency_level: value
+                .switch_op_consistency_level
+                .map(|level| matches!(level, OpConsistencyLevel::ConsistentOldValue(_))),
         }
     }
 }
@@ -599,27 +612,22 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
                         .collect(),
                 )
             }),
-            enable_consistent_op: if value.enable_consistent_op {
-                Some(CHECK_BYTES_EQUAL.clone())
-            } else {
-                None
-            },
+            switch_op_consistency_level: value.switch_op_consistency_level.map(|enable| {
+                if enable {
+                    OpConsistencyLevel::ConsistentOldValue(CHECK_BYTES_EQUAL.clone())
+                } else {
+                    OpConsistencyLevel::Inconsistent
+                }
+            }),
         }
     }
 }
 
 impl SealCurrentEpochOptions {
-    pub fn new(watermarks: Vec<VnodeWatermark>, direction: WatermarkDirection) -> Self {
-        Self {
-            table_watermarks: Some((direction, watermarks)),
-            enable_consistent_op: None,
-        }
-    }
-
     pub fn for_test() -> Self {
         Self {
             table_watermarks: None,
-            enable_consistent_op: None,
+            switch_op_consistency_level: None,
         }
     }
 }

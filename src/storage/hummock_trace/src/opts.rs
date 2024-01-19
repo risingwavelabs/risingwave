@@ -228,5 +228,5 @@ pub struct TracedInitOptions {
 pub struct TracedSealCurrentEpochOptions {
     // The watermark is serialized into protobuf
     pub table_watermarks: Option<(bool, Vec<Vec<u8>>)>,
-    pub enable_consistent_op: bool,
+    pub switch_op_consistency_level: Option<bool>,
 }
