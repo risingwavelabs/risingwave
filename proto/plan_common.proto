@@ -202,14 +202,14 @@ message AdditionalColumnHeader {
 }
 
 message AdditionalColumn {
-    oneof column_type {
-        AdditionalColumnNormal normal = 1;
-        AdditionalColumnKey key = 2;
-        AdditionalColumnTimestamp timestamp = 3;
-        AdditionalColumnPartition partition = 4;
-        AdditionalColumnOffset offset = 5;
-        AdditionalColumnHeader header = 6;
-        AdditionalColumnFilename filename = 7;
-    }
+  oneof column_type {
+    AdditionalColumnNormal normal = 1;
+    AdditionalColumnKey key = 2;
+    AdditionalColumnTimestamp timestamp = 3;
+    AdditionalColumnPartition partition = 4;
+    AdditionalColumnOffset offset = 5;
+    AdditionalColumnHeader header = 6;
+    AdditionalColumnFilename filename = 7;
+  }
 }
 
