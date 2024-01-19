@@ -15,8 +15,8 @@
 use std::fmt::Debug;
 
 use risingwave_common::catalog::{
-    ColumnDesc, ColumnId, KAFKA_TIMESTAMP_COLUMN_NAME, OFFSET_COLUMN_NAME, ROWID_PREFIX,
-    TABLE_NAME_COLUMN_NAME,
+    is_hidden_addition_col, ColumnDesc, ColumnId, KAFKA_TIMESTAMP_COLUMN_NAME, OFFSET_COLUMN_NAME,
+    ROWID_PREFIX, TABLE_NAME_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::{AdditionalColumnType, ColumnDescVersion};
@@ -105,8 +105,7 @@ impl SourceColumnDesc {
 
     #[inline]
     pub fn is_visible(&self) -> bool {
-        self.column_type == SourceColumnType::Normal
-            && self.additional_column_type == AdditionalColumnType::Normal
+        self.column_type == SourceColumnType::Normal && !is_hidden_addition_col(&self.name)
     }
 }
 

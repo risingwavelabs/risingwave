@@ -103,6 +103,10 @@ pub fn get_addition_key_name(col_name: &str) -> Option<&str> {
     col_name.strip_prefix(ADDITION_SPLIT_OFFSET_COLUMN_PREFIX)
 }
 
+pub fn is_hidden_addition_col(col_name: &str) -> bool {
+    col_name.starts_with(ADDITION_SPLIT_OFFSET_COLUMN_PREFIX)
+}
+
 pub const ROWID_PREFIX: &str = "_row_id";
 
 pub fn is_row_id_column_name(name: &str) -> bool {
