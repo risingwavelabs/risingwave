@@ -682,7 +682,6 @@ fn gen_table_plan_inner(
         source_catalog.clone(),
         columns.clone(),
         row_id_index,
-        false,
         true,
         context.clone(),
     )?

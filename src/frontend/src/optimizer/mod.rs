@@ -618,15 +618,9 @@ impl PlanRoot {
                 }
             };
 
-            let dummy_source_node = LogicalSource::new(
-                None,
-                columns.clone(),
-                row_id_index,
-                false,
-                true,
-                context.clone(),
-            )
-            .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
+            let dummy_source_node =
+                LogicalSource::new(None, columns.clone(), row_id_index, true, context.clone())
+                    .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
 
             let dml_node = inject_dml_node(
                 &columns,
