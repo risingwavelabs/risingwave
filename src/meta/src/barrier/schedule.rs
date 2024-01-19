@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use assert_matches::assert_matches;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::HummockSnapshot;
@@ -279,20 +279,17 @@ impl BarrierScheduler {
 
         for (injected_rx, collect_rx, finish_rx) in contexts {
             // Wait for this command to be injected, and record the result.
-            let info = injected_rx
-                .await
-                .map_err(|e| anyhow!("failed to inject barrier: {}", e))?;
+            let info = injected_rx.await.ok().context("failed to inject barrier")?;
             infos.push(info);
 
             // Throw the error if it occurs when collecting this barrier.
             collect_rx
                 .await
-                .map_err(|e| anyhow!("failed to collect barrier: {}", e))??;
+                .ok()
+                .context("failed to collect barrier")??;
 
             // Wait for this command to be finished.
-            finish_rx
-                .await
-                .map_err(|e| anyhow!("failed to finish command: {}", e))?;
+            finish_rx.await.ok().context("failed to finish command")?;
         }
 
         Ok(infos)
