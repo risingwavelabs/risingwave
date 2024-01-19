@@ -60,6 +60,7 @@ use risingwave_storage::store::{
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{KeyedRow, TableDistribution};
 use risingwave_storage::StateStore;
+use thiserror_ext::AsReport;
 use tracing::{trace, Instrument};
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
@@ -207,14 +208,14 @@ fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> OpConsistencyLevel 
         let first = match row_serde.deserialize(first) {
             Ok(rows) => rows,
             Err(e) => {
-                error!(err = %e, value = ?first, "fail to deserialize serialized value");
+                error!(error = %e.as_report(), value = ?first, "fail to deserialize serialized value");
                 return false;
             }
         };
         let second = match row_serde.deserialize(second) {
             Ok(rows) => rows,
             Err(e) => {
-                error!(err = %e, value = ?second, "fail to deserialize serialized value");
+                error!(error = %e.as_report(), value = ?second, "fail to deserialize serialized value");
                 return false;
             }
         };
