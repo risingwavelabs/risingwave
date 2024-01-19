@@ -487,7 +487,8 @@ impl Binder {
 
         let mut constant_lookup_inputs = Vec::new();
 
-        let mut optimize_flag = true;
+        // The prerequisite for optimization
+        let mut optimize_flag = conditions.len() >= CASE_WHEN_ARMS_OPTIMIZE_LIMIT;
 
         // Insert a dummy expression to avoid being constant fold
         // if eventually turn into `ConstantLookupExpression` by optimizing
@@ -520,7 +521,7 @@ impl Binder {
         for (condition, result) in zip_eq_fast(conditions, results_expr) {
             // If the result expression is not const
             // we will also not do the optimization
-            if !result.is_const() {
+            if optimize_flag && !result.is_const() {
                 optimize_flag = false;
             }
 
