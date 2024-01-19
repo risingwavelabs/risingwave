@@ -84,7 +84,7 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
             agg_impl,
             arg_data_types,
             buffer: WindowBuffer::<RowsWindow<StateKey, StateValue>>::new(
-                frame_bounds.clone(),
+                RowsWindow::new(frame_bounds.clone()),
                 call.frame.exclusion,
                 enable_delta,
             ),
