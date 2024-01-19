@@ -33,8 +33,8 @@ Duplicate `.vscode/settings.json.example` to `.vscode/settings.json` to enable r
 The version of the toolchain is specified in `rust-toolchain` file under current directory.
 It does not have to be exactly the same as the one used to build RisingWave, but it should be close enough to avoid compile errors.
 
-Information below may be helpful to find a proper version to bump to:
+The information below can be helpful in finding the appropriate version to bump to.
 
-- The toolchain used by the lastest version of `cargo-dylint`: https://github.com/trailofbits/dylint/blob/master/internal/template/rust-toolchain
-- The toolchain used by the lastest version of `clippy`: https://github.com/rust-lang/rust-clippy/blob/master/rust-toolchain
+- The toolchain used by the latest version of `cargo-dylint`: https://github.com/trailofbits/dylint/blob/master/internal/template/rust-toolchain
+- The toolchain used by the latest version of `clippy`: https://github.com/rust-lang/rust-clippy/blob/master/rust-toolchain
 - The hash of the latest commit in `rust-lang/rust-clippy` repo for the dependency `clippy-utils`.
