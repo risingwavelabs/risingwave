@@ -198,7 +198,7 @@ message AdditionalColumnOffset {}
 message AdditionalColumnFilename {}
 
 message AdditionalColumnHeader {
-    optional string inner_field = 1;
+  optional string inner_field = 1;
 }
 
 message AdditionalColumn {
@@ -212,4 +212,3 @@ message AdditionalColumn {
     AdditionalColumnFilename filename = 7;
   }
 }
-
