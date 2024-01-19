@@ -30,6 +30,7 @@ use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+use thiserror_ext::AsReport;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::local_version::pinned_version::{PinVersionAction, PinnedVersion};
@@ -131,7 +132,7 @@ impl BackupReader {
             }
             if let Err(e) = current_store.0.refresh_manifest().await {
                 // reschedule refresh request
-                tracing::warn!("failed to refresh backup manifest, will retry. {}", e);
+                tracing::warn!(error = %e.as_report(), "failed to refresh backup manifest, will retry");
                 let backup_reader_clone = backup_reader.clone();
                 tokio::spawn(async move {
                     tokio::time::sleep(Duration::from_secs(60)).await;
@@ -158,7 +159,7 @@ impl BackupReader {
         let _ = self
             .refresh_tx
             .send(min_manifest_id)
-            .inspect_err(|e| tracing::warn!("failed to send refresh_manifest request {}", e));
+            .inspect_err(|_| tracing::warn!("failed to send refresh_manifest request"));
     }
 
     /// Tries to get a hummock version eligible for querying `epoch`.
@@ -198,7 +199,11 @@ impl BackupReader {
                     // TODO: change to v2
                     let snapshot: meta_snapshot_v1::MetaSnapshotV1 =
                         current_store.0.get(snapshot_id).await.map_err(|e| {
-                            format!("failed to get meta snapshot {}. {}", snapshot_id, e)
+                            format!(
+                                "failed to get meta snapshot {}: {}",
+                                snapshot_id,
+                                e.as_report()
+                            )
                         })?;
                     let version_holder = build_version_holder(snapshot);
                     let version_clone = version_holder.0.clone();
@@ -238,10 +243,10 @@ impl BackupReader {
             if let Err(e) = self.set_store(config.clone()).await {
                 // Retry is driven by periodic system params notification.
                 tracing::warn!(
-                    "failed to update backup reader: url={}, dir={}, {:#?}",
+                    "failed to update backup reader: url={}, dir={}: {}",
                     config.0,
                     config.1,
-                    e
+                    e.as_report()
                 );
             }
         }
