@@ -35,7 +35,12 @@ mod order_by;
 mod subquery;
 mod value;
 
-const CASE_WHEN_ARMS_OPTIMIZE_LIMIT: usize = 1;
+/// The limit arms for case-when expression
+/// When the number of condition arms exceed
+/// this limit, we will try optimize the case-when
+/// expression to `ConstantLookupExpression`
+/// Check `case.rs` for details.
+const CASE_WHEN_ARMS_OPTIMIZE_LIMIT: usize = 500;
 
 impl Binder {
     /// Bind an expression with `bind_expr_inner`, attach the original expression
@@ -482,29 +487,41 @@ impl Binder {
 
         let mut constant_lookup_inputs = Vec::new();
 
-        // We will see if the currently binding case-when expression
-        // can be optimized to a constant lookup expression on-the-fly
-        let mut optimize_flag = if conditions.len() >= CASE_WHEN_ARMS_OPTIMIZE_LIMIT {
-            if let Some(Expr::Value(_)) | None = operand.as_deref() {
-                if operand.is_some() {
-                    let Ok(input) = self.bind_expr_inner(operand.as_deref().unwrap().clone())
-                    else {
-                        return Err(ErrorCode::BindError(
-                            "failed to bind the operand of case when expression".to_string(),
-                        )
-                        .into());
-                    };
-                    constant_lookup_inputs.push(input);
+        let mut optimize_flag = true;
+
+        // Insert a dummy expression to avoid being constant fold
+        // if eventually turn into `ConstantLookupExpression` by optimizing
+        match operand {
+            Some(ref t) => {
+                let Ok(bind_result) = self.bind_expr_inner(Expr::BinaryOp {
+                    left: t.clone(),
+                    op: BinaryOperator::Eq,
+                    right: t.clone(),
+                }) else {
+                    return Err(ErrorCode::BindError(
+                        "failed to bind case when expression".to_string(),
+                    )
+                    .into());
+                };
+                // If `bind_result` is const, the case-when expression
+                // will be rewritten during optimizer phase
+                // In this case we will also not optimized
+                if !bind_result.is_const() {
+                    constant_lookup_inputs.push(bind_result);
+                } else {
+                    optimize_flag = false;
                 }
-                true
-            } else {
-                false
             }
-        } else {
-            false
-        };
+            // In this case we will not optimize the case-when expression
+            // i.e., case when ... then ... else ... (with no operand)
+            None => optimize_flag = false,
+        }
 
         for (condition, result) in zip_eq_fast(conditions, results_expr) {
+            if !result.is_const() {
+                optimize_flag = false;
+            }
+
             // See if the current condition could be optimized
             if optimize_flag {
                 if let Expr::Value(_) = condition.clone() {
@@ -516,7 +533,7 @@ impl Binder {
                     };
                     constant_lookup_inputs.push(input);
                 } else {
-                    // If at least one condition is not in the simple form,
+                    // If at least one condition is not in the simple form / not constant,
                     // we can NOT do the subsequent optimization then
                     optimize_flag = false;
                 }
@@ -537,6 +554,7 @@ impl Binder {
             );
 
             inputs.push(result.clone());
+
             if optimize_flag {
                 constant_lookup_inputs.push(result);
             }
@@ -545,7 +563,13 @@ impl Binder {
         // The fallback arm for case-when expression
         if let Some(expr) = else_result_expr {
             inputs.push(expr.clone());
-            constant_lookup_inputs.push(expr);
+            // We assume fallback arm must be const
+            // to enable optimization
+            if expr.is_const() {
+                constant_lookup_inputs.push(expr);
+            } else {
+                optimize_flag = false;
+            }
         }
 
         if inputs.iter().any(ExprImpl::has_table_function) {
