@@ -14,12 +14,31 @@
 
 use risingwave_pb::meta::PbSystemParams;
 
-use super::{default, system_params_to_kv};
+use super::{default, system_params_to_kv, ParamValue};
+use crate::for_all_params;
 
-/// A wrapper for [`risingwave_pb::meta::SystemParams`] for 2 purposes:
-/// - Avoid misuse of deprecated fields by hiding their getters.
-/// - Abstract fallback logic for fields that might not be provided by meta service due to backward
-///   compatibility.
+macro_rules! define_system_params_read_trait {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $doc:literal, $($rest:tt)* },)*) => {
+        /// The trait delegating reads on [`risingwave_pb::meta::SystemParams`].
+        ///
+        /// For 2 purposes:
+        /// - Avoid misuse of deprecated fields by hiding their getters.
+        /// - Abstract fallback logic for fields that might not be provided by meta service due to backward
+        ///   compatibility.
+        pub trait SystemParamsRead {
+            $(
+                #[doc = $doc]
+                fn $field(&self) -> <$type as ParamValue>::Borrowed<'_>;
+            )*
+        }
+    };
+}
+
+for_all_params!(define_system_params_read_trait);
+
+/// The wrapper delegating reads on [`risingwave_pb::meta::SystemParams`].
+///
+/// See [`SystemParamsRead`] for more details.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SystemParamsReader {
     prost: PbSystemParams,
@@ -31,67 +50,76 @@ impl From<PbSystemParams> for SystemParamsReader {
     }
 }
 
-impl SystemParamsReader {
-    pub fn barrier_interval_ms(&self) -> u32 {
+/// - Unwrap the field if it always exists.
+///   For example, if a parameter is introduced before the initial public release.
+///
+/// - Otherwise, specify the fallback logic when the field is missing.
+impl SystemParamsRead for SystemParamsReader {
+    fn barrier_interval_ms(&self) -> u32 {
         self.prost.barrier_interval_ms.unwrap()
     }
 
-    pub fn checkpoint_frequency(&self) -> u64 {
+    fn checkpoint_frequency(&self) -> u64 {
         self.prost.checkpoint_frequency.unwrap()
     }
 
-    pub fn parallel_compact_size_mb(&self) -> u32 {
+    fn parallel_compact_size_mb(&self) -> u32 {
         self.prost.parallel_compact_size_mb.unwrap()
     }
 
-    pub fn sstable_size_mb(&self) -> u32 {
+    fn sstable_size_mb(&self) -> u32 {
         self.prost.sstable_size_mb.unwrap()
     }
 
-    pub fn block_size_kb(&self) -> u32 {
+    fn block_size_kb(&self) -> u32 {
         self.prost.block_size_kb.unwrap()
     }
 
-    pub fn bloom_false_positive(&self) -> f64 {
+    fn bloom_false_positive(&self) -> f64 {
         self.prost.bloom_false_positive.unwrap()
     }
 
-    pub fn state_store(&self) -> &str {
+    fn state_store(&self) -> &str {
         self.prost.state_store.as_ref().unwrap()
     }
 
-    pub fn data_directory(&self) -> &str {
+    fn data_directory(&self) -> &str {
         self.prost.data_directory.as_ref().unwrap()
     }
 
-    pub fn backup_storage_url(&self) -> &str {
+    fn backup_storage_url(&self) -> &str {
         self.prost.backup_storage_url.as_ref().unwrap()
     }
 
-    pub fn backup_storage_directory(&self) -> &str {
+    fn backup_storage_directory(&self) -> &str {
         self.prost.backup_storage_directory.as_ref().unwrap()
     }
 
-    pub fn max_concurrent_creating_streaming_jobs(&self) -> u32 {
+    fn max_concurrent_creating_streaming_jobs(&self) -> u32 {
         self.prost.max_concurrent_creating_streaming_jobs.unwrap()
     }
 
-    pub fn pause_on_next_bootstrap(&self) -> bool {
+    fn pause_on_next_bootstrap(&self) -> bool {
         self.prost
             .pause_on_next_bootstrap
-            .unwrap_or_else(|| default::pause_on_next_bootstrap().unwrap())
+            .unwrap_or_else(default::pause_on_next_bootstrap)
     }
 
-    pub fn enable_tracing(&self) -> bool {
+    fn enable_tracing(&self) -> bool {
         self.prost
             .enable_tracing
-            .unwrap_or_else(|| default::enable_tracing().unwrap())
+            .unwrap_or_else(default::enable_tracing)
     }
 
-    pub fn wasm_storage_url(&self) -> &str {
-        self.prost.wasm_storage_url.as_ref().unwrap()
+    fn wasm_storage_url(&self) -> &str {
+        self.prost
+            .wasm_storage_url
+            .as_ref()
+            .unwrap_or(&default::WASM_STORAGE_URL)
     }
+}
 
+impl SystemParamsReader {
     pub fn to_kv(&self) -> Vec<(String, String)> {
         system_params_to_kv(&self.prost).unwrap()
     }

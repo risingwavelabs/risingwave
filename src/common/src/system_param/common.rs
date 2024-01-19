@@ -14,7 +14,7 @@
 
 use std::sync::Mutex;
 
-use super::reader::SystemParamsReader;
+use super::reader::{SystemParamsRead, SystemParamsReader};
 use crate::util::tracing::layer::toggle_otel_layer;
 
 /// Node-independent handler for system parameter changes.
