@@ -654,9 +654,9 @@ impl Binder {
                         &offset_data_type,
                     )?;
                     FrameBounds::Range(RangeFrameBounds {
+                        offset_data_type,
                         start,
                         end,
-                        offset_data_type,
                     })
                 }
                 WindowFrameUnits::Groups => {
