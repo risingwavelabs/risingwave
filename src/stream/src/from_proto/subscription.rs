@@ -18,6 +18,7 @@ use risingwave_storage::store::{NewLocalOptions, OpConsistencyLevel};
 
 use super::ExecutorBuilder;
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
+use crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V1_INFO;
 use crate::common::log_store_impl::only_writer_log_store::OnlyWriterLogStoreWriter;
 use crate::error::StreamResult;
 use crate::executor::test_utils::prelude::StateTable;
@@ -54,8 +55,11 @@ impl ExecutorBuilder for SubscriptionExecutorBuilder {
                 .vnode_bitmap
                 .expect("vnodes not set for subscription"),
         );
-        let serde =
-            LogStoreRowSerde::new(node.log_store_table.as_ref().unwrap(), Some(vnodes.clone()));
+        let serde = LogStoreRowSerde::new(
+            node.log_store_table.as_ref().unwrap(),
+            Some(vnodes.clone()),
+            &KV_LOG_STORE_V1_INFO,
+        );
         let log_store_identity = format!("subscription-executor[{}]", params.executor_id);
         let log_store =
             OnlyWriterLogStoreWriter::new(table_id, local_state_store, serde, log_store_identity);
