@@ -95,7 +95,13 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
-                            additional_column_type: Normal,
+                            additional_column_type: AdditionalColumn {
+                                column_type: Some(
+                                    Normal(
+                                        AdditionalColumnNormal,
+                                    ),
+                                ),
+                            },
                             version: Pr13707,
                         },
                         ColumnDesc {
@@ -106,7 +112,13 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
-                            additional_column_type: Normal,
+                            additional_column_type: AdditionalColumn {
+                                column_type: Some(
+                                    Normal(
+                                        AdditionalColumnNormal,
+                                    ),
+                                ),
+                            },
                             version: Pr13707,
                         },
                     ],
@@ -137,7 +149,13 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
-                            additional_column_type: Normal,
+                            additional_column_type: AdditionalColumn {
+                                column_type: Some(
+                                    Normal(
+                                        AdditionalColumnNormal,
+                                    ),
+                                ),
+                            },
                             version: Pr13707,
                         },
                         ColumnDesc {
@@ -148,7 +166,13 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
-                            additional_column_type: Normal,
+                            additional_column_type: AdditionalColumn {
+                                column_type: Some(
+                                    Normal(
+                                        AdditionalColumnNormal,
+                                    ),
+                                ),
+                            },
                             version: Pr13707,
                         },
                     ],

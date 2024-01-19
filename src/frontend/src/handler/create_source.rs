@@ -1578,25 +1578,5 @@ pub mod tests {
             }
             _ => unreachable!(),
         }
-
-        // let (source, _) = catalog_reader
-        //     .get_source_by_name(
-        //         DEFAULT_DATABASE_NAME,
-        //         SchemaPath::Name(DEFAULT_SCHEMA_NAME),
-        //         "s3",
-        //     )
-        //     .unwrap();
-        // assert_eq!(source.name, "s3");
-        // let columns = GET_COLUMN_FROM_CATALOG(source);
-        // println!("{:?}", columns);
-        // let expect_columns = maplit::hashmap! {
-        //     ROWID_PREFIX => DataType::Serial,
-        //     "v1" => DataType::Int32,
-        //     "_rw_kafka_key" => DataType::Bytea,
-        //     // todo: kafka connector will automatically derive the column
-        //     // will change to a required field in the include clause
-        //     "_rw_kafka_timestamp" => DataType::Timestamptz,
-        // };
-        // assert_eq!(columns, expect_columns);
     }
 }
