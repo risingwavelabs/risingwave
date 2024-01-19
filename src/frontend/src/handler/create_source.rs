@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
+use anyhow::Context;
 use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
@@ -385,8 +386,7 @@ pub(crate) async fn bind_columns_from_source(
         (Format::Plain, Encode::Csv) => {
             let chars =
                 consume_string_from_options(&mut format_encode_options_to_consume, "delimiter")?.0;
-            let delimiter =
-                get_delimiter(chars.as_str()).map_err(|e| RwError::from(e.to_string()))?;
+            let delimiter = get_delimiter(chars.as_str()).context("failed to parse delimiter")?;
             let has_header = try_consume_string_from_options(
                 &mut format_encode_options_to_consume,
                 "without_header",
