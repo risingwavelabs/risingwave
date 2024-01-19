@@ -15,6 +15,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Context;
 use either::Either;
 use etcd_client::ConnectOptions;
 use futures::future::join_all;
@@ -68,6 +69,7 @@ use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use risingwave_rpc_client::ComputeClientPool;
 use sea_orm::{ConnectionTrait, DbBackend};
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
 use tokio::sync::watch;
 use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
@@ -165,7 +167,7 @@ pub async fn rpc_serve(
             let client =
                 EtcdClient::connect(endpoints.clone(), Some(options.clone()), auth_enabled)
                     .await
-                    .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
+                    .context("failed to connect etcd")?;
             let meta_store = EtcdMetaStore::new(client).into_ref();
 
             if election_client.is_none() {
@@ -234,7 +236,7 @@ pub fn rpc_serve_with_store(
                 .run_once(lease_interval_secs as i64, stop_rx.clone())
                 .await
             {
-                tracing::error!("election error happened, {}", e.to_string());
+                tracing::error!(error = %e.as_report(), "election error happened");
             }
         });
 
@@ -252,8 +254,8 @@ pub fn rpc_serve_with_store(
             tokio::select! {
                 _ = svc_shutdown_rx_clone.changed() => return,
                 res = is_leader_watcher.changed() => {
-                    if let Err(err) = res {
-                        tracing::error!("leader watcher recv failed {}", err.to_string());
+                    if res.is_err() {
+                        tracing::error!("leader watcher recv failed");
                     }
                 }
             }
@@ -284,8 +286,8 @@ pub fn rpc_serve_with_store(
                         return;
                     }
                     res = is_leader_watcher.changed() => {
-                        if let Err(err) = res {
-                            tracing::error!("leader watcher recv failed {}", err.to_string());
+                        if res.is_err() {
+                            tracing::error!("leader watcher recv failed");
                         }
                     }
                 }
@@ -771,13 +773,13 @@ pub async fn start_service_as_election_leader(
         match tokio::time::timeout(Duration::from_secs(1), join_all(handles)).await {
             Ok(results) => {
                 for result in results {
-                    if let Err(err) = result {
-                        tracing::warn!("Failed to join shutdown: {:?}", err);
+                    if result.is_err() {
+                        tracing::warn!("Failed to join shutdown");
                     }
                 }
             }
-            Err(e) => {
-                tracing::warn!("Join shutdown timeout: {:?}", e);
+            Err(_e) => {
+                tracing::warn!("Join shutdown timeout");
             }
         }
     };
