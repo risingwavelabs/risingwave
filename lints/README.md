@@ -38,3 +38,5 @@ The information below can be helpful in finding the appropriate version to bump 
 - The toolchain used by the latest version of `cargo-dylint`: https://github.com/trailofbits/dylint/blob/master/internal/template/rust-toolchain
 - The toolchain used by the latest version of `clippy`: https://github.com/rust-lang/rust-clippy/blob/master/rust-toolchain
 - The hash of the latest commit in `rust-lang/rust-clippy` repo for the dependency `clippy-utils`.
+
+Run the lints after bumping the toolchain to verify it works.
