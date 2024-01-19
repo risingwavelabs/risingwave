@@ -14,3 +14,4 @@
 
 pub mod in_mem;
 pub mod kv_log_store;
+pub mod only_writer_log_store;

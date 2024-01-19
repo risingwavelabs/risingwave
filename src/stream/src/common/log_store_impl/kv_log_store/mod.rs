@@ -32,21 +32,21 @@ use crate::executor::monitor::StreamingMetrics;
 
 mod buffer;
 mod reader;
-mod serde;
+pub(crate) mod serde;
 #[cfg(test)]
 mod test_utils;
 mod writer;
 
 pub(crate) use reader::{REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY};
 
-type SeqIdType = i32;
+pub(crate) type SeqIdType = i32;
 type RowOpCodeType = i16;
 
-const FIRST_SEQ_ID: SeqIdType = 0;
+pub(crate) const FIRST_SEQ_ID: SeqIdType = 0;
 
 /// Readers truncate the offset at the granularity of seq id.
 /// None `SeqIdType` means that the whole epoch is truncated.
-type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
+pub(crate) type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
 
 #[derive(Clone)]
 pub(crate) struct KvLogStoreReadMetrics {

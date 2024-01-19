@@ -239,6 +239,15 @@ message SinkNode {
   SinkLogStoreType log_store_type = 3;
 }
 
+message SubscriptionNode {
+  // log store should have a table.
+  catalog.Table log_store_table = 1;
+  // epoch store should have a table.
+  catalog.Table epoch_store_table = 2;
+  //retention time with seconds
+  int64 retention = 3;
+}
+
 message ProjectNode {
   repeated expr.ExprNode select_list = 1;
   // this two field is expressing a list of usize pair, which means when project receives a
@@ -757,6 +766,7 @@ message StreamNode {
     StreamFsFetchNode stream_fs_fetch = 138;
     StreamCdcScanNode stream_cdc_scan = 139;
     CdcFilterNode cdc_filter = 140;
+    SubscriptionNode subscription = 141;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
