@@ -63,7 +63,8 @@ impl DebeziumMongoJsonParser {
             })?
             .clone();
 
-        if rw_columns.len() != 2 {
+        // _rw_addition_partition & _rw_addition_offset are created automatically.
+        if rw_columns.len() != 4 {
             return Err(RwError::from(ProtocolError(
                 "Debezuim Mongo needs no more columns except `_id` and `payload` in table".into(),
             )));
