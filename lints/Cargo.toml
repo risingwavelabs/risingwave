@@ -11,8 +11,9 @@ crate-type = ["cdylib"]
 name = "format_error"
 path = "ui/format_error.rs"
 
+# See `README.md` before bumping the version.
 [dependencies]
-clippy_utils = { git = "https://github.com/rust-lang/rust-clippy", rev = "6fd0258e45105161b7e759a22e7350958e5cb0b1" } # should match the toolchain version of lints
+clippy_utils = { git = "https://github.com/rust-lang/rust-clippy", rev = "6fd0258e45105161b7e759a22e7350958e5cb0b1" }
 dylint_linting = "2.6.0"
 itertools = "0.12"
 
