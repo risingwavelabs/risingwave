@@ -35,6 +35,16 @@ INSERT INTO t6 VALUES (1, 1, 50, '1-50');
 statement ok
 FLUSH;
 
+query I
+select count(*) from t6;
+----
+7
+
+statement ok
+FLUSH;
+
+sleep 10s
+
 statement ok
 DROP SINK s6;
 
