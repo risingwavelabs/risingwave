@@ -9511,6 +9511,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
+ "thiserror-ext",
  "tracing",
  "workspace-hack",
 ]
