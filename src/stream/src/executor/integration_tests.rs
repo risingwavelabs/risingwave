@@ -76,11 +76,9 @@ async fn test_merger_sum_aggr() {
             input: aggregator.boxed(),
             channel: Box::new(LocalOutput::new(233, tx)),
         };
-        let context = SharedContext::for_test().into();
         let actor = Actor::new(
             consumer,
             vec![],
-            context,
             StreamingMetrics::unused().into(),
             actor_ctx.clone(),
             expr_context.clone(),
@@ -129,11 +127,9 @@ async fn test_merger_sum_aggr() {
         ctx,
         metrics,
     );
-    let context = SharedContext::for_test().into();
     let actor = Actor::new(
         dispatcher,
         vec![],
-        context,
         StreamingMetrics::unused().into(),
         actor_ctx.clone(),
         expr_context.clone(),
@@ -186,11 +182,9 @@ async fn test_merger_sum_aggr() {
         input: projection.boxed(),
         data: items.clone(),
     };
-    let context = SharedContext::for_test().into();
     let actor = Actor::new(
         consumer,
         vec![],
-        context,
         StreamingMetrics::unused().into(),
         actor_ctx.clone(),
         expr_context.clone(),

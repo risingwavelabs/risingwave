@@ -316,7 +316,7 @@ impl LocalStreamManager {
                 })
                 .try_collect()?
         };
-        let actors = self.build_actors_impl(actors, env).await?;
+        let actors = self.create_actors(actors, env).await?;
         self.core.lock().spawn_actors(
             actors,
             &self.streaming_metrics,
@@ -541,7 +541,7 @@ impl LocalStreamManager {
         Ok((executor, subtasks))
     }
 
-    async fn build_actors_impl(
+    async fn create_actors(
         &self,
         actors: Vec<StreamActor>,
         env: StreamEnvironment,
@@ -550,7 +550,7 @@ impl LocalStreamManager {
         for actor in actors {
             let actor_id = actor.actor_id;
             let actor_context = ActorContext::create_with_metrics(
-                actor.clone(),
+                &actor,
                 self.total_mem_val.clone(),
                 self.streaming_metrics.clone(),
                 env.config().unique_user_stream_errors,
@@ -575,7 +575,6 @@ impl LocalStreamManager {
             let actor = Actor::new(
                 dispatcher,
                 subtasks,
-                self.context.clone(),
                 self.streaming_metrics.clone(),
                 actor_context.clone(),
                 expr_context,

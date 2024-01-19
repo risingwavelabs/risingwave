@@ -36,7 +36,7 @@ use super::monitor::StreamingMetrics;
 use super::subtask::SubtaskHandle;
 use super::StreamConsumer;
 use crate::error::StreamResult;
-use crate::task::{ActorId, LocalBarrierManager, SharedContext};
+use crate::task::{ActorId, LocalBarrierManager};
 
 /// Shared by all operators of an actor.
 pub struct ActorContext {
@@ -70,7 +70,7 @@ impl ActorContext {
     }
 
     pub fn create_with_metrics(
-        stream_actor: PbStreamActor,
+        stream_actor: &PbStreamActor,
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
         unique_user_errors: usize,
@@ -78,7 +78,7 @@ impl ActorContext {
         Arc::new(Self {
             id: stream_actor.actor_id,
             fragment_id: stream_actor.fragment_id,
-            mview_definition: stream_actor.mview_definition,
+            mview_definition: stream_actor.mview_definition.clone(),
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             total_mem_val,
@@ -135,7 +135,6 @@ pub struct Actor<C> {
     /// The subtasks to execute concurrently.
     subtasks: Vec<SubtaskHandle>,
 
-    _context: Arc<SharedContext>,
     _metrics: Arc<StreamingMetrics>,
     pub actor_context: ActorContextRef,
     expr_context: ExprContext,
@@ -149,7 +148,6 @@ where
     pub fn new(
         consumer: C,
         subtasks: Vec<SubtaskHandle>,
-        context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
         actor_context: ActorContextRef,
         expr_context: ExprContext,
@@ -158,7 +156,6 @@ where
         Self {
             consumer,
             subtasks,
-            _context: context,
             _metrics: metrics,
             actor_context,
             expr_context,
