@@ -182,7 +182,7 @@ fn build_constant_lookup_expr(
     }
 
     if children.len() % 2 != 0 {
-        bail!("the length of children expression must be even, a dummy operator and a fallback expression is a must");
+        bail!("the length of children expression must be even, the dummy operator and fallback expression must be included");
     }
 
     let mut children = children;
