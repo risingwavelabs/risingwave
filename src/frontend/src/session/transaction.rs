@@ -195,6 +195,11 @@ impl SessionImpl {
         })
     }
 
+    /// Unpin snapshot by replacing the snapshot with None.
+    pub fn unpin_snapshot(&self) {
+        self.txn_ctx().snapshot = None;
+    }
+
     /// Acquires and pins a snapshot for the current transaction.
     ///
     /// If a snapshot is already acquired, returns it directly.

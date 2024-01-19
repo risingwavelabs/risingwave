@@ -57,7 +57,7 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt, credential):
         connector = 'gcs',
         match_pattern = '{prefix}*.{fmt}',
         gcs.bucket_name = '{config['GCS_BUCKET']}',
-        gcs.credentials = '{credential}',
+        gcs.credential = '{credential}',
     ) FORMAT PLAIN ENCODE {_encode()};''')
 
     total_rows = file_num * item_num_per_file

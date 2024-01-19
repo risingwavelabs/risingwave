@@ -238,7 +238,7 @@ pub trait Array:
     ///
     /// The raw iterator simply iterates values without checking the null bitmap.
     /// The returned value for NULL values is undefined.
-    fn raw_iter(&self) -> impl DoubleEndedIterator<Item = Self::RefItem<'_>> {
+    fn raw_iter(&self) -> impl ExactSizeIterator<Item = Self::RefItem<'_>> {
         (0..self.len()).map(|i| unsafe { self.raw_value_at_unchecked(i) })
     }
 

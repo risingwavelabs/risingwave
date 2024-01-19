@@ -623,6 +623,46 @@ mod tests {
         assert!(encoded_row1 < encoded_row2);
     }
 
+    // See also `row_value_encode_decode()` in `src/common/src/row/owned_row.rs`
+    #[test]
+    fn test_decode_row() {
+        let encoded: Vec<u8> = vec![
+            0, 128, 0, 0, 42, 255, 127, 255, 255, 255, 255, 255, 255, 213, 1, 0, 193, 186, 163,
+            215, 255, 254, 153, 144, 144, 144, 144, 144, 255, 255, 249, 0, 1, 98, 97, 97, 97, 97,
+            114, 0, 0, 6,
+        ];
+
+        let order_types = vec![
+            OrderType::ascending(),
+            OrderType::descending(),
+            OrderType::ascending(),
+            OrderType::ascending(),
+            OrderType::descending(),
+            OrderType::ascending(),
+        ];
+        let data_types = vec![
+            DataType::Int32,
+            DataType::Int64,
+            DataType::Timestamp,
+            DataType::Float32,
+            DataType::Varchar,
+            DataType::Bytea,
+        ];
+
+        let result = decode_row(&encoded, &data_types, &order_types).unwrap();
+        // println!("{:?}", &result);
+
+        let expected = OwnedRow::new(vec![
+            Some(ScalarImpl::Int32(42)),
+            Some(ScalarImpl::Int64(42)),
+            None,
+            Some(ScalarImpl::Float32(23.33.into())),
+            Some(ScalarImpl::Utf8("fooooo".into())),
+            Some(ScalarImpl::Bytea("baaaar".as_bytes().into())),
+        ]);
+        assert_eq!(&result, &expected);
+    }
+
     #[test]
     fn test_encode_chunk() {
         let v10 = Some(ScalarImpl::Int32(42));

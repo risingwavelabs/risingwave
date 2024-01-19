@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::iter::once;
 use std::str::FromStr;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
@@ -24,19 +24,21 @@ use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHE
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
-use risingwave_common::{bail_not_implemented, current_cluster_version, not_implemented};
+use risingwave_common::{bail_not_implemented, current_cluster_version, no_function};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
-    Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
+    Frame, FrameBound, FrameBounds, FrameExclusion, RowsFrameBounds, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
-    self, Function, FunctionArg, FunctionArgExpr, Ident, WindowFrameBound, WindowFrameExclusion,
-    WindowFrameUnits, WindowSpec,
+    self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, Ident, SelectItem, SetExpr,
+    Statement, WindowFrameBound, WindowFrameExclusion, WindowFrameUnits, WindowSpec,
 };
+use risingwave_sqlparser::parser::ParserError;
 use thiserror_ext::AsReport;
 
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
+use crate::catalog::function_catalog::FunctionCatalog;
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal, Now, OrderBy,
     Subquery, SubqueryKind, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
@@ -52,6 +54,12 @@ pub const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
     "current_schema",
     "current_timestamp",
 ];
+
+/// The global max calling depth for the global counter in `udf_context`
+/// To reduce the chance that the current running rw thread
+/// be killed by os, the current allowance depth of calling
+/// stack is set to `16`.
+const SQL_UDF_MAX_CALLING_DEPTH: u32 = 16;
 
 impl Binder {
     pub(in crate::binder) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
@@ -117,7 +125,10 @@ impl Binder {
             return self.bind_array_transform(f);
         }
 
-        let inputs = f
+        // Used later in sql udf expression evaluation
+        let args = f.args.clone();
+
+        let mut inputs = f
             .args
             .into_iter()
             .map(|arg| self.bind_function_arg(arg))
@@ -149,22 +160,176 @@ impl Binder {
             return Ok(TableFunction::new(function_type, inputs)?.into());
         }
 
+        /// TODO: add name related logic
+        /// NOTE: need to think of a way to prevent naming conflict
+        /// e.g., when existing column names conflict with parameter names in sql udf
+        fn create_udf_context(
+            args: &[FunctionArg],
+            _catalog: &Arc<FunctionCatalog>,
+        ) -> Result<HashMap<String, AstExpr>> {
+            let mut ret: HashMap<String, AstExpr> = HashMap::new();
+            for (i, current_arg) in args.iter().enumerate() {
+                if let FunctionArg::Unnamed(arg) = current_arg {
+                    let FunctionArgExpr::Expr(e) = arg else {
+                        return Err(
+                            ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into()
+                        );
+                    };
+                    // if catalog.arg_names.is_some() {
+                    //      todo!()
+                    // }
+                    ret.insert(format!("${}", i + 1), e.clone());
+                    continue;
+                }
+                return Err(ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into());
+            }
+            Ok(ret)
+        }
+
+        fn extract_udf_expression(ast: Vec<Statement>) -> Result<AstExpr> {
+            if ast.len() != 1 {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "the query for sql udf should contain only one statement".to_string(),
+                )
+                .into());
+            }
+
+            // Extract the expression out
+            let Statement::Query(query) = ast[0].clone() else {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "invalid function definition, please recheck the syntax".to_string(),
+                )
+                .into());
+            };
+
+            let SetExpr::Select(select) = query.body else {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "missing `select` body for sql udf expression, please recheck the syntax"
+                        .to_string(),
+                )
+                .into());
+            };
+
+            if select.projection.len() != 1 {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "`projection` should contain only one `SelectItem`".to_string(),
+                )
+                .into());
+            }
+
+            let SelectItem::UnnamedExpr(expr) = select.projection[0].clone() else {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "expect `UnnamedExpr` for `projection`".to_string(),
+                )
+                .into());
+            };
+
+            Ok(expr)
+        }
+
         // user defined function
         // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
         if let Ok(schema) = self.first_valid_schema()
-            && let Some(func) = schema.get_function_by_name_args(
-                &function_name,
-                &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
-            )
+            && let Some(func) = schema.get_function_by_name_inputs(&function_name, &mut inputs)
         {
             use crate::catalog::function_catalog::FunctionKind::*;
-            match &func.kind {
-                Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
-                Table { .. } => {
-                    self.ensure_table_function_allowed()?;
-                    return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
+
+            if func.language == "sql" {
+                if func.body.is_none() {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "`body` must exist for sql udf".to_string(),
+                    )
+                    .into());
                 }
-                Aggregate => todo!("support UDAF"),
+
+                // This represents the current user defined function is `language sql`
+                let parse_result = risingwave_sqlparser::parser::Parser::parse_sql(
+                    func.body.as_ref().unwrap().as_str(),
+                );
+                if let Err(ParserError::ParserError(err)) | Err(ParserError::TokenizerError(err)) =
+                    parse_result
+                {
+                    // Here we just return the original parse error message
+                    return Err(ErrorCode::InvalidInputSyntax(err).into());
+                }
+
+                debug_assert!(parse_result.is_ok());
+
+                // We can safely unwrap here
+                let ast = parse_result.unwrap();
+
+                // Stash the current `udf_context`
+                // Note that the `udf_context` may be empty,
+                // if the current binding is the root (top-most) sql udf.
+                // In this case the empty context will be stashed
+                // and restored later, no need to maintain other flags.
+                let stashed_udf_context = self.udf_context.get_context();
+
+                // The actual inline logic for sql udf
+                // Note that we will always create new udf context for each sql udf
+                let Ok(context) = create_udf_context(&args, &Arc::clone(func)) else {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
+                    )
+                    .into());
+                };
+
+                let mut udf_context = HashMap::new();
+                for (c, e) in context {
+                    // Note that we need to bind the args before actual delve in the function body
+                    // This will update the context in the subsequent inner calling function
+                    // e.g.,
+                    // - create function print(INT) returns int language sql as 'select $1';
+                    // - create function print_add_one(INT) returns int language sql as 'select print($1 + 1)';
+                    // - select print_add_one(1); # The result should be 2 instead of 1.
+                    // Without the pre-binding here, the ($1 + 1) will not be correctly populated,
+                    // causing the result to always be 1.
+                    let Ok(e) = self.bind_expr(e) else {
+                        return Err(ErrorCode::BindError(
+                            "failed to bind the argument, please recheck the syntax".to_string(),
+                        )
+                        .into());
+                    };
+                    udf_context.insert(c, e);
+                }
+                self.udf_context.update_context(udf_context);
+
+                // Check for potential recursive calling
+                if self.udf_context.global_count() >= SQL_UDF_MAX_CALLING_DEPTH {
+                    return Err(ErrorCode::BindError(format!(
+                        "function {} calling stack depth limit exceeded",
+                        &function_name
+                    ))
+                    .into());
+                } else {
+                    // Update the status for the global counter
+                    self.udf_context.incr_global_count();
+                }
+
+                if let Ok(expr) = extract_udf_expression(ast) {
+                    let bind_result = self.bind_expr(expr);
+                    // Restore context information for subsequent binding
+                    self.udf_context.update_context(stashed_udf_context);
+                    return bind_result;
+                } else {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "failed to parse the input query and extract the udf expression,
+                        please recheck the syntax"
+                            .to_string(),
+                    )
+                    .into());
+                }
+            } else {
+                match &func.kind {
+                    Scalar { .. } => {
+                        return Ok(UserDefinedFunction::new(func.clone(), inputs).into())
+                    }
+                    Table { .. } => {
+                        self.ensure_table_function_allowed()?;
+                        return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
+                    }
+                    Aggregate => todo!("support UDAF"),
+                }
             }
         }
 
@@ -524,7 +689,7 @@ impl Binder {
                     } else {
                         FrameBound::CurrentRow
                     };
-                    FrameBounds::Rows(start, end)
+                    FrameBounds::Rows(RowsFrameBounds { start, end })
                 }
                 WindowFrameUnits::Range | WindowFrameUnits::Groups => {
                     bail_not_implemented!(
@@ -997,6 +1162,7 @@ impl Binder {
                     }
                 ))),
                 ("pg_get_indexdef", raw_call(ExprType::PgGetIndexdef)),
+                ("pg_get_viewdef", raw_call(ExprType::PgGetViewdef)),
                 ("pg_relation_size", dispatch_by_len(vec![
                     (1, raw(|binder, inputs|{
                         let table_name = &inputs[0];
@@ -1212,7 +1378,7 @@ impl Binder {
         static FUNCTIONS_BKTREE: LazyLock<BKTree<&str>> = LazyLock::new(|| {
             let mut tree = BKTree::new(metrics::Levenshtein);
 
-            // TODO: Also hint other functinos, e,g, Agg or UDF.
+            // TODO: Also hint other functinos, e.g., Agg or UDF.
             for k in HANDLES.keys() {
                 tree.add(*k);
             }
@@ -1222,27 +1388,22 @@ impl Binder {
 
         match HANDLES.get(function_name) {
             Some(handle) => handle(self, inputs),
-            None => Err({
+            None => {
                 let allowed_distance = if function_name.len() > 3 { 2 } else { 1 };
 
                 let candidates = FUNCTIONS_BKTREE
                     .find(function_name, allowed_distance)
-                    .map(|(_idx, c)| c);
+                    .map(|(_idx, c)| c)
+                    .join(" or ");
 
-                let mut candidates = candidates.peekable();
-
-                let err_msg = if candidates.peek().is_none() {
-                    format!("unsupported function: \"{}\"", function_name)
-                } else {
-                    format!(
-                        "unsupported function \"{}\", do you mean \"{}\"?",
-                        function_name,
-                        candidates.join(" or ")
-                    )
-                };
-
-                not_implemented!(issue = 112, "{}", err_msg).into()
-            }),
+                Err(no_function!(
+                    candidates = (!candidates.is_empty()).then_some(candidates),
+                    "{}({})",
+                    function_name,
+                    inputs.iter().map(|e| e.return_type()).join(", ")
+                )
+                .into())
+            }
         }
     }
 

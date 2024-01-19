@@ -59,6 +59,7 @@ pub use values::BoundValues;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, TableId, ViewId};
+use crate::expr::ExprImpl;
 use crate::session::{AuthContext, SessionImpl};
 
 pub type ShareId = usize;
@@ -115,6 +116,58 @@ pub struct Binder {
     included_relations: HashSet<TableId>,
 
     param_types: ParameterTypes,
+
+    /// The sql udf context that will be used during binding phase
+    udf_context: UdfContext,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct UdfContext {
+    /// The mapping from `sql udf parameters` to a bound `ExprImpl` generated from `ast expressions`
+    /// Note: The expressions are constructed during runtime, correspond to the actual users' input
+    udf_param_context: HashMap<String, ExprImpl>,
+
+    /// The global counter that records the calling stack depth
+    /// of the current binding sql udf chain
+    udf_global_counter: u32,
+}
+
+impl UdfContext {
+    pub fn new() -> Self {
+        Self {
+            udf_param_context: HashMap::new(),
+            udf_global_counter: 0,
+        }
+    }
+
+    pub fn global_count(&self) -> u32 {
+        self.udf_global_counter
+    }
+
+    pub fn incr_global_count(&mut self) {
+        self.udf_global_counter += 1;
+    }
+
+    pub fn _is_empty(&self) -> bool {
+        self.udf_param_context.is_empty()
+    }
+
+    pub fn update_context(&mut self, context: HashMap<String, ExprImpl>) {
+        self.udf_param_context = context;
+    }
+
+    pub fn _clear(&mut self) {
+        self.udf_global_counter = 0;
+        self.udf_param_context.clear();
+    }
+
+    pub fn get_expr(&self, name: &str) -> Option<&ExprImpl> {
+        self.udf_param_context.get(name)
+    }
+
+    pub fn get_context(&self) -> HashMap<String, ExprImpl> {
+        self.udf_param_context.clone()
+    }
 }
 
 /// `ParameterTypes` is used to record the types of the parameters during binding. It works
@@ -216,6 +269,7 @@ impl Binder {
             shared_views: HashMap::new(),
             included_relations: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
+            udf_context: UdfContext::new(),
         }
     }
 

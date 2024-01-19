@@ -61,7 +61,7 @@ pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef}
 pub use connector_client::{ConnectorClient, SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
 pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
 pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
-use risingwave_common::util::await_future_with_monitor_error_stream;
+use rw_futures_util::await_future_with_monitor_error_stream;
 pub use sink_coordinate_client::CoordinatorStreamHandle;
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
 

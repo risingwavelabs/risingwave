@@ -41,6 +41,7 @@ memcomparable = { version = "0.2" }
 mime_guess = "2"
 num-integer = "0.1"
 num-traits = "0.2"
+otlp-embedded = { workspace = true }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 prometheus = "0.13"
 prometheus-http-query = "0.8"
@@ -58,6 +59,7 @@ risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_sqlparser = { workspace = true }
+rw_futures_util = { workspace = true }
 scopeguard = "1.2.0"
 sea-orm = { version = "0.12.0", features = [
     "sqlx-mysql",

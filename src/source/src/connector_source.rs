@@ -25,18 +25,18 @@ use risingwave_common::bail;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::ConnectorError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::util::select_all;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{
-    OpendalGcs, OpendalS3, OpendalSource,
+    OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
 use risingwave_connector::source::filesystem::FsPageItem;
 use risingwave_connector::source::{
     create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties,
     ConnectorState, FsFilterCtrlCtx, SourceColumnDesc, SourceContext, SplitReader,
 };
+use rw_futures_util::select_all;
 use tokio::time;
 use tokio::time::Duration;
 
@@ -101,6 +101,11 @@ impl ConnectorSource {
             ConnectorProperties::OpendalS3(prop) => {
                 let lister: OpendalEnumerator<OpendalS3> =
                     OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
+                Ok(build_opendal_fs_list_stream(lister))
+            }
+            ConnectorProperties::PosixFs(prop) => {
+                let lister: OpendalEnumerator<OpendalPosixFs> =
+                    OpendalEnumerator::new_posix_fs_source(*prop)?;
                 Ok(build_opendal_fs_list_stream(lister))
             }
             other => bail!("Unsupported source: {:?}", other),

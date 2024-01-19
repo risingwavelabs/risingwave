@@ -50,7 +50,9 @@ impl StreamDynamicFilter {
             if let Some(e) = core.right().as_stream_exchange()
                 && *e.distribution() == Distribution::Broadcast
             {
-                if let Some(proj) = e.input().as_stream_project() {
+                if e.input().as_stream_now().is_some() {
+                    true
+                } else if let Some(proj) = e.input().as_stream_project() {
                     proj.input().as_stream_now().is_some()
                 } else {
                     false

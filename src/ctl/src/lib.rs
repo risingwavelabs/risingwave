@@ -266,6 +266,11 @@ enum HummockCommands {
     ValidateVersion,
     /// Rebuild table stats
     RebuildTableStats,
+
+    CancelCompactTask {
+        #[clap(short, long)]
+        task_id: u64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -481,6 +486,10 @@ enum MetaCommands {
         /// The worker not found will be ignored
         #[clap(long, default_value_t = false)]
         ignore_not_found: bool,
+
+        /// Checking whether the fragment is occupied by workers
+        #[clap(long, default_value_t = false)]
+        check_fragment_occupied: bool,
     },
 
     /// Validate source interface for the cloud team
@@ -655,6 +664,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::RebuildTableStats) => {
             cmd_impl::hummock::rebuild_table_stats(context).await?;
         }
+        Commands::Hummock(HummockCommands::CancelCompactTask { task_id }) => {
+            cmd_impl::hummock::cancel_compact_task(context, task_id).await?;
+        }
         Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
             cmd_impl::table::scan(context, mv_name, data_dir).await?
         }
@@ -698,7 +710,17 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             workers,
             yes,
             ignore_not_found,
-        }) => cmd_impl::meta::unregister_workers(context, workers, yes, ignore_not_found).await?,
+            check_fragment_occupied,
+        }) => {
+            cmd_impl::meta::unregister_workers(
+                context,
+                workers,
+                yes,
+                ignore_not_found,
+                check_fragment_occupied,
+            )
+            .await?
+        }
         Commands::Meta(MetaCommands::ValidateSource { props }) => {
             cmd_impl::meta::validate_source(context, props).await?
         }

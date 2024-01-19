@@ -1,7 +1,7 @@
 ---
 version: "3"
 x-image: &image
-  image: ${RW_IMAGE:-risingwavelabs/risingwave:v1.5.0}
+  image: ${RW_IMAGE:-risingwavelabs/risingwave:v1.6.0}
 services:
   risingwave-standalone:
     <<: *image
@@ -59,7 +59,7 @@ services:
       - "2222:2222"
     depends_on:
       - etcd-0
-    env_file: multiple_object_storage.env
+    env_file: aws.env
     volumes:
       - "./risingwave.toml:/risingwave.toml"
     environment:

@@ -20,7 +20,6 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::util::select_all;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, TableKeyRange};
@@ -39,6 +38,7 @@ use risingwave_storage::hummock::{
 use risingwave_storage::monitor::HummockStateStoreMetrics;
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::{ReadOptions, StateStoreReadIterStream, StreamTypeOfIter};
+use rw_futures_util::select_all;
 use tokio::sync::mpsc::unbounded_channel;
 
 type SelectAllIterStream = impl StateStoreReadIterStream + Unpin;
@@ -73,6 +73,7 @@ impl HummockJavaBindingIterator {
             1 << 10,
             0,
             1 << 10,
+            16,
             FileCache::none(),
             FileCache::none(),
             None,

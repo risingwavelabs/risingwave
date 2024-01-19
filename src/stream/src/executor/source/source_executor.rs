@@ -21,6 +21,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
     StreamChunkWithState,
@@ -106,6 +107,7 @@ impl<S: StateStore> SourceExecutor<S> {
             self.source_ctrl_opts.clone(),
             self.connector_params.connector_client.clone(),
             self.actor_ctx.error_suppressor.clone(),
+            source_desc.source.config.clone(),
         );
         source_desc
             .source

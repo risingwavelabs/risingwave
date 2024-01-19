@@ -20,16 +20,6 @@
  */
 const nextConfig = {
   trailingSlash: true,
-
-  rewrites: () => {
-    return [
-      {
-        source: "/api/:path*",
-        // To test with a RisingWave Meta node, use "http://127.0.0.1:5691/api/:path*"
-        destination: "http://localhost:32333/:path*",
-      },
-    ]
-  },
 }
 
 module.exports = nextConfig

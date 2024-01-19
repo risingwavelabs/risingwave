@@ -288,6 +288,7 @@ mod test {
             )?),
             rw_columns: Vec::default(),
             source_ctx: Default::default(),
+            transaction_meta_builder: None,
         })
     }
 

@@ -245,7 +245,7 @@ do
   fi
 done
 
-if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 2000 )) ; then
+if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 3000 )) ; then
     echo "$(tput setaf 1)ERROR: log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
     exit 1
 fi
@@ -1332,7 +1332,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.18.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.19.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ], install_command = "binstall" }
 dependencies = ["check-risedev-env-file"]
