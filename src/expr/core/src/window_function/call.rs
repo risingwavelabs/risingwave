@@ -201,20 +201,8 @@ impl RowsFrameBounds {
 
 impl FrameBoundsImpl for RowsFrameBounds {
     fn validate(&self) -> Result<()> {
-        FrameBound::validate_bounds(&self.start, &self.end)
+        FrameBound::validate_bounds(&self.start, &self.end, |_| Ok(()))
     }
-}
-
-#[derive(Display, Debug, Clone, Eq, PartialEq, Hash, EnumAsInner)]
-#[display(style = "TITLE CASE")]
-pub enum FrameBound<T> {
-    UnboundedPreceding,
-    #[display("{0} PRECEDING")]
-    Preceding(T),
-    CurrentRow,
-    #[display("{0} FOLLOWING")]
-    Following(T),
-    UnboundedFollowing,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -270,6 +258,18 @@ impl FrameBoundsImpl for RangeFrameBounds {
             Ok(())
         })
     }
+}
+
+#[derive(Display, Debug, Clone, Eq, PartialEq, Hash, EnumAsInner)]
+#[display(style = "TITLE CASE")]
+pub enum FrameBound<T> {
+    UnboundedPreceding,
+    #[display("{0} PRECEDING")]
+    Preceding(T),
+    CurrentRow,
+    #[display("{0} FOLLOWING")]
+    Following(T),
+    UnboundedFollowing,
 }
 
 impl<T> FrameBound<T> {
