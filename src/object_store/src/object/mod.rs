@@ -37,6 +37,7 @@ pub mod object_metrics;
 
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
+use thiserror_ext::AsReport;
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
 pub type ObjectStreamingUploader = MonitoredStreamingUploader;
@@ -274,7 +275,7 @@ fn try_update_failure_metric<T>(
     operation_type: &'static str,
 ) {
     if let Err(e) = &result {
-        tracing::error!("{:?} failed because of: {:?}", operation_type, e);
+        tracing::error!(error = %e.as_report(), "{} failed", operation_type);
         metrics
             .failure_count
             .with_label_values(&[operation_type])

@@ -47,6 +47,7 @@ use itertools::Itertools;
 use risingwave_common::config::{ObjectStoreConfig, S3ObjectStoreConfig};
 use risingwave_common::monitor::connection::monitor_connector;
 use risingwave_common::range::RangeBoundsExt;
+use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
@@ -281,7 +282,7 @@ impl StreamingUploader for S3StreamingUploader {
                 Ok(())
             }
         } else if let Err(e) = self.flush_multipart_and_complete().await {
-            tracing::warn!("Failed to upload object {}: {:?}", self.key, e);
+            tracing::warn!(key = self.key, error = %e.as_report(), "Failed to upload object");
             self.abort_multipart_upload().await?;
             Err(e)
         } else {
