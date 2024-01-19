@@ -1327,7 +1327,7 @@ mod tests {
             table_id,
         );
 
-        let batch_items = vec![
+        let batch_items = [
             shared_buffer_items1,
             shared_buffer_items2,
             shared_buffer_items3,

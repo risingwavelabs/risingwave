@@ -25,7 +25,6 @@ use risingwave_common::bail;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::ConnectorError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::util::select_all;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
@@ -37,6 +36,7 @@ use risingwave_connector::source::{
     create_split_reader, BoxChunkSourceStream, BoxTryStream, Column, ConnectorProperties,
     ConnectorState, FsFilterCtrlCtx, SourceColumnDesc, SourceContext, SplitReader,
 };
+use rw_futures_util::select_all;
 use tokio::time;
 use tokio::time::Duration;
 
@@ -85,7 +85,7 @@ impl ConnectorSource {
                     .ok_or_else(|| {
                         anyhow!("Failed to find column id: {} in source: {:?}", id, self).into()
                     })
-                    .map(|col| col.clone())
+                    .cloned()
             })
             .collect::<Result<Vec<SourceColumnDesc>>>()
     }

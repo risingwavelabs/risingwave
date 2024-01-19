@@ -26,6 +26,11 @@ import com.risingwave.mock.flink.runtime.FlinkDynamicAdapterFactory;
 import com.risingwave.proto.Data;
 import io.grpc.StatusRuntimeException;
 import java.io.IOException;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
 import org.apache.flink.api.connector.sink.Committer;
 import org.apache.flink.api.connector.sink.GlobalCommitter;
@@ -272,13 +277,22 @@ public class FlinkMockTest {
 
     private TableSchema getTableSchema() {
         return new TableSchema(
-                Lists.newArrayList("id", "name"),
+                Lists.newArrayList(
+                        "id", "name", "v_date", "v_time", "v_timestamp", "v_timestamptz"),
                 Lists.newArrayList(
                         Data.DataType.newBuilder()
                                 .setTypeName(Data.DataType.TypeName.INT32)
                                 .build(),
                         Data.DataType.newBuilder()
                                 .setTypeName(Data.DataType.TypeName.VARCHAR)
+                                .build(),
+                        Data.DataType.newBuilder().setTypeName(Data.DataType.TypeName.DATE).build(),
+                        Data.DataType.newBuilder().setTypeName(Data.DataType.TypeName.TIME).build(),
+                        Data.DataType.newBuilder()
+                                .setTypeName(Data.DataType.TypeName.TIMESTAMP)
+                                .build(),
+                        Data.DataType.newBuilder()
+                                .setTypeName(Data.DataType.TypeName.TIMESTAMPTZ)
                                 .build()),
                 Lists.newArrayList("id", "name"));
     }
@@ -291,39 +305,97 @@ public class FlinkMockTest {
                 flinkDynamicAdapterFactory.createWriter(getTableSchema(), new HashMap<>());
         List<SinkRow> sinkRows =
                 java.util.Arrays.asList(
-                        new ArraySinkRow(Data.Op.INSERT, 1, "Alice"),
-                        new ArraySinkRow(Data.Op.INSERT, 2, "Bob"));
+                        new ArraySinkRow(
+                                Data.Op.INSERT,
+                                1,
+                                "Alice",
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 0),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC)),
+                        new ArraySinkRow(
+                                Data.Op.INSERT,
+                                2,
+                                "Bob",
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 1000000),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC)));
 
         writer.write(sinkRows);
         writer.barrier(true);
 
         RowData rowData1 = mockStorage.commitMap.lastEntry().getValue().get(0);
-        assertEquals(rowData1.getArity(), 2);
+        assertEquals(rowData1.getArity(), 6);
         assertEquals(rowData1.getInt(0), 1);
         assertEquals(rowData1.getString(1).toString(), "Alice");
+        assertEquals(rowData1.getInt(2), 0);
+        assertEquals(rowData1.getInt(3), 0);
+        assertEquals(
+                rowData1.getTimestamp(4, 0).toLocalDateTime(),
+                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000));
+        assertEquals(
+                rowData1.getTimestamp(5, 0).toInstant(),
+                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC).toInstant());
 
         RowData rowData2 = mockStorage.commitMap.lastEntry().getValue().get(1);
-        assertEquals(rowData2.getArity(), 2);
+        assertEquals(rowData2.getArity(), 6);
         assertEquals(rowData2.getInt(0), 2);
         assertEquals(rowData2.getString(1).toString(), "Bob");
+        assertEquals(rowData2.getInt(2), 0);
+        assertEquals(rowData2.getInt(3), 1);
+        assertEquals(
+                rowData2.getTimestamp(4, 0).toLocalDateTime(),
+                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000));
+        assertEquals(
+                rowData2.getTimestamp(5, 0).toInstant(),
+                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC).toInstant());
 
         List<SinkRow> sinkRows2 =
                 java.util.Arrays.asList(
-                        new ArraySinkRow(Data.Op.INSERT, 3, "xxx"),
-                        new ArraySinkRow(Data.Op.INSERT, 4, "hhh"));
+                        new ArraySinkRow(
+                                Data.Op.INSERT,
+                                3,
+                                "xxx",
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 0),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC)),
+                        new ArraySinkRow(
+                                Data.Op.INSERT,
+                                4,
+                                "hhh",
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 0),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC)));
 
         writer.write(sinkRows2);
         writer.barrier(true);
 
         RowData rowData3 = mockStorage.commitMap.lastEntry().getValue().get(0);
-        assertEquals(rowData3.getArity(), 2);
+        assertEquals(rowData3.getArity(), 6);
         assertEquals(rowData3.getInt(0), 3);
         assertEquals(rowData3.getString(1).toString(), "xxx");
+        assertEquals(rowData3.getInt(2), 0);
+        assertEquals(rowData3.getInt(3), 0);
+        assertEquals(
+                rowData3.getTimestamp(4, 0).toLocalDateTime(),
+                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000));
+        assertEquals(
+                rowData3.getTimestamp(5, 0).toInstant(),
+                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC).toInstant());
 
         RowData rowData4 = mockStorage.commitMap.lastEntry().getValue().get(1);
-        assertEquals(rowData4.getArity(), 2);
+        assertEquals(rowData4.getArity(), 6);
         assertEquals(rowData4.getInt(0), 4);
         assertEquals(rowData4.getString(1).toString(), "hhh");
+        assertEquals(rowData4.getInt(2), 0);
+        assertEquals(rowData4.getInt(3), 0);
+        assertEquals(
+                rowData4.getTimestamp(4, 0).toLocalDateTime(),
+                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000));
+        assertEquals(rowData4.getTimestamp(5, 0).toString(), "1970-01-01T00:00:01.000001");
     }
 
     @Test
@@ -334,38 +406,96 @@ public class FlinkMockTest {
                 flinkDynamicAdapterFactory.createWriter(getTableSchema(), new HashMap<>());
         List<SinkRow> sinkRows =
                 java.util.Arrays.asList(
-                        new ArraySinkRow(Data.Op.INSERT, 1, "Alice"),
-                        new ArraySinkRow(Data.Op.INSERT, 2, "Bob"));
+                        new ArraySinkRow(
+                                Data.Op.INSERT,
+                                1,
+                                "Alice",
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 0),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC)),
+                        new ArraySinkRow(
+                                Data.Op.INSERT,
+                                2,
+                                "Bob",
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 1000000),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC)));
 
         writer.write(sinkRows);
         writer.barrier(true);
 
         RowData rowData1 = mockStorage.commitMap.lastEntry().getValue().get(0);
-        assertEquals(rowData1.getArity(), 2);
+        assertEquals(rowData1.getArity(), 6);
         assertEquals(rowData1.getInt(0), 1);
         assertEquals(rowData1.getString(1).toString(), "Alice");
+        assertEquals(rowData1.getInt(2), 0);
+        assertEquals(rowData1.getInt(3), 0);
+        assertEquals(
+                rowData1.getTimestamp(4, 0).toLocalDateTime(),
+                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000));
+        assertEquals(
+                rowData1.getTimestamp(5, 0).toInstant(),
+                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC).toInstant());
 
         RowData rowData2 = mockStorage.commitMap.lastEntry().getValue().get(1);
-        assertEquals(rowData2.getArity(), 2);
+        assertEquals(rowData2.getArity(), 6);
         assertEquals(rowData2.getInt(0), 2);
         assertEquals(rowData2.getString(1).toString(), "Bob");
+        assertEquals(rowData2.getInt(2), 0);
+        assertEquals(rowData2.getInt(3), 1);
+        assertEquals(
+                rowData2.getTimestamp(4, 0).toLocalDateTime(),
+                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000));
+        assertEquals(
+                rowData2.getTimestamp(5, 0).toInstant(),
+                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC).toInstant());
 
         List<SinkRow> sinkRows2 =
                 java.util.Arrays.asList(
-                        new ArraySinkRow(Data.Op.INSERT, 3, "xxx"),
-                        new ArraySinkRow(Data.Op.INSERT, 4, "hhh"));
+                        new ArraySinkRow(
+                                Data.Op.INSERT,
+                                3,
+                                "xxx",
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 0),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC)),
+                        new ArraySinkRow(
+                                Data.Op.INSERT,
+                                4,
+                                "hhh",
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 0),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC)));
 
         writer.write(sinkRows2);
         writer.barrier(true);
 
         RowData rowData3 = mockStorage.commitMap.lastEntry().getValue().get(0);
-        assertEquals(rowData3.getArity(), 2);
+        assertEquals(rowData3.getArity(), 6);
         assertEquals(rowData3.getInt(0), 3);
         assertEquals(rowData3.getString(1).toString(), "xxx");
+        assertEquals(rowData3.getInt(2), 0);
+        assertEquals(rowData3.getInt(3), 0);
+        assertEquals(
+                rowData3.getTimestamp(4, 0).toLocalDateTime(),
+                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000));
+        assertEquals(
+                rowData3.getTimestamp(5, 0).toInstant(),
+                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC).toInstant());
 
         RowData rowData4 = mockStorage.commitMap.lastEntry().getValue().get(1);
-        assertEquals(rowData4.getArity(), 2);
+        assertEquals(rowData4.getArity(), 6);
         assertEquals(rowData4.getInt(0), 4);
         assertEquals(rowData4.getString(1).toString(), "hhh");
+        assertEquals(rowData4.getInt(2), 0);
+        assertEquals(rowData4.getInt(3), 0);
+        assertEquals(
+                rowData4.getTimestamp(4, 0).toLocalDateTime(),
+                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000));
+        assertEquals(rowData4.getTimestamp(5, 0).toString(), "1970-01-01T00:00:01.000001");
     }
 }

@@ -30,6 +30,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, RwConfig,
 };
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_test::get_notification_client_for_test;
@@ -218,6 +219,7 @@ async fn compaction_test(
         storage_memory_config.meta_cache_capacity_mb * (1 << 20),
         0,
         storage_memory_config.prefetch_buffer_capacity_mb * (1 << 20),
+        storage_opts.max_prefetch_block_number,
         FileCache::none(),
         FileCache::none(),
         None,

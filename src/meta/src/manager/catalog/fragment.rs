@@ -24,7 +24,6 @@ use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping}
 use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_cont};
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model_v2::SourceId;
-use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
@@ -562,7 +561,7 @@ impl FragmentManager {
         let mut table_fragments = BTreeMapTransaction::new(map);
         for table_fragment in &to_delete_table_fragments {
             table_fragments.remove(table_fragment.table_id());
-            let backfill_actor_ids = table_fragment.backfill_actor_ids();
+            let to_remove_actor_ids: HashSet<_> = table_fragment.actor_ids().into_iter().collect();
             let dependent_table_ids = table_fragment.dependent_table_ids();
             for (dependent_table_id, _) in dependent_table_ids {
                 if table_ids.contains(&dependent_table_id) {
@@ -582,12 +581,11 @@ impl FragmentManager {
                 dependent_table
                     .fragments
                     .values_mut()
-                    .filter(|f| (f.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0)
                     .flat_map(|f| &mut f.actors)
                     .for_each(|a| {
                         a.dispatcher.retain_mut(|d| {
                             d.downstream_actor_id
-                                .retain(|x| !backfill_actor_ids.contains(x));
+                                .retain(|x| !to_remove_actor_ids.contains(x));
                             !d.downstream_actor_id.is_empty()
                         })
                     });
@@ -723,12 +721,9 @@ impl FragmentManager {
         Ok(())
     }
 
-    /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
+    /// Used in [`crate::barrier::GlobalBarrierManager`], load all running actor that need to be sent or
     /// collected
-    pub async fn load_all_actors(
-        &self,
-        check_state: impl Fn(ActorState, TableId, ActorId) -> bool,
-    ) -> ActorInfos {
+    pub async fn load_all_actors(&self) -> ActorInfos {
         let mut actor_maps = HashMap::new();
         let mut barrier_inject_actor_maps = HashMap::new();
 
@@ -736,7 +731,7 @@ impl FragmentManager {
         for fragments in map.values() {
             for (worker_id, actor_states) in fragments.worker_actor_states() {
                 for (actor_id, actor_state) in actor_states {
-                    if check_state(actor_state, fragments.table_id(), actor_id) {
+                    if actor_state == ActorState::Running {
                         actor_maps
                             .entry(worker_id)
                             .or_insert_with(Vec::new)
@@ -748,7 +743,7 @@ impl FragmentManager {
             let barrier_inject_actors = fragments.worker_barrier_inject_actor_states();
             for (worker_id, actor_states) in barrier_inject_actors {
                 for (actor_id, actor_state) in actor_states {
-                    if check_state(actor_state, fragments.table_id(), actor_id) {
+                    if actor_state == ActorState::Running {
                         barrier_inject_actor_maps
                             .entry(worker_id)
                             .or_insert_with(Vec::new)
@@ -1112,7 +1107,7 @@ impl FragmentManager {
 
         let new_created_actors: HashSet<_> = reschedules
             .values()
-            .flat_map(|reschedule| reschedule.added_actors.clone())
+            .flat_map(|reschedule| reschedule.added_actors.values().flatten().cloned())
             .collect();
 
         let to_update_table_fragments = map
@@ -1158,7 +1153,7 @@ impl FragmentManager {
                 } = reschedule;
 
                 // Add actors to this fragment: set the state to `Running`.
-                for actor_id in added_actors {
+                for actor_id in added_actors.values().flatten() {
                     table_fragment
                         .actor_status
                         .get_mut(actor_id)
@@ -1241,6 +1236,7 @@ impl FragmentManager {
                 } = reschedule;
 
                 let removed_actor_ids: HashSet<_> = removed_actors.iter().cloned().collect();
+                let added_actor_ids = added_actors.values().flatten().cloned().collect_vec();
 
                 // Update the dispatcher of the upstream fragments.
                 for (upstream_fragment_id, dispatcher_id) in upstream_fragment_dispatcher_ids {
@@ -1273,7 +1269,7 @@ impl FragmentManager {
                                 update_actors(
                                     dispatcher.downstream_actor_id.as_mut(),
                                     &removed_actor_ids,
-                                    added_actors,
+                                    &added_actor_ids,
                                 );
                             }
                         }
@@ -1302,7 +1298,7 @@ impl FragmentManager {
                         update_actors(
                             downstream_actor.upstream_actor_id.as_mut(),
                             &removed_actor_ids,
-                            added_actors,
+                            &added_actor_ids,
                         );
 
                         if let Some(node) = downstream_actor.nodes.as_mut() {
@@ -1310,7 +1306,7 @@ impl FragmentManager {
                                 node,
                                 fragment_id,
                                 &removed_actor_ids,
-                                added_actors,
+                                &added_actor_ids,
                             );
                         }
                     }
@@ -1398,11 +1394,9 @@ impl FragmentManager {
             .mview_actor_ids())
     }
 
-    /// Get and filter the upstream `Materialize` or `Source` fragments of the specified relations.
     pub async fn get_upstream_root_fragments(
         &self,
         upstream_table_ids: &HashSet<TableId>,
-        table_job_type: Option<TableJobType>,
     ) -> MetaResult<HashMap<TableId, Fragment>> {
         let map = &self.core.read().await.table_fragments;
         let mut fragments = HashMap::new();
@@ -1411,18 +1405,12 @@ impl FragmentManager {
             let table_fragments = map
                 .get(&table_id)
                 .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
-            match table_job_type.as_ref() {
-                Some(TableJobType::SharedCdcSource) => {
-                    if let Some(fragment) = table_fragments.source_fragment() {
-                        fragments.insert(table_id, fragment);
-                    }
-                }
-                // MV on MV, and other kinds of table job
-                None | Some(TableJobType::General) | Some(TableJobType::Unspecified) => {
-                    if let Some(fragment) = table_fragments.mview_fragment() {
-                        fragments.insert(table_id, fragment);
-                    }
-                }
+
+            if let Some(fragment) = table_fragments.mview_fragment() {
+                fragments.insert(table_id, fragment);
+            } else if let Some(fragment) = table_fragments.source_fragment() {
+                // look for Source fragment if there's no MView fragment
+                fragments.insert(table_id, fragment);
             }
         }
 

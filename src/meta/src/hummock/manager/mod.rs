@@ -31,8 +31,8 @@ use parking_lot::Mutex;
 use risingwave_common::config::default::compaction_config;
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
-use risingwave_common::util::{pending_on_none, select_all};
 use risingwave_hummock_sdk::compact::{compact_task_to_string, statistics_compact_task};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids,
@@ -64,6 +64,7 @@ use risingwave_pb::hummock::{
     PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest, TableOption,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use rw_futures_util::{pending_on_none, select_all};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
@@ -1058,11 +1059,7 @@ impl HummockManager {
         } else {
             table_to_vnode_partition
                 .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
-            if current_version
-                .get_compaction_group_levels(compaction_group_id)
-                .vnode_partition_count
-                > 0
-            {
+            if group_config.compaction_config.split_weight_by_vnode > 0 {
                 for table_id in &compact_task.existing_table_ids {
                     table_to_vnode_partition
                         .entry(*table_id)
@@ -2193,7 +2190,7 @@ impl HummockManager {
                 GroupSplit,
                 CheckDeadTask,
                 Report,
-                CompactionHeartBeat,
+                CompactionHeartBeatExpiredCheck,
 
                 DynamicCompactionTrigger,
                 SpaceReclaimCompactionTrigger,
@@ -2225,7 +2222,7 @@ impl HummockManager {
                 .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             compaction_heartbeat_interval.reset();
             let compaction_heartbeat_trigger = IntervalStream::new(compaction_heartbeat_interval)
-                .map(|_| HummockTimerEvent::CompactionHeartBeat);
+                .map(|_| HummockTimerEvent::CompactionHeartBeatExpiredCheck);
 
             let mut min_trigger_interval = tokio::time::interval(Duration::from_secs(
                 hummock_manager.env.opts.periodic_compaction_interval_sec,
@@ -2404,27 +2401,17 @@ impl HummockManager {
                                     }
                                 }
 
-                                HummockTimerEvent::CompactionHeartBeat => {
+                                HummockTimerEvent::CompactionHeartBeatExpiredCheck => {
                                     let compactor_manager =
                                         hummock_manager.compactor_manager.clone();
 
                                     // TODO: add metrics to track expired tasks
-                                    const INTERVAL_SEC: u64 = 30;
                                     // The cancel task has two paths
                                     // 1. compactor heartbeat cancels the expired task based on task
                                     // progress (meta + compactor)
                                     // 2. meta periodically scans the task and performs a cancel on
                                     // the meta side for tasks that are not updated by heartbeat
-
-                                    // So the reason for setting Interval is to let compactor be
-                                    // responsible for canceling the corresponding task as much as
-                                    // possible by relaxing the conditions for detection on the meta
-                                    // side, and meta is just used as a last resort to clean up the
-                                    // tasks that compactor has expired.
-
-                                    for task in
-                                        compactor_manager.get_expired_tasks(Some(INTERVAL_SEC))
-                                    {
+                                    for task in compactor_manager.get_heartbeat_expired_tasks() {
                                         if let Err(e) = hummock_manager
                                             .cancel_compact_task(
                                                 task.task_id,

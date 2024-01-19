@@ -2340,16 +2340,18 @@ impl Parser {
     }
 
     fn parse_create_function_using(&mut self) -> Result<CreateFunctionUsing, ParserError> {
-        let keyword = self.expect_one_of_keywords(&[Keyword::LINK])?;
-
-        let uri = self.parse_literal_string()?;
+        let keyword = self.expect_one_of_keywords(&[Keyword::LINK, Keyword::BASE64])?;
 
         match keyword {
-            Keyword::LINK => Ok(CreateFunctionUsing::Link(uri)),
-            _ => self.expected(
-                "LINK, got {:?}",
-                TokenWithLocation::wrap(Token::make_keyword(format!("{keyword:?}").as_str())),
-            ),
+            Keyword::LINK => {
+                let uri = self.parse_literal_string()?;
+                Ok(CreateFunctionUsing::Link(uri))
+            }
+            Keyword::BASE64 => {
+                let base64 = self.parse_literal_string()?;
+                Ok(CreateFunctionUsing::Base64(base64))
+            }
+            _ => unreachable!("{}", keyword),
         }
     }
 
@@ -3181,6 +3183,9 @@ impl Parser {
             } else {
                 return self.expected("SCHEMA after SET", self.peek_token());
             }
+        } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
+            let connector_schema = self.parse_schema()?.unwrap();
+            AlterSourceOperation::FormatEncode { connector_schema }
         } else {
             return self.expected(
                 "RENAME, ADD COLUMN or OWNER TO or SET after ALTER SOURCE",

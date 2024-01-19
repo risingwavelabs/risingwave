@@ -18,11 +18,13 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::Bound;
 
+use educe::Educe;
 use enum_as_inner::EnumAsInner;
 
 /// [`DeltaBTreeMap`] wraps two [`BTreeMap`] references respectively as snapshot and delta,
 /// providing cursor that can iterate over the updated version of the snapshot.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Educe)]
+#[educe(Clone, Copy)]
 pub struct DeltaBTreeMap<'a, K: Ord, V> {
     snapshot: &'a BTreeMap<K, V>,
     delta: &'a BTreeMap<K, Change<V>>,

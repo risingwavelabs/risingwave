@@ -4,7 +4,7 @@
 
 # USAGE:
 # ```sh
-# ./ci/scripts/run-backfill-tests.sh
+# profile=(ci-release|ci-dev) ./ci/scripts/run-backfill-tests.sh
 # ```
 # Example progress:
 # dev=> select * from rw_catalog.rw_ddl_progress;
@@ -23,6 +23,11 @@ BACKGROUND_DDL_DIR=$TEST_DIR/background_ddl
 COMMON_DIR=$BACKGROUND_DDL_DIR/common
 
 CLUSTER_PROFILE='ci-1cn-1fe-kafka-with-recovery'
+if [[ -n "${BUILDKITE:-}" ]]; then
+  RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe-with-monitoring'
+else
+  RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe'
+fi
 export RUST_LOG="info,risingwave_meta::barrier::progress=debug,risingwave_meta::rpc::ddl_controller=debug"
 
 run_sql_file() {
@@ -200,12 +205,75 @@ test_sink_backfill_recovery() {
   wait
 }
 
+test_arrangement_backfill_snapshot_and_upstream_runtime() {
+  echo "--- e2e, test_backfill_snapshot_and_upstream_runtime"
+  cargo make ci-start $RUNTIME_CLUSTER_PROFILE
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_upstream.slt' 2>&1 1>out.log &
+  echo "[INFO] Upstream is ingesting in background"
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
+
+  wait
+
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_arrangement.slt'
+
+  cargo make kill
+  cargo make wait-processes-exit
+}
+
+test_no_shuffle_backfill_snapshot_and_upstream_runtime() {
+  echo "--- e2e, test_backfill_snapshot_and_upstream_runtime"
+  cargo make ci-start $RUNTIME_CLUSTER_PROFILE
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_upstream.slt' 2>&1 1>out.log &
+  echo "[INFO] Upstream is ingesting in background"
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
+
+  wait
+
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_no_shuffle.slt'
+
+  cargo make kill
+  cargo make wait-processes-exit
+}
+
+test_backfill_snapshot_runtime() {
+  echo "--- e2e, test_backfill_snapshot_runtime"
+  cargo make ci-start $RUNTIME_CLUSTER_PROFILE
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_no_shuffle.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_arrangement.slt'
+
+  cargo make kill
+  cargo make wait-processes-exit
+}
+
 main() {
   set -euo pipefail
   test_snapshot_and_upstream_read
   test_backfill_tombstone
   test_replication_with_column_pruning
   test_sink_backfill_recovery
+
+  # Only if profile is "ci-release", run it.
+  if [[ ${profile:-} == "ci-release" ]]; then
+    echo "--- Using release profile, running backfill performance tests."
+    # Need separate tests, we don't want to backfill concurrently.
+    # It's difficult to measure the time taken for each backfill if we do so.
+    test_no_shuffle_backfill_snapshot_and_upstream_runtime
+    test_arrangement_backfill_snapshot_and_upstream_runtime
+
+    # Backfill will happen in sequence here.
+    test_backfill_snapshot_runtime
+
+    # No upstream only tests, because if there's no snapshot,
+    # Backfill will complete almost immediately.
+  fi
 }
 
 main
