@@ -21,7 +21,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_connector::sink::log_store::{LogStoreResult, LogWriter, TruncateOffset};
+use risingwave_connector::sink::log_store::{LogStoreResult, TruncateOffset};
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_storage::store::{InitOptions, LocalStateStore, SealCurrentEpochOptions};
 
@@ -59,10 +59,8 @@ impl<LS: LocalStateStore> OnlyWriterLogStoreWriter<LS> {
             truncate_offset: None,
         }
     }
-}
 
-impl<LS: LocalStateStore> LogWriter for OnlyWriterLogStoreWriter<LS> {
-    async fn init(
+    pub async fn init(
         &mut self,
         epoch: risingwave_common::util::epoch::EpochPair,
         _pause_read_on_bootstrap: bool,
@@ -74,7 +72,7 @@ impl<LS: LocalStateStore> LogWriter for OnlyWriterLogStoreWriter<LS> {
         Ok(())
     }
 
-    async fn write_chunk(&mut self, chunk: StreamChunk) -> LogStoreResult<()> {
+    pub fn write_chunk(&mut self, chunk: StreamChunk) -> LogStoreResult<()> {
         if chunk.cardinality() == 0 {
             return Ok(());
         }
@@ -89,7 +87,7 @@ impl<LS: LocalStateStore> LogWriter for OnlyWriterLogStoreWriter<LS> {
         Ok(())
     }
 
-    async fn flush_current_epoch(
+    pub async fn flush_current_epoch(
         &mut self,
         next_epoch: u64,
         is_checkpoint: bool,
@@ -119,21 +117,11 @@ impl<LS: LocalStateStore> LogWriter for OnlyWriterLogStoreWriter<LS> {
         Ok(())
     }
 
-    async fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> LogStoreResult<()> {
+    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> LogStoreResult<()> {
         self.serde.update_vnode_bitmap(new_vnodes.clone());
         Ok(())
     }
 
-    fn pause(&mut self) -> risingwave_connector::sink::log_store::LogStoreResult<()> {
-        unimplemented!()
-    }
-
-    fn resume(&mut self) -> risingwave_connector::sink::log_store::LogStoreResult<()> {
-        unimplemented!()
-    }
-}
-
-impl<LS: LocalStateStore> OnlyWriterLogStoreWriter<LS> {
     pub fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
         if let TruncateOffset::Barrier { epoch } = &offset {
             let epoch_offset = match self.truncate_offset {

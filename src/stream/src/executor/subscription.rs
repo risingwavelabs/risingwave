@@ -20,9 +20,9 @@ use futures::prelude::stream::{select_with_strategy, PollNext, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_common::field_generator::ChronoFieldInner;
-use risingwave_common::row::{self, OwnedRow, Row, RowExt};
+use risingwave_common::row::{self, OwnedRow, Row};
 use risingwave_common::types::{ScalarImpl, Timestamptz};
-use risingwave_connector::sink::log_store::{LogWriter, TruncateOffset};
+use risingwave_connector::sink::log_store::TruncateOffset;
 use risingwave_storage::store::LocalStateStore;
 use risingwave_storage::StateStore;
 use tokio::time::sleep;
@@ -37,7 +37,7 @@ use crate::common::log_store_impl::only_writer_log_store::OnlyWriterLogStoreWrit
 const EXECUTE_GC_INTERVAL: u64 = 3600;
 
 pub struct SubscriptionExecutor<LS: LocalStateStore, S: StateStore> {
-    _actor_context: ActorContextRef,
+    actor_context: ActorContextRef,
     info: ExecutorInfo,
     input: BoxedExecutor,
     log_store: OnlyWriterLogStoreWriter<LS>,
@@ -57,7 +57,7 @@ impl<LS: LocalStateStore, S: StateStore> SubscriptionExecutor<LS, S> {
         retention: i64,
     ) -> StreamExecutorResult<Self> {
         Ok(Self {
-            _actor_context: actor_context,
+            actor_context,
             info,
             input,
             log_store,
@@ -135,7 +135,7 @@ impl<LS: LocalStateStore, S: StateStore> SubscriptionExecutor<LS, S> {
                                 // empty chunk
                                 continue;
                             }
-                            self.log_store.write_chunk(chunk.clone()).await?;
+                            self.log_store.write_chunk(chunk.clone())?;
                             Message::Chunk(chunk)
                         }
                         Message::Barrier(barrier) => {
@@ -145,11 +145,16 @@ impl<LS: LocalStateStore, S: StateStore> SubscriptionExecutor<LS, S> {
                                     barrier.kind.is_checkpoint(),
                                 )
                                 .await?;
-                            let row =
-                                row::once(Some(ScalarImpl::Timestamptz(Timestamptz::from_now())))
-                                    .chain(row::once(Some(ScalarImpl::Decimal(
-                                        barrier.epoch.curr.into(),
-                                    ))));
+
+                            if let Some(vnode_bitmap) =
+                                barrier.as_update_vnode_bitmap(self.actor_context.id)
+                            {
+                                self.log_store.update_vnode_bitmap(vnode_bitmap)?;
+                            }
+                            let row = OwnedRow::new(vec![
+                                Some(ScalarImpl::Timestamptz(Timestamptz::from_now())),
+                                Some(ScalarImpl::Decimal(barrier.epoch.curr.into())),
+                            ]);
                             self.epoch_store.insert(row);
                             self.epoch_store.commit(barrier.epoch).await?;
                             Message::Barrier(barrier)
