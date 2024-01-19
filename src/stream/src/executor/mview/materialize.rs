@@ -44,7 +44,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, AddMutation, BoxedExecutor,
     BoxedMessageStream, Executor, ExecutorInfo, Message, Mutation, PkIndicesRef,
-    StreamExecutorResult,
+    StreamExecutorResult, UpdateMutation,
 };
 use crate::task::{ActorId, AtomicU64Ref};
 
@@ -239,8 +239,19 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             // Add is for mv, index and sink creation.
             Mutation::Add(AddMutation { adds, .. }) => adds.get(&actor_id).is_some(),
             // AddAndUpdate is for sink-into-table.
-            Mutation::AddAndUpdate(_, _)
-            | Mutation::Update(_)
+            Mutation::AddAndUpdate(
+                AddMutation { adds, .. },
+                UpdateMutation {
+                    dispatchers,
+                    actor_new_dispatchers: actor_dispatchers,
+                    ..
+                },
+            ) => {
+                adds.get(&actor_id).is_some()
+                    || actor_dispatchers.get(&actor_id).is_some()
+                    || dispatchers.get(&actor_id).is_some()
+            }
+            Mutation::Update(_)
             | Mutation::Stop(_)
             | Mutation::Pause
             | Mutation::Resume
