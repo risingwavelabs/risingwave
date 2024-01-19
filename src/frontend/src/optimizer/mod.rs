@@ -70,7 +70,7 @@ use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
 use crate::expr::TimestamptzExprFinder;
-use crate::optimizer::plan_node::generic::Union;
+use crate::optimizer::plan_node::generic::{SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
     ToStream, VisitExprsRecursive,
@@ -618,9 +618,14 @@ impl PlanRoot {
                 }
             };
 
-            let dummy_source_node =
-                LogicalSource::new(None, columns.clone(), row_id_index, true, context.clone())
-                    .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
+            let dummy_source_node = LogicalSource::new(
+                None,
+                columns.clone(),
+                row_id_index,
+                SourceNodeKind::CreateTable,
+                context.clone(),
+            )
+            .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
 
             let dml_node = inject_dml_node(
                 &columns,

@@ -28,7 +28,7 @@ use risingwave_connector::source::DataType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 
-use super::generic::GenericPlanRef;
+use super::generic::{GenericPlanRef, SourceNodeKind};
 use super::stream_watermark_filter::StreamWatermarkFilter;
 use super::utils::{childless_record, Distill};
 use super::{
@@ -69,7 +69,7 @@ impl LogicalSource {
         source_catalog: Option<Rc<SourceCatalog>>,
         column_catalog: Vec<ColumnCatalog>,
         row_id_index: Option<usize>,
-        for_table: bool,
+        kind: SourceNodeKind,
         ctx: OptimizerContextRef,
     ) -> Result<Self> {
         let kafka_timestamp_range = (Bound::Unbounded, Bound::Unbounded);
@@ -77,7 +77,7 @@ impl LogicalSource {
             catalog: source_catalog,
             column_catalog,
             row_id_index,
-            for_table,
+            kind,
             ctx,
             kafka_timestamp_range,
         };
@@ -97,7 +97,7 @@ impl LogicalSource {
 
     pub fn with_catalog(
         source_catalog: Rc<SourceCatalog>,
-        for_table: bool,
+        kind: SourceNodeKind,
         ctx: OptimizerContextRef,
     ) -> Result<Self> {
         let column_catalogs = source_catalog.columns.clone();
@@ -110,7 +110,7 @@ impl LogicalSource {
             Some(source_catalog),
             column_catalogs,
             row_id_index,
-            for_table,
+            kind,
             ctx,
         )
     }
@@ -506,45 +506,46 @@ impl ToBatch for LogicalSource {
 impl ToStream for LogicalSource {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let mut plan: PlanRef;
-
-        if self.core.for_table {
-            // Note: for create table, row_id and generated columns is created in plan_root.gen_table_plan
-            if self.core.is_new_fs_connector() {
-                plan = Self::create_fs_list_plan(self.core.clone())?;
-                plan = StreamFsFetch::new(plan, self.core.clone()).into();
-            } else {
-                plan = StreamSource::new(self.core.clone()).into()
+        match self.core.kind {
+            SourceNodeKind::CreateTable | SourceNodeKind::CreateSourceWithStreamjob => {
+                // Note: for create table, row_id and generated columns is created in plan_root.gen_table_plan
+                if self.core.is_new_fs_connector() {
+                    plan = Self::create_fs_list_plan(self.core.clone())?;
+                    plan = StreamFsFetch::new(plan, self.core.clone()).into();
+                } else {
+                    plan = StreamSource::new(self.core.clone()).into()
+                }
             }
-        } else {
-            // Create MV on source.
-            if self.core.is_new_fs_connector() {
-                plan = Self::create_fs_list_plan(self.core.clone())?;
-                plan = StreamFsFetch::new(plan, self.core.clone()).into();
-            } else {
-                plan = StreamSource::new(self.core.clone()).into()
-            }
+            SourceNodeKind::CreateMView => {
+                // Create MV on source.
+                if self.core.is_new_fs_connector() {
+                    plan = Self::create_fs_list_plan(self.core.clone())?;
+                    plan = StreamFsFetch::new(plan, self.core.clone()).into();
+                } else {
+                    plan = StreamSource::new(self.core.clone()).into()
+                }
 
-            if let Some(exprs) = &self.output_exprs {
-                let logical_project = generic::Project::new(exprs.to_vec(), plan);
-                plan = StreamProject::new(logical_project).into();
-            }
+                if let Some(exprs) = &self.output_exprs {
+                    let logical_project = generic::Project::new(exprs.to_vec(), plan);
+                    plan = StreamProject::new(logical_project).into();
+                }
 
-            if let Some(catalog) = self.source_catalog()
-                && !catalog.watermark_descs.is_empty()
-            {
-                plan = StreamWatermarkFilter::new(plan, catalog.watermark_descs.clone()).into();
-            }
+                if let Some(catalog) = self.source_catalog()
+                    && !catalog.watermark_descs.is_empty()
+                {
+                    plan = StreamWatermarkFilter::new(plan, catalog.watermark_descs.clone()).into();
+                }
 
-            if let Some(row_id_index) = self.output_row_id_index {
-                plan = StreamRowIdGen::new_with_dist(
-                    plan,
-                    row_id_index,
-                    HashShard(vec![row_id_index]),
-                )
-                .into();
+                if let Some(row_id_index) = self.output_row_id_index {
+                    plan = StreamRowIdGen::new_with_dist(
+                        plan,
+                        row_id_index,
+                        HashShard(vec![row_id_index]),
+                    )
+                    .into();
+                }
             }
-        };
-
+        }
         Ok(plan)
     }
 

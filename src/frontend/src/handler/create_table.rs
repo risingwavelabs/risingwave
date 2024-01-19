@@ -59,6 +59,7 @@ use crate::handler::create_source::{
     check_source_schema, handle_addition_columns, validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
@@ -682,7 +683,7 @@ fn gen_table_plan_inner(
         source_catalog.clone(),
         columns.clone(),
         row_id_index,
-        true,
+        SourceNodeKind::CreateTable,
         context.clone(),
     )?
     .into();

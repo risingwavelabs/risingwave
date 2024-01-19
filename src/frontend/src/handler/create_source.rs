@@ -71,6 +71,7 @@ use crate::handler::util::{
     get_connector, is_cdc_connector, is_kafka_connector, SourceSchemaCompatExt,
 };
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
 use crate::utils::resolve_privatelink_in_with_option;
@@ -1264,7 +1265,7 @@ pub async fn handle_create_source(
             // cdc source is an append-only source in plain json format
             let source_node = LogicalSource::with_catalog(
                 Rc::new(SourceCatalog::from(&source)),
-                false,
+                SourceNodeKind::CreateSourceWithStreamjob,
                 context.into(),
             )?;
 

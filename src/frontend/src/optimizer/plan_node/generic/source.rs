@@ -29,6 +29,22 @@ use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::{TableCatalog, WithOptions};
 
+/// In which scnario the source node is created
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[expect(clippy::enum_variant_names)]
+pub enum SourceNodeKind {
+    /// `CREATE TABLE` with a connector.
+    CreateTable,
+    /// `CREATE SOURCE` with a streaming job (backfill-able source).
+    CreateSourceWithStreamjob,
+    /// `CREATE MATERIALIZED VIEW` which selects from a non backfill-able source.
+    ///
+    /// Note:
+    /// - For non backfill-able source, `CREATE SOURCE` will not create a source node.
+    /// - For backfill-able source, `CREATE MATERIALIZE VIEW` will not create a source node.
+    CreateMView,
+}
+
 /// [`Source`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
@@ -42,8 +58,7 @@ pub struct Source {
     pub column_catalog: Vec<ColumnCatalog>,
     pub row_id_index: Option<usize>,
 
-    /// True if it is a source created when creating table with a source.
-    pub for_table: bool,
+    pub kind: SourceNodeKind,
 
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]
