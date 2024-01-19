@@ -16,6 +16,7 @@ tar -xzf $SPARK_FILE --no-same-owner
   --master local[3] \
   --conf spark.driver.bindAddress=0.0.0.0 \
   --conf spark.sql.catalog.demo=org.apache.iceberg.spark.SparkCatalog \
+  --conf spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions \
   --conf spark.sql.catalog.demo.type=hadoop \
   --conf spark.sql.catalog.demo.warehouse=s3a://icebergdata/demo \
   --conf spark.sql.catalog.demo.hadoop.fs.s3a.endpoint=http://127.0.0.1:9301 \

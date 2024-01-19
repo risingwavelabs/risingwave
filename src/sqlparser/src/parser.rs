@@ -140,7 +140,12 @@ impl fmt::Display for ParserError {
 #[cfg(feature = "std")]
 impl std::error::Error for ParserError {}
 
-type ColumnsDefTuple = (Vec<ColumnDef>, Vec<TableConstraint>, Vec<SourceWatermark>);
+type ColumnsDefTuple = (
+    Vec<ColumnDef>,
+    Vec<TableConstraint>,
+    Vec<SourceWatermark>,
+    Option<usize>,
+);
 
 /// Reference:
 /// <https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-PRECEDENCE>
@@ -2464,7 +2469,8 @@ impl Parser {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         let table_name = self.parse_object_name()?;
         // parse optional column list (schema) and watermarks on source.
-        let (columns, constraints, source_watermarks) = self.parse_columns_with_watermark()?;
+        let (columns, constraints, source_watermarks, wildcard_idx) =
+            self.parse_columns_with_watermark()?;
 
         let append_only = if self.parse_keyword(Keyword::APPEND) {
             self.expect_keyword(Keyword::ONLY)?;
@@ -2516,6 +2522,7 @@ impl Parser {
             name: table_name,
             temporary,
             columns,
+            wildcard_idx,
             constraints,
             with_options,
             or_replace,
@@ -2558,12 +2565,21 @@ impl Parser {
         let mut columns = vec![];
         let mut constraints = vec![];
         let mut watermarks = vec![];
+        let mut wildcard_idx = None;
         if !self.consume_token(&Token::LParen) || self.consume_token(&Token::RParen) {
-            return Ok((columns, constraints, watermarks));
+            return Ok((columns, constraints, watermarks, wildcard_idx));
         }
 
         loop {
-            if let Some(constraint) = self.parse_optional_table_constraint()? {
+            if self.consume_token(&Token::Mul) {
+                if wildcard_idx.is_none() {
+                    wildcard_idx = Some(columns.len());
+                } else {
+                    return Err(ParserError::ParserError(
+                        "At most 1 wildcard is allowed in source definetion".to_string(),
+                    ));
+                }
+            } else if let Some(constraint) = self.parse_optional_table_constraint()? {
                 constraints.push(constraint);
             } else if let Some(watermark) = self.parse_optional_watermark()? {
                 watermarks.push(watermark);
@@ -2587,7 +2603,7 @@ impl Parser {
             }
         }
 
-        Ok((columns, constraints, watermarks))
+        Ok((columns, constraints, watermarks, wildcard_idx))
     }
 
     fn parse_column_def(&mut self) -> Result<ColumnDef, ParserError> {

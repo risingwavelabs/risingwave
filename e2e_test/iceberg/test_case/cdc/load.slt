@@ -24,8 +24,8 @@ CREATE SINK s1 AS select * from products WITH (
     connector = 'iceberg',
     type = 'upsert',
     force_append_only = 'false',
-    database.name = 'demo',
-    table.name = 'demo_db.demo_table',
+    database.name = 'demo_db',
+    table.name = 'demo_table',
     catalog.type = 'storage',
     warehouse.path = 's3://icebergdata/demo',
     s3.endpoint = 'http://127.0.0.1:9301',
@@ -37,6 +37,8 @@ CREATE SINK s1 AS select * from products WITH (
 
 statement ok
 flush;
+
+sleep 20s
 
 query I
 select count(*) from products;

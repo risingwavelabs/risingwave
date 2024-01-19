@@ -563,7 +563,7 @@ impl From<PbTable> for TableCatalog {
                 .unwrap_or_else(Cardinality::unknown),
             created_at_epoch: tb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
-            cleaned_by_watermark: matches!(tb.cleaned_by_watermark, true),
+            cleaned_by_watermark: tb.cleaned_by_watermark,
             create_type: CreateType::from_prost(create_type),
             description: tb.description,
             incoming_sinks: tb.incoming_sinks.clone(),

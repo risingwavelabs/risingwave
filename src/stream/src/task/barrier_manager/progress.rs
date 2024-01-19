@@ -15,7 +15,7 @@
 use super::LocalBarrierManager;
 use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;
 use crate::task::barrier_manager::LocalBarrierWorker;
-use crate::task::{ActorId, SharedContext};
+use crate::task::ActorId;
 
 type ConsumedEpoch = u64;
 type ConsumedRows = u64;
@@ -161,7 +161,7 @@ impl CreateMviewProgress {
     }
 }
 
-impl SharedContext {
+impl LocalBarrierManager {
     /// Create a struct for reporting the progress of creating mview. The backfill executors should
     /// report the progress of barrier rearranging continuously using this. The updated progress
     /// will be collected by the local barrier manager and reported to the meta service in this
@@ -174,6 +174,6 @@ impl SharedContext {
         backfill_actor_id: ActorId,
     ) -> CreateMviewProgress {
         trace!("register create mview progress: {}", backfill_actor_id);
-        CreateMviewProgress::new(self.barrier_manager.clone(), backfill_actor_id)
+        CreateMviewProgress::new(self.clone(), backfill_actor_id)
     }
 }

@@ -85,7 +85,7 @@ impl ConnectorSource {
                     .ok_or_else(|| {
                         anyhow!("Failed to find column id: {} in source: {:?}", id, self).into()
                     })
-                    .map(|col| col.clone())
+                    .cloned()
             })
             .collect::<Result<Vec<SourceColumnDesc>>>()
     }
