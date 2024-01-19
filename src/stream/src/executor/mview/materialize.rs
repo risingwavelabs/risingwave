@@ -44,7 +44,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, AddMutation, BoxedExecutor,
     BoxedMessageStream, Executor, ExecutorInfo, Message, Mutation, PkIndicesRef,
-    StreamExecutorResult, UpdateMutation,
+    StreamExecutorResult,
 };
 use crate::task::{ActorId, AtomicU64Ref};
 
@@ -84,14 +84,13 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     ) -> Self {
         let arrange_key_indices: Vec<usize> = arrange_key.iter().map(|k| k.column_index).collect();
 
-        let can_disable_conflict_check = actor_context.dispatch_num == 0;
+        let can_disable_overwrite_conflict_check = actor_context.dispatch_num == 0;
 
-        let state_table = if matches!(
-            conflict_behavior,
-            ConflictBehavior::Overwrite | ConflictBehavior::IgnoreConflict
-        ) && can_disable_conflict_check
+        // Note: The current implementation could potentially trigger a switch on the inconsistent_op flag. If the storage relies on this flag to perform optimizations, it would be advisable to maintain consistency with it throughout the lifecycle.
+        let state_table = if matches!(conflict_behavior, ConflictBehavior::Overwrite)
+            && can_disable_overwrite_conflict_check
         {
-            // Table could disable conflict check if no downstream mv depends on it, so we use a inconsistent_op to skip sanity check as well.
+            // Table with overwrite conflict behavior could disable conflict check if no downstream mv depends on it, so we use a inconsistent_op to skip sanity check as well.
             StateTableInner::from_table_catalog_inconsistent_op(table_catalog, store, vnodes).await
         } else {
             StateTableInner::from_table_catalog(table_catalog, store, vnodes).await
@@ -127,7 +126,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
 
-        let mut can_disable_conflict_check = self.actor_context.dispatch_num == 0;
+        let mut can_disable_overwrite_conflict_check = self.actor_context.dispatch_num == 0;
 
         #[for_await]
         for msg in input {
@@ -144,9 +143,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         .inc_by(chunk.cardinality() as u64);
 
                     match self.conflict_behavior {
-                        ConflictBehavior::Overwrite | ConflictBehavior::IgnoreConflict
-                            if can_disable_conflict_check =>
-                        {
+                        ConflictBehavior::Overwrite if can_disable_overwrite_conflict_check => {
                             self.state_table.write_chunk(chunk.clone());
                             self.state_table.try_flush().await?;
                             continue;
@@ -214,8 +211,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     self.state_table.commit(b.epoch).await?;
                     let mutation = b.mutation.clone();
                     // If a downstream mv depends on the current table, we need to do conflict check again.
-                    if Self::mutation_might_affect_dispatcher(mutation, self.actor_context.id) {
-                        can_disable_conflict_check = false;
+                    if Self::new_downstream_created(mutation, self.actor_context.id) {
+                        can_disable_overwrite_conflict_check = false;
                     }
 
                     // Update the vnode bitmap for the state table if asked.
@@ -234,59 +231,22 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         }
     }
 
-    fn mutation_might_affect_dispatcher(
-        mutation: Option<Arc<Mutation>>,
-        actor_id: ActorId,
-    ) -> bool {
+    fn new_downstream_created(mutation: Option<Arc<Mutation>>, actor_id: ActorId) -> bool {
         let Some(mutation) = mutation.as_deref() else {
             return false;
         };
         match mutation {
-            Mutation::Add(AddMutation { adds, .. }) => {
-                if adds.get(&actor_id).is_some() {
-                    return true;
-                }
-            }
-            Mutation::Update(UpdateMutation {
-                dispatchers,
-                actor_new_dispatchers: actor_dispatchers,
-                ..
-            }) => {
-                if actor_dispatchers.get(&actor_id).is_some() {
-                    return true;
-                }
-
-                if dispatchers.get(&actor_id).is_some() {
-                    return true;
-                }
-            }
-            Mutation::AddAndUpdate(
-                AddMutation { adds, .. },
-                UpdateMutation {
-                    dispatchers,
-                    actor_new_dispatchers: actor_dispatchers,
-                    ..
-                },
-            ) => {
-                if adds.get(&actor_id).is_some() {
-                    return true;
-                }
-                if actor_dispatchers.get(&actor_id).is_some() {
-                    return true;
-                }
-
-                if dispatchers.get(&actor_id).is_some() {
-                    return true;
-                }
-            }
-            Mutation::Stop(stops) => {
-                if stops.contains(&actor_id) {
-                    return true;
-                }
-            }
-            _ => {}
-        };
-        false
+            // Add is for mv, index and sink creation.
+            Mutation::Add(AddMutation { adds, .. }) => adds.get(&actor_id).is_some(),
+            // AddAndUpdate is for sink-into-table.
+            Mutation::AddAndUpdate(_, _)
+            | Mutation::Update(_)
+            | Mutation::Stop(_)
+            | Mutation::Pause
+            | Mutation::Resume
+            | Mutation::SourceChangeSplit(_)
+            | Mutation::Throttle(_) => false,
+        }
     }
 }
 
