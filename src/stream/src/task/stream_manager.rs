@@ -73,16 +73,12 @@ pub struct LocalStreamManagerCore {
 
     /// Stores all actor tokio runtime monitoring tasks.
     actor_monitor_tasks: HashMap<ActorId, ActorHandle>,
-
-    /// Manages the await-trees of all actors.
-    await_tree_reg: Option<await_tree::Registry<ActorId>>,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
 pub struct LocalStreamManager {
     core: Mutex<LocalStreamManagerCore>,
 
-    // Maintain a copy of the core to reduce async locks
     state_store: StateStoreImpl,
     context: Arc<SharedContext>,
     streaming_metrics: Arc<StreamingMetrics>,
@@ -93,6 +89,9 @@ pub struct LocalStreamManager {
     watermark_epoch: AtomicU64Ref,
 
     local_barrier_manager: LocalBarrierManager,
+
+    /// Manages the await-trees of all actors.
+    await_tree_reg: Option<Mutex<await_tree::Registry<ActorId>>>,
 }
 
 /// Report expression evaluation errors to the actor context.
@@ -177,7 +176,7 @@ impl LocalStreamManager {
         let local_barrier_manager =
             LocalBarrierManager::new(state_store.clone(), streaming_metrics.clone());
         let context = Arc::new(SharedContext::new(addr, &config));
-        let core = LocalStreamManagerCore::new(await_tree_config, context.clone());
+        let core = LocalStreamManagerCore::new(context.clone());
         Self {
             state_store,
             context,
@@ -186,6 +185,8 @@ impl LocalStreamManager {
             streaming_metrics,
             watermark_epoch,
             local_barrier_manager,
+            await_tree_reg: await_tree_config
+                .map(|config| Mutex::new(await_tree::Registry::new(config))),
         }
     }
 
@@ -194,13 +195,13 @@ impl LocalStreamManager {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
-                let mut core = self.core.lock();
                 let mut o = std::io::stdout().lock();
 
-                for (k, trace) in core
+                for (k, trace) in self
                     .await_tree_reg
-                    .as_mut()
+                    .as_ref()
                     .expect("async stack trace not enabled")
+                    .lock()
                     .iter()
                 {
                     writeln!(o, ">> Actor {}\n\n{}", k, trace).ok();
@@ -211,9 +212,8 @@ impl LocalStreamManager {
 
     /// Get await-tree contexts for all actors.
     pub fn get_actor_traces(&self) -> HashMap<ActorId, await_tree::TreeContext> {
-        let core = self.core.lock();
-        match &core.await_tree_reg {
-            Some(mgr) => mgr.iter().map(|(k, v)| (*k, v)).collect(),
+        match &self.await_tree_reg.as_ref() {
+            Some(mgr) => mgr.lock().iter().map(|(k, v)| (*k, v)).collect(),
             None => Default::default(),
         }
     }
@@ -282,6 +282,9 @@ impl LocalStreamManager {
             assert!(result.is_ok() || result.unwrap_err().is_cancelled());
         }
         self.core.lock().clear_state();
+        if let Some(m) = self.await_tree_reg.as_ref() {
+            m.lock().clear();
+        }
         self.reset_barrier_manager();
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
@@ -320,9 +323,12 @@ impl LocalStreamManager {
                 .try_collect()?
         };
         let actors = self.build_actors_impl(actors, env).await?;
-        self.core
-            .lock()
-            .spawn_actors(actors, &self.streaming_metrics, &self.local_barrier_manager);
+        self.core.lock().spawn_actors(
+            actors,
+            &self.streaming_metrics,
+            &self.local_barrier_manager,
+            self.await_tree_reg.as_ref(),
+        );
         Ok(())
     }
 
@@ -336,14 +342,7 @@ impl LocalStreamManager {
 }
 
 impl LocalStreamManagerCore {
-    fn new(await_tree_config: Option<await_tree::Config>, context: Arc<SharedContext>) -> Self {
-        Self::new_inner(context, await_tree_config)
-    }
-
-    fn new_inner(
-        context: Arc<SharedContext>,
-        await_tree_config: Option<await_tree::Config>,
-    ) -> Self {
+    fn new(context: Arc<SharedContext>) -> Self {
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
             if let Some(worker_threads_num) = context.config.actor_runtime_worker_threads_num {
@@ -362,7 +361,6 @@ impl LocalStreamManagerCore {
             context,
             actors: HashMap::new(),
             actor_monitor_tasks: HashMap::new(),
-            await_tree_reg: await_tree_config.map(await_tree::Registry::new),
         }
     }
 }
@@ -603,6 +601,7 @@ impl LocalStreamManagerCore {
         actors: Vec<Actor<DispatchExecutor>>,
         streaming_metrics: &Arc<StreamingMetrics>,
         barrier_manager: &LocalBarrierManager,
+        await_tree_reg: Option<&Mutex<await_tree::Registry<ActorId>>>,
     ) {
         for actor in actors {
             let monitor = tokio_metrics::TaskMonitor::new();
@@ -620,8 +619,9 @@ impl LocalStreamManagerCore {
                         barrier_manager.notify_failure(actor_id, err);
                     }
                 });
-                let traced = match &mut self.await_tree_reg {
+                let traced = match await_tree_reg {
                     Some(m) => m
+                        .lock()
                         .register(actor_id, trace_span)
                         .instrument(actor)
                         .left_future(),
@@ -773,9 +773,6 @@ impl LocalStreamManagerCore {
     fn clear_state(&mut self) {
         self.actors.clear();
         self.context.clear_channels();
-        if let Some(m) = self.await_tree_reg.as_mut() {
-            m.clear();
-        }
         self.actor_monitor_tasks.clear();
         self.context.actor_infos.write().clear();
     }
