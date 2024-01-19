@@ -14,10 +14,12 @@
 
 use std::fmt::Display;
 
+use anyhow::Context;
 use enum_as_inner::EnumAsInner;
 use parse_display::Display;
 use risingwave_common::bail;
-use risingwave_common::types::{DataType, IsNegative, ScalarImpl, ScalarRefImpl, ToText};
+use risingwave_common::types::{DataType, Datum, IsNegative, ScalarImpl, ScalarRefImpl, ToText};
+use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
 use risingwave_pb::expr::window_frame::{PbBound, PbExclusion};
 use risingwave_pb::expr::{PbWindowFrame, PbWindowFunction};
 use FrameBound::{CurrentRow, Following, Preceding, UnboundedFollowing, UnboundedPreceding};
@@ -85,12 +87,24 @@ impl Frame {
 impl Frame {
     pub fn from_protobuf(frame: &PbWindowFrame) -> Result<Self> {
         use risingwave_pb::expr::window_frame::PbType;
+        let start = frame.get_start()?;
+        let end = frame.get_end()?;
         let bounds = match frame.get_type()? {
             PbType::Unspecified => bail!("unspecified type of `WindowFrame`"),
             PbType::Rows => {
-                let start = FrameBound::from_protobuf(frame.get_start()?)?;
-                let end = FrameBound::from_protobuf(frame.get_end()?)?;
+                let start = FrameBound::<usize>::from_protobuf(start)?;
+                let end = FrameBound::<usize>::from_protobuf(end)?;
                 FrameBounds::Rows(RowsFrameBounds { start, end })
+            }
+            PbType::Range => {
+                let offset_data_type = DataType::from(frame.get_offset_data_type()?);
+                let start = FrameBound::<ScalarImpl>::from_protobuf(start, &offset_data_type)?;
+                let end = FrameBound::<ScalarImpl>::from_protobuf(end, &offset_data_type)?;
+                FrameBounds::Range(RangeFrameBounds {
+                    offset_data_type,
+                    start,
+                    end,
+                })
             }
         };
         let exclusion = FrameExclusion::from_protobuf(frame.get_exclusion()?)?;
@@ -106,10 +120,19 @@ impl Frame {
                 start: Some(start.to_protobuf()),
                 end: Some(end.to_protobuf()),
                 exclusion,
+                offset_data_type: None,
             },
-            FrameBounds::Range(_) => {
-                todo!("`RANGE` frame should be temporarily banned in `LogicalOverWindow`")
-            }
+            FrameBounds::Range(RangeFrameBounds {
+                offset_data_type,
+                start,
+                end,
+            }) => PbWindowFrame {
+                r#type: PbType::Range as _,
+                start: Some(start.to_protobuf()),
+                end: Some(end.to_protobuf()),
+                exclusion,
+                offset_data_type: Some(offset_data_type.to_protobuf()),
+            },
         }
     }
 }
@@ -196,6 +219,7 @@ pub enum FrameBound<T> {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct RangeFrameBounds {
+    pub offset_data_type: DataType,
     pub start: FrameBound<ScalarImpl>,
     pub end: FrameBound<ScalarImpl>,
 }
@@ -349,6 +373,64 @@ impl FrameBound<usize> {
             UnboundedFollowing => None,
             Following(n) => Some(*n),
             CurrentRow | Preceding(_) | UnboundedPreceding => Some(0),
+        }
+    }
+}
+
+impl FrameBound<ScalarImpl> {
+    pub fn from_protobuf(bound: &PbBound, offset_data_type: &DataType) -> Result<Self> {
+        use risingwave_pb::expr::window_frame::bound::PbOffset;
+        use risingwave_pb::expr::window_frame::PbBoundType;
+
+        let offset = bound.get_offset()?;
+        let bound = match offset {
+            PbOffset::Integer(_) => bail!("offset of `FrameBound<ScalarImpl>` must be `Datum`"),
+            PbOffset::Datum(offset) => match bound.get_type()? {
+                PbBoundType::Unspecified => bail!("unspecified type of `FrameBound<ScalarImpl>`"),
+                PbBoundType::UnboundedPreceding => Self::UnboundedPreceding,
+                PbBoundType::Preceding => Self::Preceding(
+                    Datum::from_protobuf(offset, offset_data_type)
+                        .context("offset `Datum` is not decodable")?
+                        .context("offset of `FrameBound<ScalarImpl>` must be non-NULL")?,
+                ),
+                PbBoundType::CurrentRow => Self::CurrentRow,
+                PbBoundType::Following => Self::Following(
+                    Datum::from_protobuf(offset, offset_data_type)
+                        .context("offset `Datum` is not decodable")?
+                        .context("offset of `FrameBound<ScalarImpl>` must be non-NULL")?,
+                ),
+                PbBoundType::UnboundedFollowing => Self::UnboundedFollowing,
+            },
+        };
+        Ok(bound)
+    }
+
+    pub fn to_protobuf(&self) -> PbBound {
+        use risingwave_pb::expr::window_frame::bound::PbOffset;
+        use risingwave_pb::expr::window_frame::PbBoundType;
+
+        let (r#type, offset) = match self {
+            Self::UnboundedPreceding => (
+                PbBoundType::UnboundedPreceding,
+                PbOffset::Datum(Default::default()),
+            ),
+            Self::Preceding(offset) => (
+                PbBoundType::Preceding,
+                PbOffset::Datum(Some(offset).to_protobuf()),
+            ),
+            Self::CurrentRow => (PbBoundType::CurrentRow, PbOffset::Datum(Default::default())),
+            Self::Following(offset) => (
+                PbBoundType::Following,
+                PbOffset::Datum(Some(offset).to_protobuf()),
+            ),
+            Self::UnboundedFollowing => (
+                PbBoundType::UnboundedFollowing,
+                PbOffset::Datum(Default::default()),
+            ),
+        };
+        PbBound {
+            r#type: r#type as _,
+            offset: Some(offset),
         }
     }
 }
