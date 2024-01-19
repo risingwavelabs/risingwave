@@ -136,9 +136,7 @@ impl GlobalBarrierManagerContext {
     }
 
     async fn recover_background_mv_progress_v1(&self) -> MetaResult<()> {
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unreachable!()
-        };
+        let mgr = self.metadata_manager.as_v1_ref();
         let mviews = mgr.catalog_manager.list_creating_background_mvs().await;
 
         let mut mview_definitions = HashMap::new();
@@ -227,9 +225,7 @@ impl GlobalBarrierManagerContext {
     }
 
     async fn recover_background_mv_progress_v2(&self) -> MetaResult<()> {
-        let MetadataManager::V2(mgr) = &self.metadata_manager else {
-            unreachable!()
-        };
+        let mgr = self.metadata_manager.as_v2_ref();
         let mviews = mgr
             .catalog_controller
             .list_background_creating_mviews()
@@ -470,9 +466,7 @@ impl GlobalBarrierManagerContext {
     }
 
     async fn migrate_actors_v2(&self) -> MetaResult<InflightActorInfo> {
-        let MetadataManager::V2(mgr) = &self.metadata_manager else {
-            unreachable!()
-        };
+        let mgr = self.metadata_manager.as_v2_ref();
 
         let all_inuse_parallel_units: HashSet<_> = mgr
             .catalog_controller
@@ -552,9 +546,7 @@ impl GlobalBarrierManagerContext {
 
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
     async fn migrate_actors_v1(&self) -> MetaResult<InflightActorInfo> {
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unreachable!()
-        };
+        let mgr = self.metadata_manager.as_v1_ref();
 
         let info = self.resolve_actor_info().await;
 
@@ -592,16 +584,12 @@ impl GlobalBarrierManagerContext {
     }
 
     fn scale_actors_v2(&self, _info: &InflightActorInfo) -> MetaResult<bool> {
-        let MetadataManager::V2(_mgr) = &self.metadata_manager else {
-            unreachable!()
-        };
+        let _mgr = self.metadata_manager.as_v2_ref();
         unimplemented!("implement auto-scale funcs in sql backend")
     }
 
     async fn scale_actors_v1(&self, info: &InflightActorInfo) -> MetaResult<bool> {
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unreachable!()
-        };
+        let mgr = self.metadata_manager.as_v1_ref();
         debug!("start scaling-in offline actors.");
 
         let expired_workers: HashSet<WorkerId> = info
@@ -695,9 +683,7 @@ impl GlobalBarrierManagerContext {
         &self,
         expired_workers: HashSet<WorkerId>,
     ) -> MetaResult<MigrationPlan> {
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unreachable!()
-        };
+        let mgr = self.metadata_manager.as_v1_ref();
 
         let mut cached_plan = MigrationPlan::get(self.env.meta_store()).await?;
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::iter;
 use std::sync::Arc;
 
@@ -25,9 +25,9 @@ use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::table::TableType;
 use risingwave_meta_model_v2::{
     connection, database, function, index, object, object_dependency, schema, sink, source,
-    streaming_job, table, user_privilege, view, ColumnCatalogArray, ConnectionId, CreateType,
-    DatabaseId, FunctionId, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
-    SourceId, StreamSourceInfo, TableId, UserId,
+    streaming_job, table, user_privilege, view, ActorId, ColumnCatalogArray, ConnectionId,
+    CreateType, DatabaseId, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
+    PrivateLinkService, Property, SchemaId, SourceId, StreamSourceInfo, TableId, UserId,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
@@ -56,7 +56,8 @@ use crate::controller::utils::{
     check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
     ensure_object_id, ensure_object_not_refer, ensure_schema_empty, ensure_user_id,
     get_fragment_mappings, get_referring_objects, get_referring_objects_cascade,
-    get_user_privilege, list_user_info_by_ids, PartialObject,
+    get_user_privilege, list_user_info_by_ids, resolve_source_register_info_for_jobs,
+    PartialObject,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
@@ -74,11 +75,17 @@ pub struct CatalogController {
 
 #[derive(Clone, Default)]
 pub struct ReleaseContext {
-    pub(crate) streaming_jobs: Vec<ObjectId>,
-    #[allow(dead_code)]
+    /// Dropped state table list, need to unregister from hummock.
     pub(crate) state_table_ids: Vec<TableId>,
+    /// Dropped source list, need to unregister from source manager.
     pub(crate) source_ids: Vec<SourceId>,
+    /// Dropped connection list, need to delete from vpc endpoints.
     pub(crate) connections: Vec<PrivateLinkService>,
+
+    /// Dropped fragments that are fetching data from the target source.
+    pub(crate) source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+    /// Dropped actors.
+    pub(crate) removed_actors: HashSet<ActorId>,
 }
 
 impl CatalogController {
@@ -200,17 +207,17 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
         ensure_object_id(ObjectType::Database, database_id, &txn).await?;
 
-        let streaming_jobs: Vec<ObjectId> = Object::find()
+        let streaming_jobs: Vec<ObjectId> = StreamingJob::find()
+            .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
             .select_only()
-            .column(object::Column::Oid)
-            .filter(
-                object::Column::DatabaseId
-                    .eq(Some(database_id))
-                    .and(object::Column::ObjType.is_in([ObjectType::Table, ObjectType::Sink])),
-            )
+            .column(streaming_job::Column::JobId)
+            .filter(object::Column::DatabaseId.eq(Some(database_id)))
             .into_tuple()
             .all(&txn)
             .await?;
+
+        let (source_fragments, removed_actors) =
+            resolve_source_register_info_for_jobs(&txn, streaming_jobs.clone()).await?;
 
         let state_table_ids: Vec<TableId> = Table::find()
             .select_only()
@@ -281,10 +288,11 @@ impl CatalogController {
             .await;
         Ok((
             ReleaseContext {
-                streaming_jobs,
                 state_table_ids,
                 source_ids,
                 connections,
+                source_fragments,
+                removed_actors,
             },
             version,
         ))
@@ -460,7 +468,6 @@ impl CatalogController {
         txn.commit().await?;
 
         Ok(ReleaseContext {
-            streaming_jobs: creating_job_ids,
             state_table_ids,
             source_ids: associated_source_ids,
             ..Default::default()
@@ -1496,6 +1503,9 @@ impl CatalogController {
             to_drop_objects.extend(to_drop_internal_table_objs);
         }
 
+        let (source_fragments, removed_actors) =
+            resolve_source_register_info_for_jobs(&txn, to_drop_streaming_jobs).await?;
+
         // Find affect users with privileges on all this objects.
         let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
             .select_only()
@@ -1578,10 +1588,11 @@ impl CatalogController {
 
         Ok((
             ReleaseContext {
-                streaming_jobs: to_drop_streaming_jobs,
                 state_table_ids: to_drop_state_table_ids,
                 source_ids: to_drop_source_ids,
                 connections: vec![],
+                source_fragments,
+                removed_actors,
             },
             version,
         ))

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::future::{join_all, try_join_all, BoxFuture};
@@ -27,6 +27,7 @@ use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, UpdateActorsRequest,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{oneshot, Mutex, RwLock};
 use tracing::Instrument;
@@ -35,7 +36,7 @@ use uuid::Uuid;
 use super::{Locations, RescheduleOptions, ScaleController, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan};
 use crate::hummock::HummockManagerRef;
-use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob, WorkerId};
+use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
 use crate::model::{ActorId, TableFragments, TableParallelism};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -339,6 +340,11 @@ impl GlobalStreamManager {
                                 tracing::debug!(
                                     "cancelling streaming job {table_id} by issue cancel command."
                                 );
+                                // Drop table fragments directly.
+                                self.metadata_manager
+                                    .drop_streaming_job_by_ids(&HashSet::from([table_id]))
+                                    .await?;
+
                                 self.barrier_scheduler
                                     .run_command(Command::CancelStreamingJob(table_fragments))
                                     .await?;
@@ -601,15 +607,33 @@ impl GlobalStreamManager {
                 .drop_streaming_jobs_impl(streaming_job_ids)
                 .await
                 .inspect_err(|err| {
-                    tracing::error!(error = ?err, "Failed to drop streaming jobs");
+                    tracing::error!(error = ?err.as_report(), "Failed to drop streaming jobs");
                 });
         }
     }
 
+    pub async fn drop_streaming_jobs_v2(
+        &self,
+        removed_actors: Vec<ActorId>,
+        state_table_ids: Vec<StateTableId>,
+    ) {
+        if !removed_actors.is_empty() {
+            let _ = self
+                .barrier_scheduler
+                .run_command(Command::DropStreamingJobs(removed_actors))
+                .await
+                .inspect_err(|err| {
+                    tracing::error!(error = ?err.as_report(), "failed to run drop command");
+                });
+
+            self.hummock_manager
+                .unregister_table_ids_fail_fast(&state_table_ids)
+                .await;
+        }
+    }
+
     pub async fn drop_streaming_jobs_impl(&self, table_ids: Vec<TableId>) -> MetaResult<()> {
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unimplemented!("call drop_streaming_jobs_impl_v2 instead.")
-        };
+        let mgr = self.metadata_manager.as_v1_ref();
         let table_fragments_vec = mgr
             .fragment_manager
             .select_table_fragments_by_ids(&table_ids)
@@ -625,21 +649,17 @@ impl GlobalStreamManager {
             .await?;
 
         // Issues a drop barrier command.
-        let mut worker_actors = HashMap::new();
-        for table_fragments in &table_fragments_vec {
-            table_fragments
-                .worker_actor_ids()
-                .into_iter()
-                .for_each(|(worker_id, actor_ids)| {
-                    worker_actors
-                        .entry(worker_id)
-                        .or_insert_with(Vec::new)
-                        .extend(actor_ids);
-                });
-        }
-        self.barrier_scheduler
-            .run_command(Command::DropStreamingJobs(worker_actors))
-            .await?;
+        let dropped_actors = table_fragments_vec
+            .iter()
+            .flat_map(|tf| tf.actor_ids().into_iter())
+            .collect_vec();
+        let _ = self
+            .barrier_scheduler
+            .run_command(Command::DropStreamingJobs(dropped_actors))
+            .await
+            .inspect_err(|err| {
+                tracing::error!(error = ?err.as_report(), "failed to run drop command");
+            });
 
         // Unregister from compaction group afterwards.
         self.hummock_manager
@@ -647,24 +667,6 @@ impl GlobalStreamManager {
             .await;
 
         Ok(())
-    }
-
-    pub fn drop_streaming_jobs_impl_v2(
-        &self,
-        _job_info: HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
-        _state_table_ids: Vec<StateTableId>,
-    ) -> MetaResult<()> {
-        // self.barrier_scheduler.run_command(Command::DropStreamingJobsV2(job_info)).await?;
-        //
-        // // TODO: need some refactoring on source manager.
-        //
-        // // Unregister from compaction group afterwards.
-        // self.hummock_manager
-        //     .unregister_table_ids_fail_fast(
-        //         &state_table_ids
-        //     )
-        //     .await;
-        unimplemented!("drop_streaming_jobs_impl_v2")
     }
 
     /// Cancel streaming jobs and return the canceled table ids.
@@ -710,6 +712,9 @@ impl GlobalStreamManager {
                     unimplemented!("support cancel streaming job in v2");
                 };
                 mgr.catalog_manager.cancel_create_table_procedure(id.into(), fragment.internal_table_ids()).await?;
+
+                // Drop table fragments directly.
+                mgr.fragment_manager.drop_table_fragments_vec(&HashSet::from([id])).await?;
 
                 self.barrier_scheduler
                     .run_command(Command::CancelStreamingJob(fragment))
