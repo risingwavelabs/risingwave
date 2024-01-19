@@ -8,7 +8,7 @@ create source mysql_mydb with (
     username = 'root',
     password = '123456',
     database.name = 'mydb',
-    server.id = '2'
+    server.id = '5085'
 );
 
 statement ok
