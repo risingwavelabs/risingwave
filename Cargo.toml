@@ -239,6 +239,7 @@ lto = "thin"
 [profile.ci-release]
 inherits = "release"
 incremental = false
+lto = "off"
 debug = "line-tables-only"
 split-debuginfo = "off"
 debug-assertions = true
