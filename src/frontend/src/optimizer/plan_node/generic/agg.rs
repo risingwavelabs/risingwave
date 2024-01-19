@@ -168,13 +168,14 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
 impl<PlanRef: BatchPlanRef> Agg<PlanRef> {
     // Check if the input is already sorted on group keys.
     pub(crate) fn input_provides_order_on_group_keys(&self) -> bool {
-        self.group_key.indices().all(|group_by_idx| {
-            self.input
-                .order()
-                .column_orders
-                .iter()
-                .any(|order| order.column_index == group_by_idx)
-        })
+        let mut input_order_prefix = IndexSet::empty();
+        for input_order_col in &self.input.order().column_orders {
+            if !self.group_key.contains(input_order_col.column_index) {
+                break;
+            }
+            input_order_prefix.insert(input_order_col.column_index);
+        }
+        self.group_key == input_order_prefix
     }
 }
 

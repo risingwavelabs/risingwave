@@ -25,7 +25,9 @@ use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
 
 use super::*;
 use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
-use crate::common::log_store_impl::kv_log_store::{KvLogStoreFactory, KvLogStoreMetrics};
+use crate::common::log_store_impl::kv_log_store::{
+    KvLogStoreFactory, KvLogStoreMetrics, KV_LOG_STORE_V1_INFO,
+};
 use crate::executor::SinkExecutor;
 
 pub struct SinkExecutorBuilder;
@@ -156,6 +158,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     65536,
                     metrics,
                     log_store_identity,
+                    &KV_LOG_STORE_V1_INFO,
                 );
 
                 Ok(Box::new(

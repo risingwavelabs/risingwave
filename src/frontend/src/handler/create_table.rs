@@ -527,14 +527,6 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     check_source_schema(&with_properties, row_id_index, &columns)?;
 
-    if row_id_index.is_none() && columns.iter().any(|c| c.is_generated()) {
-        // TODO(yuhao): allow delete from a non append only source
-        return Err(ErrorCode::BindError(
-            "Generated columns are only allowed in an append only source.".to_string(),
-        )
-        .into());
-    }
-
     gen_table_plan_inner(
         context.into(),
         table_name,
@@ -755,11 +747,11 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
 
     // cdc table cannot be append-only
     let append_only = false;
-    let source_name = source_name.real_value();
+    let (source_schema, source_name) = Binder::resolve_schema_qualified_name(db_name, source_name)?;
 
     let source = {
         let catalog_reader = session.env().catalog_reader().read_guard();
-        let schema_name = schema_name
+        let schema_name = source_schema
             .clone()
             .unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
         let (source, _) = catalog_reader.get_source_by_name(
