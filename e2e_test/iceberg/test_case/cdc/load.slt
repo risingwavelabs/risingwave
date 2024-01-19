@@ -35,15 +35,9 @@ CREATE SINK s1 AS select * from products WITH (
     primary_key = 'id'
 );
 
-statement ok
-flush;
-
 sleep 20s
 
 query I
 select count(*) from products;
 ----
 8
-
-statement ok
-flush;
