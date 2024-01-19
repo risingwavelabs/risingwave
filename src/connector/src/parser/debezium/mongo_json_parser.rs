@@ -17,6 +17,7 @@ use std::fmt::Debug;
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_pb::plan_common::AdditionalColumnType;
 use simd_json::prelude::MutableObject;
 use simd_json::BorrowedValue;
 
@@ -63,8 +64,20 @@ impl DebeziumMongoJsonParser {
             })?
             .clone();
 
-        // _rw_addition_partition & _rw_addition_offset are created automatically.
-        if rw_columns.len() != 4 {
+        // _rw_{connector}_file/partition & _rw_{connector}_offset are created automatically.
+        if rw_columns
+            .iter()
+            .filter(|desc| {
+                !matches!(
+                    desc.additional_column_type,
+                    AdditionalColumnType::Partition
+                        | AdditionalColumnType::Filename
+                        | AdditionalColumnType::Offset
+                )
+            })
+            .count()
+            != 2
+        {
             return Err(RwError::from(ProtocolError(
                 "Debezuim Mongo needs no more columns except `_id` and `payload` in table".into(),
             )));
