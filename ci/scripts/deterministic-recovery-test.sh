@@ -20,7 +20,9 @@ mkdir -p $LOGDIR
 
 filter_stack_trace_for_all_logs() {
   # Defined in `common.sh`
-  filter_stack_trace ${LOGDIR}/*.log
+  for log in "${LOGDIR}"/*.log; do
+    filter_stack_trace $log
+  done
 }
 
 trap filter_stack_trace_for_all_logs ERR

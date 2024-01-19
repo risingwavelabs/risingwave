@@ -89,10 +89,12 @@ function download_and_prepare_rw() {
 }
 
 function filter_stack_trace() {
+  # Only keep first 3 lines of backtrace: 0-2.
   echo "filtering stack trace for $1"
   touch tmp
   cat "$1" \
   | sed -E '/  [1-9][0-9]+:/d' \
+  | sed -E '/  [3-9]+:/d' \
   | sed -E '/  at .rustc/d' \
   | sed -E '/  at ...cargo/d' > tmp
   cp tmp "$1"
