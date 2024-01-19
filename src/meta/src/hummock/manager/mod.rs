@@ -19,6 +19,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant, SystemTime};
 
+use anyhow::Context;
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use fail::fail_point;
@@ -2079,26 +2080,27 @@ impl HummockManager {
             }
             Err(err) => {
                 tracing::warn!(error = %err.as_report(), "Failed to get compaction task");
-                return Err(anyhow::anyhow!(
-                    "Failed to get compaction task for compaction_group {}: {}",
-                    compaction_group,
-                    err.as_report()
-                )
-                .into());
+
+                return Err(anyhow::anyhow!(err)
+                    .context(format!(
+                        "Failed to get compaction task for compaction_group {}",
+                        compaction_group,
+                    ))
+                    .into());
             }
         };
 
         // 3. send task to compactor
         let compact_task_string = compact_task_to_string(&compact_task);
-        if let Err(e) = compactor.send_event(ResponseEvent::CompactTask(compact_task)) {
-            // TODO: shall we need to cancel on meta ?
-            return Err(anyhow::anyhow!(
-                "Failed to trigger compaction task for compaction_group {}: {}",
-                compaction_group,
-                e.as_report()
-            )
-            .into());
-        }
+        // TODO: shall we need to cancel on meta ?
+        compactor
+            .send_event(ResponseEvent::CompactTask(compact_task))
+            .with_context(|| {
+                format!(
+                    "Failed to trigger compaction task for compaction_group {}",
+                    compaction_group,
+                )
+            })?;
 
         tracing::info!(
             "Trigger manual compaction task. {}. cost time: {:?}",

@@ -156,10 +156,9 @@ impl BackupReader {
     }
 
     pub fn try_refresh_manifest(self: &BackupReaderRef, min_manifest_id: u64) {
-        let _ = self
-            .refresh_tx
-            .send(min_manifest_id)
-            .inspect_err(|_| tracing::warn!("failed to send refresh_manifest request"));
+        let _ = self.refresh_tx.send(min_manifest_id).inspect_err(|_| {
+            tracing::warn!(min_manifest_id, "failed to send refresh_manifest request")
+        });
     }
 
     /// Tries to get a hummock version eligible for querying `epoch`.
@@ -243,10 +242,9 @@ impl BackupReader {
             if let Err(e) = self.set_store(config.clone()).await {
                 // Retry is driven by periodic system params notification.
                 tracing::warn!(
-                    "failed to update backup reader: url={}, dir={}: {}",
-                    config.0,
-                    config.1,
-                    e.as_report()
+                    url = config.0, dir = config.1,
+                    error = %e.as_report(),
+                    "failed to update backup reader",
                 );
             }
         }
