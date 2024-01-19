@@ -16,6 +16,7 @@ use itertools::Itertools;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatService;
 use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
+use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
@@ -58,7 +59,7 @@ impl HeartbeatService for HeartbeatServiceImpl {
                     return Ok(Response::new(HeartbeatResponse {
                         status: Some(risingwave_pb::common::Status {
                             code: risingwave_pb::common::status::Code::UnknownWorker as i32,
-                            message: format!("{}", e),
+                            message: e.to_report_string(),
                         }),
                     }));
                 }

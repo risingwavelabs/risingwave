@@ -22,13 +22,14 @@ use risingwave_connector::source::kafka::private_link::insert_privatelink_broker
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
 };
-use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::manager::{MetadataManager, ConnectionId};
 use risingwave_pb::catalog::connection::Info::PrivateLinkService;
 use risingwave_pb::cloud_service::cloud_service_server::CloudService;
 use risingwave_pb::cloud_service::rw_cloud_validate_source_response::{Error, ErrorType};
 use risingwave_pb::cloud_service::{
     RwCloudValidateSourceRequest, RwCloudValidateSourceResponse, SourceType,
 };
+use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 use crate::rpc::cloud_provider::AwsEc2Client;
@@ -77,8 +78,8 @@ impl CloudService for CloudServiceImpl {
         // if connection_id provided, check whether endpoint service is available and resolve
         // broker rewrite map currently only support aws privatelink connection
         if let Some(connection_id_str) = source_cfg.get("connection.id") {
-            let connection_id = connection_id_str.parse().map_err(|e| {
-                Status::invalid_argument(format!("connection.id is not an integer: {}", e))
+            let connection_id = connection_id_str.parse::<ConnectionId>().map_err(|e| {
+                Status::invalid_argument(format!("connection.id is not an integer: {}", e.as_report()))
             })?;
 
             let connection = match &self.metadata_manager {
@@ -97,7 +98,7 @@ impl CloudService for CloudServiceImpl {
             if let Err(e) = connection {
                 return Ok(new_rwc_validate_fail_response(
                     ErrorType::PrivatelinkConnectionNotFound,
-                    e.to_string(),
+                    e.to_report_string(),
                 ));
             }
             if let Some(PrivateLinkService(service)) = connection.unwrap().info {
@@ -115,7 +116,7 @@ impl CloudService for CloudServiceImpl {
                     Err(e) => {
                         return Ok(new_rwc_validate_fail_response(
                             ErrorType::PrivatelinkUnavailable,
-                            e.to_string(),
+                            e.to_report_string(),
                         ));
                     }
                     Ok(false) => {

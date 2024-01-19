@@ -9539,6 +9539,7 @@ dependencies = [
  "risingwave_pb",
  "sea-orm",
  "sync-point",
+ "thiserror-ext",
  "tokio-stream",
  "tracing",
  "workspace-hack",
