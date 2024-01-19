@@ -34,6 +34,8 @@ use super::{
 };
 use crate::common::log_store_impl::only_writer_log_store::OnlyWriterLogStoreWriter;
 
+const EXECUTE_GC_INTERVAL: u64 = 3600;
+
 pub struct SubscriptionExecutor<LS: LocalStateStore, S: StateStore> {
     _actor_context: ActorContextRef,
     info: ExecutorInfo,
@@ -161,7 +163,7 @@ impl<LS: LocalStateStore, S: StateStore> SubscriptionExecutor<LS, S> {
     #[try_stream(ok = (), error = StreamExecutorError)]
     pub async fn timeout() {
         loop {
-            sleep(tokio::time::Duration::from_secs(3600)).await;
+            sleep(tokio::time::Duration::from_secs(EXECUTE_GC_INTERVAL)).await;
             yield ();
         }
     }
