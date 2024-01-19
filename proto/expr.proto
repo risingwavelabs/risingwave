@@ -418,9 +418,9 @@ message AggCall {
 message WindowFrame {
   enum Type {
     TYPE_UNSPECIFIED = 0;
-    // RANGE = 1;
+    TYPE_RANGE = 1;
     TYPE_ROWS = 2;
-    // GROUPS = 3;
+    // TYPE_GROUPS = 3;
   }
   enum BoundType {
     BOUND_TYPE_UNSPECIFIED = 0;
@@ -449,6 +449,9 @@ message WindowFrame {
   Bound start = 2;
   Bound end = 3;
   Exclusion exclusion = 4;
+
+  // The data type of offset value in `RANGE` frame.
+  optional data.DataType offset_data_type = 10;
 }
 
 message WindowFunction {

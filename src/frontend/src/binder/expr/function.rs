@@ -651,9 +651,13 @@ impl Binder {
                     let (start, end) = self.bind_window_frame_scalar_impl_bounds(
                         frame.start_bound,
                         frame.end_bound,
-                        offset_data_type,
+                        &offset_data_type,
                     )?;
-                    FrameBounds::Range(RangeFrameBounds { start, end })
+                    FrameBounds::Range(RangeFrameBounds {
+                        start,
+                        end,
+                        offset_data_type,
+                    })
                 }
                 WindowFrameUnits::Groups => {
                     bail_not_implemented!(
@@ -713,7 +717,7 @@ impl Binder {
         &mut self,
         start: WindowFrameBound,
         end: Option<WindowFrameBound>,
-        offset_data_type: DataType,
+        offset_data_type: &DataType,
     ) -> Result<(FrameBound<ScalarImpl>, FrameBound<ScalarImpl>)> {
         let mut convert_bound = |bound| -> Result<FrameBound<_>> {
             Ok(match bound {
