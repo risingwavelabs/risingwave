@@ -368,6 +368,7 @@ pub struct QueryStage {
     pub has_lookup_join: bool,
     pub dml_table_id: Option<TableId>,
     pub session_id: SessionId,
+    pub batch_enable_distributed_dml: bool,
 
     /// Used to generate exchange information when complete source scan information.
     children_exchange_distribution: Option<HashMap<StageId, Distribution>>,
@@ -400,6 +401,7 @@ impl QueryStage {
                 has_lookup_join: self.has_lookup_join,
                 dml_table_id: self.dml_table_id,
                 session_id: self.session_id,
+                batch_enable_distributed_dml: self.batch_enable_distributed_dml,
                 children_exchange_distribution: self.children_exchange_distribution.clone(),
             };
         }
@@ -429,6 +431,7 @@ impl QueryStage {
             has_lookup_join: self.has_lookup_join,
             dml_table_id: self.dml_table_id,
             session_id: self.session_id,
+            batch_enable_distributed_dml: self.batch_enable_distributed_dml,
             children_exchange_distribution: None,
         }
     }
@@ -474,6 +477,7 @@ struct QueryStageBuilder {
     has_lookup_join: bool,
     dml_table_id: Option<TableId>,
     session_id: SessionId,
+    batch_enable_distributed_dml: bool,
 
     children_exchange_distribution: HashMap<StageId, Distribution>,
 }
@@ -490,6 +494,7 @@ impl QueryStageBuilder {
         has_lookup_join: bool,
         dml_table_id: Option<TableId>,
         session_id: SessionId,
+        batch_enable_distributed_dml: bool,
     ) -> Self {
         Self {
             query_id,
@@ -503,6 +508,7 @@ impl QueryStageBuilder {
             has_lookup_join,
             dml_table_id,
             session_id,
+            batch_enable_distributed_dml,
             children_exchange_distribution: HashMap::new(),
         }
     }
@@ -524,6 +530,7 @@ impl QueryStageBuilder {
             has_lookup_join: self.has_lookup_join,
             dml_table_id: self.dml_table_id,
             session_id: self.session_id,
+            batch_enable_distributed_dml: self.batch_enable_distributed_dml,
             children_exchange_distribution,
         });
 
@@ -797,7 +804,7 @@ impl BatchPlanFragmenter {
                     )
                 } else {
                     // can be 0 if no available serving worker
-                    self.worker_node_manager.worker_node_count()
+                    self.worker_node_manager.schedule_unit_count()
                 }
             }
         };
@@ -820,6 +827,10 @@ impl BatchPlanFragmenter {
             has_lookup_join,
             dml_table_id,
             root.ctx().session_ctx().session_id(),
+            root.ctx()
+                .session_ctx()
+                .config()
+                .batch_enable_distributed_dml(),
         );
 
         self.visit_node(root, &mut builder, None)?;
@@ -1133,7 +1144,7 @@ mod tests {
 
         let join_node = query.stage_graph.stages.get(&1).unwrap();
         assert_eq!(join_node.root.node_type(), PlanNodeType::BatchHashJoin);
-        assert_eq!(join_node.parallelism, Some(3));
+        assert_eq!(join_node.parallelism, Some(24));
 
         assert!(matches!(join_node.root.node, NodeBody::HashJoin(_)));
         assert_eq!(join_node.root.source_stage_id, None);
