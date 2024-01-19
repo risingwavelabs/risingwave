@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::default::Default;
+use std::fmt::Formatter;
 use std::future::Future;
 use std::ops::Bound;
 use std::sync::{Arc, LazyLock};
@@ -409,6 +410,22 @@ pub enum OpConsistencyLevel {
     ConsistentOldValue(Arc<dyn CheckOldValueEquality>),
 }
 
+impl OpConsistencyLevel {
+    pub fn enable_consistent_old_value(
+        &mut self,
+        old_value_checker: Arc<dyn CheckOldValueEquality>,
+    ) {
+        match self {
+            OpConsistencyLevel::Inconsistent => {
+                *self = OpConsistencyLevel::ConsistentOldValue(old_value_checker)
+            }
+            OpConsistencyLevel::ConsistentOldValue(_) => {
+                panic!("should not enable consistent old value again")
+            }
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct NewLocalOptions {
     pub table_id: TableId,
@@ -531,9 +548,18 @@ impl From<TracedInitOptions> for InitOptions {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SealCurrentEpochOptions {
     pub table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>)>,
+    pub enable_consistent_op: Option<Arc<dyn CheckOldValueEquality>>,
+}
+
+impl std::fmt::Debug for SealCurrentEpochOptions {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SealCurrentEpochOptions")
+            .field("table_watermarks", &self.table_watermarks)
+            .finish()
+    }
 }
 
 impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
@@ -548,6 +574,7 @@ impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
                         .collect(),
                 )
             }),
+            enable_consistent_op: value.enable_consistent_op.is_some(),
         }
     }
 }
@@ -572,6 +599,11 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
                         .collect(),
                 )
             }),
+            enable_consistent_op: if value.enable_consistent_op {
+                Some(CHECK_BYTES_EQUAL.clone())
+            } else {
+                None
+            },
         }
     }
 }
@@ -580,16 +612,14 @@ impl SealCurrentEpochOptions {
     pub fn new(watermarks: Vec<VnodeWatermark>, direction: WatermarkDirection) -> Self {
         Self {
             table_watermarks: Some((direction, watermarks)),
-        }
-    }
-
-    pub fn no_watermark() -> Self {
-        Self {
-            table_watermarks: None,
+            enable_consistent_op: None,
         }
     }
 
     pub fn for_test() -> Self {
-        Self::no_watermark()
+        Self {
+            table_watermarks: None,
+            enable_consistent_op: None,
+        }
     }
 }

@@ -54,8 +54,8 @@ use risingwave_storage::row_serde::row_serde_util::{
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
-    InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, PrefetchOptions,
-    ReadOptions, SealCurrentEpochOptions, StateStoreIterItemStream,
+    CheckOldValueEquality, InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel,
+    PrefetchOptions, ReadOptions, SealCurrentEpochOptions, StateStoreIterItemStream,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{KeyedRow, TableDistribution};
@@ -149,6 +149,8 @@ pub struct StateTableInner<
     /// 1. Computing output_value_indices to ser/de replicated rows.
     /// 2. Computing output pk indices to used them for backfill state.
     output_indices: Vec<usize>,
+
+    is_consistent_op: bool,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -199,8 +201,8 @@ where
     }
 }
 
-fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> OpConsistencyLevel {
-    OpConsistencyLevel::ConsistentOldValue(Arc::new(move |first: &Bytes, second: &Bytes| {
+fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> Arc<dyn CheckOldValueEquality> {
+    Arc::new(move |first: &Bytes, second: &Bytes| {
         if first == second {
             return true;
         }
@@ -224,7 +226,7 @@ fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> OpConsistencyLevel 
         } else {
             true
         }
-    }))
+    })
 }
 
 // initialize
@@ -349,7 +351,7 @@ where
 
         let op_consistency_level = if is_consistent_op {
             let row_serde = make_row_serde();
-            consistent_old_value_op(row_serde)
+            OpConsistencyLevel::ConsistentOldValue(consistent_old_value_op(row_serde))
         } else {
             OpConsistencyLevel::Inconsistent
         };
@@ -425,6 +427,7 @@ where
             data_types,
             output_indices,
             i2o_mapping,
+            is_consistent_op,
         }
     }
 
@@ -560,7 +563,7 @@ where
         };
         let op_consistency_level = if is_consistent_op {
             let row_serde = make_row_serde();
-            consistent_old_value_op(row_serde)
+            OpConsistencyLevel::ConsistentOldValue(consistent_old_value_op(row_serde))
         } else {
             OpConsistencyLevel::Inconsistent
         };
@@ -604,6 +607,7 @@ where
             data_types,
             output_indices: vec![],
             i2o_mapping: ColIndexMapping::new(vec![], 0),
+            is_consistent_op,
         }
     }
 
@@ -1025,7 +1029,29 @@ where
     }
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.commit_inner(new_epoch, false).await
+    }
+
+    pub async fn commit_with_enable_consistent_op(
+        &mut self,
+        new_epoch: EpochPair,
+    ) -> StreamExecutorResult<()> {
+        self.commit_inner(new_epoch, true).await
+    }
+
+    pub async fn commit_inner(
+        &mut self,
+        new_epoch: EpochPair,
+        enable_consistent_op: bool,
+    ) -> StreamExecutorResult<()> {
         assert_eq!(self.epoch(), new_epoch.prev);
+        let enable_consistent_op = if enable_consistent_op {
+            assert!(!self.is_consistent_op);
+            self.is_consistent_op = true;
+            Some(consistent_old_value_op(self.row_serde.clone()))
+        } else {
+            None
+        };
         trace!(
             table_id = %self.table_id,
             epoch = ?self.epoch(),
@@ -1036,11 +1062,16 @@ where
         self.watermark_buffer_strategy.tick();
         if !self.is_dirty() {
             // If the state table is not modified, go fast path.
-            self.local_store
-                .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::no_watermark());
+            self.local_store.seal_current_epoch(
+                new_epoch.curr,
+                SealCurrentEpochOptions {
+                    table_watermarks: None,
+                    enable_consistent_op,
+                },
+            );
             return Ok(());
         } else {
-            self.seal_current_epoch(new_epoch.curr)
+            self.seal_current_epoch(new_epoch.curr, enable_consistent_op)
                 .instrument(tracing::info_span!("state_table_commit"))
                 .await?;
         }
@@ -1105,12 +1136,21 @@ where
         // Tick the watermark buffer here because state table is expected to be committed once
         // per epoch.
         self.watermark_buffer_strategy.tick();
-        self.local_store
-            .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::no_watermark());
+        self.local_store.seal_current_epoch(
+            new_epoch.curr,
+            SealCurrentEpochOptions {
+                table_watermarks: None,
+                enable_consistent_op: None,
+            },
+        );
     }
 
     /// Write to state store.
-    async fn seal_current_epoch(&mut self, next_epoch: u64) -> StreamExecutorResult<()> {
+    async fn seal_current_epoch(
+        &mut self,
+        next_epoch: u64,
+        enable_consistent_op: Option<Arc<dyn CheckOldValueEquality>>,
+    ) -> StreamExecutorResult<()> {
         let watermark = self.state_clean_watermark.take();
         watermark.as_ref().inspect(|watermark| {
             trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
@@ -1197,13 +1237,16 @@ where
         }
 
         self.local_store.flush(vec![]).await?;
-        let seal_opt = match seal_watermark {
-            Some((direction, watermark)) => {
-                SealCurrentEpochOptions::new(vec![watermark], direction)
-            }
-            None => SealCurrentEpochOptions::no_watermark(),
-        };
-        self.local_store.seal_current_epoch(next_epoch, seal_opt);
+        let table_watermarks =
+            seal_watermark.map(|(direction, watermark)| (direction, vec![watermark]));
+
+        self.local_store.seal_current_epoch(
+            next_epoch,
+            SealCurrentEpochOptions {
+                table_watermarks,
+                enable_consistent_op,
+            },
+        );
         Ok(())
     }
 
