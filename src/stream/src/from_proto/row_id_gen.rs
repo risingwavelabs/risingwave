@@ -19,7 +19,7 @@ use super::ExecutorBuilder;
 use crate::error::StreamResult;
 use crate::executor::row_id_gen::RowIdGenExecutor;
 use crate::executor::BoxedExecutor;
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::task::ExecutorParams;
 
 pub struct RowIdGenExecutorBuilder;
 
@@ -30,7 +30,6 @@ impl ExecutorBuilder for RowIdGenExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
         tracing::debug!("row id gen executor: {:?}", params.vnode_bitmap);

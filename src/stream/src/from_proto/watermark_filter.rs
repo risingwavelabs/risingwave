@@ -34,7 +34,6 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let watermark_descs = node.get_watermark_descs().clone();
