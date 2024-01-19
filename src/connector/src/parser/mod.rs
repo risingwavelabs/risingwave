@@ -365,11 +365,13 @@ impl SourceStreamChunkRowWriter<'_> {
                             .map(|ele| ScalarImpl::Utf8(ele.offset.to_string().into())),
                     ));
                 }
-                (_, &Some(AdditionalColumnType::Header(_))) => {
+                (_, &Some(AdditionalColumnType::Header(ref header))) => {
                     return Ok(A::output_for(
                         self.row_meta
                             .as_ref()
-                            .and_then(|ele| extract_headers_from_meta(ele.meta))
+                            .and_then(|ele| {
+                                extract_headers_from_meta(ele.meta, header.inner_field.as_deref())
+                            })
                             .unwrap_or(None),
                     ))
                 }

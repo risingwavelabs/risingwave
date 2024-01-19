@@ -119,9 +119,9 @@ pub fn extreact_timestamp_from_meta(meta: &SourceMeta) -> Option<Datum> {
     }
 }
 
-pub fn extract_headers_from_meta(meta: &SourceMeta) -> Option<Datum> {
+pub fn extract_headers_from_meta(meta: &SourceMeta, inner_field: Option<&str>) -> Option<Datum> {
     match meta {
-        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_headers(),
+        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_headers(inner_field),
         _ => None,
     }
 }

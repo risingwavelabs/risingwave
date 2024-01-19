@@ -39,22 +39,38 @@ impl KafkaMeta {
             .into()
     }
 
-    pub fn extract_headers(&self) -> Option<Datum> {
-        self.headers.as_ref().map(|headers| {
-            let header_item: Vec<Datum> = headers
+    pub fn extract_headers(&self, inner_field: Option<&str>) -> Option<Datum> {
+        // return the exact header value if inner_field is specified, if not found, return None
+        if let Some(target_field) = inner_field {
+            let target_value = self
+                .headers
+                .as_ref()
                 .iter()
-                .map(|header| {
-                    Some(ScalarImpl::Struct(StructValue::new(vec![
-                        Some(ScalarImpl::Utf8(header.key.to_string().into())),
-                        header.value.map(|byte| ScalarImpl::Bytea(byte.into())),
-                    ])))
+                .find_map(|headers| {
+                    headers
+                        .iter()
+                        .find(|header| header.key == target_field)
+                        .map(|header| header.value)
                 })
-                .collect_vec();
-            Some(ScalarImpl::List(ListValue::from_datum_iter(
-                &get_kafka_header_item_datatype(),
-                header_item,
-            )))
-        })
+                .unwrap();
+            Some(target_value.map(|byte| ScalarImpl::Bytea(byte.into())))
+        } else {
+            self.headers.as_ref().map(|headers| {
+                let header_item: Vec<Datum> = headers
+                    .iter()
+                    .map(|header| {
+                        Some(ScalarImpl::Struct(StructValue::new(vec![
+                            Some(ScalarImpl::Utf8(header.key.to_string().into())),
+                            header.value.map(|byte| ScalarImpl::Bytea(byte.into())),
+                        ])))
+                    })
+                    .collect_vec();
+                Some(ScalarImpl::List(ListValue::from_datum_iter(
+                    &get_kafka_header_item_datatype(),
+                    header_item,
+                )))
+            })
+        }
     }
 }
 
