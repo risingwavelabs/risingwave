@@ -20,7 +20,6 @@ use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
-use aws_sdk_s3::config::{Credentials, Region};
 use aws_sdk_s3::operation::get_object::builders::GetObjectFluentBuilder;
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Error;
@@ -65,8 +64,6 @@ const MIN_PART_ID: PartId = 1;
 ///
 /// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html>
 const S3_PART_SIZE: usize = 16 * 1024 * 1024;
-// TODO: we should do some benchmark to determine the proper part size for MinIO
-const MINIO_PART_SIZE: usize = 16 * 1024 * 1024;
 /// The number of S3/MinIO bucket prefixes
 const NUM_BUCKET_PREFIXES: u32 = 256;
 /// Stop multipart uploads that don't complete within a specified number of days after being
@@ -624,57 +621,6 @@ impl S3ObjectStore {
             part_size: S3_PART_SIZE,
             metrics,
             config,
-        }
-    }
-
-    /// Creates a minio client. The server should be like `minio://key:secret@address:port/bucket`.
-    pub async fn with_minio(server: &str, metrics: Arc<ObjectStoreMetrics>) -> Self {
-        let server = server.strip_prefix("minio://").unwrap();
-        let (access_key_id, rest) = server.split_once(':').unwrap();
-        let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
-        let endpoint_prefix = if let Some(rest_stripped) = rest.strip_prefix("https://") {
-            rest = rest_stripped;
-            "https://"
-        } else if let Some(rest_stripped) = rest.strip_prefix("http://") {
-            rest = rest_stripped;
-            "http://"
-        } else {
-            "http://"
-        };
-        let (address, bucket) = rest.split_once('/').unwrap();
-
-        let s3_object_store_config = ObjectStoreConfig::default();
-        #[cfg(madsim)]
-        let builder = aws_sdk_s3::config::Builder::new().credentials_provider(
-            Credentials::from_keys(access_key_id, secret_access_key, None),
-        );
-        #[cfg(not(madsim))]
-        let builder = aws_sdk_s3::config::Builder::from(
-            &aws_config::ConfigLoader::default()
-                // FIXME: https://github.com/awslabs/aws-sdk-rust/issues/973
-                .credentials_provider(Credentials::from_keys(
-                    access_key_id,
-                    secret_access_key,
-                    None,
-                ))
-                .load()
-                .await,
-        )
-        .force_path_style(true)
-        .http_client(Self::new_http_client(&s3_object_store_config))
-        .behavior_version_latest();
-        let config = builder
-            .region(Region::new("custom"))
-            .endpoint_url(format!("{}{}", endpoint_prefix, address))
-            .build();
-        let client = Client::from_conf(config);
-
-        Self {
-            client,
-            bucket: bucket.to_string(),
-            part_size: MINIO_PART_SIZE,
-            metrics,
-            config: s3_object_store_config,
         }
     }
 

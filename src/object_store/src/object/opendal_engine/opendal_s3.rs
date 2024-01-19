@@ -64,4 +64,38 @@ impl OpendalObjectStore {
             engine_type: EngineType::OpendalS3,
         })
     }
+
+    /// Creates a minio client. The server should be like `minio://key:secret@address:port/bucket`.
+    pub fn with_minio(server: &str) -> ObjectResult<Self> {
+        let server = server.strip_prefix("minio://").unwrap();
+        let (access_key_id, rest) = server.split_once(':').unwrap();
+        let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
+        let endpoint_prefix = if let Some(rest_stripped) = rest.strip_prefix("https://") {
+            rest = rest_stripped;
+            "https://"
+        } else if let Some(rest_stripped) = rest.strip_prefix("http://") {
+            rest = rest_stripped;
+            "http://"
+        } else {
+            "http://"
+        };
+        let (address, bucket) = rest.split_once('/').unwrap();
+        let mut builder = S3::default();
+        builder
+            .bucket(bucket)
+            .region("custom")
+            .access_key_id(access_key_id)
+            .secret_access_key(secret_access_key)
+            .endpoint(&format!("{}{}", endpoint_prefix, address));
+
+        builder.disable_config_load();
+        let op: Operator = Operator::new(builder)?
+            .layer(LoggingLayer::default())
+            .layer(RetryLayer::default())
+            .finish();
+        Ok(Self {
+            op,
+            engine_type: EngineType::Minio,
+        })
+    }
 }

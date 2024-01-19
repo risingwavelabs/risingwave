@@ -875,9 +875,9 @@ pub async fn build_remote_object_store(
             set your endpoint to the environment variable RW_S3_ENDPOINT.");
             panic!("Passing s3-compatible is not supported, please modify the environment variable and pass in s3.");
         }
-        minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
-            S3ObjectStore::with_minio(minio, metrics.clone())
-                .await
+        minio if minio.starts_with("minio://") => ObjectStoreImpl::Opendal(
+            OpendalObjectStore::with_minio(minio)
+                .unwrap()
                 .monitored(metrics),
         ),
         "memory" => {
