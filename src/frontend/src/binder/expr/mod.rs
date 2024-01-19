@@ -518,6 +518,8 @@ impl Binder {
         }
 
         for (condition, result) in zip_eq_fast(conditions, results_expr) {
+            // If the result expression is not const
+            // we will also not do the optimization
             if !result.is_const() {
                 optimize_flag = false;
             }

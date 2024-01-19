@@ -138,8 +138,6 @@ impl Expression for ConstantLookupExpression {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        println!("[ConstantLookupExpression] input: {:#?}", input);
-
         let input_len = input.capacity();
         let mut builder = self.return_type().create_array_builder(input_len);
 
