@@ -382,7 +382,7 @@ impl HummockStateStoreMetrics {
         let block_efficiency_histogram =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
         let block_efficiency_histogram = RelabeledHistogramVec::with_metric_level(
-            MetricLevel::Debug,
+            MetricLevel::Info,
             block_efficiency_histogram,
             metric_level,
         );
