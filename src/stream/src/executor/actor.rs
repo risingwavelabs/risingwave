@@ -65,7 +65,8 @@ impl ActorContext {
             total_mem_val: Arc::new(TrAdder::new()),
             streaming_metrics: Arc::new(StreamingMetrics::unused()),
             error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(10))),
-            dispatch_num: 0,
+            // Set 1 for test to enable sanity check on table
+            dispatch_num: 1,
         })
     }
 
