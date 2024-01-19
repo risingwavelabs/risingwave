@@ -150,15 +150,6 @@ impl SharedContext {
             .ok_or_else(|| anyhow!("receiver for {ids:?} has already been taken").into())
     }
 
-    pub fn retain_channel<F>(&self, mut f: F)
-    where
-        F: FnMut(&(u32, u32)) -> bool,
-    {
-        self.channel_map
-            .lock()
-            .retain(|up_down_ids, _| f(up_down_ids));
-    }
-
     pub fn clear_channels(&self) {
         self.channel_map.lock().clear()
     }
@@ -173,6 +164,16 @@ impl SharedContext {
 
     pub fn config(&self) -> &StreamingConfig {
         &self.config
+    }
+
+    pub fn drop_actors(&self, actors: &[ActorId]) {
+        self.channel_map
+            .lock()
+            .retain(|(up_id, _), _| !actors.contains(up_id));
+        let mut actor_infos = self.actor_infos.write();
+        for actor_id in actors {
+            actor_infos.remove(actor_id);
+        }
     }
 }
 

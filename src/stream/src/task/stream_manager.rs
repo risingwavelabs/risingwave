@@ -66,8 +66,6 @@ pub struct LocalStreamManagerCore {
     /// termination.
     handles: HashMap<ActorId, ActorHandle>,
 
-    context: Arc<SharedContext>,
-
     /// Stores all actor information, taken after actor built.
     actors: HashMap<ActorId, stream_plan::StreamActor>,
 
@@ -176,7 +174,7 @@ impl LocalStreamManager {
         let local_barrier_manager =
             LocalBarrierManager::new(state_store.clone(), streaming_metrics.clone());
         let context = Arc::new(SharedContext::new(addr, &config));
-        let core = LocalStreamManagerCore::new(context.clone());
+        let core = LocalStreamManagerCore::new(context.config.actor_runtime_worker_threads_num);
         Self {
             state_store,
             context,
@@ -261,6 +259,7 @@ impl LocalStreamManager {
 
     /// Drop the resources of the given actors.
     pub fn drop_actors(&self, actors: &[ActorId]) -> StreamResult<()> {
+        self.context.drop_actors(actors);
         let mut core = self.core.lock();
         for &id in actors {
             core.drop_actor(id);
@@ -281,6 +280,8 @@ impl LocalStreamManager {
             let result = handle.await;
             assert!(result.is_ok() || result.unwrap_err().is_cancelled());
         }
+        self.context.clear_channels();
+        self.context.actor_infos.write().clear();
         self.core.lock().clear_state();
         if let Some(m) = self.await_tree_reg.as_ref() {
             m.lock().clear();
@@ -295,13 +296,6 @@ impl LocalStreamManager {
     pub fn update_actors(&self, actors: &[stream_plan::StreamActor]) -> StreamResult<()> {
         let mut core = self.core.lock();
         core.update_actors(actors)
-    }
-
-    /// This function could only be called once during the lifecycle of `LocalStreamManager` for
-    /// now.
-    pub fn update_actor_info(&self, actor_infos: &[ActorInfo]) -> StreamResult<()> {
-        let mut core = self.core.lock();
-        core.update_actor_info(actor_infos)
     }
 
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
@@ -342,10 +336,10 @@ impl LocalStreamManager {
 }
 
 impl LocalStreamManagerCore {
-    fn new(context: Arc<SharedContext>) -> Self {
+    fn new(actor_runtime_worker_threads_num: Option<usize>) -> Self {
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
-            if let Some(worker_threads_num) = context.config.actor_runtime_worker_threads_num {
+            if let Some(worker_threads_num) = actor_runtime_worker_threads_num {
                 builder.worker_threads(worker_threads_num);
             }
             builder
@@ -358,7 +352,6 @@ impl LocalStreamManagerCore {
         Self {
             runtime: runtime.into(),
             handles: HashMap::new(),
-            context,
             actors: HashMap::new(),
             actor_monitor_tasks: HashMap::new(),
         }
@@ -731,8 +724,12 @@ impl LocalStreamManagerCore {
             })
             .try_collect()
     }
+}
 
-    fn update_actor_info(&mut self, new_actor_infos: &[ActorInfo]) -> StreamResult<()> {
+impl LocalStreamManager {
+    /// This function could only be called once during the lifecycle of `LocalStreamManager` for
+    /// now.
+    pub fn update_actor_info(&self, new_actor_infos: &[ActorInfo]) -> StreamResult<()> {
         let mut actor_infos = self.context.actor_infos.write();
         for actor in new_actor_infos {
             let ret = actor_infos.insert(actor.get_actor_id(), actor.clone());
@@ -747,15 +744,15 @@ impl LocalStreamManagerCore {
         }
         Ok(())
     }
+}
 
+impl LocalStreamManagerCore {
     /// `drop_actor` is invoked by meta node via RPC once the stop barrier arrives at the
     /// sink. All the actors in the actors should stop themselves before this method is invoked.
     fn drop_actor(&mut self, actor_id: ActorId) {
-        self.context.retain_channel(|&(up_id, _)| up_id != actor_id);
         self.actor_monitor_tasks
             .remove(&actor_id)
             .inspect(|handle| handle.abort());
-        self.context.actor_infos.write().remove(&actor_id);
         self.actors.remove(&actor_id);
 
         // Task should have already stopped when this method is invoked. There might be some
@@ -772,9 +769,7 @@ impl LocalStreamManagerCore {
     /// `drop_actor`, the execution of the actors will be aborted.
     fn clear_state(&mut self) {
         self.actors.clear();
-        self.context.clear_channels();
         self.actor_monitor_tasks.clear();
-        self.context.actor_infos.write().clear();
     }
 
     fn update_actors(&mut self, actors: &[stream_plan::StreamActor]) -> StreamResult<()> {
