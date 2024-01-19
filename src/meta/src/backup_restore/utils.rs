@@ -75,8 +75,7 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendI
             }
             let client = EtcdClient::connect(endpoints, Some(options), credentials.is_some())
                 .await
-                .context("failed to connect etcd")
-?;
+                .context("failed to connect etcd")?;
             Ok(MetaStoreBackendImpl::Etcd(EtcdMetaStore::new(client)))
         }
         MetaStoreBackend::Mem => Ok(MetaStoreBackendImpl::Mem(MemStore::new())),

@@ -22,7 +22,7 @@ use risingwave_connector::source::kafka::private_link::insert_privatelink_broker
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
 };
-use risingwave_meta::manager::{MetadataManager, ConnectionId};
+use risingwave_meta::manager::{ConnectionId, MetadataManager};
 use risingwave_pb::catalog::connection::Info::PrivateLinkService;
 use risingwave_pb::cloud_service::cloud_service_server::CloudService;
 use risingwave_pb::cloud_service::rw_cloud_validate_source_response::{Error, ErrorType};
@@ -79,7 +79,10 @@ impl CloudService for CloudServiceImpl {
         // broker rewrite map currently only support aws privatelink connection
         if let Some(connection_id_str) = source_cfg.get("connection.id") {
             let connection_id = connection_id_str.parse::<ConnectionId>().map_err(|e| {
-                Status::invalid_argument(format!("connection.id is not an integer: {}", e.as_report()))
+                Status::invalid_argument(format!(
+                    "connection.id is not an integer: {}",
+                    e.as_report()
+                ))
             })?;
 
             let connection = match &self.metadata_manager {
