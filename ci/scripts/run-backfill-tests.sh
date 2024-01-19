@@ -200,6 +200,8 @@ test_sink_backfill_recovery() {
 
   # Verify data matches upstream table.
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/validate_sink.slt'
+
+  echo "--- Kill cluster"
   cargo make kill
   cargo make wait-processes-exit
   wait

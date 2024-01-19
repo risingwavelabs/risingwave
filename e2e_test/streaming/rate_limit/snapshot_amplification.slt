@@ -6,9 +6,6 @@ statement ok
 SET STREAMING_PARALLELISM=2;
 
 statement ok
-SET STREAMING_RATE_LIMIT=1;
-
-statement ok
 CREATE TABLE table (i1 int);
 
 statement ok
@@ -16,6 +13,10 @@ INSERT INTO table select 1 from generate_series(1, 100000);
 
 statement ok
 flush;
+
+# Only apply to sink
+statement ok
+SET STREAMING_RATE_LIMIT=1;
 
 statement ok
 CREATE SINK sink AS

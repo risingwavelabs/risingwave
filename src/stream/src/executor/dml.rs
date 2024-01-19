@@ -14,6 +14,7 @@
 
 use std::collections::BTreeMap;
 use std::mem;
+use std::num::NonZeroU64;
 
 use either::Either;
 use futures::StreamExt;
@@ -52,6 +53,9 @@ pub struct DmlExecutor {
     column_descs: Vec<ColumnDesc>,
 
     chunk_size: usize,
+
+    // Rate limit for DML.
+    rate_limit: Option<NonZeroU64>,
 }
 
 /// If a transaction's data is less than `MAX_CHUNK_FOR_ATOMICITY` * `CHUNK_SIZE`, we can provide
@@ -80,7 +84,12 @@ impl DmlExecutor {
         table_version_id: TableVersionId,
         column_descs: Vec<ColumnDesc>,
         chunk_size: usize,
+        rate_limit: Option<NonZeroU64>,
     ) -> Self {
+        // If chunk_size > rate_limit, we should decrease its size, so rate limit can take effect.
+        let chunk_size = rate_limit
+            .map(|rate_limit| std::cmp::min(chunk_size, rate_limit.get() as usize))
+            .unwrap_or(chunk_size);
         Self {
             info,
             upstream,
@@ -89,6 +98,7 @@ impl DmlExecutor {
             table_version_id,
             column_descs,
             chunk_size,
+            rate_limit,
         }
     }
 
@@ -110,12 +120,18 @@ impl DmlExecutor {
             .dml_manager
             .register_reader(self.table_id, self.table_version_id, &self.column_descs)
             .map_err(StreamExecutorError::connector_error)?;
-        let batch_reader = batch_reader.stream_reader().into_stream();
+        let batch_reader = batch_reader
+            .stream_reader()
+            .into_stream_with_rate_limit(self.rate_limit);
 
         // Merge the two streams using `StreamReaderWithPause` because when we receive a pause
         // barrier, we should stop receiving the data from DML. We poll data from the two streams in
         // a round robin way.
-        let mut stream = StreamReaderWithPause::<false, TxnMsg>::new(upstream, batch_reader);
+        //
+        // We bias the upstream side,
+        // because barrier should always take precedence,
+        // to avoid high barrier latency.
+        let mut stream = StreamReaderWithPause::<true, TxnMsg>::new(upstream, batch_reader);
 
         // If the first barrier requires us to pause on startup, pause the stream.
         if barrier.is_pause_on_startup() {
@@ -336,6 +352,7 @@ mod tests {
             INITIAL_TABLE_VERSION_ID,
             column_descs,
             1024,
+            None,
         ));
         let mut dml_executor = dml_executor.execute();
 
