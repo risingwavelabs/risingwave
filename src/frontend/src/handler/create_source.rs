@@ -57,7 +57,7 @@ use risingwave_sqlparser::ast::{
     get_delimiter, AstString, ColumnDef, ConnectorSchema, CreateSourceStatement, Encode, Format,
     ProtobufSchema, SourceWatermark,
 };
-use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
+use risingwave_sqlparser::parser::IncludeOption;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
@@ -531,48 +531,49 @@ pub fn handle_addition_columns(
         .max()
         .unwrap(); // there must be at least one column in the column catalog
 
-    for (col_name, gen_column_catalog_fn) in addition_col_list {
-        // always insert in spec order
-        if let Some(idx) =
-            additional_columns
-                .iter()
-                .position(|include_option_item: &IncludeOptionItem| {
-                    include_option_item
-                        .column_type
-                        .real_value()
-                        .eq_ignore_ascii_case(col_name)
-                })
+    while let Some(item) = additional_columns.pop() {
         {
-            let item: IncludeOptionItem = additional_columns.remove(idx);
-
+            // only allow header column have inner field
+            if item.inner_field.is_some()
+                && !item.column_type.real_value().eq_ignore_ascii_case("header")
             {
-                // only allow header column have inner field
-                if item.inner_field.is_some()
-                    && !item.column_type.real_value().eq_ignore_ascii_case("header")
-                {
-                    return Err(RwError::from(ProtocolError(format!(
-                        "Only header column can have inner field, but got {:?}",
-                        item.column_type.real_value(),
-                    ))));
-                }
+                return Err(RwError::from(ProtocolError(format!(
+                    "Only header column can have inner field, but got {:?}",
+                    item.column_type.real_value(),
+                ))));
             }
-
-            columns.push(gen_column_catalog_fn(
-                latest_col_id.next(),
-                item.column_alias
-                    .map(|alias| alias.real_value())
-                    .unwrap_or_else(|| {
-                        gen_default_column_name(
-                            connector_name.as_str(),
-                            col_name,
-                            item.inner_field.as_ref(),
-                        )
-                    })
-                    .as_str(),
-                item.inner_field.as_deref(),
-            ))
         }
+
+        let (_, gen_column_catalog_fn) = addition_col_list
+            // todo: refactor `addition_col_hashmap` to HashMap<&str, CompatibleAdditionalColumnsFn>
+            .iter()
+            .find(|ele| {
+                ele.0
+                    .eq_ignore_ascii_case(item.column_type.real_value().as_str())
+            })
+            .ok_or_else(|| {
+                RwError::from(ProtocolError(format!(
+                    "Unknown additional column type {:?}",
+                    item.column_type.real_value()
+                )))
+            })?;
+
+        columns.push(gen_column_catalog_fn(
+            latest_col_id.next(),
+            item.column_alias
+                .map(|alias| alias.real_value())
+                .unwrap_or_else(|| {
+                    gen_default_column_name(
+                        connector_name.as_str(),
+                        item.column_type.real_value().as_str(),
+                        item.inner_field.as_ref(),
+                    )
+                })
+                .as_str(),
+            item.inner_field.as_deref(),
+        ))
     }
+
     if !additional_columns.is_empty() {
         return Err(RwError::from(ProtocolError(format!(
             "Unknown additional columns {:?}",
