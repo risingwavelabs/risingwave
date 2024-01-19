@@ -15,7 +15,7 @@
 use risingwave_common::config::{
     extract_storage_memory_config, ObjectStoreConfig, RwConfig, StorageMemoryConfig,
 };
-use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::system_param::reader::{SystemParamsRead, SystemParamsReader};
 use risingwave_common::system_param::system_params_for_test;
 
 #[derive(Clone, Debug)]
@@ -130,7 +130,7 @@ pub struct StorageOpts {
     pub compactor_max_sst_size: u64,
     /// enable FastCompactorRunner.
     pub enable_fast_compaction: bool,
-    pub check_fast_compaction_result: bool,
+    pub check_compaction_result: bool,
     pub max_preload_io_retry_times: usize,
     pub compactor_fast_max_compact_delete_ratio: u32,
     pub compactor_fast_max_compact_task_size: u64,
@@ -253,7 +253,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             compactor_max_task_multiplier: c.storage.compactor_max_task_multiplier,
             compactor_max_sst_size: c.storage.compactor_max_sst_size,
             enable_fast_compaction: c.storage.enable_fast_compaction,
-            check_fast_compaction_result: c.storage.check_fast_compaction_result,
+            check_compaction_result: c.storage.check_compaction_result,
             mem_table_spill_threshold: c.storage.mem_table_spill_threshold,
             object_store_config: c.storage.object_store.clone(),
             compactor_fast_max_compact_delete_ratio: c

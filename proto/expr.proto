@@ -275,6 +275,9 @@ message ExprNode {
     PG_GET_INDEXDEF = 2400;
     COL_DESCRIPTION = 2401;
     PG_GET_VIEWDEF = 2402;
+
+    // EXTERNAL
+    ICEBERG_TRANSFORM = 2201;
   }
   // Only use this field for function call. For other types of expression, it should be UNSPECIFIED.
   Type function_type = 1;

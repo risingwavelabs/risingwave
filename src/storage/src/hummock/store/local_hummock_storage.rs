@@ -30,8 +30,8 @@ use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use crate::error::StorageResult;
 use crate::hummock::event_handler::{HummockEvent, LocalInstanceGuard};
 use crate::hummock::iterator::{
-    ConcatIteratorInner, Forward, HummockIteratorUnion, OrderedMergeIteratorInner,
-    SkipWatermarkIterator, UnorderedMergeIteratorInner, UserIterator,
+    ConcatIteratorInner, Forward, HummockIteratorUnion, MergeIterator, SkipWatermarkIterator,
+    UserIterator,
 };
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
@@ -568,11 +568,11 @@ impl LocalHummockStorage {
     }
 }
 
-pub type StagingDataIterator = OrderedMergeIteratorInner<
+pub type StagingDataIterator = MergeIterator<
     HummockIteratorUnion<Forward, SharedBufferBatchIterator<Forward>, SstableIterator>,
 >;
 pub type HummockStorageIteratorPayloadInner<'a> = SkipWatermarkIterator<
-    UnorderedMergeIteratorInner<
+    MergeIterator<
         HummockIteratorUnion<
             Forward,
             StagingDataIterator,

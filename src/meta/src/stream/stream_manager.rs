@@ -619,8 +619,26 @@ impl GlobalStreamManager {
             .drop_source_fragments(&table_fragments_vec)
             .await;
 
+        // Drop table fragments directly.
+        mgr.fragment_manager
+            .drop_table_fragments_vec(&table_ids.into_iter().collect())
+            .await?;
+
+        // Issues a drop barrier command.
+        let mut worker_actors = HashMap::new();
+        for table_fragments in &table_fragments_vec {
+            table_fragments
+                .worker_actor_ids()
+                .into_iter()
+                .for_each(|(worker_id, actor_ids)| {
+                    worker_actors
+                        .entry(worker_id)
+                        .or_insert_with(Vec::new)
+                        .extend(actor_ids);
+                });
+        }
         self.barrier_scheduler
-            .run_command(Command::DropStreamingJobs(table_ids.into_iter().collect()))
+            .run_command(Command::DropStreamingJobs(worker_actors))
             .await?;
 
         // Unregister from compaction group afterwards.
@@ -767,6 +785,7 @@ mod tests {
 
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::ParallelUnitMapping;
+    use risingwave_common::system_param::reader::SystemParamsRead;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::add_worker_node_request::Property;
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;

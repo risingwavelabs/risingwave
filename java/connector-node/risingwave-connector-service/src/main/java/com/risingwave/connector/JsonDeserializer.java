@@ -23,10 +23,10 @@ import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch.JsonPayload;
 import com.risingwave.proto.Data;
 import java.math.BigDecimal;
-import java.sql.Date;
-import java.sql.Time;
-import java.sql.Timestamp;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.util.Base64;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -135,10 +135,10 @@ public class JsonDeserializer implements Deserializer {
         }
     }
 
-    private static Time castTime(Object value) {
+    private static LocalTime castTime(Object value) {
         try {
             Long milli = castLong(value);
-            return new Time(milli);
+            return LocalTime.ofNanoOfDay(milli * 1_000_000L);
         } catch (RuntimeException e) {
             throw io.grpc.Status.INVALID_ARGUMENT
                     .withDescription("unable to cast into time from " + value.getClass())
@@ -146,10 +146,10 @@ public class JsonDeserializer implements Deserializer {
         }
     }
 
-    private static Date castDate(Object value) {
+    private static LocalDate castDate(Object value) {
         try {
-            Long days = castLong(value) - 1;
-            return Date.valueOf(LocalDate.of(1, 1, 1).plusDays(days));
+            Long days = castLong(value);
+            return LocalDate.ofEpochDay(days);
         } catch (RuntimeException e) {
             throw io.grpc.Status.INVALID_ARGUMENT
                     .withDescription("unable to cast into date from " + value.getClass())
@@ -190,14 +190,21 @@ public class JsonDeserializer implements Deserializer {
                 }
                 return value;
             case TIMESTAMP:
-            case TIMESTAMPTZ:
                 if (!(value instanceof String)) {
                     throw io.grpc.Status.INVALID_ARGUMENT
                             .withDescription(
                                     "Expected timestamp in string, got " + value.getClass())
                             .asRuntimeException();
                 }
-                return Timestamp.valueOf((String) value);
+                return LocalDateTime.parse((String) value);
+            case TIMESTAMPTZ:
+                if (!(value instanceof String)) {
+                    throw io.grpc.Status.INVALID_ARGUMENT
+                            .withDescription(
+                                    "Expected timestamptz in string, got " + value.getClass())
+                            .asRuntimeException();
+                }
+                return OffsetDateTime.parse((String) value);
             case TIME:
                 return castTime(value);
             case DATE:

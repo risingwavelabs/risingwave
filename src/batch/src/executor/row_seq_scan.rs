@@ -24,7 +24,6 @@ use risingwave_common::catalog::{ColumnId, Schema};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::select_all;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, PbScanRange};
@@ -32,8 +31,9 @@ use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::{collect_data_chunk, Distribution};
+use risingwave_storage::table::{collect_data_chunk, TableDistribution};
 use risingwave_storage::{dispatch_state_store, StateStore};
+use rw_futures_util::select_all;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
@@ -183,7 +183,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             Some(vnodes) => Some(Bitmap::from(vnodes).into()),
             // This is possible for dml. vnode_bitmap is not filled by scheduler.
             // Or it's single distribution, e.g., distinct agg. We scan in a single executor.
-            None => Some(Distribution::all_vnodes()),
+            None => Some(TableDistribution::all_vnodes()),
         };
 
         let scan_ranges = {

@@ -27,7 +27,7 @@ use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
 use risingwave_common::{bail_not_implemented, current_cluster_version, no_function};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
-    Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
+    Frame, FrameBound, FrameBounds, FrameExclusion, RowsFrameBounds, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
     self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, Ident, SelectItem, SetExpr,
@@ -54,6 +54,12 @@ pub const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
     "current_schema",
     "current_timestamp",
 ];
+
+/// The global max calling depth for the global counter in `udf_context`
+/// To reduce the chance that the current running rw thread
+/// be killed by os, the current allowance depth of calling
+/// stack is set to `16`.
+const SQL_UDF_MAX_CALLING_DEPTH: u32 = 16;
 
 impl Binder {
     pub(in crate::binder) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
@@ -235,6 +241,7 @@ impl Binder {
                     )
                     .into());
                 }
+
                 // This represents the current user defined function is `language sql`
                 let parse_result = risingwave_sqlparser::parser::Parser::parse_sql(
                     func.body.as_ref().unwrap().as_str(),
@@ -245,45 +252,64 @@ impl Binder {
                     // Here we just return the original parse error message
                     return Err(ErrorCode::InvalidInputSyntax(err).into());
                 }
+
                 debug_assert!(parse_result.is_ok());
 
                 // We can safely unwrap here
                 let ast = parse_result.unwrap();
 
-                let mut clean_flag = true;
+                // Stash the current `udf_context`
+                // Note that the `udf_context` may be empty,
+                // if the current binding is the root (top-most) sql udf.
+                // In this case the empty context will be stashed
+                // and restored later, no need to maintain other flags.
+                let stashed_udf_context = self.udf_context.get_context();
 
-                // We need to check if the `udf_context` is empty first, consider the following example:
-                // - create function add(INT, INT) returns int language sql as 'select $1 + $2';
-                // - create function add_wrapper(INT, INT) returns int language sql as 'select add($1, $2)';
-                // - select add_wrapper(1, 1);
-                // When binding `add($1, $2)` in `add_wrapper`, the input args are [$1, $2] instead of
-                // the original [1, 1], thus we need to check `udf_context` to see if the input
-                // args already exist in the context. If so, we do NOT need to create the context again.
-                // Otherwise the current `udf_context` will be corrupted.
-                if self.udf_context.is_empty() {
-                    // The actual inline logic for sql udf
-                    if let Ok(context) = create_udf_context(&args, &Arc::clone(func)) {
-                        self.udf_context = context;
-                    } else {
-                        return Err(ErrorCode::InvalidInputSyntax(
-                            "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
+                // The actual inline logic for sql udf
+                // Note that we will always create new udf context for each sql udf
+                let Ok(context) = create_udf_context(&args, &Arc::clone(func)) else {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
+                    )
+                    .into());
+                };
+
+                let mut udf_context = HashMap::new();
+                for (c, e) in context {
+                    // Note that we need to bind the args before actual delve in the function body
+                    // This will update the context in the subsequent inner calling function
+                    // e.g.,
+                    // - create function print(INT) returns int language sql as 'select $1';
+                    // - create function print_add_one(INT) returns int language sql as 'select print($1 + 1)';
+                    // - select print_add_one(1); # The result should be 2 instead of 1.
+                    // Without the pre-binding here, the ($1 + 1) will not be correctly populated,
+                    // causing the result to always be 1.
+                    let Ok(e) = self.bind_expr(e) else {
+                        return Err(ErrorCode::BindError(
+                            "failed to bind the argument, please recheck the syntax".to_string(),
                         )
                         .into());
-                    }
+                    };
+                    udf_context.insert(c, e);
+                }
+                self.udf_context.update_context(udf_context);
+
+                // Check for potential recursive calling
+                if self.udf_context.global_count() >= SQL_UDF_MAX_CALLING_DEPTH {
+                    return Err(ErrorCode::BindError(format!(
+                        "function {} calling stack depth limit exceeded",
+                        &function_name
+                    ))
+                    .into());
                 } else {
-                    // If the `udf_context` is not empty, this means the current binding
-                    // function is not the root binding sql udf, thus we should NOT
-                    // clean the context after binding.
-                    clean_flag = false;
+                    // Update the status for the global counter
+                    self.udf_context.incr_global_count();
                 }
 
                 if let Ok(expr) = extract_udf_expression(ast) {
                     let bind_result = self.bind_expr(expr);
-                    // Clean the `udf_context` after inlining,
-                    // which makes sure the subsequent binding will not be affected
-                    if clean_flag {
-                        self.udf_context.clear();
-                    }
+                    // Restore context information for subsequent binding
+                    self.udf_context.update_context(stashed_udf_context);
                     return bind_result;
                 } else {
                     return Err(ErrorCode::InvalidInputSyntax(
@@ -663,7 +689,7 @@ impl Binder {
                     } else {
                         FrameBound::CurrentRow
                     };
-                    FrameBounds::Rows(start, end)
+                    FrameBounds::Rows(RowsFrameBounds { start, end })
                 }
                 WindowFrameUnits::Range | WindowFrameUnits::Groups => {
                     bail_not_implemented!(

@@ -30,6 +30,7 @@ aws-smithy-runtime = { version = "1", default-features = false, features = ["cli
 aws-smithy-types = { version = "1", default-features = false, features = ["byte-stream-poll-next", "http-body-0-4-x", "hyper-0-14-x", "rt-tokio"] }
 axum = { version = "0.6" }
 base64 = { version = "0.21", features = ["alloc"] }
+bigdecimal = { version = "0.4" }
 bit-vec = { version = "0.6" }
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
 byteorder = { version = "1" }
@@ -51,6 +52,7 @@ frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 futures = { version = "0.3" }
 futures-channel = { version = "0.3", features = ["sink"] }
 futures-core = { version = "0.3" }
+futures-executor = { version = "0.3" }
 futures-io = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-task = { version = "0.3" }
@@ -148,6 +150,8 @@ url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
 whoami = { version = "1" }
 zeroize = { version = "1" }
+zstd = { version = "0.13" }
+zstd-safe = { version = "7", default-features = false, features = ["arrays", "legacy", "std", "zdict_builder"] }
 zstd-sys = { version = "2", default-features = false, features = ["legacy", "std", "zdict_builder"] }
 
 [build-dependencies]

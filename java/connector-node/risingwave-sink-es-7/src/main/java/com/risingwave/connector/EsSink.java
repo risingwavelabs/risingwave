@@ -20,7 +20,6 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.connector.api.sink.SinkWriterBase;
 import io.grpc.Status;
-import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -249,7 +248,7 @@ public class EsSink extends SinkWriterBase {
         /** This method is called just before bulk is executed. */
         @Override
         public void beforeBulk(long executionId, BulkRequest request) {
-            LOG.info("Sending bulk of {} actions to Elasticsearch.", request.numberOfActions());
+            LOG.debug("Sending bulk of {} actions to Elasticsearch.", request.numberOfActions());
         }
 
         /** This method is called after bulk execution. */
@@ -263,7 +262,7 @@ public class EsSink extends SinkWriterBase {
                 this.requestTracker.addErrResult(errMessage);
             } else {
                 this.requestTracker.addOkResult(request.numberOfActions());
-                LOG.info("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
+                LOG.debug("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
             }
         }
 
@@ -352,11 +351,5 @@ public class EsSink extends SinkWriterBase {
 
     public RestHighLevelClient getClient() {
         return client;
-    }
-
-    private final SimpleDateFormat createSimpleDateFormat(String pattern, TimeZone timeZone) {
-        SimpleDateFormat sdf = new SimpleDateFormat(pattern);
-        sdf.setTimeZone(timeZone);
-        return sdf;
     }
 }
