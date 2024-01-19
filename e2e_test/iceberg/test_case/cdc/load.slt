@@ -7,7 +7,7 @@ create source mysql_mydb with (
     port = '3306',
     username = 'root',
     password = '123456',
-    database.name = 'my@db',
+    database.name = 'mydb',
     server.id = '2'
 );
 
@@ -16,7 +16,7 @@ create table products ( id INT,
  name STRING,
  description STRING,
  PRIMARY KEY (id)
-) FROM mysql_mydb TABLE 'my@db.products';
+) FROM mysql_mydb TABLE 'mydb.products';
 
 
 statement ok
