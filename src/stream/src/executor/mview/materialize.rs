@@ -211,6 +211,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     let mutation = b.mutation.clone();
                     // If a downstream mv depends on the current table, we need to do conflict check again.
                     if can_disable_overwrite_conflict_check
+                        && matches!(self.conflict_behavior, ConflictBehavior::Overwrite)
                         && Self::new_downstream_created(mutation, self.actor_context.id)
                     {
                         can_disable_overwrite_conflict_check = false;
