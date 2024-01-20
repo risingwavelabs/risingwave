@@ -985,8 +985,8 @@ impl HummockVersionReader {
                     // We put the SstableIterator in `overlapping_iters` just for convenience since
                     // it overlaps with SSTs in other levels. In metrics reporting, we still count
                     // it in `non_overlapping_iter_count`.
-                    overlapping_iters.push(SstableIterator::new(
-                        sstable,
+                    non_overlapping_iters.push(ConcatIterator::new(
+                        sstables,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
                     ));
