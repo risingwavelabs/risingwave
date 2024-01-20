@@ -37,12 +37,12 @@ pub enum SourceNodeKind {
     CreateTable,
     /// `CREATE SOURCE` with a streaming job (backfill-able source).
     CreateSourceWithStreamjob,
-    /// `CREATE MATERIALIZED VIEW` which selects from a non backfill-able source.
+    /// `CREATE MATERIALIZED VIEW` which selects from a source.
     ///
     /// Note:
-    /// - For non backfill-able source, `CREATE SOURCE` will not create a source node.
-    /// - For backfill-able source, `CREATE MATERIALIZE VIEW` will not create a source node.
-    CreateMView,
+    /// - For non backfill-able source, `CREATE SOURCE` will not create a source node, and `CREATE MATERIALIZE VIEW` will create a `LogicalSource`.
+    /// - For backfill-able source, `CREATE MATERIALIZE VIEW` will create `LogicalSourceBackfill` instead of `LogicalSource`.
+    CreateMViewOrBatch,
 }
 
 /// [`Source`] returns contents of a table or other equivalent object

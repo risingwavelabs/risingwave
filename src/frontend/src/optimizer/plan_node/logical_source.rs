@@ -516,7 +516,7 @@ impl ToStream for LogicalSource {
                     plan = StreamSource::new(self.core.clone()).into()
                 }
             }
-            SourceNodeKind::CreateMView => {
+            SourceNodeKind::CreateMViewOrBatch => {
                 // Create MV on source.
                 if self.core.is_new_fs_connector() {
                     plan = Self::create_fs_list_plan(self.core.clone())?;

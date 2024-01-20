@@ -88,7 +88,7 @@ impl Planner {
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
         Ok(LogicalSource::with_catalog(
             Rc::new(source.catalog),
-            SourceNodeKind::CreateMView,
+            SourceNodeKind::CreateMViewOrBatch,
             self.ctx(),
         )?
         .into())
