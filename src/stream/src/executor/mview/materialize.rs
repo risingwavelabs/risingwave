@@ -208,11 +208,17 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     }
                 }
                 Message::Barrier(b) => {
-                    self.state_table.commit(b.epoch).await?;
                     let mutation = b.mutation.clone();
                     // If a downstream mv depends on the current table, we need to do conflict check again.
-                    if Self::new_downstream_created(mutation, self.actor_context.id) {
+                    if can_disable_overwrite_conflict_check
+                        && Self::new_downstream_created(mutation, self.actor_context.id)
+                    {
                         can_disable_overwrite_conflict_check = false;
+                        self.state_table
+                            .commit_with_switch_consistent_op(b.epoch, Some(true))
+                            .await?;
+                    } else {
+                        self.state_table.commit(b.epoch).await?;
                     }
 
                     // Update the vnode bitmap for the state table if asked.
