@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -90,6 +93,10 @@ impl<I: stream::StreamPlanRef> Join<I> {
     ) -> (TableCatalog, TableCatalog, Vec<usize>) {
         let schema = input.schema();
 
+        // Dedup join_key_indices because sometimes a column can appear multiple times in join key
+        // e.g. t1.a = t2.a and t1.a = t3.b
+        // let join_key_indices = join_key_indices.into_iter().unique().collect_vec();
+
         let internal_table_dist_keys = dk_indices_in_jk
             .iter()
             .map(|idx| join_key_indices[*idx])
@@ -101,7 +108,7 @@ impl<I: stream::StreamPlanRef> Join<I> {
         let join_key_len = join_key_indices.len();
         let mut pk_indices = join_key_indices;
 
-        // dedup the pk in dist key..
+        // dedup the pk in dist key.
         let mut deduped_input_pk_indices = vec![];
         for input_pk_idx in input.stream_key().unwrap() {
             if !pk_indices.contains(input_pk_idx)
@@ -118,23 +125,33 @@ impl<I: stream::StreamPlanRef> Join<I> {
             TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
         let internal_columns_fields = schema.fields().to_vec();
 
-        internal_columns_fields.iter().for_each(|field| {
+        for field in &internal_columns_fields {
             internal_table_catalog_builder.add_column(field);
-        });
-        pk_indices.iter().for_each(|idx| {
+        }
+        for idx in &pk_indices {
             internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending())
-        });
+        }
 
         // Build degree table.
         let mut degree_table_catalog_builder =
             TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
 
-        let degree_column_field = Field::with_name(DataType::Int64, "_degree");
-
-        pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
-            degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
+        let mut pk_index_to_degree_table_index = HashMap::new();
+        for idx in &pk_indices {
+            let order_idx = match pk_index_to_degree_table_index.entry(*idx) {
+                // If the pk column is already in the degree table, we should use the same order_idx
+                Entry::Occupied(entry) => *entry.get(),
+                // Otherwise, add the pk column to the degree table and use the new order_idx
+                Entry::Vacant(entry) => {
+                    let order_idx =
+                        degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
+                    *entry.insert(order_idx)
+                }
+            };
             degree_table_catalog_builder.add_order_column(order_idx, OrderType::ascending());
-        });
+        }
+
+        let degree_column_field = Field::with_name(DataType::Int64, "_degree");
         degree_table_catalog_builder.add_column(&degree_column_field);
         degree_table_catalog_builder
             .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
