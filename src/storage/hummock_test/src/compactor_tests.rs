@@ -1733,18 +1733,19 @@ pub(crate) mod tests {
         }
 
         let target_file_size = max_sst_file_size / 4;
+        let old_sst = sst_infos.drain(..1).collect_vec();
 
         let task = CompactTask {
             input_ssts: vec![
                 InputLevel {
                     level_idx: 5,
                     level_type: 1,
-                    table_infos: sst_infos.drain(..1).collect_vec(),
+                    table_infos: sst_infos,
                 },
                 InputLevel {
                     level_idx: 6,
                     level_type: 1,
-                    table_infos: sst_infos,
+                    table_infos: old_sst,
                 },
             ],
             existing_table_ids: vec![1],

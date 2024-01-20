@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use await_tree::InstrumentAwait;
+use itertools::Itertools;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
@@ -417,6 +418,23 @@ impl HummockEventHandler {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
                     if version_to_apply.max_committed_epoch == version_delta.max_committed_epoch {
                         sst_delta_infos = version_to_apply.build_sst_delta_infos(version_delta);
+                        tracing::info!(
+                            "apply version delta {}: sst deltas: {:?}",
+                            version_delta.id,
+                            sst_delta_infos
+                                .iter()
+                                .map(|info| {
+                                    (
+                                        info.insert_sst_level,
+                                        info.insert_sst_infos
+                                            .iter()
+                                            .map(|sst| sst.sst_id)
+                                            .collect_vec(),
+                                        info.delete_sst_object_ids.clone(),
+                                    )
+                                })
+                                .collect_vec()
+                        );
                     }
                     version_to_apply.apply_version_delta(version_delta);
                 }

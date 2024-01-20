@@ -486,6 +486,14 @@ impl HummockIterator for ConcatSstableIterator {
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         stats.add(&self.stats)
     }
+
+    fn debug_print(&self) -> String {
+        if let Some(iter) = self.sstable_iter.as_ref() {
+            iter.sst_debug_info()
+        } else {
+            format!("compactor-concat-iterator")
+        }
+    }
 }
 
 pub struct MonitoredCompactorIterator<I> {

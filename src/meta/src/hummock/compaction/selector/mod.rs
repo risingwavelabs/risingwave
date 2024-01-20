@@ -69,6 +69,7 @@ pub fn default_compaction_selector() -> Box<dyn CompactionSelector> {
 #[derive(Default)]
 pub struct LocalSelectorStatistic {
     skip_picker: Vec<(usize, usize, LocalPickerStatistic)>,
+    pick_whole_level: u64,
 }
 
 impl LocalSelectorStatistic {
@@ -102,6 +103,13 @@ impl LocalSelectorStatistic {
             metrics
                 .compact_skip_frequency
                 .with_label_values(&[level_label.as_str(), "picker"])
+                .inc();
+        }
+        if self.pick_whole_level > 0 {
+            let level_label = format!("cg{}-", group_id);
+            metrics
+                .compact_skip_frequency
+                .with_label_values(&[level_label.as_str(), "pick_whole_level"])
                 .inc();
         }
     }

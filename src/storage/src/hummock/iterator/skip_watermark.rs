@@ -269,6 +269,10 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for SkipWatermarkI
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         self.inner.collect_local_statistic(stats)
     }
+
+    fn debug_print(&self) -> String {
+        self.inner.debug_print()
+    }
 }
 
 #[cfg(test)]

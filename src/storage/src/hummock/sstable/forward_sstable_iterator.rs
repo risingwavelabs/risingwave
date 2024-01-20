@@ -291,6 +291,10 @@ impl HummockIterator for SstableIterator {
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         stats.add(&self.stats);
     }
+
+    fn debug_print(&self) -> String {
+        format!("sstable-{}", self.sst.id)
+    }
 }
 
 impl SstableIteratorType for SstableIterator {

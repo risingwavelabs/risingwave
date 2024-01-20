@@ -180,4 +180,11 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
             iter.collect_local_statistic(stats);
         }
     }
+
+    fn debug_print(&self) -> String {
+        if let Some(iter) = self.sstable_iter.as_ref() {
+            return iter.debug_print();
+        }
+        "concat-iterator-empty".to_string()
+    }
 }

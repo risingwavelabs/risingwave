@@ -62,6 +62,7 @@ impl CompactionPicker for IntraCompactionPicker {
         if let Some(ret) =
             self.pick_whole_level(l0, &level_handlers[0], vnode_partition_count, stats)
         {
+            stats.pick_whole_level += 1;
             return Some(ret);
         }
 
@@ -145,6 +146,7 @@ impl IntraCompactionPicker {
                 });
             }
             if !select_level_inputs.is_empty() {
+                select_level_inputs.reverse();
                 let vnode_partition_count =
                     if select_input_size > self.config.sub_level_max_compaction_bytes / 2 {
                         partition_count

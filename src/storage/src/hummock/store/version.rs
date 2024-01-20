@@ -1046,7 +1046,10 @@ impl HummockVersionReader {
 
         // 3. build user_iterator
         let merge_iter = MergeIterator::new(
-            once(HummockIteratorUnion::First(staging_iter))
+            mem_table
+                .into_iter()
+                .map(HummockIteratorUnion::Fourth)
+                .chain(once(HummockIteratorUnion::First(staging_iter)))
                 .chain(
                     overlapping_iters
                         .into_iter()
@@ -1056,8 +1059,7 @@ impl HummockVersionReader {
                     non_overlapping_iters
                         .into_iter()
                         .map(HummockIteratorUnion::Third),
-                )
-                .chain(mem_table.into_iter().map(HummockIteratorUnion::Fourth)),
+                ),
         );
 
         let watermark = watermark

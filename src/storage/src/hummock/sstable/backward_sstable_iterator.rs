@@ -149,6 +149,10 @@ impl HummockIterator for BackwardSstableIterator {
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         stats.add(&self.stats)
     }
+
+    fn debug_print(&self) -> String {
+        format!("backward-sstable-{}", self.sst.id)
+    }
 }
 
 impl SstableIteratorType for BackwardSstableIterator {

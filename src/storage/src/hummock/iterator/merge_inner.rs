@@ -29,6 +29,7 @@ use crate::monitor::StoreLocalStatistic;
 
 pub struct Node<I: HummockIterator> {
     iter: I,
+    index: usize,
 }
 
 impl<I: HummockIterator> Eq for Node<I> where Self: PartialEq {}
@@ -48,7 +49,30 @@ impl<I: HummockIterator> Ord for Node<I> {
         // order should be reversed.
 
         match I::Direction::direction() {
-            DirectionEnum::Forward => other.iter.key().cmp(&self.iter.key()),
+            DirectionEnum::Forward => {
+                let ord = other.iter.key().cmp(&self.iter.key());
+                if other.iter.key().user_key.eq(&self.iter.key().user_key) {
+                    let seq_ord = self
+                        .iter
+                        .key()
+                        .epoch_with_gap
+                        .cmp(&other.iter.key().epoch_with_gap);
+                    let index_ord = other.index.cmp(&self.index);
+                    assert_eq!(
+                        seq_ord,
+                        index_ord,
+                        "tombstone sequence is not correct {:?}, {:?} vs {:?}. index-{}: {}, index-{}: {}",
+                        self.iter.key().user_key,
+                        self.iter.key().epoch_with_gap,
+                        other.iter.key().epoch_with_gap,
+                        self.index,
+                        self.iter.debug_print(),
+                        other.index,
+                        other.iter.debug_print(),
+                    );
+                }
+                ord
+            }
             DirectionEnum::Backward => self.iter.key().cmp(&other.iter.key()),
         }
     }
@@ -91,7 +115,11 @@ impl<I: HummockIterator> MergeIterator<I> {
 
     fn create(iterators: impl IntoIterator<Item = I>) -> Self {
         Self {
-            unused_iters: iterators.into_iter().map(|iter| Node { iter }).collect(),
+            unused_iters: iterators
+                .into_iter()
+                .enumerate()
+                .map(|(index, iter)| Node { iter, index })
+                .collect(),
             heap: BinaryHeap::new(),
         }
     }
@@ -266,5 +294,12 @@ where
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         self.collect_local_statistic_impl(stats);
+    }
+
+    fn debug_print(&self) -> String {
+        if let Some(node) = self.heap.peek().as_ref() {
+            return node.iter.debug_print();
+        }
+        "merge-iterator-empty".to_string()
     }
 }

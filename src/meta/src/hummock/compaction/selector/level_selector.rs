@@ -442,6 +442,7 @@ impl CompactionSelector for DynamicLevelSelector {
             let mut stats = LocalPickerStatistic::default();
             if let Some(ret) = picker.pick_compaction(levels, level_handlers, &mut stats) {
                 ret.add_pending_task(task_id, level_handlers);
+                selector_stats.pick_whole_level += stats.pick_whole_level;
                 return Some(create_compaction_task(
                     dynamic_level_core.get_config(),
                     ret,
