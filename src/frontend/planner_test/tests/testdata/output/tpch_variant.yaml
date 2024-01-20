@@ -727,7 +727,7 @@
 
     Table 1 { columns: [ n_nationkey, n_name, _row_id, r_regionkey, _row_id_0 ], primary key: [ $0 ASC, $0 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 0 ], read pk prefix len hint: 2 }
 
-    Table 2 { columns: [ n_nationkey, n_nationkey_0, _row_id, _row_id_0, r_regionkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC ], value indices: [ 5 ], distribution key: [ 1, 0 ], read pk prefix len hint: 2 }
+    Table 2 { columns: [ n_nationkey, _row_id, _row_id_0, r_regionkey, _degree ], primary key: [ $0 ASC, $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 1, 0 ], read pk prefix len hint: 2 }
 
     Table 3
     ├── columns: [ c_nationkey, l_extendedprice, l_discount, s_nationkey, _row_id, _row_id_0, o_custkey, o_orderkey, _row_id_1, _row_id_2, l_suppkey ]
@@ -1597,7 +1597,7 @@
 
     Table 1 { columns: [ p_partkey, ps_partkey, ps_suppkey, ps_supplycost, _row_id, _row_id_0 ], primary key: [ $0 ASC, $2 ASC, $1 ASC, $2 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 2 ], read pk prefix len hint: 4 }
 
-    Table 2 { columns: [ p_partkey, ps_suppkey, ps_partkey, ps_suppkey_0, _row_id, _row_id_0, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 6 ], distribution key: [ 3 ], read pk prefix len hint: 4 }
+    Table 2 { columns: [ p_partkey, ps_suppkey, ps_partkey, _row_id, _row_id_0, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $1 ASC, $3 ASC, $4 ASC ], value indices: [ 5 ], distribution key: [ 3 ], read pk prefix len hint: 4 }
 
     Table 3
     ├── columns: [ n_name, s_suppkey, o_orderdate, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, o_orderkey ]
@@ -1606,7 +1606,7 @@
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 4
 
-    Table 4 { columns: [ l_partkey, l_suppkey, l_partkey_0, s_suppkey, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, o_orderkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC ], value indices: [ 10 ], distribution key: [ 3 ], read pk prefix len hint: 4 }
+    Table 4 { columns: [ l_partkey, l_suppkey, s_suppkey, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, o_orderkey, _degree ], primary key: [ $0 ASC, $1 ASC, $0 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC ], value indices: [ 9 ], distribution key: [ 3 ], read pk prefix len hint: 4 }
 
     Table 5 { columns: [ p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id ], primary key: [ $0 ASC, $9 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 

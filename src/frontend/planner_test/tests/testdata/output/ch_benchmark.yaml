@@ -287,7 +287,7 @@
 
     Table 4 { columns: [ stock_s_i_id, min(stock_s_quantity) ], primary key: [ $0 ASC, $1 ASC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 3 }
 
-    Table 5 { columns: [ stock_s_i_id, min(stock_s_quantity), stock_s_i_id_0, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0 ], read pk prefix len hint: 3 }
+    Table 5 { columns: [ stock_s_i_id, min(stock_s_quantity), _degree ], primary key: [ $0 ASC, $1 ASC, $0 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 3 }
 
     Table 6 { columns: [ item_i_id, item_i_name, stock_s_i_id, stock_s_w_id, stock_s_quantity ], primary key: [ $0 ASC, $4 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 3 }
 
@@ -483,11 +483,11 @@
 
     Table 1 { columns: [ customer_c_id, customer_c_d_id, customer_c_w_id, new_order_no_o_id, new_order_no_d_id, new_order_no_w_id ], primary key: [ $0 ASC, $2 ASC, $1 ASC, $5 ASC, $4 ASC, $3 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 3, 4, 5 ], read pk prefix len hint: 11 }
 
-    Table 2 { columns: [ customer_c_id, customer_c_w_id, customer_c_d_id, new_order_no_w_id, new_order_no_d_id, new_order_no_o_id, customer_c_d_id_0, customer_c_w_id_0, new_order_no_o_id_0, new_order_no_d_id_0, new_order_no_w_id_0, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC ], value indices: [ 11 ], distribution key: [ 5, 4, 3 ], read pk prefix len hint: 11 }
+    Table 2 { columns: [ customer_c_id, customer_c_w_id, customer_c_d_id, new_order_no_w_id, new_order_no_d_id, new_order_no_o_id, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $2 ASC, $1 ASC, $5 ASC, $4 ASC, $3 ASC ], value indices: [ 6 ], distribution key: [ 5, 4, 3 ], read pk prefix len hint: 11 }
 
     Table 3 { columns: [ orders_o_id, orders_o_d_id, orders_o_w_id, orders_o_c_id, orders_o_entry_d, order_line_ol_o_id, order_line_ol_d_id, order_line_ol_w_id, order_line_ol_amount, order_line_ol_number ], primary key: [ $3 ASC, $2 ASC, $1 ASC, $2 ASC, $1 ASC, $0 ASC, $6 ASC, $7 ASC, $5 ASC, $6 ASC, $7 ASC, $9 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 11 }
 
-    Table 4 { columns: [ orders_o_c_id, orders_o_w_id, orders_o_d_id, orders_o_w_id_0, orders_o_d_id_0, orders_o_id, order_line_ol_d_id, order_line_ol_w_id, order_line_ol_o_id, order_line_ol_d_id_0, order_line_ol_w_id_0, order_line_ol_number, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC ], value indices: [ 12 ], distribution key: [ 5, 4, 3 ], read pk prefix len hint: 11 }
+    Table 4 { columns: [ orders_o_c_id, orders_o_w_id, orders_o_d_id, orders_o_id, order_line_ol_d_id, order_line_ol_w_id, order_line_ol_o_id, order_line_ol_number, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC ], value indices: [ 8 ], distribution key: [ 5, 4, 3 ], read pk prefix len hint: 11 }
 
     Table 5 { columns: [ customer_c_id, customer_c_d_id, customer_c_w_id ], primary key: [ $1 ASC, $2 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1, 2 ], read pk prefix len hint: 2 }
 
@@ -792,11 +792,11 @@
 
     Table 5 { columns: [ customer_c_d_id, customer_c_w_id, customer_c_state, orders_o_id, orders_o_d_id, orders_o_w_id, customer_c_id ], primary key: [ $3 ASC, $5 ASC, $4 ASC, $0 ASC, $1 ASC, $5 ASC, $6 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 3, 0, 1, 5 ], read pk prefix len hint: 6 }
 
-    Table 6 { columns: [ orders_o_id, orders_o_w_id, orders_o_d_id, customer_c_d_id, customer_c_w_id, orders_o_w_id_0, customer_c_id, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC ], value indices: [ 7 ], distribution key: [ 0, 3, 4, 5 ], read pk prefix len hint: 6 }
+    Table 6 { columns: [ orders_o_id, orders_o_w_id, orders_o_d_id, customer_c_d_id, customer_c_w_id, customer_c_id, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $1 ASC, $5 ASC ], value indices: [ 6 ], distribution key: [ 0, 3, 4, 5 ], read pk prefix len hint: 6 }
 
     Table 7 { columns: [ order_line_ol_o_id, order_line_ol_d_id, order_line_ol_w_id, order_line_ol_amount, stock_s_i_id, stock_s_w_id, order_line_ol_number, order_line_ol_i_id ], primary key: [ $0 ASC, $2 ASC, $1 ASC, $1 ASC, $2 ASC, $5 ASC, $6 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 0, 1, 2, 5 ], read pk prefix len hint: 6 }
 
-    Table 8 { columns: [ order_line_ol_o_id, order_line_ol_w_id, order_line_ol_d_id, order_line_ol_d_id_0, order_line_ol_w_id_0, stock_s_w_id, order_line_ol_number, order_line_ol_i_id, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC ], value indices: [ 8 ], distribution key: [ 0, 3, 4, 5 ], read pk prefix len hint: 6 }
+    Table 8 { columns: [ order_line_ol_o_id, order_line_ol_w_id, order_line_ol_d_id, stock_s_w_id, order_line_ol_number, order_line_ol_i_id, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $2 ASC, $1 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 6 ], distribution key: [ 0, 3, 4, 5 ], read pk prefix len hint: 6 }
 
     Table 9 { columns: [ customer_c_id, customer_c_d_id, customer_c_w_id, customer_c_state ], primary key: [ $0 ASC, $2 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 1, 2, 0 ], read pk prefix len hint: 3 }
 
@@ -1105,7 +1105,7 @@
 
     Table 9 { columns: [ stock_s_i_id, stock_s_w_id, order_line_ol_o_id, order_line_ol_d_id, order_line_ol_w_id, order_line_ol_amount, order_line_ol_number ], primary key: [ $4 ASC, $3 ASC, $2 ASC, $3 ASC, $4 ASC, $1 ASC, $0 ASC, $6 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 2, 3, 4, 3, 4 ], read pk prefix len hint: 5 }
 
-    Table 10 { columns: [ order_line_ol_w_id, order_line_ol_d_id, order_line_ol_o_id, order_line_ol_d_id_0, order_line_ol_w_id_0, stock_s_w_id, stock_s_i_id, order_line_ol_number, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC ], value indices: [ 8 ], distribution key: [ 2, 1, 0, 3, 4 ], read pk prefix len hint: 5 }
+    Table 10 { columns: [ order_line_ol_w_id, order_line_ol_d_id, order_line_ol_o_id, stock_s_w_id, stock_s_i_id, order_line_ol_number, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $1 ASC, $0 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 6 ], distribution key: [ 2, 1, 0, 3, 4 ], read pk prefix len hint: 5 }
 
     Table 11 { columns: [ orders_o_id, orders_o_d_id, orders_o_w_id, orders_o_entry_d, customer_c_d_id, customer_c_w_id, customer_c_state, orders_o_c_id, customer_c_id ], primary key: [ $2 ASC, $1 ASC, $0 ASC, $4 ASC, $5 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ], distribution key: [ 0, 1, 2, 4, 5 ], read pk prefix len hint: 5 }
 
@@ -1414,7 +1414,7 @@
 
     Table 11 { columns: [ stock_s_i_id, stock_s_w_id, order_line_ol_o_id, order_line_ol_d_id, order_line_ol_w_id, order_line_ol_amount, item_i_id, order_line_ol_number ], primary key: [ $4 ASC, $3 ASC, $2 ASC, $3 ASC, $4 ASC, $6 ASC, $1 ASC, $7 ASC, $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 2, 3, 4 ], read pk prefix len hint: 5 }
 
-    Table 12 { columns: [ order_line_ol_w_id, order_line_ol_d_id, order_line_ol_o_id, order_line_ol_d_id_0, order_line_ol_w_id_0, item_i_id, stock_s_w_id, order_line_ol_number, stock_s_i_id, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC ], value indices: [ 9 ], distribution key: [ 2, 3, 4 ], read pk prefix len hint: 5 }
+    Table 12 { columns: [ order_line_ol_w_id, order_line_ol_d_id, order_line_ol_o_id, item_i_id, stock_s_w_id, order_line_ol_number, stock_s_i_id, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $1 ASC, $0 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC ], value indices: [ 7 ], distribution key: [ 2, 3, 4 ], read pk prefix len hint: 5 }
 
     Table 13 { columns: [ orders_o_id, orders_o_d_id, orders_o_w_id, orders_o_c_id, orders_o_entry_d ], primary key: [ $3 ASC, $2 ASC, $1 ASC, $0 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 1, 2, 3 ], read pk prefix len hint: 3 }
 
@@ -1434,7 +1434,7 @@
 
     Table 21 { columns: [ order_line_ol_o_id, order_line_ol_d_id, order_line_ol_w_id, order_line_ol_i_id, order_line_ol_supply_w_id, order_line_ol_amount, order_line_ol_number ], primary key: [ $3 ASC, $4 ASC, $3 ASC, $2 ASC, $1 ASC, $0 ASC, $6 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 3, 4 ], read pk prefix len hint: 3 }
 
-    Table 22 { columns: [ order_line_ol_i_id, order_line_ol_supply_w_id, order_line_ol_i_id_0, order_line_ol_w_id, order_line_ol_d_id, order_line_ol_o_id, order_line_ol_number, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC ], value indices: [ 7 ], distribution key: [ 2, 1 ], read pk prefix len hint: 3 }
+    Table 22 { columns: [ order_line_ol_i_id, order_line_ol_supply_w_id, order_line_ol_w_id, order_line_ol_d_id, order_line_ol_o_id, order_line_ol_number, _degree ], primary key: [ $0 ASC, $1 ASC, $0 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 6 ], distribution key: [ 2, 1 ], read pk prefix len hint: 3 }
 
     Table 23 { columns: [ item_i_id ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -1657,7 +1657,7 @@
     ├── distribution key: [ 1, 2 ]
     └── read pk prefix len hint: 3
 
-    Table 8 { columns: [ order_line_ol_i_id, order_line_ol_supply_w_id, order_line_ol_i_id_0, orders_o_w_id, orders_o_d_id, orders_o_id, order_line_ol_number, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC ], value indices: [ 7 ], distribution key: [ 2, 1 ], read pk prefix len hint: 3 }
+    Table 8 { columns: [ order_line_ol_i_id, order_line_ol_supply_w_id, orders_o_w_id, orders_o_d_id, orders_o_id, order_line_ol_number, _degree ], primary key: [ $0 ASC, $1 ASC, $0 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 6 ], distribution key: [ 2, 1 ], read pk prefix len hint: 3 }
 
     Table 9 { columns: [ item_i_id ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -1828,7 +1828,7 @@
 
     Table 5 { columns: [ order_line_ol_o_id, order_line_ol_d_id, order_line_ol_w_id, order_line_ol_delivery_d, order_line_ol_amount, order_line_ol_number ], primary key: [ $2 ASC, $1 ASC, $0 ASC, $1 ASC, $2 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 1, 2, 0, 1, 2 ], read pk prefix len hint: 5 }
 
-    Table 6 { columns: [ order_line_ol_w_id, order_line_ol_d_id, order_line_ol_o_id, order_line_ol_d_id_0, order_line_ol_w_id_0, order_line_ol_number, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 6 ], distribution key: [ 3, 4, 2, 1, 0 ], read pk prefix len hint: 5 }
+    Table 6 { columns: [ order_line_ol_w_id, order_line_ol_d_id, order_line_ol_o_id, order_line_ol_number, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $1 ASC, $0 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 3, 4, 2, 1, 0 ], read pk prefix len hint: 5 }
 
     Table 7
     ├── columns: [ customer_c_id, customer_c_d_id, customer_c_w_id, customer_c_last, customer_c_city, customer_c_state, customer_c_phone, orders_o_id, orders_o_d_id, orders_o_w_id, orders_o_entry_d ]
@@ -3384,7 +3384,7 @@
 
     Table 9 { columns: [ stock_s_i_id, stock_s_w_id ], primary key: [ $1 ASC, $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1, 0, 1 ], read pk prefix len hint: 3 }
 
-    Table 10 { columns: [ stock_s_w_id, stock_s_i_id, stock_s_w_id_0, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 10 { columns: [ stock_s_w_id, stock_s_i_id, _degree ], primary key: [ $0 ASC, $1 ASC, $0 ASC ], value indices: [ 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
     Table 11 { columns: [ order_line_ol_o_id, order_line_ol_d_id, order_line_ol_w_id, order_line_ol_i_id, order_line_ol_delivery_d, orders_o_w_id, order_line_ol_number, orders_o_d_id, orders_o_id ], primary key: [ $2 ASC, $3 ASC, $5 ASC, $1 ASC, $0 ASC, $6 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ], distribution key: [ 2, 3, 5 ], read pk prefix len hint: 3 }
 

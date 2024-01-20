@@ -337,3 +337,10 @@
   expected_outputs:
   - stream_plan
   - stream_dist_plan
+- name: Duplicate join key columns on one side
+  sql: |
+    create table t1 (c1 int, c2 int);
+    create table t2 (c3 int, c4 int);
+    select * from t1,t2 where c1=c3 and c1=c4;
+  expected_outputs:
+  - stream_dist_plan
