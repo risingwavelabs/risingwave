@@ -51,6 +51,7 @@ use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_stream::executor::test_utils::prelude::ColumnDesc;
 use risingwave_stream::executor::{Barrier, Message, MessageStreamItem, StreamExecutorError};
 use serde::{Deserialize, Deserializer};
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::time::{sleep, Instant};
 
@@ -298,7 +299,7 @@ where
     }
     let log_sinker = sink.new_log_sinker(sink_writer_param).await.unwrap();
     if let Err(e) = log_sinker.consume_log_and_sink(&mut log_reader).await {
-        return Err(e.to_string());
+        return Err(e.to_report_string());
     }
     Err("Stream closed".to_string())
 }

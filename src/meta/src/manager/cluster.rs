@@ -31,6 +31,7 @@ use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
@@ -400,11 +401,11 @@ impl ClusterManager {
                         }
                         Err(err) => {
                             tracing::warn!(
-                                "Failed to delete expired worker {} {:#?}, current timestamp {}. {:?}",
+                                error = %err.as_report(),
+                                "Failed to delete expired worker {} {:#?}, current timestamp {}",
                                 worker_id,
                                 key,
                                 now,
-                                err,
                             );
                         }
                     }

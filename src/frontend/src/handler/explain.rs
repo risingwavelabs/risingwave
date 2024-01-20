@@ -64,6 +64,7 @@ async fn do_handle_explain(
                 append_only,
                 cdc_table_info,
                 include_column_options,
+                wildcard_idx,
                 ..
             } => {
                 let col_id_gen = ColumnIdGenerator::new_initial();
@@ -77,6 +78,7 @@ async fn do_handle_explain(
                     cdc_table_info,
                     name.clone(),
                     columns,
+                    wildcard_idx,
                     constraints,
                     source_watermarks,
                     append_only,

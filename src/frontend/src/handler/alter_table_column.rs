@@ -153,6 +153,7 @@ pub async fn handle_alter_table_column(
         constraints,
         source_watermarks,
         append_only,
+        wildcard_idx,
         ..
     } = definition
     else {
@@ -167,6 +168,7 @@ pub async fn handle_alter_table_column(
         handler_args,
         col_id_gen,
         columns,
+        wildcard_idx,
         constraints,
         source_watermarks,
         append_only,

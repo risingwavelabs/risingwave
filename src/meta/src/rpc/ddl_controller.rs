@@ -57,6 +57,7 @@ use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::log::warn;
@@ -779,7 +780,7 @@ impl DdlController {
                         .await;
                     match result {
                         Err(e) => {
-                            tracing::error!(id=stream_job_id, error = ?e, "finish stream job failed")
+                            tracing::error!(id = stream_job_id, error = %e.as_report(), "finish stream job failed")
                         }
                         Ok(_) => {
                             tracing::info!(id = stream_job_id, "finish stream job succeeded")
@@ -1079,7 +1080,7 @@ impl DdlController {
         let job_id = stream_job.id();
         tracing::debug!(id = job_id, "creating stream job");
 
-        let result = try {
+        let result: MetaResult<()> = try {
             // Add table fragments to meta store with state: `State::Initial`.
             mgr.fragment_manager
                 .start_create_table_fragments(table_fragments.clone())
@@ -1093,7 +1094,7 @@ impl DdlController {
         if let Err(e) = result {
             match stream_job.create_type() {
                 CreateType::Background => {
-                    tracing::error!(id = job_id, error = ?e, "finish stream job failed");
+                    tracing::error!(id = job_id, error = %e.as_report(), "finish stream job failed");
                     let should_cancel = match mgr
                         .fragment_manager
                         .select_table_fragments_by_table_id(&job_id.into())
@@ -1428,7 +1429,10 @@ impl DdlController {
                     .await;
                 creating_internal_table_ids.push(table.id);
                 if let Err(e) = result {
-                    tracing::warn!("Failed to cancel create table procedure, perhaps barrier manager has already cleaned it. Reason: {e:#?}");
+                    tracing::warn!(
+                        error = %e.as_report(),
+                        "Failed to cancel create table procedure, perhaps barrier manager has already cleaned it."
+                    );
                 }
             }
             StreamingJob::Sink(sink, target_table) => {
@@ -1450,7 +1454,10 @@ impl DdlController {
                         )
                         .await;
                     if let Err(e) = result {
-                        tracing::warn!("Failed to cancel create table procedure, perhaps barrier manager has already cleaned it. Reason: {e:#?}");
+                        tracing::warn!(
+                            error = %e.as_report(),
+                            "Failed to cancel create table procedure, perhaps barrier manager has already cleaned it."
+                        );
                     }
                 }
                 creating_internal_table_ids.push(table.id);

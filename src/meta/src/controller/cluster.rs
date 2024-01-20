@@ -42,6 +42,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect,
     TransactionTrait,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
@@ -268,7 +269,7 @@ impl ClusterController {
                 {
                     Ok(keys) => keys,
                     Err(err) => {
-                        tracing::warn!("Failed to load expire worker info from db: {}", err);
+                        tracing::warn!(error = %err.as_report(), "Failed to load expire worker info from db");
                         continue;
                     }
                 };
@@ -278,7 +279,7 @@ impl ClusterController {
                     .exec(&inner.db)
                     .await
                 {
-                    tracing::warn!("Failed to delete expire workers from db: {}", err);
+                    tracing::warn!(error = %err.as_report(), "Failed to delete expire workers from db");
                     continue;
                 }
 

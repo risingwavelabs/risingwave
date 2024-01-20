@@ -33,7 +33,6 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for GroupTopNExecutorBuilder<APPEN
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let group_by: Vec<usize> = node
             .get_group_key()
@@ -68,7 +67,7 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for GroupTopNExecutorBuilder<APPEN
             order_by,
             group_by,
             state_table,
-            watermark_epoch: stream.get_watermark_epoch(),
+            watermark_epoch: params.watermark_epoch,
             group_key_types,
 
             with_ties: node.with_ties,
