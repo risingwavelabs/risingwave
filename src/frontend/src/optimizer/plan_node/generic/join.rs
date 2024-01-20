@@ -138,15 +138,15 @@ impl<I: stream::StreamPlanRef> Join<I> {
 
         let mut pk_index_to_degree_table_index = HashMap::new();
         for idx in &pk_indices {
-            let order_idx = match pk_index_to_degree_table_index.entry(*idx) {
+            let order_idx = if let Some(order_idx) = pk_index_to_degree_table_index.get(idx) {
                 // If the pk column is already in the degree table, we should use the same order_idx
-                Entry::Occupied(entry) => *entry.get(),
+                *order_idx
+            } else {
                 // Otherwise, add the pk column to the degree table and use the new order_idx
-                Entry::Vacant(entry) => {
-                    let order_idx =
-                        degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
-                    *entry.insert(order_idx)
-                }
+                let order_idx =
+                    degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
+                pk_index_to_degree_table_index.insert(*idx, order_idx);
+                order_idx
             };
             degree_table_catalog_builder.add_order_column(order_idx, OrderType::ascending());
         }
