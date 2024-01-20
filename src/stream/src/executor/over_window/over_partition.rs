@@ -31,7 +31,7 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::general::RowConverter;
-use crate::executor::test_utils::prelude::StateTable;
+use crate::common::table::state_table::StateTable;
 use crate::executor::StreamExecutorResult;
 
 pub(super) type CacheKey = Sentinelled<StateKey>;

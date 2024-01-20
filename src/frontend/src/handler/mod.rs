@@ -244,6 +244,7 @@ pub async fn handle(
         Statement::CreateTable {
             name,
             columns,
+            wildcard_idx,
             constraints,
             query,
             with_options: _, // It is put in OptimizerContext
@@ -279,6 +280,7 @@ pub async fn handle(
                 handler_args,
                 name,
                 columns,
+                wildcard_idx,
                 constraints,
                 if_not_exists,
                 source_schema,

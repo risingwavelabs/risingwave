@@ -22,6 +22,7 @@ use risingwave_pb::meta::{
     ListAllNodesResponse, UpdateWorkerNodeSchedulabilityRequest,
     UpdateWorkerNodeSchedulabilityResponse,
 };
+use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 use crate::MetaError;
@@ -64,7 +65,7 @@ impl ClusterService for ClusterServiceImpl {
                     return Ok(Response::new(AddWorkerNodeResponse {
                         status: Some(risingwave_pb::common::Status {
                             code: risingwave_pb::common::status::Code::UnknownWorker as i32,
-                            message: format!("{}", e),
+                            message: e.to_report_string(),
                         }),
                         node_id: None,
                     }));

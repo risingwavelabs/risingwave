@@ -65,7 +65,6 @@ impl MonitorService for MonitorServiceImpl {
         let actor_traces = self
             .stream_mgr
             .get_actor_traces()
-            .await
             .into_iter()
             .map(|(k, v)| (k, v.to_string()))
             .collect();

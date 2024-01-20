@@ -564,7 +564,9 @@ where
     ) -> PsqlResult<()> {
         // Parse sql.
         let stmts = Parser::parse_sql(&sql)
-            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
+            .inspect_err(
+                |e| tracing::error!(sql = &*sql, error = %e.as_report(), "failed to parse sql"),
+            )
             .map_err(|err| PsqlError::SimpleQueryError(err.into()))?;
         if stmts.is_empty() {
             self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
@@ -684,7 +686,9 @@ where
 
         let stmt = {
             let stmts = Parser::parse_sql(sql)
-                .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
+                .inspect_err(
+                    |e| tracing::error!(sql, error = %e.as_report(), "failed to parse sql"),
+                )
                 .map_err(|err| PsqlError::ExtendedPrepareError(err.into()))?;
 
             if stmts.len() > 1 {
@@ -1039,7 +1043,7 @@ where
         let ssl = openssl::ssl::Ssl::new(ssl_ctx).unwrap();
         let mut stream = tokio_openssl::SslStream::new(ssl, stream).unwrap();
         if let Err(e) = Pin::new(&mut stream).accept().await {
-            tracing::warn!("Unable to set up an ssl connection, reason: {}", e);
+            tracing::warn!(error = %e.as_report(), "Unable to set up an ssl connection");
             let _ = stream.shutdown().await;
             return Err(e.into());
         }
@@ -1081,7 +1085,7 @@ where
             Conn::Unencrypted(s) => s.write_no_flush(message),
             Conn::Ssl(s) => s.write_no_flush(message),
         }
-        .inspect_err(|error| tracing::error!(%error, "flush error"))
+        .inspect_err(|error| tracing::error!(error = %error.as_report(), "flush error"))
     }
 
     async fn write(&mut self, message: &BeMessage<'_>) -> io::Result<()> {
@@ -1096,7 +1100,7 @@ where
             Conn::Unencrypted(s) => s.flush().await,
             Conn::Ssl(s) => s.flush().await,
         }
-        .inspect_err(|error| tracing::error!(%error, "flush error"))
+        .inspect_err(|error| tracing::error!(error = %error.as_report(), "flush error"))
     }
 
     async fn ssl(&mut self, ssl_ctx: &SslContextRef) -> PsqlResult<PgStream<SslStream<S>>> {

@@ -34,7 +34,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         state_store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
 

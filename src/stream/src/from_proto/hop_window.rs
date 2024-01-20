@@ -27,7 +27,6 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let ExecutorParams {
             actor_context,

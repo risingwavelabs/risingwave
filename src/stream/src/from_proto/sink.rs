@@ -39,7 +39,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         state_store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input_executor]: [_; 1] = params.input.try_into().unwrap();
 
@@ -106,7 +105,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
 
         let sink_id_str = format!("{}", sink_id.sink_id);
 
-        let sink_metrics = stream.streaming_metrics.new_sink_metrics(
+        let sink_metrics = params.executor_stats.new_sink_metrics(
             &params.info.identity,
             sink_id_str.as_str(),
             connector,

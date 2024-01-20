@@ -80,6 +80,8 @@ macro_rules! impl_fmt_display {
 pub struct CreateSourceStatement {
     pub if_not_exists: bool,
     pub columns: Vec<ColumnDef>,
+    // The wildchar position in columns defined in sql. Only exist when using external schema.
+    pub wildcard_idx: Option<usize>,
     pub constraints: Vec<TableConstraint>,
     pub source_name: ObjectName,
     pub with_properties: WithProperties,
@@ -325,7 +327,8 @@ impl ParseTo for CreateSourceStatement {
         impl_parse_to!(source_name: ObjectName, p);
 
         // parse columns
-        let (columns, constraints, source_watermarks) = p.parse_columns_with_watermark()?;
+        let (columns, constraints, source_watermarks, wildcard_idx) =
+            p.parse_columns_with_watermark()?;
         let include_options = p.parse_include_options()?;
 
         let with_options = p.parse_with_properties()?;
@@ -343,6 +346,7 @@ impl ParseTo for CreateSourceStatement {
         Ok(Self {
             if_not_exists,
             columns,
+            wildcard_idx,
             constraints,
             source_name,
             with_properties: WithProperties(with_options),
@@ -357,11 +361,28 @@ pub(super) fn fmt_create_items(
     columns: &[ColumnDef],
     constraints: &[TableConstraint],
     watermarks: &[SourceWatermark],
+    wildcard_idx: Option<usize>,
 ) -> std::result::Result<String, fmt::Error> {
     let mut items = String::new();
-    let has_items = !columns.is_empty() || !constraints.is_empty() || !watermarks.is_empty();
+    let has_items = !columns.is_empty()
+        || !constraints.is_empty()
+        || !watermarks.is_empty()
+        || wildcard_idx.is_some();
     has_items.then(|| write!(&mut items, "("));
-    write!(&mut items, "{}", display_comma_separated(columns))?;
+    if let Some(wildcard_idx) = wildcard_idx {
+        let (columns_l, columns_r) = columns.split_at(wildcard_idx);
+        write!(&mut items, "{}", display_comma_separated(columns_l))?;
+        if !columns_l.is_empty() {
+            write!(&mut items, ", ")?;
+        }
+        write!(&mut items, "{}", Token::Mul)?;
+        if !columns_r.is_empty() {
+            write!(&mut items, ", ")?;
+        }
+        write!(&mut items, "{}", display_comma_separated(columns_r))?;
+    } else {
+        write!(&mut items, "{}", display_comma_separated(columns))?;
+    }
     if !columns.is_empty() && (!constraints.is_empty() || !watermarks.is_empty()) {
         write!(&mut items, ", ")?;
     }
@@ -380,7 +401,12 @@ impl fmt::Display for CreateSourceStatement {
         impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
         impl_fmt_display!(source_name, v, self);
 
-        let items = fmt_create_items(&self.columns, &self.constraints, &self.source_watermarks)?;
+        let items = fmt_create_items(
+            &self.columns,
+            &self.constraints,
+            &self.source_watermarks,
+            self.wildcard_idx,
+        )?;
         if !items.is_empty() {
             v.push(items);
         }
