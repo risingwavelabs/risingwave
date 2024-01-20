@@ -28,6 +28,7 @@ use risingwave_common::config::{
 };
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
@@ -271,13 +272,6 @@ pub async fn compute_node_serve(
         config.batch.clone(),
         batch_manager_metrics,
     ));
-    let stream_mgr = Arc::new(LocalStreamManager::new(
-        advertise_addr.clone(),
-        state_store.clone(),
-        streaming_metrics.clone(),
-        config.streaming.clone(),
-        await_tree_config.clone(),
-    ));
 
     // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
     // `total_compute_memory_bytes` for memory control. This is just a workaround for some
@@ -304,10 +298,14 @@ pub async fn compute_node_serve(
     // Run a background heap profiler
     heap_profiler.start();
 
-    let watermark_epoch = memory_mgr.get_watermark_epoch();
-    // Set back watermark epoch to stream mgr. Executor will read epoch from stream manager instead
-    // of lru manager.
-    stream_mgr.set_watermark_epoch(watermark_epoch).await;
+    let stream_mgr = Arc::new(LocalStreamManager::new(
+        advertise_addr.clone(),
+        state_store.clone(),
+        streaming_metrics.clone(),
+        config.streaming.clone(),
+        await_tree_config.clone(),
+        memory_mgr.get_watermark_epoch(),
+    ));
 
     let grpc_await_tree_reg = await_tree_config
         .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));

@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     object_size_map, summarize_group_deltas,
 };
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
 use risingwave_pb::hummock::{PbHummockVersionArchive, PbHummockVersionCheckpoint};
 
@@ -34,7 +34,7 @@ use crate::hummock::HummockManager;
 #[derive(Default)]
 pub struct HummockVersionCheckpoint {
     pub version: HummockVersion,
-    pub stale_objects: HashMap<HummockSstableObjectId, PbStaleObjects>,
+    pub stale_objects: HashMap<HummockVersionId, PbStaleObjects>,
 }
 
 impl HummockVersionCheckpoint {
@@ -44,7 +44,7 @@ impl HummockVersionCheckpoint {
             stale_objects: checkpoint
                 .stale_objects
                 .iter()
-                .map(|(object_id, objects)| (*object_id as HummockSstableObjectId, objects.clone()))
+                .map(|(version_id, objects)| (*version_id as HummockVersionId, objects.clone()))
                 .collect(),
         }
     }

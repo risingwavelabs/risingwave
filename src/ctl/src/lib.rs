@@ -486,6 +486,10 @@ enum MetaCommands {
         /// The worker not found will be ignored
         #[clap(long, default_value_t = false)]
         ignore_not_found: bool,
+
+        /// Checking whether the fragment is occupied by workers
+        #[clap(long, default_value_t = false)]
+        check_fragment_occupied: bool,
     },
 
     /// Validate source interface for the cloud team
@@ -706,7 +710,17 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             workers,
             yes,
             ignore_not_found,
-        }) => cmd_impl::meta::unregister_workers(context, workers, yes, ignore_not_found).await?,
+            check_fragment_occupied,
+        }) => {
+            cmd_impl::meta::unregister_workers(
+                context,
+                workers,
+                yes,
+                ignore_not_found,
+                check_fragment_occupied,
+            )
+            .await?
+        }
         Commands::Meta(MetaCommands::ValidateSource { props }) => {
             cmd_impl::meta::validate_source(context, props).await?
         }

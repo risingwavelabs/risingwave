@@ -115,6 +115,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
             storage_opts.meta_cache_capacity_mb * (1 << 20),
             storage_opts.high_priority_ratio,
             storage_opts.prefetch_buffer_capacity_mb * (1 << 20),
+            storage_opts.max_prefetch_block_number,
             FileCache::none(),
             FileCache::none(),
             None,

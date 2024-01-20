@@ -58,8 +58,9 @@ use risingwave_storage::store::{
     ReadOptions, SealCurrentEpochOptions, StateStoreIterItemStream,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
-use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution, KeyedRow};
+use risingwave_storage::table::{KeyedRow, TableDistribution};
 use risingwave_storage::StateStore;
+use thiserror_ext::AsReport;
 use tracing::{trace, Instrument};
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
@@ -108,30 +109,17 @@ pub struct StateTableInner<
     // FIXME: revisit constructions and usages.
     pk_indices: Vec<usize>,
 
-    /// Indices of distribution key for computing vnode.
-    /// Note that the index is based on the all columns of the table, instead of the output ones.
-    // FIXME: revisit constructions and usages.
-    // dist_key_indices: Vec<usize>,
-
-    /// Indices of distribution key for computing vnode.
-    /// Note that the index is based on the primary key columns by `pk_indices`.
-    dist_key_in_pk_indices: Vec<usize>,
+    /// Distribution of the state table.
+    ///
+    /// It holds vnode bitmap. Only the rows whose vnode of the primary key is in this set will be visible to the
+    /// executor. The table will also check whether the written rows
+    /// conform to this partition.
+    distribution: TableDistribution,
 
     prefix_hint_len: usize,
 
-    /// Virtual nodes that the table is partitioned into.
-    ///
-    /// Only the rows whose vnode of the primary key is in this set will be visible to the
-    /// executor. The table will also check whether the written rows
-    /// conform to this partition.
-    vnodes: Arc<Bitmap>,
-
     /// Used for catalog table_properties
     table_option: TableOption,
-
-    /// An optional column index which is the vnode of each row computed by the table's consistent
-    /// hash distribution.
-    vnode_col_idx_in_pk: Option<usize>,
 
     value_indices: Option<Vec<usize>>,
 
@@ -162,6 +150,8 @@ pub struct StateTableInner<
     /// 1. Computing output_value_indices to ser/de replicated rows.
     /// 2. Computing output pk indices to used them for backfill state.
     output_indices: Vec<usize>,
+
+    is_consistent_op: bool,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -220,14 +210,14 @@ fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> OpConsistencyLevel 
         let first = match row_serde.deserialize(first) {
             Ok(rows) => rows,
             Err(e) => {
-                error!(err = %e, value = ?first, "fail to deserialize serialized value");
+                error!(error = %e.as_report(), value = ?first, "fail to deserialize serialized value");
                 return false;
             }
         };
         let second = match row_serde.deserialize(second) {
             Ok(rows) => rows,
             Err(e) => {
-                error!(err = %e, value = ?second, "fail to deserialize serialized value");
+                error!(error = %e.as_report(), value = ?second, "fail to deserialize serialized value");
                 return false;
             }
         };
@@ -322,21 +312,20 @@ where
                 .collect()
         };
 
+        let vnode_col_idx_in_pk = table_catalog.vnode_col_index.as_ref().and_then(|idx| {
+            let vnode_col_idx = *idx as usize;
+            pk_indices.iter().position(|&i| vnode_col_idx == i)
+        });
+
+        let distribution =
+            TableDistribution::new(vnodes, dist_key_in_pk_indices, vnode_col_idx_in_pk);
+
         let pk_data_types = pk_indices
             .iter()
             .map(|i| table_columns[*i].data_type.clone())
             .collect();
         let pk_serde = OrderedRowSerde::new(pk_data_types, order_types);
 
-        let vnodes = match vnodes {
-            Some(vnodes) => vnodes,
-
-            None => Distribution::fallback_vnodes(),
-        };
-        let vnode_col_idx_in_pk = table_catalog.vnode_col_index.as_ref().and_then(|idx| {
-            let vnode_col_idx = *idx as usize;
-            pk_indices.iter().position(|&i| vnode_col_idx == i)
-        });
         let input_value_indices = table_catalog
             .value_indices
             .iter()
@@ -428,11 +417,9 @@ where
             pk_serde,
             row_serde,
             pk_indices,
-            dist_key_in_pk_indices,
+            distribution,
             prefix_hint_len,
-            vnodes,
             table_option,
-            vnode_col_idx_in_pk,
             value_indices,
             watermark_buffer_strategy: W::default(),
             state_clean_watermark: None,
@@ -441,6 +428,7 @@ where
             data_types,
             output_indices,
             i2o_mapping,
+            is_consistent_op,
         }
     }
 
@@ -458,7 +446,7 @@ where
             columns,
             order_types,
             pk_indices,
-            Distribution::fallback(),
+            TableDistribution::singleton(),
             None,
         )
         .await
@@ -479,7 +467,7 @@ where
             columns,
             order_types,
             pk_indices,
-            Distribution::fallback(),
+            TableDistribution::singleton(),
             Some(value_indices),
         )
         .await
@@ -499,7 +487,7 @@ where
             columns,
             order_types,
             pk_indices,
-            Distribution::fallback(),
+            TableDistribution::singleton(),
             None,
             false,
         )
@@ -514,7 +502,7 @@ where
         table_columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
-        distribution: Distribution,
+        distribution: TableDistribution,
         value_indices: Option<Vec<usize>>,
     ) -> Self {
         Self::new_with_distribution_inner(
@@ -536,7 +524,7 @@ where
         table_columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
-        distribution: Distribution,
+        distribution: TableDistribution,
         value_indices: Option<Vec<usize>>,
     ) -> Self {
         Self::new_with_distribution_inner(
@@ -559,10 +547,7 @@ where
         table_columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
-        Distribution {
-            dist_key_in_pk_indices,
-            vnodes,
-        }: Distribution,
+        distribution: TableDistribution,
         value_indices: Option<Vec<usize>>,
         is_consistent_op: bool,
     ) -> Self {
@@ -612,11 +597,9 @@ where
             pk_serde,
             row_serde,
             pk_indices,
-            dist_key_in_pk_indices,
+            distribution,
             prefix_hint_len: 0,
-            vnodes,
             table_option: Default::default(),
-            vnode_col_idx_in_pk: None,
             value_indices,
             watermark_buffer_strategy: W::default(),
             state_clean_watermark: None,
@@ -625,6 +608,7 @@ where
             data_types,
             output_indices: vec![],
             i2o_mapping: ColIndexMapping::new(vec![], 0),
+            is_consistent_op,
         }
     }
 
@@ -636,17 +620,6 @@ where
         self.table_id.table_id
     }
 
-    /// Returns whether the table is a singleton table.
-    fn is_singleton(&self) -> bool {
-        // If the table has a vnode column, it must be hash-distributed (but act like a singleton
-        // table). So we should return false here. Otherwise, we check the distribution key.
-        if self.vnode_col_idx_in_pk.is_some() {
-            false
-        } else {
-            self.dist_key_in_pk_indices.is_empty()
-        }
-    }
-
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
     pub fn epoch(&self) -> u64 {
         self.local_store.epoch()
@@ -654,25 +627,14 @@ where
 
     /// Get the vnode value with given (prefix of) primary key
     fn compute_prefix_vnode(&self, pk_prefix: impl Row) -> VirtualNode {
-        let prefix_len = pk_prefix.len();
-        if let Some(vnode_col_idx_in_pk) = self.vnode_col_idx_in_pk {
-            let vnode = pk_prefix.datum_at(vnode_col_idx_in_pk).unwrap();
-            VirtualNode::from_scalar(vnode.into_int16())
-        } else {
-            // For streaming, the given prefix must be enough to calculate the vnode
-            assert!(self.dist_key_in_pk_indices.iter().all(|&d| d < prefix_len));
-            compute_vnode(pk_prefix, &self.dist_key_in_pk_indices, &self.vnodes)
-        }
+        self.distribution
+            .try_compute_vnode_by_pk_prefix(pk_prefix)
+            .expect("For streaming, the given prefix must be enough to calculate the vnode")
     }
 
-    /// Get the vnode value of the given row
-    // pub fn compute_vnode(&self, row: impl Row) -> VirtualNode {
-    //     compute_vnode(row, &self.dist_key_indices, &self.vnodes)
-    // }
-
-    /// Get the vnode value of the given row
+    /// Get the vnode value of the given primary key
     pub fn compute_vnode_by_pk(&self, pk: impl Row) -> VirtualNode {
-        compute_vnode(pk, &self.dist_key_in_pk_indices, &self.vnodes)
+        self.distribution.compute_vnode_by_pk(pk)
     }
 
     /// NOTE(kwannoel): This is used by backfill.
@@ -696,12 +658,8 @@ where
         &self.pk_serde
     }
 
-    // pub fn dist_key_indices(&self) -> &[usize] {
-    //     &self.dist_key_indices
-    // }
-
     pub fn vnodes(&self) -> &Arc<Bitmap> {
-        &self.vnodes
+        self.distribution.vnodes()
     }
 
     pub fn value_indices(&self) -> &Option<Vec<usize>> {
@@ -710,10 +668,6 @@ where
 
     fn is_dirty(&self) -> bool {
         self.local_store.is_dirty() || self.state_clean_watermark.is_some()
-    }
-
-    pub fn vnode_bitmap(&self) -> &Bitmap {
-        &self.vnodes
     }
 }
 
@@ -774,7 +728,7 @@ where
         }
 
         let serialized_pk =
-            serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
+            serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_vnode_by_pk(&pk));
 
         let prefix_hint = if self.prefix_hint_len != 0 && self.prefix_hint_len == pk.len() {
             Some(serialized_pk.slice(VirtualNode::SIZE..))
@@ -822,15 +776,16 @@ where
             !self.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"
         );
-        if self.is_singleton() {
+        if self.distribution.is_singleton() {
             assert_eq!(
-                new_vnodes, self.vnodes,
+                &new_vnodes,
+                self.vnodes(),
                 "should not update vnode bitmap for singleton table"
             );
         }
-        assert_eq!(self.vnodes.len(), new_vnodes.len());
+        assert_eq!(self.vnodes().len(), new_vnodes.len());
 
-        let cache_may_stale = cache_may_stale(&self.vnodes, &new_vnodes);
+        let cache_may_stale = cache_may_stale(self.vnodes(), &new_vnodes);
 
         if cache_may_stale {
             self.state_clean_watermark = None;
@@ -840,7 +795,7 @@ where
         }
 
         (
-            std::mem::replace(&mut self.vnodes, new_vnodes),
+            self.distribution.update_vnode_bitmap(new_vnodes),
             cache_may_stale,
         )
     }
@@ -920,7 +875,7 @@ where
             self.watermark_cache.insert(&pk);
         }
 
-        let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
+        let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_vnode_by_pk(pk));
         let value_bytes = self.serialize_value(value);
         self.insert_inner(key_bytes, value_bytes);
     }
@@ -934,7 +889,7 @@ where
             self.watermark_cache.delete(&pk);
         }
 
-        let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
+        let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_vnode_by_pk(pk));
         let value_bytes = self.serialize_value(old_value);
         self.delete_inner(key_bytes, value_bytes);
     }
@@ -949,7 +904,7 @@ where
         );
 
         let new_key_bytes =
-            serialize_pk_with_vnode(new_pk, &self.pk_serde, self.compute_prefix_vnode(new_pk));
+            serialize_pk_with_vnode(new_pk, &self.pk_serde, self.compute_vnode_by_pk(new_pk));
         let old_value_bytes = self.serialize_value(old_value);
         let new_value_bytes = self.serialize_value(new_value);
 
@@ -962,7 +917,7 @@ where
     pub fn update_without_old_value(&mut self, new_value: impl Row) {
         let new_pk = (&new_value).project(self.pk_indices());
         let new_key_bytes =
-            serialize_pk_with_vnode(new_pk, &self.pk_serde, self.compute_prefix_vnode(new_pk));
+            serialize_pk_with_vnode(new_pk, &self.pk_serde, self.compute_vnode_by_pk(new_pk));
         let new_value_bytes = self.serialize_value(new_value);
 
         self.update_inner(new_key_bytes, None, new_value_bytes);
@@ -992,12 +947,9 @@ where
         };
         let (chunk, op) = chunk.into_parts();
 
-        let vnodes = compute_chunk_vnode(
-            &chunk,
-            &self.dist_key_in_pk_indices,
-            &self.pk_indices,
-            &self.vnodes,
-        );
+        let vnodes = self
+            .distribution
+            .compute_chunk_vnode(&chunk, &self.pk_indices);
 
         let values = if let Some(ref value_indices) = self.value_indices {
             chunk.project(value_indices).serialize_with(&self.row_serde)
@@ -1078,7 +1030,24 @@ where
     }
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.commit_with_switch_consistent_op(new_epoch, None).await
+    }
+
+    pub async fn commit_with_switch_consistent_op(
+        &mut self,
+        new_epoch: EpochPair,
+        switch_consistent_op: Option<bool>,
+    ) -> StreamExecutorResult<()> {
         assert_eq!(self.epoch(), new_epoch.prev);
+        let switch_op_consistency_level = switch_consistent_op.map(|enable_consistent_op| {
+            assert_ne!(self.is_consistent_op, enable_consistent_op);
+            self.is_consistent_op = enable_consistent_op;
+            if enable_consistent_op {
+                consistent_old_value_op(self.row_serde.clone())
+            } else {
+                OpConsistencyLevel::Inconsistent
+            }
+        });
         trace!(
             table_id = %self.table_id,
             epoch = ?self.epoch(),
@@ -1089,11 +1058,16 @@ where
         self.watermark_buffer_strategy.tick();
         if !self.is_dirty() {
             // If the state table is not modified, go fast path.
-            self.local_store
-                .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::no_watermark());
+            self.local_store.seal_current_epoch(
+                new_epoch.curr,
+                SealCurrentEpochOptions {
+                    table_watermarks: None,
+                    switch_op_consistency_level,
+                },
+            );
             return Ok(());
         } else {
-            self.seal_current_epoch(new_epoch.curr)
+            self.seal_current_epoch(new_epoch.curr, switch_op_consistency_level)
                 .instrument(tracing::info_span!("state_table_commit"))
                 .await?;
         }
@@ -1158,12 +1132,21 @@ where
         // Tick the watermark buffer here because state table is expected to be committed once
         // per epoch.
         self.watermark_buffer_strategy.tick();
-        self.local_store
-            .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::no_watermark());
+        self.local_store.seal_current_epoch(
+            new_epoch.curr,
+            SealCurrentEpochOptions {
+                table_watermarks: None,
+                switch_op_consistency_level: None,
+            },
+        );
     }
 
     /// Write to state store.
-    async fn seal_current_epoch(&mut self, next_epoch: u64) -> StreamExecutorResult<()> {
+    async fn seal_current_epoch(
+        &mut self,
+        next_epoch: u64,
+        switch_op_consistency_level: Option<OpConsistencyLevel>,
+    ) -> StreamExecutorResult<()> {
         let watermark = self.state_clean_watermark.take();
         watermark.as_ref().inspect(|watermark| {
             trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
@@ -1209,7 +1192,7 @@ where
         // Compute Delete Ranges
         if should_clean_watermark && let Some(watermark_suffix) = watermark_suffix {
             trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
-                self.vnodes.iter_vnodes().collect_vec()
+                self.vnodes().iter_vnodes().collect_vec()
             }, "delete range");
             if prefix_serializer
                 .as_ref()
@@ -1222,7 +1205,7 @@ where
                 seal_watermark = Some((
                     WatermarkDirection::Ascending,
                     VnodeWatermark::new(
-                        self.vnodes.clone(),
+                        self.vnodes().clone(),
                         Bytes::copy_from_slice(watermark_suffix.as_ref()),
                     ),
                 ));
@@ -1230,7 +1213,7 @@ where
                 seal_watermark = Some((
                     WatermarkDirection::Descending,
                     VnodeWatermark::new(
-                        self.vnodes.clone(),
+                        self.vnodes().clone(),
                         Bytes::copy_from_slice(watermark_suffix.as_ref()),
                     ),
                 ));
@@ -1250,13 +1233,16 @@ where
         }
 
         self.local_store.flush(vec![]).await?;
-        let seal_opt = match seal_watermark {
-            Some((direction, watermark)) => {
-                SealCurrentEpochOptions::new(vec![watermark], direction)
-            }
-            None => SealCurrentEpochOptions::no_watermark(),
-        };
-        self.local_store.seal_current_epoch(next_epoch, seal_opt);
+        let table_watermarks =
+            seal_watermark.map(|(direction, watermark)| (direction, vec![watermark]));
+
+        self.local_store.seal_current_epoch(
+            next_epoch,
+            SealCurrentEpochOptions {
+                table_watermarks,
+                switch_op_consistency_level,
+            },
+        );
         Ok(())
     }
 
@@ -1414,10 +1400,6 @@ where
         self.iter_kv(memcomparable_range_with_vnode, None, prefetch_options)
             .await
             .map_err(StreamExecutorError::from)
-    }
-
-    pub fn get_vnodes(&self) -> Arc<Bitmap> {
-        self.vnodes.clone()
     }
 
     /// Returns:

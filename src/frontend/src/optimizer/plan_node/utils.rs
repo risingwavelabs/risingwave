@@ -20,14 +20,14 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, Schema,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, Schema, OBJECT_ID_PLACEHOLDER,
 };
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::{CreateType, TableType};
-use crate::catalog::{ColumnId, FragmentId, TableCatalog, TableId};
-use crate::optimizer::property::Cardinality;
-use crate::utils::WithOptions;
+use crate::catalog::{ColumnId, TableCatalog, TableId};
+use crate::optimizer::property::{Cardinality, Order, RequiredDist};
+use crate::utils::{Condition, IndexSet, WithOptions};
 
 #[derive(Default)]
 pub struct TableCatalogBuilder {
@@ -160,8 +160,7 @@ impl TableCatalogBuilder {
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: self.properties,
-            // TODO(zehua): replace it with FragmentId::placeholder()
-            fragment_id: FragmentId::MAX - 1,
+            fragment_id: OBJECT_ID_PLACEHOLDER,
             dml_fragment_id: None,
             vnode_col_index: self.vnode_col_idx,
             row_id_index: None,
@@ -289,6 +288,23 @@ impl<'a> IndicesDisplay<'a> {
     }
 }
 
+pub(crate) fn sum_affected_row(dml: PlanRef) -> error::Result<PlanRef> {
+    let dml = RequiredDist::single().enforce_if_not_satisfies(dml, &Order::any())?;
+    // Accumulate the affected rows.
+    let sum_agg = PlanAggCall {
+        agg_kind: AggKind::Sum,
+        return_type: DataType::Int64,
+        inputs: vec![InputRef::new(0, DataType::Int64)],
+        distinct: false,
+        order_by: vec![],
+        filter: Condition::true_cond(),
+        direct_args: vec![],
+    };
+    let agg = Agg::new(vec![sum_agg], IndexSet::empty(), dml);
+    let batch_agg = BatchSimpleAgg::new(agg);
+    Ok(batch_agg.into())
+}
+
 /// Call `debug_struct` on the given formatter to create a debug struct builder.
 /// If a property list is provided, properties in it will be added to the struct name according to
 /// the condition of that property.
@@ -309,6 +325,13 @@ macro_rules! plan_node_name {
     };
 }
 pub(crate) use plan_node_name;
+use risingwave_common::error;
+use risingwave_common::types::DataType;
+use risingwave_expr::aggregate::AggKind;
 
 use super::generic::{self, GenericPlanRef};
 use super::pretty_config;
+use crate::expr::InputRef;
+use crate::optimizer::plan_node::generic::Agg;
+use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
+use crate::PlanRef;

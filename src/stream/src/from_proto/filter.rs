@@ -27,7 +27,6 @@ impl ExecutorBuilder for FilterExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let search_condition =

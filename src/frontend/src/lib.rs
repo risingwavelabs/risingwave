@@ -33,6 +33,7 @@
 #![feature(result_flattening)]
 #![feature(error_generic_member_access)]
 #![feature(round_ties_even)]
+#![feature(iterator_try_collect)]
 #![recursion_limit = "256"]
 
 #[cfg(test)]

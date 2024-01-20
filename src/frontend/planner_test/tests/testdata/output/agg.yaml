@@ -314,8 +314,7 @@
     └─BatchSortAgg { group_key: [mv.v1], aggs: [max(mv.v2)] }
       └─BatchExchange { order: [mv.v1 DESC], dist: HashShard(mv.v1) }
         └─BatchScan { table: mv, columns: [mv.v1, mv.v2], distribution: SomeShard }
-- name: Use BatchSortAgg, when output requires order
-  sql: |
+- sql: |
     create table t(v1 int, v2 int);
     select v1, max(v2) from t group by v1 order by v1 desc;
   batch_plan: |-
@@ -324,8 +323,7 @@
       └─BatchHashAgg { group_key: [t.v1], aggs: [max(t.v2)] }
         └─BatchExchange { order: [], dist: HashShard(t.v1) }
           └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
-- name: Use BatchSortAgg, when required order satisfies input order
-  sql: |
+- sql: |
     create table t(k1 int, k2 int, v1 int);
     SELECT max(v1), k1, k2 from t group by k1, k2 order by k1;
   batch_plan: |-
@@ -335,8 +333,7 @@
         └─BatchHashAgg { group_key: [t.k1, t.k2], aggs: [max(t.v1)] }
           └─BatchExchange { order: [], dist: HashShard(t.k1, t.k2) }
             └─BatchScan { table: t, columns: [t.k1, t.k2, t.v1], distribution: SomeShard }
-- name: Use BatchSortAgg, when output requires order with swapped output
-  sql: |
+- sql: |
     create table t(v1 int, v2 int);
     select max(v2), v1 from t group by v1 order by v1 desc;
   batch_plan: |-
@@ -346,6 +343,22 @@
         └─BatchHashAgg { group_key: [t.v1], aggs: [max(t.v2)] }
           └─BatchExchange { order: [], dist: HashShard(t.v1) }
             └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+- sql: |
+    create table t (a int, b int, c int, primary key (a, b, c));
+    select a, c, first_value(b order by b), count(*) from t group by a, c;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashAgg { group_key: [t.a, t.c], aggs: [first_value(t.b order_by(t.b ASC)), count] }
+      └─BatchExchange { order: [], dist: HashShard(t.a, t.c) }
+        └─BatchScan { table: t, columns: [t.a, t.b, t.c], distribution: UpstreamHashShard(t.a, t.b, t.c) }
+- sql: |
+    create table t (a int, b int, c int, primary key (a, b, c));
+    select a, c, first_value(b order by b), count(*) from t group by a, c having a = 1;;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashAgg { group_key: [t.a, t.c], aggs: [first_value(t.b order_by(t.b ASC)), count] }
+      └─BatchExchange { order: [], dist: HashShard(t.a, t.c) }
+        └─BatchScan { table: t, columns: [t.a, t.b, t.c], scan_ranges: [t.a = Int32(1)], distribution: UpstreamHashShard(t.a, t.b, t.c) }
 - name: Not use BatchSortAgg, when input provides order
   sql: |
     create table t(v1 int, v2 int);

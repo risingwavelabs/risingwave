@@ -24,6 +24,7 @@ use risingwave_hummock_sdk::version_checkpoint_path;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::hummock::PbHummockVersionCheckpoint;
+use thiserror_ext::AsReport;
 
 use crate::backup_restore::restore_impl::v1::{LoaderV1, WriterModelV1ToMetaStoreV1};
 use crate::backup_restore::restore_impl::v2::{LoaderV2, WriterModelV2ToMetaStoreV2};
@@ -193,7 +194,7 @@ pub async fn restore(opts: RestoreOpts) -> BackupResult<()> {
             tracing::info!("command succeeded");
         }
         Err(e) => {
-            tracing::warn!("command failed: {}", e);
+            tracing::warn!(error = %e.as_report(), "command failed");
         }
     }
     result
@@ -241,6 +242,7 @@ mod tests {
         SystemParams {
             state_store: Some("state_store".to_string()),
             data_directory: Some("data_directory".to_string()),
+            wasm_storage_url: Some("wasm_storage_url".to_string()),
             ..SystemConfig::default().into_init_system_params()
         }
     }
