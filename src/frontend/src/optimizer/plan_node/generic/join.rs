@@ -92,10 +92,6 @@ impl<I: stream::StreamPlanRef> Join<I> {
     ) -> (TableCatalog, TableCatalog, Vec<usize>) {
         let schema = input.schema();
 
-        // Dedup join_key_indices because sometimes a column can appear multiple times in join key
-        // e.g. t1.a = t2.a and t1.a = t3.b
-        // let join_key_indices = join_key_indices.into_iter().unique().collect_vec();
-
         let internal_table_dist_keys = dk_indices_in_jk
             .iter()
             .map(|idx| join_key_indices[*idx])
