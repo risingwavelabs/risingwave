@@ -23,6 +23,7 @@ use quote::quote;
 use syn::parse_macro_input;
 
 mod config;
+mod config_doc;
 mod estimate_size;
 mod session_config;
 
@@ -262,4 +263,27 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
 pub fn session_config(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input);
     session_config::derive_config(input).into()
+}
+
+/// This proc macro will recursively extract field comments in a struct and generate a method
+/// that can produce docs for every field.
+/// Unlike rustdoc, this tool only produces documents for fields, not including methods.
+///
+/// ```ignore
+/// #[derive(ConfigDoc)]
+/// pub struct Foo {
+///   /// This is a
+///   a i32,
+///
+///   #[config_doc]
+///   b Bar,
+/// }
+/// ```
+#[proc_macro_derive(ConfigDoc, attributes(nested_config))]
+pub fn config_doc(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input);
+
+    let gen = config_doc::generate_config_doc_fn(input);
+
+    gen.into()
 }

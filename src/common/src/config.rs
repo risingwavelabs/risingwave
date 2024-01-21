@@ -25,6 +25,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
+use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
 use serde::{Deserialize, Serialize, Serializer};
@@ -766,7 +767,7 @@ pub enum CompactorMode {
     Shared,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct HeapProfilingConfig {
     /// Enable to auto dump heap profile when memory usage is high
     #[serde(default = "default::heap_profiling::enable_auto")]
@@ -1656,5 +1657,22 @@ mod tests {
 
         let expected = format!("{HEADER}\n\n{default}");
         actual.assert_eq(&expected);
+
+        // let doc = toml_edit::ser::to_document(&RwConfig::default()).unwrap();
+        // let configs = doc.as_table().iter().map(|(section, section_item)| {
+        //     let section_configs = section_item
+        //         .as_table()
+        //         .expect("the first level should be section");
+        //     let configs = section_configs
+        //         .iter()
+        //         .map(|(config, value_item)| {
+        //             let value = value_item
+        //                 .as_value()
+        //                 .expect("the second level should be value");
+        //             value.fmt(config, value)
+        //         })
+        //         .collect();
+        //     (section, configs)
+        // });
     }
 }
