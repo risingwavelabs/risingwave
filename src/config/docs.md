@@ -1,69 +1,30 @@
 
-## meta.compaction_config
-
-| Config | Desription |
-|--------|------------|
-| max_bytes_for_level_base | |
-| max_bytes_for_level_multiplier | |
-| max_compaction_bytes | |
-| sub_level_max_compaction_bytes | |
-| level0_tier_compact_file_number | |
-| target_file_size_base | |
-| compaction_filter_mask | |
-| max_sub_compaction | |
-| level0_stop_write_threshold_sub_level_number | |
-| level0_sub_level_compact_level_count | |
-| level0_overlapping_sub_level_compact_level_count | |
-| max_space_reclaim_bytes | |
-| level0_max_compact_file_number | |
-| tombstone_reclaim_ratio | |
-| enable_emergency_picker | |
-
-## server
-
-| Config | Desription |
-|--------|------------|
-| heartbeat_interval_ms |  The interval for periodic heartbeat from worker to the meta service.|
-| connection_pool_size | |
-| metrics_level |  Used for control the metrics level, similar to log level.|
-| telemetry_enabled | |
-| heap_profiling |  Enable heap profile dump when memory usage is high.|
-| grpc_max_reset_stream | |
-| unrecognized | |
-
-## system
-
-| Config | Desription |
-|--------|------------|
-| barrier_interval_ms | The interval of periodic barrier.|
-| checkpoint_frequency | There will be a checkpoint for every n barriers.|
-| sstable_size_mb | Target size of the Sstable.|
-| parallel_compact_size_mb | |
-| block_size_kb | Size of each block in bytes in SST.|
-| bloom_false_positive | False positive probability of bloom filter.|
-| state_store | |
-| data_directory | Remote directory for storing data and metadata objects.|
-| backup_storage_url | Remote storage url for storing snapshots.|
-| backup_storage_directory | Remote directory for storing snapshots.|
-| max_concurrent_creating_streaming_jobs | Max number of concurrent creating streaming jobs.|
-| pause_on_next_bootstrap | Whether to pause all data sources on next bootstrap.|
-| wasm_storage_url | |
-| enable_tracing | Whether to enable distributed tracing.|
-
-## meta.developer
-
-| Config | Desription |
-|--------|------------|
-| cached_traces_num |  The number of traces to be cached in-memory by the tracing collector
- embedded in the meta node.|
-| cached_traces_memory_limit_bytes |  The maximum memory usage in bytes for the tracing collector embedded
- in the meta node.|
-
 ## 
 
 | Config | Desription |
 |--------|------------|
 | unrecognized | |
+
+## batch
+
+| Config | Desription |
+|--------|------------|
+| worker_threads_num |  The thread number of the batch task runtime in the compute node. The default value is
+ decided by `tokio`.|
+| distributed_query_limit | |
+| enable_barrier_read | |
+| statement_timeout_in_sec |  Timeout for a batch query in seconds.|
+| unrecognized | |
+| frontend_compute_runtime_worker_threads |  frontend compute runtime worker threads|
+
+## batch.developer
+
+| Config | Desription |
+|--------|------------|
+| connector_message_buffer_size |  The capacity of the chunks in the channel that connects between `ConnectorSource` and
+ `SourceExecutor`.|
+| output_channel_size |  The size of the channel used for output to exchange/shuffle.|
+| chunk_size |  The size of a chunk produced by `RowSeqScanExecutor`|
 
 ## meta
 
@@ -116,14 +77,46 @@
 | event_log_enabled | |
 | event_log_channel_max_size |  Keeps the latest N events per channel.|
 
-## batch.developer
+## meta.compaction_config
 
 | Config | Desription |
 |--------|------------|
-| connector_message_buffer_size |  The capacity of the chunks in the channel that connects between `ConnectorSource` and
- `SourceExecutor`.|
-| output_channel_size |  The size of the channel used for output to exchange/shuffle.|
-| chunk_size |  The size of a chunk produced by `RowSeqScanExecutor`|
+| max_bytes_for_level_base | |
+| max_bytes_for_level_multiplier | |
+| max_compaction_bytes | |
+| sub_level_max_compaction_bytes | |
+| level0_tier_compact_file_number | |
+| target_file_size_base | |
+| compaction_filter_mask | |
+| max_sub_compaction | |
+| level0_stop_write_threshold_sub_level_number | |
+| level0_sub_level_compact_level_count | |
+| level0_overlapping_sub_level_compact_level_count | |
+| max_space_reclaim_bytes | |
+| level0_max_compact_file_number | |
+| tombstone_reclaim_ratio | |
+| enable_emergency_picker | |
+
+## meta.developer
+
+| Config | Desription |
+|--------|------------|
+| cached_traces_num |  The number of traces to be cached in-memory by the tracing collector
+ embedded in the meta node.|
+| cached_traces_memory_limit_bytes |  The maximum memory usage in bytes for the tracing collector embedded
+ in the meta node.|
+
+## server
+
+| Config | Desription |
+|--------|------------|
+| heartbeat_interval_ms |  The interval for periodic heartbeat from worker to the meta service.|
+| connection_pool_size | |
+| metrics_level |  Used for control the metrics level, similar to log level.|
+| telemetry_enabled | |
+| heap_profiling |  Enable heap profile dump when memory usage is high.|
+| grpc_max_reset_stream | |
+| unrecognized | |
 
 ## storage
 
@@ -172,18 +165,6 @@
 | mem_table_spill_threshold |  The spill threshold for mem table.|
 | object_store | |
 
-## batch
-
-| Config | Desription |
-|--------|------------|
-| worker_threads_num |  The thread number of the batch task runtime in the compute node. The default value is
- decided by `tokio`.|
-| distributed_query_limit | |
-| enable_barrier_read | |
-| statement_timeout_in_sec |  Timeout for a batch query in seconds.|
-| unrecognized | |
-| frontend_compute_runtime_worker_threads |  frontend compute runtime worker threads|
-
 ## streaming
 
 | Config | Desription |
@@ -195,3 +176,22 @@
 | developer | |
 | unique_user_stream_errors |  Max unique user stream errors per actor|
 | unrecognized | |
+
+## system
+
+| Config | Desription |
+|--------|------------|
+| barrier_interval_ms | The interval of periodic barrier.|
+| checkpoint_frequency | There will be a checkpoint for every n barriers.|
+| sstable_size_mb | Target size of the Sstable.|
+| parallel_compact_size_mb | |
+| block_size_kb | Size of each block in bytes in SST.|
+| bloom_false_positive | False positive probability of bloom filter.|
+| state_store | |
+| data_directory | Remote directory for storing data and metadata objects.|
+| backup_storage_url | Remote storage url for storing snapshots.|
+| backup_storage_directory | Remote directory for storing snapshots.|
+| max_concurrent_creating_streaming_jobs | Max number of concurrent creating streaming jobs.|
+| pause_on_next_bootstrap | Whether to pause all data sources on next bootstrap.|
+| wasm_storage_url | |
+| enable_tracing | Whether to enable distributed tracing.|

@@ -15,7 +15,7 @@ pub fn generate_config_doc_fn(input: DeriveInput) -> proc_macro2::TokenStream {
     let call_nested_fields = doc.token_call_nested_fields();
     quote! {
         impl #struct_name {
-            pub fn config_docs(name: String, docs: &mut std::collections::HashMap<String, Vec<(String, String)>>) {
+            pub fn config_docs(name: String, docs: &mut std::collections::BTreeMap<String, Vec<(String, String)>>) {
                 docs.insert(name.clone(), #vec_fields);
                 #call_nested_fields;
             }

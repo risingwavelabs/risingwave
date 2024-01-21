@@ -1620,7 +1620,7 @@ pub struct CompactionConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     use super::*;
 
@@ -1638,7 +1638,7 @@ mod tests {
         let expected = format!("{HEADER}\n\n{default}");
         actual.assert_eq(&expected);
 
-        let mut docs = HashMap::<String, Vec<(String, String)>>::new();
+        let mut docs = BTreeMap::<String, Vec<(String, String)>>::new();
         RwConfig::config_docs("".to_string(), &mut docs);
         let expected = configs_to_markdown(&docs);
         let actual = expect_test::expect_file!["../../config/docs.md"];
@@ -1662,7 +1662,7 @@ mod tests {
         // });
     }
 
-    fn configs_to_markdown(configs: &HashMap<String, Vec<(String, String)>>) -> String {
+    fn configs_to_markdown(configs: &BTreeMap<String, Vec<(String, String)>>) -> String {
         let mut markdown = String::new();
         for (section, configs) in configs {
             markdown.push_str(&format!("\n## {}\n\n", section));
