@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use thiserror_ext::AsReport;
+
 use crate::storage::{MetaStore, MetaStoreError, DEFAULT_COLUMN_FAMILY};
 
 /// `NotificationVersion` records the last sent notification version, this will be stored
@@ -31,7 +33,7 @@ impl NotificationVersion {
         {
             Ok(byte_vec) => memcomparable::from_slice(&byte_vec).unwrap(),
             Err(MetaStoreError::ItemNotFound(_)) => 0,
-            Err(e) => panic!("{:?}", e),
+            Err(e) => panic!("{}", e.as_report()),
         };
         Self(version)
     }

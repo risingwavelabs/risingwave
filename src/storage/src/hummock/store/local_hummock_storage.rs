@@ -30,8 +30,8 @@ use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use crate::error::StorageResult;
 use crate::hummock::event_handler::{HummockEvent, LocalInstanceGuard};
 use crate::hummock::iterator::{
-    ConcatIteratorInner, Forward, HummockIteratorUnion, OrderedMergeIteratorInner,
-    SkipWatermarkIterator, UnorderedMergeIteratorInner, UserIterator,
+    ConcatIteratorInner, Forward, HummockIteratorUnion, MergeIterator, SkipWatermarkIterator,
+    UserIterator,
 };
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
@@ -401,6 +401,10 @@ impl LocalStateStore for LocalHummockStorage {
 
     fn seal_current_epoch(&mut self, next_epoch: u64, mut opts: SealCurrentEpochOptions) {
         assert!(!self.is_dirty());
+        if let Some(new_level) = &opts.switch_op_consistency_level {
+            self.mem_table.op_consistency_level.update(new_level);
+            self.op_consistency_level.update(new_level);
+        }
         let prev_epoch = self
             .epoch
             .replace(next_epoch)
@@ -568,11 +572,11 @@ impl LocalHummockStorage {
     }
 }
 
-pub type StagingDataIterator = OrderedMergeIteratorInner<
+pub type StagingDataIterator = MergeIterator<
     HummockIteratorUnion<Forward, SharedBufferBatchIterator<Forward>, SstableIterator>,
 >;
 pub type HummockStorageIteratorPayloadInner<'a> = SkipWatermarkIterator<
-    UnorderedMergeIteratorInner<
+    MergeIterator<
         HummockIteratorUnion<
             Forward,
             StagingDataIterator,

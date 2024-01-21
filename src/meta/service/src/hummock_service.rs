@@ -24,6 +24,7 @@ use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Event as RequestEvent;
 use risingwave_pb::hummock::*;
+use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status, Streaming};
 
 use crate::hummock::compaction::selector::ManualCompactionOption;
@@ -308,7 +309,7 @@ impl HummockManagerService for HummockServiceImpl {
                     tracing::info!("Full GC results {} SSTs to delete", number);
                 }
                 Err(e) => {
-                    tracing::warn!("Full GC SST failed: {:#?}", e);
+                    tracing::warn!(error = %e.as_report(),  "Full GC SST failed");
                 }
             }
         });

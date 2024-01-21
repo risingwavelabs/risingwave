@@ -24,7 +24,7 @@ use crate::error::StreamResult;
 use crate::executor::{
     BoxedExecutor, EowcOverWindowExecutor, EowcOverWindowExecutorArgs, Executor,
 };
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::task::ExecutorParams;
 
 pub struct EowcOverWindowExecutorBuilder;
 
@@ -35,7 +35,6 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let calls: Vec<_> = node
@@ -67,7 +66,7 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
             partition_key_indices,
             order_key_index,
             state_table,
-            watermark_epoch: stream.get_watermark_epoch(),
+            watermark_epoch: params.watermark_epoch,
         })
         .boxed())
     }

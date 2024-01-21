@@ -94,8 +94,23 @@ pub struct Configuration {
 
 impl Default for Configuration {
     fn default() -> Self {
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+
+            let config_data = r#"
+[server]
+telemetry_enabled = false
+metrics_level = "Disabled"
+"#
+            .to_string();
+            file.write_all(config_data.as_bytes())
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
         Configuration {
-            config_path: ConfigPath::Regular("".into()),
+            config_path: ConfigPath::Temp(config_path.into()),
             frontend_nodes: 1,
             compute_nodes: 1,
             meta_nodes: 1,
@@ -109,7 +124,7 @@ impl Default for Configuration {
 }
 
 impl Configuration {
-    /// Returns the config for scale test.
+    /// Returns the configuration for scale test.
     pub fn for_scale() -> Self {
         // Embed the config file and create a temporary file at runtime. The file will be deleted
         // automatically when it's dropped.
@@ -128,7 +143,31 @@ impl Configuration {
             meta_nodes: 3,
             compactor_nodes: 2,
             compute_node_cores: 2,
-            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL=false".into()]
+            ..Default::default()
+        }
+    }
+
+    /// Provides a configuration for scale test which ensures that the arrangement backfill is disabled,
+    /// so table scan will use `no_shuffle`.
+    pub fn for_scale_no_shuffle() -> Self {
+        // Embed the config file and create a temporary file at runtime. The file will be deleted
+        // automatically when it's dropped.
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+            file.write_all(include_bytes!("risingwave-scale.toml"))
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 2,
+            compute_nodes: 3,
+            meta_nodes: 3,
+            compactor_nodes: 2,
+            compute_node_cores: 2,
+            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL = false;".into()]
                 .into(),
             ..Default::default()
         }
@@ -170,7 +209,10 @@ metrics_level = "Disabled"
             meta_nodes: 1,
             compactor_nodes: 1,
             compute_node_cores: 2,
-            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL=false".into()]
+            per_session_queries: vec![
+                "create view if not exists table_parallelism as select t.name, tf.parallelism from rw_tables t, rw_table_fragments tf where t.id = tf.table_id;".into(),
+                "create view if not exists mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;".into(),
+            ]
                 .into(),
             ..Default::default()
         }
@@ -818,6 +860,13 @@ impl Session {
     pub async fn flush(&mut self) -> Result<()> {
         self.run("FLUSH").await?;
         Ok(())
+    }
+
+    pub async fn is_arrangement_backfill_enabled(&mut self) -> Result<bool> {
+        let result = self
+            .run("show streaming_enable_arrangement_backfill")
+            .await?;
+        Ok(result == "true")
     }
 }
 

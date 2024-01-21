@@ -293,8 +293,8 @@ with (
   properties.bootstrap.server = 'message_queue:29092'
 ) FORMAT PLAIN ENCODE AVRO (schema.registry = 'http://127.0.0.1:8081');
 
-# we cannot create debezium source with generated column
-statement error
+# create debezium source with generated column
+statement ok
 create table s20 (
   id integer primary key,
   first_name varchar,
@@ -680,10 +680,10 @@ select count(*) from s16
 ----
 0
 
-statement error Feature is not yet implemented: Alter source with schema registry
+statement error Not supported: alter source with schema registry
 alter source s18 add column v10 int;
 
-statement error Feature is not yet implemented: Alter source with schema registry
+statement error Not supported: alter source with schema registry
 alter source s17 add column v10 int;
 
 query III rowsort
@@ -846,6 +846,9 @@ drop source s17
 
 statement ok
 drop source s18
+
+statement ok
+drop table s20
 
 statement ok
 drop table s21
