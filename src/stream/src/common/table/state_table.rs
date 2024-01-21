@@ -150,6 +150,8 @@ pub struct StateTableInner<
     /// 1. Computing output_value_indices to ser/de replicated rows.
     /// 2. Computing output pk indices to used them for backfill state.
     output_indices: Vec<usize>,
+
+    is_consistent_op: bool,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -426,6 +428,7 @@ where
             data_types,
             output_indices,
             i2o_mapping,
+            is_consistent_op,
         }
     }
 
@@ -605,6 +608,7 @@ where
             data_types,
             output_indices: vec![],
             i2o_mapping: ColIndexMapping::new(vec![], 0),
+            is_consistent_op,
         }
     }
 
@@ -1026,7 +1030,24 @@ where
     }
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.commit_with_switch_consistent_op(new_epoch, None).await
+    }
+
+    pub async fn commit_with_switch_consistent_op(
+        &mut self,
+        new_epoch: EpochPair,
+        switch_consistent_op: Option<bool>,
+    ) -> StreamExecutorResult<()> {
         assert_eq!(self.epoch(), new_epoch.prev);
+        let switch_op_consistency_level = switch_consistent_op.map(|enable_consistent_op| {
+            assert_ne!(self.is_consistent_op, enable_consistent_op);
+            self.is_consistent_op = enable_consistent_op;
+            if enable_consistent_op {
+                consistent_old_value_op(self.row_serde.clone())
+            } else {
+                OpConsistencyLevel::Inconsistent
+            }
+        });
         trace!(
             table_id = %self.table_id,
             epoch = ?self.epoch(),
@@ -1037,11 +1058,16 @@ where
         self.watermark_buffer_strategy.tick();
         if !self.is_dirty() {
             // If the state table is not modified, go fast path.
-            self.local_store
-                .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::no_watermark());
+            self.local_store.seal_current_epoch(
+                new_epoch.curr,
+                SealCurrentEpochOptions {
+                    table_watermarks: None,
+                    switch_op_consistency_level,
+                },
+            );
             return Ok(());
         } else {
-            self.seal_current_epoch(new_epoch.curr)
+            self.seal_current_epoch(new_epoch.curr, switch_op_consistency_level)
                 .instrument(tracing::info_span!("state_table_commit"))
                 .await?;
         }
@@ -1106,12 +1132,21 @@ where
         // Tick the watermark buffer here because state table is expected to be committed once
         // per epoch.
         self.watermark_buffer_strategy.tick();
-        self.local_store
-            .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::no_watermark());
+        self.local_store.seal_current_epoch(
+            new_epoch.curr,
+            SealCurrentEpochOptions {
+                table_watermarks: None,
+                switch_op_consistency_level: None,
+            },
+        );
     }
 
     /// Write to state store.
-    async fn seal_current_epoch(&mut self, next_epoch: u64) -> StreamExecutorResult<()> {
+    async fn seal_current_epoch(
+        &mut self,
+        next_epoch: u64,
+        switch_op_consistency_level: Option<OpConsistencyLevel>,
+    ) -> StreamExecutorResult<()> {
         let watermark = self.state_clean_watermark.take();
         watermark.as_ref().inspect(|watermark| {
             trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
@@ -1198,13 +1233,16 @@ where
         }
 
         self.local_store.flush(vec![]).await?;
-        let seal_opt = match seal_watermark {
-            Some((direction, watermark)) => {
-                SealCurrentEpochOptions::new(vec![watermark], direction)
-            }
-            None => SealCurrentEpochOptions::no_watermark(),
-        };
-        self.local_store.seal_current_epoch(next_epoch, seal_opt);
+        let table_watermarks =
+            seal_watermark.map(|(direction, watermark)| (direction, vec![watermark]));
+
+        self.local_store.seal_current_epoch(
+            next_epoch,
+            SealCurrentEpochOptions {
+                table_watermarks,
+                switch_op_consistency_level,
+            },
+        );
         Ok(())
     }
 
