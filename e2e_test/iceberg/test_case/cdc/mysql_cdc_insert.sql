@@ -1,4 +1,4 @@
-USE `my@db`;
+USE `mydb`;
 
 INSERT INTO products VALUES (default,"109","109"),
 (default,"110","110"),
