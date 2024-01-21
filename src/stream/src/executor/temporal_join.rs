@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use either::Either;
 use futures::stream::{self, PollNext};
-use futures::{pin_mut, StreamExt, TryStreamExt};
+use futures::{future, pin_mut, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use lru::DefaultHasher;
@@ -29,7 +29,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::hash::{HashKey, NullBitmap};
-use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::NonStrictExpression;
@@ -38,6 +38,7 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
+use tokio::sync::Mutex;
 
 use super::{
     Barrier, Executor, ExecutorInfo, Message, MessageStream, StreamExecutorError,
@@ -55,7 +56,8 @@ pub struct TemporalJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrim
     info: ExecutorInfo,
     left: BoxedExecutor,
     right: BoxedExecutor,
-    right_table: TemporalSide<K, S>,
+    // Mutex here acts as a `RefCell` that implements `Sync`, it'll never be blocked.
+    right_table: Mutex<TemporalSide<K, S>>,
     left_join_keys: Vec<usize>,
     right_join_keys: Vec<usize>,
     null_safe: Vec<bool>,
@@ -368,14 +370,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
             info,
             left,
             right,
-            right_table: TemporalSide {
+            right_table: Mutex::new(TemporalSide {
                 source: table,
                 table_stream_key_indices,
                 table_output_indices,
                 cache,
                 ctx,
                 join_key_data_types,
-            },
+            }),
             left_join_keys,
             right_join_keys,
             null_safe,
@@ -387,7 +389,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn into_stream(mut self) {
+    async fn into_stream(self) {
         let (left_map, right_map) = JoinStreamChunkBuilder::get_i2o_mapping(
             &self.output_indices,
             self.left.schema().len(),
@@ -402,17 +404,23 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
 
         let mut prev_epoch = None;
 
-        let table_id_str = self.right_table.source.table_id().to_string();
+        let table_id_str = {
+            let right_table = self.right_table.try_lock().unwrap();
+            right_table.source.table_id().to_string()
+        };
         let actor_id_str = self.ctx.id.to_string();
         let fragment_id_str = self.ctx.fragment_id.to_string();
         #[for_await]
         for msg in align_input(self.left, self.right) {
-            self.right_table.cache.evict();
-            self.ctx
-                .streaming_metrics
-                .temporal_join_cached_entry_count
-                .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
-                .set(self.right_table.cache.len() as i64);
+            {
+                let mut right_table = self.right_table.try_lock().unwrap();
+                right_table.cache.evict();
+                self.ctx
+                    .streaming_metrics
+                    .temporal_join_cached_entry_count
+                    .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                    .set(right_table.cache.len() as i64);
+            }
             match msg? {
                 InternalMessage::WaterMark(watermark) => {
                     let output_watermark_col_idx = *left_to_output.get(&watermark.col_idx).unwrap();
@@ -425,61 +433,106 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                         left_map.clone(),
                         right_map.clone(),
                     );
+
                     let epoch = prev_epoch.expect("Chunk data should come after some barrier.");
                     let keys = K::build(&self.left_join_keys, chunk.data_chunk())?;
-                    for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
-                        let Some((op, left_row)) = r else {
-                            continue;
-                        };
-                        if key.null_bitmap().is_subset(&null_matched)
-                            && let join_entry = self.right_table.lookup(&key, epoch).await?
-                            && !join_entry.is_empty()
-                        {
-                            for right_row in join_entry.cached.values() {
-                                // check join condition
-                                let ok = if let Some(ref mut cond) = self.condition {
-                                    let concat_row = left_row.chain(&right_row).into_owned_row();
-                                    cond.eval_row_infallible(&concat_row)
-                                        .await
-                                        .map(|s| *s.as_bool())
-                                        .unwrap_or(false)
-                                } else {
-                                    true
-                                };
 
-                                if ok {
-                                    if let Some(chunk) = builder.append_row(op, left_row, right_row)
-                                    {
-                                        yield Message::Chunk(chunk);
+                    enum RowAction<R1: Row, R2: Row = row::Empty> {
+                        Append { op: Op, left_row: R1, right_row: R2 },
+                        Update { op: Op, left_row: R1 },
+                    }
+                    let futs = chunk
+                        .rows_with_holes()
+                        .zip_eq_debug(keys.into_iter())
+                        .filter_map(|(r, key)| {
+                            let (op, left_row) = r?;
+                            let right_table = &self.right_table;
+                            let condition = &self.condition;
+                            let null_matched = &null_matched;
+
+                            Some(async move {
+                                let actions = if key.null_bitmap().is_subset(null_matched)
+                                    && let join_entry = {
+                                        let mut right_table = right_table.try_lock().unwrap();
+                                        right_table.lookup(&key, epoch).await?
                                     }
-                                }
+                                    && !join_entry.is_empty()
+                                {
+                                    let mut actions =
+                                        Vec::with_capacity(join_entry.cached.values().len());
+                                    for right_row in join_entry.cached.values() {
+                                        // check join condition
+                                        let ok = if let Some(ref cond) = condition {
+                                            let concat_row =
+                                                left_row.chain(&right_row).into_owned_row();
+                                            cond.eval_row_infallible(&concat_row)
+                                                .await
+                                                .map(|s| *s.as_bool())
+                                                .unwrap_or(false)
+                                        } else {
+                                            true
+                                        };
+
+                                        if ok {
+                                            actions.push(RowAction::Append {
+                                                op,
+                                                left_row,
+                                                right_row: right_row.to_owned_row(),
+                                            });
+                                        }
+                                    }
+
+                                    // Insert back the state taken from ht.
+                                    {
+                                        let mut right_table = right_table.try_lock().unwrap();
+                                        right_table.insert_back(key.clone(), join_entry);
+                                    }
+
+                                    actions
+                                } else if T == JoinType::LeftOuter {
+                                    vec![RowAction::Update { op, left_row }]
+                                } else {
+                                    vec![]
+                                };
+                                Ok(actions) as StreamExecutorResult<_>
+                            })
+                        });
+                    for row_action in future::try_join_all(futs).await?.into_iter().flatten() {
+                        if let Some(chunk) = match row_action {
+                            RowAction::Append {
+                                op,
+                                left_row,
+                                right_row,
+                            } => builder.append_row(op, left_row, right_row),
+                            RowAction::Update { op, left_row } => {
+                                builder.append_row_update(op, left_row)
                             }
-                            // Insert back the state taken from ht.
-                            self.right_table.insert_back(key.clone(), join_entry);
-                        } else if T == JoinType::LeftOuter {
-                            if let Some(chunk) = builder.append_row_update(op, left_row) {
-                                yield Message::Chunk(chunk);
-                            }
+                        } {
+                            yield Message::Chunk(chunk);
                         }
                     }
+
                     if let Some(chunk) = builder.take() {
                         yield Message::Chunk(chunk);
                     }
                 }
                 InternalMessage::Barrier(updates, barrier) => {
-                    if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        let prev_vnodes =
-                            self.right_table.source.update_vnode_bitmap(vnodes.clone());
-                        if cache_may_stale(&prev_vnodes, &vnodes) {
-                            self.right_table.cache.clear();
+                    {
+                        let mut right_table = self.right_table.try_lock().unwrap();
+                        if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
+                            let prev_vnodes =
+                                right_table.source.update_vnode_bitmap(vnodes.clone());
+                            if cache_may_stale(&prev_vnodes, &vnodes) {
+                                right_table.cache.clear();
+                            }
                         }
+                        right_table.cache.update_epoch(barrier.epoch.curr);
+                        right_table.update(
+                            updates,
+                            &self.right_join_keys,
+                            &right_stream_key_indices,
+                        )?;
                     }
-                    self.right_table.cache.update_epoch(barrier.epoch.curr);
-                    self.right_table.update(
-                        updates,
-                        &self.right_join_keys,
-                        &right_stream_key_indices,
-                    )?;
                     prev_epoch = Some(barrier.epoch.curr);
                     yield Message::Barrier(barrier)
                 }
