@@ -16,7 +16,7 @@ pub fn generate_config_doc_fn(input: DeriveInput) -> proc_macro2::TokenStream {
     quote! {
         impl #struct_name {
             pub fn config_docs(name: String, docs: &mut std::collections::HashMap<String, Vec<(String, String)>>) {
-                docs.insert(name, #vec_fields);
+                docs.insert(name.clone(), #vec_fields);
                 #call_nested_fields;
             }
         }
@@ -99,7 +99,7 @@ impl StructFieldDocs {
             .fields
             .iter()
             .map(|(name, doc)| {
-                quote! { (String::from(#name), String::from(#doc)) }
+                quote! { (#name.to_string(), #doc.to_string()) }
             })
             .collect();
 
@@ -115,7 +115,7 @@ impl StructFieldDocs {
             .map(|(ident, ty)| {
                 quote! {
                     if name.is_empty() {
-                        #ty::config_docs(#ident, docs);
+                        #ty::config_docs(#ident.to_string(), docs);
                     } else {
                         #ty::config_docs(format!("{}.{}", name, #ident), docs);
                     }

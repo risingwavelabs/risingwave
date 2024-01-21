@@ -133,26 +133,32 @@ impl OverrideConfig for NoOverride {
 
 /// [`RwConfig`] corresponds to the whole config file `risingwave.toml`. Each field corresponds to a
 /// section.
-#[derive(Educe, Clone, Serialize, Deserialize, Default)]
+#[derive(Educe, Clone, Serialize, Deserialize, Default, ConfigDoc)]
 #[educe(Debug)]
 pub struct RwConfig {
     #[serde(default)]
+    #[nested_config]
     pub server: ServerConfig,
 
     #[serde(default)]
+    #[nested_config]
     pub meta: MetaConfig,
 
     #[serde(default)]
+    #[nested_config]
     pub batch: BatchConfig,
 
     #[serde(default)]
+    #[nested_config]
     pub streaming: StreamingConfig,
 
     #[serde(default)]
+    #[nested_config]
     pub storage: StorageConfig,
 
     #[serde(default)]
     #[educe(Debug(ignore))]
+    #[nested_config]
     pub system: SystemConfig,
 
     #[serde(flatten)]
@@ -171,7 +177,7 @@ pub enum MetaBackend {
 }
 
 /// The section `[meta]` in `risingwave.toml`.
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaConfig {
     /// Objects within `min_sst_retention_time_sec` won't be deleted by hummock full GC, even they
     /// are dangling.
@@ -307,6 +313,7 @@ pub struct MetaConfig {
     pub compaction_task_max_progress_interval_secs: u64,
 
     #[serde(default)]
+    #[nested_config]
     pub compaction_config: CompactionConfig,
 
     #[serde(default = "default::meta::hybird_partition_vnode_count")]
@@ -318,6 +325,7 @@ pub struct MetaConfig {
     pub event_log_channel_max_size: u32,
 
     #[serde(default, with = "meta_prefix")]
+    #[nested_config]
     pub developer: MetaDeveloperConfig,
 }
 
@@ -388,7 +396,7 @@ impl<'de> Deserialize<'de> for DefaultParallelism {
 /// The subsections `[meta.developer]`.
 ///
 /// It is put at [`MetaConfig::developer`].
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaDeveloperConfig {
     /// The number of traces to be cached in-memory by the tracing collector
     /// embedded in the meta node.
@@ -402,7 +410,7 @@ pub struct MetaDeveloperConfig {
 }
 
 /// The section `[server]` in `risingwave.toml`.
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct ServerConfig {
     /// The interval for periodic heartbeat from worker to the meta service.
     #[serde(default = "default::server::heartbeat_interval_ms")]
@@ -431,7 +439,7 @@ pub struct ServerConfig {
 }
 
 /// The section `[batch]` in `risingwave.toml`.
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct BatchConfig {
     /// The thread number of the batch task runtime in the compute node. The default value is
     /// decided by `tokio`.
@@ -439,6 +447,7 @@ pub struct BatchConfig {
     pub worker_threads_num: Option<usize>,
 
     #[serde(default, with = "batch_prefix")]
+    #[nested_config]
     pub developer: BatchDeveloperConfig,
 
     #[serde(default)]
@@ -460,7 +469,7 @@ pub struct BatchConfig {
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StreamingConfig {
     /// The maximum number of barriers in-flight in the compute nodes.
     #[serde(default = "default::streaming::in_flight_barrier_nums")]
@@ -523,7 +532,7 @@ impl PartialOrd for MetricLevel {
 }
 
 /// The section `[storage]` in `risingwave.toml`.
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StorageConfig {
     /// parallelism while syncing share buffers into L0 SST. Should NOT be 0.
     #[serde(default = "default::storage::share_buffers_sync_parallelism")]
@@ -652,7 +661,7 @@ pub struct StorageConfig {
     pub object_store: ObjectStoreConfig,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct CacheRefillConfig {
     /// SSTable levels to refill.
     #[serde(default = "default::cache_refill::data_refill_levels")]
@@ -691,7 +700,7 @@ pub struct CacheRefillConfig {
 /// The subsection `[storage.data_file_cache]` and `[storage.meta_file_cache]` in `risingwave.toml`.
 ///
 /// It's put at [`StorageConfig::data_file_cache`] and  [`StorageConfig::meta_file_cache`].
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::dir")]
     pub dir: String,
@@ -790,7 +799,7 @@ pub struct HeapProfilingConfig {
 /// The subsections `[streaming.developer]`.
 ///
 /// It is put at [`StreamingConfig::developer`].
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StreamingDeveloperConfig {
     /// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries
     /// and might affect the prometheus performance. If you only need actor input and output
@@ -845,7 +854,7 @@ pub struct StreamingDeveloperConfig {
 /// The subsections `[batch.developer]`.
 ///
 /// It is put at [`BatchConfig::developer`].
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct BatchDeveloperConfig {
     /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
     /// `SourceExecutor`.
@@ -867,7 +876,7 @@ macro_rules! define_system_config {
             /// The section `[system]` in `risingwave.toml`. All these fields are used to initialize the system
             /// parameters persisted in Meta store. Most fields are for testing purpose only and should not be
             /// documented.
-            #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+            #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
             pub struct SystemConfig {
                 $(
                     #[doc = $doc]
@@ -1573,7 +1582,7 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct CompactionConfig {
     #[serde(default = "default::compaction_config::max_bytes_for_level_base")]
     pub max_bytes_for_level_base: u64,
@@ -1611,6 +1620,8 @@ pub struct CompactionConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
 
     /// This test ensures that `config/example.toml` is up-to-date with the default values specified
@@ -1625,6 +1636,12 @@ mod tests {
         let default = toml::to_string(&RwConfig::default()).expect("failed to serialize");
 
         let expected = format!("{HEADER}\n\n{default}");
+        actual.assert_eq(&expected);
+
+        let mut docs = HashMap::<String, Vec<(String, String)>>::new();
+        RwConfig::config_docs("".to_string(), &mut docs);
+        let expected = configs_to_markdown(&docs);
+        let actual = expect_test::expect_file!["../../config/docs.md"];
         actual.assert_eq(&expected);
 
         // let doc = toml_edit::ser::to_document(&RwConfig::default()).unwrap();
@@ -1643,5 +1660,18 @@ mod tests {
         //         .collect();
         //     (section, configs)
         // });
+    }
+
+    fn configs_to_markdown(configs: &HashMap<String, Vec<(String, String)>>) -> String {
+        let mut markdown = String::new();
+        for (section, configs) in configs {
+            markdown.push_str(&format!("\n## {}\n\n", section));
+            markdown.push_str(&format!("| Config | Desription |\n"));
+            markdown.push_str(&format!("|--------|------------|\n"));
+            for (config, doc) in configs {
+                markdown.push_str(&format!("| {} | {}|\n", config, doc));
+            }
+        }
+        markdown
     }
 }
