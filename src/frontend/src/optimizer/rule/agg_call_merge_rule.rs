@@ -22,9 +22,7 @@ pub struct AggCallMergeRule {}
 
 impl Rule for AggCallMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let Some(agg) = plan.as_logical_agg() else {
-            return None;
-        };
+        let agg = plan.as_logical_agg()?;
 
         let calls = agg.agg_calls();
         let mut new_calls = Vec::with_capacity(calls.len());

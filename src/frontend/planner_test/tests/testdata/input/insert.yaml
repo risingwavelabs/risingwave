@@ -257,3 +257,10 @@
   expected_outputs:
   - batch_plan
   - logical_plan
+- name: distributed insert
+  sql: |
+    set batch_enable_distributed_dml = true;
+    create table t (a int, b int);
+    insert into t select * from t;
+  expected_outputs:
+  - batch_distributed_plan

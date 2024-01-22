@@ -187,11 +187,14 @@ impl<S: StateStore> KvLogStoreReader<S> {
     {
         let range_start = if let Some(last_persisted_epoch) = last_persisted_epoch {
             // start from the next epoch of last_persisted_epoch
-            Included(self.serde.serialize_epoch(last_persisted_epoch + 1))
+            Included(
+                self.serde
+                    .serialize_pk_epoch_prefix(last_persisted_epoch + 1),
+            )
         } else {
             Unbounded
         };
-        let range_end = self.serde.serialize_epoch(
+        let range_end = self.serde.serialize_pk_epoch_prefix(
             self.first_write_epoch
                 .expect("should have set first write epoch"),
         );

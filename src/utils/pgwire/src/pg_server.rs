@@ -19,11 +19,13 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
+use parking_lot::Mutex;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Statement;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite};
 
+use crate::error::PsqlResult;
 use crate::net::{AddressRef, Listener};
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_message::TransactionStatus;
@@ -112,6 +114,8 @@ pub trait Session: Send + Sync {
     fn transaction_status(&self) -> TransactionStatus;
 
     fn init_exec_context(&self, sql: Arc<str>) -> ExecContextGuard;
+
+    fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()>;
 }
 
 /// Each session could run different SQLs multiple times.
@@ -120,6 +124,8 @@ pub struct ExecContext {
     pub running_sql: Arc<str>,
     /// The instant of the running sql
     pub last_instant: Instant,
+    /// A reference used to update when `ExecContext` is dropped
+    pub last_idle_instant: Arc<Mutex<Option<Instant>>>,
 }
 
 /// `ExecContextGuard` holds a `Arc` pointer. Once `ExecContextGuard` is dropped,
@@ -129,6 +135,12 @@ pub struct ExecContextGuard(Arc<ExecContext>);
 impl ExecContextGuard {
     pub fn new(exec_context: Arc<ExecContext>) -> Self {
         Self(exec_context)
+    }
+}
+
+impl Drop for ExecContext {
+    fn drop(&mut self) {
+        *self.last_idle_instant.lock() = Some(Instant::now());
     }
 }
 
@@ -225,6 +237,7 @@ mod tests {
     use risingwave_sqlparser::ast::Statement;
     use tokio_postgres::NoTls;
 
+    use crate::error::PsqlResult;
     use crate::pg_field_descriptor::PgFieldDescriptor;
     use crate::pg_message::TransactionStatus;
     use crate::pg_response::{PgResponse, RowSetResult, StatementType};
@@ -362,8 +375,13 @@ mod tests {
             let exec_context = Arc::new(ExecContext {
                 running_sql: sql,
                 last_instant: Instant::now(),
+                last_idle_instant: Default::default(),
             });
             ExecContextGuard::new(exec_context)
+        }
+
+        fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()> {
+            Ok(())
         }
     }
 

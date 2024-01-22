@@ -19,6 +19,7 @@ use risingwave_pb::meta::table_parallelism::{AutoParallelism, FixedParallelism, 
 use risingwave_pb::meta::{PbTableParallelism, TableParallelism};
 use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSingle, Value};
 use risingwave_sqlparser::keywords::Keyword;
+use thiserror_ext::AsReport;
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
@@ -115,10 +116,10 @@ fn extract_table_parallelism(parallelism: SetVariableValue) -> Result<TableParal
 
         SetVariableValue::Default => auto_parallelism,
         SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Number(v))) => {
-            let fixed_parallelism = v.parse().map_err(|e| {
+            let fixed_parallelism = v.parse::<u32>().map_err(|e| {
                 ErrorCode::InvalidInputSyntax(format!(
                     "target parallelism must be a valid number or auto: {}",
-                    e
+                    e.as_report()
                 ))
             })?;
 

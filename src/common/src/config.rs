@@ -203,6 +203,14 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
     pub hummock_version_checkpoint_interval_sec: u64,
 
+    /// If enabled, SSTable object file and version delta will be retained.
+    ///
+    /// SSTable object file need to be deleted via full GC.
+    ///
+    /// version delta need to be manually deleted.
+    #[serde(default = "default::meta::enable_hummock_data_archive")]
+    pub enable_hummock_data_archive: bool,
+
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected.
     #[serde(default = "default::meta::min_delta_log_num_for_hummock_version_checkpoint")]
@@ -452,6 +460,10 @@ pub struct BatchConfig {
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
+
+    #[serde(default = "default::batch::frontend_compute_runtime_worker_threads")]
+    /// frontend compute runtime worker threads
+    pub frontend_compute_runtime_worker_threads: usize,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -962,6 +974,10 @@ pub mod default {
             30
         }
 
+        pub fn enable_hummock_data_archive() -> bool {
+            false
+        }
+
         pub fn min_delta_log_num_for_hummock_version_checkpoint() -> u64 {
             10
         }
@@ -1383,6 +1399,10 @@ pub mod default {
             // 1 hour
             60 * 60
         }
+
+        pub fn frontend_compute_runtime_worker_threads() -> usize {
+            4
+        }
     }
 
     pub mod compaction_config {
@@ -1391,15 +1411,15 @@ pub mod default {
         const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * 1024 * 1024; // 512MB
 
         // decrease this configure when the generation of checkpoint barrier is not frequent.
-        const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 6;
+        const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 12;
         const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024; // 32MB
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
         const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
         const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 300;
-        const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 96;
+        const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 100;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
-        const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
+        const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 12;
         const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
         const DEFAULT_EMERGENCY_PICKER: bool = true;
 

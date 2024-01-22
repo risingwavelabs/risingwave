@@ -473,7 +473,7 @@ pub fn start_compactor(
                                                         sstable_object_id_manager.remove_watermark_object_id(tracker_id);
                                                     },
                                                 );
-                                                compactor_runner::compact(context, compact_task, rx, Box::new(sstable_object_id_manager.clone()), filter_key_extractor_manager.clone()).await
+                                                compactor_runner::compact(context.clone(), compact_task, rx, Box::new(sstable_object_id_manager.clone()), filter_key_extractor_manager.clone()).await
                                             },
                                             Err(err) => {
                                                 tracing::warn!("Failed to track pending SST object id. {:#?}", err);
@@ -484,12 +484,14 @@ pub fn start_compactor(
                                         };
                                         shutdown.lock().unwrap().remove(&task_id);
 
+                                        let enable_check_compaction_result = context.storage_opts.check_compaction_result;
+                                        let need_check_task = !compact_task.sorted_output_ssts.is_empty() && compact_task.task_status() == TaskStatus::Success;
                                         if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
                                             event: Some(RequestEvent::ReportTask(
                                                 ReportTask {
                                                     task_id: compact_task.task_id,
                                                     task_status: compact_task.task_status,
-                                                    sorted_output_ssts: compact_task.sorted_output_ssts,
+                                                    sorted_output_ssts: compact_task.sorted_output_ssts.clone(),
                                                     table_stats_change:to_prost_table_stats_map(table_stats),
                                                 }
                                             )),
@@ -499,6 +501,18 @@ pub fn start_compactor(
                                                 .as_millis() as u64,
                                         }) {
                                             tracing::warn!("Failed to report task {task_id:?} . {e:?}");
+                                            if enable_check_compaction_result && need_check_task {
+                                                match check_compaction_result(&compact_task, context.clone()).await {
+                                                    Err(e) => {
+                                                        tracing::warn!("Failed to check compaction task {} because: {:?}",compact_task.task_id, e);
+                                                    },
+                                                    Ok(true) => (),
+                                                    Ok(false) => {
+                                                        panic!("Failed to pass consistency check for result of compaction task:\n{:?}", compact_task_to_string(&compact_task));
+                                                    }
+                                                }
+                                            }
+
                                         }
                                     }
                                     ResponseEvent::VacuumTask(vacuum_task) => {
@@ -677,11 +691,9 @@ pub fn start_shared_compactor(
                                     {
                                         Ok(_) => {
                                             // TODO: remove this method after we have running risingwave cluster with fast compact algorithm stably for a long time.
-
-                                            if context.storage_opts.check_compaction_result
-                                                && !compact_task.sorted_output_ssts.is_empty()
-                                                && compact_task.task_status() == TaskStatus::Success
-                                            {
+                                            let enable_check_compaction_result = context.storage_opts.check_compaction_result;
+                                            let need_check_task =  !compact_task.sorted_output_ssts.is_empty() && compact_task.task_status() == TaskStatus::Success;
+                                            if enable_check_compaction_result && need_check_task {
                                                 match check_compaction_result(&compact_task, context.clone()).await {
                                                     Err(e) => {
                                                         tracing::warn!("Failed to check compaction task {} because: {:?}",compact_task.task_id, e);

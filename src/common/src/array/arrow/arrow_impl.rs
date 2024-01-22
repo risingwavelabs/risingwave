@@ -880,7 +880,7 @@ mod tests {
 
     #[test]
     fn int256() {
-        let values = vec![
+        let values = [
             None,
             Some(Int256::from(1)),
             Some(Int256::from(i64::MAX)),
