@@ -628,7 +628,11 @@ impl S3ObjectStore {
     }
 
     /// Creates a minio client. The server should be like `minio://key:secret@address:port/bucket`.
-    pub async fn with_minio(server: &str, metrics: Arc<ObjectStoreMetrics>) -> Self {
+    pub async fn with_minio(
+        server: &str,
+        metrics: Arc<ObjectStoreMetrics>,
+        s3_object_store_config: ObjectStoreConfig,
+    ) -> Self {
         let server = server.strip_prefix("minio://").unwrap();
         let (access_key_id, rest) = server.split_once(':').unwrap();
         let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
@@ -643,7 +647,6 @@ impl S3ObjectStore {
         };
         let (address, bucket) = rest.split_once('/').unwrap();
 
-        let s3_object_store_config = ObjectStoreConfig::default();
         #[cfg(madsim)]
         let builder = aws_sdk_s3::config::Builder::new().credentials_provider(
             Credentials::from_keys(access_key_id, secret_access_key, None),
