@@ -97,18 +97,6 @@ pub fn is_system_schema(schema_name: &str) -> bool {
     SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)
 }
 
-/// Hidden additional columns for partition/file and offset.
-/// Refer to <https://github.com/risingwavelabs/risingwave/issues/14384> for more details.
-pub const ADDITION_SPLIT_OFFSET_COLUMN_PREFIX: &str = "_rw_addition_";
-
-pub fn get_addition_key_name(col_name: &str) -> Option<&str> {
-    col_name.strip_prefix(ADDITION_SPLIT_OFFSET_COLUMN_PREFIX)
-}
-
-pub fn is_hidden_addition_col(col_name: &str) -> bool {
-    col_name.starts_with(ADDITION_SPLIT_OFFSET_COLUMN_PREFIX)
-}
-
 pub const ROWID_PREFIX: &str = "_row_id";
 
 pub fn is_row_id_column_name(name: &str) -> bool {

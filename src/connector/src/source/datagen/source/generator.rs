@@ -16,7 +16,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::get_addition_key_name;
 use risingwave_common::error::RwError;
 use risingwave_common::field_generator::FieldGeneratorImpl;
 use risingwave_common::row::OwnedRow;
@@ -25,6 +24,10 @@ use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use crate::source::{SourceMessage, SourceMeta, SplitId};
+
+fn get_addition_key_name(field_name: &str) -> Option<&str> {
+    field_name.strip_prefix("_rw_datagen_")
+}
 
 pub enum FieldDesc {
     // field is invisible, generate None

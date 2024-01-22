@@ -22,7 +22,6 @@ pub use fs_source_executor::*;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
-use risingwave_common::catalog::is_hidden_addition_col;
 use risingwave_common::row::Row;
 use risingwave_connector::source::{SourceColumnDesc, SplitId};
 use risingwave_pb::plan_common::AdditionalColumnType;
@@ -92,8 +91,7 @@ pub fn prune_additional_cols(
     chunk.project(
         &(0..chunk.dimension())
             .filter(|&idx| {
-                (idx != split_idx && idx != offset_idx)
-                    || !is_hidden_addition_col(&column_descs[idx].name)
+                (idx != split_idx && idx != offset_idx) || column_descs[idx].is_visible()
             })
             .collect_vec(),
     )

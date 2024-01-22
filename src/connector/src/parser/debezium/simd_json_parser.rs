@@ -566,6 +566,7 @@ mod tests {
                     fields: vec![],
                     column_type: SourceColumnType::Normal,
                     is_pk: false,
+                    is_hidden: false,
                     additional_column_type: AdditionalColumnType::Normal,
                 },
                 SourceColumnDesc::simple("o_enum", DataType::Varchar, ColumnId::from(8)),

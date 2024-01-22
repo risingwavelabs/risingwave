@@ -15,8 +15,8 @@
 use std::fmt::Debug;
 
 use risingwave_common::catalog::{
-    is_hidden_addition_col, ColumnDesc, ColumnId, KAFKA_TIMESTAMP_COLUMN_NAME, OFFSET_COLUMN_NAME,
-    ROWID_PREFIX, TABLE_NAME_COLUMN_NAME,
+    ColumnDesc, ColumnId, KAFKA_TIMESTAMP_COLUMN_NAME, OFFSET_COLUMN_NAME, ROWID_PREFIX,
+    TABLE_NAME_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::{AdditionalColumnType, ColumnDescVersion};
@@ -33,6 +33,9 @@ pub struct SourceColumnDesc {
 
     // `is_pk` is used to indicate whether the column is part of the primary key columns.
     pub is_pk: bool,
+
+    // `is_hidden` is used to indicate whether the column is hidden from the user.
+    pub is_hidden: bool,
 
     // `additional_column_type` and `column_type` are orthogonal
     // `additional_column_type` is used to indicate the column is from which part of the message
@@ -87,7 +90,15 @@ impl SourceColumnDesc {
             fields: vec![],
             column_type: SourceColumnType::Normal,
             is_pk: false,
+            is_hidden: false,
             additional_column_type: AdditionalColumnType::Normal,
+        }
+    }
+
+    pub fn from_column_desc_with_hidden(c: &ColumnDesc, is_hidden: bool) -> Self {
+        Self {
+            is_hidden,
+            ..c.into()
         }
     }
 
@@ -105,13 +116,14 @@ impl SourceColumnDesc {
 
     #[inline]
     pub fn is_visible(&self) -> bool {
-        self.column_type == SourceColumnType::Normal && !is_hidden_addition_col(&self.name)
+        !self.is_hidden
     }
 }
 
 impl From<&ColumnDesc> for SourceColumnDesc {
     fn from(c: &ColumnDesc) -> Self {
         let column_type = SourceColumnType::from_name(c.name.as_str());
+        let is_hidden = column_type != SourceColumnType::Normal;
         Self {
             name: c.name.clone(),
             data_type: c.data_type.clone(),
@@ -119,6 +131,7 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             fields: c.field_descs.clone(),
             column_type,
             is_pk: false,
+            is_hidden,
             additional_column_type: c.additional_column_type,
         }
     }

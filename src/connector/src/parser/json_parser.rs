@@ -580,6 +580,7 @@ mod tests {
             fields: vec![],
             column_type: SourceColumnType::Normal,
             is_pk: true,
+            is_hidden: false,
             additional_column_type: AdditionalColumnType::Key,
         };
         let descs = vec![

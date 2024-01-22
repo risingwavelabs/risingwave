@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnDesc, ColumnId, ADDITION_SPLIT_OFFSET_COLUMN_PREFIX};
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -107,7 +107,7 @@ impl SourceDescBuilder {
             ["partition", "file", "offset"]
                 .into_iter()
                 .filter_map(|key_name| {
-                    let col_name = format!("{}{}", ADDITION_SPLIT_OFFSET_COLUMN_PREFIX, key_name);
+                    let col_name = format!("_rw_{}_{}", connector_name, key_name);
                     col_list.iter().find_map(|(n, f)| {
                         if key_name == *n {
                             last_column_id = last_column_id.next();
@@ -147,9 +147,10 @@ impl SourceDescBuilder {
 
         for (existed, c) in columns_exist.iter().zip_eq_fast(&additional_columns) {
             if !existed {
-                columns.push(SourceColumnDesc::from(&ColumnDesc::from(
-                    c.column_desc.as_ref().unwrap(),
-                )));
+                columns.push(SourceColumnDesc::from_column_desc_with_hidden(
+                    &ColumnDesc::from(c.column_desc.as_ref().unwrap()),
+                    true,
+                ));
             }
         }
 
