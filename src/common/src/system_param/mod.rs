@@ -417,6 +417,7 @@ impl FromParams for OverrideFromParams {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::SystemConfig;
 
     #[test]
     fn test_to_from_kv() {
@@ -456,7 +457,7 @@ mod tests {
 
     #[test]
     fn test_set() {
-        let mut p = PbSystemParams::default();
+        let mut p = SystemConfig::default().into_init_system_params();
         // Unrecognized param.
         assert!(set_system_param(&mut p, "?", Some("?".to_string())).is_err());
         // Value out of range.
