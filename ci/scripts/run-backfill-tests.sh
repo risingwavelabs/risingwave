@@ -28,7 +28,7 @@ if [[ -n "${BUILDKITE:-}" ]]; then
 else
   RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe'
 fi
-export RUST_LOG="info,risingwave_meta::barrier::progress=debug,risingwave_meta::rpc::ddl_controller=debug"
+export RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 
 run_sql_file() {
   psql -h localhost -p 4566 -d dev -U root -f "$@"
@@ -60,8 +60,8 @@ rename_logs_with_prefix() {
 }
 
 kill_cluster() {
-  cargo make kill
-  cargo make wait-processes-exit
+  cargo make ci-kill
+  wait
 }
 
 restart_cluster() {
@@ -150,7 +150,6 @@ test_backfill_tombstone() {
   ./risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
   echo "--- Kill cluster"
   kill_cluster
-  cargo make wait-processes-exit
   wait
 }
 
@@ -171,9 +170,7 @@ test_replication_with_column_pruning() {
   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/select.sql </dev/null
   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/drop.sql
   echo "--- Kill cluster"
-  cargo make kill
-  cargo make wait-processes-exit
-  wait
+  kill_cluster
 }
 
 # Test sink backfill recovery
@@ -200,9 +197,7 @@ test_sink_backfill_recovery() {
 
   # Verify data matches upstream table.
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/validate_sink.slt'
-  cargo make kill
-  cargo make wait-processes-exit
-  wait
+  kill_cluster
 }
 
 test_arrangement_backfill_snapshot_and_upstream_runtime() {
@@ -218,8 +213,7 @@ test_arrangement_backfill_snapshot_and_upstream_runtime() {
 
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_arrangement.slt'
 
-  cargo make kill
-  cargo make wait-processes-exit
+  cargo make ci-kill
 }
 
 test_no_shuffle_backfill_snapshot_and_upstream_runtime() {
@@ -235,8 +229,7 @@ test_no_shuffle_backfill_snapshot_and_upstream_runtime() {
 
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_no_shuffle.slt'
 
-  cargo make kill
-  cargo make wait-processes-exit
+  kill_cluster
 }
 
 test_backfill_snapshot_runtime() {
@@ -249,8 +242,7 @@ test_backfill_snapshot_runtime() {
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_no_shuffle.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_arrangement.slt'
 
-  cargo make kill
-  cargo make wait-processes-exit
+  kill_cluster
 }
 
 main() {
