@@ -9831,6 +9831,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_sqlparser",
  "similar",
+ "thiserror-ext",
  "tokio-postgres",
  "tracing",
  "tracing-subscriber",
