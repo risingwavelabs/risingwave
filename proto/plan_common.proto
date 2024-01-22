@@ -198,8 +198,11 @@ message AdditionalColumnOffset {}
 message AdditionalColumnFilename {}
 
 message AdditionalColumnHeader {
-  optional string inner_field = 1;
+  string inner_field = 1;
 }
+
+// this type means we read all headers as a whole
+message AdditionalColumnHeaders {}
 
 message AdditionalColumn {
   oneof column_type {
@@ -208,7 +211,8 @@ message AdditionalColumn {
     AdditionalColumnTimestamp timestamp = 3;
     AdditionalColumnPartition partition = 4;
     AdditionalColumnOffset offset = 5;
-    AdditionalColumnHeader header = 6;
+    AdditionalColumnHeader header_inner = 6;
     AdditionalColumnFilename filename = 7;
+    AdditionalColumnHeaders headers = 8;
   }
 }

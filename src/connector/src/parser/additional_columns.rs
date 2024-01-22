@@ -16,8 +16,9 @@ use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::{DataType, StructType};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{
-    AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader, AdditionalColumnKey,
-    AdditionalColumnOffset, AdditionalColumnPartition, AdditionalColumnTimestamp,
+    AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader, AdditionalColumnHeaders,
+    AdditionalColumnKey, AdditionalColumnOffset, AdditionalColumnPartition,
+    AdditionalColumnTimestamp,
 };
 
 use crate::source::{
@@ -134,9 +135,9 @@ fn kafka_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColum
                                 id,
                                 DataType::Bytea,
                                 AdditionalColumn {
-                                    column_type: Some(AdditionalColumnType::Header(
+                                    column_type: Some(AdditionalColumnType::HeaderInner(
                                         AdditionalColumnHeader {
-                                            inner_field: Some(inner.to_string()),
+                                            inner_field: inner.to_string(),
                                         },
                                     )),
                                 },
@@ -150,8 +151,8 @@ fn kafka_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColum
                                 id,
                                 DataType::List(get_kafka_header_item_datatype().into()),
                                 AdditionalColumn {
-                                    column_type: Some(AdditionalColumnType::Header(
-                                        AdditionalColumnHeader { inner_field: None },
+                                    column_type: Some(AdditionalColumnType::Headers(
+                                        AdditionalColumnHeaders {},
                                     )),
                                 },
                             ),

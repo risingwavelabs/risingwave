@@ -119,9 +119,16 @@ pub fn extreact_timestamp_from_meta(meta: &SourceMeta) -> Option<Datum> {
     }
 }
 
-pub fn extract_headers_from_meta(meta: &SourceMeta, inner_field: Option<&str>) -> Option<Datum> {
+pub fn extract_headers_from_meta(meta: &SourceMeta) -> Option<Datum> {
     match meta {
-        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_headers(inner_field),
+        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_headers(None), /* expect output of type `array[struct<varchar, bytea>]` */
+        _ => None,
+    }
+}
+
+pub fn extract_header_inner_from_meta(meta: &SourceMeta, inner_field: &str) -> Option<Datum> {
+    match meta {
+        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_headers(Some(inner_field)), /* expect output of type `bytea` */
         _ => None,
     }
 }

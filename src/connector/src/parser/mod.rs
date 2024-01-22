@@ -49,7 +49,9 @@ use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
 use crate::common::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
-use crate::parser::util::{extract_headers_from_meta, extreact_timestamp_from_meta};
+use crate::parser::util::{
+    extract_header_inner_from_meta, extract_headers_from_meta, extreact_timestamp_from_meta,
+};
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
@@ -365,13 +367,24 @@ impl SourceStreamChunkRowWriter<'_> {
                             .map(|ele| ScalarImpl::Utf8(ele.offset.to_string().into())),
                     ));
                 }
-                (_, &Some(AdditionalColumnType::Header(ref header))) => {
+                (_, &Some(AdditionalColumnType::HeaderInner(ref header_inner))) => {
                     return Ok(A::output_for(
                         self.row_meta
                             .as_ref()
                             .and_then(|ele| {
-                                extract_headers_from_meta(ele.meta, header.inner_field.as_deref())
+                                extract_header_inner_from_meta(
+                                    ele.meta,
+                                    header_inner.inner_field.as_ref(),
+                                )
                             })
+                            .unwrap_or(None),
+                    ))
+                }
+                (_, &Some(AdditionalColumnType::Headers(_))) => {
+                    return Ok(A::output_for(
+                        self.row_meta
+                            .as_ref()
+                            .and_then(|ele| extract_headers_from_meta(ele.meta))
                             .unwrap_or(None),
                     ))
                 }

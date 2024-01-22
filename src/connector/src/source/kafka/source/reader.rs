@@ -199,7 +199,10 @@ impl CommonSplitReader for KafkaSplitReader {
         let require_message_header = self.parser_config.common.rw_columns.iter().any(|col_desc| {
             matches!(
                 col_desc.additional_column_type.column_type,
-                Some(AdditionalColumnType::Header(_))
+                Some(AdditionalColumnType::Headers(_))
+            ) || matches!(
+                col_desc.additional_column_type.column_type,
+                Some(AdditionalColumnType::HeaderInner(_))
             )
         });
 
