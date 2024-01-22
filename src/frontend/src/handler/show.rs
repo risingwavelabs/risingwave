@@ -252,7 +252,7 @@ pub async fn handle_show_object(
                         Some(t.arg_types.iter().map(|t| t.to_string()).join(", ").into()),
                         Some(t.return_type.to_string().into()),
                         Some(t.language.clone().into()),
-                        Some(t.link.clone().into()),
+                        t.link.clone().map(Into::into),
                     ])
                 })
                 .collect_vec();
