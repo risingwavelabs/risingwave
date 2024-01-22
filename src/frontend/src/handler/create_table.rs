@@ -807,10 +807,16 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
 
+    let disable_backfill = match context.with_options().get("disable_backfill") {
+        None => false,
+        Some(v) => v == "true",
+    };
+
     let logical_scan = LogicalCdcScan::create(
         external_table_name,
         Rc::new(cdc_table_desc),
         context.clone(),
+        disable_backfill,
     );
 
     let scan_node: PlanRef = logical_scan.into();

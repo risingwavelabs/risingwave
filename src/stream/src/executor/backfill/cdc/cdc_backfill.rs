@@ -75,6 +75,8 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     metrics: Arc<StreamingMetrics>,
 
     chunk_size: usize,
+
+    disable_backfill: bool,
 }
 
 impl<S: StateStore> CdcBackfillExecutor<S> {
@@ -89,6 +91,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         metrics: Arc<StreamingMetrics>,
         state_table: StateTable<S>,
         chunk_size: usize,
+        disable_backfill: bool,
     ) -> Self {
         Self {
             actor_ctx,
@@ -100,6 +103,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             progress,
             metrics,
             chunk_size,
+            disable_backfill,
         }
     }
 
@@ -143,7 +147,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let state = state_impl.restore_state().await?;
         current_pk_pos = state.current_pk_pos.clone();
 
-        let to_backfill = !state.is_finished;
+        let to_backfill = !self.disable_backfill && !state.is_finished;
 
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
@@ -434,6 +438,20 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     }
                 }
             }
+        } else {
+            tracing::info!(
+                upstream_table_id,
+                upstream_table_name,
+                "CdcBackfill has been skipped"
+            );
+            state_impl
+                .mutate_state(
+                    current_pk_pos,
+                    last_binlog_offset.clone(),
+                    total_snapshot_row_count,
+                    true,
+                )
+                .await?;
         }
 
         // drop reader to release db connection
@@ -441,6 +459,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         tracing::info!(
             upstream_table_id,
+            upstream_table_name,
             "CdcBackfill has already finished and will forward messages directly to the downstream"
         );
 
