@@ -832,11 +832,12 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             txn.append_data_file(s.data_files);
             txn.append_delete_file(s.delete_files);
         });
-        txn.commit()
-            .await
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+        txn.commit().await.map_err(|err| {
+            tracing::error!(?err, "Failed to commit iceberg table");
+            SinkError::Iceberg(anyhow!(err))
+        })?;
 
-        tracing::info!("Succeeded to commit ti iceberg table in epoch {epoch}.");
+        tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
         Ok(())
     }
 }
