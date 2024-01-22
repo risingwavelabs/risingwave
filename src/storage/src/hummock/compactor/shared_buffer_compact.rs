@@ -28,6 +28,7 @@ use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
+use thiserror_ext::AsReport;
 use tracing::error;
 
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
@@ -203,14 +204,14 @@ async fn compact_shared_buffer(
             }
             Ok(Err(e)) => {
                 compact_success = false;
-                tracing::warn!("Shared Buffer Compaction failed with error: {:#?}", e);
+                tracing::warn!(error = %e.as_report(), "Shared Buffer Compaction failed with error");
                 err = Some(e);
             }
             Err(e) => {
                 compact_success = false;
                 tracing::warn!(
-                    "Shared Buffer Compaction failed with future error: {:#?}",
-                    e
+                    error = %e.as_report(),
+                    "Shared Buffer Compaction failed with future error",
                 );
                 err = Some(HummockError::compaction_executor(
                     "failed while execute in tokio",
@@ -265,7 +266,7 @@ async fn compact_shared_buffer(
                 .await
                 {
                     Err(e) => {
-                        tracing::warn!("Failed check flush result of memtable because of {:?}", e);
+                        tracing::warn!(error = %e.as_report(), "Failed check flush result of memtable");
                     }
                     Ok(true) => (),
                     Ok(false) => {

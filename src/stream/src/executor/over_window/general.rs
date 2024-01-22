@@ -40,9 +40,9 @@ use super::over_partition::{
 };
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
+use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::test_utils::prelude::StateTable;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message,
     StreamExecutorError, StreamExecutorResult,

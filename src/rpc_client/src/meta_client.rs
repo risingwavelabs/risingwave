@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use either::Either;
 use futures::stream::BoxStream;
@@ -86,6 +86,7 @@ use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
 use risingwave_pb::user::*;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, Receiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{mpsc, oneshot, RwLock};
@@ -739,10 +740,10 @@ impl MetaClient {
                 {
                     Ok(Ok(_)) => {}
                     Ok(Err(err)) => {
-                        tracing::warn!("Failed to send_heartbeat: error {}", err);
+                        tracing::warn!(error = %err.as_report(), "Failed to send_heartbeat");
                     }
-                    Err(err) => {
-                        tracing::warn!("Failed to send_heartbeat: timeout {}", err);
+                    Err(_) => {
+                        tracing::warn!("Failed to send_heartbeat: timeout");
                     }
                 }
             }
@@ -1422,7 +1423,7 @@ impl HummockMetaClient for MetaClient {
                     .expect("Clock may have gone backwards")
                     .as_millis() as u64,
             })
-            .map_err(|err| RpcError::Internal(anyhow!(err.to_string())))?;
+            .context("Failed to subscribe compaction event")?;
 
         let stream = self
             .inner
@@ -1438,7 +1439,10 @@ impl HummockMetaClient for MetaClient {
 #[async_trait]
 impl TelemetryInfoFetcher for MetaClient {
     async fn fetch_telemetry_info(&self) -> std::result::Result<Option<String>, String> {
-        let resp = self.get_telemetry_info().await.map_err(|e| e.to_string())?;
+        let resp = self
+            .get_telemetry_info()
+            .await
+            .map_err(|e| e.to_report_string())?;
         let tracking_id = resp.get_tracking_id().ok();
         Ok(tracking_id.map(|id| id.to_owned()))
     }
@@ -1574,12 +1578,12 @@ impl MetaMemberManagement {
                         }
                     };
                     if let Err(err) = client {
-                        tracing::warn!("failed to create client from {}: {}", addr, err);
+                        tracing::warn!(%addr, error = %err.as_report(), "failed to create client");
                         continue;
                     }
                     match client.unwrap().members(MembersRequest {}).await {
                         Err(err) => {
-                            tracing::warn!("failed to fetch members from {}: {}", addr, err);
+                            tracing::warn!(%addr, error = %err.as_report(), "failed to fetch members");
                             continue;
                         }
                         Ok(resp) => {
@@ -1696,7 +1700,7 @@ impl GrpcMetaClient {
 
                 let tick_result = member_management.refresh_members().await;
                 if let Err(e) = tick_result.as_ref() {
-                    tracing::warn!("refresh meta member client failed {}", e);
+                    tracing::warn!(error = %e.as_report(),  "refresh meta member client failed");
                 }
 
                 if let Some(sender) = event {
@@ -1777,9 +1781,9 @@ impl GrpcMetaClient {
                 }
                 Err(e) => {
                     tracing::warn!(
-                        "Failed to connect to meta server {}, trying again: {}",
+                        error = %e.as_report(),
+                        "Failed to connect to meta server {}, trying again",
                         addr,
-                        e
                     )
                 }
             }
@@ -1948,7 +1952,7 @@ impl GrpcMetaClient {
                 .is_ok()
             {
                 if let Ok(Err(e)) = result_receiver.await {
-                    tracing::warn!("force refresh meta client failed {}", e);
+                    tracing::warn!(error = %e.as_report(), "force refresh meta client failed");
                 }
             } else {
                 tracing::debug!("skipping the current refresh, somewhere else is already doing it")
