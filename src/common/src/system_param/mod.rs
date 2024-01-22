@@ -417,7 +417,6 @@ impl FromParams for OverrideFromParams {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::SystemConfig;
 
     #[test]
     fn test_to_from_kv() {
