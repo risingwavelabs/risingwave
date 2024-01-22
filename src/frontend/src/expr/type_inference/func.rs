@@ -331,13 +331,10 @@ fn infer_type_for_special(
             let len = inputs.len();
             align_types(inputs.iter_mut().enumerate().filter_map(|(i, e)| {
                 // This optimized `ConstantLookup` organize `inputs` as
-                // [operand_const_expr]? (cond, res) [else]? pairs.
+                // [dummy_expression] (cond, res) [else / fallback]? pairs.
                 // So we align exprs at even indices as well as the last one
                 // when length is odd.
-                // Note that currently we assume fallback expression must exist
-                match (len.is_even() && i != 0 && i.is_even())
-                    || (len.is_odd() && i.is_odd())
-                    || i == len - 1
+                match (i != 0 && i.is_even() || i == len - 1)
                 {
                     true => Some(e),
                     false => None,
