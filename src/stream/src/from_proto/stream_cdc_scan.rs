@@ -88,6 +88,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         let state_table =
             StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
 
+        // adjust backfill chunk size if rate limit is set.
         let chunk_size = params.env.config().developer.chunk_size;
         let backfill_chunk_size = node
             .rate_limit
