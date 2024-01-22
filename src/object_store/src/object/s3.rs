@@ -942,6 +942,7 @@ struct RetryCondition {
 
 impl RetryCondition {
     fn new(config: &S3ObjectStoreConfig) -> Self {
+        println!("s3 config: {:?}", config);
         Self {
             retry_unknown_service_error: config.retry_unknown_service_error,
         }
@@ -958,13 +959,24 @@ impl tokio_retry::Condition<RetryError> for RetryCondition {
                         return true;
                     }
                 }
-                SdkError::ServiceError(e) => {
-                    if self.retry_unknown_service_error && e.err().code().is_none() {
-                        tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
-                        return true;
+                SdkError::ServiceError(e) if self.retry_unknown_service_error => {
+                    match e.err().code() {
+                        None => {
+                            tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
+                            return true;
+                        }
+                        Some(code) => {
+                            println!("code: {}", code);
+                            if code == "SlowDown" {
+                                tracing::warn!(target: "slowdown_error", "{e:?} occurs, retry S3 get_object request.");
+                                return true;
+                            }
+                        }
                     }
                 }
-                _ => {}
+                _ => {
+                    println!("encountered_other_error: {:?}", err);
+                }
             },
             Either::Right(_) => {
                 // Unfortunately `ErrorKind` of `ByteStreamError` is not accessible.
