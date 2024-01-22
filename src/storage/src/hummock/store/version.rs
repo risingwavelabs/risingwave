@@ -15,7 +15,6 @@
 use std::cmp::Ordering;
 use std::collections::vec_deque::VecDeque;
 use std::collections::HashSet;
-use std::iter::once;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -913,13 +912,16 @@ impl HummockVersionReader {
         local_stats.staging_sst_iter_count = staging_sst_iter_count;
         let staging_iter: StagingDataIterator = MergeIterator::new(staging_iters);
 
-        let mut non_overlapping_iters = Vec::new();
-        let mut overlapping_iters = Vec::new();
         let timer = self
             .state_store_metrics
             .iter_fetch_meta_duration
             .with_label_values(&[table_id_label])
             .start_timer();
+        let mut sub_iters = vec![];
+        if let Some(iter) = mem_table {
+            sub_iters.push(HummockIteratorUnion::Fourth(iter));
+        }
+        sub_iters.push(HummockIteratorUnion::First(staging_iter));
 
         for level in committed.levels(read_options.table_id) {
             if level.table_infos.is_empty() {
@@ -952,11 +954,11 @@ impl HummockVersionReader {
                             self.sstable_store.clone(),
                         );
                     }
-                    non_overlapping_iters.push(ConcatIterator::new(
+                    sub_iters.push(HummockIteratorUnion::Third(ConcatIterator::new(
                         sstables,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
-                    ));
+                    )));
                     local_stats.non_overlapping_iter_count += 1;
                 } else {
                     let sstable = self
@@ -985,11 +987,11 @@ impl HummockVersionReader {
                     // We put the SstableIterator in `overlapping_iters` just for convenience since
                     // it overlaps with SSTs in other levels. In metrics reporting, we still count
                     // it in `non_overlapping_iter_count`.
-                    non_overlapping_iters.push(ConcatIterator::new(
-                        sstables,
+                    sub_iters.push(HummockIteratorUnion::Second(SstableIterator::new(
+                        sstable,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
-                    ));
+                    )));
                     local_stats.non_overlapping_iter_count += 1;
                 }
             } else {
@@ -1026,11 +1028,11 @@ impl HummockVersionReader {
                             continue;
                         }
                     }
-                    overlapping_iters.push(SstableIterator::new(
+                    sub_iters.push(HummockIteratorUnion::Second(SstableIterator::new(
                         sstable,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
-                    ));
+                    )));
                     local_stats.overlapping_iter_count += 1;
                 }
             }
@@ -1045,22 +1047,7 @@ impl HummockVersionReader {
         }
 
         // 3. build user_iterator
-        let merge_iter = MergeIterator::new(
-            mem_table
-                .into_iter()
-                .map(HummockIteratorUnion::Fourth)
-                .chain(once(HummockIteratorUnion::First(staging_iter)))
-                .chain(
-                    overlapping_iters
-                        .into_iter()
-                        .map(HummockIteratorUnion::Second),
-                )
-                .chain(
-                    non_overlapping_iters
-                        .into_iter()
-                        .map(HummockIteratorUnion::Third),
-                ),
-        );
+        let merge_iter = MergeIterator::new(sub_iters);
 
         let watermark = watermark
             .into_iter()
