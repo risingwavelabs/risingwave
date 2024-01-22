@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use aes_gcm::{Aes128Gcm, Aes256Gcm, Key, KeyInit, OsRng};
+use aes_gcm::aead::OsRng;
+use aes_gcm::{Aes128Gcm, Aes256Gcm, Key, KeyInit};
 use risingwave_expr::{function, ExprError, Result};
 
 enum CypherEnum {
@@ -37,9 +38,9 @@ fn build_encrypt(key: &[u8], mode: &str) -> Result<CypherEnum> {
 
 /// from pg doc https://www.postgresql.org/docs/current/pgcrypto.html#PGCRYPTO-RAW-ENC-FUNCS
 #[function(
-    "decrypt(bytea, bytea, text) -> bytea",
-    prebuilt = "build_encrypt($1, $2)"
+    "decrypt(bytea, bytea, varchar) -> bytea",
+    prebuild = "build_encrypt($1, $2)?"
 )]
-pub fn decrypt(data: &[u8], cypher: CypherEnum) -> Result<Vec<u8>> {
+pub fn decrypt(data: &[u8], cypher: CypherEnum) -> Result<Box<[u8]>> {
     Ok(data)
 }
