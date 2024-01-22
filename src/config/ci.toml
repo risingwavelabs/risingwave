@@ -20,3 +20,6 @@ imm_merge_threshold = 2
 barrier_interval_ms = 250
 checkpoint_frequency = 5
 max_concurrent_creating_streaming_jobs = 0
+
+[storage.object_store.s3]
+retry_unknown_service_error = true

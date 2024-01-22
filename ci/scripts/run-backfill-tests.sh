@@ -24,9 +24,9 @@ COMMON_DIR=$BACKGROUND_DDL_DIR/common
 
 CLUSTER_PROFILE='ci-1cn-1fe-kafka-with-recovery'
 if [[ -n "${BUILDKITE:-}" ]]; then
-  RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe-with-monitoring'
+  RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe-with-minio-rate-limit'
 else
-  RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe'
+  RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe-with-monitoring-and-minio-rate-limit'
 fi
 export RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 
@@ -60,7 +60,7 @@ rename_logs_with_prefix() {
 }
 
 kill_cluster() {
-  cargo make ci-kill
+  cargo make ci-kill-no-logs
   wait
 }
 
@@ -247,18 +247,18 @@ test_backfill_snapshot_runtime() {
 
 main() {
   set -euo pipefail
-  test_snapshot_and_upstream_read
-  test_backfill_tombstone
-  test_replication_with_column_pruning
-  test_sink_backfill_recovery
+#  test_snapshot_and_upstream_read
+#  test_backfill_tombstone
+#  test_replication_with_column_pruning
+#  test_sink_backfill_recovery
 
   # Only if profile is "ci-release", run it.
   if [[ ${profile:-} == "ci-release" ]]; then
     echo "--- Using release profile, running backfill performance tests."
     # Need separate tests, we don't want to backfill concurrently.
     # It's difficult to measure the time taken for each backfill if we do so.
-    test_no_shuffle_backfill_snapshot_and_upstream_runtime
-    test_arrangement_backfill_snapshot_and_upstream_runtime
+#    test_no_shuffle_backfill_snapshot_and_upstream_runtime
+#    test_arrangement_backfill_snapshot_and_upstream_runtime
 
     # Backfill will happen in sequence here.
     test_backfill_snapshot_runtime

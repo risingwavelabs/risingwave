@@ -629,7 +629,7 @@ impl S3ObjectStore {
     }
 
     /// Creates a minio client. The server should be like `minio://key:secret@address:port/bucket`.
-    pub async fn with_minio(server: &str, metrics: Arc<ObjectStoreMetrics>) -> Self {
+    pub async fn with_minio(server: &str, metrics: Arc<ObjectStoreMetrics>, s3_object_store_config: ObjectStoreConfig) -> Self {
         let server = server.strip_prefix("minio://").unwrap();
         let (access_key_id, rest) = server.split_once(':').unwrap();
         let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
@@ -643,8 +643,6 @@ impl S3ObjectStore {
             "http://"
         };
         let (address, bucket) = rest.split_once('/').unwrap();
-
-        let s3_object_store_config = ObjectStoreConfig::default();
         #[cfg(madsim)]
         let builder = aws_sdk_s3::config::Builder::new().credentials_provider(
             Credentials::from_keys(access_key_id, secret_access_key, None),
@@ -938,6 +936,7 @@ struct RetryCondition {
 
 impl RetryCondition {
     fn new(config: &S3ObjectStoreConfig) -> Self {
+        println!("s3 config: {:?}", config);
         Self {
             retry_unknown_service_error: config.retry_unknown_service_error,
         }
@@ -954,13 +953,24 @@ impl tokio_retry::Condition<RetryError> for RetryCondition {
                         return true;
                     }
                 }
-                SdkError::ServiceError(e) => {
-                    if self.retry_unknown_service_error && e.err().code().is_none() {
-                        tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
-                        return true;
+                SdkError::ServiceError(e) if self.retry_unknown_service_error => {
+                    match e.err().code() {
+                        None => {
+                            tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
+                            return true;
+                        }
+                        Some(code) => {
+                            println!("code: {}", code);
+                            if code == "SlowDown" {
+                                tracing::warn!(target: "slowdown_error", "{e:?} occurs, retry S3 get_object request.");
+                                return true;
+                            }
+                        }
                     }
                 }
-                _ => {}
+                _ => {
+                    println!("encountered_other_error: {:?}", err);
+                }
             },
             Either::Right(_) => {
                 // Unfortunately `ErrorKind` of `ByteStreamError` is not accessible.

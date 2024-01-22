@@ -875,7 +875,7 @@ pub async fn build_remote_object_store(
             panic!("Passing s3-compatible is not supported, please modify the environment variable and pass in s3.");
         }
         minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
-            S3ObjectStore::with_minio(minio, metrics.clone())
+            S3ObjectStore::with_minio(minio, metrics.clone(), config)
                 .await
                 .monitored(metrics),
         ),
