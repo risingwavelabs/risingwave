@@ -925,34 +925,39 @@ pub fn bound_table_key_range<T: AsRef<[u8]> + EmptySliceRef>(
 mod tests {
     use std::cmp::Ordering;
 
+    use risingwave_common::util::epoch::TestEpoch;
+
     use super::*;
 
     #[test]
     fn test_encode_decode() {
+        let epoch = TestEpoch::new_without_offset(1);
         let table_key = b"abc".to_vec();
         let key = FullKey::for_test(TableId::new(0), &table_key[..], 0);
         let buf = key.encode();
         assert_eq!(FullKey::decode(&buf), key);
-        let key = FullKey::for_test(TableId::new(1), &table_key[..], 65536);
+        let key = FullKey::for_test(TableId::new(1), &table_key[..], epoch.as_u64());
         let buf = key.encode();
         assert_eq!(FullKey::decode(&buf), key);
         let mut table_key = vec![1];
-        let a = FullKey::for_test(TableId::new(1), table_key.clone(), 65536);
+        let a = FullKey::for_test(TableId::new(1), table_key.clone(), epoch.as_u64());
         table_key[0] = 2;
-        let b = FullKey::for_test(TableId::new(1), table_key.clone(), 65536);
+        let b = FullKey::for_test(TableId::new(1), table_key.clone(), epoch.as_u64());
         table_key[0] = 129;
-        let c = FullKey::for_test(TableId::new(1), table_key, 65536);
+        let c = FullKey::for_test(TableId::new(1), table_key, epoch.as_u64());
         assert!(a.lt(&b));
         assert!(b.lt(&c));
     }
 
     #[test]
     fn test_key_cmp() {
+        let epoch = TestEpoch::new_without_offset(1);
+        let epoch2 = TestEpoch::new_without_offset(2);
         // 1 compared with 256 under little-endian encoding would return wrong result.
-        let key1 = FullKey::for_test(TableId::new(0), b"0".to_vec(), 65536);
-        let key2 = FullKey::for_test(TableId::new(1), b"0".to_vec(), 65536);
-        let key3 = FullKey::for_test(TableId::new(1), b"1".to_vec(), 65536 * 2);
-        let key4 = FullKey::for_test(TableId::new(1), b"1".to_vec(), 65536);
+        let key1 = FullKey::for_test(TableId::new(0), b"0".to_vec(), epoch.as_u64());
+        let key2 = FullKey::for_test(TableId::new(1), b"0".to_vec(), epoch.as_u64());
+        let key3 = FullKey::for_test(TableId::new(1), b"1".to_vec(), epoch2.as_u64());
+        let key4 = FullKey::for_test(TableId::new(1), b"1".to_vec(), epoch.as_u64());
 
         assert_eq!(key1.cmp(&key1), Ordering::Equal);
         assert_eq!(key1.cmp(&key2), Ordering::Less);

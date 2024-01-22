@@ -19,6 +19,7 @@ use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::{pin_mut, TryStreamExt};
 use risingwave_common::cache::CachePriority;
+use risingwave_common::util::epoch::TestEpoch;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_hummock_test::get_notification_client_for_test;
@@ -82,9 +83,9 @@ fn criterion_benchmark(c: &mut Criterion) {
             .await
     });
 
-    let epoch = 100 * 65536;
+    let epoch = TestEpoch::new_without_offset(100);
     runtime
-        .block_on(hummock_storage.init_for_test(epoch))
+        .block_on(hummock_storage.init_for_test(epoch.as_u64()))
         .unwrap();
 
     for batch in batches {
@@ -93,7 +94,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                 batch,
                 vec![],
                 WriteOptions {
-                    epoch,
+                    epoch: epoch.as_u64(),
                     table_id: Default::default(),
                 },
             ))
@@ -106,7 +107,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             let iter = runtime
                 .block_on(global_hummock_storage.iter(
                     (Unbounded, Unbounded),
-                    epoch,
+                    epoch.as_u64(),
                     ReadOptions {
                         ignore_range_tombstone: true,
                         prefetch_options: PrefetchOptions::default(),

@@ -167,6 +167,153 @@ impl EpochPair {
     }
 }
 
+/// The `TestEpoch` struct is used in unit tests to provide consistent logic similar to a normal epoch.
+/// It ensures that the lower 16 bits are always zero and any addition or subtraction operations are only applied to the upper 48 bits.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug, PartialOrd, Ord)]
+pub struct TestEpoch {
+    epoch_with_gap: TestEpochWithGap,
+}
+
+impl TestEpoch {
+    pub fn new_without_offset(epoch: u64) -> Self {
+        Self {
+            epoch_with_gap: TestEpochWithGap::new(epoch * (1 << EPOCH_PHYSICAL_SHIFT_BITS), 0),
+        }
+    }
+
+    pub fn new(epoch: u64, spill_offset: u16) -> Self {
+        Self {
+            epoch_with_gap: TestEpochWithGap::new(
+                epoch * (1 << EPOCH_PHYSICAL_SHIFT_BITS),
+                spill_offset,
+            ),
+        }
+    }
+
+    pub fn inc(&mut self) {
+        self.epoch_with_gap.inc();
+    }
+
+    pub fn next_epoch(&self) -> TestEpoch {
+        Self {
+            epoch_with_gap: TestEpochWithGap::new(
+                self.epoch_with_gap.0 + (1 << EPOCH_PHYSICAL_SHIFT_BITS),
+                0,
+            ),
+        }
+    }
+
+    pub fn prev_epoch(&self) -> TestEpoch {
+        Self {
+            epoch_with_gap: TestEpochWithGap::new(
+                self.epoch_with_gap.0 - (1 << EPOCH_PHYSICAL_SHIFT_BITS),
+                0,
+            ),
+        }
+    }
+
+    pub fn sub(&mut self) {
+        self.epoch_with_gap.sub();
+    }
+
+    pub fn inc_by(&mut self, e: u64) {
+        self.epoch_with_gap.inc_by(e);
+    }
+
+    pub fn sub_by(&mut self, e: u64) {
+        self.epoch_with_gap.sub_by(e);
+    }
+
+    pub fn pure_epoch(&self) -> u64 {
+        self.epoch_with_gap.pure_epoch()
+    }
+
+    pub fn as_u64(&self) -> u64 {
+        self.epoch_with_gap._as_u64()
+    }
+
+    pub fn _new_min_epoch() -> Self {
+        Self {
+            epoch_with_gap: TestEpochWithGap::new_min_epoch(),
+        }
+    }
+
+    pub fn _new_max_epoch() -> Self {
+        Self {
+            epoch_with_gap: TestEpochWithGap::new_max_epoch(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug, PartialOrd, Ord)]
+pub struct TestEpochWithGap(u64);
+
+impl TestEpochWithGap {
+    #[allow(unused_variables)]
+    pub fn new(epoch: u64, spill_offset: u16) -> Self {
+        // We only use 48 high bit to store epoch and use 16 low bit to store spill offset. But for MAX epoch,
+        // we still keep `u64::MAX` because we have use it in delete range and persist this value to sstable files.
+        //  So for compatibility, we must skip checking it for u64::MAX. See bug description in https://github.com/risingwavelabs/risingwave/issues/13717
+        if risingwave_common::util::epoch::is_max_epoch(epoch) {
+            TestEpochWithGap::new_max_epoch()
+        } else {
+            debug_assert!((epoch & EPOCH_SPILL_TIME_MASK) == 0);
+            TestEpochWithGap(epoch + spill_offset as u64)
+        }
+    }
+
+    pub fn new_from_epoch(epoch: u64) -> Self {
+        TestEpochWithGap::new(epoch, 0)
+    }
+
+    pub fn new_min_epoch() -> Self {
+        TestEpochWithGap(0)
+    }
+
+    pub fn new_max_epoch() -> Self {
+        TestEpochWithGap(u64::MAX)
+    }
+
+    // return the epoch_with_gap(epoch + spill_offset)
+    pub(crate) fn _as_u64(&self) -> u64 {
+        self.0
+    }
+
+    // return the epoch_with_gap(epoch + spill_offset)
+    pub(crate) fn _from_u64(epoch_with_gap: u64) -> Self {
+        TestEpochWithGap(epoch_with_gap)
+    }
+
+    // return the pure epoch without spill offset
+    pub fn pure_epoch(&self) -> u64 {
+        self.0 & !EPOCH_SPILL_TIME_MASK
+    }
+
+    pub fn offset(&self) -> u64 {
+        self.0 & EPOCH_SPILL_TIME_MASK
+    }
+
+    pub fn inc(&mut self) {
+        self.0 += 1 << EPOCH_PHYSICAL_SHIFT_BITS;
+    }
+
+    pub fn sub(&mut self) {
+        if self.0 > (1 << EPOCH_PHYSICAL_SHIFT_BITS) {
+            self.0 -= 1 << EPOCH_PHYSICAL_SHIFT_BITS;
+        }
+    }
+
+    pub fn inc_by(&mut self, e: u64) {
+        self.0 += e << EPOCH_PHYSICAL_SHIFT_BITS;
+    }
+
+    pub fn sub_by(&mut self, e: u64) {
+        if self.0 > (e << EPOCH_PHYSICAL_SHIFT_BITS) {
+            self.0 -= e << EPOCH_PHYSICAL_SHIFT_BITS;
+        }
+    }
+}
+
 /// Task-local storage for the epoch pair.
 pub mod task_local {
     use futures::Future;

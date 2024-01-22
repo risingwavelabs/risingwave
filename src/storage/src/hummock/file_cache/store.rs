@@ -676,6 +676,7 @@ impl Cursor for CachedSstableCursor {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_hummock_sdk::key::FullKey;
 
     use super::*;
@@ -697,19 +698,19 @@ mod tests {
 
         let mut builder = BlockBuilder::new(options);
         builder.add_for_test(
-            construct_full_key_struct_for_test(0, b"k1", 1 * 65536),
+            construct_full_key_struct_for_test(0, b"k1", TestEpoch::new_without_offset(1).as_u64()),
             b"v01",
         );
         builder.add_for_test(
-            construct_full_key_struct_for_test(0, b"k2", 2 * 65536),
+            construct_full_key_struct_for_test(0, b"k2", TestEpoch::new_without_offset(2).as_u64()),
             b"v02",
         );
         builder.add_for_test(
-            construct_full_key_struct_for_test(0, b"k3", 3 * 65536),
+            construct_full_key_struct_for_test(0, b"k3", TestEpoch::new_without_offset(3).as_u64()),
             b"v03",
         );
         builder.add_for_test(
-            construct_full_key_struct_for_test(0, b"k4", 4 * 65536),
+            construct_full_key_struct_for_test(0, b"k4", TestEpoch::new_without_offset(4).as_u64()),
             b"v04",
         );
 

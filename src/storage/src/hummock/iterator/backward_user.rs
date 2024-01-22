@@ -300,6 +300,7 @@ mod tests {
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
     use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_hummock_sdk::key::prev_key;
     use risingwave_hummock_sdk::EpochWithGap;
 
@@ -917,7 +918,9 @@ mod tests {
                 inserts.iter().map(|(time, value)| {
                     let full_key = FullKey {
                         user_key: key.clone(),
-                        epoch_with_gap: EpochWithGap::new_from_epoch(time.0 * 65536),
+                        epoch_with_gap: EpochWithGap::new_from_epoch(
+                            TestEpoch::new_without_offset(time.0).as_u64(),
+                        ),
                     };
                     (full_key, value.clone())
                 })
@@ -1064,13 +1067,13 @@ mod tests {
             |x| x * 3,
             sstable_store.clone(),
             TEST_KEYS_COUNT,
-            65536,
+            TestEpoch::new_without_offset(1).as_u64(),
         )
         .await;
 
         let backward_iters = vec![BackwardSstableIterator::new(table0, sstable_store)];
 
-        let min_epoch = ((TEST_KEYS_COUNT / 5) * 65536) as u64;
+        let min_epoch = TestEpoch::new_without_offset((TEST_KEYS_COUNT / 5) as u64).as_u64();
         let mi = UnorderedMergeIteratorInner::new(backward_iters);
         let mut ui = BackwardUserIterator::with_min_epoch(mi, (Unbounded, Unbounded), min_epoch);
         ui.rewind().await.unwrap();

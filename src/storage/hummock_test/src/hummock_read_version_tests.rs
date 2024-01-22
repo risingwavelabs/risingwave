@@ -20,6 +20,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::TestEpoch;
 use risingwave_hummock_sdk::key::{key_with_epoch, map_table_key_range};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -44,17 +45,17 @@ async fn test_read_version_basic() {
     let (pinned_version, _, _) =
         prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
 
-    let mut epoch = 65536;
+    let mut epoch = TestEpoch::new_without_offset(1);
     let table_id = 0;
     let mut read_version = HummockReadVersion::new(TableId::from(table_id), pinned_version);
 
     {
         // single imm
-        let kv_pairs = gen_dummy_batch(epoch / 65536);
+        let kv_pairs = gen_dummy_batch(epoch.as_u64() / 65536);
         let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
         let size = SharedBufferBatch::measure_batch_size(&sorted_items);
         let imm = SharedBufferBatch::build_shared_buffer_batch(
-            epoch,
+            epoch.as_u64(),
             0,
             sorted_items,
             size,
@@ -66,7 +67,7 @@ async fn test_read_version_basic() {
 
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
-        let key = iterator_test_table_key_of((epoch / 65536) as usize);
+        let key = iterator_test_table_key_of((epoch.as_u64() / 65536) as usize);
         let key_range = map_table_key_range((
             Bound::Included(Bytes::from(key.to_vec())),
             Bound::Included(Bytes::from(key.to_vec())),
@@ -75,24 +76,26 @@ async fn test_read_version_basic() {
         let (staging_imm_iter, staging_sst_iter) =
             read_version
                 .staging()
-                .prune_overlap(epoch, TableId::default(), &key_range);
+                .prune_overlap(epoch.as_u64(), TableId::default(), &key_range);
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
 
         assert_eq!(1, staging_imm.len());
         assert_eq!(0, staging_sst_iter.count());
-        assert!(staging_imm.iter().any(|imm| imm.min_epoch() <= epoch));
+        assert!(staging_imm
+            .iter()
+            .any(|imm| imm.min_epoch() <= epoch.as_u64()));
     }
 
     {
         // several epoch
         for _ in 0..5 {
-            epoch += 65536;
-            let kv_pairs = gen_dummy_batch(epoch / 65536);
+            epoch.inc();
+            let kv_pairs = gen_dummy_batch(epoch.as_u64() / 65536);
             let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
             let size = SharedBufferBatch::measure_batch_size(&sorted_items);
             let imm = SharedBufferBatch::build_shared_buffer_batch(
-                epoch,
+                epoch.as_u64(),
                 0,
                 sorted_items,
                 size,
@@ -105,23 +108,27 @@ async fn test_read_version_basic() {
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
         }
 
-        for e in 1..epoch / 65536 {
-            let epoch = e * 65536;
-            let key = iterator_test_table_key_of((epoch / 65536) as usize);
+        let repeat_num = epoch.as_u64() / 65536;
+        for e in 1..repeat_num {
+            let epoch = TestEpoch::new_without_offset(e);
+            let key = iterator_test_table_key_of((epoch.as_u64() / 65536) as usize);
             let key_range = map_table_key_range((
                 Bound::Included(Bytes::from(key.to_vec())),
                 Bound::Included(Bytes::from(key.to_vec())),
             ));
-            let (staging_imm_iter, staging_sst_iter) =
-                read_version
-                    .staging()
-                    .prune_overlap(epoch, TableId::default(), &key_range);
+            let (staging_imm_iter, staging_sst_iter) = read_version.staging().prune_overlap(
+                epoch.as_u64(),
+                TableId::default(),
+                &key_range,
+            );
 
             let staging_imm = staging_imm_iter.cloned().collect_vec();
 
             assert_eq!(1, staging_imm.len() as u64);
             assert_eq!(0, staging_sst_iter.count());
-            assert!(staging_imm.iter().any(|imm| imm.min_epoch() <= epoch));
+            assert!(staging_imm
+                .iter()
+                .any(|imm| imm.min_epoch() <= epoch.as_u64()));
         }
     }
 
@@ -153,8 +160,14 @@ async fn test_read_version_basic() {
                     object_id: 1,
                     sst_id: 1,
                     key_range: Some(KeyRange {
-                        left: key_with_epoch(iterator_test_user_key_of(1).encode(), 1 * 65536),
-                        right: key_with_epoch(iterator_test_user_key_of(2).encode(), 2 * 65536),
+                        left: key_with_epoch(
+                            iterator_test_user_key_of(1).encode(),
+                            TestEpoch::new_without_offset(1).as_u64(),
+                        ),
+                        right: key_with_epoch(
+                            iterator_test_user_key_of(2).encode(),
+                            TestEpoch::new_without_offset(2).as_u64(),
+                        ),
                         right_exclusive: false,
                     }),
                     file_size: 1,
@@ -169,8 +182,14 @@ async fn test_read_version_basic() {
                     object_id: 2,
                     sst_id: 2,
                     key_range: Some(KeyRange {
-                        left: key_with_epoch(iterator_test_user_key_of(3).encode(), 3 * 65536),
-                        right: key_with_epoch(iterator_test_user_key_of(3).encode(), 3 * 65536),
+                        left: key_with_epoch(
+                            iterator_test_user_key_of(3).encode(),
+                            TestEpoch::new_without_offset(3).as_u64(),
+                        ),
+                        right: key_with_epoch(
+                            iterator_test_user_key_of(3).encode(),
+                            TestEpoch::new_without_offset(3).as_u64(),
+                        ),
                         right_exclusive: false,
                     }),
                     file_size: 1,
@@ -222,11 +241,15 @@ async fn test_read_version_basic() {
         let (staging_imm_iter, staging_sst_iter) =
             read_version
                 .staging()
-                .prune_overlap(epoch, TableId::default(), &key_range);
+                .prune_overlap(epoch.as_u64(), TableId::default(), &key_range);
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
-        assert_eq!(4 * 65536, staging_imm[0].min_epoch());
+
+        assert_eq!(
+            TestEpoch::new_without_offset(4).as_u64(),
+            staging_imm[0].min_epoch()
+        );
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(2, staging_ssts.len());
@@ -246,11 +269,14 @@ async fn test_read_version_basic() {
         let (staging_imm_iter, staging_sst_iter) =
             read_version
                 .staging()
-                .prune_overlap(epoch, TableId::default(), &key_range);
+                .prune_overlap(epoch.as_u64(), TableId::default(), &key_range);
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
-        assert_eq!(4 * 65536, staging_imm[0].min_epoch());
+        assert_eq!(
+            TestEpoch::new_without_offset(4).as_u64(),
+            staging_imm[0].min_epoch()
+        );
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(1, staging_ssts.len());
@@ -266,7 +292,7 @@ async fn test_read_filter_basic() {
     let (pinned_version, _, _) =
         prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
 
-    let epoch = 65536;
+    let epoch = TestEpoch::new_without_offset(1);
     let table_id = 0;
     let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
         TableId::from(table_id),
@@ -275,11 +301,11 @@ async fn test_read_filter_basic() {
 
     {
         // single imm
-        let kv_pairs = gen_dummy_batch(epoch);
+        let kv_pairs = gen_dummy_batch(epoch.as_u64());
         let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
         let size = SharedBufferBatch::measure_batch_size(&sorted_items);
         let imm = SharedBufferBatch::build_shared_buffer_batch(
-            epoch,
+            epoch.as_u64(),
             0,
             sorted_items,
             size,
@@ -294,7 +320,7 @@ async fn test_read_filter_basic() {
             .update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
         // directly prune_overlap
-        let key = Bytes::from(iterator_test_table_key_of(epoch as usize));
+        let key = Bytes::from(iterator_test_table_key_of(epoch.as_u64() as usize));
         let key_range = map_table_key_range((Bound::Included(key.clone()), Bound::Included(key)));
 
         let (staging_imm, staging_sst) = {
@@ -302,7 +328,7 @@ async fn test_read_filter_basic() {
             let (staging_imm_iter, staging_sst_iter) = {
                 read_guard
                     .staging()
-                    .prune_overlap(epoch, TableId::default(), &key_range)
+                    .prune_overlap(epoch.as_u64(), TableId::default(), &key_range)
             };
 
             (
@@ -313,14 +339,20 @@ async fn test_read_filter_basic() {
 
         assert_eq!(1, staging_imm.len());
         assert_eq!(0, staging_sst.len());
-        assert!(staging_imm.iter().any(|imm| imm.min_epoch() <= epoch));
+        assert!(staging_imm
+            .iter()
+            .any(|imm| imm.min_epoch() <= epoch.as_u64()));
 
         // build for local
         {
             let key_range = key_range.clone();
-            let (_, hummock_read_snapshot) =
-                read_filter_for_local(epoch, TableId::from(table_id), key_range, &read_version)
-                    .unwrap();
+            let (_, hummock_read_snapshot) = read_filter_for_local(
+                epoch.as_u64(),
+                TableId::from(table_id),
+                key_range,
+                &read_version,
+            )
+            .unwrap();
 
             assert_eq!(1, hummock_read_snapshot.0.len());
             assert_eq!(0, hummock_read_snapshot.1.len());
@@ -335,9 +367,13 @@ async fn test_read_filter_basic() {
             let key_range = key_range.clone();
             let read_version_vec = vec![read_version];
 
-            let (_, hummock_read_snapshot) =
-                read_filter_for_batch(epoch, TableId::from(table_id), key_range, read_version_vec)
-                    .unwrap();
+            let (_, hummock_read_snapshot) = read_filter_for_batch(
+                epoch.as_u64(),
+                TableId::from(table_id),
+                key_range,
+                read_version_vec,
+            )
+            .unwrap();
 
             assert_eq!(1, hummock_read_snapshot.0.len());
             assert_eq!(0, hummock_read_snapshot.1.len());

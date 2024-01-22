@@ -91,11 +91,11 @@ async fn test_update_pinned_version() {
     let initial_version_id = pinned_version.id();
     let initial_max_commit_epoch = pinned_version.max_committed_epoch();
 
-    let epochs: Vec<u64> = vec![
-        initial_max_commit_epoch + 1*65536,
-        initial_max_commit_epoch + 2*65536,
-        initial_max_commit_epoch + 3*65536,
-        initial_max_commit_epoch + 4*65536,
+    let epochs: Vec<TestEpoch> = vec![
+        TestEpoch::new_without_offset(initial_max_commit_epoch+1),
+        TestEpoch::new_without_offset(initial_max_commit_epoch+2),
+        TestEpoch::new_without_offset(initial_max_commit_epoch+3),
+        TestEpoch::new_without_offset(initial_max_commit_epoch+4)
     ];
     let batches: Vec<Vec<(Bytes, StorageValue)>> =
         epochs.iter().map(|e| gen_dummy_batch(*e)).collect();
@@ -103,12 +103,12 @@ async fn test_update_pinned_version() {
     // Fill shared buffer with a dummy empty batch in epochs[0] and epochs[1]
     for i in 0..2 {
         local_version_manager
-            .write_shared_buffer(epochs[i], batches[i].clone(), vec![], Default::default())
+            .write_shared_buffer(epochs[i].as_u64(), batches[i].clone(), vec![], Default::default())
             .await
             .unwrap();
         let local_version = local_version_manager.get_local_version();
         assert_eq!(
-            local_version.get_shared_buffer(epochs[i]).unwrap().size(),
+            local_version.get_shared_buffer(epochs[i].as_u64()).unwrap().size(),
             SharedBufferBatch::measure_batch_size(
                 &SharedBufferBatch::build_shared_buffer_item_batches(batches[i].clone())
             )
@@ -116,7 +116,7 @@ async fn test_update_pinned_version() {
     }
 
     local_version_manager
-        .write_shared_buffer(epochs[2], batches[2].clone(), vec![], Default::default())
+        .write_shared_buffer(epochs[2].as_u64(), batches[2].clone(), vec![], Default::default())
         .await
         .unwrap();
     let local_version = local_version_manager.get_local_version();
@@ -147,11 +147,11 @@ async fn test_update_pinned_version() {
         vec![
             vec![vec![UncommittedData::Batch(build_batch(
                 batches[1].clone(),
-                epochs[1]
+                epochs[1].as_u64()
             ))]],
             vec![vec![UncommittedData::Batch(build_batch(
                 batches[0].clone(),
-                epochs[0]
+                epochs[0].as_u64()
             ))]]
         ]
     );
@@ -163,15 +163,15 @@ async fn test_update_pinned_version() {
         vec![
             vec![vec![UncommittedData::Batch(build_batch(
                 batches[2].clone(),
-                epochs[2]
+                epochs[2].as_u64()
             ))]],
             vec![vec![UncommittedData::Batch(build_batch(
                 batches[1].clone(),
-                epochs[1]
+                epochs[1].as_u64()
             ))]],
             vec![vec![UncommittedData::Batch(build_batch(
                 batches[0].clone(),
-                epochs[0]
+                epochs[0].as_u64()
             ))]]
         ]
     );
@@ -184,7 +184,7 @@ async fn test_update_pinned_version() {
     // Update version for epochs[0]
     let version = HummockVersion {
         id: initial_version_id + 1,
-        max_committed_epoch: epochs[0],
+        max_committed_epoch: epochs[0].as_u64(),
         ..Default::default()
     };
     local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version));
@@ -205,7 +205,7 @@ async fn test_update_pinned_version() {
     // Update version for epochs[1]
     let version = HummockVersion {
         id: initial_version_id + 2,
-        max_committed_epoch: epochs[1],
+        max_committed_epoch: epochs[1].as_u64(),
         ..Default::default()
     };
     local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version));
@@ -214,19 +214,19 @@ async fn test_update_pinned_version() {
     assert!(local_version.get_shared_buffer(epochs[1]).is_none());
 
     let _ = local_version_manager
-        .sync_shared_buffer(epochs[2])
+        .sync_shared_buffer(epochs[2].as_u64())
         .await
         .unwrap();
     // Update version for epochs[2]
     let version = HummockVersion {
         id: initial_version_id + 3,
-        max_committed_epoch: epochs[2],
+        max_committed_epoch: epochs[2].as_u64(),
         ..Default::default()
     };
 
     local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version));
-    assert!(local_version.get_shared_buffer(epochs[0]).is_none());
-    assert!(local_version.get_shared_buffer(epochs[1]).is_none());
+    assert!(local_version.get_shared_buffer(epochs[0].as_u64()).is_none());
+    assert!(local_version.get_shared_buffer(epochs[1].as_u64()).is_none());
 }
 
 #[tokio::test]

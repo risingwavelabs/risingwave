@@ -919,6 +919,7 @@ mod tests {
     use std::collections::HashSet;
 
     use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_hummock_sdk::key::UserKey;
     use risingwave_pb::hummock::InputLevel;
 
@@ -938,13 +939,13 @@ mod tests {
                 TableId::new(1),
                 b"abc".to_vec(),
                 b"cde".to_vec(),
-                65536,
+                TestEpoch::new_without_offset(1).as_u64(),
             ),
             DeleteRangeTombstone::new_for_test(
                 TableId::new(2),
                 b"abc".to_vec(),
                 b"def".to_vec(),
-                65536,
+                TestEpoch::new_without_offset(1).as_u64(),
             ),
         ];
         let mut sstable_info_1 = gen_test_sstable_impl::<Bytes, Xor16FilterBuilder>(

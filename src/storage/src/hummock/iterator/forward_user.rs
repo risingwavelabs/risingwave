@@ -306,6 +306,8 @@ mod tests {
     use std::ops::Bound::*;
     use std::sync::Arc;
 
+    use risingwave_common::util::epoch::TestEpoch;
+
     use super::*;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
@@ -804,7 +806,7 @@ mod tests {
             |x| x * 3,
             sstable_store.clone(),
             TEST_KEYS_COUNT,
-            65536,
+            TestEpoch::new_without_offset(1).as_u64(),
         )
         .await;
         let iters = vec![SstableIterator::create(
@@ -813,7 +815,7 @@ mod tests {
             read_options.clone(),
         )];
 
-        let min_epoch = ((TEST_KEYS_COUNT / 5) * 65536) as u64;
+        let min_epoch = TestEpoch::new_without_offset((TEST_KEYS_COUNT / 5) as u64).as_u64();
         let mi = UnorderedMergeIteratorInner::new(iters);
         let mut ui =
             UserIterator::for_test_with_epoch(mi, (Unbounded, Unbounded), u64::MAX, min_epoch);
@@ -852,8 +854,14 @@ mod tests {
 
         let mut del_iter = ForwardMergeRangeIterator::new(150);
         del_iter.add_sst_iter(SstableDeleteRangeIterator::new(table.clone()));
-        let mut ui: UserIterator<_> =
-            UserIterator::new(mi, (Unbounded, Unbounded), 150 * 65536, 0, None, del_iter);
+        let mut ui: UserIterator<_> = UserIterator::new(
+            mi,
+            (Unbounded, Unbounded),
+            TestEpoch::new_without_offset(150).as_u64(),
+            0,
+            None,
+            del_iter,
+        );
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
@@ -884,8 +892,8 @@ mod tests {
         let mut ui: UserIterator<_> = UserIterator::new(
             mi,
             (Unbounded, Unbounded),
-            300 * 65536,
-            0 * 65536,
+            TestEpoch::new_without_offset(150).as_u64(),
+            0,
             None,
             del_iter,
         );
