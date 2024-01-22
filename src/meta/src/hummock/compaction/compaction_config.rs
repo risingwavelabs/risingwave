@@ -66,6 +66,9 @@ impl CompactionConfigBuilder {
                     compaction_config::level0_overlapping_sub_level_compact_level_count(),
                 tombstone_reclaim_ratio: compaction_config::tombstone_reclaim_ratio(),
                 enable_emergency_picker: compaction_config::enable_emergency_picker(),
+                enable_trivial_move: compaction_config::enable_trivial_move(),
+                enable_check_task_level_overlap: compaction_config::enable_check_task_level_overlap(
+                ),
             },
         }
     }
@@ -94,6 +97,8 @@ impl CompactionConfigBuilder {
             .max_space_reclaim_bytes(opt.max_space_reclaim_bytes)
             .level0_max_compact_file_number(opt.level0_max_compact_file_number)
             .tombstone_reclaim_ratio(opt.tombstone_reclaim_ratio)
+            .enable_trivial_move(opt.enable_trivial_move)
+            .enable_check_task_level_overlap(opt.enable_check_task_level_overlap)
     }
 
     pub fn build(self) -> CompactionConfig {
@@ -154,4 +159,6 @@ builder_field! {
     level0_sub_level_compact_level_count: u32,
     level0_overlapping_sub_level_compact_level_count: u32,
     tombstone_reclaim_ratio: u32,
+    enable_trivial_move: bool,
+    enable_check_task_level_overlap: bool,
 }

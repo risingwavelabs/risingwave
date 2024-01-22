@@ -115,8 +115,12 @@ impl LevelCompactionPicker {
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
-        let trivial_move_picker =
-            TrivialMovePicker::new(0, self.target_level, overlap_strategy.clone());
+        let trivial_move_picker = TrivialMovePicker::new(
+            0,
+            self.target_level,
+            overlap_strategy.clone(),
+            self.config.enable_trivial_move,
+        );
 
         trivial_move_picker.pick_trivial_move_task(
             &l0.sub_levels[0].table_infos,
@@ -148,6 +152,7 @@ impl LevelCompactionPicker {
             // The maximum number of sub_level compact level per task
             self.config.level0_max_compact_file_number,
             overlap_strategy.clone(),
+            self.config.enable_check_task_level_overlap,
         );
 
         let mut max_vnode_partition_idx = 0;

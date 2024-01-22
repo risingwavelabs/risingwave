@@ -15,6 +15,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -185,6 +186,8 @@ pub struct NonOverlapSubLevelPicker {
     min_depth: usize,
     max_file_count: u64,
     overlap_strategy: Arc<dyn OverlapStrategy>,
+
+    enable_check_task_level_overlap: bool,
 }
 
 impl NonOverlapSubLevelPicker {
@@ -194,6 +197,7 @@ impl NonOverlapSubLevelPicker {
         min_depth: usize,
         max_file_count: u64,
         overlap_strategy: Arc<dyn OverlapStrategy>,
+        enable_check_task_level_overlap: bool,
     ) -> Self {
         Self {
             min_compaction_bytes,
@@ -201,6 +205,7 @@ impl NonOverlapSubLevelPicker {
             min_depth,
             max_file_count,
             overlap_strategy,
+            enable_check_task_level_overlap,
         }
     }
 
@@ -226,6 +231,7 @@ impl NonOverlapSubLevelPicker {
             select_sst_id_set.insert(sst.sst_id);
         }
 
+        let mut last_target_index = 0;
         for (target_index, target_level) in levels.iter().enumerate().skip(1) {
             if target_level.level_type() != LevelType::Nonoverlapping {
                 break;
@@ -244,6 +250,7 @@ impl NonOverlapSubLevelPicker {
                 overlap_files_range =
                     overlap_info.check_multiple_overlap(&target_level.table_infos);
             }
+
             // We allow a layer in the middle without overlap, so we need to continue to
             // the next layer to search for overlap
             let mut pending_compact = false;
@@ -337,9 +344,10 @@ impl NonOverlapSubLevelPicker {
             for (reverse_index, files) in extra_overlap_levels {
                 ret.sstable_infos[reverse_index].extend(files);
             }
+
+            last_target_index = std::cmp::max(last_target_index, target_index);
         }
 
-        ret.sstable_infos.retain(|ssts| !ssts.is_empty());
         // sort sst per level due to reverse expand
         ret.sstable_infos.iter_mut().for_each(|level_ssts| {
             level_ssts.sort_by(|sst1, sst2| {
@@ -348,6 +356,42 @@ impl NonOverlapSubLevelPicker {
                 a.compare(b)
             });
         });
+
+        if self.enable_check_task_level_overlap {
+            use crate::hummock::compaction::overlap_strategy::OverlapInfo;
+            let mut overlap_info: Option<Box<dyn OverlapInfo>> = None;
+            for (level_idx, ssts) in ret.sstable_infos.iter().enumerate().rev() {
+                if let Some(overlap_info) = overlap_info.as_mut() {
+                    // skip the check if `overlap_info` is not initialized (i.e. the first non-empty level is not met)
+                    let level = levels.get(level_idx).unwrap();
+                    let overlap_sst_range = overlap_info.check_multiple_overlap(&level.table_infos);
+                    let expected_sst_ids = level.table_infos[overlap_sst_range.clone()]
+                        .iter()
+                        .map(|s| s.object_id)
+                        .collect_vec();
+                    let actual_sst_ids = ssts.iter().map(|s| s.object_id).collect_vec();
+
+                    assert_eq!(
+                        actual_sst_ids,
+                        expected_sst_ids,
+                        "level_idx {} overlap_sst_range {:?} level_sst_count {} select_sst_count {}",
+                        level_idx,
+                        overlap_sst_range,
+                        level.table_infos.len(),
+                        ssts.len()
+                    );
+                } else if !ssts.is_empty() {
+                    // init the `overlap_info` when meeting the first non-empty level.
+                    overlap_info = Some(self.overlap_strategy.create_overlap_info());
+                }
+
+                for sst in ssts {
+                    overlap_info.as_mut().unwrap().update(sst);
+                }
+            }
+        }
+
+        ret.sstable_infos.retain(|ssts| !ssts.is_empty());
         ret
     }
 
@@ -621,6 +665,7 @@ pub mod tests {
                 1,
                 10000,
                 Arc::new(RangeOverlapStrategy::default()),
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             assert_eq!(6, ret.len());
@@ -634,6 +679,7 @@ pub mod tests {
                 1,
                 10000,
                 Arc::new(RangeOverlapStrategy::default()),
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             assert_eq!(6, ret.len());
@@ -647,6 +693,7 @@ pub mod tests {
                 1,
                 5,
                 Arc::new(RangeOverlapStrategy::default()),
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             assert_eq!(6, ret.len());
@@ -721,6 +768,7 @@ pub mod tests {
                 1,
                 10000,
                 Arc::new(RangeOverlapStrategy::default()),
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             assert_eq!(6, ret.len());
@@ -735,6 +783,7 @@ pub mod tests {
                 1,
                 10000,
                 Arc::new(RangeOverlapStrategy::default()),
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             assert_eq!(6, ret.len());
@@ -749,6 +798,7 @@ pub mod tests {
                 1,
                 max_file_count,
                 Arc::new(RangeOverlapStrategy::default()),
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             assert_eq!(6, ret.len());
@@ -771,6 +821,7 @@ pub mod tests {
                 min_depth,
                 10000,
                 Arc::new(RangeOverlapStrategy::default()),
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             assert_eq!(3, ret.len());

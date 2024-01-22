@@ -25,6 +25,8 @@ pub trait OverlapInfo {
     fn check_multiple_overlap(&self, others: &[SstableInfo]) -> Range<usize>;
     fn check_multiple_include(&self, others: &[SstableInfo]) -> Range<usize>;
     fn update(&mut self, table: &SstableInfo);
+
+    fn debug_info(&self) -> String;
 }
 
 pub trait OverlapStrategy: Send + Sync {
@@ -143,6 +145,10 @@ impl OverlapInfo for RangeOverlapInfo {
             return;
         }
         self.target_range = Some(other.clone());
+    }
+
+    fn debug_info(&self) -> String {
+        format!("range {:?}", self.target_range)
     }
 }
 

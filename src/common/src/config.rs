@@ -1459,6 +1459,14 @@ pub mod default {
         pub fn enable_emergency_picker() -> bool {
             DEFAULT_EMERGENCY_PICKER
         }
+
+        pub fn enable_trivial_move() -> bool {
+            true
+        }
+
+        pub fn enable_check_task_level_overlap() -> bool {
+            false
+        }
     }
 
     pub mod object_store_config {
@@ -1606,6 +1614,10 @@ pub struct CompactionConfig {
     pub tombstone_reclaim_ratio: u32,
     #[serde(default = "default::compaction_config::enable_emergency_picker")]
     pub enable_emergency_picker: bool,
+    #[serde(default = "default::compaction_config::enable_trivial_move")]
+    pub enable_trivial_move: bool,
+    #[serde(default = "default::compaction_config::enable_check_task_level_overlap")]
+    pub enable_check_task_level_overlap: bool,
 }
 
 #[cfg(test)]
