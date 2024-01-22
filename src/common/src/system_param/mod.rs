@@ -457,7 +457,7 @@ mod tests {
 
     #[test]
     fn test_set() {
-        let mut p = SystemConfig::default().into_init_system_params();
+        let mut p = system_params_for_test();
         // Unrecognized param.
         assert!(set_system_param(&mut p, "?", Some("?".to_string())).is_err());
         // Value out of range.
