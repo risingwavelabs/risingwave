@@ -25,6 +25,7 @@ use crate::binder::{
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
     LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
@@ -85,7 +86,12 @@ impl Planner {
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        Ok(LogicalSource::with_catalog(Rc::new(source.catalog), false, self.ctx())?.into())
+        Ok(LogicalSource::with_catalog(
+            Rc::new(source.catalog),
+            SourceNodeKind::CreateMViewOrBatch,
+            self.ctx(),
+        )?
+        .into())
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {
