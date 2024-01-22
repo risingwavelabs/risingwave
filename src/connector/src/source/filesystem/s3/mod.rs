@@ -17,17 +17,17 @@ use std::collections::HashMap;
 
 pub use enumerator::S3SplitEnumerator;
 mod source;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 pub use source::S3FileReader;
 
 use crate::common::AwsAuthProps;
 use crate::source::filesystem::FsSplit;
-use crate::source::{SourceProperties, UnknownFields};
+use crate::source::{SecretString, SourceProperties, UnknownFields};
 
 pub const S3_CONNECTOR: &str = "s3";
 
 /// These are supported by both `s3` and `s3_v2` (opendal) sources.
-#[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, with_options::WithOptions)]
 pub struct S3PropertiesCommon {
     #[serde(rename = "s3.region_name")]
     pub region_name: String,
@@ -38,7 +38,7 @@ pub struct S3PropertiesCommon {
     #[serde(rename = "s3.credentials.access", default)]
     pub access: Option<String>,
     #[serde(rename = "s3.credentials.secret", default)]
-    pub secret: Option<String>,
+    pub secret: Option<SecretString>,
     #[serde(rename = "s3.endpoint_url")]
     pub endpoint_url: Option<String>,
 }

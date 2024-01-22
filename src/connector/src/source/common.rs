@@ -15,9 +15,11 @@
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::error::RwError;
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::parser::ParserConfig;
 use crate::source::{SourceContextRef, SourceMessage, SplitReader, StreamChunkWithState};
+use crate::with_options::WithOptions;
 
 pub(crate) trait CommonSplitReader: SplitReader + 'static {
     fn into_data_stream(
@@ -72,5 +74,33 @@ pub(crate) async fn into_chunk_stream(
     #[for_await]
     for msg_batch in parser.into_stream(data_stream) {
         yield msg_batch?;
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
+pub struct SecretString {
+    inner: redact::Secret<String>,
+}
+
+impl Serialize for SecretString {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        format!("{:?}", self.inner).serialize(serializer)
+    }
+}
+
+impl WithOptions for redact::Secret<String> {}
+
+impl SecretString {
+    pub fn expose_secret(&self) -> &String {
+        self.inner.expose_secret()
+    }
+
+    pub fn new(s: impl Into<String>) -> Self {
+        Self {
+            inner: redact::Secret::new(s.into()),
+        }
     }
 }

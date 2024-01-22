@@ -25,6 +25,7 @@ pub mod nats;
 pub mod nexmark;
 pub mod pulsar;
 pub use base::{UPSTREAM_SOURCE_KEY, *};
+pub use common::SecretString;
 pub(crate) use common::*;
 pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
 pub use kafka::KAFKA_CONNECTOR;

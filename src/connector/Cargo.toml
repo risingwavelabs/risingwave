@@ -102,6 +102,7 @@ rdkafka = { workspace = true, features = [
     "gssapi",
     "zstd",
 ] }
+redact = { version = "0.1.5", features = ["serde"] }
 redis = { version = "0.24.0", features = ["aio","tokio-comp","async-std-comp"] }
 regex = "1.4"
 reqwest = { version = "0.11", features = ["json"] }

@@ -56,6 +56,8 @@ use aws_credential_types::provider::SharedCredentialsProvider;
 use aws_types::region::Region;
 use aws_types::SdkConfig;
 
+use crate::source::SecretString;
+
 /// A flatten config map for aws auth.
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct AwsAuthProps {
@@ -63,7 +65,7 @@ pub struct AwsAuthProps {
     #[serde(alias = "endpoint_url")]
     pub endpoint: Option<String>,
     pub access_key: Option<String>,
-    pub secret_key: Option<String>,
+    pub secret_key: Option<SecretString>,
     pub session_token: Option<String>,
     pub arn: Option<String>,
     /// This field was added for kinesis. Not sure if it's useful for other connectors.
@@ -95,7 +97,7 @@ impl AwsAuthProps {
             Ok(SharedCredentialsProvider::new(
                 aws_credential_types::Credentials::from_keys(
                     self.access_key.as_ref().unwrap(),
-                    self.secret_key.as_ref().unwrap(),
+                    self.secret_key.as_ref().unwrap().expose_secret(),
                     self.session_token.clone(),
                 ),
             ))
@@ -453,7 +455,7 @@ pub struct KinesisCommon {
         rename = "aws.credentials.secret_access_key",
         alias = "kinesis.credentials.secret"
     )]
-    pub credentials_secret_access_key: Option<String>,
+    pub credentials_secret_access_key: Option<SecretString>,
     #[serde(
         rename = "aws.credentials.session_token",
         alias = "kinesis.credentials.session_token"

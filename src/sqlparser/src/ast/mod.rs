@@ -17,6 +17,7 @@ mod legacy_source;
 mod operator;
 mod query;
 mod statement;
+pub mod utils;
 mod value;
 
 #[cfg(not(feature = "std"))]

@@ -49,7 +49,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         }
 
         if let Some(secret) = s3_properties.secret {
-            builder.secret_access_key(&secret);
+            builder.secret_access_key(secret.expose_secret());
         } else {
             tracing::error!(
                 "secret access key of aws s3 is not set, bucket {}",

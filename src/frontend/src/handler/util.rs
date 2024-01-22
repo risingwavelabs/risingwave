@@ -286,6 +286,9 @@ mod tests {
     use postgres_types::{ToSql, Type};
     use risingwave_common::array::*;
     use risingwave_common::types::Timestamptz;
+    use risingwave_connector::source::filesystem::s3::S3PropertiesCommon;
+    use risingwave_connector::source::SecretString;
+    use risingwave_sqlparser::ast::{Ident, ObjectName, SqlOption, Value};
 
     use super::*;
 
@@ -439,6 +442,57 @@ mod tests {
                 Format::Text
             ),
             "1969-12-31 23:59:59.999999+00:00"
+        );
+    }
+
+    fn to_object_name(s: &str) -> ObjectName {
+        ObjectName(vec![Ident::new_unchecked(s)])
+    }
+
+    #[test]
+    fn test_redact() {
+        use risingwave_sqlparser::ast::utils::SqlOptionVecSerializer;
+        use serde::Serialize;
+
+        let p = S3PropertiesCommon {
+            region_name: "region".to_string(),
+            bucket_name: "bucket".to_string(),
+            match_pattern: Some("pattern".into()),
+            access: None,
+            secret: Some(SecretString::new("123")),
+            endpoint_url: None,
+        };
+        let mut s = SqlOptionVecSerializer::default();
+        p.serialize(&mut s).unwrap();
+        let sql_options: Vec<SqlOption> = s.into();
+        assert_eq!(
+            sql_options,
+            vec![
+                SqlOption {
+                    name: to_object_name("s3.region_name"),
+                    value: Value::SingleQuotedString("region".into())
+                },
+                SqlOption {
+                    name: to_object_name("s3.bucket_name"),
+                    value: Value::SingleQuotedString("bucket".into())
+                },
+                SqlOption {
+                    name: to_object_name("match_pattern"),
+                    value: Value::SingleQuotedString("pattern".into())
+                },
+                SqlOption {
+                    name: to_object_name("s3.credentials.access"),
+                    value: Value::Null
+                },
+                SqlOption {
+                    name: to_object_name("s3.credentials.secret"),
+                    value: Value::SingleQuotedString("[REDACTED alloc::string::String]".into())
+                },
+                SqlOption {
+                    name: to_object_name("s3.endpoint_url"),
+                    value: Value::Null
+                },
+            ]
         );
     }
 }

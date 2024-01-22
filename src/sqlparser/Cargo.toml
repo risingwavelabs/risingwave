@@ -26,7 +26,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 itertools = "0.12"
-serde = { version = "1.0", features = ["derive"], optional = true }
+serde = { version = "1.0", features = ["derive"] }
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]

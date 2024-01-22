@@ -8166,6 +8166,9 @@ name = "redact"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b97c0a6319ae55341eb213c8ef97002630a3a5bd6f287f0124d077121d3f2a5"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "redis"
@@ -8996,6 +8999,7 @@ dependencies = [
  "pulsar",
  "quote",
  "rand",
+ "redact",
  "redis",
  "regex",
  "reqwest",
