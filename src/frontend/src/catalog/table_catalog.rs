@@ -695,7 +695,7 @@ mod tests {
                             type_name: ".test.Country".to_string(),
                             description: None,
                             generated_or_default_column: None,
-                            additional_column_type: AdditionalColumn {
+                            additional_columns: AdditionalColumn {
                                 column_type: Some(AdditionalColumnType::Normal(
                                     AdditionalColumnNormal {}
                                 )),

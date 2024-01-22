@@ -64,7 +64,7 @@ fn avro_field_to_column_desc(
                 type_name: schema_name.to_string(),
                 generated_or_default_column: None,
                 description: None,
-                additional_column_type: Some(AdditionalColumn {
+                additional_columns: Some(AdditionalColumn {
                     column_type: Some(AdditionalColumnType::Normal(AdditionalColumnNormal {})),
                 }),
                 version: ColumnDescVersion::Pr13707 as i32,
@@ -76,7 +76,7 @@ fn avro_field_to_column_desc(
                 column_type: Some(data_type.to_protobuf()),
                 column_id: *index,
                 name: name.to_owned(),
-                additional_column_type: Some(AdditionalColumn {
+                additional_columns: Some(AdditionalColumn {
                     column_type: Some(AdditionalColumnType::Normal(AdditionalColumnNormal {})),
                 }),
                 version: ColumnDescVersion::Pr13707 as i32,

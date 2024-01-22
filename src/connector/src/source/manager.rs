@@ -122,7 +122,7 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             fields: c.field_descs.clone(),
             column_type,
             is_pk: false,
-            additional_column_type: c.additional_column_type.clone(),
+            additional_column_type: c.additional_columns.clone(),
         }
     }
 }
@@ -137,7 +137,7 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             type_name: "".to_string(),
             generated_or_default_column: None,
             description: None,
-            additional_column_type: s.additional_column_type.clone(),
+            additional_columns: s.additional_column_type.clone(),
             version: ColumnDescVersion::Pr13707,
         }
     }

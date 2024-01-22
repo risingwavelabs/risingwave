@@ -38,7 +38,7 @@ impl ColumnDescTestExt for ColumnDesc {
             column_type: Some(data_type),
             column_id,
             name: name.to_string(),
-            additional_column_type: Some(AdditionalColumn {
+            additional_columns: Some(AdditionalColumn {
                 column_type: Some(ColumnType::Normal(AdditionalColumnNormal {})),
             }),
             version: ColumnDescVersion::Pr13707 as i32,
@@ -65,7 +65,7 @@ impl ColumnDescTestExt for ColumnDesc {
             field_descs: fields,
             generated_or_default_column: None,
             description: None,
-            additional_column_type: Some(AdditionalColumn {
+            additional_columns: Some(AdditionalColumn {
                 column_type: Some(ColumnType::Normal(AdditionalColumnNormal {})),
             }),
             version: ColumnDescVersion::Pr13707 as i32,

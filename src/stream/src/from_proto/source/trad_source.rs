@@ -78,7 +78,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                                     // the column is from a legacy version
                                     && desc.version == ColumnDescVersion::Unspecified as i32
                                 {
-                                    desc.additional_column_type = Some(AdditionalColumn {
+                                    desc.additional_columns = Some(AdditionalColumn {
                                         column_type: Some(AdditionalColumnType::Key(
                                             AdditionalColumnKey {},
                                         )),
@@ -92,7 +92,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 {
                     // compatible code: handle legacy column `_rw_kafka_timestamp`
                     // the column is auto added for all kafka source to empower batch query on source
-                    // solution: rewrite the column `additional_column_type` to Timestamp
+                    // solution: rewrite the column `additional_columns` to Timestamp
 
                     let _ = source_columns.iter_mut().map(|c| {
                         let _ = c.column_desc.as_mut().map(|desc| {
@@ -107,7 +107,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                                 // the column is from a legacy version
                                 && desc.version == ColumnDescVersion::Unspecified as i32
                             {
-                                desc.additional_column_type = Some(AdditionalColumn {
+                                desc.additional_columns = Some(AdditionalColumn {
                                     column_type: Some(AdditionalColumnType::Timestamp(
                                         AdditionalColumnTimestamp {},
                                     )),

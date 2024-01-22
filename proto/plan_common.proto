@@ -60,7 +60,7 @@ message ColumnDesc {
 
   ColumnDescVersion version = 10;
 
-  AdditionalColumn additional_column_type = 11;
+  AdditionalColumn additional_columns = 11;
 }
 
 message ColumnCatalog {
