@@ -74,3 +74,8 @@ SELECT * FROM rw.products_test order by id limit 3
 102 RW 12V car battery
 103 RW 12-pack of drill bits with sizes ranging from #40 to #3
 
+
+query TTTTT
+select order_date,customer_name,price,product_id,order_status from orders_no_backfill order by order_id;
+----
+2022-12-01 15:08:22 Sam 1000.52 110 false
