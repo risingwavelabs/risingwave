@@ -83,31 +83,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     }
                 }
 
-                {
-                    // compatible code: handle legacy column `_rw_kafka_timestamp`
-                    // the column is auto added for all kafka source to empower batch query on source
-                    // solution: rewrite the column `additional_column_type` to Timestamp
-
-                    let _ = source_columns.iter_mut().map(|c| {
-                        let _ = c.column_desc.as_mut().map(|desc| {
-                            let is_timestamp = desc
-                                .get_column_type()
-                                .map(|col_type| {
-                                    col_type.type_name == PbTypeName::Timestamptz as i32
-                                })
-                                .unwrap();
-                            if desc.name == KAFKA_TIMESTAMP_COLUMN_NAME
-                                && is_timestamp
-                                // the column is from a legacy version
-                                && desc.version == ColumnDescVersion::Unspecified as i32
-                            {
-                                desc.additional_column_type =
-                                    AdditionalColumnType::Timestamp as i32;
-                            }
-                        });
-                    });
-                }
-
                 let source_desc_builder = SourceDescBuilder::new(
                     source_columns.clone(),
                     params.env.source_metrics(),

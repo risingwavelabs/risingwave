@@ -21,13 +21,11 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, Field, Schema, KAFKA_TIMESTAMP_COLUMN_NAME,
-};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field};
 use risingwave_common::error::Result;
 use risingwave_connector::source::{ConnectorProperties, DataType};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
-use risingwave_pb::plan_common::GeneratedColumnDesc;
+use risingwave_pb::plan_common::{AdditionalColumnType, GeneratedColumnDesc};
 
 use super::generic::GenericPlanRef;
 use super::stream_watermark_filter::StreamWatermarkFilter;
@@ -39,6 +37,7 @@ use super::{
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
+use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::stream_fs_fetch::StreamFsFetch;
@@ -302,6 +301,20 @@ impl LogicalSource {
             Ok(source.into())
         }
     }
+
+    fn is_kafka(&self) -> bool {
+        self.source_catalog()
+            .is_some_and(|s| s.with_properties.get(UPSTREAM_SOURCE_KEY).unwrap() == "kafka")
+    }
+
+    /// For kafka source, the column is always available. But when `CREATE TABLE` with kafka connector,
+    /// it's not available.
+    fn kafka_timestamp_col_idx(&self) -> Option<usize> {
+        self.core
+            .column_catalog
+            .iter()
+            .position(|c| c.column_desc.additional_column_type == AdditionalColumnType::Timestamp)
+    }
 }
 
 impl_plan_tree_node_for_leaf! {LogicalSource}
@@ -376,7 +389,7 @@ impl ExprVisitable for LogicalSource {
 fn expr_to_kafka_timestamp_range(
     expr: ExprImpl,
     range: &mut (Bound<i64>, Bound<i64>),
-    schema: &Schema,
+    kakfa_timestamp_col_idx: usize,
 ) -> Option<ExprImpl> {
     let merge_upper_bound = |first, second| -> Bound<i64> {
         match (first, second) {
@@ -430,8 +443,7 @@ fn expr_to_kafka_timestamp_range(
                 match (&function_call.inputs()[0], &function_call.inputs()[1]) {
                     (ExprImpl::InputRef(input_ref), literal)
                         if let Some(datum) = literal.try_fold_const().transpose()?
-                            && schema.fields[input_ref.index].name
-                                == KAFKA_TIMESTAMP_COLUMN_NAME
+                            && input_ref.index == kakfa_timestamp_col_idx
                             && literal.return_type() == DataType::Timestamptz =>
                     {
                         Ok(Some((
@@ -441,8 +453,7 @@ fn expr_to_kafka_timestamp_range(
                     }
                     (literal, ExprImpl::InputRef(input_ref))
                         if let Some(datum) = literal.try_fold_const().transpose()?
-                            && schema.fields[input_ref.index].name
-                                == KAFKA_TIMESTAMP_COLUMN_NAME
+                            && input_ref.index == kakfa_timestamp_col_idx
                             && literal.return_type() == DataType::Timestamptz =>
                     {
                         Ok(Some((
@@ -515,11 +526,21 @@ impl PredicatePushdown for LogicalSource {
         predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
+        if !self.is_kafka() {
+            return LogicalFilter::create(self.clone().into(), predicate);
+        }
+        let Some(kafka_timestamp_col_idx) = self.kafka_timestamp_col_idx() else {
+            return LogicalFilter::create(self.clone().into(), predicate);
+        };
+
+        // try to pushdown kafka timestamp
         let mut range = self.core.kafka_timestamp_range;
 
         let mut new_conjunctions = Vec::with_capacity(predicate.conjunctions.len());
         for expr in predicate.conjunctions {
-            if let Some(e) = expr_to_kafka_timestamp_range(expr, &mut range, self.base.schema()) {
+            if let Some(e) =
+                expr_to_kafka_timestamp_range(expr, &mut range, kafka_timestamp_col_idx)
+            {
                 // Not recognized, so push back
                 new_conjunctions.push(e);
             }

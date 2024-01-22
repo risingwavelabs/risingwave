@@ -177,6 +177,9 @@ impl MessageMeta<'_> {
             SourceColumnType::Offset => Datum::Some(self.offset.into()).into(),
             // Extract custom meta data per connector.
             SourceColumnType::Meta if let SourceMeta::Kafka(kafka_meta) = self.meta => {
+                // Note: this branch is for backwards compatibility.
+                // For previously created sources, they have _rw_kafka_timestamp column and it's column_type is meta.
+                // For newly created sources, the column type is normal and addtion_column_type is timestamp. The column name can be customized.
                 assert_eq!(
                     desc.name.as_str(),
                     KAFKA_TIMESTAMP_COLUMN_NAME,

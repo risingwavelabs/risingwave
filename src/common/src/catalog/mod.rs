@@ -91,6 +91,10 @@ pub fn default_key_column_name_version_mapping(version: &ColumnDescVersion) -> &
 /// can limit the timestamp range when querying it directly with batch query. The column type is
 /// [`DataType::Timestamptz`]. For more details, please refer to
 /// [this rfc](https://github.com/risingwavelabs/rfcs/pull/20).
+///
+/// Compatibility Note:
+/// - For previously created sources, they have `_rw_kafka_timestamp` column and it's `column_type` is meta.
+/// - For newly created sources, the column type is normal and `addtion_column_type` is timestamp. The column name can be customized.
 pub const KAFKA_TIMESTAMP_COLUMN_NAME: &str = "_rw_kafka_timestamp";
 
 pub fn is_system_schema(schema_name: &str) -> bool {
