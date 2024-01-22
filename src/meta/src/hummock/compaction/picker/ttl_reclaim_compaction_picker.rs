@@ -202,6 +202,8 @@ impl TtlReclaimCompactionPicker {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use itertools::Itertools;
     use risingwave_pb::hummock::compact_task;
     pub use risingwave_pb::hummock::{Level, LevelType};
@@ -213,7 +215,7 @@ mod test {
         generate_table_with_ids_and_epochs,
     };
     use crate::hummock::compaction::selector::{CompactionSelector, TtlCompactionSelector};
-    use crate::hummock::compaction::LocalSelectorStatistic;
+    use crate::hummock::compaction::{CompactionDeveloperConfig, LocalSelectorStatistic};
     use crate::hummock::model::CompactionGroup;
 
     #[test]
@@ -379,6 +381,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options,
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -428,6 +431,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options.clone(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -460,6 +464,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options.clone(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -515,6 +520,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options,
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -555,6 +561,7 @@ mod test {
                 &mut levels_handler,
                 &mut local_stats,
                 HashMap::default(),
+                Arc::new(CompactionDeveloperConfig::default()),
             );
 
             // empty table_options does not select any files
@@ -616,6 +623,7 @@ mod test {
                         &mut levels_handler,
                         &mut local_stats,
                         table_id_to_options.clone(),
+                        Arc::new(CompactionDeveloperConfig::default()),
                     )
                     .unwrap();
 
@@ -707,6 +715,7 @@ mod test {
                         &mut levels_handler,
                         &mut local_stats,
                         table_id_to_options.clone(),
+                        Arc::new(CompactionDeveloperConfig::default()),
                     )
                     .unwrap();
 

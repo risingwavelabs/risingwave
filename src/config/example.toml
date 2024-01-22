@@ -70,6 +70,8 @@ enable_emergency_picker = true
 [meta.developer]
 meta_cached_traces_num = 256
 meta_cached_traces_memory_limit_bytes = 134217728
+meta_enable_trivial_move = true
+meta_enable_check_task_level_overlap = false
 
 [batch]
 enable_barrier_read = false
