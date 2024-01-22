@@ -1305,6 +1305,11 @@ command = "target/${BUILD_MODE_DIR}/risedev-dev"
 args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
 
+[tasks.ci-kill-no-logs]
+category = "RiseDev - CI"
+dependencies = ["k", "check-logs", "wait-processes-exit"]
+description = "Kill cluster, dump logs and check logs"
+
 [tasks.ci-kill]
 category = "RiseDev - CI"
 dependencies = ["k", "l", "check-logs", "wait-processes-exit"]
