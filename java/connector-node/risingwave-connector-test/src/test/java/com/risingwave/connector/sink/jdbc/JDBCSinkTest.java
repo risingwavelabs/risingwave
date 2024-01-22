@@ -257,7 +257,7 @@ public class JDBCSinkTest {
     @Test
     public void testMySQL() throws SQLException {
         MySQLContainer mysql =
-                new MySQLContainer<>("mysql:8")
+                new MySQLContainer<>("mysql:8.0")
                         .withDatabaseName("test")
                         .withUsername("postgres")
                         .withPassword("password")
