@@ -211,6 +211,14 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
     pub hummock_version_checkpoint_interval_sec: u64,
 
+    /// If enabled, SSTable object file and version delta will be retained.
+    ///
+    /// SSTable object file need to be deleted via full GC.
+    ///
+    /// version delta need to be manually deleted.
+    #[serde(default = "default::meta::enable_hummock_data_archive")]
+    pub enable_hummock_data_archive: bool,
+
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected.
     #[serde(default = "default::meta::min_delta_log_num_for_hummock_version_checkpoint")]
@@ -982,6 +990,10 @@ pub mod default {
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
             30
+        }
+
+        pub fn enable_hummock_data_archive() -> bool {
+            false
         }
 
         pub fn min_delta_log_num_for_hummock_version_checkpoint() -> u64 {
