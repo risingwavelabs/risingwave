@@ -229,20 +229,24 @@ impl SimulationTestSink {
     }
 }
 
-pub fn build_stream_chunk(row_iter: impl Iterator<Item = (i32, String)>) -> StreamChunk {
+pub fn build_stream_chunk(
+    row_iter: impl Iterator<Item = (i32, String, String, String)>,
+) -> StreamChunk {
     static ROW_ID_GEN: LazyLock<Arc<AtomicI64>> = LazyLock::new(|| Arc::new(AtomicI64::new(0)));
 
     let mut builder = DataChunkBuilder::new(
         vec![DataType::Int32, DataType::Varchar, DataType::Serial],
         100000,
     );
-    for (id, name) in row_iter {
+    for (id, name, split_id, offset) in row_iter {
         let row_id = ROW_ID_GEN.fetch_add(1, Relaxed);
         std::assert!(builder
             .append_one_row([
                 Some(ScalarImpl::Int32(id)),
                 Some(ScalarImpl::Utf8(name.into())),
                 Some(ScalarImpl::Serial(Serial::from(row_id))),
+                Some(ScalarImpl::Utf8(split_id.into())),
+                Some(ScalarImpl::Utf8(offset.into())),
             ])
             .is_none());
     }
@@ -302,7 +306,12 @@ impl SimulationTestSource {
                         let mut chunks = Vec::new();
                         while offset < id_list.len() && chunks.len() < pause_interval {
                             let id = id_list[offset];
-                            let chunk = build_stream_chunk(once((id, simple_name_of_id(id))));
+                            let chunk = build_stream_chunk(once((
+                                id,
+                                simple_name_of_id(id),
+                                split.id.to_string(),
+                                offset.to_string(),
+                            )));
                             chunks.push(chunk);
 
                             offset += 1;
