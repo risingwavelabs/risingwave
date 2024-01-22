@@ -48,7 +48,7 @@ ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 RUN cargo binstall -y --no-symlinks cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-cache cargo-audit \
     cargo-make@0.36.10 \
-    cargo-dylint@2.6.0 \
+    cargo-dylint@2.6.0 dylint-link@2.6.0 \
     sqllogictest-bin@0.19.1 \
     sccache@0.7.4 \
     && cargo cache -a \
