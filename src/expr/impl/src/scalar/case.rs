@@ -114,14 +114,14 @@ impl Expression for CaseExpression {
 struct ConstantLookupExpression {
     return_type: DataType,
     arms: HashMap<ScalarImpl, BoxedExpression>,
-    fallback: BoxedExpression,
+    fallback: Option<BoxedExpression>,
 }
 
 impl ConstantLookupExpression {
     fn new(
         return_type: DataType,
         arms: HashMap<ScalarImpl, BoxedExpression>,
-        fallback: BoxedExpression,
+        fallback: Option<BoxedExpression>,
     ) -> Self {
         Self {
             return_type,
@@ -154,13 +154,15 @@ impl Expression for ConstantLookupExpression {
             } else {
                 // Otherwise this should goes to the fallback arm
                 // The fallback arm should also be const
-                builder.append(
-                    self.fallback
-                        .eval_row(&OwnedRow::empty())
-                        .await
-                        .unwrap()
-                        .as_ref(),
-                );
+                if let Some(ref fallback) = self.fallback {
+                    builder.append(
+                        fallback
+                            .eval_row(&OwnedRow::empty())
+                            .await
+                            .unwrap()
+                            .as_ref(),
+                    );
+                }
             }
         }
 
@@ -203,11 +205,11 @@ fn build_constant_lookup_expr(
 
     let fallback = if let Some(else_clause) = iter.into_remainder().unwrap().next() {
         if else_clause.return_type() != return_type {
-            bail!("type mismatched between else and case");
+            bail!("Type mismatched between else and case.");
         }
-        else_clause
+        Some(else_clause)
     } else {
-        bail!("fallback arm must exist for `ConstantLookupExpression`")
+        None
     };
 
     Ok(Box::new(ConstantLookupExpression::new(
