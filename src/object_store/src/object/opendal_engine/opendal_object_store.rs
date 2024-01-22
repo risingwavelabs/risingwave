@@ -20,6 +20,7 @@ use futures::{stream, StreamExt, TryStreamExt};
 use opendal::services::Memory;
 use opendal::{Metakey, Operator, Writer};
 use risingwave_common::range::RangeBoundsExt;
+use thiserror_ext::AsReport;
 
 use crate::object::{
     BoxedStreamingUploader, ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter,
@@ -116,9 +117,9 @@ impl ObjectStore for OpendalObjectStore {
         ));
         let range: Range<u64> = (range.start as u64)..(range.end as u64);
         let reader = self.op.reader_with(path).range(range).await?;
-        let stream = reader
-            .into_stream()
-            .map(|item| item.map_err(|e| ObjectError::internal(format!("OpendalError: {:?}", e))));
+        let stream = reader.into_stream().map(|item| {
+            item.map_err(|e| ObjectError::internal(format!("OpendalError: {}", e.as_report())))
+        });
 
         Ok(Box::pin(stream))
     }

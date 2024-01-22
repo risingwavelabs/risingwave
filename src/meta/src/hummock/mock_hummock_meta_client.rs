@@ -40,6 +40,7 @@ use risingwave_pb::hummock::{
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient};
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -119,7 +120,7 @@ impl MockHummockMetaClient {
 }
 
 fn mock_err(error: super::error::Error) -> RpcError {
-    anyhow!("mock error: {}", error).into()
+    anyhow!(error).context("mock error").into()
 }
 
 #[async_trait]
@@ -326,7 +327,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                             )
                             .await
                         {
-                            tracing::error!("report compact_tack fail {e:?}");
+                            tracing::error!(error = %e.as_report(), "report compact_tack fail");
                         }
                     }
                 }
