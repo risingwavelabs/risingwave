@@ -23,6 +23,7 @@ use alloc::{
 use core::fmt;
 
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 use tracing::{debug, instrument};
 
 use crate::ast::ddl::{
@@ -82,6 +83,7 @@ use IsLateral::*;
 
 pub type IncludeOption = Vec<IncludeOptionItem>;
 
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Eq, Clone, Debug, PartialEq, Hash)]
 pub struct IncludeOptionItem {
     pub column_type: Ident,
