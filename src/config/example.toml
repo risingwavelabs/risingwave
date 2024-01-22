@@ -66,6 +66,8 @@ max_space_reclaim_bytes = 536870912
 level0_max_compact_file_number = 100
 tombstone_reclaim_ratio = 40
 enable_emergency_picker = true
+enable_trivial_move = true
+enable_check_task_level_overlap = false
 
 [meta.developer]
 meta_cached_traces_num = 256
