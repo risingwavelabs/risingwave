@@ -334,7 +334,7 @@ fn infer_type_for_special(
                 // [dummy_expression] (cond, res) [else / fallback]? pairs.
                 // So we align exprs at even indices as well as the last one
                 // when length is odd.
-                match (i != 0 && i.is_even() || i == len - 1) {
+                match i != 0 && i.is_even() || i == len - 1 {
                     true => Some(e),
                     false => None,
                 }

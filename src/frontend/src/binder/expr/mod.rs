@@ -40,7 +40,7 @@ mod value;
 /// this limit, we will try optimize the case-when
 /// expression to `ConstantLookupExpression`
 /// Check `case.rs` for details.
-const CASE_WHEN_ARMS_OPTIMIZE_LIMIT: usize = 500;
+const CASE_WHEN_ARMS_OPTIMIZE_LIMIT: usize = 0;
 
 impl Binder {
     /// Bind an expression with `bind_expr_inner`, attach the original expression
@@ -469,6 +469,82 @@ impl Binder {
         Ok(func_call.into())
     }
 
+    /// The helper function to check if the current case-when
+    /// expression in `bind_case` could be optimized
+    /// into `ConstantLookupExpression`
+    fn check_bind_case_optimization(
+        &mut self,
+        conditions: Vec<Expr>,
+        results_expr: Vec<ExprImpl>,
+        operand: Option<Box<Expr>>,
+        fallback: Option<ExprImpl>,
+        constant_lookup_inputs: &mut Vec<ExprImpl>,
+    ) -> bool {
+        if conditions.len() < CASE_WHEN_ARMS_OPTIMIZE_LIMIT {
+            return false;
+        }
+
+        // Insert a dummy expression to avoid being constant fold
+        // if eventually turn into `ConstantLookupExpression` by optimizing
+        match operand {
+            Some(ref t) => {
+                let Ok(bind_result) = self.bind_expr_inner(Expr::BinaryOp {
+                    left: t.clone(),
+                    op: BinaryOperator::Eq,
+                    right: t.clone(),
+                }) else {
+                    // Failed to bind the expression
+                    return false;
+                };
+                // If `bind_result` is const, the case-when expression
+                // will be rewritten during optimizer phase
+                // In this case we will also not optimized
+                if !bind_result.is_const() {
+                    constant_lookup_inputs.push(bind_result);
+                } else {
+                    return false;
+                }
+            }
+            // In this case we will not optimize the case-when expression
+            // i.e., case when ... then ... else ... (with no operand)
+            None => return false,
+        }
+
+        for (condition, result) in zip_eq_fast(conditions, results_expr) {
+            // If the result expression is not const
+            // we will also not conduct the optimization
+            if !result.is_const() {
+                return false;
+            }
+
+            if let Expr::Value(_) = condition.clone() {
+                let Ok(input) = self.bind_expr_inner(condition.clone()) else {
+                    return false;
+                };
+                constant_lookup_inputs.push(input);
+            } else {
+                // If at least one condition is not in the simple form / not constant,
+                // we can NOT do the subsequent optimization then
+                return false;
+            }
+
+            constant_lookup_inputs.push(result);
+        }
+
+        // The fallback arm for case-when expression
+        if let Some(expr) = fallback {
+            // We assume fallback arm must be const
+            // to enable optimization (if exists)
+            if expr.is_const() {
+                constant_lookup_inputs.push(expr);
+            } else {
+                return false;
+            }
+        }
+
+        true
+    }
+
     pub(super) fn bind_case(
         &mut self,
         operand: Option<Box<Expr>>,
@@ -487,61 +563,21 @@ impl Binder {
 
         let mut constant_lookup_inputs = Vec::new();
 
-        // The prerequisite for optimization
-        let mut optimize_flag = conditions.len() >= CASE_WHEN_ARMS_OPTIMIZE_LIMIT;
+        // See if the case-when expression can be optimized
+        let optimize_flag = self.check_bind_case_optimization(
+            conditions.clone(),
+            results_expr.clone(),
+            operand.clone(),
+            else_result_expr.clone(),
+            &mut constant_lookup_inputs,
+        );
 
-        // Insert a dummy expression to avoid being constant fold
-        // if eventually turn into `ConstantLookupExpression` by optimizing
-        match operand {
-            Some(ref t) => {
-                let Ok(bind_result) = self.bind_expr_inner(Expr::BinaryOp {
-                    left: t.clone(),
-                    op: BinaryOperator::Eq,
-                    right: t.clone(),
-                }) else {
-                    return Err(ErrorCode::BindError(
-                        "failed to bind case when expression".to_string(),
-                    )
-                    .into());
-                };
-                // If `bind_result` is const, the case-when expression
-                // will be rewritten during optimizer phase
-                // In this case we will also not optimized
-                if !bind_result.is_const() {
-                    constant_lookup_inputs.push(bind_result);
-                } else {
-                    optimize_flag = false;
-                }
-            }
-            // In this case we will not optimize the case-when expression
-            // i.e., case when ... then ... else ... (with no operand)
-            None => optimize_flag = false,
+        if optimize_flag {
+            println!("Hey!");
+            return Ok(FunctionCall::new(ExprType::ConstantLookup, constant_lookup_inputs)?.into());
         }
 
         for (condition, result) in zip_eq_fast(conditions, results_expr) {
-            // If the result expression is not const
-            // we will also not do the optimization
-            if optimize_flag && !result.is_const() {
-                optimize_flag = false;
-            }
-
-            // See if the current condition could be optimized
-            if optimize_flag {
-                if let Expr::Value(_) = condition.clone() {
-                    let Ok(input) = self.bind_expr_inner(condition.clone()) else {
-                        return Err(ErrorCode::BindError(
-                            "failed to bind case when expression".to_string(),
-                        )
-                        .into());
-                    };
-                    constant_lookup_inputs.push(input);
-                } else {
-                    // If at least one condition is not in the simple form / not constant,
-                    // we can NOT do the subsequent optimization then
-                    optimize_flag = false;
-                }
-            }
-
             let condition = match operand {
                 Some(ref t) => Expr::BinaryOp {
                     left: t.clone(),
@@ -550,29 +586,16 @@ impl Binder {
                 },
                 None => condition,
             };
-
             inputs.push(
                 self.bind_expr_inner(condition)
                     .and_then(|expr| expr.enforce_bool_clause("CASE WHEN"))?,
             );
-
-            inputs.push(result.clone());
-
-            if optimize_flag {
-                constant_lookup_inputs.push(result);
-            }
+            inputs.push(result);
         }
 
         // The fallback arm for case-when expression
         if let Some(expr) = else_result_expr {
-            inputs.push(expr.clone());
-            // We assume fallback arm must be const
-            // to enable optimization
-            if expr.is_const() {
-                constant_lookup_inputs.push(expr);
-            } else {
-                optimize_flag = false;
-            }
+            inputs.push(expr);
         }
 
         if inputs.iter().any(ExprImpl::has_table_function) {
@@ -581,11 +604,7 @@ impl Binder {
             );
         }
 
-        if optimize_flag {
-            Ok(FunctionCall::new(ExprType::ConstantLookup, constant_lookup_inputs)?.into())
-        } else {
-            Ok(FunctionCall::new(ExprType::Case, inputs)?.into())
-        }
+        Ok(FunctionCall::new(ExprType::Case, inputs)?.into())
     }
 
     pub(super) fn bind_is_operator(&mut self, func_type: ExprType, expr: Expr) -> Result<ExprImpl> {

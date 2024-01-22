@@ -162,6 +162,8 @@ impl Expression for ConstantLookupExpression {
                             .unwrap()
                             .as_ref(),
                     );
+                } else {
+                    builder.append_null();
                 }
             }
         }
@@ -181,10 +183,6 @@ fn build_constant_lookup_expr(
 ) -> Result<BoxedExpression> {
     if children.is_empty() {
         bail!("children expression must not be empty for constant lookup expression");
-    }
-
-    if children.len() % 2 != 0 {
-        bail!("the length of children expression must be even, the dummy operator and fallback expression must be included");
     }
 
     let mut children = children;
