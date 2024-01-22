@@ -33,6 +33,7 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
+use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
@@ -304,7 +305,7 @@ impl CacheRefillTask {
                     let holders = match Self::meta_cache_refill(&context, delta).await {
                         Ok(holders) => holders,
                         Err(e) => {
-                            tracing::warn!("meta cache refill error: {:?}", e);
+                            tracing::warn!(error = %e.as_report(), "meta cache refill error");
                             return;
                         }
                     };
@@ -514,7 +515,9 @@ impl CacheRefillTask {
         });
         let parent_ssts = match try_join_all(futures).await {
             Ok(parent_ssts) => parent_ssts.into_iter().flatten().collect_vec(),
-            Err(e) => return tracing::error!("get old meta from cache error: {}", e),
+            Err(e) => {
+                return tracing::error!(error = %e.as_report(), "get old meta from cache error")
+            }
         };
         let units = Self::get_units_to_refill_by_inheritance(context, &holders, &parent_ssts);
 
@@ -525,7 +528,7 @@ impl CacheRefillTask {
             async move {
                 let sst = ssts.get(&unit.sst_obj_id).unwrap();
                 if let Err(e) = Self::data_file_cache_refill_unit(context, sst, unit).await {
-                    tracing::error!("data file cache unit refill error: {}", e);
+                    tracing::error!(error = %e.as_report(), "data file cache unit refill error");
                 }
             }
         });

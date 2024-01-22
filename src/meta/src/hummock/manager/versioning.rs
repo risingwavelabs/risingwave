@@ -55,15 +55,12 @@ pub struct HummockVersionSafePoint {
 
 impl Drop for HummockVersionSafePoint {
     fn drop(&mut self) {
-        if let Err(e) = self
+        if self
             .event_sender
             .send(HummockManagerEvent::DropSafePoint(self.id))
+            .is_err()
         {
-            tracing::debug!(
-                "failed to drop hummock version safe point {}. {}",
-                self.id,
-                e
-            );
+            tracing::debug!("failed to drop hummock version safe point {}", self.id);
         }
     }
 }
