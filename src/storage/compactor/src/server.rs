@@ -304,12 +304,12 @@ pub async fn compactor_serve(
                         _ = tokio::signal::ctrl_c() => {},
                         _ = &mut shutdown_recv => {
                             for (join_handle, shutdown_sender) in sub_tasks {
-                                if let Err(err) = shutdown_sender.send(()) {
-                                    tracing::warn!("Failed to send shutdown: {:?}", err);
+                                if shutdown_sender.send(()).is_err() {
+                                    tracing::warn!("Failed to send shutdown");
                                     continue;
                                 }
-                                if let Err(err) = join_handle.await {
-                                    tracing::warn!("Failed to join shutdown: {:?}", err);
+                                if join_handle.await.is_err() {
+                                    tracing::warn!("Failed to join shutdown");
                                 }
                             }
                         },
@@ -414,12 +414,12 @@ pub async fn shared_compactor_serve(
                     tokio::select! {
                         _ = tokio::signal::ctrl_c() => {},
                         _ = &mut shutdown_recv => {
-                                if let Err(err) = shutdown_sender.send(()) {
-                                    tracing::warn!("Failed to send shutdown: {:?}", err);
-                                }
-                                if let Err(err) = join_handle.await {
-                                    tracing::warn!("Failed to join shutdown: {:?}", err);
-                                }
+                            if shutdown_sender.send(()).is_err() {
+                                tracing::warn!("Failed to send shutdown");
+                            }
+                            if join_handle.await.is_err() {
+                                tracing::warn!("Failed to join shutdown");
+                            }
                         },
                     }
                 },
