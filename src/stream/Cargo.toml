@@ -41,7 +41,7 @@ lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 maplit = "1.0.2"
 memcomparable = "0.2"
 multimap = "0.10"
-parking_lot = "0.12"
+parking_lot = { version = "0.12", features = ["arc_lock"] }
 pin-project = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = { workspace = true }
