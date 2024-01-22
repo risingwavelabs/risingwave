@@ -12,16 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::cmp::max;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_connector::sink::log_store::{LogStoreResult, TruncateOffset};
+use risingwave_connector::sink::log_store::LogStoreResult;
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_storage::store::{InitOptions, LocalStateStore, SealCurrentEpochOptions};
 
@@ -29,7 +27,7 @@ use super::kv_log_store::ReaderTruncationOffsetType;
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
 use crate::common::log_store_impl::kv_log_store::{SeqIdType, FIRST_SEQ_ID};
 
-pub struct OnlyWriterLogStoreWriter<LS: LocalStateStore> {
+pub struct SubscriptionLogStoreWriter<LS: LocalStateStore> {
     _table_id: TableId,
 
     seq_id: SeqIdType,
@@ -39,11 +37,9 @@ pub struct OnlyWriterLogStoreWriter<LS: LocalStateStore> {
     serde: LogStoreRowSerde,
 
     _identity: String,
-
-    truncate_offset: Option<ReaderTruncationOffsetType>,
 }
 
-impl<LS: LocalStateStore> OnlyWriterLogStoreWriter<LS> {
+impl<LS: LocalStateStore> SubscriptionLogStoreWriter<LS> {
     pub(crate) fn new(
         table_id: TableId,
         state_store: LS,
@@ -56,7 +52,6 @@ impl<LS: LocalStateStore> OnlyWriterLogStoreWriter<LS> {
             state_store,
             serde,
             _identity: identity,
-            truncate_offset: None,
         }
     }
 
@@ -91,6 +86,7 @@ impl<LS: LocalStateStore> OnlyWriterLogStoreWriter<LS> {
         &mut self,
         next_epoch: u64,
         is_checkpoint: bool,
+        truncate_offset: Option<ReaderTruncationOffsetType>,
     ) -> LogStoreResult<()> {
         let epoch = self.state_store.epoch();
         for vnode in self.serde.vnodes().iter_vnodes() {
@@ -99,13 +95,12 @@ impl<LS: LocalStateStore> OnlyWriterLogStoreWriter<LS> {
         }
 
         let mut watermark = None;
-        if let Some(truncate_offset) = self.truncate_offset {
+        if let Some(truncate_offset) = truncate_offset {
             watermark = Some(VnodeWatermark::new(
                 self.serde.vnodes().clone(),
                 self.serde
                     .serialize_truncation_offset_watermark(truncate_offset),
             ));
-            self.truncate_offset = None;
         }
         self.state_store.flush(vec![]).await?;
         let watermark = watermark.into_iter().collect_vec();
@@ -120,18 +115,5 @@ impl<LS: LocalStateStore> OnlyWriterLogStoreWriter<LS> {
     pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> LogStoreResult<()> {
         self.serde.update_vnode_bitmap(new_vnodes.clone());
         Ok(())
-    }
-
-    pub fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
-        if let TruncateOffset::Barrier { epoch } = &offset {
-            let epoch_offset = match self.truncate_offset {
-                Some(truncate_offset) => max(*epoch, truncate_offset.0),
-                None => *epoch,
-            };
-            self.truncate_offset = Some((epoch_offset, None));
-            Ok(())
-        } else {
-            Err(anyhow!("only support truncate at barrier."))
-        }
     }
 }

@@ -19,9 +19,8 @@ use risingwave_storage::store::{NewLocalOptions, OpConsistencyLevel};
 use super::ExecutorBuilder;
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
 use crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V1_INFO;
-use crate::common::log_store_impl::only_writer_log_store::OnlyWriterLogStoreWriter;
+use crate::common::log_store_impl::subscription_log_store::SubscriptionLogStoreWriter;
 use crate::error::StreamResult;
-use crate::executor::test_utils::prelude::StateTable;
 use crate::executor::{BoxedExecutor, SubscriptionExecutor};
 
 pub struct SubscriptionExecutorBuilder;
@@ -62,20 +61,13 @@ impl ExecutorBuilder for SubscriptionExecutorBuilder {
         );
         let log_store_identity = format!("subscription-executor[{}]", params.executor_id);
         let log_store =
-            OnlyWriterLogStoreWriter::new(table_id, local_state_store, serde, log_store_identity);
-        let epoch_store = StateTable::from_table_catalog(
-            node.epoch_store_table.as_ref().unwrap(),
-            state_store.clone(),
-            Some(vnodes),
-        )
-        .await;
+            SubscriptionLogStoreWriter::new(table_id, local_state_store, serde, log_store_identity);
         Ok(Box::new(
             SubscriptionExecutor::new(
                 params.actor_context,
                 params.info,
                 input,
                 log_store,
-                epoch_store,
                 node.retention,
             )
             .await?,
