@@ -270,6 +270,7 @@ pub struct SinkWriterParam {
     pub vnode_bitmap: Option<Bitmap>,
     pub meta_client: Option<SinkMetaClient>,
     pub sink_metrics: SinkMetrics,
+    pub extra_partition_col_idx: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -303,6 +304,7 @@ impl SinkWriterParam {
             vnode_bitmap: Default::default(),
             meta_client: Default::default(),
             sink_metrics: SinkMetrics::for_test(),
+            extra_partition_col_idx: Default::default(),
         }
     }
 }

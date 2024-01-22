@@ -833,6 +833,9 @@ impl TestCase {
                     format_desc,
                     false,
                     None,
+                    // # TODO
+                    // Fixed me. It may should not use None here.
+                    None,
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));
