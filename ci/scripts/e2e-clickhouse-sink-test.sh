@@ -35,7 +35,7 @@ sleep 2
 
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/clickhouse_sink.slt'
-sleep 1
+sleep 5
 ./clickhouse client --host=clickhouse-server --port=9000 --query="select * from demo_test FORMAT CSV;" > ./query_result.csv
 
 
