@@ -239,7 +239,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
         if !incompleted.is_empty() {
             tracing::debug!(actor_id = self.actor_ctx.id, incompleted = ?incompleted, "take snapshot");
-            core.split_state_store.take_snapshot(incompleted).await?
+            core.split_state_store.set_states(incompleted).await?
         }
 
         if !completed.is_empty() {

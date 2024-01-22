@@ -41,6 +41,9 @@ pub struct StreamSourceCore<S: StateStore> {
     pub(crate) split_state_store: SourceStateTableHandler<S>,
 
     /// In-memory cache for the splits.
+    ///
+    /// Source messages will only write the cache.
+    /// It is read on split change and rebuild stream reader on error.
     pub(crate) state_cache: HashMap<SplitId, SplitImpl>,
 }
 

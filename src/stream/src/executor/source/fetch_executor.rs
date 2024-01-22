@@ -293,7 +293,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                             )
                                         })
                                         .collect();
-                                    state_store_handler.take_snapshot(file_assignment).await?;
+                                    state_store_handler.set_states(file_assignment).await?;
                                     state_store_handler.state_store.try_flush().await?;
                                 }
                                 _ => unreachable!(),

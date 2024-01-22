@@ -170,7 +170,7 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(None)
     }
 
-    // Note: `update_state_if_changed` will modify `state_cache`
+    /// Note: `update_state_if_changed` will modify `state_cache`
     async fn update_state_if_changed(
         &mut self,
         state: ConnectorState,
@@ -293,7 +293,9 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(())
     }
 
-    async fn take_snapshot_and_clear_cache(
+    /// - `target_state`: the new split info from barrier. `None` if no split update.
+    /// - `should_trim_state`: whether to trim state for dropped splits.
+    async fn persist_state_and_clear_cache(
         &mut self,
         epoch: EpochPair,
         target_state: Option<Vec<SplitImpl>>,
@@ -332,16 +334,17 @@ impl<S: StateStore> SourceExecutor<S> {
 
         if !cache.is_empty() {
             tracing::debug!(actor_id = self.actor_ctx.id, state = ?cache, "take snapshot");
-            core.split_state_store.take_snapshot(cache).await?
+            core.split_state_store.set_states(cache).await?
         }
+
         // commit anyway, even if no message saved
         core.split_state_store.state_store.commit(epoch).await?;
-
         core.state_cache.clear();
 
         Ok(())
     }
 
+    /// try mem table spill
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
         core.split_state_store.state_store.try_flush().await?;
@@ -519,7 +522,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                     latest_split_info = target_state.clone();
                                 }
 
-                                self.take_snapshot_and_clear_cache(
+                                self.persist_state_and_clear_cache(
                                     epoch,
                                     target_state,
                                     should_trim_state,
