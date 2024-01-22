@@ -210,7 +210,7 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
         right_stream_key_indices: &[usize],
     ) -> StreamExecutorResult<()> {
         for chunk in chunks {
-            let keys = K::build(join_keys, chunk.data_chunk())?;
+            let keys = K::build_many(join_keys, chunk.data_chunk());
             for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
                 let Some((op, row)) = r else {
                     continue;
@@ -427,7 +427,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                         right_map.clone(),
                     );
                     let epoch = prev_epoch.expect("Chunk data should come after some barrier.");
-                    let keys = K::build(&self.left_join_keys, chunk.data_chunk())?;
+                    let keys = K::build_many(&self.left_join_keys, chunk.data_chunk());
 
                     // Fetch the local cache.
                     struct FetchingCacheItem<'a, K> {
