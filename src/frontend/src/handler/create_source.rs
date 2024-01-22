@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
+use anyhow::Context;
 use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
@@ -24,7 +25,7 @@ use risingwave_common::catalog::{
     is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, INITIAL_SOURCE_VERSION_ID,
     KAFKA_TIMESTAMP_COLUMN_NAME,
 };
-use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
+use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, NotSupported, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
@@ -385,8 +386,7 @@ pub(crate) async fn bind_columns_from_source(
         (Format::Plain, Encode::Csv) => {
             let chars =
                 consume_string_from_options(&mut format_encode_options_to_consume, "delimiter")?.0;
-            let delimiter =
-                get_delimiter(chars.as_str()).map_err(|e| RwError::from(e.to_string()))?;
+            let delimiter = get_delimiter(chars.as_str()).context("failed to parse delimiter")?;
             let has_header = try_consume_string_from_options(
                 &mut format_encode_options_to_consume,
                 "without_header",
@@ -556,17 +556,40 @@ pub(crate) fn bind_all_columns(
     cols_from_source: Option<Vec<ColumnCatalog>>,
     cols_from_sql: Vec<ColumnCatalog>,
     col_defs_from_sql: &[ColumnDef],
+    wildcard_idx: Option<usize>,
 ) -> Result<Vec<ColumnCatalog>> {
     if let Some(cols_from_source) = cols_from_source {
         if cols_from_sql.is_empty() {
             Ok(cols_from_source)
+        } else if let Some(wildcard_idx) = wildcard_idx {
+            if col_defs_from_sql.iter().any(|c| !c.is_generated()) {
+                Err(RwError::from(NotSupported(
+                    "Only generated columns are allowed in user-defined schema from SQL"
+                        .to_string(),
+                    "Remove the non-generated columns".to_string(),
+                )))
+            } else {
+                // Replace `*` with `cols_from_source`
+                let mut cols_from_sql = cols_from_sql;
+                let mut cols_from_source = cols_from_source;
+                let mut cols_from_sql_r = cols_from_sql.split_off(wildcard_idx);
+                cols_from_sql.append(&mut cols_from_source);
+                cols_from_sql.append(&mut cols_from_sql_r);
+                Ok(cols_from_sql)
+            }
         } else {
             // TODO(yuhao): https://github.com/risingwavelabs/risingwave/issues/12209
             Err(RwError::from(ProtocolError(
-                format!("User-defined schema from SQL is not allowed with FORMAT {} ENCODE {}. \
-                Please refer to https://www.risingwave.dev/docs/current/sql-create-source/ for more information.", source_schema.format, source_schema.row_encode))))
+                    format!("User-defined schema from SQL is not allowed with FORMAT {} ENCODE {}. \
+                    Please refer to https://www.risingwave.dev/docs/current/sql-create-source/ for more information.", source_schema.format, source_schema.row_encode))))
         }
     } else {
+        if wildcard_idx.is_some() {
+            return Err(RwError::from(NotSupported(
+                "Wildcard in user-defined schema is only allowed when there exists columns from external schema".to_string(),
+                "Remove the wildcard or use a source with external schema".to_string(),
+            )));
+        }
         // FIXME(yuhao): cols_from_sql should be None is no `()` is given.
         if cols_from_sql.is_empty() {
             return Err(RwError::from(ProtocolError(
@@ -1147,6 +1170,7 @@ pub async fn handle_create_source(
         columns_from_resolve_source,
         columns_from_sql,
         &stmt.columns,
+        stmt.wildcard_idx,
     )?;
     // add additional columns before bind pk, because `format upsert` requires the key column
     handle_addition_columns(&with_properties, stmt.include_column_options, &mut columns)?;

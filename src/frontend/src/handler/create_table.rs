@@ -452,6 +452,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     context: OptimizerContext,
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
+    wildcard_idx: Option<usize>,
     constraints: Vec<TableConstraint>,
     source_schema: ConnectorSchema,
     source_watermarks: Vec<SourceWatermark>,
@@ -487,6 +488,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         columns_from_resolve_source,
         columns_from_sql,
         &column_defs,
+        wildcard_idx,
     )?;
 
     // add additional columns before bind pk, because `format upsert` requires the key column
@@ -882,6 +884,7 @@ fn derive_connect_properties(
     Ok(connect_properties.into_iter().collect())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_create_table_plan(
     context: OptimizerContext,
     col_id_gen: ColumnIdGenerator,
@@ -889,6 +892,7 @@ pub(super) async fn handle_create_table_plan(
     cdc_table_info: Option<CdcTableInfo>,
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
+    wildcard_idx: Option<usize>,
     constraints: Vec<TableConstraint>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
@@ -907,6 +911,7 @@ pub(super) async fn handle_create_table_plan(
                     context,
                     table_name.clone(),
                     column_defs,
+                    wildcard_idx,
                     constraints,
                     source_schema,
                     source_watermarks,
@@ -958,6 +963,7 @@ pub async fn handle_create_table(
     handler_args: HandlerArgs,
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
+    wildcard_idx: Option<usize>,
     constraints: Vec<TableConstraint>,
     if_not_exists: bool,
     source_schema: Option<ConnectorSchema>,
@@ -990,6 +996,7 @@ pub async fn handle_create_table(
             cdc_table_info,
             table_name.clone(),
             column_defs,
+            wildcard_idx,
             constraints,
             source_watermarks,
             append_only,
@@ -1051,6 +1058,7 @@ pub async fn generate_stream_graph_for_table(
     handler_args: HandlerArgs,
     col_id_gen: ColumnIdGenerator,
     columns: Vec<ColumnDef>,
+    wildcard_idx: Option<usize>,
     constraints: Vec<TableConstraint>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
@@ -1064,6 +1072,7 @@ pub async fn generate_stream_graph_for_table(
                 context,
                 table_name,
                 columns,
+                wildcard_idx,
                 constraints,
                 source_schema,
                 source_watermarks,

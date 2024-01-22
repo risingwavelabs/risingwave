@@ -94,7 +94,7 @@ use self::watermark_filter::WatermarkFilterBuilder;
 use crate::error::StreamResult;
 use crate::executor::{BoxedExecutor, Executor, ExecutorInfo};
 use crate::from_proto::values::ValuesExecutorBuilder;
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::task::ExecutorParams;
 
 trait ExecutorBuilder {
     type Node;
@@ -104,16 +104,15 @@ trait ExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
     ) -> impl std::future::Future<Output = StreamResult<BoxedExecutor>> + Send;
 }
 
 macro_rules! build_executor {
-    ($source:expr, $node:expr, $store:expr, $stream:expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
+    ($source:expr, $node:expr, $store:expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
         match $node.get_node_body().unwrap() {
             $(
                 $proto_type_name(node) => {
-                    <$data_type>::new_boxed_executor($source, node, $store, $stream).await
+                    <$data_type>::new_boxed_executor($source, node, $store).await
                 },
             )*
             NodeBody::Exchange(_) | NodeBody::DeltaIndexJoin(_) => unreachable!()
@@ -124,7 +123,6 @@ macro_rules! build_executor {
 /// Create an executor from protobuf [`StreamNode`].
 pub async fn create_executor(
     params: ExecutorParams,
-    stream: &mut LocalStreamManagerCore,
     node: &StreamNode,
     store: impl StateStore,
 ) -> StreamResult<BoxedExecutor> {
@@ -132,7 +130,6 @@ pub async fn create_executor(
         params,
         node,
         store,
-        stream,
         NodeBody::Source => SourceExecutorBuilder,
         NodeBody::Sink => SinkExecutorBuilder,
         NodeBody::Project => ProjectExecutorBuilder,
