@@ -147,9 +147,8 @@ impl SourceDescBuilder {
 
         for (existed, c) in columns_exist.iter().zip_eq_fast(&additional_columns) {
             if !existed {
-                columns.push(SourceColumnDesc::from_column_desc_with_hidden(
+                columns.push(SourceColumnDesc::hidden_addition_col_from_column_desc(
                     &ColumnDesc::from(c.column_desc.as_ref().unwrap()),
-                    true,
                 ));
             }
         }
