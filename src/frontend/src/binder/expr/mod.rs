@@ -573,7 +573,6 @@ impl Binder {
         );
 
         if optimize_flag {
-            println!("Hey!");
             return Ok(FunctionCall::new(ExprType::ConstantLookup, constant_lookup_inputs)?.into());
         }
 
