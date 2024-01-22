@@ -26,6 +26,7 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::{Parser, ParserError};
 
 use super::*;
+use crate::binder::UdfContext;
 use crate::catalog::CatalogError;
 use crate::expr::{ExprImpl, Literal};
 use crate::{bind_data_type, Binder};
@@ -39,46 +40,6 @@ fn create_mock_udf_context(arg_types: Vec<DataType>) -> HashMap<String, ExprImpl
             (format!("${i}"), mock_expr.clone())
         })
         .collect()
-}
-
-fn extract_udf_expression(ast: Vec<Statement>) -> Result<Expr> {
-    if ast.len() != 1 {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "the query for sql udf should contain only one statement".to_string(),
-        )
-        .into());
-    }
-
-    // Extract the expression out
-    let Statement::Query(query) = ast[0].clone() else {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "invalid function definition, please recheck the syntax".to_string(),
-        )
-        .into());
-    };
-
-    let SetExpr::Select(select) = query.body else {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "missing `select` body for sql udf expression, please recheck the syntax".to_string(),
-        )
-        .into());
-    };
-
-    if select.projection.len() != 1 {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "`projection` should contain only one `SelectItem`".to_string(),
-        )
-        .into());
-    }
-
-    let SelectItem::UnnamedExpr(expr) = select.projection[0].clone() else {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "expect `UnnamedExpr` for `projection`".to_string(),
-        )
-        .into());
-    };
-
-    Ok(expr)
 }
 
 pub async fn handle_create_sql_function(
@@ -213,7 +174,7 @@ pub async fn handle_create_sql_function(
             .udf_context_mut()
             .update_context(create_mock_udf_context(arg_types.clone()));
 
-        if let Ok(expr) = extract_udf_expression(ast) {
+        if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
             if let Err(e) = binder.bind_expr(expr) {
                 return Err(ErrorCode::InvalidInputSyntax(
                     format!("failed to conduct semantic check, please see if you are calling non-existence functions.\nDetailed error: {e}")
