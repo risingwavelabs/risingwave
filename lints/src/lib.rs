@@ -45,12 +45,26 @@ pub fn register_lints(_sess: &rustc_session::Session, lint_store: &mut rustc_lin
 
     // --  End lint registration  --
 
-    // Register all lints in the `rw::all` group.
-    let all_lints = lint_store
+    // Register lints into groups.
+    // Note: use `rw_` instead of `rw::` to avoid "error[E0602]: unknown lint tool: `rw`".
+    register_group(lint_store, "rw_all", |_| true);
+    register_group(lint_store, "rw_warnings", |l| {
+        l.default_level >= rustc_lint::Level::Warn
+    });
+}
+
+fn register_group(
+    lint_store: &mut rustc_lint::LintStore,
+    name: &'static str,
+    filter_predicate: impl Fn(&rustc_lint::Lint) -> bool,
+) {
+    let lints = lint_store
         .get_lints()
         .iter()
         .filter(|l| l.name.starts_with("rw::"))
+        .filter(|l| filter_predicate(l))
         .map(|l| rustc_lint::LintId::of(l))
         .collect();
-    lint_store.register_group(true, "rw::all", None, all_lints);
+
+    lint_store.register_group(true, name, None, lints);
 }
