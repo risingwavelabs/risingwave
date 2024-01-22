@@ -48,7 +48,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<UpdateActorsRequest>,
     ) -> std::result::Result<Response<UpdateActorsResponse>, Status> {
         let req = request.into_inner();
-        let res = self.mgr.update_actors(&req.actors).await;
+        let res = self.mgr.update_actors(&req.actors);
         match res {
             Err(e) => {
                 error!(error = %e.as_report(), "failed to update stream actor");
@@ -89,7 +89,7 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<BroadcastActorInfoTableResponse>, Status> {
         let req = request.into_inner();
 
-        let res = self.mgr.update_actor_info(&req.info).await;
+        let res = self.mgr.update_actor_info(&req.info);
         match res {
             Err(e) => {
                 error!(error = %e.as_report(), "failed to update actor info table actor");
@@ -108,7 +108,7 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<DropActorsResponse>, Status> {
         let req = request.into_inner();
         let actors = req.actor_ids;
-        self.mgr.drop_actors(&actors).await?;
+        self.mgr.drop_actors(&actors)?;
         Ok(Response::new(DropActorsResponse {
             request_id: req.request_id,
             status: None,
@@ -143,7 +143,7 @@ impl StreamService for StreamServiceImpl {
         // recovery. Check it here and return an error here if some actors are not found to
         // avoid collection hang. We need some refine in meta side to remove this workaround since
         // it will cause another round of unnecessary recovery.
-        let actor_ids = self.mgr.all_actor_ids().await;
+        let actor_ids = self.mgr.all_actor_ids();
         let missing_actor_ids = req
             .actor_ids_to_collect
             .iter()

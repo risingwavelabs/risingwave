@@ -27,7 +27,6 @@ impl ExecutorBuilder for BarrierRecvExecutorBuilder {
         params: ExecutorParams,
         _node: &Self::Node,
         _store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         assert!(
             params.input.is_empty(),
@@ -35,9 +34,8 @@ impl ExecutorBuilder for BarrierRecvExecutorBuilder {
         );
 
         let (sender, barrier_receiver) = unbounded_channel();
-        stream
-            .context
-            .barrier_manager()
+        params
+            .local_barrier_manager
             .register_sender(params.actor_context.id, sender);
 
         Ok(BarrierRecvExecutor::new(params.actor_context, params.info, barrier_receiver).boxed())

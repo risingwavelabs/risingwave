@@ -30,7 +30,6 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream_manager: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let lookup = node;
 
@@ -82,7 +81,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             arrange_join_key_indices: lookup.arrange_key.iter().map(|x| *x as usize).collect(),
             column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
             storage_table,
-            watermark_epoch: stream_manager.get_watermark_epoch(),
+            watermark_epoch: params.watermark_epoch,
             chunk_size: params.env.config().developer.chunk_size,
         })))
     }

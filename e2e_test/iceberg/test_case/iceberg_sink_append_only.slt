@@ -43,12 +43,16 @@ INSERT INTO t6 VALUES
 statement ok
 FLUSH;
 
+sleep 5s
+
 statement ok
 INSERT INTO t6 VALUES
 (5, 5, 5000, 5.5, 5.55, '5-5', true, '2022-03-15', '2022-03-15 05:00:00Z'::timestamptz, '2022-03-15 05:00:00');
 
 statement ok
 FLUSH;
+
+sleep 5s
 
 statement ok
 DROP SINK s6;

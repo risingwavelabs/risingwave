@@ -28,6 +28,7 @@ use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::backup_service::{BackupJobStatus, MetaBackupManifestId};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 
 use crate::backup_restore::meta_snapshot_builder;
@@ -134,10 +135,10 @@ impl BackupManager {
         if let Err(e) = self.set_store(new_config.clone()).await {
             // Retry is driven by periodic system params notification.
             tracing::warn!(
-                "failed to apply new backup config: url={}, dir={}, {:#?}",
-                new_config.0,
-                new_config.1,
-                e
+                url = &new_config.0,
+                dir = &new_config.1,
+                error = %e.as_report(),
+                "failed to apply new backup config",
             );
         }
     }
@@ -269,7 +270,7 @@ impl BackupManager {
             }
             BackupJobResult::Failed(e) => {
                 self.metrics.job_latency_failure.observe(job_latency);
-                let message = format!("failed backup job {}: {}", job_id, e);
+                let message = format!("failed backup job {}: {}", job_id, e.as_report());
                 tracing::warn!(message);
                 self.latest_job_info
                     .store(Arc::new((job_id, BackupJobStatus::Failed, message)));
