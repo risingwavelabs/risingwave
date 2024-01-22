@@ -534,7 +534,7 @@ async fn test_reload_storage() {
     let anchor = gen_key_from_str(VirtualNode::ZERO, "aa");
 
     // First batch inserts the anchor and others.
-    let mut batch1 = vec![
+    let mut batch1 = [
         (anchor.clone(), StorageValue::new_put("111")),
         (
             gen_key_from_str(VirtualNode::ZERO, "bb"),
@@ -546,7 +546,7 @@ async fn test_reload_storage() {
     batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
     // Second batch modifies the anchor.
-    let mut batch2 = vec![
+    let mut batch2 = [
         (
             gen_key_from_str(VirtualNode::ZERO, "cc"),
             StorageValue::new_put("333"),

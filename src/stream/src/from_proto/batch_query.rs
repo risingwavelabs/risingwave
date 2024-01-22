@@ -30,7 +30,6 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         state_store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         if node.table_desc.is_none() {
             // used in sharing cdc source backfill as a dummy batch plan node
@@ -57,7 +56,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         assert_eq!(table.schema().data_types(), params.info.schema.data_types());
 
         let executor =
-            BatchQueryExecutor::new(table, stream.config.developer.chunk_size, params.info);
+            BatchQueryExecutor::new(table, params.env.config().developer.chunk_size, params.info);
 
         Ok(executor.boxed())
     }

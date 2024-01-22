@@ -98,9 +98,9 @@ impl GlobalBarrierManagerContext {
         }
         rx.map(move |result| match result {
             Ok(completion) => completion,
-            Err(e) => BarrierCompletion {
+            Err(_e) => BarrierCompletion {
                 prev_epoch,
-                result: Err(anyhow!("failed to receive barrier completion result: {:?}", e).into()),
+                result: Err(anyhow!("failed to receive barrier completion result").into()),
             },
         })
     }
