@@ -55,35 +55,29 @@ SELECT * from series(5);
 
 ## Appendix: Type Mapping
 
-The following table shows the type mapping between Arrow and JavaScript:
+The following table shows the type mapping between SQL and JavaScript:
 
-| Arrow Type            | JS Type       | Note                  |
+| SQL Type              | JS Type       | Note                  |
 | --------------------- | ------------- | --------------------- |
-| Null                  | null          |                       |
-| Boolean               | boolean       |                       |
-| Int8                  | number        |                       |
-| Int16                 | number        |                       |
-| Int32                 | number        |                       |
-| Int64                 | number        |                       |
-| UInt8                 | number        |                       |
-| UInt16                | number        |                       |
-| UInt32                | number        |                       |
-| UInt64                | number        |                       |
-| Float32               | number        |                       |
-| Float64               | number        |                       |
-| Utf8                  | string        |                       |
-| Binary                | Uint8Array    |                       |
-| LargeString (json)    | null, boolean, number, string, array or object | `JSON.parse(string)`  |
-| LargeBinary (decimal) | BigDecimal    |                       |
-| List(Int8)            | Int8Array     |                       |
-| List(Int16)           | Int16Array    |                       |
-| List(Int32)           | Int32Array    |                       |
-| List(Int64)           | BigInt64Array |                       |
-| List(UInt8)           | Uint8Array    |                       |
-| List(UInt16)          | Uint16Array   |                       |
-| List(UInt32)          | Uint32Array   |                       |
-| List(UInt64)          | BigUint64Array|                       |
-| List(Float32)         | Float32Array  |                       |
-| List(Float64)         | Float64Array  |                       |
-| List(others)          | Array         |                       |
-| Struct                | object        |                       |
+| boolean               | boolean       |                       |
+| smallint              | number        |                       |
+| int                   | number        |                       |
+| bigint                | number        |                       |
+| real                  | number        |                       |
+| double precision      | number        |                       |
+| decimal               | BigDecimal    |                       |
+| date                  |               | not supported yet     |
+| time                  |               | not supported yet     |
+| timestamp             |               | not supported yet     |
+| timestamptz           |               | not supported yet     |
+| interval              |               | not supported yet     |
+| varchar               | string        |                       |
+| bytea                 | Uint8Array    |                       |
+| jsonb                 | null, boolean, number, string, array or object | `JSON.parse(string)`  |
+| smallint[]            | Int16Array    |                       |
+| int[]                 | Int32Array    |                       |
+| bigint[]              | BigInt64Array |                       |
+| real[]                | Float32Array  |                       |
+| double precision[]    | Float64Array  |                       |
+| others[]              | array         |                       |
+| struct<..>            | object        |                       |

@@ -3,6 +3,15 @@ create function int_42() returns int language javascript as $$
     return 42;
 $$;
 
+query I
+select int_42();
+----
+42
+
+statement ok
+drop function int_42;
+
+
 statement ok
 create function gcd(a int, b int) returns int language javascript as $$
     // required before we support `RETURNS NULL ON NULL INPUT`
@@ -17,15 +26,42 @@ create function gcd(a int, b int) returns int language javascript as $$
     return a;
 $$;
 
+query I
+select gcd(25, 15);
+----
+5
+
+statement ok
+drop function gcd;
+
+
 statement ok
 create function decimal_add(a decimal, b decimal) returns decimal language javascript as $$
     return a + b;
 $$;
 
+query R
+select decimal_add(1.11, 2.22);
+----
+3.33
+
+statement ok
+drop function decimal_add;
+
+
 statement ok
 create function to_string(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb) returns varchar language javascript as $$
     return a.toString() + b.toString() + c.toString() + d.toString() + e.toString() + f.toString() + g.toString() + h.toString() + i.toString() + JSON.stringify(j);
 $$;
+
+query T
+select to_string(false, 1::smallint, 2, 3, 4.5, 6.7, 8.9, 'abc', '\x010203', '{"key": 1}');
+----
+false1234.56.78.9abc1,2,3{"key":1}
+
+statement ok
+drop function to_string;
+
 
 # show data types in javascript
 statement ok
@@ -44,37 +80,49 @@ create function js_typeof(a boolean, b smallint, c int, d bigint, e real, f floa
     };
 $$;
 
+query T
+select js_typeof(false, 1::smallint, 2, 3, 4.5, 6.7, 8.9, 'abc', '\x010203', '{"key": 1}');
+----
+{"bigint": "number", "boolean": "boolean", "bytea": "object", "decimal": "bigdecimal", "float": "number", "int": "number", "jsonb": "object", "real": "number", "smallint": "number", "varchar": "string"}
+
+statement ok
+drop function js_typeof;
+
+
+statement ok
+create function return_all(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb, s struct<f1 int, f2 int>)
+returns struct<a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb, s struct<f1 int, f2 int>>
+language javascript as $$
+    return {a,b,c,d,e,f,g,h,i,j,s};
+$$;
+
+query T
+select (return_all(
+    true,
+    1 ::smallint,
+    1,
+    1,
+    1,
+    1,
+    12345678901234567890.12345678,
+    'string',
+    'bytes',
+    '{"key":1}',
+    row(1, 2)::struct<f1 int, f2 int>
+)).*;
+----
+t 1 1 1 1 1 12345678901234567890.12345678 string \x6279746573 {"key": 1} (1,2)
+
+statement ok
+drop function return_all;
+
+
 statement ok
 create function series(n int) returns table (x int) language javascript as $$
     for(let i = 0; i < n; i++) {
         yield i;
     }
 $$;
-
-query I
-select int_42();
-----
-42
-
-query I
-select gcd(25, 15);
-----
-5
-
-query R
-select decimal_add(1.11, 2.22);
-----
-3.33
-
-query T
-select to_string(false, 1::smallint, 2, 3, 4.5, 6.7, 8.9, 'abc', '\x010203', '{"key": 1}');
-----
-false1234.56.78.9abc1,2,3{"key":1}
-
-query T
-select js_typeof(false, 1::smallint, 2, 3, 4.5, 6.7, 8.9, 'abc', '\x010203', '{"key": 1}');
-----
-{"bigint": "number", "boolean": "boolean", "bytea": "object", "decimal": "bigdecimal", "float": "number", "int": "number", "jsonb": "object", "real": "number", "smallint": "number", "varchar": "string"}
 
 query I
 select series(5);
@@ -86,19 +134,21 @@ select series(5);
 4
 
 statement ok
-drop function int_42;
-
-statement ok
-drop function gcd;
-
-statement ok
-drop function decimal_add;
-
-statement ok
-drop function to_string;
-
-statement ok
 drop function series;
 
+
 statement ok
-drop function js_typeof;
+create function split(s varchar) returns table (word varchar, length int) language javascript as $$
+    for(let word of s.split(' ')) {
+        yield { word: word, length: word.length };
+    }
+$$;
+
+query IT
+select * from split('rising wave');
+----
+rising 6
+wave   4
+
+statement ok
+drop function split;
