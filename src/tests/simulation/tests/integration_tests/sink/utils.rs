@@ -38,7 +38,6 @@ use risingwave_connector::sink::SinkError;
 use risingwave_connector::source::test_source::{
     registry_test_source, BoxSource, TestSourceRegistryGuard, TestSourceSplit,
 };
-use risingwave_connector::source::StreamChunk;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration};
 use tokio::time::sleep;
 
@@ -304,13 +303,7 @@ impl SimulationTestSource {
                         while offset < id_list.len() && chunks.len() < pause_interval {
                             let id = id_list[offset];
                             let chunk = build_stream_chunk(once((id, simple_name_of_id(id))));
-                            let mut split_offset = HashMap::new();
-                            split_offset.insert(split.id.clone(), offset.to_string());
-                            let chunk_with_state = StreamChunk {
-                                chunk,
-                                split_offset_mapping: Some(split_offset),
-                            };
-                            chunks.push(chunk_with_state);
+                            chunks.push(chunk);
 
                             offset += 1;
                         }
