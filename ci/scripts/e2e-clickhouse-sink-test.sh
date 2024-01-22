@@ -52,6 +52,7 @@ if ($1 == 1 && $2 == 50 && $3 == "\"1-50\"") c1++;
   echo "Clickhouse sink check passed"
 else
   echo "The output is not as expected."
+  cat ./query_result.csv
   exit 1
 fi
 
