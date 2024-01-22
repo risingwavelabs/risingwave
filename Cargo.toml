@@ -124,16 +124,17 @@ prost = { version = "0.12" }
 icelake = { git = "https://github.com/icelake-io/icelake", rev = "32c0bbf242f5c47b1e743f10577012fe7436c770", features = [
   "prometheus",
 ] }
-arrow-array = "49"
-arrow-arith = "49"
-arrow-cast = "49"
-arrow-schema = "49"
-arrow-buffer = "49"
-arrow-flight = "49"
-arrow-select = "49"
-arrow-ord = "49"
-arrow-row = "49"
-arrow-udf-wasm = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "f9a9e0d" }
+arrow-array = "50"
+arrow-arith = "50"
+arrow-cast = "50"
+arrow-schema = "50"
+arrow-buffer = "50"
+arrow-flight = "50"
+arrow-select = "50"
+arrow-ord = "50"
+arrow-row = "50"
+arrow-udf-js = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "7ba1c22" }
+arrow-udf-wasm = "0.1"
 arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
 arrow-buffer-deltalake = { package = "arrow-buffer", version = "48.0.1" }
 arrow-cast-deltalake = { package = "arrow-cast", version = "48.0.1" }
@@ -144,7 +145,7 @@ deltalake = { git = "https://github.com/risingwavelabs/delta-rs", rev = "5c2dccd
   "s3-no-concurrent-write",
 ] }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "95f347b" }
-parquet = "49"
+parquet = "50"
 thiserror-ext = "0.0.11"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
