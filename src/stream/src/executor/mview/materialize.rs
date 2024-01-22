@@ -84,11 +84,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     ) -> Self {
         let arrange_key_indices: Vec<usize> = arrange_key.iter().map(|k| k.column_index).collect();
 
-        let can_disable_overwrite_conflict_check = actor_context.dispatch_num == 0;
-
         // Note: The current implementation could potentially trigger a switch on the inconsistent_op flag. If the storage relies on this flag to perform optimizations, it would be advisable to maintain consistency with it throughout the lifecycle.
         let state_table = if matches!(conflict_behavior, ConflictBehavior::Overwrite)
-            && can_disable_overwrite_conflict_check
+            && actor_context.dispatch_num == 0
         {
             // Table with overwrite conflict behavior could disable conflict check if no downstream mv depends on it, so we use a inconsistent_op to skip sanity check as well.
             StateTableInner::from_table_catalog_inconsistent_op(table_catalog, store, vnodes).await
@@ -126,8 +124,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
 
-        let mut can_disable_overwrite_conflict_check = self.actor_context.dispatch_num == 0;
-
         #[for_await]
         for msg in input {
             let msg = msg?;
@@ -143,12 +139,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         .inc_by(chunk.cardinality() as u64);
 
                     match self.conflict_behavior {
-                        ConflictBehavior::Overwrite if can_disable_overwrite_conflict_check => {
-                            self.state_table.write_chunk(chunk.clone());
-                            self.state_table.try_flush().await?;
-                            continue;
-                        }
-                        ConflictBehavior::Overwrite | ConflictBehavior::IgnoreConflict => {
+                        ConflictBehavior::Overwrite | ConflictBehavior::IgnoreConflict
+                            if self.state_table.is_consistent_op() =>
+                        {
                             if chunk.cardinality() == 0 {
                                 // empty chunk
                                 continue;
@@ -199,8 +192,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 None => continue,
                             }
                         }
-
-                        ConflictBehavior::NoCheck => {
+                        ConflictBehavior::IgnoreConflict => unreachable!(),
+                        ConflictBehavior::NoCheck | ConflictBehavior::Overwrite => {
                             self.state_table.write_chunk(chunk.clone());
                             self.state_table.try_flush().await?;
                             Message::Chunk(chunk)
@@ -210,11 +203,10 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 Message::Barrier(b) => {
                     let mutation = b.mutation.clone();
                     // If a downstream mv depends on the current table, we need to do conflict check again.
-                    if can_disable_overwrite_conflict_check
-                        && matches!(self.conflict_behavior, ConflictBehavior::Overwrite)
+                    if !self.state_table.is_consistent_op()
                         && Self::new_downstream_created(mutation, self.actor_context.id)
                     {
-                        can_disable_overwrite_conflict_check = false;
+                        assert_eq!(self.conflict_behavior, ConflictBehavior::Overwrite);
                         self.state_table
                             .commit_with_switch_consistent_op(b.epoch, Some(true))
                             .await?;
