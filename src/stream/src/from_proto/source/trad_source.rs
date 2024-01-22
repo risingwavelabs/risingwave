@@ -29,7 +29,7 @@ use super::*;
 use crate::executor::source::{FsListExecutor, StreamSourceCore};
 use crate::executor::source_executor::SourceExecutor;
 use crate::executor::state_table_handler::SourceStateTableHandler;
-use crate::executor::{FlowControlExecutor, FsSourceExecutor, StreamExecutorError};
+use crate::executor::{FlowControlExecutor, FsSourceExecutor};
 
 const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
@@ -132,13 +132,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     chunk_size: params.env.config().developer.chunk_size,
                 };
 
-                let source_desc = source_desc_builder
-                    .clone()
-                    .build()
-                    .map_err(StreamExecutorError::connector_error)?;
-
-                let source_column_ids: Vec<_> = source_desc
-                    .columns
+                let source_column_ids: Vec<_> = source_desc_builder
+                    .column_catalogs_to_source_column_descs()
                     .iter()
                     .map(|column| column.column_id)
                     .collect();

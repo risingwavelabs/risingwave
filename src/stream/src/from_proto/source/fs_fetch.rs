@@ -26,7 +26,7 @@ use risingwave_storage::StateStore;
 use crate::error::StreamResult;
 use crate::executor::{
     BoxedExecutor, Executor, FlowControlExecutor, FsFetchExecutor, SourceStateTableHandler,
-    StreamExecutorError, StreamSourceCore,
+    StreamSourceCore,
 };
 use crate::from_proto::ExecutorBuilder;
 use crate::task::ExecutorParams;
@@ -63,13 +63,8 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             chunk_size: params.env.config().developer.chunk_size,
         };
 
-        let source_desc = source_desc_builder
-            .clone()
-            .build()
-            .map_err(StreamExecutorError::connector_error)?;
-
-        let source_column_ids: Vec<_> = source_desc
-            .columns
+        let source_column_ids: Vec<_> = source_desc_builder
+            .column_catalogs_to_source_column_descs()
             .iter()
             .map(|column| column.column_id)
             .collect();

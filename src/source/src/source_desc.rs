@@ -87,7 +87,7 @@ impl SourceDescBuilder {
         }
     }
 
-    fn column_catalogs_to_source_column_descs(&self) -> Vec<SourceColumnDesc> {
+    pub fn column_catalogs_to_source_column_descs(&self) -> Vec<SourceColumnDesc> {
         let mut columns_exist = [false; 2];
         let mut last_column_id = self
             .columns
