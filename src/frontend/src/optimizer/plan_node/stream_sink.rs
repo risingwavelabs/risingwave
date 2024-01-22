@@ -116,7 +116,7 @@ impl StreamSink {
             |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)));
 
         // check and ensure that the sink connector is specified and supported
-        let default_sink_decouple_fn = match sink.properties.get(CONNECTOR_TYPE_KEY) {
+        let default_sink_decouple = match sink.properties.get(CONNECTOR_TYPE_KEY) {
             Some(connector) => {
                 match_sink_name_str!(
                     connector.to_lowercase().as_str(),
@@ -126,7 +126,7 @@ impl StreamSink {
                         if connector == TABLE_SINK && sink.target_table.is_none() {
                             unsupported_sink(TABLE_SINK)
                         } else {
-                            Ok(SinkType::default_sink_decouple as for<'a> fn(&'a SinkDesc) -> bool)
+                            Ok(SinkType::default_sink_decouple(&sink))
                         }
                     },
                     |other: &str| unsupported_sink(other)
@@ -139,7 +139,6 @@ impl StreamSink {
             }
         };
 
-        let default_sink_decouple = default_sink_decouple_fn(&sink);
         let default_log_store_type = if default_sink_decouple {
             SinkLogStoreType::KvLogStore
         } else {
