@@ -208,7 +208,7 @@ pub async fn handle_create_sql_function(
         let mut binder = Binder::new_for_system(session);
 
         binder
-            .get_udf_context()
+            .udf_context_mut()
             .update_context(create_mock_udf_context(arg_types.clone()));
 
         if let Ok(expr) = extract_udf_expression(ast) {

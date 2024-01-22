@@ -416,7 +416,7 @@ impl Binder {
         self.context.clause = clause;
     }
 
-    pub fn get_udf_context(&mut self) -> &mut UdfContext {
+    pub fn udf_context_mut(&mut self) -> &mut UdfContext {
         &mut self.udf_context
     }
 }
