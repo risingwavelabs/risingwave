@@ -216,6 +216,7 @@ impl IntraCompactionPicker {
                 self.config.level0_sub_level_compact_level_count as usize,
                 self.config.level0_max_compact_file_number,
                 overlap_strategy.clone(),
+                self.config.enable_check_task_level_overlap,
             );
 
             let l0_select_tables_vec = non_overlap_sub_level_picker
@@ -303,7 +304,12 @@ impl IntraCompactionPicker {
                 continue;
             }
 
-            let trivial_move_picker = TrivialMovePicker::new(0, 0, overlap_strategy.clone());
+            let trivial_move_picker = TrivialMovePicker::new(
+                0,
+                0,
+                overlap_strategy.clone(),
+                self.config.enable_trivial_move,
+            );
 
             let select_sst = trivial_move_picker.pick_trivial_move_sst(
                 &l0.sub_levels[idx + 1].table_infos,

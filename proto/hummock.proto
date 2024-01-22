@@ -831,6 +831,8 @@ message CompactionConfig {
   uint32 level0_overlapping_sub_level_compact_level_count = 18;
   uint32 tombstone_reclaim_ratio = 19;
   bool enable_emergency_picker = 20;
+  bool enable_trivial_move = 21;
+  bool enable_check_task_level_overlap = 22;
 }
 
 message TableStats {
