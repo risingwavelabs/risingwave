@@ -235,7 +235,13 @@ pub fn build_stream_chunk(
     static ROW_ID_GEN: LazyLock<Arc<AtomicI64>> = LazyLock::new(|| Arc::new(AtomicI64::new(0)));
 
     let mut builder = DataChunkBuilder::new(
-        vec![DataType::Int32, DataType::Varchar, DataType::Serial],
+        vec![
+            DataType::Int32,
+            DataType::Varchar,
+            DataType::Serial,
+            DataType::Varchar,
+            DataType::Varchar,
+        ],
         100000,
     );
     for (id, name, split_id, offset) in row_iter {
