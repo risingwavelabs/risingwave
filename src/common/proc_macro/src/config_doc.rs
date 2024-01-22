@@ -40,14 +40,27 @@ fn extract_comment(attrs: &Vec<Attribute>) -> String {
             }
             None
         })
-        .join("\n")
+        .join(" ")
 }
 
 fn is_nested_config_field(field: &Field) -> bool {
-    field
-        .attrs
-        .iter()
-        .any(|attr| attr.path.is_ident("nested_config"))
+    field.attrs.iter().any(|attr| {
+        if let Some(attr_name) = attr.path.get_ident() {
+            attr_name == "config_doc" && attr.tokens.to_string() == "(nested)"
+        } else {
+            false
+        }
+    })
+}
+
+fn is_omitted_config_field(field: &Field) -> bool {
+    field.attrs.iter().any(|attr| {
+        if let Some(attr_name) = attr.path.get_ident() {
+            attr_name == "config_doc" && attr.tokens.to_string() == "(omitted)"
+        } else {
+            false
+        }
+    })
 }
 
 fn field_name(f: &Field) -> String {
@@ -79,6 +92,9 @@ impl StructFieldDocs {
                     .named
                     .iter()
                     .filter_map(|field| {
+                        if is_omitted_config_field(field) {
+                            return None;
+                        }
                         if is_nested_config_field(field) {
                             self.nested_fields
                                 .push((field_name(field), field.ty.clone()));

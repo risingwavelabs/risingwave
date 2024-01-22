@@ -279,7 +279,7 @@ pub fn session_config(input: TokenStream) -> TokenStream {
 ///   b Bar,
 /// }
 /// ```
-#[proc_macro_derive(ConfigDoc, attributes(nested_config))]
+#[proc_macro_derive(ConfigDoc, attributes(config_doc))]
 pub fn config_doc(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input);
 

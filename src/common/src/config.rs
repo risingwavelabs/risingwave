@@ -137,31 +137,32 @@ impl OverrideConfig for NoOverride {
 #[educe(Debug)]
 pub struct RwConfig {
     #[serde(default)]
-    #[nested_config]
+    #[config_doc(nested)]
     pub server: ServerConfig,
 
     #[serde(default)]
-    #[nested_config]
+    #[config_doc(nested)]
     pub meta: MetaConfig,
 
     #[serde(default)]
-    #[nested_config]
+    #[config_doc(nested)]
     pub batch: BatchConfig,
 
     #[serde(default)]
-    #[nested_config]
+    #[config_doc(nested)]
     pub streaming: StreamingConfig,
 
     #[serde(default)]
-    #[nested_config]
+    #[config_doc(nested)]
     pub storage: StorageConfig,
 
     #[serde(default)]
     #[educe(Debug(ignore))]
-    #[nested_config]
+    #[config_doc(nested)]
     pub system: SystemConfig,
 
     #[serde(flatten)]
+    #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
 }
 
@@ -313,7 +314,7 @@ pub struct MetaConfig {
     pub compaction_task_max_progress_interval_secs: u64,
 
     #[serde(default)]
-    #[nested_config]
+    #[config_doc(nested)]
     pub compaction_config: CompactionConfig,
 
     #[serde(default = "default::meta::hybird_partition_vnode_count")]
@@ -325,7 +326,7 @@ pub struct MetaConfig {
     pub event_log_channel_max_size: u32,
 
     #[serde(default, with = "meta_prefix")]
-    #[nested_config]
+    #[config_doc(omitted)]
     pub developer: MetaDeveloperConfig,
 }
 
@@ -435,6 +436,7 @@ pub struct ServerConfig {
     pub grpc_max_reset_stream: u32,
 
     #[serde(default, flatten)]
+    #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
 }
 
@@ -447,7 +449,7 @@ pub struct BatchConfig {
     pub worker_threads_num: Option<usize>,
 
     #[serde(default, with = "batch_prefix")]
-    #[nested_config]
+    #[config_doc(omitted)]
     pub developer: BatchDeveloperConfig,
 
     #[serde(default)]
@@ -461,6 +463,7 @@ pub struct BatchConfig {
     pub statement_timeout_in_sec: u32,
 
     #[serde(default, flatten)]
+    #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
 
     #[serde(default = "default::batch::frontend_compute_runtime_worker_threads")]
@@ -485,6 +488,7 @@ pub struct StreamingConfig {
     pub async_stack_trace: AsyncStackTraceOption,
 
     #[serde(default, with = "streaming_prefix")]
+    #[config_doc(omitted)]
     pub developer: StreamingDeveloperConfig,
 
     /// Max unique user stream errors per actor
@@ -492,6 +496,7 @@ pub struct StreamingConfig {
     pub unique_user_stream_errors: usize,
 
     #[serde(default, flatten)]
+    #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
 }
 
@@ -651,6 +656,7 @@ pub struct StorageConfig {
     pub compactor_fast_max_compact_task_size: u64,
 
     #[serde(default, flatten)]
+    #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
 
     /// The spill threshold for mem table.
@@ -694,6 +700,7 @@ pub struct CacheRefillConfig {
     pub recent_filter_rotate_interval_ms: usize,
 
     #[serde(default, flatten)]
+    #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
 }
 
@@ -745,6 +752,7 @@ pub struct FileCacheConfig {
     pub compression: String,
 
     #[serde(default, flatten)]
+    #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
 }
 
@@ -1638,40 +1646,88 @@ mod tests {
         let expected = format!("{HEADER}\n\n{default}");
         actual.assert_eq(&expected);
 
-        let mut docs = BTreeMap::<String, Vec<(String, String)>>::new();
-        RwConfig::config_docs("".to_string(), &mut docs);
-        let expected = configs_to_markdown(&docs);
+        let expected = rw_config_to_markdown();
         let actual = expect_test::expect_file!["../../config/docs.md"];
         actual.assert_eq(&expected);
-
-        // let doc = toml_edit::ser::to_document(&RwConfig::default()).unwrap();
-        // let configs = doc.as_table().iter().map(|(section, section_item)| {
-        //     let section_configs = section_item
-        //         .as_table()
-        //         .expect("the first level should be section");
-        //     let configs = section_configs
-        //         .iter()
-        //         .map(|(config, value_item)| {
-        //             let value = value_item
-        //                 .as_value()
-        //                 .expect("the second level should be value");
-        //             value.fmt(config, value)
-        //         })
-        //         .collect();
-        //     (section, configs)
-        // });
     }
 
-    fn configs_to_markdown(configs: &BTreeMap<String, Vec<(String, String)>>) -> String {
-        let mut markdown = String::new();
+    #[derive(Debug)]
+    struct ConfigItemDoc {
+        desc: String,
+        default: String,
+    }
+
+    fn rw_config_to_markdown() -> String {
+        let mut config_rustdocs = BTreeMap::<String, Vec<(String, String)>>::new();
+        RwConfig::config_docs("".to_string(), &mut config_rustdocs);
+
+        // Section -> Config Name -> ConfigItemDoc
+        let mut configs: BTreeMap<String, BTreeMap<String, ConfigItemDoc>> = config_rustdocs
+            .into_iter()
+            .map(|(k, v)| {
+                let docs: BTreeMap<String, ConfigItemDoc> = v
+                    .into_iter()
+                    .map(|(name, desc)| {
+                        (
+                            name,
+                            ConfigItemDoc {
+                                desc,
+                                default: "".to_string(), // unset
+                            },
+                        )
+                    })
+                    .collect();
+                (k, docs)
+            })
+            .collect();
+
+        let toml_doc: BTreeMap<String, toml::Value> =
+            toml::from_str(&toml::to_string(&RwConfig::default()).unwrap()).unwrap();
+        toml_doc.into_iter().for_each(|(name, value)| {
+            set_default_values("".to_string(), name, value, &mut configs);
+        });
+
+        let mut markdown = "# RisingWave System Configurations\n\n".to_string()
+            + "This page is automatically generated by `./risedev generate-example-config\n\n`";
         for (section, configs) in configs {
+            if configs.is_empty() {
+                continue;
+            }
             markdown.push_str(&format!("\n## {}\n\n", section));
-            markdown.push_str(&format!("| Config | Desription |\n"));
-            markdown.push_str(&format!("|--------|------------|\n"));
+            markdown.push_str("| Config | Description | Default |\n");
+            markdown.push_str("|--------|-------------|---------|\n");
             for (config, doc) in configs {
-                markdown.push_str(&format!("| {} | {}|\n", config, doc));
+                markdown.push_str(&format!(
+                    "| {} | {} | {} |\n",
+                    config, doc.desc, doc.default
+                ));
             }
         }
         markdown
+    }
+
+    fn set_default_values(
+        section: String,
+        name: String,
+        value: toml::Value,
+        configs: &mut BTreeMap<String, BTreeMap<String, ConfigItemDoc>>,
+    ) {
+        // Set the default value if it's a config name-value pair, otherwise it's a sub-section (Table) that should be recursively processed.
+        if let toml::Value::Table(table) = value {
+            let section_configs: BTreeMap<String, toml::Value> =
+                table.clone().into_iter().collect();
+            let sub_section = if section.is_empty() {
+                name
+            } else {
+                format!("{}.{}", section, name)
+            };
+            section_configs
+                .into_iter()
+                .for_each(|(k, v)| set_default_values(sub_section.clone(), k, v, configs))
+        } else if let Some(t) = configs.get_mut(&section) {
+            if let Some(item_doc) = t.get_mut(&name) {
+                item_doc.default = format!("{}", value);
+            }
+        }
     }
 }
