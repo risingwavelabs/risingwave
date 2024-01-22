@@ -32,10 +32,25 @@ dylint_linting::dylint_library!();
 #[allow(clippy::no_mangle_with_rust_abi)]
 #[no_mangle]
 pub fn register_lints(_sess: &rustc_session::Session, lint_store: &mut rustc_lint::LintStore) {
+    // -- Begin lint registration --
+
+    // Preparation steps.
     lint_store.register_early_pass(|| {
         Box::<utils::format_args_collector::FormatArgsCollector>::default()
     });
 
+    // Actual lints.
     lint_store.register_lints(&[format_error::FORMAT_ERROR]);
     lint_store.register_late_pass(|_| Box::<format_error::FormatError>::default());
+
+    // --  End lint registration  --
+
+    // Register all lints in the `rw::all` group.
+    let all_lints = lint_store
+        .get_lints()
+        .iter()
+        .filter(|l| l.name.starts_with("rw::"))
+        .map(|l| rustc_lint::LintId::of(l))
+        .collect();
+    lint_store.register_group(true, "rw::all", None, all_lints);
 }
