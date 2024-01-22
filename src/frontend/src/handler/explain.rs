@@ -25,6 +25,7 @@ use thiserror_ext::AsReport;
 use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::gen_sink_plan;
+use super::create_subscription::gen_subscription_plan;
 use super::create_table::ColumnIdGenerator;
 use super::query::gen_batch_plan_by_statement;
 use super::util::SourceSchemaCompatExt;
@@ -124,6 +125,10 @@ async fn do_handle_explain(
                     }
                     Statement::CreateSink { stmt } => {
                         gen_sink_plan(&session, context.clone(), stmt).map(|plan| plan.sink_plan)
+                    }
+
+                    Statement::CreateSubscription { stmt } => {
+                        gen_subscription_plan(&session, context.clone(), stmt).map(|plan| plan.subscription_plan)
                     }
 
                     Statement::CreateIndex {

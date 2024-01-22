@@ -22,10 +22,11 @@ use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
 pub use risingwave_expr::sig::*;
 use risingwave_pb::catalog::{
-    PbConnection, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+    PbConnection, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, PbSubscription,
 };
 
-use super::OwnedByUserCatalog;
+use super::{OwnedByUserCatalog, SubscriptionId};
+use super::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
@@ -48,6 +49,8 @@ pub struct SchemaCatalog {
     source_by_id: HashMap<SourceId, Arc<SourceCatalog>>,
     sink_by_name: HashMap<String, Arc<SinkCatalog>>,
     sink_by_id: HashMap<SinkId, Arc<SinkCatalog>>,
+    subscription_by_name: HashMap<String, Arc<SubscriptionCatalog>>,
+    subscription_by_id: HashMap<SinkId, Arc<SubscriptionCatalog>>,
     index_by_name: HashMap<String, Arc<IndexCatalog>>,
     index_by_id: HashMap<IndexId, Arc<IndexCatalog>>,
     indexes_by_table_id: HashMap<TableId, Vec<Arc<IndexCatalog>>>,
@@ -289,6 +292,39 @@ impl SchemaCatalog {
 
         self.sink_by_name.insert(name, sink_ref.clone());
         self.sink_by_id.insert(id, sink_ref);
+    }
+
+    pub fn create_subscription(&mut self, prost: &PbSubscription) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let subscription_catalog = SubscriptionCatalog::from(prost);
+        let subscription_ref = Arc::new(subscription_catalog);
+
+        self.subscription_by_name
+            .try_insert(name, subscription_ref.clone())
+            .unwrap();
+        self.subscription_by_id.try_insert(id, subscription_ref).unwrap();
+    }
+
+    pub fn drop_subscription(&mut self, id: SubscriptionId) {
+        let subscription_ref = self.subscription_by_id.remove(&id).unwrap();
+        self.subscription_by_name.remove(&subscription_ref.name).unwrap();
+    }
+
+    pub fn update_subscription(&mut self, prost: &PbSubscription) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let subscription = SubscriptionCatalog::from(prost);
+        let subscription_ref = Arc::new(subscription);
+
+        let old_subscription = self.subscription_by_id.get(&id).unwrap();
+        // check if subscription name get updated.
+        if old_subscription.name != name {
+            self.subscription_by_name.remove(&old_subscription.name);
+        }
+
+        self.subscription_by_name.insert(name, subscription_ref.clone());
+        self.subscription_by_id.insert(id, subscription_ref);
     }
 
     pub fn create_view(&mut self, prost: &PbView) {
@@ -536,6 +572,20 @@ impl SchemaCatalog {
         self.sink_by_id.get(sink_id)
     }
 
+    pub fn get_subscription_by_name(
+        &self,
+        subscription_name: &str,
+    ) -> Option<&Arc<SubscriptionCatalog>> {
+        self.subscription_by_name.get(subscription_name)
+    }
+
+    pub fn get_subscription_by_id(
+        &self,
+        subscription_id: &SubscriptionId,
+    ) -> Option<&Arc<SubscriptionCatalog>> {
+        self.subscription_by_id.get(subscription_id)
+    }
+
     pub fn get_index_by_name(&self, index_name: &str) -> Option<&Arc<IndexCatalog>> {
         self.index_by_name.get(index_name)
     }
@@ -689,6 +739,8 @@ impl From<&PbSchema> for SchemaCatalog {
             connection_by_id: HashMap::new(),
             connection_source_ref: HashMap::new(),
             connection_sink_ref: HashMap::new(),
+            subscription_by_name: HashMap::new(),
+            subscription_by_id: HashMap::new(),
         }
     }
 }

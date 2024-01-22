@@ -98,6 +98,16 @@ message DropSinkResponse {
   uint64 version = 2;
 }
 
+message CreateSubscriptionRequest {
+  catalog.Subscription subscription = 1;
+  stream_plan.StreamFragmentGraph fragment_graph = 2;
+}
+
+message CreateSubscriptionResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 message CreateMaterializedViewRequest {
   catalog.Table materialized_view = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
@@ -398,6 +408,7 @@ service DdlService {
   rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
   rpc CreateSink(CreateSinkRequest) returns (CreateSinkResponse);
+  rpc CreateSubscription(CreateSubscriptionRequest) returns (CreateSubscriptionResponse);
   rpc DropSink(DropSinkRequest) returns (DropSinkResponse);
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);

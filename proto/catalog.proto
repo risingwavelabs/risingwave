@@ -159,6 +159,27 @@ message Sink {
   optional string created_at_cluster_version = 23;
 }
 
+message Subscription {
+  uint32 id = 1;
+  string name = 2;
+  string definition = 3;
+  repeated common.ColumnOrder plan_pk = 5;
+  repeated int32 distribution_key = 6;
+  map<string, string> properties = 7;
+  repeated plan_common.ColumnCatalog column_catalogs = 8;
+  string db_name = 9;
+  // If the sink is from table or mv, this is name of the table/mv. Otherwise
+  // it is the name of the sink itself.
+  string subscription_from_name = 10;
+  uint32 database_id = 11;
+  uint32 schema_id = 12;
+  repeated uint32 dependent_relations = 13;
+  optional uint64 initialized_at_epoch = 14;
+  optional uint64 created_at_epoch = 15;
+  uint32 owner = 16;
+  StreamJobStatus stream_job_status = 17;
+}
+
 message Connection {
   message PrivateLinkService {
     enum PrivateLinkProvider {

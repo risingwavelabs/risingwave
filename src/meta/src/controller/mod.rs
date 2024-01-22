@@ -15,14 +15,14 @@
 use anyhow::anyhow;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model_v2::{
-    connection, database, function, index, object, schema, sink, source, table, view,
+    connection, database, function, index, object, schema, sink, source, table, view, subscription,
 };
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableType};
 use risingwave_pb::catalog::{
     PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex,
-    PbSchema, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbTable, PbView,
+    PbSchema, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbTable, PbView, PbSubscription,
 };
 use sea_orm::{DatabaseConnection, ModelTrait};
 
@@ -208,6 +208,33 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             target_table: None,
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
+        }
+    }
+}
+
+impl From<ObjectModel<subscription::Model>> for PbSubscription {
+    fn from(value: ObjectModel<subscription::Model>) -> Self {
+        Self {
+            id: value.0.subscription_id as _,
+            schema_id: value.1.schema_id.unwrap() as _,
+            database_id: value.1.database_id.unwrap() as _,
+            name: value.0.name,
+            plan_pk: value.0.plan_pk.0,
+            dependent_relations: vec![], // todo: deprecate it.
+            distribution_key: value.0.distribution_key.0,
+            owner: value.1.owner_id as _,
+            properties: value.0.properties.0,
+            definition: value.0.definition,
+            initialized_at_epoch: Some(
+                Epoch::from_unix_millis(value.1.initialized_at.timestamp_millis() as _).0,
+            ),
+            created_at_epoch: Some(
+                Epoch::from_unix_millis(value.1.created_at.timestamp_millis() as _).0,
+            ),
+            db_name: value.0.db_name,
+            stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
+            column_catalogs: value.0.columns.0,
+            subscription_from_name: value.0.subscription_from_name,
         }
     }
 }

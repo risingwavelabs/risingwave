@@ -45,7 +45,7 @@ use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
     Connection, PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
-    PbView, Table,
+    PbView, Table, PbSubscription,
 };
 use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
@@ -377,6 +377,20 @@ impl MetaClient {
         };
 
         let resp = self.inner.create_sink(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn create_subscription(
+        &self,
+        subscription: PbSubscription,
+        graph: StreamFragmentGraph,
+    ) -> Result<CatalogVersion> {
+        let request = CreateSubscriptionRequest {
+            subscription: Some(subscription),
+            fragment_graph: Some(graph),
+        };
+
+        let resp = self.inner.create_subscription(request).await?;
         Ok(resp.version)
     }
 
@@ -1855,6 +1869,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
             ,{ ddl_client, create_sink, CreateSinkRequest, CreateSinkResponse }
+            ,{ ddl_client, create_subscription, CreateSubscriptionRequest, CreateSubscriptionResponse }
             ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }
             ,{ ddl_client, create_index, CreateIndexRequest, CreateIndexResponse }

@@ -339,11 +339,15 @@ impl StreamSink {
     /// The table schema is: | epoch | seq id | row op | sink columns |
     /// Pk is: | epoch | seq id |
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
+        Self::infer_kv_log_store_table_catalog_inner(&self.input, &self.sink_desc.columns)
+    }
+
+    pub fn infer_kv_log_store_table_catalog_inner(input:&PlanRef, columns: &Vec<ColumnCatalog>) -> TableCatalog{
         let mut table_catalog_builder =
-            TableCatalogBuilder::new(self.input.ctx().with_options().internal_table_subset());
+            TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
 
         let mut value_indices = Vec::with_capacity(
-            KV_LOG_STORE_PREDEFINED_COLUMNS.len() + self.sink_desc.columns.len(),
+            KV_LOG_STORE_PREDEFINED_COLUMNS.len() + columns.len(),
         );
 
         for (name, data_type) in KV_LOG_STORE_PREDEFINED_COLUMNS {
@@ -357,14 +361,13 @@ impl StreamSink {
 
         let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
 
-        let payload_indices = table_catalog_builder.extend_columns(&self.sink_desc().columns);
+        let payload_indices = table_catalog_builder.extend_columns(&columns);
 
         value_indices.extend(payload_indices);
         table_catalog_builder.set_value_indices(value_indices);
 
         // Modify distribution key indices based on the pre-defined columns.
-        let dist_key = self
-            .input
+        let dist_key = input
             .distribution()
             .dist_column_indices()
             .iter()

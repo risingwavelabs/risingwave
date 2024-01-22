@@ -73,6 +73,7 @@ impl NotificationServiceImpl {
                     tables,
                     sources,
                     sinks,
+                    subscriptions,
                     indexes,
                     views,
                     functions,
@@ -87,6 +88,7 @@ impl NotificationServiceImpl {
                         tables,
                         sources,
                         sinks,
+                        subscriptions,
                         indexes,
                         views,
                         functions,
@@ -105,6 +107,7 @@ impl NotificationServiceImpl {
                         tables,
                         sources,
                         sinks,
+                        subscriptions,
                         indexes,
                         views,
                         functions,
@@ -120,6 +123,7 @@ impl NotificationServiceImpl {
                         tables,
                         sources,
                         sinks,
+                        subscriptions,
                         indexes,
                         views,
                         functions,
@@ -220,7 +224,7 @@ impl NotificationServiceImpl {
 
     async fn frontend_subscribe(&self) -> MetaResult<MetaSnapshot> {
         let (
-            (databases, schemas, tables, sources, sinks, indexes, views, functions, connections),
+            (databases, schemas, tables, sources, sinks, subscriptions, indexes, views, functions, connections),
             users,
             catalog_version,
         ) = self.get_catalog_snapshot().await?;
@@ -239,6 +243,7 @@ impl NotificationServiceImpl {
             tables,
             indexes,
             views,
+            subscriptions,
             functions,
             connections,
             users,

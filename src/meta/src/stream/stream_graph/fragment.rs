@@ -655,7 +655,7 @@ impl CompleteStreamFragmentGraph {
 
                             (source_job_id, edge)
                         }
-                        DdlType::MaterializedView | DdlType::Sink | DdlType::Index => {
+                        DdlType::MaterializedView | DdlType::Sink | DdlType::Index | DdlType::Subscription=> {
                             // handle MV on MV
 
                             // Build the extra edges between the upstream `Materialize` and the downstream `StreamScan`

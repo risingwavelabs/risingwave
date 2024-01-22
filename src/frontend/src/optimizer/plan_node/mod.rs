@@ -851,6 +851,7 @@ mod stream_project_set;
 mod stream_row_id_gen;
 mod stream_simple_agg;
 mod stream_sink;
+mod stream_subscription;
 mod stream_sort;
 mod stream_source;
 mod stream_stateless_simple_agg;
@@ -944,6 +945,7 @@ pub use stream_row_id_gen::StreamRowIdGen;
 pub use stream_share::StreamShare;
 pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_sink::StreamSink;
+pub use stream_subscription::StreamSubscription;
 pub use stream_sort::StreamEowcSort;
 pub use stream_source::StreamSource;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
@@ -1039,6 +1041,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, TableScan }
             , { Stream, CdcTableScan }
             , { Stream, Sink }
+            , { Stream, Subscription }
             , { Stream, Source }
             , { Stream, HashJoin }
             , { Stream, Exchange }
@@ -1155,6 +1158,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, TableScan }
             , { Stream, CdcTableScan }
             , { Stream, Sink }
+            , { Stream, Subscription }
             , { Stream, Source }
             , { Stream, HashAgg }
             , { Stream, SimpleAgg }

@@ -291,7 +291,7 @@ pub fn gen_sink_plan(
     })
 }
 
-pub async fn handle_create_sink(
+pub async fn  handle_create_sink(
     handle_args: HandlerArgs,
     stmt: CreateSinkStatement,
 ) -> Result<RwPgResponse> {

@@ -371,6 +371,7 @@ message MetaSnapshot {
   repeated catalog.Table tables = 5;
   repeated catalog.Index indexes = 6;
   repeated catalog.View views = 7;
+  repeated catalog.Subscription subscriptions = 19;
   repeated catalog.Function functions = 15;
   repeated catalog.Connection connections = 17;
   repeated user.UserInfo users = 8;
@@ -394,6 +395,7 @@ message Relation {
     catalog.Sink sink = 3;
     catalog.Index index = 4;
     catalog.View view = 5;
+    catalog.Subscription subscription = 6;
   }
 }
 

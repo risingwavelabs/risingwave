@@ -22,7 +22,7 @@ use risingwave_common::error::Result;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
-    PbView,
+    PbView, PbSubscription,
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
@@ -30,7 +30,7 @@ use risingwave_pb::ddl_service::{
     PbTableJobType, ReplaceTablePlan,
 };
 use risingwave_pb::meta::PbTableParallelism;
-use risingwave_pb::stream_plan::StreamFragmentGraph;
+use risingwave_pb::stream_plan::{StreamFragmentGraph};
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
@@ -115,6 +115,12 @@ pub trait CatalogWriter: Send + Sync {
         sink: PbSink,
         graph: StreamFragmentGraph,
         affected_table_change: Option<PbReplaceTablePlan>,
+    ) -> Result<()>;
+
+    async fn create_subscription(
+        &self,
+        subscription: PbSubscription,
+        graph: StreamFragmentGraph,
     ) -> Result<()>;
 
     async fn create_function(&self, function: PbFunction) -> Result<()>;
@@ -317,6 +323,18 @@ impl CatalogWriter for CatalogWriterImpl {
         let version = self
             .meta_client
             .create_sink(sink, graph, affected_table_change)
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn create_subscription(
+        &self,
+        subscription: PbSubscription,
+        graph: StreamFragmentGraph,
+    ) -> Result<()>{
+        let version = self
+            .meta_client
+            .create_subscription(subscription, graph)
             .await?;
         self.wait_version(version).await
     }

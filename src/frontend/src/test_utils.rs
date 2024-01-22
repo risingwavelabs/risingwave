@@ -35,7 +35,7 @@ use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
+    PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table, PbSubscription,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
@@ -319,6 +319,14 @@ impl CatalogWriter for MockCatalogWriter {
         _affected_table_change: Option<ReplaceTablePlan>,
     ) -> Result<()> {
         self.create_sink_inner(sink, graph)
+    }
+
+    async fn create_subscription(
+        &self,
+        subscription: PbSubscription,
+        graph: StreamFragmentGraph,
+    ) -> Result<()>{
+        self.create_subscription_inner(subscription, graph)
     }
 
     async fn create_index(
@@ -714,6 +722,13 @@ impl MockCatalogWriter {
         sink.id = self.gen_id();
         self.catalog.write().create_sink(&sink);
         self.add_table_or_sink_id(sink.id, sink.schema_id, sink.database_id);
+        Ok(())
+    }
+
+    fn create_subscription_inner(&self, mut subscription: PbSubscription, _graph: StreamFragmentGraph) -> Result<()> {
+        subscription.id = self.gen_id();
+        self.catalog.write().create_subscription(&subscription);
+        self.add_table_or_sink_id(subscription.id, subscription.schema_id, subscription.database_id);
         Ok(())
     }
 

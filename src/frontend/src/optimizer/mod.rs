@@ -1,5 +1,5 @@
 use std::assert_matches::assert_matches;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 // Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -47,7 +47,7 @@ use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId,
+    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, UserId,
 };
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -60,7 +60,7 @@ use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::generic::{self, PhysicalPlanRef};
 use self::plan_node::{
     stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject, LogicalSource,
-    StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
+    StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink,StreamSubscription, StreamWatermarkFilter,
     ToStreamContext,
 };
 #[cfg(debug_assertions)]
@@ -818,6 +818,43 @@ impl PlanRoot {
             format_desc,
         )
     }
+
+    /// Optimize and generate a create sink plan.
+    pub fn gen_subscription_plan(
+        &mut self,
+        database_id: u32,
+        schema_id: u32,
+        dependent_relations: HashSet<TableId>,
+        subscription_name: String,
+        definition: String,
+        properties: WithOptions,
+        emit_on_window_close: bool,
+        db_name: String,
+        subscription_from_table_name: String,
+        user_id: UserId,
+    ) -> Result<StreamSubscription> {
+        let stream_scan_type = StreamScanType::UpstreamOnly;
+        let stream_plan =
+            self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)?;
+
+        StreamSubscription::create(
+            database_id,
+            schema_id,
+            dependent_relations,
+            stream_plan,
+            subscription_name,
+            db_name, 
+            subscription_from_table_name, 
+            self.required_dist.clone(),
+            self.required_order.clone(),
+            self.out_fields.clone(),
+            self.out_names.clone(),
+            definition, 
+            properties,
+            user_id
+        )
+    }
+
 
     /// Set the plan root's required dist.
     pub fn set_required_dist(&mut self, required_dist: RequiredDist) {

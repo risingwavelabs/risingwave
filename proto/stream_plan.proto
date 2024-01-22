@@ -714,6 +714,12 @@ message OverWindowNode {
   OverWindowCachePolicy cache_policy = 5;
 }
 
+message SubscriptionNode{
+  catalog.Subscription subscription_catalog = 1;
+  // log store should have a table.
+  catalog.Table log_store_table = 2;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -757,6 +763,7 @@ message StreamNode {
     StreamFsFetchNode stream_fs_fetch = 138;
     StreamCdcScanNode stream_cdc_scan = 139;
     CdcFilterNode cdc_filter = 140;
+    SubscriptionNode Subscription = 141;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

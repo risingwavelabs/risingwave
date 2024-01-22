@@ -311,6 +311,34 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    async fn create_subscription(
+        &self,
+        request: Request<CreateSubscriptionRequest>,
+    ) -> Result<Response<CreateSubscriptionResponse>, Status> {
+        self.env.idle_manager().record_activity();
+
+        let req = request.into_inner();
+
+        let subscription = req.get_subscription()?.clone();
+        let fragment_graph = req.get_fragment_graph()?.clone();
+
+        let stream_job = StreamingJob::Subscription(subscription);
+
+        let command = DdlCommand::CreateStreamingJob(
+            stream_job,
+            fragment_graph,
+            CreateType::Foreground,
+            None,
+        );
+
+        let version = self.ddl_controller.run_command(command).await?;
+
+        Ok(Response::new(CreateSubscriptionResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn create_materialized_view(
         &self,
         request: Request<CreateMaterializedViewRequest>,

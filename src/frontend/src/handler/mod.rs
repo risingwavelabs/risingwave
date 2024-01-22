@@ -83,6 +83,7 @@ mod transaction;
 pub mod util;
 pub mod variable;
 mod wait;
+pub mod create_subscription;
 
 /// The [`PgResponseBuilder`] used by RisingWave.
 pub type RwPgResponseBuilder = PgResponseBuilder<PgResponseStream>;

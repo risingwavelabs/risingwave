@@ -54,7 +54,7 @@ mod watermark_filter;
 // import for submodules
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{StreamNode, TemporalJoinNode};
+use risingwave_pb::stream_plan::{StreamNode, TemporalJoinNode, SubscriptionNode};
 use risingwave_storage::StateStore;
 
 use self::append_only_dedup::*;
@@ -106,6 +106,20 @@ trait ExecutorBuilder {
         store: impl StateStore,
     ) -> impl std::future::Future<Output = StreamResult<BoxedExecutor>> + Send;
 }
+pub struct SubscriptionExecutorBuilder{
+
+}
+impl ExecutorBuilder for SubscriptionExecutorBuilder{
+    type Node = SubscriptionNode;
+    async fn new_boxed_executor(
+        _params: ExecutorParams,
+        _node: &Self::Node,
+        _store: impl StateStore,
+    ) -> StreamResult<BoxedExecutor> {
+        unimplemented!()
+    }
+    
+}
 
 macro_rules! build_executor {
     ($source:expr, $node:expr, $store:expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
@@ -132,6 +146,7 @@ pub async fn create_executor(
         store,
         NodeBody::Source => SourceExecutorBuilder,
         NodeBody::Sink => SinkExecutorBuilder,
+        NodeBody::Subscription => SubscriptionExecutorBuilder,
         NodeBody::Project => ProjectExecutorBuilder,
         NodeBody::TopN => TopNExecutorBuilder::<false>,
         NodeBody::AppendOnlyTopN => TopNExecutorBuilder::<true>,

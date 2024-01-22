@@ -36,6 +36,7 @@ pub(crate) mod source_catalog;
 pub(crate) mod system_catalog;
 pub(crate) mod table_catalog;
 pub(crate) mod view_catalog;
+pub(crate) mod subscription_catalog;
 
 pub(crate) use catalog_service::CatalogReader;
 pub use index_catalog::IndexCatalog;
@@ -46,6 +47,7 @@ use crate::user::UserId;
 pub(crate) type ConnectionId = u32;
 pub(crate) type SourceId = u32;
 pub(crate) type SinkId = u32;
+pub(crate) type SubscriptionId = u32;
 pub(crate) type ViewId = u32;
 pub(crate) type DatabaseId = u32;
 pub(crate) type SchemaId = u32;

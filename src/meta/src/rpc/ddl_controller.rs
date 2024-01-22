@@ -1440,6 +1440,12 @@ impl DdlController {
                     .cancel_create_sink_procedure(sink, target_table)
                     .await;
             }
+            StreamingJob::Subscription(subscription) => {
+                mgr
+                    .catalog_manager
+                    .cancel_create_subscription_procedure(subscription)
+                    .await;
+            }
             StreamingJob::Table(source, table, ..) => {
                 if let Some(source) = source {
                     mgr.catalog_manager
@@ -1525,6 +1531,12 @@ impl DdlController {
                 }
 
                 version
+            }
+            StreamingJob::Subscription(subscription) => {
+                mgr
+                    .catalog_manager
+                    .finish_create_subscription_procedure(internal_tables, subscription)
+                    .await?
             }
             StreamingJob::Table(source, table, ..) => {
                 creating_internal_table_ids.push(table.id);
