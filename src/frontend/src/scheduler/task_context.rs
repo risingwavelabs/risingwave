@@ -75,7 +75,7 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         self.env.batch_config()
     }
 
-    fn dml_manager(&self) -> risingwave_source::dml_manager::DmlManagerRef {
+    fn dml_manager(&self) -> risingwave_dml::dml_manager::DmlManagerRef {
         unimplemented!("not supported in local mode")
     }
 

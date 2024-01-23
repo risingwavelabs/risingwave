@@ -1910,13 +1910,16 @@ async fn test_table_watermark() {
         local.flush(vec![]).await.unwrap();
         local.seal_current_epoch(
             epoch2,
-            SealCurrentEpochOptions::new(
-                vec![VnodeWatermark::new(
-                    Arc::new(vnode_bitmap),
-                    gen_inner_key(watermark1),
-                )],
-                WatermarkDirection::Ascending,
-            ),
+            SealCurrentEpochOptions {
+                table_watermarks: Some((
+                    WatermarkDirection::Ascending,
+                    vec![VnodeWatermark::new(
+                        Arc::new(vnode_bitmap),
+                        gen_inner_key(watermark1),
+                    )],
+                )),
+                switch_op_consistency_level: None,
+            },
         );
     }
 
@@ -2009,7 +2012,13 @@ async fn test_table_watermark() {
             local.insert(key, value, None).unwrap();
         }
         local.flush(vec![]).await.unwrap();
-        local.seal_current_epoch(epoch3, SealCurrentEpochOptions::no_watermark());
+        local.seal_current_epoch(
+            epoch3,
+            SealCurrentEpochOptions {
+                table_watermarks: None,
+                switch_op_consistency_level: None,
+            },
+        );
     }
 
     let indexes_after_epoch2 = || gen_range().filter(|index| index % 3 == 0 || index % 3 == 1);
@@ -2250,13 +2259,16 @@ async fn test_table_watermark() {
         // regress watermark
         local.seal_current_epoch(
             epoch4,
-            SealCurrentEpochOptions::new(
-                vec![VnodeWatermark::new(
-                    Arc::new(vnode_bitmap),
-                    gen_inner_key(5),
-                )],
-                WatermarkDirection::Ascending,
-            ),
+            SealCurrentEpochOptions {
+                table_watermarks: Some((
+                    WatermarkDirection::Ascending,
+                    vec![VnodeWatermark::new(
+                        Arc::new(vnode_bitmap),
+                        gen_inner_key(5),
+                    )],
+                )),
+                switch_op_consistency_level: None,
+            },
         );
     }
 

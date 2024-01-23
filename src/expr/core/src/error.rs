@@ -156,7 +156,7 @@ impl MultiExprError {
 impl Display for MultiExprError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for (i, e) in self.0.iter().enumerate() {
-            writeln!(f, "{i}: {e}")?;
+            writeln!(f, "{i}: {}", e.as_report())?;
         }
         Ok(())
     }

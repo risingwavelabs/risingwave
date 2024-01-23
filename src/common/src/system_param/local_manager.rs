@@ -20,6 +20,7 @@ use risingwave_pb::meta::SystemParams;
 use tokio::sync::watch::{channel, Receiver, Sender};
 
 use super::common::CommonHandler;
+use super::diff::SystemParamsDiff;
 use super::reader::SystemParamsReader;
 use super::system_params_for_test;
 
@@ -41,28 +42,39 @@ pub struct LocalSystemParamsManager {
 }
 
 impl LocalSystemParamsManager {
+    /// Create a new instance of `LocalSystemParamsManager` and spawn a task to run
+    /// the common handler.
     pub fn new(initial_params: SystemParamsReader) -> Self {
-        let params = Arc::new(ArcSwap::from_pointee(initial_params.clone()));
-        let (tx, _) = channel(params.clone());
+        let this = Self::new_inner(initial_params.clone());
 
         // Spawn a task to run the common handler.
         tokio::spawn({
-            let mut rx = tx.subscribe();
+            let mut rx = this.tx.subscribe();
             async move {
+                let mut params = initial_params.clone();
                 let handler = CommonHandler::new(initial_params);
 
                 while rx.changed().await.is_ok() {
+                    // TODO: directly watch the changes instead of diffing ourselves.
                     let new_params = (**rx.borrow_and_update().load()).clone();
-                    handler.handle_change(new_params);
+                    let diff = SystemParamsDiff::diff(params.as_ref(), new_params.as_ref());
+                    handler.handle_change(&diff);
+                    params = new_params;
                 }
             }
         });
 
-        Self { params, tx }
+        this
     }
 
     pub fn for_test() -> Self {
-        Self::new(system_params_for_test().into())
+        Self::new_inner(system_params_for_test().into())
+    }
+
+    fn new_inner(initial_params: SystemParamsReader) -> Self {
+        let params = Arc::new(ArcSwap::from_pointee(initial_params));
+        let (tx, _) = channel(params.clone());
+        Self { params, tx }
     }
 
     pub fn get_params(&self) -> SystemParamsReaderRef {
@@ -89,12 +101,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_manager() {
-        let p = SystemParams::default().into();
-        let manager = LocalSystemParamsManager::new(p);
+        let manager = LocalSystemParamsManager::for_test();
         let shared_params = manager.get_params();
 
         let new_params = SystemParams {
-            sstable_size_mb: Some(1),
+            sstable_size_mb: Some(114514),
             ..Default::default()
         };
 
