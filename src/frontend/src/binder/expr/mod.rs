@@ -40,7 +40,7 @@ mod value;
 /// this limit, we will try optimize the case-when
 /// expression to `ConstantLookupExpression`
 /// Check `case.rs` for details.
-const CASE_WHEN_ARMS_OPTIMIZE_LIMIT: usize = 500;
+const CASE_WHEN_ARMS_OPTIMIZE_LIMIT: usize = 0;
 
 impl Binder {
     /// Bind an expression with `bind_expr_inner`, attach the original expression
@@ -484,30 +484,16 @@ impl Binder {
             return false;
         }
 
-        // Insert a dummy expression to avoid being constant fold
-        // if eventually turn into `ConstantLookupExpression` by optimizing
-        match operand {
-            Some(ref t) => {
-                let Ok(bind_result) = self.bind_expr_inner(Expr::BinaryOp {
-                    left: t.clone(),
-                    op: BinaryOperator::Eq,
-                    right: t.clone(),
-                }) else {
-                    // Failed to bind the expression
-                    return false;
-                };
-                // If `bind_result` is const, the case-when expression
-                // will be rewritten during optimizer phase
-                // In this case we will also not optimized
-                if !bind_result.is_const() {
-                    constant_lookup_inputs.push(bind_result);
-                } else {
-                    return false;
-                }
-            }
-            // In this case we will not optimize the case-when expression
-            // i.e., case when ... then ... else ... (with no operand)
-            None => return false,
+        // TODO(Zihao): we could possibly optimize some simple cases when
+        // `operand` is None in the future, the current choice is not conducting the optimization.
+        // e.g., select case when c1 = 1 then (...) when (same pattern) then (... ) [else (...)] end from t1;
+        if let Some(operand) = operand {
+            let Ok(operand) = self.bind_expr_inner(*operand) else {
+                return false;
+            };
+            constant_lookup_inputs.push(operand);
+        } else {
+            return false;
         }
 
         for (condition, result) in zip_eq_fast(conditions, results_expr) {
