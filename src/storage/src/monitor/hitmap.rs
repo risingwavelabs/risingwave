@@ -41,42 +41,6 @@ impl<const N: usize> Hitmap<N> {
         N * 8
     }
 
-    pub fn reset(&self) {
-        for elem in &*self.data {
-            elem.store(0, Ordering::Relaxed);
-        }
-    }
-
-    pub fn fill(&self, start_bit: usize, end_bit: usize) {
-        const MASK: usize = (1 << 6) - 1;
-
-        let end_bit = std::cmp::min(end_bit, Self::bits());
-
-        let head_bits = start_bit & MASK;
-        let tail_bits_rev = end_bit & MASK;
-
-        let head_elem = start_bit >> 6;
-        let tail_elem = end_bit >> 6;
-
-        for i in head_elem..=std::cmp::min(tail_elem, N - 1) {
-            let elem = &self.data[i];
-            let mut umask = 0u64;
-            if i == head_elem {
-                umask |= (1u64 << head_bits) - 1;
-            }
-            if i == tail_elem {
-                umask |= !((1u64 << tail_bits_rev) - 1);
-            }
-            elem.fetch_or(!umask, Ordering::Relaxed);
-        }
-    }
-
-    pub fn fill_with_ratio(&self, start: f64, end: f64) {
-        let start_bit = (Self::bits() as f64 * start) as usize;
-        let end_bit = (Self::bits() as f64 * end) as usize;
-        self.fill(start_bit, end_bit)
-    }
-
     pub fn local(&self) -> LocalHitmap<N> {
         LocalHitmap::new(self)
     }
@@ -136,12 +100,6 @@ impl<const N: usize> LocalHitmap<N> {
         }
     }
 
-    pub fn reset(&mut self) {
-        for elem in &mut *self.data {
-            *elem = 0;
-        }
-    }
-
     pub fn fill(&mut self, start_bit: usize, end_bit: usize) {
         const MASK: usize = (1 << 6) - 1;
 
@@ -166,9 +124,9 @@ impl<const N: usize> LocalHitmap<N> {
         }
     }
 
-    pub fn fill_with_ratio(&mut self, start: f64, end: f64) {
-        let start_bit = (Self::bits() as f64 * start) as usize;
-        let end_bit = (Self::bits() as f64 * end) as usize;
+    pub fn fill_with_range(&mut self, start: usize, end: usize, len: usize) {
+        let start_bit = Self::bits() * start / len;
+        let end_bit = Self::bits() * end / len;
         self.fill(start_bit, end_bit)
     }
 
@@ -208,7 +166,9 @@ mod tests {
     #[test]
     fn test_hitmap() {
         // hex: high <== low
-        let h = Hitmap::<4>::default();
+        let g = Hitmap::<4>::default();
+
+        let mut h = g.local();
         assert_eq!(
             h.to_hex_vec(),
             vec![
@@ -263,6 +223,16 @@ mod tests {
             ]
         );
         assert_eq!(h.ones(), 256);
-        h.reset();
+        drop(h);
+        assert_eq!(
+            g.to_hex_vec(),
+            vec![
+                "ffffffffffffffff",
+                "ffffffffffffffff",
+                "ffffffffffffffff",
+                "ffffffffffffffff",
+            ]
+        );
+        assert_eq!(g.ones(), 256);
     }
 }

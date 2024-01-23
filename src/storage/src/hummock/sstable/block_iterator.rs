@@ -175,10 +175,7 @@ impl BlockIterator {
         self.offset = offset;
         self.entry_len = prefix.entry_len();
 
-        self.hitmap.fill_with_ratio(
-            self.offset as f64 / self.block.len() as f64,
-            self.value_range.end as f64 / self.block.len() as f64,
-        );
+        self.update_hitmap();
 
         true
     }
@@ -294,10 +291,7 @@ impl BlockIterator {
         self.entry_len = prefix.entry_len();
         self.update_restart_point(index);
 
-        self.hitmap.fill_with_ratio(
-            self.offset as f64 / self.block.len() as f64,
-            self.value_range.end as f64 / self.block.len() as f64,
-        );
+        self.update_hitmap();
     }
 
     fn update_restart_point(&mut self, index: usize) {
@@ -306,6 +300,12 @@ impl BlockIterator {
 
         self.last_key_len_type = restart_point.key_len_type;
         self.last_value_len_type = restart_point.value_len_type;
+    }
+
+    /// Update the local hitmap of the block based on the current iterator position.
+    fn update_hitmap(&mut self) {
+        self.hitmap
+            .fill_with_range(self.offset, self.value_range.end, self.block.len());
     }
 }
 
