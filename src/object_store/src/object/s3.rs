@@ -944,8 +944,12 @@ struct RetryCondition {
 impl RetryCondition {
     fn new(config: &S3ObjectStoreConfig) -> Self {
         Self {
-            retry_unknown_service_error: config.developer.retry_unknown_service_error,
-            retryable_service_error_codes: config.developer.retryable_service_error_codes.clone(),
+            retry_unknown_service_error: config.developer.object_store_retry_unknown_service_error
+                || config.retry_unknown_service_error,
+            retryable_service_error_codes: config
+                .developer
+                .object_store_retryable_service_error_codes
+                .clone(),
         }
     }
 }

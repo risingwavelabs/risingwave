@@ -921,6 +921,11 @@ pub struct S3ObjectStoreConfig {
     pub object_store_req_retry_max_delay_ms: u64,
     #[serde(default = "default::object_store_config::s3::object_store_req_retry_max_attempts")]
     pub object_store_req_retry_max_attempts: usize,
+    /// For backwards compatibility, users should use `S3ObjectStoreDeveloperConfig` instead.
+    #[serde(
+        default = "default::object_store_config::s3::developer::object_store_retry_unknown_service_error"
+    )]
+    pub retry_unknown_service_error: bool,
     #[serde(default)]
     pub developer: S3ObjectStoreDeveloperConfig,
 }
@@ -932,13 +937,13 @@ pub struct S3ObjectStoreDeveloperConfig {
     #[serde(
         default = "default::object_store_config::s3::developer::object_store_retry_unknown_service_error"
     )]
-    pub retry_unknown_service_error: bool,
+    pub object_store_retry_unknown_service_error: bool,
     /// An array of error codes that should be retried.
     /// e.g. `["SlowDown", "TooManyRequests"]`
     #[serde(
         default = "default::object_store_config::s3::developer::object_store_retryable_service_error_codes"
     )]
-    pub retryable_service_error_codes: Vec<String>,
+    pub object_store_retryable_service_error_codes: Vec<String>,
 }
 
 impl SystemConfig {

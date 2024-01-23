@@ -179,10 +179,11 @@ object_store_nodelay = true
 object_store_req_retry_interval_ms = 20
 object_store_req_retry_max_delay_ms = 10000
 object_store_req_retry_max_attempts = 8
+retry_unknown_service_error = false
 
 [storage.object_store.s3.developer]
-retry_unknown_service_error = false
-retryable_service_error_codes = ["SlowDown", "TooManyRequests"]
+object_store_retry_unknown_service_error = false
+object_store_retryable_service_error_codes = ["SlowDown", "TooManyRequests"]
 
 [system]
 barrier_interval_ms = 1000
