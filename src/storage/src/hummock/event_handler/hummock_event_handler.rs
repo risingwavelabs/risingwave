@@ -502,6 +502,7 @@ impl HummockEventHandler {
     }
 
     fn handle_uploader_event(&mut self, event: UploaderEvent) {
+        tracing::info!("handle_uploader_event {:?}", event);
         match event {
             UploaderEvent::SyncFinish(epoch, newly_uploaded_sstables) => {
                 self.handle_epoch_synced(epoch, newly_uploaded_sstables);

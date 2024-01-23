@@ -144,6 +144,16 @@ impl MergingImmTask {
     }
 }
 
+impl Debug for MergeImmTaskOutput {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MergeImmTaskOutput")
+            .field("instance_id", &self.instance_id)
+            .field("table_id", &self.table_id)
+            .field("imm_ids", &self.merged_imm.get_imm_ids())
+            .finish()
+    }
+}
+
 impl Future for MergingImmTask {
     type Output = HummockResult<ImmutableMemtable>;
 
@@ -1095,6 +1105,7 @@ pub(crate) struct NextUploaderEvent<'a> {
     uploader: &'a mut HummockUploader,
 }
 
+#[derive(Debug)]
 pub(crate) enum UploaderEvent {
     // staging sstable info of newer data comes first
     SyncFinish(HummockEpoch, Vec<StagingSstableInfo>),
