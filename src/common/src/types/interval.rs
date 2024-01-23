@@ -1051,7 +1051,7 @@ impl Interval {
     pub fn from_iso_8601(s: &str) -> ParseResult<Self> {
         // ISO pattern - PnYnMnDTnHnMnS
         static ISO_8601_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"P([0-9]+)Y([0-9]+)M([0-9]+)DT([0-9]+)H([0-9]+)M([0-9]+(?:\.[0-9]+)?)S")
+            Regex::new(r"^P([0-9]+)Y([0-9]+)M([0-9]+)DT([0-9]+)H([0-9]+)M([0-9]+(?:\.[0-9]+)?)S$")
                 .unwrap()
         });
         // wrap into a closure to simplify error handling
