@@ -33,7 +33,7 @@
 #![feature(error_generic_member_access)]
 #![feature(register_tool)]
 #![register_tool(rw)]
-// #![allow(rw::format_error)] // TODO(error-handling): need further refactoring
+#![allow(rw::format_error)] // TODO(error-handling): need further refactoring
 
 use std::time::Duration;
 
