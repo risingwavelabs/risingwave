@@ -944,7 +944,6 @@ struct RetryCondition {
 
 impl RetryCondition {
     fn new(config: &S3ObjectStoreConfig) -> Self {
-        println!("s3 config: {:?}", config);
         Self {
             retry_unknown_service_error: config.retry_unknown_service_error,
             retry_too_many_requests_error: config.retry_too_many_requests_error,
@@ -982,9 +981,7 @@ impl tokio_retry::Condition<RetryError> for RetryCondition {
                     }
                     _ => {}
                 },
-                _ => {
-                    println!("encountered_other_error: {:?}", err);
-                }
+                _ => {}
             },
             Either::Right(_) => {
                 // Unfortunately `ErrorKind` of `ByteStreamError` is not accessible.
