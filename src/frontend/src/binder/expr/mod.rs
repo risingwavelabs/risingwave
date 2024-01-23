@@ -40,7 +40,7 @@ mod value;
 /// this limit, we will try optimize the case-when
 /// expression to `ConstantLookupExpression`
 /// Check `case.rs` for details.
-const CASE_WHEN_ARMS_OPTIMIZE_LIMIT: usize = 0;
+const CASE_WHEN_ARMS_OPTIMIZE_LIMIT: usize = 500;
 
 impl Binder {
     /// Bind an expression with `bind_expr_inner`, attach the original expression
