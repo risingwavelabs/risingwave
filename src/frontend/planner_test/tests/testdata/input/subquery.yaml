@@ -309,7 +309,6 @@
     - batch_plan
 - name: Only table-in-out functions can have subquery parameters. issue 14734
   sql: |
-    SELECT anon_1.f1 AS "IntegerRange(0, -2, 1)" 
-    FROM unnest(CASE WHEN (nullif(1, 0) IS NOT NULL AND sign(1) = sign( -2 - 0)) THEN array_remove(array((SELECT generate_series(0,  -2, 1) AS generate_series_1)),  -2) ELSE CAST(ARRAY[] AS SMALLINT[]) END) AS anon_1(f1);
+    SELECT anon_1.f1 AS "IntegerRange(0, -2, 1)" FROM unnest(CASE WHEN (nullif(1, 0) IS NOT NULL AND sign(1) = sign( -2 - 0)) THEN array_remove(array((SELECT generate_series(0,  -2, 1) AS generate_series_1)),  -2) ELSE CAST(ARRAY[] AS SMALLINT[]) END) AS anon_1(f1);
   expected_outputs:
     - binder_error
