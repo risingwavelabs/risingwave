@@ -205,7 +205,7 @@ async fn test_lookup_this_epoch() {
         identity: "LookupExecutor".to_string(),
     };
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
-        ctx: ActorContext::create(0),
+        ctx: ActorContext::for_test(0),
         info,
         arrangement,
         stream,
@@ -279,7 +279,7 @@ async fn test_lookup_last_epoch() {
         identity: "LookupExecutor".to_string(),
     };
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
-        ctx: ActorContext::create(0),
+        ctx: ActorContext::for_test(0),
         info,
         arrangement,
         stream,

@@ -749,7 +749,7 @@ mod tests {
         let system_params_manager = LocalSystemParamsManager::for_test();
 
         let executor = SourceExecutor::new(
-            ActorContext::create(0),
+            ActorContext::for_test(0),
             ExecutorInfo {
                 schema,
                 pk_indices,
@@ -843,7 +843,7 @@ mod tests {
         let system_params_manager = LocalSystemParamsManager::for_test();
 
         let executor = SourceExecutor::new(
-            ActorContext::create(0),
+            ActorContext::for_test(0),
             ExecutorInfo {
                 schema,
                 pk_indices,

@@ -76,7 +76,7 @@ async fn create_executor<S: StateStore>(
 
     let (tx, source) = MockSource::channel(input_schema, input_pk_indices.clone());
     let executor = OverWindowExecutor::new(OverWindowExecutorArgs {
-        actor_ctx: ActorContext::create(123),
+        actor_ctx: ActorContext::for_test(123),
         info: ExecutorInfo {
             schema: output_schema,
             pk_indices: output_pk_indices,
