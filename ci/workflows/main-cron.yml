@@ -315,7 +315,8 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-      - ./ci/plugins/upload-failure-logs
+      # Only upload zipped files, otherwise the logs is too much.
+      - ./ci/plugins/upload-failure-logs-zipped
     timeout_in_minutes: 60
     retry: *auto-retry
 
@@ -333,7 +334,8 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-      - ./ci/plugins/upload-failure-logs
+      # Only upload zipped files, otherwise the logs is too much.
+      - ./ci/plugins/upload-failure-logs-zipped
     timeout_in_minutes: 60
     retry: *auto-retry
 
