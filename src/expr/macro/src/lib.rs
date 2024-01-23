@@ -187,11 +187,10 @@ mod utils;
 ///
 /// ```ignore
 /// #[function("trim_array(anyarray, int32) -> anyarray")]
-/// fn trim_array(array: Option<ListRef<'_>>, n: Option<i32>) -> ListValue {...}
+/// fn trim_array(array: ListRef<'_>, n: Option<i32>) -> ListValue {...}
 /// ```
 ///
-/// Note that we currently only support all arguments being either `Option` or non-`Option`. Mixed
-/// cases are not supported.
+/// This function will be called when `n` is null, but not when `array` is null.
 ///
 /// ## Return Value
 ///
@@ -278,11 +277,11 @@ mod utils;
 /// }
 /// ```
 ///
-/// The `prebuild` argument can be specified, and its value is a Rust expression used to construct a
-/// new variable from the input arguments of the function. Here `$1`, `$2` represent the second and
-/// third arguments of the function (indexed from 0), and their types are `&str`. In the Rust
-/// function signature, these positions of parameters will be omitted, replaced by an extra new
-/// variable at the end.
+/// The `prebuild` argument can be specified, and its value is a Rust expression `Type::method(...)`
+/// used to construct a new variable of `Type` from the input arguments of the function.
+/// Here `$1`, `$2` represent the second and third arguments of the function (indexed from 0),
+/// and their types are `&str`. In the Rust function signature, these positions of parameters will
+/// be omitted, replaced by an extra new variable at the end.
 ///
 /// This macro generates two versions of the function. If all the input parameters that `prebuild`
 /// depends on are constants, it will precompute them during the build function. Otherwise, it will
