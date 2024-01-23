@@ -17,7 +17,6 @@ use std::fmt::Debug;
 use std::io::{Read, Write};
 use std::mem::size_of;
 use std::ops::{Range, RangeBounds};
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
@@ -30,10 +29,13 @@ use super::utils::{bytes_diff_below_max_key_length, xxhash64_verify, Compression
 use crate::hummock::sstable::utils;
 use crate::hummock::sstable::utils::xxhash64_checksum;
 use crate::hummock::{HummockError, HummockResult};
+use crate::monitor::Hitmap;
 
 pub const DEFAULT_BLOCK_SIZE: usize = 4 * 1024;
 pub const DEFAULT_RESTART_INTERVAL: usize = 16;
 pub const DEFAULT_ENTRY_SIZE: usize = 24; // table_id(u64) + primary_key(u64) + epoch(u64)
+
+pub const HITMAP_ELEMS: usize = 4;
 
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -141,93 +143,6 @@ impl RestartPoint {
     }
 }
 
-#[derive(Debug)]
-pub struct Hitmap<const N: usize> {
-    /// For [`Block`] is rarely access in multi-thread pattern,
-    /// the cons of false-sharing can be ignored.
-    data: Box<[AtomicU64; N]>,
-}
-
-impl<const N: usize> Default for Hitmap<N> {
-    fn default() -> Self {
-        let data = [(); N].map(|_| AtomicU64::default());
-        let data = Box::new(data);
-        Self { data }
-    }
-}
-
-impl<const N: usize> Hitmap<N> {
-    pub const fn bits() -> usize {
-        N * u64::BITS as usize
-    }
-
-    pub const fn bytes() -> usize {
-        N * 8
-    }
-
-    pub fn reset(&self) {
-        for elem in &*self.data {
-            elem.store(0, AtomicOrdering::Relaxed);
-        }
-    }
-
-    pub fn fill(&self, start_bit: usize, end_bit: usize) {
-        const MASK: usize = (1 << 6) - 1;
-
-        let end_bit = std::cmp::min(end_bit, Self::bits());
-
-        let head_bits = start_bit & MASK;
-        let tail_bits_rev = end_bit & MASK;
-
-        let head_elem = start_bit >> 6;
-        let tail_elem = end_bit >> 6;
-
-        for i in head_elem..=std::cmp::min(tail_elem, N - 1) {
-            let elem = &self.data[i];
-            let mut umask = 0u64;
-            if i == head_elem {
-                umask |= (1u64 << head_bits) - 1;
-            }
-            if i == tail_elem {
-                umask |= !((1u64 << tail_bits_rev) - 1);
-            }
-            elem.fetch_or(!umask, AtomicOrdering::Relaxed);
-        }
-    }
-
-    pub fn fill_with_ratio(&self, start: f64, end: f64) {
-        let start_bit = (Self::bits() as f64 * start) as usize;
-        let end_bit = (Self::bits() as f64 * end) as usize;
-        self.fill(start_bit, end_bit)
-    }
-
-    pub fn ones(&self) -> usize {
-        let mut res = 0;
-        for elem in &*self.data {
-            res += elem.load(AtomicOrdering::Relaxed).count_ones() as usize;
-        }
-        res
-    }
-
-    pub fn zeros(&self) -> usize {
-        Self::bits() - self.ones()
-    }
-
-    pub fn ratio(&self) -> f64 {
-        self.ones() as f64 / Self::bits() as f64
-    }
-
-    #[cfg(test)]
-    pub fn to_hex_vec(&self) -> Vec<String> {
-        use itertools::Itertools;
-        self.data
-            .iter()
-            .map(|elem| elem.load(AtomicOrdering::Relaxed))
-            .map(|v| format!("{v:016x}"))
-            .collect_vec()
-    }
-}
-
 pub struct Block {
     /// Uncompressed entries data, with restart encoded restart points info.
     data: Bytes,
@@ -240,7 +155,7 @@ pub struct Block {
     /// Restart points.
     restart_points: Vec<RestartPoint>,
 
-    hitmap: Hitmap<4>,
+    hitmap: Hitmap<HITMAP_ELEMS>,
 }
 
 impl Clone for Block {
@@ -416,15 +331,15 @@ impl Block {
     pub fn slice(&self, range: impl RangeBounds<usize>) -> &[u8] {
         let start = range.start().unwrap_or_default();
         let end = range.end().unwrap_or(self.data_len);
-        self.hitmap.fill_with_ratio(
-            start as f64 / self.data_len as f64,
-            end as f64 / self.data_len as f64,
-        );
         &self.data[start..end]
     }
 
     pub fn raw(&self) -> &[u8] {
         &self.data[..]
+    }
+
+    pub fn hitmap(&self) -> &Hitmap<HITMAP_ELEMS> {
+        &self.hitmap
     }
 
     pub fn efficiency(&self) -> f64 {
@@ -1041,66 +956,5 @@ mod tests {
             assert!(!bi.is_valid());
             builder.clear();
         }
-    }
-
-    #[test]
-    fn test_hitmap() {
-        // hex: high <== low
-        let h = Hitmap::<4>::default();
-        assert_eq!(
-            h.to_hex_vec(),
-            vec![
-                "0000000000000000",
-                "0000000000000000",
-                "0000000000000000",
-                "0000000000000000",
-            ]
-        );
-        assert_eq!(h.ones(), 0);
-        h.fill(16, 24);
-        assert_eq!(
-            h.to_hex_vec(),
-            vec![
-                "0000000000ff0000",
-                "0000000000000000",
-                "0000000000000000",
-                "0000000000000000",
-            ]
-        );
-        assert_eq!(h.ones(), 8);
-        h.fill(32, 64);
-        assert_eq!(
-            h.to_hex_vec(),
-            vec![
-                "ffffffff00ff0000",
-                "0000000000000000",
-                "0000000000000000",
-                "0000000000000000",
-            ]
-        );
-        assert_eq!(h.ones(), 40);
-        h.fill(96, 224);
-        assert_eq!(
-            h.to_hex_vec(),
-            vec![
-                "ffffffff00ff0000",
-                "ffffffff00000000",
-                "ffffffffffffffff",
-                "00000000ffffffff",
-            ]
-        );
-        assert_eq!(h.ones(), 168);
-        h.fill(0, 256);
-        assert_eq!(
-            h.to_hex_vec(),
-            vec![
-                "ffffffffffffffff",
-                "ffffffffffffffff",
-                "ffffffffffffffff",
-                "ffffffffffffffff",
-            ]
-        );
-        assert_eq!(h.ones(), 256);
-        h.reset();
     }
 }
