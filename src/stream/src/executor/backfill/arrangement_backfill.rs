@@ -451,37 +451,44 @@ where
                     "backfill_finished_wait_for_barrier"
                 );
                 // If not finished then we need to update state, otherwise no need.
-                if let Message::Barrier(barrier) = &msg
-                    && !is_completely_finished
-                {
-                    // If snapshot was empty, we do not need to backfill,
-                    // but we still need to persist the finished state.
-                    // We currently persist it on the second barrier here rather than first.
-                    // This is because we can't update state table in first epoch,
-                    // since it expects to have been initialized in previous epoch
-                    // (there's no epoch before the first epoch).
-                    for vnode in upstream_table.vnodes().iter_vnodes() {
-                        backfill_state.finish_progress(vnode, upstream_table.pk_indices().len());
-                    }
+                if let Message::Barrier(barrier) = &msg {
+                    if is_completely_finished {
+                    } else {
+                        // If snapshot was empty, we do not need to backfill,
+                        // but we still need to persist the finished state.
+                        // We currently persist it on the second barrier here rather than first.
+                        // This is because we can't update state table in first epoch,
+                        // since it expects to have been initialized in previous epoch
+                        // (there's no epoch before the first epoch).
+                        for vnode in upstream_table.vnodes().iter_vnodes() {
+                            backfill_state
+                                .finish_progress(vnode, upstream_table.pk_indices().len());
+                        }
 
-                    persist_state_per_vnode(
-                        barrier.epoch,
-                        &mut self.state_table,
-                        &mut backfill_state,
-                        #[cfg(debug_assertions)]
-                        state_len,
-                        vnodes.iter_vnodes(),
-                    )
-                    .await?;
+                        persist_state_per_vnode(
+                            barrier.epoch,
+                            &mut self.state_table,
+                            &mut backfill_state,
+                            #[cfg(debug_assertions)]
+                            state_len,
+                            vnodes.iter_vnodes(),
+                        )
+                        .await?;
+                    }
 
                     self.progress
                         .finish(barrier.epoch.curr, total_snapshot_processed_rows);
+                    tracing::trace!(
+                        epoch = ?barrier.epoch,
+                        "Updated CreateMaterializedTracker"
+                    );
                     yield msg;
                     break;
-                } else {
-                    // Allow other messages to pass through.
-                    yield msg;
                 }
+                // Allow other messages to pass through.
+                // We won't yield twice here, since if there's a barrier,
+                // we will always break out of the loop.
+                yield msg;
             }
         }
 

@@ -530,6 +530,9 @@ where
                     yield msg;
                     break;
                 }
+                // Allow other messages to pass through.
+                // We won't yield twice here, since if there's a barrier,
+                // we will always break out of the loop.
                 yield msg;
             }
         }
