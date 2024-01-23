@@ -634,7 +634,15 @@ impl Binder {
                         // NOTE: actually in PG it can be a larger type, but we don't support this here
                         t @ data_types::range_frame_numeric!() => t.clone(),
                         // for datetime ordering columns, `offset` should be interval
-                        data_types::range_frame_datetime!() => DataType::Interval,
+                        t @ data_types::range_frame_datetime!() => {
+                            if matches!(t, DataType::Date | DataType::Time) {
+                                bail_not_implemented!(
+                                    "`RANGE` frame with offset of type `{}` is not implemented yet, please manually cast the `ORDER BY` column to `timestamp`",
+                                    t
+                                );
+                            }
+                            DataType::Interval
+                        }
                         // other types are not supported
                         t => {
                             return Err(ErrorCode::NotSupported(
@@ -668,7 +676,10 @@ impl Binder {
                     );
                 }
             };
+
+            // Validate the frame bounds, may return `ExprError` to user if the bounds given are not valid.
             bounds.validate()?;
+
             Some(Frame { bounds, exclusion })
         } else {
             None
