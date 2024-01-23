@@ -121,10 +121,11 @@ pub(crate) struct StreamActorManagerState {
 
     #[expect(clippy::type_complexity)]
     pub(super) creating_actors: FuturesUnordered<
-        AttachedFuture<JoinHandle<StreamResult<Vec<Actor<DispatchExecutor>>>>, u64>,
+        AttachedFuture<
+            JoinHandle<StreamResult<Vec<Actor<DispatchExecutor>>>>,
+            oneshot::Sender<StreamResult<()>>,
+        >,
     >,
-
-    pub(super) next_create_actor_future_id: u64,
 }
 
 impl StreamActorManagerState {
@@ -134,14 +135,18 @@ impl StreamActorManagerState {
             actors: HashMap::new(),
             actor_monitor_tasks: HashMap::new(),
             creating_actors: FuturesUnordered::new(),
-            next_create_actor_future_id: 0,
         }
     }
 
-    async fn next_created_actors(&mut self) -> (u64, StreamResult<Vec<Actor<DispatchExecutor>>>) {
-        let (join_result, future_id) = pending_on_none(self.creating_actors.next()).await;
+    async fn next_created_actors(
+        &mut self,
+    ) -> (
+        oneshot::Sender<StreamResult<()>>,
+        StreamResult<Vec<Actor<DispatchExecutor>>>,
+    ) {
+        let (join_result, sender) = pending_on_none(self.creating_actors.next()).await;
         (
-            future_id,
+            sender,
             join_result
                 .map_err(|join_error| {
                     anyhow!("failed to join creating actors futures: {:?}", join_error).into()
@@ -183,8 +188,6 @@ pub(super) struct LocalBarrierWorker {
 
     epoch_result_sender: HashMap<u64, oneshot::Sender<StreamResult<BarrierCompleteResult>>>,
 
-    build_actors_result_sender: HashMap<u64, oneshot::Sender<StreamResult<()>>>,
-
     pub(super) actor_manager: Arc<StreamActorManager>,
 
     pub(super) actor_manager_state: StreamActorManagerState,
@@ -202,15 +205,14 @@ impl LocalBarrierWorker {
             epoch_result_sender: HashMap::default(),
             actor_manager,
             actor_manager_state: StreamActorManagerState::new(),
-            build_actors_result_sender: HashMap::new(),
         }
     }
 
     async fn run(mut self, mut event_rx: UnboundedReceiver<LocalBarrierEvent>) {
         loop {
             select! {
-                (future_id, create_actors_result) = self.actor_manager_state.next_created_actors() => {
-                    self.handle_actor_created(future_id, create_actors_result);
+                (sender, create_actors_result) = self.actor_manager_state.next_created_actors() => {
+                    self.handle_actor_created(sender, create_actors_result);
                 }
                 completed_epoch = self.state.next_completed_epoch() => {
                     self.on_epoch_completed(completed_epoch);
@@ -237,15 +239,14 @@ impl LocalBarrierWorker {
 
     fn handle_actor_created(
         &mut self,
-        future_id: u64,
+        sender: oneshot::Sender<StreamResult<()>>,
         create_actor_result: StreamResult<Vec<Actor<DispatchExecutor>>>,
     ) {
-        let result_sender = self.build_actors_result_sender.remove(&future_id).unwrap();
         let result = create_actor_result.map(|actors| {
             self.spawn_actors(actors);
         });
 
-        let _ = result_sender.send(result);
+        let _ = sender.send(result);
     }
 
     fn handle_event(&mut self, event: LocalBarrierEvent) {
@@ -303,17 +304,7 @@ impl LocalBarrierWorker {
             LocalBarrierEvent::BuildActors {
                 actors,
                 result_sender,
-            } => match self.start_create_actors(&actors) {
-                Ok(future_id) => {
-                    assert!(self
-                        .build_actors_result_sender
-                        .insert(future_id, result_sender)
-                        .is_none());
-                }
-                Err(e) => {
-                    let _ = result_sender.send(Err(e));
-                }
-            },
+            } => self.start_create_actors(&actors, result_sender),
         }
     }
 }
@@ -361,7 +352,7 @@ impl LocalBarrierWorker {
         // it will cause another round of unnecessary recovery.
         let missing_actor_ids = to_collect
             .iter()
-            .filter(|id| !self.actor_manager_state.actors.contains_key(id))
+            .filter(|id| !self.actor_manager_state.handles.contains_key(id))
             .collect_vec();
         if !missing_actor_ids.is_empty() {
             tracing::warn!(

@@ -79,16 +79,37 @@ pub async fn await_future_with_monitor_error_stream<T, E, F: Future>(
 }
 
 pub struct AttachedFuture<F, T> {
-    pub inner: F,
-    pub item: T,
+    inner: F,
+    item: Option<T>,
 }
 
-impl<F: Future + Unpin, T: Copy + Unpin> Future for AttachedFuture<F, T> {
+impl<F, T> AttachedFuture<F, T> {
+    pub fn new(inner: F, item: T) -> Self {
+        Self {
+            inner,
+            item: Some(item),
+        }
+    }
+
+    pub fn into_inner(self) -> (F, T) {
+        (
+            self.inner,
+            self.item.expect("should not be called after polled ready"),
+        )
+    }
+}
+
+impl<F: Future + Unpin, T: Unpin> Future for AttachedFuture<F, T> {
     type Output = (F::Output, T);
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         let output = ready!(this.inner.poll_unpin(cx));
-        Poll::Ready((output, this.item))
+        Poll::Ready((
+            output,
+            this.item
+                .take()
+                .expect("should not be polled ready for twice"),
+        ))
     }
 }

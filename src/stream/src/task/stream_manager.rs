@@ -38,6 +38,7 @@ use risingwave_storage::{dispatch_state_store, StateStore};
 use rw_futures_util::AttachedFuture;
 use thiserror_ext::AsReport;
 use tokio::spawn;
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, BarrierCompleteResult};
@@ -281,9 +282,10 @@ impl LocalBarrierWorker {
             let result = handle.await;
             assert!(result.is_ok() || result.unwrap_err().is_cancelled());
         }
+        // Clear the join handle of creating actors
         for handle in take(&mut self.actor_manager_state.creating_actors)
             .into_iter()
-            .map(|attached_future| attached_future.inner)
+            .map(|attached_future| attached_future.into_inner().0)
         {
             handle.abort();
             let result = handle.await;
@@ -311,9 +313,13 @@ impl LocalBarrierWorker {
 
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
     /// now.
-    pub(super) fn start_create_actors(&mut self, actors: &[ActorId]) -> StreamResult<u64> {
+    pub(super) fn start_create_actors(
+        &mut self,
+        actors: &[ActorId],
+        result_sender: oneshot::Sender<StreamResult<()>>,
+    ) {
         let actors = {
-            actors
+            let actor_result = actors
                 .iter()
                 .map(|actor_id| {
                     self.actor_manager_state
@@ -321,19 +327,20 @@ impl LocalBarrierWorker {
                         .remove(actor_id)
                         .ok_or_else(|| anyhow!("No such actor with actor id:{}", actor_id))
                 })
-                .try_collect()?
+                .try_collect();
+            match actor_result {
+                Ok(actors) => actors,
+                Err(e) => {
+                    let _ = result_sender.send(Err(e.into()));
+                    return;
+                }
+            }
         };
-        self.actor_manager_state.next_create_actor_future_id += 1;
-        let future_id = self.actor_manager_state.next_create_actor_future_id;
         let actor_manager = self.actor_manager.clone();
         let join_handle = spawn(actor_manager.create_actors(actors));
         self.actor_manager_state
             .creating_actors
-            .push(AttachedFuture {
-                inner: join_handle,
-                item: future_id,
-            });
-        Ok(future_id)
+            .push(AttachedFuture::new(join_handle, result_sender));
     }
 }
 
