@@ -224,12 +224,12 @@ where
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
-                    let right_snapshot = pin!(Self::snapshot_read_per_vnode(
+                    let (right_snapshot, valve) = pausable((Self::snapshot_read_per_vnode(
                         &upstream_table,
                         backfill_state.clone(), // FIXME: Use mutable reference instead.
                         &mut builders,
                     )
-                    .map(Either::Right),);
+                    .map(Either::Right),));
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.
