@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use risingwave_hummock_sdk::key::FullKey;
+use thiserror_ext::AsReport;
 
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::block_stream::BlockStream;
@@ -131,14 +132,20 @@ impl SstableIterator {
         if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx {
             match self
                 .sstable_store
-                .prefetch_blocks(self.sst.value(), idx, self.preload_end_block_idx,
-                                 self.options.cache_policy,
-                                 &mut self.stats,
+                .prefetch_blocks(
+                    self.sst.value(),
+                    idx,
+                    self.preload_end_block_idx,
+                    self.options.cache_policy,
+                    &mut self.stats,
                 )
                 .verbose_instrument_await("prefetch_blocks")
-                .await {
+                .await
+            {
                 Ok(preload_stream) => self.preload_stream = Some(preload_stream),
-                Err(e) => tracing::warn!("failed to create stream for prefetch data because of {:?}, fall back to block get.", e),
+                Err(e) => {
+                    tracing::warn!(error = %e.as_report(), "failed to create stream for prefetch data, fall back to block get")
+                }
             }
         }
 
@@ -177,7 +184,7 @@ impl SstableIterator {
                 }
                 if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx {
                     if let Err(e) = ret {
-                        tracing::warn!("recreate stream because the connection to remote storage has closed, reason: {:?}", e);
+                        tracing::warn!(error = %e.as_report(), "recreate stream because the connection to remote storage has closed");
                         if self.preload_retry_times >= self.options.max_preload_retry_times {
                             break;
                         }
@@ -200,7 +207,7 @@ impl SstableIterator {
                             self.preload_stream = Some(stream);
                         }
                         Err(e) => {
-                            tracing::warn!("failed to recreate stream meet IO error: {:?}", e);
+                            tracing::warn!(error = %e.as_report(), "failed to recreate stream meet IO error");
                             break;
                         }
                     }

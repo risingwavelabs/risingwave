@@ -34,6 +34,7 @@ use risingwave_pb::hummock::{
     compact_task, CompactionConfig, CompactionGroupInfo, CompatibilityVersion, GroupConstruct,
     GroupDelta, GroupDestroy, GroupMetaChange, GroupTableChange,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::{OnceCell, RwLock};
 use tracing::warn;
 
@@ -397,7 +398,9 @@ impl HummockManager {
     pub async fn unregister_table_ids_fail_fast(&self, table_ids: &[StateTableId]) {
         self.unregister_table_ids(table_ids)
             .await
-            .unwrap_or_else(|e| panic!("unregister table ids fail: {table_ids:?} {e}"));
+            .unwrap_or_else(|e| {
+                panic!("unregister table ids fail: {table_ids:?} {}", e.as_report())
+            });
     }
 
     pub async fn update_compaction_config(
