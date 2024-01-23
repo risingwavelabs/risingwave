@@ -173,6 +173,9 @@ impl SharedBufferBatchInner {
         }
 
         let batch_id = SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed);
+        if spill_offset > 0 {
+            tracing::info!("Spill imm_id {} epoch {:?} spill offset {}", batch_id, epoch_with_gap, spill_offset);
+        }
         SharedBufferBatchInner {
             payload: items,
             imm_ids: vec![batch_id],

@@ -465,13 +465,15 @@ impl HummockReadVersion {
             // `merged_imm_ids`
             let diff = staging_imm_count - merged_imm_ids.len();
             let mut count: usize = 0;
+            let staging_imm_ids = self.staging.imm.iter().map(|i| i.batch_id()).collect_vec();
             for (i, imm) in self.staging.imm.iter().skip(diff).enumerate() {
                 count += 1;
                 assert_eq!(
                     imm.batch_id(),
                     merged_imm_ids[i],
-                    "merged_imm_ids: {:?}",
-                    merged_imm_ids
+                    "merged_imm_ids: {:?}, {:?}",
+                    merged_imm_ids,
+                    staging_imm_ids
                 );
             }
             assert_eq!(count, merged_imm_ids.len());
