@@ -30,15 +30,14 @@ use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, RowsFrameBounds, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
-    self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, Ident, SelectItem, SetExpr,
-    Statement, WindowFrameBound, WindowFrameExclusion, WindowFrameUnits, WindowSpec,
+    self, Function, FunctionArg, FunctionArgExpr, Ident, WindowFrameBound, WindowFrameExclusion,
+    WindowFrameUnits, WindowSpec,
 };
 use risingwave_sqlparser::parser::ParserError;
 use thiserror_ext::AsReport;
 
 use crate::binder::bind_context::Clause;
-use crate::binder::{Binder, BoundQuery, BoundSetExpr};
-use crate::catalog::function_catalog::FunctionCatalog;
+use crate::binder::{Binder, BoundQuery, BoundSetExpr, UdfContext};
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal, Now, OrderBy,
     Subquery, SubqueryKind, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
@@ -160,73 +159,6 @@ impl Binder {
             return Ok(TableFunction::new(function_type, inputs)?.into());
         }
 
-        /// TODO: add name related logic
-        /// NOTE: need to think of a way to prevent naming conflict
-        /// e.g., when existing column names conflict with parameter names in sql udf
-        fn create_udf_context(
-            args: &[FunctionArg],
-            _catalog: &Arc<FunctionCatalog>,
-        ) -> Result<HashMap<String, AstExpr>> {
-            let mut ret: HashMap<String, AstExpr> = HashMap::new();
-            for (i, current_arg) in args.iter().enumerate() {
-                if let FunctionArg::Unnamed(arg) = current_arg {
-                    let FunctionArgExpr::Expr(e) = arg else {
-                        return Err(
-                            ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into()
-                        );
-                    };
-                    // if catalog.arg_names.is_some() {
-                    //      todo!()
-                    // }
-                    ret.insert(format!("${}", i + 1), e.clone());
-                    continue;
-                }
-                return Err(ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into());
-            }
-            Ok(ret)
-        }
-
-        fn extract_udf_expression(ast: Vec<Statement>) -> Result<AstExpr> {
-            if ast.len() != 1 {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "the query for sql udf should contain only one statement".to_string(),
-                )
-                .into());
-            }
-
-            // Extract the expression out
-            let Statement::Query(query) = ast[0].clone() else {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "invalid function definition, please recheck the syntax".to_string(),
-                )
-                .into());
-            };
-
-            let SetExpr::Select(select) = query.body else {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "missing `select` body for sql udf expression, please recheck the syntax"
-                        .to_string(),
-                )
-                .into());
-            };
-
-            if select.projection.len() != 1 {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "`projection` should contain only one `SelectItem`".to_string(),
-                )
-                .into());
-            }
-
-            let SelectItem::UnnamedExpr(expr) = select.projection[0].clone() else {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "expect `UnnamedExpr` for `projection`".to_string(),
-                )
-                .into());
-            };
-
-            Ok(expr)
-        }
-
         // user defined function
         // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
         if let Ok(schema) = self.first_valid_schema()
@@ -267,7 +199,7 @@ impl Binder {
 
                 // The actual inline logic for sql udf
                 // Note that we will always create new udf context for each sql udf
-                let Ok(context) = create_udf_context(&args, &Arc::clone(func)) else {
+                let Ok(context) = UdfContext::create_udf_context(&args, &Arc::clone(func)) else {
                     return Err(ErrorCode::InvalidInputSyntax(
                         "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
                     )
@@ -306,7 +238,7 @@ impl Binder {
                     self.udf_context.incr_global_count();
                 }
 
-                if let Ok(expr) = extract_udf_expression(ast) {
+                if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
                     let bind_result = self.bind_expr(expr);
                     // Restore context information for subsequent binding
                     self.udf_context.update_context(stashed_udf_context);

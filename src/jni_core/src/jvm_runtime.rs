@@ -219,14 +219,14 @@ pub fn execute_with_jni_env<T>(
         Ok(true) => env
             .exception_clear()
             .inspect_err(|e| {
-                tracing::warn!("Exception occurred but failed to clear: {:?}", e);
+                tracing::warn!(error = %e.as_report(), "Exception occurred but failed to clear");
             })
             .unwrap(),
         Ok(false) => {
             // No exception, do nothing
         }
         Err(e) => {
-            tracing::warn!("Failed to check exception: {:?}", e);
+            tracing::warn!(error = %e.as_report(), "Failed to check exception");
         }
     }
 
