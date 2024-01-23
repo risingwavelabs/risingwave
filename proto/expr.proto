@@ -450,8 +450,12 @@ message WindowFrame {
   Bound end = 3;
   Exclusion exclusion = 4;
 
+  // The data type of order column in `RANGE` frame.
+  optional data.DataType order_data_type = 10;
+  // The order type of order column in `RANGE` frame.
+  optional common.OrderType order_type = 15;
   // The data type of offset value in `RANGE` frame.
-  optional data.DataType offset_data_type = 10;
+  optional data.DataType offset_data_type = 20;
 }
 
 message WindowFunction {

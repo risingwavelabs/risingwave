@@ -27,8 +27,8 @@ use risingwave_common::types::{data_types, DataType, ScalarImpl, Timestamptz};
 use risingwave_common::{bail_not_implemented, current_cluster_version, no_function};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
-    Frame, FrameBound, FrameBounds, FrameExclusion, RangeFrameBounds, RowsFrameBounds,
-    WindowFuncKind,
+    Frame, FrameBound, FrameBounds, FrameExclusion, RangeFrameBounds, RangeFrameOffset,
+    RowsFrameBounds, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
     self, Function, FunctionArg, FunctionArgExpr, Ident, WindowFrameBound, WindowFrameExclusion,
@@ -615,7 +615,7 @@ impl Binder {
                     FrameBounds::Rows(RowsFrameBounds { start, end })
                 }
                 WindowFrameUnits::Range => {
-                    let order_data_type = order_by
+                    let order_by_expr = order_by
                         .sort_exprs
                         .iter()
                         // for `RANGE` frame, there should be exactly one `ORDER BY` column
@@ -625,14 +625,14 @@ impl Binder {
                                 "there should be exactly one ordering column for `RANGE` frame"
                                     .to_string(),
                             )
-                        })?
-                        .expr
-                        .return_type();
+                        })?;
+                    let order_data_type = order_by_expr.expr.return_type();
+                    let order_type = order_by_expr.order_type;
 
-                    let offset_data_type = match order_data_type {
+                    let offset_data_type = match &order_data_type {
                         // for numeric ordering columns, `offset` should be the same type
                         // NOTE: actually in PG it can be a larger type, but we don't support this here
-                        t @ data_types::range_frame_numeric!() => t,
+                        t @ data_types::range_frame_numeric!() => t.clone(),
                         // for datetime ordering columns, `offset` should be interval
                         data_types::range_frame_datetime!() => DataType::Interval,
                         // other types are not supported
@@ -654,9 +654,11 @@ impl Binder {
                         &offset_data_type,
                     )?;
                     FrameBounds::Range(RangeFrameBounds {
+                        order_data_type,
+                        order_type,
                         offset_data_type,
-                        start,
-                        end,
+                        start: start.map(RangeFrameOffset::new),
+                        end: end.map(RangeFrameOffset::new),
                     })
                 }
                 WindowFrameUnits::Groups => {
