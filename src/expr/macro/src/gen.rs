@@ -349,6 +349,7 @@ impl FunctionAttr {
                 }
             };
         } else {
+            #[allow(clippy::disallowed_methods)] // allow zip
             let some_inputs = inputs
                 .iter()
                 .zip(user_fn.args_option.iter())
