@@ -219,6 +219,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::ArrayPositions
             | expr_node::Type::StringToArray
             | expr_node::Type::Format
+            | expr_node::Type::FormatVariadic
             | expr_node::Type::PgwireSend
             | expr_node::Type::PgwireRecv
             | expr_node::Type::ArrayTransform

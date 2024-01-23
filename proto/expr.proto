@@ -176,6 +176,7 @@ message ExprNode {
     LEFT = 317;
     RIGHT = 318;
     FORMAT = 319;
+    FORMAT_VARIADIC = 324;
     PGWIRE_SEND = 320;
     PGWIRE_RECV = 321;
     CONVERT_FROM = 322;

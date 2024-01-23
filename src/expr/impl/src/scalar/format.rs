@@ -27,7 +27,11 @@ use super::string::quote_ident;
     "format(varchar, ...) -> varchar",
     prebuild = "Formatter::from_str($0).map_err(|e| ExprError::Parse(e.to_report_string().into()))?"
 )]
-fn format(formatter: &Formatter, row: impl Row, writer: &mut impl Write) -> Result<()> {
+#[function(
+    "format_variadic(varchar, anyarray) -> varchar",
+    prebuild = "Formatter::from_str($0).map_err(|e| ExprError::Parse(e.to_report_string().into()))?"
+)]
+fn format(row: impl Row, formatter: &Formatter, writer: &mut impl Write) -> Result<()> {
     let mut args = row.iter();
     for node in &formatter.nodes {
         match node {

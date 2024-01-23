@@ -314,8 +314,8 @@ impl FunctionAttr {
         // inputs: [ Option<impl ScalarRef> ]
         let mut output = quote! { #fn_name #generic(
             #(#non_prebuilt_inputs,)*
-            #prebuilt_arg
             #variadic_args
+            #prebuilt_arg
             #context
             #writer
         ) #await_ };
