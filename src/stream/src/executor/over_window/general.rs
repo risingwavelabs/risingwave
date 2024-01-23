@@ -325,7 +325,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
         }
 
         // `input pk` => `Record`
-        let mut key_change_update_buffer: BTreeMap<DefaultOrdered<OwnedRow>, Record<OwnedRow>> = BTreeMap::new();
+        let mut key_change_update_buffer: BTreeMap<DefaultOrdered<OwnedRow>, Record<OwnedRow>> =
+            BTreeMap::new();
         let mut chunk_builder =
             StreamChunkBuilder::new(this.chunk_size, this.info.schema.data_types());
 
@@ -387,8 +388,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                                 }
                             }
                             _ => {
-                                let vnode =
-                                    this.state_table.compute_vnode_by_pk(&key.pk);
+                                let vnode = this.state_table.compute_vnode_by_pk(&key.pk);
                                 let raw_key = serialize_pk_with_vnode(
                                     &key.pk,
                                     this.state_table.pk_serde(),
