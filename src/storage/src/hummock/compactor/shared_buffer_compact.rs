@@ -375,17 +375,25 @@ pub async fn merge_imms_in_memory(
         });
     }
 
-    let mut full_key_tracker = FullKeyTracker::<Bytes>::new(FullKey::default());
+    // Use first key, max epoch to initialize the tracker to ensure that the check first call to full_key_tracker.observe will succeed
+    let mut full_key_tracker = FullKeyTracker::<Bytes>::new(FullKey::new_with_gap_epoch(
+        table_id,
+        first_item_key,
+        EpochWithGap::new_max_epoch(),
+    ));
     let mut table_key_versions: Vec<(EpochWithGap, HummockValue<Bytes>)> = Vec::new();
     let mut table_key_last_delete_epoch = HummockEpoch::MAX;
 
     for ((key, value), epoch_with_gap) in items {
         let full_key = FullKey::new_with_gap_epoch(table_id, key, epoch_with_gap);
-        if let Some(last_full_key) = full_key_tracker.observe(full_key)
-            && !last_full_key.is_empty()
-        {
+        if let Some(last_full_key) = full_key_tracker.observe(full_key) {
+            let last_user_key = last_full_key.user_key;
+            // `epoch_with_gap` of the `last_full_key` may not reflect the real epoch in the items
+            // and should not be used because we use max epoch to initialize the tracker
+            let _epoch_with_gap = last_full_key.epoch_with_gap;
+
             // Record kv entries
-            merged_payload.push((last_full_key.user_key.table_key, table_key_versions));
+            merged_payload.push((last_user_key.table_key, table_key_versions));
 
             // Reset state before moving onto the new table key
             table_key_versions = vec![];

@@ -992,10 +992,7 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
                 self.last_observed_epoch_with_gap = key.epoch_with_gap;
 
                 // Take the previous key and set latest key
-                let mut full_key = key.into();
-                std::mem::swap(&mut self.latest_full_key, &mut full_key);
-
-                Some(full_key)
+                Some(std::mem::replace(&mut self.latest_full_key, key.into()))
             }
             Ordering::Equal => {
                 if key.epoch_with_gap >= self.last_observed_epoch_with_gap {
