@@ -37,7 +37,6 @@ use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::{dispatch_state_store, StateStore};
 use rw_futures_util::AttachedFuture;
 use thiserror_ext::AsReport;
-use tokio::spawn;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
