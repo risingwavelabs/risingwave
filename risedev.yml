@@ -909,6 +909,15 @@ template:
     # Prometheus nodes used by this MinIO
     provide-prometheus: "prometheus*"
 
+    # Max concurrent api requests.
+    # see: https://github.com/minio/minio/blob/master/docs/throttle/README.md.
+    # '0' means this env var will use the default of minio.
+    api-requests-max: 0
+
+    # Deadline for api requests.
+    # Empty string means this env var will use the default of minio.
+    api-requests-deadline: ""
+
   etcd:
     # Id of this instance
     id: etcd-${port}
