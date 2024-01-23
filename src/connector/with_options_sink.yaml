@@ -123,6 +123,9 @@ IcebergConfig:
     required: true
   - name: database.name
     field_type: String
+    required: false
+  - name: catalog.name
+    field_type: String
     required: true
   - name: catalog.type
     field_type: String
