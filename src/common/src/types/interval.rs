@@ -1453,7 +1453,10 @@ impl Interval {
         if let Some(leading_field) = leading_field {
             Self::parse_sql_standard(s, leading_field)
         } else {
-            Self::parse_postgres(s)
+            match s.as_bytes().get(0) {
+                Some(b'P') => Self::from_iso_8601(s),
+                _ => Self::parse_postgres(s),
+            }
         }
     }
 }
@@ -1466,7 +1469,6 @@ impl FromStr for Interval {
     }
 }
 
-#[cfg(test)]
 mod tests {
     use interval::test_utils::IntervalTestExt;
 
@@ -1530,6 +1532,12 @@ mod tests {
             interval,
             Interval::from_month(14) + Interval::from_days(3) + Interval::from_minutes(62)
         );
+
+        let interval = "P1Y2M3DT0H5M0S".parse::<Interval>().unwrap();
+        assert_eq!(
+            interval,
+            Interval::from_month(14) + Interval::from_days(3) + Interval::from_minutes(5)
+        )
     }
 
     #[test]
