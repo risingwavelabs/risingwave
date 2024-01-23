@@ -23,9 +23,9 @@ use futures::StreamExt;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::ConnectorError;
 use risingwave_common::error::Result;
-use risingwave_connector::dispatch_source_prop;
-use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
-use risingwave_connector::source::{
+use crate::dispatch_source_prop;
+use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
+use crate::source::{
     create_split_reader, BoxSourceWithStateStream, ConnectorProperties, ConnectorState,
     SourceColumnDesc, SourceContext, SplitReader,
 };

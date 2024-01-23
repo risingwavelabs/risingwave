@@ -25,10 +25,9 @@ pub use table::*;
 
 pub mod dml_manager;
 
-mod common;
-pub mod connector_source;
-pub mod source_desc;
-pub use source_desc::test_utils as connector_test_utils;
-pub mod fs_connector_source;
+pub use risingwave_connector::source::reader::source_desc::test_utils as connector_test_utils;
+pub use risingwave_connector::source::reader::{
+    connector_source, fs_connector_source, source_desc,
+};
 mod table;
 mod txn_channel;
