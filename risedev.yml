@@ -565,11 +565,11 @@ profile:
       - use: prometheus
       - use: grafana
 
-  ci-3cn-1fe-and-minio-rate-limit:
+  ci-3cn-1fe-with-minio-rate-limit:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-        api-requests-max: 1
+        api-requests-max: 18
         api-requests-deadline: 1s
       - use: etcd
         unsafe-no-fsync: true
