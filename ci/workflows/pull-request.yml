@@ -575,7 +575,7 @@ steps:
     timeout_in_minutes: 40
 
   - label: "Backfill tests"
-    command: "ci/scripts/backfill-test.sh -p ci-dev"
+    command: "BUILDKITE=${BUILDKITE:-} ci/scripts/backfill-test.sh -p ci-dev"
     if: build.pull_request.labels includes "ci/run-backfill-tests" || build.env("CI_STEPS") =~ /(^|,)backfill-tests?(,|$$)/
     depends_on:
       - "build"
