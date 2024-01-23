@@ -118,10 +118,6 @@ pub fn add_hummock_backend(
                 cmd.arg("--state-store")
                 .arg(format!("hummock+hdfs://{}", opendal.namenode));
             }
-            else if opendal.engine == "opendal_s3"{
-                cmd.arg("--state-store")
-                .arg(format!("hummock+opendal_s3://{}", opendal.bucket));
-            }
             else if opendal.engine == "gcs"{
                 cmd.arg("--state-store")
                 .arg(format!("hummock+gcs://{}", opendal.bucket));

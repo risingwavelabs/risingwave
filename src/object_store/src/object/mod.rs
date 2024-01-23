@@ -786,23 +786,26 @@ pub async fn build_remote_object_store(
     config: ObjectStoreConfig,
 ) -> ObjectStoreImpl {
     match url {
-        s3 if s3.starts_with("s3://") => ObjectStoreImpl::S3(
-            S3ObjectStore::new_with_config(
-                s3.strip_prefix("s3://").unwrap().to_string(),
-                metrics.clone(),
-                config,
-            )
-            .await
-            .monitored(metrics),
-        ),
-        opendal_s3 if opendal_s3.starts_with("opendal_s3://") => {
-            let opendal_s3 = opendal_s3.strip_prefix("opendal_s3://").unwrap();
-            let (bucket, root) = opendal_s3.split_once('@').unwrap_or((opendal_s3, ""));
-            ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_s3_engine(bucket.to_string(), root.to_string())
-                    .unwrap()
+        s3 if s3.starts_with("s3://") => {
+            if std::env::var("RW_USE_OPENDAL_FOR_S3").is_ok() {
+                let s3 = s3.strip_prefix("s3://").unwrap();
+                let (bucket, root) = s3.split_once('@').unwrap_or((s3, ""));
+                ObjectStoreImpl::Opendal(
+                    OpendalObjectStore::new_s3_engine(bucket.to_string(), root.to_string())
+                        .unwrap()
+                        .monitored(metrics),
+                )
+            } else {
+                ObjectStoreImpl::S3(
+                    S3ObjectStore::new_with_config(
+                        s3.strip_prefix("s3://").unwrap().to_string(),
+                        metrics.clone(),
+                        config,
+                    )
+                    .await
                     .monitored(metrics),
-            )
+                )
+            }
         }
         #[cfg(feature = "hdfs-backend")]
         hdfs if hdfs.starts_with("hdfs://") => {
