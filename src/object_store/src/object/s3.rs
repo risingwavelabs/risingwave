@@ -938,16 +938,14 @@ impl From<RetryError> for ObjectError {
 
 struct RetryCondition {
     retry_unknown_service_error: bool,
-    retry_too_many_requests_error: bool,
-    retry_slowdown_error: bool,
+    retryable_service_error_codes: Vec<String>,
 }
 
 impl RetryCondition {
     fn new(config: &S3ObjectStoreConfig) -> Self {
         Self {
             retry_unknown_service_error: config.retry_unknown_service_error,
-            retry_too_many_requests_error: config.retry_too_many_requests_error,
-            retry_slowdown_error: config.retry_slowdown_error,
+            retryable_service_error_codes: config.retryable_service_error_codes.clone(),
         }
     }
 }
@@ -967,15 +965,13 @@ impl tokio_retry::Condition<RetryError> for RetryCondition {
                         tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
                         return true;
                     }
-                    Some(code) if self.retry_slowdown_error => {
-                        if code == "SlowDown" {
-                            tracing::warn!(target: "slowdown_error", "{e:?} occurs, retry S3 get_object request.");
-                            return true;
-                        }
-                    }
-                    Some(code) if self.retry_too_many_requests_error => {
-                        if code == "TooManyRequests" {
-                            tracing::warn!(target: "too_many_requests_error", "{e:?} occurs, retry S3 get_object request.");
+                    Some(code) => {
+                        if self
+                            .retryable_service_error_codes
+                            .iter()
+                            .any(|s| s.as_str() == code)
+                        {
+                            tracing::warn!(target: "retryable_service_error", "{e:?} occurs, retry S3 get_object request.");
                             return true;
                         }
                     }

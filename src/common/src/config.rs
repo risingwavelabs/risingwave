@@ -924,10 +924,8 @@ pub struct S3ObjectStoreConfig {
     /// Whether to retry s3 sdk error from which no error metadata is provided.
     #[serde(default = "default::object_store_config::s3::retry_unknown_service_error")]
     pub retry_unknown_service_error: bool,
-    #[serde(default = "default::object_store_config::s3::retry_slowdown_error")]
-    pub retry_slowdown_error: bool,
-    #[serde(default = "default::object_store_config::s3::retry_too_many_requests_error")]
-    pub retry_too_many_requests_error: bool,
+    #[serde(default = "default::object_store_config::s3::retryable_service_error_codes")]
+    pub retryable_service_error_codes: Vec<String>,
 }
 
 impl SystemConfig {
@@ -1534,12 +1532,8 @@ pub mod default {
                 false
             }
 
-            pub fn retry_too_many_requests_error() -> bool {
-                true
-            }
-
-            pub fn retry_slowdown_error() -> bool {
-                true
+            pub fn retryable_service_error_codes() -> Vec<String> {
+                vec!["SlowDown".into(), "TooManyRequests".into()]
             }
         }
     }
