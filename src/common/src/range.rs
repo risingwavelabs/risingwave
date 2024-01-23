@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::{Add, Bound, Range, RangeBounds, Sub};
+use std::ops::{Add, Bound, RangeBounds, Sub};
 
 mod private {
 
@@ -73,12 +73,6 @@ pub trait RangeBoundsExt<T: Idx>: RangeBounds<T> {
             Bound::Excluded(v) => Some(*v),
             Bound::Unbounded => None,
         }
-    }
-
-    fn bounds(&self, start: T, end: T) -> Range<T> {
-        let start = self.start().unwrap_or(start);
-        let end = self.end().unwrap_or(end);
-        start..end
     }
 
     fn len(&self) -> Option<T> {

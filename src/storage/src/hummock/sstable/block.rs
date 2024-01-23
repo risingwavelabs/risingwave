@@ -15,7 +15,7 @@
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::io::{Read, Write};
-use std::mem::{size_of, MaybeUninit};
+use std::mem::size_of;
 use std::ops::{Range, RangeBounds};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
@@ -145,23 +145,20 @@ impl RestartPoint {
 pub struct Hitmap<const N: usize> {
     /// For [`Block`] is rarely access in multi-thread pattern,
     /// the cons of false-sharing can be ignored.
-    data: [AtomicU64; N],
+    data: Box<[AtomicU64; N]>,
 }
 
 impl<const N: usize> Default for Hitmap<N> {
     fn default() -> Self {
-        let mut data: [MaybeUninit<AtomicU64>; N] = MaybeUninit::uninit_array();
-        for elem in &mut data[..] {
-            elem.write(AtomicU64::new(0));
-        }
-        let data = unsafe { MaybeUninit::array_assume_init(data) };
+        let data = [(); N].map(|_| AtomicU64::default());
+        let data = Box::new(data);
         Self { data }
     }
 }
 
 impl<const N: usize> Hitmap<N> {
     pub const fn bits() -> usize {
-        N * 64
+        N * u64::BITS as usize
     }
 
     pub const fn bytes() -> usize {
@@ -169,7 +166,7 @@ impl<const N: usize> Hitmap<N> {
     }
 
     pub fn reset(&self) {
-        for elem in &self.data {
+        for elem in &*self.data {
             elem.store(0, AtomicOrdering::Relaxed);
         }
     }
@@ -206,7 +203,7 @@ impl<const N: usize> Hitmap<N> {
 
     pub fn ones(&self) -> usize {
         let mut res = 0;
-        for elem in &self.data {
+        for elem in &*self.data {
             res += elem.load(AtomicOrdering::Relaxed).count_ones() as usize;
         }
         res
@@ -417,12 +414,13 @@ impl Block {
     }
 
     pub fn slice(&self, range: impl RangeBounds<usize>) -> &[u8] {
-        let range = range.bounds(0, self.data.len());
+        let start = range.start().unwrap_or_default();
+        let end = range.end().unwrap_or(self.data_len);
         self.hitmap.fill_with_ratio(
-            range.start as f64 / self.data_len as f64,
-            range.end as f64 / self.data_len as f64,
+            start as f64 / self.data_len as f64,
+            end as f64 / self.data_len as f64,
         );
-        &self.data[range]
+        &self.data[start..end]
     }
 
     pub fn raw(&self) -> &[u8] {
