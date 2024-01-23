@@ -20,6 +20,7 @@ use sea_orm::{
     ConnectionTrait, DatabaseBackend, DatabaseConnection, FromQueryResult, Statement,
     TransactionTrait, Value,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::watch;
 use tokio::sync::watch::Receiver;
 use tokio::time;
@@ -614,7 +615,7 @@ where
                             .update_heartbeat(META_ELECTION_KEY, id.as_str())
                             .await {
 
-                            tracing::debug!("keep alive for member {} failed {}", id, e);
+                            tracing::debug!(error = %e.as_report(), "keep alive for member {} failed", id);
                             continue
                         }
                     }
@@ -669,7 +670,7 @@ where
                     if is_leader {
                         tracing::info!("leader {} resigning", self.id);
                         if let Err(e) = self.driver.resign(META_ELECTION_KEY, self.id.as_str()).await {
-                            tracing::warn!("resign failed {}", e);
+                            tracing::warn!(error = %e.as_report(), "resign failed");
                         }
                     }
 

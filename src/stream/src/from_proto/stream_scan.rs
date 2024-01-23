@@ -37,12 +37,11 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         state_store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [upstream, snapshot]: [_; 2] = params.input.try_into().unwrap();
         // For reporting the progress.
-        let progress = stream
-            .context
+        let progress = params
+            .local_barrier_manager
             .register_create_mview_progress(params.actor_context.id);
 
         let output_indices = node
@@ -90,7 +89,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     state_table,
                     output_indices,
                     progress,
-                    stream.streaming_metrics.clone(),
+                    params.executor_stats.clone(),
                     params.env.config().developer.chunk_size,
                     node.rate_limit.map(|x| x as _),
                 )
@@ -133,7 +132,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                             state_table,
                             output_indices,
                             progress,
-                            stream.streaming_metrics.clone(),
+                            params.executor_stats.clone(),
                             params.env.config().developer.chunk_size,
                             node.rate_limit.map(|x| x as _),
                         )

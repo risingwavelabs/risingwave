@@ -259,7 +259,7 @@ mod tests {
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::<_, false>::new(
                 source as Box<dyn Executor>,
-                ActorContext::create(0),
+                ActorContext::for_test(0),
                 info,
                 storage_key,
                 (0, 5),
@@ -346,7 +346,7 @@ mod tests {
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::<_, false>::new(
                 source as Box<dyn Executor>,
-                ActorContext::create(0),
+                ActorContext::for_test(0),
                 info,
                 storage_key(),
                 (3, 4),

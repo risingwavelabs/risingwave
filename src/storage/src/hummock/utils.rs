@@ -578,7 +578,7 @@ pub(crate) async fn wait_for_epoch(
     }
     loop {
         match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
-            Err(elapsed) => {
+            Err(_) => {
                 // The reason that we need to retry here is batch scan in
                 // chain/rearrange_chain is waiting for an
                 // uncommitted epoch carried by the CreateMV barrier, which
@@ -589,9 +589,8 @@ pub(crate) async fn wait_for_epoch(
                 // CN with the same distribution as the upstream MV.
                 // See #3845 for more details.
                 tracing::warn!(
-                    "wait_epoch {:?} timeout when waiting for version update elapsed {:?}s",
-                    wait_epoch,
-                    elapsed
+                    epoch = wait_epoch,
+                    "wait_epoch timeout when waiting for version update",
                 );
                 continue;
             }

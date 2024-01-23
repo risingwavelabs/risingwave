@@ -15,6 +15,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Context;
 use etcd_client::ConnectOptions;
 use risingwave_backup::error::BackupResult;
 use risingwave_backup::storage::{MetaSnapshotStorageRef, ObjectStoreMetaSnapshotStorage};
@@ -74,7 +75,7 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendI
             }
             let client = EtcdClient::connect(endpoints, Some(options), credentials.is_some())
                 .await
-                .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
+                .context("failed to connect etcd")?;
             Ok(MetaStoreBackendImpl::Etcd(EtcdMetaStore::new(client)))
         }
         MetaStoreBackend::Mem => Ok(MetaStoreBackendImpl::Mem(MemStore::new())),

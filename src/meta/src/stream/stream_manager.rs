@@ -27,6 +27,7 @@ use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, UpdateActorsRequest,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{oneshot, Mutex, RwLock};
 use tracing::Instrument;
@@ -272,7 +273,7 @@ impl GlobalStreamManager {
                         })
                         .await
                         .inspect_err(|_| {
-                            tracing::warn!("failed to notify failed: {table_id}, err: {err}")
+                            tracing::warn!(error = %err.as_report(), "failed to notify failed: {table_id}")
                         });
                 }
             }
@@ -601,7 +602,7 @@ impl GlobalStreamManager {
                 .drop_streaming_jobs_impl(streaming_job_ids)
                 .await
                 .inspect_err(|err| {
-                    tracing::error!(error = ?err, "Failed to drop streaming jobs");
+                    tracing::error!(error = %err.as_report(), "Failed to drop streaming jobs");
                 });
         }
     }

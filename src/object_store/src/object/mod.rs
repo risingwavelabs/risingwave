@@ -37,6 +37,7 @@ pub mod object_metrics;
 
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
+use thiserror_ext::AsReport;
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
 pub type ObjectStreamingUploader = MonitoredStreamingUploader;
@@ -274,7 +275,7 @@ fn try_update_failure_metric<T>(
     operation_type: &'static str,
 ) {
     if let Err(e) = &result {
-        tracing::error!("{:?} failed because of: {:?}", operation_type, e);
+        tracing::error!(error = %e.as_report(), "{} failed", operation_type);
         metrics
             .failure_count
             .with_label_values(&[operation_type])
@@ -875,7 +876,7 @@ pub async fn build_remote_object_store(
             panic!("Passing s3-compatible is not supported, please modify the environment variable and pass in s3.");
         }
         minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
-            S3ObjectStore::with_minio(minio, metrics.clone())
+            S3ObjectStore::with_minio(minio, metrics.clone(), config)
                 .await
                 .monitored(metrics),
         ),
