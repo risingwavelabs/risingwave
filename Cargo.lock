@@ -9195,6 +9195,7 @@ dependencies = [
 name = "risingwave_expr"
 version = "1.7.0-alpha"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "arrow-array 49.0.0",
  "arrow-schema 49.0.0",

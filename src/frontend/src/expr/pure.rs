@@ -244,6 +244,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::PgGetIndexdef
             | expr_node::Type::ColDescription
             | expr_node::Type::PgGetViewdef
+            | expr_node::Type::Decrypt
+            | expr_node::Type::Encrypt
             | expr_node::Type::MakeTimestamptz => self.impure = true,
         }
     }

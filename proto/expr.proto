@@ -259,6 +259,10 @@ message ExprNode {
     JSONB_PATH_QUERY_ARRAY = 622;
     JSONB_PATH_QUERY_FIRST = 623;
 
+    // encrypt and decrypt functions
+    DECRYPT = 700;
+    ENCRYPT = 701;
+
     // Non-pure functions below (> 1000)
     // ------------------------
     // Internal functions

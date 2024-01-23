@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Display;
+use std::fmt::{Debug, Display, Formatter, Write};
 
 use risingwave_common::array::{ArrayError, ArrayRef};
 use risingwave_common::error::{ErrorCode, RwError};
@@ -117,6 +117,37 @@ pub enum ExprError {
 
     #[error("invalid state: {0}")]
     InvalidState(String),
+
+    #[error("error in cryptography: {0}")]
+    Cryptography(Box<CryptographyError>),
+}
+
+#[derive(Debug)]
+pub enum CryptographyStage {
+    Encrypt,
+    Decrypt,
+}
+
+#[derive(Debug)]
+pub struct CryptographyError {
+    pub stage: CryptographyStage,
+    pub payload: Box<[u8]>,
+    pub reason: aes_gcm::Error,
+}
+
+impl Display for CryptographyError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let payload_hex = self.payload.iter().fold(String::new(), |mut output, b| {
+            let _ = write!(output, "{b:02X}");
+            output
+        });
+
+        write!(
+            f,
+            "{:?} stage, payload: {}, reason: {:?}",
+            self.stage, payload_hex, self.reason
+        )
+    }
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);
