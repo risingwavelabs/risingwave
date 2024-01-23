@@ -397,7 +397,6 @@ impl<V: Clone> WindowImpl for RangeWindow<V> {
             self.frame_bounds.order_type,
         )
         .expect("no reason to fail here because we just encoded it in memory");
-        println!("[rc] curr_order_value = {:?}", curr_order_value);
 
         match self.frame_bounds.frame_start_of(&curr_order_value) {
             Sentinelled::Smallest => {
@@ -433,19 +432,6 @@ impl<V: Clone> WindowImpl for RangeWindow<V> {
             }
             Sentinelled::Smallest => unreachable!("frame end never be UNBOUNDED PRECEDING"),
         }
-
-        println!(
-            "[rc] buffer: {:?}",
-            buffer_ref
-                .buffer
-                .iter()
-                .map(|elem| &elem.key)
-                .collect::<Vec<_>>()
-        );
-        println!(
-            "[rc] left = {}, right excl = {}, curr = {}",
-            buffer_ref.left_idx, buffer_ref.right_excl_idx, buffer_ref.curr_idx
-        );
     }
 }
 
