@@ -496,7 +496,7 @@ impl LocalHummockStorage {
                 size,
                 delete_ranges,
                 table_id,
-                Some(instance_id),
+                instance_id,
                 Some(tracker),
             );
             self.spill_offset += 1;

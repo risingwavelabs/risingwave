@@ -23,6 +23,7 @@ use risingwave_hummock_trace::{
     init_collector, should_use_trace, ConcurrentId, MayTraceSpan, OperationResult, StorageType,
     TraceResult, TraceSpan, TracedBytes, TracedSealCurrentEpochOptions, LOCAL_ID,
 };
+use thiserror_ext::AsReport;
 
 use super::identity;
 use crate::error::{StorageError, StorageResult};
@@ -357,7 +358,7 @@ impl<S: StateStoreIterItemStream> TracedStateStoreIter<S> {
         while let Some((key, value)) = inner
             .try_next()
             .await
-            .inspect_err(|e| tracing::error!("Failed in next: {:?}", e))?
+            .inspect_err(|e| tracing::error!(error = %e.as_report(), "Failed in next"))?
         {
             self.span.may_send_iter_next();
             self.span

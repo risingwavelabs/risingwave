@@ -13,6 +13,7 @@ members = [
   "src/connector",
   "src/connector/with_options",
   "src/ctl",
+  "src/dml",
   "src/error",
   "src/expr/core",
   "src/expr/impl",
@@ -33,7 +34,6 @@ members = [
   "src/risedevtool",
   "src/risedevtool/config",
   "src/rpc_client",
-  "src/source",
   "src/sqlparser",
   "src/sqlparser/test_runner",
   "src/storage",
@@ -144,6 +144,7 @@ arrow-schema-deltalake = { package = "arrow-schema", version = "48.0.1" }
 deltalake = { git = "https://github.com/risingwavelabs/delta-rs", rev = "5c2dccd4640490202ffe98adbd13b09cef8e007b", features = [
   "s3-no-concurrent-write",
 ] }
+lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "95f347b" }
 parquet = "50"
 thiserror-ext = "0.0.11"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
@@ -151,6 +152,7 @@ tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git"
   "profiling",
   "stats",
 ], rev = "64a2d9" }
+tokio-util = "0.7"
 
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
@@ -162,6 +164,7 @@ risingwave_compactor = { path = "./src/storage/compactor" }
 risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }
 risingwave_connector = { path = "./src/connector" }
+risingwave_dml = { path = "./src/dml" }
 risingwave_error = { path = "./src/error" }
 risingwave_expr = { path = "./src/expr/core" }
 risingwave_expr_impl = { path = "./src/expr/impl" }
@@ -179,7 +182,6 @@ risingwave_object_store = { path = "./src/object_store" }
 risingwave_pb = { path = "./src/prost" }
 risingwave_rpc_client = { path = "./src/rpc_client" }
 risingwave_rt = { path = "./src/utils/runtime" }
-risingwave_source = { path = "./src/source" }
 risingwave_sqlparser = { path = "./src/sqlparser" }
 risingwave_sqlsmith = { path = "./src/tests/sqlsmith" }
 risingwave_storage = { path = "./src/storage" }
@@ -190,7 +192,6 @@ risingwave_variables = { path = "./src/utils/variables" }
 risingwave_java_binding = { path = "./src/java_binding" }
 risingwave_jni_core = { path = "src/jni_core" }
 rw_futures_util = { path = "src/utils/futures_util" }
-tokio-util = "0.7"
 
 [workspace.lints.rust]
 # `forbid` will also prevent the misuse of `#[allow(unused)]`

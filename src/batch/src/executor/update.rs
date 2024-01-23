@@ -22,9 +22,9 @@ use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_source::dml_manager::DmlManagerRef;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
@@ -136,7 +136,7 @@ impl UpdateExecutor {
 
         let mut builder = DataChunkBuilder::new(data_types, self.chunk_size);
 
-        let mut write_handle: risingwave_source::WriteHandle =
+        let mut write_handle: risingwave_dml::WriteHandle =
             table_dml_handle.write_handle(self.session_id, self.txn_id)?;
         write_handle.begin()?;
 
@@ -264,8 +264,8 @@ mod tests {
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
     use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_dml::dml_manager::DmlManager;
     use risingwave_expr::expr::InputRefExpression;
-    use risingwave_source::dml_manager::DmlManager;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
