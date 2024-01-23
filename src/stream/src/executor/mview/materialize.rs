@@ -42,10 +42,11 @@ use crate::common::table::state_table::StateTableInner;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
-    Executor, ExecutorInfo, Message, PkIndicesRef, StreamExecutorResult,
+    expect_first_barrier, ActorContext, ActorContextRef, AddMutation, BoxedExecutor,
+    BoxedMessageStream, Executor, ExecutorInfo, Message, Mutation, PkIndicesRef,
+    StreamExecutorResult, UpdateMutation,
 };
-use crate::task::AtomicU64Ref;
+use crate::task::{ActorId, AtomicU64Ref};
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
@@ -83,7 +84,15 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     ) -> Self {
         let arrange_key_indices: Vec<usize> = arrange_key.iter().map(|k| k.column_index).collect();
 
-        let state_table = StateTableInner::from_table_catalog(table_catalog, store, vnodes).await;
+        // Note: The current implementation could potentially trigger a switch on the inconsistent_op flag. If the storage relies on this flag to perform optimizations, it would be advisable to maintain consistency with it throughout the lifecycle.
+        let state_table = if matches!(conflict_behavior, ConflictBehavior::Overwrite)
+            && actor_context.dispatch_num == 0
+        {
+            // Table with overwrite conflict behavior could disable conflict check if no downstream mv depends on it, so we use a inconsistent_op to skip sanity check as well.
+            StateTableInner::from_table_catalog_inconsistent_op(table_catalog, store, vnodes).await
+        } else {
+            StateTableInner::from_table_catalog(table_catalog, store, vnodes).await
+        };
 
         let metrics_info =
             MetricsInfo::new(metrics, table_catalog.id, actor_context.id, "Materialize");
@@ -130,7 +139,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         .inc_by(chunk.cardinality() as u64);
 
                     match self.conflict_behavior {
-                        ConflictBehavior::Overwrite | ConflictBehavior::IgnoreConflict => {
+                        ConflictBehavior::Overwrite | ConflictBehavior::IgnoreConflict
+                            if self.state_table.is_consistent_op() =>
+                        {
                             if chunk.cardinality() == 0 {
                                 // empty chunk
                                 continue;
@@ -181,8 +192,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 None => continue,
                             }
                         }
-
-                        ConflictBehavior::NoCheck => {
+                        ConflictBehavior::IgnoreConflict => unreachable!(),
+                        ConflictBehavior::NoCheck | ConflictBehavior::Overwrite => {
                             self.state_table.write_chunk(chunk.clone());
                             self.state_table.try_flush().await?;
                             Message::Chunk(chunk)
@@ -190,7 +201,18 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     }
                 }
                 Message::Barrier(b) => {
-                    self.state_table.commit(b.epoch).await?;
+                    let mutation = b.mutation.clone();
+                    // If a downstream mv depends on the current table, we need to do conflict check again.
+                    if !self.state_table.is_consistent_op()
+                        && Self::new_downstream_created(mutation, self.actor_context.id)
+                    {
+                        assert_eq!(self.conflict_behavior, ConflictBehavior::Overwrite);
+                        self.state_table
+                            .commit_with_switch_consistent_op(b.epoch, Some(true))
+                            .await?;
+                    } else {
+                        self.state_table.commit(b.epoch).await?;
+                    }
 
                     // Update the vnode bitmap for the state table if asked.
                     if let Some(vnode_bitmap) = b.as_update_vnode_bitmap(self.actor_context.id) {
@@ -205,6 +227,35 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     Message::Barrier(b)
                 }
             }
+        }
+    }
+
+    fn new_downstream_created(mutation: Option<Arc<Mutation>>, actor_id: ActorId) -> bool {
+        let Some(mutation) = mutation.as_deref() else {
+            return false;
+        };
+        match mutation {
+            // Add is for mv, index and sink creation.
+            Mutation::Add(AddMutation { adds, .. }) => adds.get(&actor_id).is_some(),
+            // AddAndUpdate is for sink-into-table.
+            Mutation::AddAndUpdate(
+                AddMutation { adds, .. },
+                UpdateMutation {
+                    dispatchers,
+                    actor_new_dispatchers: actor_dispatchers,
+                    ..
+                },
+            ) => {
+                adds.get(&actor_id).is_some()
+                    || actor_dispatchers.get(&actor_id).is_some()
+                    || dispatchers.get(&actor_id).is_some()
+            }
+            Mutation::Update(_)
+            | Mutation::Stop(_)
+            | Mutation::Pause
+            | Mutation::Resume
+            | Mutation::SourceChangeSplit(_)
+            | Mutation::Throttle(_) => false,
         }
     }
 }
