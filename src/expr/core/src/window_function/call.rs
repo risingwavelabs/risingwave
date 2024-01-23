@@ -468,7 +468,7 @@ impl RangeFrameBounds {
     }
 }
 
-#[derive(Display, Debug, Clone, Copy, Eq, PartialEq, Hash, EnumAsInner)]
+#[derive(Display, Debug, Clone, Eq, PartialEq, Hash, EnumAsInner)]
 #[display(style = "TITLE CASE")]
 pub enum FrameBound<T> {
     UnboundedPreceding,
@@ -532,7 +532,7 @@ impl<T> FrameBound<T> {
 
 impl<T> FrameBound<T>
 where
-    FrameBound<T>: Copy,
+    T: Copy,
 {
     fn reverse(self) -> FrameBound<T> {
         match self {
