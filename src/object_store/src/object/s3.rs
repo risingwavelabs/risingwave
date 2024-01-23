@@ -965,9 +965,11 @@ impl tokio_retry::Condition<RetryError> for RetryCondition {
                     }
                 }
                 SdkError::ServiceError(e) => match e.err().code() {
-                    None if self.retry_unknown_service_error => {
-                        tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
-                        return true;
+                    None => {
+                        if self.retry_unknown_service_error {
+                            tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
+                            return true;
+                        }
                     }
                     Some(code) => {
                         if self
@@ -979,7 +981,6 @@ impl tokio_retry::Condition<RetryError> for RetryCondition {
                             return true;
                         }
                     }
-                    _ => {}
                 },
                 _ => {}
             },
