@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use itertools::Itertools;
+use risingwave_common::config::MetricLevel;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
@@ -23,6 +24,7 @@ use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
 use risingwave_storage::dispatch_state_store;
 use risingwave_stream::error::StreamError;
+use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::executor::Barrier;
 use risingwave_stream::task::{BarrierCompleteResult, LocalStreamManager, StreamEnvironment};
 use thiserror_ext::AsReport;
@@ -237,5 +239,16 @@ impl StreamService for StreamServiceImpl {
         });
 
         Ok(Response::new(WaitEpochCommitResponse { status: None }))
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_back_pressure(
+        &self,
+        _request: Request<GetBackPressureRequest>,
+    ) -> Result<Response<GetBackPressureResponse>, Status> {
+        let back_pressure = global_streaming_metrics(MetricLevel::Info);
+        Ok(Response::new(GetBackPressureResponse {
+            back_pressure: 199,
+        }))
     }
 }

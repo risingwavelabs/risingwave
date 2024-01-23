@@ -492,6 +492,22 @@ impl ClusterManager {
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> Option<Worker> {
         self.core.read().await.get_worker_by_id(worker_id)
     }
+
+    pub async fn get_back_pressure_rate(&self) -> MetaResult<u64>  {
+        let mut core = self.core.write().await;
+        for worker in core.workers.values_mut() {
+            let client = self
+                .env
+                .stream_client_pool()
+                .get(&worker.worker_node)
+                .await
+                .unwrap();
+            let request = risingwave_pb::stream_service::GetBackPressureRequest {};
+            let result = client.get_back_pressure(request).await.unwrap();
+            break;
+        }
+        Ok(197)
+    }
 }
 
 /// The cluster info used for scheduling a streaming job.

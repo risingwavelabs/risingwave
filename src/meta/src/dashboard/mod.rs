@@ -360,6 +360,17 @@ pub(super) mod handlers {
 
         Ok(report)
     }
+
+    pub async fn get_back_pressure_rate(
+        // Path(worker_id): Path<WorkerId>,
+        Extension(srv): Extension<Service>,
+    ) -> Result<String> {
+        let result = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.cluster_manager.get_back_pressure_rate().await,
+            MetadataManager::V2(mgr) => mgr.cluster_controller.get_back_pressure_rate().await,
+        };
+        Ok("198".to_string())
+    }
 }
 
 impl DashboardService {
@@ -388,6 +399,7 @@ impl DashboardService {
                 "/metrics/actor/back_pressures",
                 get(prometheus::list_prometheus_actor_back_pressure),
             )
+            .route("/metrics/back_pressures_rate", get(get_back_pressure_rate))
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
             .route("/monitor/await_tree/", get(dump_await_tree_all))
             .route("/monitor/dump_heap_profile/:worker_id", get(heap_profile))

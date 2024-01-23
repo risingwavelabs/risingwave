@@ -369,6 +369,24 @@ impl ClusterController {
             .await
             .get_worker_extra_info_by_id(worker_id)
     }
+
+    pub async fn get_back_pressure_rate(&self) -> MetaResult<u64> {
+        let nodes = self
+            .inner
+            .read()
+            .await
+            .list_active_serving_workers()
+            .await
+            .unwrap();
+        for node in nodes {
+            let client = self.env.stream_client_pool().get(&node).await.unwrap();
+            let request = risingwave_pb::stream_service::GetBackPressureRequest {};
+            let back_pressure = client.get_back_pressure(request).await.unwrap();
+            break;
+        }
+
+        Ok(196)
+    }
 }
 
 #[derive(Default, Clone)]
