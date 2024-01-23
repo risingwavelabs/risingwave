@@ -23,6 +23,7 @@ use futures::StreamExt;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::ConnectorError;
 use risingwave_common::error::Result;
+
 use crate::dispatch_source_prop;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::{

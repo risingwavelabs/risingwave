@@ -15,13 +15,13 @@
 use risingwave_common::catalog::{
     default_key_column_name_version_mapping, ColumnId, TableId, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
+use risingwave_connector::source::reader::source_desc::SourceDescBuilder;
 use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 use risingwave_pb::plan_common::{
     AdditionalColumnType, ColumnDescVersion, FormatType, PbEncodeType,
 };
 use risingwave_pb::stream_plan::SourceNode;
-use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::panic_store::PanicStateStore;
 use tokio::sync::mpsc::unbounded_channel;
 

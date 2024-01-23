@@ -22,11 +22,11 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::SpecificParserConfig;
 use risingwave_connector::source::monitor::SourceMetrics;
+use risingwave_connector::source::reader::connector_source::ConnectorSource;
 use risingwave_connector::source::{
     ConnectorProperties, SourceColumnDesc, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_source::connector_source::ConnectorSource;
 
 use super::Executor;
 use crate::error::{BatchError, Result};

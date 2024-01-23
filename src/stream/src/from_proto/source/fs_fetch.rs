@@ -18,9 +18,9 @@ use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalGcs, OpendalPosixFs, OpendalS3,
 };
+use risingwave_connector::source::reader::source_desc::SourceDescBuilder;
 use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
 use risingwave_pb::stream_plan::StreamFsFetchNode;
-use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::StateStore;
 
 use crate::error::StreamResult;

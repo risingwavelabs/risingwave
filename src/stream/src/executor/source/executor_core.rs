@@ -15,8 +15,8 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_connector::source::reader::source_desc::SourceDescBuilder;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
-use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::StateStore;
 
 use super::SourceStateTableHandler;
