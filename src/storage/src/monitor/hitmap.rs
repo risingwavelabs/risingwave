@@ -19,7 +19,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 
 #[derive(Debug, Clone)]
 pub struct Hitmap<const N: usize> {
-    /// For [`Block`] is rarely access in multi-thread pattern,
+    /// For [`Hitmap`] is rarely access in multi-thread pattern,
     /// the cons of false-sharing can be ignored.
     data: Arc<[AtomicU64; N]>,
 }
