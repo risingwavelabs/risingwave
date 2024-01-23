@@ -200,7 +200,6 @@ select 'P12Y2M30DT4H5M0.1234567S'::interval;
 ----
 12 years 2 mons 30 days 04:05:00.123456
 
-
 # The following is an overflow bug present in PostgreSQL 15.2
 # Their `days` overflows to a negative value, leading to the latter smaller
 # than the former. We report an error in this case.

@@ -1469,6 +1469,7 @@ impl FromStr for Interval {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use interval::test_utils::IntervalTestExt;
 
@@ -1537,7 +1538,7 @@ mod tests {
         assert_eq!(
             interval,
             Interval::from_month(14) + Interval::from_days(3) + Interval::from_minutes(5)
-        )
+        );
     }
 
     #[test]
