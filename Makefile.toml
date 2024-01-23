@@ -922,7 +922,7 @@ cargo build \
   -p risingwave_frontend \
   -p risingwave_meta \
   -p risingwave_object_store \
-  -p risingwave_source \
+  -p risingwave_dml \
   -p risingwave_storage \
   -p risingwave_stream \
   -p pgwire \
@@ -947,7 +947,7 @@ cargo nextest run \
   -p risingwave_frontend \
   -p risingwave_meta \
   -p risingwave_object_store \
-  -p risingwave_source \
+  -p risingwave_dml \
   -p risingwave_storage \
   -p risingwave_stream \
   -p pgwire \
@@ -1003,7 +1003,7 @@ cargo check \
   -p risingwave_frontend \
   -p risingwave_meta \
   -p risingwave_object_store \
-  -p risingwave_source \
+  -p risingwave_dml \
   -p risingwave_storage \
   -p risingwave_stream \
   -p pgwire \

@@ -32,7 +32,7 @@ There's also a [Dash](https://kapeli.com/dash) docset feed containing all crate 
 
 ### Source and Connector
 
-- [risingwave_source](risingwave_source/index.html)
+- [risingwave_dml](risingwave_dml/index.html)
 - [risingwave_connector](risingwave_connector/index.html)
 
 ### Common

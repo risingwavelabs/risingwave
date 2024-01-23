@@ -36,7 +36,7 @@ risingwave_hummock_sdk = { workspace = true }
 risingwave_jni_core = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
-risingwave_source = { workspace = true }
+risingwave_dml = { workspace = true }
 risingwave_storage = { workspace = true }
 risingwave_stream = { workspace = true }
 serde = { version = "1", features = ["derive"] }
