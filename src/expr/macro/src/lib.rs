@@ -522,8 +522,8 @@ struct UserFunctionAttr {
     write: bool,
     /// Whether the last argument type is `retract: bool`.
     retract: bool,
-    /// The argument type are `Option`s.
-    arg_option: bool,
+    /// Whether each argument type is `Option<T>`.
+    args_option: Vec<bool>,
     /// If the first argument type is `&mut T`, then `Some(T)`.
     first_mut_ref_arg: Option<String>,
     /// The return type kind.
@@ -610,7 +610,7 @@ impl UserFunctionAttr {
         !self.async_
             && !self.write
             && !self.context
-            && !self.arg_option
+            && self.args_option.iter().all(|b| !b)
             && self.return_type_kind == ReturnTypeKind::T
     }
 }
