@@ -105,11 +105,11 @@ impl SourceDescBuilder {
             let col_list = get_connector_compatible_additional_columns(&connector_name)
                 .unwrap_or(common_compatible_column_vec());
             ["partition", "file", "offset"]
-                .into_iter()
+                .iter()
                 .filter_map(|key_name| {
                     let col_name = format!("_rw_{}_{}", connector_name, key_name);
                     col_list.iter().find_map(|(n, f)| {
-                        if key_name == *n {
+                        if key_name == n {
                             last_column_id = last_column_id.next();
                             Some(f(last_column_id, &col_name).to_protobuf())
                         } else {
@@ -119,8 +119,7 @@ impl SourceDescBuilder {
                 })
                 .collect()
         };
-
-        debug_assert_eq!(additional_columns.len(), 2);
+        assert_eq!(additional_columns.len(), 2);
 
         for col in &self.columns {
             match col
