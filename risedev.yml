@@ -594,7 +594,7 @@ profile:
     steps:
       - use: minio
         api-requests-max: 1
-        api-requests-deadline: 1s
+        api-requests-deadline: 10s
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node

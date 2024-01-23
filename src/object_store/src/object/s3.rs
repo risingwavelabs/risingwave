@@ -938,6 +938,8 @@ impl From<RetryError> for ObjectError {
 
 struct RetryCondition {
     retry_unknown_service_error: bool,
+    retry_too_many_requests_error: bool,
+    retry_slowdown_error: bool,
 }
 
 impl RetryCondition {
@@ -945,6 +947,8 @@ impl RetryCondition {
         println!("s3 config: {:?}", config);
         Self {
             retry_unknown_service_error: config.retry_unknown_service_error,
+            retry_too_many_requests_error: config.retry_too_many_requests_error,
+            retry_slowdown_error: config.retry_slowdown_error,
         }
     }
 }
@@ -959,21 +963,25 @@ impl tokio_retry::Condition<RetryError> for RetryCondition {
                         return true;
                     }
                 }
-                SdkError::ServiceError(e) if self.retry_unknown_service_error => {
-                    match e.err().code() {
-                        None => {
-                            tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
+                SdkError::ServiceError(e) => match e.err().code() {
+                    None if self.retry_unknown_service_error => {
+                        tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
+                        return true;
+                    }
+                    Some(code) if self.retry_slowdown_error => {
+                        if code == "SlowDown" {
+                            tracing::warn!(target: "slowdown_error", "{e:?} occurs, retry S3 get_object request.");
                             return true;
                         }
-                        Some(code) => {
-                            println!("code: {}", code);
-                            if code == "SlowDown" {
-                                tracing::warn!(target: "slowdown_error", "{e:?} occurs, retry S3 get_object request.");
-                                return true;
-                            }
+                    }
+                    Some(code) if self.retry_too_many_requests_error => {
+                        if code == "TooManyRequests" {
+                            tracing::warn!(target: "too_many_requests_error", "{e:?} occurs, retry S3 get_object request.");
+                            return true;
                         }
                     }
-                }
+                    _ => {}
+                },
                 _ => {
                     println!("encountered_other_error: {:?}", err);
                 }
