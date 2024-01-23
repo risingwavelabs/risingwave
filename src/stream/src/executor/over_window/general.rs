@@ -32,6 +32,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::window_function::{
     create_window_state, StateKey, WindowFuncCall, WindowStates,
 };
+use risingwave_storage::row_serde::row_serde_util::serialize_pk_with_vnode;
 use risingwave_storage::StateStore;
 
 use super::over_partition::{
@@ -324,7 +325,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         }
 
         // `input pk` => `Record`
-        let mut key_change_update_buffer = BTreeMap::new();
+        let mut key_change_update_buffer: BTreeMap<DefaultOrdered<OwnedRow>, Record<OwnedRow>> = BTreeMap::new();
         let mut chunk_builder =
             StreamChunkBuilder::new(this.chunk_size, this.info.schema.data_types());
 
@@ -372,6 +373,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     let pk = key.pk.clone();
                     let record = record.clone();
                     if let Some(existed) = key_change_update_buffer.remove(&key.pk) {
+                        let tp1 = existed.to_record_type();
+                        let tp2 = record.to_record_type();
+
                         match (existed, record) {
                             (Record::Insert { new_row }, Record::Delete { old_row })
                             | (Record::Delete { old_row }, Record::Insert { new_row }) => {
@@ -382,7 +386,16 @@ impl<S: StateStore> OverWindowExecutor<S> {
                                     yield chunk;
                                 }
                             }
-                            _ => panic!("other cases should not exist"),
+                            _ => {
+                                let vnode =
+                                    this.state_table.compute_vnode_by_pk(&key.pk);
+                                let raw_key = serialize_pk_with_vnode(
+                                    &key.pk,
+                                    this.state_table.pk_serde(),
+                                    vnode,
+                                );
+                                panic!("other cases should not exist. raw_key: {:?}, existed: {:?}, new: {:?}", raw_key, tp1, tp2);
+                            }
                         }
                     } else {
                         key_change_update_buffer.insert(pk, record);
