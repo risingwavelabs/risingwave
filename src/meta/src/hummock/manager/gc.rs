@@ -17,6 +17,7 @@ use std::collections::HashSet;
 use std::ops::DerefMut;
 use std::time::Duration;
 
+use anyhow::Context;
 use function_name::named;
 use futures::{stream, StreamExt};
 use itertools::Itertools;
@@ -266,8 +267,7 @@ pub async fn collect_global_gc_watermark(
     }
     let mut buffered = stream::iter(worker_futures).buffer_unordered(workers.len());
     while let Some(worker_result) = buffered.next().await {
-        let worker_watermark = worker_result
-            .map_err(|e| anyhow::anyhow!("Failed to collect GC watermark: {:#?}", e))?;
+        let worker_watermark = worker_result.context("Failed to collect GC watermark")?;
         // None means either the worker has gone or the worker has not set a watermark.
         global_watermark = cmp::min(
             global_watermark,

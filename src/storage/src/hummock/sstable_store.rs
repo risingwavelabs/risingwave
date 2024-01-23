@@ -33,6 +33,7 @@ use risingwave_object_store::object::{
     ObjectError, ObjectMetadataIter, ObjectStoreRef, ObjectStreamingUploader,
 };
 use risingwave_pb::hummock::SstableInfo;
+use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use zstd::zstd_safe::WriteBuf;
@@ -297,7 +298,7 @@ impl SstableStore {
     pub fn delete_cache(&self, object_id: HummockSstableObjectId) {
         self.meta_cache.erase(object_id, &object_id);
         if let Err(e) = self.meta_file_cache.remove(&object_id) {
-            tracing::warn!("meta file cache remove error: {}", e);
+            tracing::warn!(error = %e.as_report(), "meta file cache remove error");
         }
     }
 
@@ -572,7 +573,7 @@ impl SstableStore {
     pub fn clear_block_cache(&self) {
         self.block_cache.clear();
         if let Err(e) = self.data_file_cache.clear() {
-            tracing::warn!("data file cache clear error: {}", e);
+            tracing::warn!(error = %e.as_report(), "data file cache clear error");
         }
     }
 
@@ -580,7 +581,7 @@ impl SstableStore {
     pub fn clear_meta_cache(&self) {
         self.meta_cache.clear();
         if let Err(e) = self.meta_file_cache.clear() {
-            tracing::warn!("meta file cache clear error: {}", e);
+            tracing::warn!(error = %e.as_report(), "meta file cache clear error");
         }
     }
 
@@ -725,8 +726,8 @@ impl SstableStore {
             Ok(Err(e)) => return Err(HummockError::from(e)),
             Err(e) => {
                 return Err(HummockError::other(format!(
-                    "failed to get result, this read request may be canceled: {:?}",
-                    e
+                    "failed to get result, this read request may be canceled: {}",
+                    e.as_report()
                 )))
             }
         };

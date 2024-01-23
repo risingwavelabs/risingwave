@@ -386,16 +386,22 @@ impl StreamConsumer for DispatchExecutor {
             #[for_await]
             for msg in input {
                 let msg: Message = msg?;
-                let (barrier, span) = match msg {
-                    Message::Chunk(_) => (None, "dispatch_chunk"),
-                    Message::Barrier(ref barrier) => (Some(barrier.clone()), "dispatch_barrier"),
-                    Message::Watermark(_) => (None, "dispatch_watermark"),
-                };
-
-                let tracing_span = if let Some(_barrier) = &barrier {
-                    tracing::info_span!("dispatch_barrier")
-                } else {
-                    tracing::Span::none()
+                let (barrier, span, tracing_span) = match msg {
+                    Message::Chunk(_) => (
+                        None,
+                        "dispatch_chunk",
+                        tracing::info_span!("dispatch_chunk"),
+                    ),
+                    Message::Barrier(ref barrier) => (
+                        Some(barrier.clone()),
+                        "dispatch_barrier",
+                        tracing::info_span!("dispatch_barrier"),
+                    ),
+                    Message::Watermark(_) => (
+                        None,
+                        "dispatch_watermark",
+                        tracing::info_span!("dispatch_watermark"),
+                    ),
                 };
 
                 self.inner
@@ -619,7 +625,14 @@ impl RoundRobinDataDispatcher {
 
 impl Dispatcher for RoundRobinDataDispatcher {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
-        let chunk = chunk.project(&self.output_indices);
+        let chunk = if self.output_indices.len() < chunk.columns().len() {
+            chunk
+                .project(&self.output_indices)
+                .eliminate_adjacent_noop_update()
+        } else {
+            chunk.project(&self.output_indices)
+        };
+
         self.outputs[self.cur].send(Message::Chunk(chunk)).await?;
         self.cur += 1;
         self.cur %= self.outputs.len();
@@ -739,7 +752,13 @@ impl Dispatcher for HashDataDispatcher {
         let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
         // Apply output indices after calculating the vnode.
-        let chunk = chunk.project(&self.output_indices);
+        let chunk = if self.output_indices.len() < chunk.columns().len() {
+            chunk
+                .project(&self.output_indices)
+                .eliminate_adjacent_noop_update()
+        } else {
+            chunk.project(&self.output_indices)
+        };
 
         for ((vnode, &op), visible) in vnodes
             .iter()
@@ -858,7 +877,13 @@ impl BroadcastDispatcher {
 
 impl Dispatcher for BroadcastDispatcher {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
-        let chunk = chunk.project(&self.output_indices);
+        let chunk = if self.output_indices.len() < chunk.columns().len() {
+            chunk
+                .project(&self.output_indices)
+                .eliminate_adjacent_noop_update()
+        } else {
+            chunk.project(&self.output_indices)
+        };
         broadcast_concurrent(self.outputs.values_mut(), Message::Chunk(chunk)).await
     }
 
@@ -956,7 +981,13 @@ impl Dispatcher for SimpleDispatcher {
             .exactly_one()
             .expect("expect exactly one output");
 
-        let chunk = chunk.project(&self.output_indices);
+        let chunk = if self.output_indices.len() < chunk.columns().len() {
+            chunk
+                .project(&self.output_indices)
+                .eliminate_adjacent_noop_update()
+        } else {
+            chunk.project(&self.output_indices)
+        };
         output.send(Message::Chunk(chunk)).await
     }
 
@@ -1178,7 +1209,7 @@ mod tests {
         // 2. Take downstream receivers.
         let mut rxs = [untouched, old, new, old_simple, new_simple]
             .into_iter()
-            .map(|id| (id, ctx.take_receiver(&(actor_id, id)).unwrap()))
+            .map(|id| (id, ctx.take_receiver((actor_id, id)).unwrap()))
             .collect::<HashMap<_, _>>();
         macro_rules! try_recv {
             ($down_id:expr) => {

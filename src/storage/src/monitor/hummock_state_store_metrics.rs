@@ -29,6 +29,7 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
 };
+use thiserror_ext::AsReport;
 use tracing::warn;
 
 /// [`HummockStateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
@@ -534,8 +535,8 @@ pub fn monitor_cache(memory_collector: Arc<dyn MemoryCollector>) {
     let collector = Box::new(StateStoreCollector::new(memory_collector));
     if let Err(e) = GLOBAL_METRICS_REGISTRY.register(collector) {
         warn!(
-            "unable to monitor cache. May have been registered if in all-in-one deployment: {:?}",
-            e
+            "unable to monitor cache. May have been registered if in all-in-one deployment: {}",
+            e.as_report()
         );
     }
 }
