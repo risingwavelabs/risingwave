@@ -94,14 +94,13 @@ impl<LS: LocalStateStore> SubscriptionLogStoreWriter<LS> {
             self.state_store.insert(key, value, None)?;
         }
 
-        let mut watermark = None;
-        if let Some(truncate_offset) = truncate_offset {
-            watermark = Some(VnodeWatermark::new(
+        let watermark = truncate_offset.map(|truncate_offset| {
+            VnodeWatermark::new(
                 self.serde.vnodes().clone(),
                 self.serde
                     .serialize_truncation_offset_watermark(truncate_offset),
-            ));
-        }
+            )
+        });
         self.state_store.flush(vec![]).await?;
         let watermark = watermark.into_iter().collect_vec();
         self.state_store.seal_current_epoch(

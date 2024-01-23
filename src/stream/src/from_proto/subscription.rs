@@ -57,6 +57,7 @@ impl ExecutorBuilder for SubscriptionExecutorBuilder {
         let serde = LogStoreRowSerde::new(
             node.log_store_table.as_ref().unwrap(),
             Some(vnodes.clone()),
+            // TODO: Use V2 after pr #14599
             &KV_LOG_STORE_V1_INFO,
         );
         let log_store_identity = format!("subscription-executor[{}]", params.executor_id);
@@ -68,7 +69,7 @@ impl ExecutorBuilder for SubscriptionExecutorBuilder {
                 params.info,
                 input,
                 log_store,
-                node.retention,
+                node.retention_seconds,
             )
             .await?,
         ))

@@ -36,7 +36,7 @@ pub struct SubscriptionExecutor<LS: LocalStateStore> {
     info: ExecutorInfo,
     input: BoxedExecutor,
     log_store: SubscriptionLogStoreWriter<LS>,
-    retention: i64,
+    retention_seconds: i64,
 }
 
 impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
@@ -47,14 +47,14 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
         info: ExecutorInfo,
         input: BoxedExecutor,
         log_store: SubscriptionLogStoreWriter<LS>,
-        retention: i64,
+        retention_seconds: i64,
     ) -> StreamExecutorResult<Self> {
         Ok(Self {
             actor_context,
             info,
             input,
             log_store,
-            retention,
+            retention_seconds,
         })
     }
 
@@ -68,7 +68,7 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
 
-        let mut timer = Instant::now() + Duration::from_secs(EXECUTE_GC_INTERVAL);
+        let mut next_truncate_time = Instant::now() + Duration::from_secs(EXECUTE_GC_INTERVAL);
 
         #[for_await]
         for msg in input {
@@ -84,13 +84,14 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
                     Message::Chunk(chunk)
                 }
                 Message::Barrier(barrier) => {
-                    let truncate_offset: Option<ReaderTruncationOffsetType> = if timer
+                    let truncate_offset: Option<ReaderTruncationOffsetType> = if next_truncate_time
                         < Instant::now()
                     {
-                        let truncate_timestamptz = Timestamptz::from_secs(barrier.get_curr_epoch().as_timestamptz().timestamp() - self.retention).ok_or_else(||{StreamExecutorError::from("Subscription retention time calculation error: timestamp is out of range.".to_string())})?;
+                        let truncate_timestamptz = Timestamptz::from_secs(barrier.get_curr_epoch().as_timestamptz().timestamp() - self.retention_seconds).ok_or_else(||{StreamExecutorError::from("Subscription retention time calculation error: timestamp is out of range.".to_string())})?;
                         let epoch =
                             Epoch::from_unix_millis(truncate_timestamptz.timestamp_millis() as u64);
-                        timer = Instant::now() + Duration::from_secs(EXECUTE_GC_INTERVAL);
+                        next_truncate_time =
+                            Instant::now() + Duration::from_secs(EXECUTE_GC_INTERVAL);
                         Some((epoch.0, None))
                     } else {
                         None
