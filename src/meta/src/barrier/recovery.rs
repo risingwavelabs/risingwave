@@ -16,7 +16,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
 use futures::TryStreamExt;
@@ -31,6 +31,7 @@ use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, UpdateActorsRequest,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, warn, Instrument};
@@ -197,9 +198,7 @@ impl GlobalBarrierManagerContext {
             tokio::spawn(async move {
                 let res: MetaResult<()> = try {
                     tracing::debug!("recovering stream job {}", table.id);
-                    finished
-                        .await
-                        .map_err(|e| anyhow!("failed to finish command: {}", e))?;
+                    finished.await.context("failed to finish command")?;
 
                     tracing::debug!("finished stream job {}", table.id);
                     // Once notified that job is finished we need to notify frontend.
@@ -212,8 +211,9 @@ impl GlobalBarrierManagerContext {
                 };
                 if let Err(e) = res.as_ref() {
                     tracing::error!(
-                        "stream job {} interrupted, will retry after recovery: {e:?}",
-                        table.id
+                        id = table.id,
+                        error = %e.as_report(),
+                        "stream job interrupted, will retry after recovery",
                     );
                     // NOTE(kwannoel): We should not cleanup stream jobs,
                     // we don't know if it's just due to CN killed,
@@ -283,16 +283,15 @@ impl GlobalBarrierManagerContext {
             tokio::spawn(async move {
                 let res: MetaResult<()> = try {
                     tracing::debug!("recovering stream job {}", id);
-                    finished
-                        .await
-                        .map_err(|e| anyhow!("failed to finish command: {}", e))?;
-                    tracing::debug!("finished stream job {}", id);
+                    finished.await.ok().context("failed to finish command")?;
+                    tracing::debug!(id, "finished stream job");
                     catalog_controller.finish_streaming_job(id).await?;
                 };
                 if let Err(e) = &res {
                     tracing::error!(
-                        "stream job {} interrupted, will retry after recovery: {e:?}",
-                        id
+                        id,
+                        error = %e.as_report(),
+                        "stream job interrupted, will retry after recovery",
                     );
                     // NOTE(kwannoel): We should not cleanup stream jobs,
                     // we don't know if it's just due to CN killed,
@@ -354,7 +353,7 @@ impl GlobalBarrierManagerContext {
                     let mut info = if self.env.opts.enable_scale_in_when_recovery {
                         let info = self.resolve_actor_info().await;
                         let scaled = self.scale_actors(&info).await.inspect_err(|err| {
-                            warn!(err = ?err, "scale actors failed");
+                            warn!(error = %err.as_report(), "scale actors failed");
                         })?;
                         if scaled {
                             self.resolve_actor_info().await
@@ -364,13 +363,13 @@ impl GlobalBarrierManagerContext {
                     } else {
                         // Migrate actors in expired CN to newly joined one.
                         self.migrate_actors().await.inspect_err(|err| {
-                            warn!(err = ?err, "migrate actors failed");
+                            warn!(error = %err.as_report(), "migrate actors failed");
                         })?
                     };
 
                     // Reset all compute nodes, stop and drop existing actors.
                     self.reset_compute_nodes(&info).await.inspect_err(|err| {
-                        warn!(err = ?err, "reset compute nodes failed");
+                        warn!(error = %err.as_report(), "reset compute nodes failed");
                     })?;
 
                     if scheduled_barriers.pre_apply_drop_scheduled().await {
@@ -379,10 +378,10 @@ impl GlobalBarrierManagerContext {
 
                     // update and build all actors.
                     self.update_actors(&info).await.inspect_err(|err| {
-                        warn!(err = ?err, "update actors failed");
+                        warn!(error = %err.as_report(), "update actors failed");
                     })?;
                     self.build_actors(&info).await.inspect_err(|err| {
-                        warn!(err = ?err, "build_actors failed");
+                        warn!(error = %err.as_report(), "build_actors failed");
                     })?;
 
                     // get split assignments for all actors
@@ -424,14 +423,14 @@ impl GlobalBarrierManagerContext {
                     let res = match await_barrier_complete.await.result {
                         Ok(response) => {
                             if let Err(err) = command_ctx.post_collect().await {
-                                warn!(err = ?err, "post_collect failed");
+                                warn!(error = %err.as_report(), "post_collect failed");
                                 Err(err)
                             } else {
                                 Ok((new_epoch.clone(), response))
                             }
                         }
                         Err(err) => {
-                            warn!(err = ?err, "inject_barrier failed");
+                            warn!(error = %err.as_report(), "inject_barrier failed");
                             Err(err)
                         }
                     };
@@ -674,8 +673,8 @@ impl GlobalBarrierManagerContext {
             .await
         {
             tracing::error!(
-                "failed to apply reschedule for offline scaling in recovery: {}",
-                e.to_string()
+                error = %e.as_report(),
+                "failed to apply reschedule for offline scaling in recovery",
             );
 
             mgr.fragment_manager

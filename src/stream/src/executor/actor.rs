@@ -27,6 +27,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr_context::expr_context_scope;
 use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::ExprContext;
+use risingwave_pb::stream_plan::PbStreamActor;
 use thiserror_ext::AsReport;
 use tokio_stream::StreamExt;
 use tracing::Instrument;
@@ -35,12 +36,13 @@ use super::monitor::StreamingMetrics;
 use super::subtask::SubtaskHandle;
 use super::StreamConsumer;
 use crate::error::StreamResult;
-use crate::task::{ActorId, SharedContext};
+use crate::task::{ActorId, LocalBarrierManager};
 
 /// Shared by all operators of an actor.
 pub struct ActorContext {
     pub id: ActorId,
     pub fragment_id: u32,
+    pub mview_definition: String,
 
     // TODO(eric): these seem to be useless now?
     last_mem_val: Arc<AtomicUsize>,
@@ -58,6 +60,7 @@ impl ActorContext {
         Arc::new(Self {
             id,
             fragment_id: 0,
+            mview_definition: "".to_string(),
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             total_mem_val: Arc::new(TrAdder::new()),
@@ -67,15 +70,15 @@ impl ActorContext {
     }
 
     pub fn create_with_metrics(
-        id: ActorId,
-        fragment_id: u32,
+        stream_actor: &PbStreamActor,
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
         unique_user_errors: usize,
     ) -> ActorContextRef {
         Arc::new(Self {
-            id,
-            fragment_id,
+            id: stream_actor.actor_id,
+            fragment_id: stream_actor.fragment_id,
+            mview_definition: stream_actor.mview_definition.clone(),
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             total_mem_val,
@@ -132,10 +135,10 @@ pub struct Actor<C> {
     /// The subtasks to execute concurrently.
     subtasks: Vec<SubtaskHandle>,
 
-    context: Arc<SharedContext>,
     _metrics: Arc<StreamingMetrics>,
-    actor_context: ActorContextRef,
+    pub actor_context: ActorContextRef,
     expr_context: ExprContext,
+    barrier_manager: LocalBarrierManager,
 }
 
 impl<C> Actor<C>
@@ -145,18 +148,18 @@ where
     pub fn new(
         consumer: C,
         subtasks: Vec<SubtaskHandle>,
-        context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
         actor_context: ActorContextRef,
         expr_context: ExprContext,
+        barrier_manager: LocalBarrierManager,
     ) -> Self {
         Self {
             consumer,
             subtasks,
-            context,
             _metrics: metrics,
             actor_context,
             expr_context,
+            barrier_manager,
         }
     }
 
@@ -219,7 +222,7 @@ where
             .into()));
 
             // Collect barriers to local barrier manager
-            self.context.barrier_manager().collect(id, &barrier);
+            self.barrier_manager.collect(id, &barrier);
 
             // Then stop this actor if asked
             if barrier.is_stop(id) {
