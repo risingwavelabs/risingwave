@@ -216,11 +216,12 @@ impl UploadingTask {
             Ok(task_result) => task_result
                 .inspect(|_| {
                     if self.task_info.task_size > Self::LOG_THRESHOLD_FOR_UPLOAD_TASK_SIZE {
-                        info!("upload task finish {:?}", self.task_info)
+                        info!(task_info = ?self.task_info, "upload task finish");
                     } else {
-                        debug!("upload task finish {:?}", self.task_info)
+                        debug!(task_info = ?self.task_info, "upload task finish");
                     }
                 })
+                .inspect_err(|e| error!(task_info = ?self.task_info, ?e, "upload task failed"))
                 .map(|ssts| {
                     StagingSstableInfo::new(
                         ssts,
@@ -460,7 +461,7 @@ impl SealedData {
                 .entry((imm.table_id, imm.instance_id))
                 .or_default();
             if let Some(front) = queue.front() {
-                assert_gt!(front.instance_id, front.instance_id);
+                assert_gt!(imm.batch_id(), front.batch_id());
             }
             queue.push_front(imm);
         }
