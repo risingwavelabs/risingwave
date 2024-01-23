@@ -337,7 +337,10 @@ impl LocalBarrierWorker {
             }
         };
         let actor_manager = self.actor_manager.clone();
-        let join_handle = spawn(actor_manager.create_actors(actors));
+        let join_handle = self
+            .actor_manager
+            .runtime
+            .spawn(actor_manager.create_actors(actors));
         self.actor_manager_state
             .creating_actors
             .push(AttachedFuture::new(join_handle, result_sender));
