@@ -203,7 +203,7 @@ test_sink_backfill_recovery() {
 }
 
 test_arrangement_backfill_snapshot_and_upstream_runtime() {
-  echo "--- e2e, test_backfill_snapshot_and_upstream_runtime"
+  echo "--- e2e, test_arrangement_backfill_snapshot_and_upstream_runtime"
   cargo make ci-start $RUNTIME_CLUSTER_PROFILE
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
@@ -219,7 +219,7 @@ test_arrangement_backfill_snapshot_and_upstream_runtime() {
 }
 
 test_no_shuffle_backfill_snapshot_and_upstream_runtime() {
-  echo "--- e2e, test_backfill_snapshot_and_upstream_runtime"
+  echo "--- e2e, test_no_shuffle_backfill_snapshot_and_upstream_runtime"
   cargo make ci-start $RUNTIME_CLUSTER_PROFILE
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
@@ -250,7 +250,7 @@ test_backfill_snapshot_runtime() {
 # Throttle the storage throughput.
 # Arrangement Backfill should not fail because of this.
 test_backfill_snapshot_with_limited_storage_throughput() {
-  echo "--- e2e, test_backfill_snapshot_runtime"
+  echo "--- e2e, test_backfill_snapshot_with_limited_storage_throughput"
   cargo make ci-start $MINIO_RATE_LIMIT_CLUSTER_PROFILE
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
