@@ -944,8 +944,8 @@ struct RetryCondition {
 impl RetryCondition {
     fn new(config: &S3ObjectStoreConfig) -> Self {
         Self {
-            retry_unknown_service_error: config.retry_unknown_service_error,
-            retryable_service_error_codes: config.retryable_service_error_codes.clone(),
+            retry_unknown_service_error: config.developer.retry_unknown_service_error,
+            retryable_service_error_codes: config.developer.retryable_service_error_codes.clone(),
         }
     }
 }
@@ -969,7 +969,7 @@ impl tokio_retry::Condition<RetryError> for RetryCondition {
                         if self
                             .retryable_service_error_codes
                             .iter()
-                            .any(|s| s.as_str() == code)
+                            .any(|s| s.as_str().eq_ignore_ascii_case(code))
                         {
                             tracing::warn!(target: "retryable_service_error", "{e:?} occurs, retry S3 get_object request.");
                             return true;

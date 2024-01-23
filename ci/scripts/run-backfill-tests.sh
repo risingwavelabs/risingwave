@@ -65,7 +65,7 @@ rename_logs_with_prefix() {
 }
 
 kill_cluster() {
-  cargo make ci-kill-no-logs
+  cargo make ci-kill-no-dump-logs
   wait
 }
 

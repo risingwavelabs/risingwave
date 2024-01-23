@@ -921,10 +921,23 @@ pub struct S3ObjectStoreConfig {
     pub object_store_req_retry_max_delay_ms: u64,
     #[serde(default = "default::object_store_config::s3::object_store_req_retry_max_attempts")]
     pub object_store_req_retry_max_attempts: usize,
+    #[serde(default)]
+    pub developer: S3ObjectStoreDeveloperConfig,
+}
+
+/// The subsections `[storage.object_store.s3.developer]`.
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct S3ObjectStoreDeveloperConfig {
     /// Whether to retry s3 sdk error from which no error metadata is provided.
-    #[serde(default = "default::object_store_config::s3::retry_unknown_service_error")]
+    #[serde(
+        default = "default::object_store_config::s3::developer::object_store_retry_unknown_service_error"
+    )]
     pub retry_unknown_service_error: bool,
-    #[serde(default = "default::object_store_config::s3::retryable_service_error_codes")]
+    /// An array of error codes that should be retried.
+    /// e.g. `["SlowDown", "TooManyRequests"]`
+    #[serde(
+        default = "default::object_store_config::s3::developer::object_store_retryable_service_error_codes"
+    )]
     pub retryable_service_error_codes: Vec<String>,
 }
 
@@ -1528,12 +1541,14 @@ pub mod default {
                 DEFAULT_RETRY_MAX_ATTEMPTS
             }
 
-            pub fn retry_unknown_service_error() -> bool {
-                false
-            }
+            pub mod developer {
+                pub fn object_store_retry_unknown_service_error() -> bool {
+                    false
+                }
 
-            pub fn retryable_service_error_codes() -> Vec<String> {
-                vec!["SlowDown".into(), "TooManyRequests".into()]
+                pub fn object_store_retryable_service_error_codes() -> Vec<String> {
+                    vec!["SlowDown".into(), "TooManyRequests".into()]
+                }
             }
         }
     }
