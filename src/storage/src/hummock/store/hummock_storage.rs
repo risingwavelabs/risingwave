@@ -32,7 +32,7 @@ use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
-use tracing::log::error;
+use tracing::error;
 
 use super::local_hummock_storage::LocalHummockStorage;
 use super::version::{CommittedVersion, HummockVersionReader};
@@ -69,7 +69,7 @@ impl Drop for HummockStorageShutdownGuard {
         let _ = self
             .shutdown_sender
             .send(HummockEvent::Shutdown)
-            .inspect_err(|e| error!("unable to send shutdown: {:?}", e));
+            .inspect_err(|e| error!(event = ?e.0, "unable to send shutdown"));
     }
 }
 
