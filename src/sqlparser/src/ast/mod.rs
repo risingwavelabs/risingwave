@@ -2260,6 +2260,8 @@ impl fmt::Display for FunctionArg {
 pub struct Function {
     pub name: ObjectName,
     pub args: Vec<FunctionArg>,
+    /// whether the last argument is variadic, e.g. `foo(a, b, variadic c)`
+    pub variadic: bool,
     pub over: Option<WindowSpec>,
     // aggregate functions may specify eg `COUNT(DISTINCT x)`
     pub distinct: bool,
@@ -2274,6 +2276,7 @@ impl Function {
         Self {
             name,
             args: vec![],
+            variadic: false,
             over: None,
             distinct: false,
             order_by: vec![],
@@ -2287,17 +2290,22 @@ impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{}({}{}{}{})",
+            "{}({}",
             self.name,
             if self.distinct { "DISTINCT " } else { "" },
-            display_comma_separated(&self.args),
-            if !self.order_by.is_empty() {
-                " ORDER BY "
-            } else {
-                ""
-            },
-            display_comma_separated(&self.order_by),
         )?;
+        if self.variadic {
+            for arg in &self.args[0..self.args.len() - 1] {
+                write!(f, "{}, ", arg)?;
+            }
+            write!(f, "VARIADIC {}", self.args.last().unwrap())?;
+        } else {
+            write!(f, "{}", display_comma_separated(&self.args))?;
+        }
+        if !self.order_by.is_empty() {
+            write!(f, " ORDER BY {}", display_comma_separated(&self.order_by))?;
+        }
+        write!(f, ")")?;
         if let Some(o) = &self.over {
             write!(f, " OVER ({})", o)?;
         }
