@@ -491,7 +491,7 @@ impl HummockIterator for ConcatSstableIterator {
         if let Some(iter) = self.sstable_iter.as_ref() {
             iter.sst_debug_info()
         } else {
-            format!("compactor-concat-iterator")
+            "compactor-concat-iterator".to_string()
         }
     }
 }

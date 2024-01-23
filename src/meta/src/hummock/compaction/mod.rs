@@ -17,20 +17,23 @@
 pub mod compaction_config;
 mod overlap_strategy;
 use risingwave_common::catalog::TableOption;
-use risingwave_pb::hummock::compact_task::{self, TaskType};
+use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
+use risingwave_pb::hummock::compact_task::{self, TaskStatus, TaskType};
 
 mod picker;
 pub mod selector;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use picker::{LevelCompactionPicker, TierCompactionPicker};
-use risingwave_hummock_sdk::{can_concat, CompactionGroupId, HummockCompactionTaskId};
+use risingwave_hummock_sdk::{
+    can_concat, CompactionGroupId, HummockCompactionTaskId, HummockEpoch,
+};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactTask, CompactionConfig, LevelType};
+use risingwave_pb::hummock::{CompactTask, CompactionConfig, KeyRange, LevelType};
 pub use selector::CompactionSelector;
 
 use self::selector::LocalSelectorStatistic;
@@ -104,18 +107,52 @@ impl CompactStatus {
         stats: &mut LocalSelectorStatistic,
         selector: &mut Box<dyn CompactionSelector>,
         table_id_to_options: HashMap<u32, TableOption>,
-    ) -> Option<CompactionTask> {
+    ) -> Option<CompactTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
-        selector.pick_compaction(
+        let ret = selector.pick_compaction(
             task_id,
             group,
             levels,
             &mut self.level_handlers,
             stats,
             table_id_to_options,
-        )
+        )?;
+        let target_level_id = ret.input.target_level;
+
+        let compression_algorithm = match ret.compression_algorithm.as_str() {
+            "Lz4" => 1,
+            "Zstd" => 2,
+            _ => 0,
+        };
+
+        let compact_task = CompactTask {
+            input_ssts: ret.input.input_levels,
+            splits: vec![KeyRange::inf()],
+            watermark: HummockEpoch::MAX,
+            sorted_output_ssts: vec![],
+            task_id,
+            target_level: target_level_id as u32,
+            // only gc delete keys in last level because there may be older version in more bottom
+            // level.
+            gc_delete_keys: target_level_id == self.level_handlers.len() - 1,
+            base_level: ret.base_level as u32,
+            task_status: TaskStatus::Pending as i32,
+            compaction_group_id: group.group_id,
+            existing_table_ids: vec![],
+            compression_algorithm,
+            target_file_size: ret.target_file_size,
+            compaction_filter_mask: 0,
+            table_options: BTreeMap::default(),
+            current_epoch_time: 0,
+            target_sub_level_id: ret.input.target_sub_level_id,
+            task_type: ret.compaction_task_type as i32,
+            table_vnode_partition: BTreeMap::default(),
+            split_weight_by_vnode: ret.input.vnode_partition_count,
+            ..Default::default()
+        };
+        Some(compact_task)
     }
 
     pub fn is_trivial_move_task(task: &CompactTask) -> bool {
