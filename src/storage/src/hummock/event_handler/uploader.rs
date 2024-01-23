@@ -391,6 +391,7 @@ struct SealedData {
     merged_imms: VecDeque<ImmutableMemtable>,
 
     // Sealed imms grouped by table shard.
+    // newer data (larger imm id) at the front
     imms_by_table_shard: HashMap<(TableId, LocalInstanceId), VecDeque<ImmutableMemtable>>,
 
     // Merging tasks generated from sealed imms
@@ -454,10 +455,14 @@ impl SealedData {
 
         // rearrange sealed imms by table shard and in epoch descending order
         for imm in unseal_epoch_data.imms.into_iter().rev() {
-            self.imms_by_table_shard
+            let queue = self
+                .imms_by_table_shard
                 .entry((imm.table_id, imm.instance_id))
-                .or_default()
-                .push_front(imm);
+                .or_default();
+            if let Some(front) = queue.front() {
+                assert_gt!(front.instance_id, front.instance_id);
+            }
+            queue.push_front(imm);
         }
 
         self.epochs.push_front(epoch);
