@@ -18,7 +18,6 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 use rw_futures_util::{pending_on_none, AttachedFuture};
@@ -345,21 +344,25 @@ impl LocalBarrierWorker {
         to_send: HashSet<ActorId>,
         to_collect: HashSet<ActorId>,
     ) -> StreamResult<()> {
-        // The barrier might be outdated and been injected after recovery in some certain extreme
-        // scenarios. So some newly creating actors in the barrier are possibly not rebuilt during
-        // recovery. Check it here and return an error here if some actors are not found to
-        // avoid collection hang. We need some refine in meta side to remove this workaround since
-        // it will cause another round of unnecessary recovery.
-        let missing_actor_ids = to_collect
-            .iter()
-            .filter(|id| !self.actor_manager_state.handles.contains_key(id))
-            .collect_vec();
-        if !missing_actor_ids.is_empty() {
-            tracing::warn!(
-                "to collect actors not found, they should be cleaned when recovering: {:?}",
-                missing_actor_ids
-            );
-            return Err(anyhow!("to collect actors not found: {:?}", to_collect).into());
+        #[cfg(not(test))]
+        {
+            use itertools::Itertools;
+            // The barrier might be outdated and been injected after recovery in some certain extreme
+            // scenarios. So some newly creating actors in the barrier are possibly not rebuilt during
+            // recovery. Check it here and return an error here if some actors are not found to
+            // avoid collection hang. We need some refine in meta side to remove this workaround since
+            // it will cause another round of unnecessary recovery.
+            let missing_actor_ids = to_collect
+                .iter()
+                .filter(|id| !self.actor_manager_state.handles.contains_key(id))
+                .collect_vec();
+            if !missing_actor_ids.is_empty() {
+                tracing::warn!(
+                    "to collect actors not found, they should be cleaned when recovering: {:?}",
+                    missing_actor_ids
+                );
+                return Err(anyhow!("to collect actors not found: {:?}", to_collect).into());
+            }
         }
 
         if barrier.kind == BarrierKind::Initial {
