@@ -575,13 +575,6 @@ pub fn handle_addition_columns(
         ))
     }
 
-    if !additional_columns.is_empty() {
-        return Err(RwError::from(ProtocolError(format!(
-            "Unknown additional columns {:?}",
-            additional_columns
-        ))));
-    }
-
     Ok(())
 }
 
