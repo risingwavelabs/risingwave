@@ -333,7 +333,7 @@ impl Binder {
             }
         }
 
-        self.bind_builtin_scalar_function(function_name.as_str(), inputs)
+        self.bind_builtin_scalar_function(function_name.as_str(), inputs, f.variadic)
     }
 
     fn bind_array_transform(&mut self, f: Function) -> Result<ExprImpl> {
@@ -711,6 +711,7 @@ impl Binder {
         &mut self,
         function_name: &str,
         inputs: Vec<ExprImpl>,
+        variadic: bool,
     ) -> Result<ExprImpl> {
         type Inputs = Vec<ExprImpl>;
 
@@ -990,7 +991,7 @@ impl Binder {
                     guard_by_len(2, raw(|binder, inputs| {
                         let (arg0, arg1) = inputs.into_iter().next_tuple().unwrap();
                         // rewrite into `CASE WHEN 0 < arg1 AND arg1 <= array_ndims(arg0) THEN 1 END`
-                        let ndims_expr = binder.bind_builtin_scalar_function("array_ndims", vec![arg0])?;
+                        let ndims_expr = binder.bind_builtin_scalar_function("array_ndims", vec![arg0], false)?;
                         let arg1 = arg1.cast_implicit(DataType::Int32)?;
 
                         FunctionCall::new(
@@ -1385,6 +1386,24 @@ impl Binder {
 
             tree
         });
+
+        if variadic {
+            match function_name {
+                "format" => {
+                    return Ok(FunctionCall::new(ExprType::FormatVariadic, inputs)?.into());
+                }
+                "concat_ws" => {
+                    return Ok(FunctionCall::new(ExprType::ConcatWsVariadic, inputs)?.into());
+                }
+                _ => {
+                    return Err(ErrorCode::BindError(format!(
+                        "VARIADIC argument is not allowed in function \"{}\"",
+                        function_name
+                    ))
+                    .into())
+                }
+            }
+        }
 
         match HANDLES.get(function_name) {
             Some(handle) => handle(self, inputs),

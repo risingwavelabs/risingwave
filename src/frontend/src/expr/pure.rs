@@ -88,6 +88,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Translate
             | expr_node::Type::Coalesce
             | expr_node::Type::ConcatWs
+            | expr_node::Type::ConcatWsVariadic
             | expr_node::Type::Abs
             | expr_node::Type::SplitPart
             | expr_node::Type::Ceil

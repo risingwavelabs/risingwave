@@ -20,7 +20,22 @@ use risingwave_expr::function;
 
 /// Concatenates all but the first argument, with separators. The first argument is used as the
 /// separator string, and should not be NULL. Other NULL arguments are ignored.
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// select concat_ws(',', 'abcde', 2, NULL, 22);
+/// ----
+/// abcde,2,22
+///
+/// query T
+/// select concat_ws(',', variadic array['abcde', 2, NULL, 22] :: varchar[]);
+/// ----
+/// abcde,2,22
+/// ```
 #[function("concat_ws(varchar, ...) -> varchar")]
+#[function("concat_ws_variadic(varchar, anyarray) -> varchar")]
 fn concat_ws(sep: &str, vals: impl Row, writer: &mut impl Write) -> Option<()> {
     let mut string_iter = vals.iter().flatten();
     if let Some(string) = string_iter.next() {

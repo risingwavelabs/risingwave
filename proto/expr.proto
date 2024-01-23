@@ -91,6 +91,7 @@ message ExprNode {
     TRANSLATE = 216;
     COALESCE = 217;
     CONCAT_WS = 218;
+    CONCAT_WS_VARIADIC = 285;
     ABS = 219;
     SPLIT_PART = 220;
     CEIL = 221;
