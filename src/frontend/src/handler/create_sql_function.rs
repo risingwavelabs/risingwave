@@ -24,6 +24,7 @@ use risingwave_sqlparser::ast::{
     CreateFunctionBody, FunctionDefinition, ObjectName, OperateFunctionArg,
 };
 use risingwave_sqlparser::parser::{Parser, ParserError};
+use thiserror_ext::AsReport;
 
 use super::*;
 use crate::binder::UdfContext;
@@ -176,9 +177,10 @@ pub async fn handle_create_sql_function(
 
         if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
             if let Err(e) = binder.bind_expr(expr) {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    format!("failed to conduct semantic check, please see if you are calling non-existence functions.\nDetailed error: {e}")
-                )
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "failed to conduct semantic check, please see if you are calling non-existence functions: {}",
+                    e.as_report()
+                ))
                 .into());
             }
         } else {
