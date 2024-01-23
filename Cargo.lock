@@ -8582,12 +8582,12 @@ dependencies = [
  "rand",
  "risingwave_common",
  "risingwave_connector",
+ "risingwave_dml",
  "risingwave_expr",
  "risingwave_expr_impl",
  "risingwave_hummock_sdk",
  "risingwave_pb",
  "risingwave_rpc_client",
- "risingwave_source",
  "risingwave_storage",
  "rw_futures_util",
  "scopeguard",
@@ -8925,11 +8925,11 @@ dependencies = [
  "risingwave_common_heap_profiling",
  "risingwave_common_service",
  "risingwave_connector",
+ "risingwave_dml",
  "risingwave_hummock_sdk",
  "risingwave_jni_core",
  "risingwave_pb",
  "risingwave_rpc_client",
- "risingwave_source",
  "risingwave_storage",
  "risingwave_stream",
  "serde",
@@ -8951,6 +8951,7 @@ dependencies = [
  "apache-avro 0.16.0",
  "arrow-array 50.0.0",
  "arrow-schema 50.0.0",
+ "assert_matches",
  "async-nats",
  "async-trait",
  "auto_enums",
@@ -9080,6 +9081,29 @@ dependencies = [
  "thiserror-ext",
  "tracing",
  "uuid",
+ "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_dml"
+version = "1.7.0-alpha"
+dependencies = [
+ "anyhow",
+ "assert_matches",
+ "criterion",
+ "futures",
+ "futures-async-stream",
+ "itertools 0.12.0",
+ "madsim-tokio",
+ "parking_lot 0.12.1",
+ "paste",
+ "rand",
+ "risingwave_common",
+ "risingwave_connector",
+ "risingwave_pb",
+ "rw_futures_util",
+ "tempfile",
+ "tracing",
  "workspace-hack",
 ]
 
@@ -9253,13 +9277,13 @@ dependencies = [
  "risingwave_common_heap_profiling",
  "risingwave_common_service",
  "risingwave_connector",
+ "risingwave_dml",
  "risingwave_expr",
  "risingwave_expr_impl",
  "risingwave_hummock_sdk",
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
- "risingwave_source",
  "risingwave_sqlparser",
  "risingwave_storage",
  "risingwave_udf",
@@ -9762,29 +9786,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "risingwave_source"
-version = "1.7.0-alpha"
-dependencies = [
- "anyhow",
- "assert_matches",
- "criterion",
- "futures",
- "futures-async-stream",
- "itertools 0.12.0",
- "madsim-tokio",
- "parking_lot 0.12.1",
- "paste",
- "rand",
- "risingwave_common",
- "risingwave_connector",
- "risingwave_pb",
- "rw_futures_util",
- "tempfile",
- "tracing",
- "workspace-hack",
-]
-
-[[package]]
 name = "risingwave_sqlparser"
 version = "1.7.0-alpha"
 dependencies = [
@@ -9832,6 +9833,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_sqlparser",
  "similar",
+ "thiserror-ext",
  "tokio-postgres",
  "tracing",
  "tracing-subscriber",
@@ -9962,13 +9964,13 @@ dependencies = [
  "rand",
  "risingwave_common",
  "risingwave_connector",
+ "risingwave_dml",
  "risingwave_expr",
  "risingwave_expr_impl",
  "risingwave_hummock_sdk",
  "risingwave_hummock_test",
  "risingwave_pb",
  "risingwave_rpc_client",
- "risingwave_source",
  "risingwave_storage",
  "rw_futures_util",
  "serde",

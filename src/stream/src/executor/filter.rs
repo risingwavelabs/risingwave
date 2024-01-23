@@ -229,7 +229,7 @@ mod tests {
         let test_expr = build_from_pretty("(greater_than:boolean $0:int8 $1:int8)");
 
         let filter = Box::new(FilterExecutor::new(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             info,
             Box::new(source),
             test_expr,

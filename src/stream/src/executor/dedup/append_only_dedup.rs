@@ -263,7 +263,7 @@ mod tests {
             Box::new(input),
             state_table,
             info,
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             Arc::new(AtomicU64::new(0)),
             Arc::new(StreamingMetrics::unused()),
         ))
