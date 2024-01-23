@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::pin::pin;
 use std::sync::Arc;
 
 use either::Either;
@@ -29,6 +28,7 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
+use rw_futures_util::pausable;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 #[cfg(debug_assertions)]
@@ -146,6 +146,7 @@ where
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
+        let mut paused = first_barrier.is_pause_on_startup();
         let first_epoch = first_barrier.epoch;
         self.state_table.init_epoch(first_barrier.epoch);
 
@@ -224,12 +225,15 @@ where
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
-                    let (right_snapshot, valve) = pausable((Self::snapshot_read_per_vnode(
+                    let (right_snapshot, valve) = pausable(Self::snapshot_read_per_vnode(
                         &upstream_table,
                         backfill_state.clone(), // FIXME: Use mutable reference instead.
                         &mut builders,
-                    )
-                    .map(Either::Right),));
+                    ));
+                    let right_snapshot = right_snapshot.map(Either::Right);
+                    if paused {
+                        valve.pause();
+                    }
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.
@@ -245,6 +249,22 @@ where
                             Either::Left(msg) => {
                                 match msg? {
                                     Message::Barrier(barrier) => {
+                                        // We can process any barrier mutation here.
+                                        if let Some(mutation) = barrier.mutation.as_deref() {
+                                            use crate::executor::Mutation;
+                                            match mutation {
+                                                Mutation::Pause => {
+                                                    paused = true;
+                                                    valve.pause();
+                                                }
+                                                Mutation::Resume => {
+                                                    paused = false;
+                                                    valve.resume();
+                                                }
+                                                _ => (),
+                                            }
+                                        }
+
                                         // We have to process the barrier outside of the loop.
                                         // This is because our state_table reference is still live
                                         // here, we have to break the loop to drop it,

@@ -30,6 +30,7 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
+use rw_futures_util::pausable;
 
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
@@ -155,6 +156,7 @@ where
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
+        let mut paused = first_barrier.is_pause_on_startup();
         let init_epoch = first_barrier.epoch.prev;
         if let Some(state_table) = self.state_table.as_mut() {
             state_table.init_epoch(first_barrier.epoch);
@@ -232,12 +234,15 @@ where
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
-                    let right_snapshot = pin!(Self::snapshot_read(
+                    let (right_snapshot, valve) = pausable(Self::snapshot_read(
                         &self.upstream_table,
                         snapshot_read_epoch,
                         current_pos.clone(),
-                    )
-                    .map(Either::Right),);
+                    ));
+                    let right_snapshot = pin!(right_snapshot.map(Either::Right));
+                    if paused {
+                        valve.pause();
+                    }
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.
@@ -253,6 +258,21 @@ where
                             Either::Left(msg) => {
                                 match msg? {
                                     Message::Barrier(barrier) => {
+                                        if let Some(mutation) = barrier.mutation.as_deref() {
+                                            use crate::executor::Mutation;
+                                            match mutation {
+                                                Mutation::Pause => {
+                                                    paused = true;
+                                                    valve.pause();
+                                                }
+                                                Mutation::Resume => {
+                                                    paused = false;
+                                                    valve.resume();
+                                                }
+                                                _ => (),
+                                            }
+                                        }
+
                                         // We have to process barrier outside of the loop.
                                         // This is because the backfill stream holds a mutable
                                         // reference to our chunk builder.
