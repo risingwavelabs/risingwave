@@ -16,11 +16,10 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::io::{Read, Write};
 use std::mem::size_of;
-use std::ops::{Range, RangeBounds};
+use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
-use risingwave_common::range::RangeBoundsExt;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::KeyComparator;
 use {lz4, zstd};
@@ -328,10 +327,8 @@ impl Block {
         self.restart_points.partition_point(pred)
     }
 
-    pub fn slice(&self, range: impl RangeBounds<usize>) -> &[u8] {
-        let start = range.start().unwrap_or_default();
-        let end = range.end().unwrap_or(self.data_len);
-        &self.data[start..end]
+    pub fn data(&self) -> &[u8] {
+        &self.data[..self.data_len]
     }
 
     pub fn raw(&self) -> &[u8] {

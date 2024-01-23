@@ -83,7 +83,7 @@ impl<const N: usize> Hitmap<N> {
 
     pub fn apply(&self, local: &LocalHitmap<N>) {
         for (global, local) in self.data.iter().zip_eq_fast(local.data.iter()) {
-            global.fetch_add(*local, Ordering::Relaxed);
+            global.fetch_or(*local, Ordering::Relaxed);
         }
     }
 
