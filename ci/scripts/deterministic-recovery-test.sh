@@ -13,8 +13,7 @@ export RUST_LOG="risingwave_meta::barrier::recovery=debug,\
 risingwave_meta::manager::catalog=debug,\
 risingwave_meta::rpc::ddl_controller=debug,\
 risingwave_meta::barrier::mod=debug,\
-risingwave_simulation=debug,\
-risingwave_stream::executor::backfill=trace"
+risingwave_simulation=debug"
 export LOGDIR=.risingwave/log
 
 mkdir -p $LOGDIR
