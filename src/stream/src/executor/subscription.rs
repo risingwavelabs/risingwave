@@ -36,7 +36,7 @@ pub struct SubscriptionExecutor<LS: LocalStateStore> {
     info: ExecutorInfo,
     input: BoxedExecutor,
     log_store: SubscriptionLogStoreWriter<LS>,
-    retention_seconds: i64,
+    retention_seconds: u64,
 }
 
 impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
@@ -47,7 +47,7 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
         info: ExecutorInfo,
         input: BoxedExecutor,
         log_store: SubscriptionLogStoreWriter<LS>,
-        retention_seconds: i64,
+        retention_seconds: u64,
     ) -> StreamExecutorResult<Self> {
         Ok(Self {
             actor_context,
@@ -87,7 +87,7 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
                     let truncate_offset: Option<ReaderTruncationOffsetType> = if next_truncate_time
                         < Instant::now()
                     {
-                        let truncate_timestamptz = Timestamptz::from_secs(barrier.get_curr_epoch().as_timestamptz().timestamp() - self.retention_seconds).ok_or_else(||{StreamExecutorError::from("Subscription retention time calculation error: timestamp is out of range.".to_string())})?;
+                        let truncate_timestamptz = Timestamptz::from_secs(barrier.get_curr_epoch().as_timestamptz().timestamp() - (self.retention_seconds as i64)).ok_or_else(||{StreamExecutorError::from("Subscription retention time calculation error: timestamp is out of range.".to_string())})?;
                         let epoch =
                             Epoch::from_unix_millis(truncate_timestamptz.timestamp_millis() as u64);
                         next_truncate_time =
