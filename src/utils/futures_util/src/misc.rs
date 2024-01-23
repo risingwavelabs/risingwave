@@ -14,6 +14,7 @@
 
 use std::future::Future;
 use std::pin::{pin, Pin};
+use std::task::{ready, Context, Poll};
 
 use futures::future::{pending, select, Either};
 use futures::stream::Peekable;
@@ -74,5 +75,20 @@ pub async fn await_future_with_monitor_error_stream<T, E, F: Future>(
             Some(Ok(_)) => Ok(send_future.await),
         },
         Either::Right((output, _)) => Ok(output),
+    }
+}
+
+pub struct AttachedFuture<F, T> {
+    pub inner: F,
+    pub item: T,
+}
+
+impl<F: Future + Unpin, T: Copy + Unpin> Future for AttachedFuture<F, T> {
+    type Output = (F::Output, T);
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let output = ready!(this.inner.poll_unpin(cx));
+        Poll::Ready((output, this.item))
     }
 }

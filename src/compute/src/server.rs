@@ -298,17 +298,6 @@ pub async fn compute_node_serve(
     // Run a background heap profiler
     heap_profiler.start();
 
-    let stream_mgr = Arc::new(LocalStreamManager::new(
-        advertise_addr.clone(),
-        state_store.clone(),
-        streaming_metrics.clone(),
-        config.streaming.clone(),
-        await_tree_config.clone(),
-        memory_mgr.get_watermark_epoch(),
-    ));
-
-    let grpc_await_tree_reg = await_tree_config
-        .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
     let dml_mgr = Arc::new(DmlManager::new(
         worker_id,
         config.streaming.developer.dml_channel_initial_permits,
@@ -362,6 +351,16 @@ pub async fn compute_node_serve(
         source_metrics,
         meta_client.clone(),
     );
+
+    let stream_mgr = LocalStreamManager::new(
+        stream_env.clone(),
+        streaming_metrics.clone(),
+        await_tree_config.clone(),
+        memory_mgr.get_watermark_epoch(),
+    );
+
+    let grpc_await_tree_reg = await_tree_config
+        .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
 
     // Generally, one may use `risedev ctl trace` to manually get the trace reports. However, if
     // this is not the case, we can use the following command to get it printed into the logs

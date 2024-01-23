@@ -21,7 +21,7 @@ type ConsumedEpoch = u64;
 type ConsumedRows = u64;
 
 #[derive(Debug, Clone, Copy)]
-pub(super) enum BackfillState {
+pub(crate) enum BackfillState {
     ConsumingUpstream(ConsumedEpoch, ConsumedRows),
     Done(ConsumedRows),
 }

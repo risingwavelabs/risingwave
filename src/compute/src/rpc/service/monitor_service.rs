@@ -15,7 +15,6 @@
 use std::ffi::CString;
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
@@ -34,14 +33,14 @@ use tonic::{Code, Request, Response, Status};
 
 #[derive(Clone)]
 pub struct MonitorServiceImpl {
-    stream_mgr: Arc<LocalStreamManager>,
+    stream_mgr: LocalStreamManager,
     grpc_await_tree_reg: Option<AwaitTreeRegistryRef>,
     server_config: ServerConfig,
 }
 
 impl MonitorServiceImpl {
     pub fn new(
-        stream_mgr: Arc<LocalStreamManager>,
+        stream_mgr: LocalStreamManager,
         grpc_await_tree_reg: Option<AwaitTreeRegistryRef>,
         server_config: ServerConfig,
     ) -> Self {
