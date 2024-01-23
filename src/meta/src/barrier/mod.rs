@@ -24,6 +24,7 @@ use itertools::Itertools;
 use prometheus::HistogramTimer;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::table_watermark::{
@@ -36,6 +37,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -667,7 +669,7 @@ impl GlobalBarrierManager {
             // back to frontend
             fail_point!("inject_barrier_err_success");
             let fail_node = self.checkpoint_control.barrier_failed();
-            tracing::warn!("Failed to complete epoch {}: {:?}", prev_epoch, err);
+            tracing::warn!(%prev_epoch, error = %err.as_report(), "Failed to complete epoch");
             self.failure_recovery(err, fail_node).await;
             return;
         }
@@ -692,7 +694,7 @@ impl GlobalBarrierManager {
                 .drain(index..)
                 .chain(self.checkpoint_control.barrier_failed().into_iter())
                 .collect_vec();
-            tracing::warn!("Failed to commit epoch {}: {:?}", prev_epoch, err);
+            tracing::warn!(%prev_epoch, error = %err.as_report(), "Failed to commit epoch");
             self.failure_recovery(err, fail_nodes).await;
         }
     }
@@ -727,7 +729,7 @@ impl GlobalBarrierManager {
             let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch
             let span = tracing::info_span!(
                 "failure_recovery",
-                %err,
+                error = %err.as_report(),
                 prev_epoch = prev_epoch.value().0
             );
 
@@ -740,7 +742,7 @@ impl GlobalBarrierManager {
                 .await;
             self.context.set_status(BarrierManagerStatus::Running).await;
         } else {
-            panic!("failed to execute barrier: {:?}", err);
+            panic!("failed to execute barrier: {}", err.as_report());
         }
     }
 

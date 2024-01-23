@@ -23,6 +23,7 @@ use itertools::Itertools;
 use rand::Rng;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::stream_graph_visitor::{
@@ -56,6 +57,7 @@ use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::log::warn;
@@ -449,7 +451,9 @@ impl DdlController {
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
         let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            return self.drop_object(ObjectType::Source, source_id as _, drop_mode).await;
+            return self
+                .drop_object(ObjectType::Source, source_id as _, drop_mode)
+                .await;
         };
         // 1. Drop source in catalog.
         let (version, streaming_job_ids) = mgr
@@ -517,7 +521,9 @@ impl DdlController {
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
         let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            return self.drop_object(ObjectType::View, view_id as _, drop_mode).await;
+            return self
+                .drop_object(ObjectType::View, view_id as _, drop_mode)
+                .await;
         };
         let (version, streaming_job_ids) = mgr
             .catalog_manager
@@ -750,7 +756,7 @@ impl DdlController {
                         .await;
                     match result {
                         Err(e) => {
-                            tracing::error!(id=stream_job_id, error = ?e, "finish stream job failed")
+                            tracing::error!(id = stream_job_id, error = %e.as_report(), "finish stream job failed")
                         }
                         Ok(_) => {
                             tracing::info!(id = stream_job_id, "finish stream job succeeded")
@@ -1050,7 +1056,7 @@ impl DdlController {
         let job_id = stream_job.id();
         tracing::debug!(id = job_id, "creating stream job");
 
-        let result = try {
+        let result: MetaResult<()> = try {
             // Add table fragments to meta store with state: `State::Initial`.
             mgr.fragment_manager
                 .start_create_table_fragments(table_fragments.clone())
@@ -1064,7 +1070,7 @@ impl DdlController {
         if let Err(e) = result {
             match stream_job.create_type() {
                 CreateType::Background => {
-                    tracing::error!(id = job_id, error = ?e, "finish stream job failed");
+                    tracing::error!(id = job_id, error = %e.as_report(), "finish stream job failed");
                     let should_cancel = match mgr
                         .fragment_manager
                         .select_table_fragments_by_table_id(&job_id.into())
@@ -1107,7 +1113,10 @@ impl DdlController {
         target_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<NotificationVersion> {
         match &self.metadata_manager {
-            MetadataManager::V1(_) => self.drop_streaming_job_v1(job_id, drop_mode, target_replace_info).await,
+            MetadataManager::V1(_) => {
+                self.drop_streaming_job_v1(job_id, drop_mode, target_replace_info)
+                    .await
+            }
             MetadataManager::V2(_) => {
                 if target_replace_info.is_some() {
                     unimplemented!("support replace table for drop in v2");
@@ -1420,7 +1429,10 @@ impl DdlController {
                     .await;
                 creating_internal_table_ids.push(table.id);
                 if let Err(e) = result {
-                    tracing::warn!("Failed to cancel create table procedure, perhaps barrier manager has already cleaned it. Reason: {e:#?}");
+                    tracing::warn!(
+                        error = %e.as_report(),
+                        "Failed to cancel create table procedure, perhaps barrier manager has already cleaned it."
+                    );
                 }
             }
             StreamingJob::Sink(sink, target_table) => {
@@ -1442,7 +1454,10 @@ impl DdlController {
                         )
                         .await;
                     if let Err(e) = result {
-                        tracing::warn!("Failed to cancel create table procedure, perhaps barrier manager has already cleaned it. Reason: {e:#?}");
+                        tracing::warn!(
+                            error = %e.as_report(),
+                            "Failed to cancel create table procedure, perhaps barrier manager has already cleaned it."
+                        );
                     }
                 }
                 creating_internal_table_ids.push(table.id);

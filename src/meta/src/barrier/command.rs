@@ -35,6 +35,7 @@ use risingwave_pb::stream_plan::{
     UpdateMutation,
 };
 use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
+use thiserror_ext::AsReport;
 use uuid::Uuid;
 
 use super::info::{ActorDesc, CommandActorChanges, InflightActorInfo};
@@ -853,7 +854,7 @@ impl CommandContext {
                             let table_id = table_fragments.table_id().table_id;
                             tracing::warn!(
                                 table_id,
-                                reason=?e,
+                                error = %e.as_report(),
                                 "cancel_create_table_procedure failed for CancelStreamingJob",
                             );
                             // If failed, check that table is not in meta store.

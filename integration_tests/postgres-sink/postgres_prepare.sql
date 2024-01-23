@@ -23,3 +23,28 @@ CREATE TABLE data_types (
     bytea_column BYTEA,
     array_column VARCHAR[]
 );
+
+CREATE TABLE pg_all_data_types (
+  id BIGINT PRIMARY KEY,
+  c_boolean boolean,
+  c_smallint smallint,
+  c_integer integer,
+  c_bigint bigint,
+  c_decimal decimal,
+  c_real real,
+  c_double_precision double precision,
+  c_varchar varchar,
+  c_bytea bytea,
+  c_date date,
+  c_time time,
+  c_timestamp timestamp,
+  c_timestamptz timestamptz,
+  c_interval interval,
+  c_jsonb jsonb,
+  c_smallint_array smallint[],
+  c_integer_array integer[],
+  c_bigint_array bigint[],
+  c_real_array real[],
+  c_double_precision_array double precision[],
+  c_varchar_array varchar[]
+);

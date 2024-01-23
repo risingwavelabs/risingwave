@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use either::Either;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
+use pgwire::error::{PsqlError, PsqlResult};
 use pgwire::net::{Address, AddressRef};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_message::TransactionStatus;
@@ -167,6 +168,18 @@ impl FrontendEnv {
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
         let client_pool = Arc::new(ComputeClientPool::default());
         let creating_streaming_tracker = StreamingJobTracker::new(meta_client.clone());
+        let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
+            Builder::new_multi_thread()
+                .worker_threads(
+                    load_config("", FrontendOpts::default())
+                        .batch
+                        .frontend_compute_runtime_worker_threads,
+                )
+                .thread_name("rw-batch-local")
+                .enable_all()
+                .build()
+                .unwrap(),
+        ));
         Self {
             meta_client,
             catalog_writer,
@@ -184,7 +197,7 @@ impl FrontendEnv {
             meta_config: MetaConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
-            compute_runtime: Self::create_compute_runtime(),
+            compute_runtime,
         }
     }
 
@@ -325,6 +338,33 @@ impl FrontendEnv {
         let creating_streaming_job_tracker =
             Arc::new(StreamingJobTracker::new(frontend_meta_client.clone()));
 
+        let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
+            Builder::new_multi_thread()
+                .worker_threads(batch_config.frontend_compute_runtime_worker_threads)
+                .thread_name("rw-batch-local")
+                .enable_all()
+                .build()
+                .unwrap(),
+        ));
+
+        let sessions_map: SessionMapRef = Arc::new(RwLock::new(HashMap::new()));
+        let sessions = sessions_map.clone();
+
+        // Idle transaction background monitor
+        let join_handle = tokio::spawn(async move {
+            let mut check_idle_txn_interval =
+                tokio::time::interval(core::time::Duration::from_secs(10));
+            check_idle_txn_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            check_idle_txn_interval.reset();
+            loop {
+                check_idle_txn_interval.tick().await;
+                sessions.read().values().for_each(|session| {
+                    let _ = session.check_idle_in_transaction_timeout();
+                })
+            }
+        });
+        join_handles.push(join_handle);
+
         Ok((
             Self {
                 catalog_reader,
@@ -338,12 +378,12 @@ impl FrontendEnv {
                 server_addr: frontend_address,
                 client_pool,
                 frontend_metrics,
-                sessions_map: Arc::new(RwLock::new(HashMap::new())),
+                sessions_map,
                 batch_config,
                 meta_config,
                 source_metrics,
                 creating_streaming_job_tracker,
-                compute_runtime: Self::create_compute_runtime(),
+                compute_runtime,
             },
             join_handles,
             shutdown_senders,
@@ -432,17 +472,6 @@ impl FrontendEnv {
         self.compute_runtime.clone()
     }
 
-    fn create_compute_runtime() -> Arc<BackgroundShutdownRuntime> {
-        Arc::new(BackgroundShutdownRuntime::from(
-            Builder::new_multi_thread()
-                .worker_threads(4)
-                .thread_name("rw-batch-local")
-                .enable_all()
-                .build()
-                .unwrap(),
-        ))
-    }
-
     /// Cancel queries (i.e. batch queries) in session.
     /// If the session exists return true, otherwise, return false.
     pub fn cancel_queries_in_session(&self, session_id: SessionId) -> bool {
@@ -514,6 +543,9 @@ pub struct SessionImpl {
 
     /// execution context represents the lifetime of a running SQL in the current session
     exec_context: Mutex<Option<Weak<ExecContext>>>,
+
+    /// Last idle instant
+    last_idle_instant: Arc<Mutex<Option<Instant>>>,
 }
 
 #[derive(Error, Debug)]
@@ -552,6 +584,7 @@ impl SessionImpl {
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
             exec_context: Mutex::new(None),
+            last_idle_instant: Default::default(),
         }
     }
 
@@ -577,6 +610,7 @@ impl SessionImpl {
                 8080,
             ))
             .into(),
+            last_idle_instant: Default::default(),
         }
     }
 
@@ -656,6 +690,13 @@ impl SessionImpl {
             .as_ref()
             .and_then(|weak| weak.upgrade())
             .map(|context| context.last_instant.elapsed().as_millis())
+    }
+
+    pub fn elapse_since_last_idle_instant(&self) -> Option<u128> {
+        self.last_idle_instant
+            .lock()
+            .as_ref()
+            .map(|x| x.elapsed().as_millis())
     }
 
     pub fn check_relation_name_duplicated(
@@ -1129,9 +1170,40 @@ impl Session for SessionImpl {
         let exec_context = Arc::new(ExecContext {
             running_sql: sql,
             last_instant: Instant::now(),
+            last_idle_instant: self.last_idle_instant.clone(),
         });
         *self.exec_context.lock() = Some(Arc::downgrade(&exec_context));
+        // unset idle state, since there is a sql running
+        *self.last_idle_instant.lock() = None;
         ExecContextGuard::new(exec_context)
+    }
+
+    /// Check whether idle transaction timeout.
+    /// If yes, unpin snapshot and return an `IdleInTxnTimeout` error.
+    fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()> {
+        // In transaction.
+        if matches!(self.transaction_status(), TransactionStatus::InTransaction) {
+            let idle_in_transaction_session_timeout =
+                self.config().idle_in_transaction_session_timeout() as u128;
+            // Idle transaction timeout has been enabled.
+            if idle_in_transaction_session_timeout != 0 {
+                // Hold the `exec_context` lock to ensure no new sql coming when unpin_snapshot.
+                let guard = self.exec_context.lock();
+                // No running sql i.e. idle
+                if guard.as_ref().and_then(|weak| weak.upgrade()).is_none() {
+                    // Idle timeout.
+                    if let Some(elapse_since_last_idle_instant) =
+                        self.elapse_since_last_idle_instant()
+                    {
+                        if elapse_since_last_idle_instant > idle_in_transaction_session_timeout {
+                            self.unpin_snapshot();
+                            return Err(PsqlError::IdleInTxnTimeout);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
