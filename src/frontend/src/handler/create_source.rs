@@ -518,9 +518,16 @@ pub fn handle_addition_columns(
             }
         };
     let gen_default_column_name =
-        |connector_name: &str, addi_column_name: &str, inner_field: Option<&String>| {
+        |connector_name: &str,
+         addi_column_name: &str,
+         inner_field: Option<&String>,
+         data_type: Option<&risingwave_sqlparser::ast::DataType>| {
             if let Some(inner) = inner_field {
-                format!("_rw_{}_{}_{}", connector_name, addi_column_name, inner)
+                let mut name = format!("_rw_{}_{}_{}", connector_name, addi_column_name, inner);
+                if let Some(data_type) = data_type {
+                    name.push_str(format!("_{:?}", data_type).as_str())
+                }
+                name
             } else {
                 format!("_rw_{}_{}", connector_name, addi_column_name)
             }
@@ -568,6 +575,7 @@ pub fn handle_addition_columns(
                         connector_name.as_str(),
                         item.column_type.real_value().as_str(),
                         item.inner_field.as_ref(),
+                        item.header_inner_expect_type.as_ref(),
                     )
                 })
                 .as_str(),

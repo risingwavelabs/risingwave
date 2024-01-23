@@ -2549,23 +2549,20 @@ impl Parser {
                 self.next_token();
                 column_inner_field = Some(inner_field);
 
-                let data_type = if let Token::Word(_) = self.peek_token().token {
-                    Some(self.parse_data_type()?)
-                } else {
-                    None
-                };
-                {
-                    // check if the data type is supported. Only allow BYTEA and VARCHAR.
-                    if !matches!(data_type, Some(DataType::Bytea | DataType::Varchar)) {
-                        return Err(ParserError::ParserError(
-                            "Only BYTEA and VARCHAR are supported when specifying field in header"
-                                .to_string(),
-                        ));
-                    }
-                    if matches!(data_type, Some(DataType::Varchar)) {
-                        header_inner_expect_type = Some(DataType::Varchar);
-                    } else {
-                        header_inner_expect_type = Some(DataType::Bytea);
+                if let Token::Word(w) = self.peek_token().token {
+                    match w.keyword {
+                        Keyword::BYTEA => {
+                            header_inner_expect_type = Some(DataType::Bytea);
+                            self.next_token();
+                        }
+                        Keyword::VARCHAR => {
+                            header_inner_expect_type = Some(DataType::Varchar);
+                            self.next_token();
+                        }
+                        _ => {
+                            // default to bytea
+                            header_inner_expect_type = Some(DataType::Bytea);
+                        }
                     }
                 }
             }

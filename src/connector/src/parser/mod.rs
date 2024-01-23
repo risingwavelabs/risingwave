@@ -375,6 +375,7 @@ impl SourceStreamChunkRowWriter<'_> {
                                 extract_header_inner_from_meta(
                                     ele.meta,
                                     header_inner.inner_field.as_ref(),
+                                    header_inner.data_type.as_ref(),
                                 )
                             })
                             .unwrap_or(None),
