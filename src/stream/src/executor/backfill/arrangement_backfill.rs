@@ -109,6 +109,7 @@ where
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
+        tracing::debug!("Arrangement Backfill Executor started");
         // The primary key columns, in the output columns of the upstream_table scan.
         // Table scan scans a subset of the columns of the upstream table.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
