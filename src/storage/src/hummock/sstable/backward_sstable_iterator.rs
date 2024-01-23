@@ -168,6 +168,7 @@ mod tests {
     use rand::prelude::*;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::TestEpoch;
 
     use super::*;
     use crate::assert_bytes_eq;
@@ -244,7 +245,7 @@ mod tests {
                 format!("key_zzzz_{:05}", 0).as_bytes(),
             ]
             .concat(),
-            65536,
+            TestEpoch::new_without_offset(1).as_u64(),
         );
         sstable_iter.seek(largest_key.to_ref()).await.unwrap();
         let key = sstable_iter.key();
@@ -258,7 +259,7 @@ mod tests {
                 format!("key_aaaa_{:05}", 0).as_bytes(),
             ]
             .concat(),
-            65536,
+            TestEpoch::new_without_offset(1).as_u64(),
         );
         sstable_iter.seek(smallest_key.to_ref()).await.unwrap();
         assert!(!sstable_iter.is_valid());

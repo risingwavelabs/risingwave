@@ -444,6 +444,7 @@ impl Clone for XorFilterReader {
 mod tests {
     use rand::RngCore;
     use risingwave_common::cache::CachePriority;
+    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
@@ -486,7 +487,7 @@ mod tests {
         for i in 0..TEST_KEYS_COUNT {
             let epoch_count = rng.next_u64() % 20;
             for j in 0..epoch_count {
-                let epoch = (20 - j) * 65536 as u64;
+                let epoch = TestEpoch::new_without_offset((20 - j) as u64).as_u64();
                 let k = FullKey {
                     user_key: test_user_key_of(i),
                     epoch_with_gap: EpochWithGap::new_from_epoch(epoch),

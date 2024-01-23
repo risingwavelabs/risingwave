@@ -712,6 +712,8 @@ impl<R: RangeKv> RangeKvStateStoreIter<R> {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::util::epoch::TestEpoch;
+
     use super::*;
     use crate::memory::sled::SledStateStore;
 
@@ -762,7 +764,7 @@ mod tests {
                 ],
                 vec![],
                 WriteOptions {
-                    epoch: 65536,
+                    epoch: TestEpoch::new_without_offset(1).as_u64(),
                     table_id: Default::default(),
                 },
             )
@@ -820,15 +822,19 @@ mod tests {
                         Bound::Included(TableKey(Bytes::from("a"))),
                         Bound::Included(TableKey(Bytes::from("b"))),
                     ),
-                    65536,
+                    TestEpoch::new_without_offset(1).as_u64(),
                     TableId::default(),
                     None,
                 )
                 .unwrap(),
             vec![(
-                FullKey::for_test(Default::default(), b"a".to_vec(), 65536)
-                    .encode()
-                    .into(),
+                FullKey::for_test(
+                    Default::default(),
+                    b"a".to_vec(),
+                    TestEpoch::new_without_offset(1).as_u64()
+                )
+                .encode()
+                .into(),
                 b"v2".to_vec().into()
             )]
         );
@@ -865,7 +871,7 @@ mod tests {
             state_store
                 .get(
                     TableKey(Bytes::copy_from_slice(b"a")),
-                    65536,
+                    TestEpoch::new_without_offset(1).as_u64(),
                     ReadOptions::default(),
                 )
                 .await
@@ -874,14 +880,22 @@ mod tests {
         );
         assert_eq!(
             state_store
-                .get(TableKey(Bytes::from("b")), 65536, ReadOptions::default(),)
+                .get(
+                    TableKey(Bytes::from("b")),
+                    TestEpoch::new_without_offset(1).as_u64(),
+                    ReadOptions::default(),
+                )
                 .await
                 .unwrap(),
             None
         );
         assert_eq!(
             state_store
-                .get(TableKey(Bytes::from("c")), 65536, ReadOptions::default())
+                .get(
+                    TableKey(Bytes::from("c")),
+                    TestEpoch::new_without_offset(1).as_u64(),
+                    ReadOptions::default()
+                )
                 .await
                 .unwrap(),
             None

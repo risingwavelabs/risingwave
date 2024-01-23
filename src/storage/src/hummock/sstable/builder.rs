@@ -734,6 +734,7 @@ pub(super) mod tests {
 
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_hummock_sdk::key::UserKey;
 
     use super::*;
@@ -919,7 +920,7 @@ pub(super) mod tests {
                 let v = test_value_of(idx);
                 builder
                     .add(
-                        FullKey::from_user_key(k, 65536),
+                        FullKey::from_user_key(k, TestEpoch::new_without_offset(1).as_u64()),
                         HummockValue::put(v.as_ref()),
                     )
                     .await

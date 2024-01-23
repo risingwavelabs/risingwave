@@ -122,6 +122,8 @@ impl CompactionDeleteRangeIterator {
         target_user_key: UserKey<&[u8]>,
         epoch: HummockEpoch,
     ) -> HummockResult<HummockEpoch> {
+        use risingwave_common::util::epoch::TestEpoch;
+
         let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
         while self.inner.is_valid()
             && self
@@ -131,7 +133,7 @@ impl CompactionDeleteRangeIterator {
         {
             self.inner.next().await?;
         }
-        Ok(self.earliest_delete_since(epoch * 65536))
+        Ok(self.earliest_delete_since(TestEpoch::new_without_offset(epoch).as_u64()))
     }
 
     pub fn key(&self) -> PointRange<&[u8]> {
@@ -258,7 +260,7 @@ mod tests {
 
     use bytes::Bytes;
     use risingwave_common::catalog::TableId;
-    use risingwave_common::util::epoch::is_max_epoch;
+    use risingwave_common::util::epoch::{is_max_epoch, TestEpoch};
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
@@ -336,25 +338,25 @@ mod tests {
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbb").as_ref(), 11)
                 .await
                 .unwrap(),
-            12 * 65536
+            TestEpoch::new_without_offset(12).as_u64()
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbb").as_ref(), 8)
                 .await
                 .unwrap(),
-            9 * 65536
+            TestEpoch::new_without_offset(9).as_u64()
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbbaaa").as_ref(), 8)
                 .await
                 .unwrap(),
-            9 * 65536
+            TestEpoch::new_without_offset(9).as_u64()
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbbccd").as_ref(), 8)
                 .await
                 .unwrap(),
-            9 * 65536
+            TestEpoch::new_without_offset(9).as_u64()
         );
 
         assert_eq!(
@@ -380,13 +382,13 @@ mod tests {
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"eeeeee").as_ref(), 8)
                 .await
                 .unwrap(),
-            8 * 65536
+            TestEpoch::new_without_offset(8).as_u64()
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"gggggg").as_ref(), 8)
                 .await
                 .unwrap(),
-            9 * 65536
+            TestEpoch::new_without_offset(9).as_u64()
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"hhhhhh").as_ref(), 6)
@@ -398,7 +400,7 @@ mod tests {
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"iiiiii").as_ref(), 6)
                 .await
                 .unwrap(),
-            7 * 65536
+            TestEpoch::new_without_offset(7).as_u64()
         );
     }
 
@@ -492,22 +494,22 @@ mod tests {
             sstable.value(),
             iterator_test_user_key_of(0).as_ref(),
         );
-        assert_eq!(ret, 300 * 65536);
+        assert_eq!(ret, TestEpoch::new_without_offset(300).as_u64());
         let ret = get_min_delete_range_epoch_from_sstable(
             sstable.value(),
             iterator_test_user_key_of(1).as_ref(),
         );
-        assert_eq!(ret, 150 * 65536);
+        assert_eq!(ret, TestEpoch::new_without_offset(150).as_u64());
         let ret = get_min_delete_range_epoch_from_sstable(
             sstable.value(),
             iterator_test_user_key_of(3).as_ref(),
         );
-        assert_eq!(ret, 50 * 65536);
+        assert_eq!(ret, TestEpoch::new_without_offset(50).as_u64());
         let ret = get_min_delete_range_epoch_from_sstable(
             sstable.value(),
             iterator_test_user_key_of(6).as_ref(),
         );
-        assert_eq!(ret, 150 * 65536);
+        assert_eq!(ret, TestEpoch::new_without_offset(150).as_u64());
         let ret = get_min_delete_range_epoch_from_sstable(
             sstable.value(),
             iterator_test_user_key_of(8).as_ref(),
