@@ -873,7 +873,7 @@
 - name: Only table-in-out functions can have subquery parameters.
   sql: |
     SELECT * FROM generate_series(1, (select 1));
-  binder_error: 'Invalid input syntax: Only table-in-out functions can have subquery parameters, generate_series only accepts constant parameters'
+  binder_error: 'Invalid input syntax: Only table-in-out functions can have subquery parameters. The table function has subquery parameters is generate_series'
 - name: While this one is allowed.
   sql: |
     SELECT generate_series(1, (select 1));
@@ -894,3 +894,6 @@
         └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
           └─BatchExchange { order: [], dist: HashShard(1:Int32) }
             └─BatchValues { rows: [[1:Int32], [2:Int32]] }
+- name: Only table-in-out functions can have subquery parameters. issue 14734
+  sql: "SELECT anon_1.f1 AS \"IntegerRange(0, -2, 1)\" \nFROM unnest(CASE WHEN (nullif(1, 0) IS NOT NULL AND sign(1) = sign( -2 - 0)) THEN array_remove(array((SELECT generate_series(0,  -2, 1) AS generate_series_1)),  -2) ELSE CAST(ARRAY[] AS SMALLINT[]) END) AS anon_1(f1);\n"
+  binder_error: 'Invalid input syntax: Only table-in-out functions can have subquery parameters. The table function has subquery parameters is unnest'
