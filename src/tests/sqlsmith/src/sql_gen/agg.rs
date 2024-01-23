@@ -142,6 +142,7 @@ fn make_agg_func(
     Function {
         name: ObjectName(vec![Ident::new_unchecked(func_name)]),
         args,
+        variadic: false,
         over: None,
         distinct,
         order_by,
