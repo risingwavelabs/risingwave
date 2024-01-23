@@ -295,7 +295,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             input,
             state_table,
             arrange_key_indices: arrange_columns.clone(),
-            actor_context: ActorContext::create(0),
+            actor_context: ActorContext::for_test(0),
             info: ExecutorInfo {
                 schema,
                 pk_indices: arrange_columns,

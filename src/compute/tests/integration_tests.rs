@@ -159,7 +159,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let barrier_tx = Arc::new(barrier_tx);
     let vnodes = Bitmap::from_bytes(&[0b11111111]);
 
-    let actor_ctx = ActorContext::create(0x3f3f3f);
+    let actor_ctx = ActorContext::for_test(0x3f3f3f);
     let system_params_manager = LocalSystemParamsManager::for_test();
 
     // Create a `SourceExecutor` to read the changes.

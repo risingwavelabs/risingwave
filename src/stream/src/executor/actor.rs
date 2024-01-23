@@ -58,7 +58,7 @@ pub struct ActorContext {
 pub type ActorContextRef = Arc<ActorContext>;
 
 impl ActorContext {
-    pub fn create(id: ActorId) -> ActorContextRef {
+    pub fn for_test(id: ActorId) -> ActorContextRef {
         Arc::new(Self {
             id,
             fragment_id: 0,
@@ -73,7 +73,7 @@ impl ActorContext {
         })
     }
 
-    pub fn create_with_metrics(
+    pub fn create(
         stream_actor: &PbStreamActor,
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
