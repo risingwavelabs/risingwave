@@ -16,7 +16,6 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
@@ -45,7 +44,6 @@ struct ExecutorInner {
     calls: Vec<WindowFuncCall>,
     partition_key_indices: Vec<usize>,
     order_key_indices: Vec<usize>,
-    order_key_data_types: Vec<DataType>,
     order_key_order_types: Vec<OrderType>,
     chunk_size: usize,
 }
@@ -73,7 +71,7 @@ impl BoxedExecutorBuilder for SortOverWindowExecutor {
             .iter()
             .map(|i| *i as usize)
             .collect();
-        let (order_key_indices, order_key_order_types): (Vec<_>, Vec<_>) = node
+        let (order_key_indices, order_key_order_types) = node
             .get_order_by()
             .iter()
             .map(ColumnOrder::from_protobuf)
@@ -85,11 +83,6 @@ impl BoxedExecutorBuilder for SortOverWindowExecutor {
             schema.fields.push(Field::unnamed(call.return_type.clone()));
         });
 
-        let order_key_data_types = order_key_indices
-            .iter()
-            .map(|i| schema[*i].data_type())
-            .collect();
-
         Ok(Box::new(Self {
             child,
             schema,
@@ -100,7 +93,6 @@ impl BoxedExecutorBuilder for SortOverWindowExecutor {
                 calls,
                 partition_key_indices,
                 order_key_indices,
-                order_key_data_types,
                 order_key_order_types,
                 chunk_size: source.context.get_config().developer.chunk_size,
             },
