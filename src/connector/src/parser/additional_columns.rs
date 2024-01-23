@@ -14,6 +14,8 @@
 
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::{DataType, StructType};
+use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::DataType as PbDataType;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{
     AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader, AdditionalColumnHeaders,
@@ -26,8 +28,12 @@ use crate::source::{
     S3_CONNECTOR,
 };
 
-pub type CompatibleAdditionalColumnsFn =
-    Box<dyn Fn(ColumnId, &str, Option<&str>) -> ColumnCatalog + Send + Sync + 'static>;
+pub type CompatibleAdditionalColumnsFn = Box<
+    dyn Fn(ColumnId, &str, Option<&str>, Option<PbDataType>) -> ColumnCatalog
+        + Send
+        + Sync
+        + 'static,
+>;
 
 pub fn get_connector_compatible_additional_columns(
     connector_name: &str,
@@ -47,7 +53,11 @@ fn kafka_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColum
         (
             "key",
             Box::new(
-                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                |id: ColumnId,
+                 name: &str,
+                 _inner_field: Option<&str>,
+                 _data_type: Option<PbDataType>|
+                 -> ColumnCatalog {
                     ColumnCatalog {
                         column_desc: ColumnDesc::named_with_additional_column(
                             name,
@@ -67,7 +77,11 @@ fn kafka_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColum
         (
             "timestamp",
             Box::new(
-                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                |id: ColumnId,
+                 name: &str,
+                 _inner_field: Option<&str>,
+                 _data_type: Option<PbDataType>|
+                 -> ColumnCatalog {
                     ColumnCatalog {
                         column_desc: ColumnDesc::named_with_additional_column(
                             name,
@@ -87,7 +101,11 @@ fn kafka_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColum
         (
             "partition",
             Box::new(
-                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                |id: ColumnId,
+                 name: &str,
+                 _inner_field: Option<&str>,
+                 _data_type: Option<PbDataType>|
+                 -> ColumnCatalog {
                     ColumnCatalog {
                         column_desc: ColumnDesc::named_with_additional_column(
                             name,
@@ -107,7 +125,11 @@ fn kafka_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColum
         (
             "offset",
             Box::new(
-                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                |id: ColumnId,
+                 name: &str,
+                 _inner_field: Option<&str>,
+                 _data_type: Option<PbDataType>|
+                 -> ColumnCatalog {
                     ColumnCatalog {
                         column_desc: ColumnDesc::named_with_additional_column(
                             name,
@@ -127,17 +149,28 @@ fn kafka_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColum
         (
             "header", // type: struct<key varchar, value bytea>[]
             Box::new(
-                |id: ColumnId, name: &str, inner_field: Option<&str>| -> ColumnCatalog {
+                |id: ColumnId,
+                 name: &str,
+                 inner_field: Option<&str>,
+                 data_type: Option<PbDataType>|
+                 -> ColumnCatalog {
                     if let Some(inner) = inner_field {
                         ColumnCatalog {
                             column_desc: ColumnDesc::named_with_additional_column(
                                 name,
                                 id,
-                                DataType::Bytea,
+                                if let Some(data_type_inner) = &data_type
+                                    && data_type_inner.type_name == TypeName::Varchar as i32
+                                {
+                                    DataType::Varchar
+                                } else {
+                                    DataType::Bytea
+                                },
                                 AdditionalColumn {
                                     column_type: Some(AdditionalColumnType::HeaderInner(
                                         AdditionalColumnHeader {
                                             inner_field: inner.to_string(),
+                                            data_type,
                                         },
                                     )),
                                 },
@@ -175,7 +208,11 @@ fn pulsar_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColu
         (
             "key",
             Box::new(
-                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                |id: ColumnId,
+                 name: &str,
+                 _inner_field: Option<&str>,
+                 _data_type: Option<PbDataType>|
+                 -> ColumnCatalog {
                     ColumnCatalog {
                         column_desc: ColumnDesc::named_with_additional_column(
                             name,
@@ -195,7 +232,11 @@ fn pulsar_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColu
         (
             "partition",
             Box::new(
-                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                |id: ColumnId,
+                 name: &str,
+                 _inner_field: Option<&str>,
+                 _data_type: Option<PbDataType>|
+                 -> ColumnCatalog {
                     ColumnCatalog {
                         column_desc: ColumnDesc::named_with_additional_column(
                             name,
@@ -215,7 +256,11 @@ fn pulsar_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColu
         (
             "offset",
             Box::new(
-                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                |id: ColumnId,
+                 name: &str,
+                 _inner_field: Option<&str>,
+                 _data_type: Option<PbDataType>|
+                 -> ColumnCatalog {
                     ColumnCatalog {
                         column_desc: ColumnDesc::named_with_additional_column(
                             name,
@@ -240,7 +285,11 @@ fn kinesis_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalCol
         (
             "key",
             Box::new(
-                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                |id: ColumnId,
+                 name: &str,
+                 _inner_field: Option<&str>,
+                 _data_type: Option<PbDataType>|
+                 -> ColumnCatalog {
                     ColumnCatalog {
                         column_desc: ColumnDesc::named_with_additional_column(
                             name,
@@ -260,7 +309,11 @@ fn kinesis_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalCol
         (
             "partition",
             Box::new(
-                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                |id: ColumnId,
+                 name: &str,
+                 _inner_field: Option<&str>,
+                 _data_type: Option<PbDataType>|
+                 -> ColumnCatalog {
                     ColumnCatalog {
                         column_desc: ColumnDesc::named_with_additional_column(
                             name,
@@ -280,7 +333,11 @@ fn kinesis_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalCol
         (
             "offset",
             Box::new(
-                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                |id: ColumnId,
+                 name: &str,
+                 _inner_field: Option<&str>,
+                 _data_type: Option<PbDataType>|
+                 -> ColumnCatalog {
                     ColumnCatalog {
                         column_desc: ColumnDesc::named_with_additional_column(
                             name,
@@ -300,7 +357,11 @@ fn kinesis_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalCol
         (
             "timestamp",
             Box::new(
-                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                |id: ColumnId,
+                 name: &str,
+                 _inner_field: Option<&str>,
+                 _data_type: Option<PbDataType>|
+                 -> ColumnCatalog {
                     ColumnCatalog {
                         column_desc: ColumnDesc::named_with_additional_column(
                             name,
@@ -325,7 +386,11 @@ fn s3_compatible_column_column_vec() -> Vec<(&'static str, CompatibleAdditionalC
         (
             "file",
             Box::new(
-                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                |id: ColumnId,
+                 name: &str,
+                 _inner_field: Option<&str>,
+                 _data_type: Option<PbDataType>|
+                 -> ColumnCatalog {
                     ColumnCatalog {
                         column_desc: ColumnDesc::named_with_additional_column(
                             name,
@@ -345,7 +410,11 @@ fn s3_compatible_column_column_vec() -> Vec<(&'static str, CompatibleAdditionalC
         (
             "offset",
             Box::new(
-                |id: ColumnId, name: &str, _inner_field: Option<&str>| -> ColumnCatalog {
+                |id: ColumnId,
+                 name: &str,
+                 _inner_field: Option<&str>,
+                 _data_type: Option<PbDataType>|
+                 -> ColumnCatalog {
                     ColumnCatalog {
                         column_desc: ColumnDesc::named_with_additional_column(
                             name,

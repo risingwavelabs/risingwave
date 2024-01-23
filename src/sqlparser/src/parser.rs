@@ -88,6 +88,7 @@ pub struct IncludeOptionItem {
     pub column_type: Ident,
     pub column_alias: Option<Ident>,
     pub inner_field: Option<String>,
+    pub header_inner_expect_type: Option<DataType>,
 }
 
 #[derive(Debug)]
@@ -2543,9 +2544,30 @@ impl Parser {
             let column_type = self.parse_identifier()?;
 
             let mut column_inner_field = None;
+            let mut header_inner_expect_type = None;
             if let Token::SingleQuotedString(inner_field) = self.peek_token().token {
                 self.next_token();
                 column_inner_field = Some(inner_field);
+
+                let data_type = if let Token::Word(_) = self.peek_token().token {
+                    Some(self.parse_data_type()?)
+                } else {
+                    None
+                };
+                {
+                    // check if the data type is supported. Only allow BYTEA and VARCHAR.
+                    if !matches!(data_type, Some(DataType::Bytea | DataType::Varchar)) {
+                        return Err(ParserError::ParserError(
+                            "Only BYTEA and VARCHAR are supported when specifying field in header"
+                                .to_string(),
+                        ));
+                    }
+                    if matches!(data_type, Some(DataType::Varchar)) {
+                        header_inner_expect_type = Some(DataType::Varchar);
+                    } else {
+                        header_inner_expect_type = Some(DataType::Bytea);
+                    }
+                }
             }
 
             let mut column_alias = None;
@@ -2557,6 +2579,7 @@ impl Parser {
                 column_type,
                 inner_field: column_inner_field,
                 column_alias,
+                header_inner_expect_type,
             });
         }
         Ok(options)

@@ -572,6 +572,27 @@ pub fn handle_addition_columns(
                 })
                 .as_str(),
             item.inner_field.as_deref(),
+            {
+                if let Some(data_type) = item.header_inner_expect_type.as_ref() {
+                    match data_type {
+                        risingwave_sqlparser::ast::DataType::Varchar => {
+                            Some(risingwave_pb::data::DataType {
+                                type_name: risingwave_pb::data::data_type::TypeName::Varchar as i32,
+                                ..Default::default()
+                            })
+                        }
+                        risingwave_sqlparser::ast::DataType::Bytea => {
+                            Some(risingwave_pb::data::DataType {
+                                type_name: risingwave_pb::data::data_type::TypeName::Bytea as i32,
+                                ..Default::default()
+                            })
+                        }
+                        _ => unreachable!(),
+                    }
+                } else {
+                    None
+                }
+            },
         ))
     }
 
@@ -894,7 +915,12 @@ fn check_and_add_timestamp_column(
             .iter()
             .find(|(col_name, _)| col_name.eq(&"timestamp"))
             .unwrap()
-            .1(ColumnId::placeholder(), KAFKA_TIMESTAMP_COLUMN_NAME, None);
+            .1(
+            ColumnId::placeholder(),
+            KAFKA_TIMESTAMP_COLUMN_NAME,
+            None,
+            None,
+        );
         catalog.is_hidden = true;
 
         columns.push(catalog);

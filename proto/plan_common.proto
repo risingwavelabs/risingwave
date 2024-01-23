@@ -199,6 +199,7 @@ message AdditionalColumnFilename {}
 
 message AdditionalColumnHeader {
   string inner_field = 1;
+  data.DataType data_type = 2;
 }
 
 // this type means we read all headers as a whole
