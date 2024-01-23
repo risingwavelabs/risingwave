@@ -40,7 +40,7 @@ use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_connector::source::reader::source_desc::test_utils::create_source_desc_builder;
+use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
 use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_connector::ConnectorParams;
 use risingwave_dml::dml_manager::DmlManager;

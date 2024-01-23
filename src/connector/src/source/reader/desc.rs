@@ -21,8 +21,9 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::plan_common::PbColumnCatalog;
 
-use super::connector_source::ConnectorSource;
-use super::fs_connector_source::FsConnectorSource;
+#[expect(deprecated)]
+use super::fs_reader::FsSourceReader;
+use super::reader::SourceReader;
 use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use crate::source::monitor::SourceMetrics;
 use crate::source::{SourceColumnDesc, SourceColumnType};
@@ -33,15 +34,17 @@ pub const DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 16;
 /// `SourceDesc` describes a stream source.
 #[derive(Debug, Clone)]
 pub struct SourceDesc {
-    pub source: ConnectorSource,
+    pub source: SourceReader,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
 }
 
 /// `FsSourceDesc` describes a stream source.
+#[deprecated = "will be replaced by new fs source (list + fetch)"]
+#[expect(deprecated)]
 #[derive(Debug)]
 pub struct FsSourceDesc {
-    pub source: FsConnectorSource,
+    pub source: FsSourceReader,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
 }
@@ -102,7 +105,7 @@ impl SourceDescBuilder {
 
         let psrser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
 
-        let source = ConnectorSource::new(
+        let source = SourceReader::new(
             self.with_properties,
             columns.clone(),
             self.connector_message_buffer_size,
@@ -120,6 +123,8 @@ impl SourceDescBuilder {
         self.metrics.clone()
     }
 
+    #[deprecated = "will be replaced by new fs source (list + fetch)"]
+    #[expect(deprecated)]
     pub fn build_fs_source_desc(&self) -> Result<FsSourceDesc> {
         let parser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
 
@@ -141,7 +146,7 @@ impl SourceDescBuilder {
 
         let columns = self.column_catalogs_to_source_column_descs();
 
-        let source = FsConnectorSource::new(
+        let source = FsSourceReader::new(
             self.with_properties.clone(),
             columns.clone(),
             self.connector_params

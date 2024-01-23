@@ -22,7 +22,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_connector::source::reader::source_desc::{SourceDesc, SourceDescBuilder};
+use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
     StreamChunkWithState,
@@ -111,7 +111,7 @@ impl<S: StateStore> SourceExecutor<S> {
         );
         source_desc
             .source
-            .stream_reader(state, column_ids, Arc::new(source_ctx))
+            .into_stream(state, column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)
     }
@@ -694,7 +694,7 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_connector::source::datagen::DatagenSplit;
-    use risingwave_connector::source::reader::source_desc::test_utils::create_source_desc_builder;
+    use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::PbRowFormatType;
     use risingwave_storage::memory::MemoryStateStore;

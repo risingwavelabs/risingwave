@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// *** NOTICE: TO BE DEPRECATED *** //
+#![deprecated = "will be replaced by new fs source (list + fetch)"]
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,14 +32,14 @@ use crate::source::{
 };
 
 #[derive(Clone, Debug)]
-pub struct FsConnectorSource {
+pub struct FsSourceReader {
     pub config: ConnectorProperties,
     pub columns: Vec<SourceColumnDesc>,
     pub properties: HashMap<String, String>,
     pub parser_config: SpecificParserConfig,
 }
 
-impl FsConnectorSource {
+impl FsSourceReader {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         properties: HashMap<String, String>,
@@ -77,7 +77,7 @@ impl FsConnectorSource {
             .collect::<Result<Vec<SourceColumnDesc>>>()
     }
 
-    pub async fn stream_reader(
+    pub async fn into_stream(
         &self,
         state: ConnectorState,
         column_ids: Vec<ColumnId>,

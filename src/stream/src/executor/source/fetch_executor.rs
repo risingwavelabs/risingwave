@@ -29,7 +29,7 @@ use risingwave_connector::source::filesystem::opendal_source::{
     OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
 use risingwave_connector::source::filesystem::OpendalFsSplit;
-use risingwave_connector::source::reader::source_desc::SourceDesc;
+use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
     BoxSourceWithStateStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
     StreamChunkWithState,
@@ -162,7 +162,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     ) -> StreamExecutorResult<BoxSourceWithStateStream> {
         source_desc
             .source
-            .stream_reader(batch, column_ids, Arc::new(source_ctx))
+            .into_stream(batch, column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)
     }
