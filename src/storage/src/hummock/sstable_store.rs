@@ -51,7 +51,7 @@ use crate::hummock::multi_builder::UploadJoinHandle;
 use crate::hummock::{
     BlockHolder, CacheableEntry, HummockError, HummockResult, LruCache, MemoryLimiter,
 };
-use crate::monitor::{MemoryCollector, StoreLocalStatistic};
+use crate::monitor::{HummockStateStoreMetrics, MemoryCollector, StoreLocalStatistic};
 
 const MAX_META_CACHE_SHARD_BITS: usize = 2;
 const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
@@ -102,6 +102,7 @@ impl From<CachePolicy> for TracedCachePolicy {
 
 struct BlockCacheEventListener {
     data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
+    metrics: Arc<HummockStateStoreMetrics>,
 }
 
 impl LruCacheEventListener for BlockCacheEventListener {
@@ -113,6 +114,10 @@ impl LruCacheEventListener for BlockCacheEventListener {
             sst_id: key.0,
             block_idx: key.1,
         };
+        self.metrics
+            .block_efficiency_histogram
+            .with_label_values(&[&value.table_id().to_string()])
+            .observe(value.efficiency());
         // temporarily avoid spawn task while task drop with madsim
         // FYI: https://github.com/madsim-rs/madsim/issues/182
         #[cfg(not(madsim))]
@@ -159,6 +164,20 @@ where
     }
 }
 
+pub struct SstableStoreConfig {
+    pub store: ObjectStoreRef,
+    pub path: String,
+    pub block_cache_capacity: usize,
+    pub meta_cache_capacity: usize,
+    pub high_priority_ratio: usize,
+    pub prefetch_buffer_capacity: usize,
+    pub max_prefetch_block_number: usize,
+    pub data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
+    pub meta_file_cache: FileCache<HummockSstableObjectId, CachedSstable>,
+    pub recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
+    pub state_store_metrics: Arc<HummockStateStoreMetrics>,
+}
+
 pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
@@ -177,51 +196,43 @@ pub struct SstableStore {
 }
 
 impl SstableStore {
-    pub fn new(
-        store: ObjectStoreRef,
-        path: String,
-        block_cache_capacity: usize,
-        meta_cache_capacity: usize,
-        high_priority_ratio: usize,
-        prefetch_buffer_capacity: usize,
-        max_prefetch_block_number: usize,
-        data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
-        meta_file_cache: FileCache<HummockSstableObjectId, CachedSstable>,
-        recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
-    ) -> Self {
+    pub fn new(config: SstableStoreConfig) -> Self {
         // TODO: We should validate path early. Otherwise object store won't report invalid path
         // error until first write attempt.
         let mut shard_bits = MAX_META_CACHE_SHARD_BITS;
-        while (meta_cache_capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
+        while (config.meta_cache_capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD
+            && shard_bits > 0
+        {
             shard_bits -= 1;
         }
         let block_cache_listener = Arc::new(BlockCacheEventListener {
-            data_file_cache: data_file_cache.clone(),
+            data_file_cache: config.data_file_cache.clone(),
+            metrics: config.state_store_metrics,
         });
-        let meta_cache_listener = Arc::new(MetaCacheEventListener(meta_file_cache.clone()));
+        let meta_cache_listener = Arc::new(MetaCacheEventListener(config.meta_file_cache.clone()));
         Self {
-            path,
-            store,
+            path: config.path,
+            store: config.store,
             block_cache: BlockCache::with_event_listener(
-                block_cache_capacity,
+                config.block_cache_capacity,
                 MAX_CACHE_SHARD_BITS,
-                high_priority_ratio,
+                config.high_priority_ratio,
                 block_cache_listener,
             ),
             meta_cache: Arc::new(LruCache::with_event_listener(
                 shard_bits,
-                meta_cache_capacity,
+                config.meta_cache_capacity,
                 0,
                 meta_cache_listener,
             )),
 
-            data_file_cache,
-            meta_file_cache,
+            data_file_cache: config.data_file_cache,
+            meta_file_cache: config.meta_file_cache,
 
-            recent_filter,
+            recent_filter: config.recent_filter,
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
-            prefetch_buffer_capacity,
-            max_prefetch_block_number,
+            prefetch_buffer_capacity: config.prefetch_buffer_capacity,
+            max_prefetch_block_number: config.max_prefetch_block_number,
         }
     }
 
