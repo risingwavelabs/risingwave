@@ -314,6 +314,14 @@ impl FrameBoundsImpl for RangeFrameBounds {
                             val
                         );
                     }
+                    if matches!(self.order_data_type, DataType::Timestamptz) {
+                        // for `timestamptz`, we only support offset without `month` and `day` fields
+                        if val.months() != 0 || val.days() != 0 {
+                            bail!(
+                                "for frame order column of type `timestamptz`, offset should not have non-zero `month` and `day`",
+                            );
+                        }
+                    }
                 },
                 _ => unreachable!("other order column data types are not supported and should be banned in frontend"),
             }
