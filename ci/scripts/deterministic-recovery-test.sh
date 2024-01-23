@@ -14,7 +14,8 @@ risingwave_meta::manager::catalog=debug,\
 risingwave_meta::rpc::ddl_controller=debug,\
 risingwave_meta::barrier::mod=debug,\
 risingwave_meta::barrier::progress=debug,\
-risingwave_simulation=debug"
+risingwave_simulation=debug,\
+risingwave_stream::executor::backfill=trace"
 export LOGDIR=.risingwave/log
 
 mkdir -p $LOGDIR
