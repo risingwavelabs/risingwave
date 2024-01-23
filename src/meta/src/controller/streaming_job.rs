@@ -23,10 +23,10 @@ use risingwave_meta_model_v2::prelude::{
     Actor, ActorDispatcher, Fragment, Index, Object, ObjectDependency, Source, Table,
 };
 use risingwave_meta_model_v2::{
-    actor, actor_dispatcher, fragment, index, object_dependency, sink, source, streaming_job,
-    table, ActorId, ActorUpstreamActors, CreateType, DatabaseId, ExprNodeArray, FragmentId,
-    I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId, StreamNode, TableId, TableVersion,
-    UserId,
+    actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
+    streaming_job, table, ActorId, ActorUpstreamActors, CreateType, DatabaseId, ExprNodeArray,
+    FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId, StreamNode, TableId,
+    TableVersion, UserId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableVersion};
@@ -346,7 +346,19 @@ impl CatalogController {
             return Ok(false);
         }
 
+        let internal_table_ids: Vec<TableId> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .filter(table::Column::BelongsToJobId.eq(job_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
         Object::delete_by_id(job_id).exec(&txn).await?;
+        Object::delete_many()
+            .filter(object::Column::Oid.is_in(internal_table_ids))
+            .exec(&txn)
+            .await?;
         txn.commit().await?;
 
         Ok(true)

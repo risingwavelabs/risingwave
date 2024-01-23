@@ -460,8 +460,14 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
+        let to_delete_objs: HashSet<ObjectId> = creating_job_ids
+            .clone()
+            .into_iter()
+            .chain(state_table_ids.clone().into_iter())
+            .collect();
+
         let res = Object::delete_many()
-            .filter(object::Column::Oid.is_in(creating_job_ids.clone()))
+            .filter(object::Column::Oid.is_in(to_delete_objs))
             .exec(&txn)
             .await?;
         assert!(res.rows_affected > 0);
@@ -584,6 +590,18 @@ impl CatalogController {
                 relations.push(PbRelation {
                     relation_info: Some(PbRelationInfo::Index(
                         ObjectModel(index, obj.unwrap()).into(),
+                    )),
+                });
+            }
+            ObjectType::Source => {
+                let (source, obj) = Source::find_by_id(job_id)
+                    .find_also_related(Object)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("source", job_id))?;
+                relations.push(PbRelation {
+                    relation_info: Some(PbRelationInfo::Source(
+                        ObjectModel(source, obj.unwrap()).into(),
                     )),
                 });
             }
