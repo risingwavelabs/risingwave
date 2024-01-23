@@ -52,15 +52,13 @@ async fn test_read_version_basic() {
         let kv_pairs = gen_dummy_batch(epoch);
         let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
         let size = SharedBufferBatch::measure_batch_size(&sorted_items);
-        let imm = SharedBufferBatch::build_shared_buffer_batch(
+        let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
             epoch,
             0,
             sorted_items,
             size,
             vec![],
             TableId::from(table_id),
-            None,
-            None,
         );
 
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
@@ -91,15 +89,13 @@ async fn test_read_version_basic() {
             let kv_pairs = gen_dummy_batch(epoch);
             let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
             let size = SharedBufferBatch::measure_batch_size(&sorted_items);
-            let imm = SharedBufferBatch::build_shared_buffer_batch(
+            let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
                 epoch,
                 0,
                 sorted_items,
                 size,
                 vec![],
                 TableId::from(table_id),
-                None,
-                None,
             );
 
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
@@ -278,15 +274,13 @@ async fn test_read_filter_basic() {
         let kv_pairs = gen_dummy_batch(epoch);
         let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
         let size = SharedBufferBatch::measure_batch_size(&sorted_items);
-        let imm = SharedBufferBatch::build_shared_buffer_batch(
+        let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
             epoch,
             0,
             sorted_items,
             size,
             vec![],
             TableId::from(table_id),
-            None,
-            None,
         );
 
         read_version
@@ -370,15 +364,13 @@ async fn test_read_filter_for_batch_issue_14659() {
 
         let items = SharedBufferBatch::build_shared_buffer_item_batches(gen_dummy_batch(i));
         let size = SharedBufferBatch::measure_batch_size(&items);
-        let imm = SharedBufferBatch::build_shared_buffer_batch(
+        let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
             epoch,
             0,
             items,
             size,
             vec![],
             table_id,
-            None,
-            None,
         );
 
         imms.push(imm.clone());
