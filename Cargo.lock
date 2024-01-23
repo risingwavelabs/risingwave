@@ -8951,6 +8951,7 @@ dependencies = [
  "apache-avro 0.16.0",
  "arrow-array 50.0.0",
  "arrow-schema 50.0.0",
+ "assert_matches",
  "async-nats",
  "async-trait",
  "auto_enums",
