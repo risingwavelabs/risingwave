@@ -14,4 +14,5 @@
 
 pub mod desc;
 pub mod fs_reader;
+#[expect(clippy::module_inception)]
 pub mod reader;

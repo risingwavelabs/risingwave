@@ -77,7 +77,7 @@ impl FsSourceReader {
             .collect::<Result<Vec<SourceColumnDesc>>>()
     }
 
-    pub async fn into_stream(
+    pub async fn to_stream(
         &self,
         state: ConnectorState,
         column_ids: Vec<ColumnId>,

@@ -150,7 +150,7 @@ impl SourceExecutor {
         ));
         let stream = self
             .source
-            .into_stream(Some(vec![self.split]), self.column_ids, source_ctx)
+            .to_stream(Some(vec![self.split]), self.column_ids, source_ctx)
             .await?;
 
         #[for_await]

@@ -162,7 +162,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     ) -> StreamExecutorResult<BoxSourceWithStateStream> {
         source_desc
             .source
-            .into_stream(batch, column_ids, Arc::new(source_ctx))
+            .to_stream(batch, column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)
     }
