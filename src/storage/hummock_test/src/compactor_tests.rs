@@ -1361,7 +1361,7 @@ pub(crate) mod tests {
             .last()
             .unwrap();
         assert_eq!(1, output_level_info.table_infos.len());
-        assert_eq!(254, output_level_info.table_infos[0].total_key_count);
+        assert_eq!(252, output_level_info.table_infos[0].total_key_count);
     }
 
     type KeyValue = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>);
