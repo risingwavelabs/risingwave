@@ -20,12 +20,11 @@ use bytes::{Bytes, BytesMut};
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use more_asserts::debug_assert_lt;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, PointRange, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
@@ -356,7 +355,6 @@ pub async fn merge_imms_in_memory(
         EpochWithGap::new_max_epoch(),
     ));
     let mut table_key_versions: Vec<(EpochWithGap, HummockValue<Bytes>)> = Vec::new();
-    let mut table_key_last_delete_epoch = HummockEpoch::MAX;
 
     for ((key, value), epoch_with_gap) in items {
         let full_key = FullKey::new_with_gap_epoch(table_id, key, epoch_with_gap);
@@ -371,10 +369,6 @@ pub async fn merge_imms_in_memory(
 
             // Reset state before moving onto the new table key
             table_key_versions = vec![];
-            table_key_last_delete_epoch = HummockEpoch::MAX;
-        }
-        if value.is_delete() {
-            table_key_last_delete_epoch = epoch_with_gap.pure_epoch();
         }
         table_key_versions.push((epoch_with_gap, value));
     }
