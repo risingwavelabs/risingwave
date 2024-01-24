@@ -82,8 +82,8 @@ macro_rules! for_all_params {
             { bloom_false_positive,                     f64,    Some(0.001_f64),                            false,  "False positive probability of bloom filter.", },
             { state_store,                              String, None,                                       false,  "", },
             { data_directory,                           String, None,                                       false,  "Remote directory for storing data and metadata objects.", },
-            { backup_storage_url,                       String, Some("memory".to_string()),                 true,   "Remote storage url for storing snapshots.", },
-            { backup_storage_directory,                 String, Some("backup".to_string()),                 true,   "Remote directory for storing snapshots.", },
+            { backup_storage_url,                       String, None,                                       true,   "Remote storage url for storing snapshots.", },
+            { backup_storage_directory,                 String, None,                                       true,   "Remote directory for storing snapshots.", },
             { max_concurrent_creating_streaming_jobs,   u32,    Some(1_u32),                                true,   "Max number of concurrent creating streaming jobs.", },
             { pause_on_next_bootstrap,                  bool,   Some(false),                                true,   "Whether to pause all data sources on next bootstrap.", },
             { wasm_storage_url,                         String, Some("fs://.risingwave/data".to_string()),  false,  "", },
@@ -398,13 +398,17 @@ impl ValidateOnSet for OverrideValidateOnSet {
         Self::expect_range(*v, 1..)
     }
 
-    fn backup_storage_directory(_v: &String) -> Result<()> {
-        // TODO
+    fn backup_storage_directory(v: &String) -> Result<()> {
+        if v.trim().is_empty() {
+            return Err("backup_storage_directory cannot be empty".into());
+        }
         Ok(())
     }
 
-    fn backup_storage_url(_v: &String) -> Result<()> {
-        // TODO
+    fn backup_storage_url(v: &String) -> Result<()> {
+        if v.trim().is_empty() {
+            return Err("backup_storage_url cannot be empty".into());
+        }
         Ok(())
     }
 }
