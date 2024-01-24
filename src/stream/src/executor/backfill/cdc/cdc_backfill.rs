@@ -23,6 +23,7 @@ use itertools::Itertools;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -474,6 +475,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 &self.output_indices,
                 &offset_parse_func,
                 &last_binlog_offset,
+                &upstream_table_name,
+                upstream_table_id,
             ) {
                 // If not finished then we need to update state, otherwise no need.
                 if let Message::Barrier(barrier) = &msg {
@@ -504,6 +507,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 &self.output_indices,
                 &offset_parse_func,
                 &last_binlog_offset,
+                &upstream_table_name,
+                upstream_table_id,
             ) {
                 if let Message::Barrier(barrier) = &msg {
                     // commit state just to bump the epoch of state table
@@ -520,6 +525,8 @@ fn mapping_message(
     upstream_indices: &[usize],
     offset_parse_func: &CdcOffsetParseFunc,
     last_cdc_offset: &Option<CdcOffset>,
+    upstream_table_name: &str,
+    upstream_table_id: u32,
 ) -> Option<Message> {
     match msg {
         Message::Barrier(_) => Some(msg),
@@ -532,6 +539,11 @@ fn mapping_message(
                 Ok(chunk) => Some(Message::Chunk(mapping_chunk(chunk, upstream_indices))),
                 Err(e) => {
                     tracing::error!("failed to mark upstream chunk: {}", e);
+                    GLOBAL_ERROR_METRICS.cdc_source_error.report([
+                        upstream_table_name.into(),
+                        upstream_table_id.to_string(),
+                        e.to_string().into(),
+                    ]);
                     None
                 }
             }
