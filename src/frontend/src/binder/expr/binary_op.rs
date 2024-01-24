@@ -113,8 +113,8 @@ impl Binder {
             BinaryOperator::Arrow => ExprType::JsonbAccess,
             BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
             BinaryOperator::HashMinus => ExprType::JsonbDeletePath,
-            BinaryOperator::HashArrow => ExprType::JsonbExtractPath,
-            BinaryOperator::HashLongArrow => ExprType::JsonbExtractPathText,
+            BinaryOperator::HashArrow => ExprType::JsonbExtractPathVariadic,
+            BinaryOperator::HashLongArrow => ExprType::JsonbExtractPathTextVariadic,
             BinaryOperator::Prefix => ExprType::StartsWith,
             BinaryOperator::Contains => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());

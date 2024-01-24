@@ -178,7 +178,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::JsonbAccess
             | expr_node::Type::JsonbAccessStr
             | expr_node::Type::JsonbExtractPath
+            | expr_node::Type::JsonbExtractPathVariadic
             | expr_node::Type::JsonbExtractPathText
+            | expr_node::Type::JsonbExtractPathTextVariadic
             | expr_node::Type::JsonbTypeof
             | expr_node::Type::JsonbArrayLength
             | expr_node::Type::JsonbObject

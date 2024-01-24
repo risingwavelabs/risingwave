@@ -14,7 +14,8 @@
 
 use std::fmt::Write;
 
-use risingwave_common::types::{JsonbRef, ListRef};
+use risingwave_common::row::Row;
+use risingwave_common::types::JsonbRef;
 use risingwave_expr::function;
 
 /// Extracts JSON object field with the given key.
@@ -91,9 +92,14 @@ pub fn jsonb_array_element(v: JsonbRef<'_>, p: i32) -> Option<JsonbRef<'_>> {
 /// select jsonb_extract_path('{"a": {"b": ["foo","bar"]}}', 'a', 'b', '1');
 /// ----
 /// "bar"
+///
+/// query T
+/// select jsonb_extract_path('{"a": {"b": ["foo","bar"]}}', variadic array['a', 'b', '1']);
+/// ----
+/// "bar"
 /// ```
-#[function("jsonb_extract_path(jsonb, varchar[]) -> jsonb")]
-pub fn jsonb_extract_path<'a>(v: JsonbRef<'a>, path: ListRef<'_>) -> Option<JsonbRef<'a>> {
+#[function("jsonb_extract_path(jsonb, variadic varchar[]) -> jsonb")]
+pub fn jsonb_extract_path<'a>(v: JsonbRef<'a>, path: impl Row) -> Option<JsonbRef<'a>> {
     let mut jsonb = v;
     for key in path.iter() {
         // return null if any element is null
@@ -192,11 +198,16 @@ pub fn jsonb_array_element_str(v: JsonbRef<'_>, p: i32, writer: &mut impl Write)
 /// select jsonb_extract_path_text('{"a": {"b": ["foo","bar"]}}', 'a', 'b', '1');
 /// ----
 /// bar
+///
+/// query T
+/// select jsonb_extract_path_text('{"a": {"b": ["foo","bar"]}}', variadic array['a', 'b', '1']);
+/// ----
+/// bar
 /// ```
-#[function("jsonb_extract_path_text(jsonb, varchar[]) -> varchar")]
+#[function("jsonb_extract_path_text(jsonb, variadic varchar[]) -> varchar")]
 pub fn jsonb_extract_path_text(
     v: JsonbRef<'_>,
-    path: ListRef<'_>,
+    path: impl Row,
     writer: &mut impl Write,
 ) -> Option<()> {
     let jsonb = jsonb_extract_path(v, path)?;

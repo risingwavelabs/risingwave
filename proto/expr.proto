@@ -226,9 +226,11 @@ message ExprNode {
     // jsonb ->> int, jsonb ->> text that returns text
     JSONB_ACCESS_STR = 601;
     // jsonb #> text[] -> jsonb
-    JSONB_EXTRACT_PATH = 613;
+    JSONB_EXTRACT_PATH = 626;
+    JSONB_EXTRACT_PATH_VARIADIC = 613;
     // jsonb #>> text[] -> text
-    JSONB_EXTRACT_PATH_TEXT = 614;
+    JSONB_EXTRACT_PATH_TEXT = 627;
+    JSONB_EXTRACT_PATH_TEXT_VARIADIC = 614;
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
     IS_JSON = 604;
