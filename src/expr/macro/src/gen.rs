@@ -23,6 +23,42 @@ use super::*;
 impl FunctionAttr {
     /// Expands the wildcard in function arguments or return type.
     pub fn expand(&self) -> Vec<Self> {
+        // handle variadic argument
+        if self
+            .args
+            .last()
+            .is_some_and(|arg| arg.starts_with("variadic"))
+        {
+            // expand:  foo(a, b, variadic anyarray)
+            // to:      foo(a, b, ...)
+            //        + foo_variadic(a, b, anyarray)
+            let mut attrs = Vec::new();
+            attrs.extend(
+                FunctionAttr {
+                    args: {
+                        let mut args = self.args.clone();
+                        *args.last_mut().unwrap() = "...".to_string();
+                        args
+                    },
+                    ..self.clone()
+                }
+                .expand(),
+            );
+            attrs.extend(
+                FunctionAttr {
+                    name: format!("{}_variadic", self.name),
+                    args: {
+                        let mut args = self.args.clone();
+                        let last = args.last_mut().unwrap();
+                        *last = last.strip_prefix("variadic ").unwrap().into();
+                        args
+                    },
+                    ..self.clone()
+                }
+                .expand(),
+            );
+            return attrs;
+        }
         let args = self.args.iter().map(|ty| types::expand_type_wildcard(ty));
         let ret = types::expand_type_wildcard(&self.ret);
         // multi_cartesian_product should emit an empty set if the input is empty.

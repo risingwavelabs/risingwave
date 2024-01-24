@@ -38,11 +38,7 @@ use super::string::quote_ident;
 /// Hello World
 /// ```
 #[function(
-    "format(varchar, ...) -> varchar",
-    prebuild = "Formatter::from_str($0).map_err(|e| ExprError::Parse(e.to_report_string().into()))?"
-)]
-#[function(
-    "format_variadic(varchar, anyarray) -> varchar",
+    "format(varchar, variadic anyarray) -> varchar",
     prebuild = "Formatter::from_str($0).map_err(|e| ExprError::Parse(e.to_report_string().into()))?"
 )]
 fn format(row: impl Row, formatter: &Formatter, writer: &mut impl Write) -> Result<()> {

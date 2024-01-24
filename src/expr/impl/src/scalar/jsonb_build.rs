@@ -31,8 +31,13 @@ use super::{ToJsonb, ToTextDisplay};
 /// select jsonb_build_array(1, 2, 'foo', 4, 5);
 /// ----
 /// [1, 2, "foo", 4, 5]
+///
+/// query T
+/// select jsonb_build_array(variadic array[1, 2, 4, 5]);
+/// ----
+/// [1, 2, 4, 5]
 /// ```
-#[function("jsonb_build_array(...) -> jsonb")]
+#[function("jsonb_build_array(variadic anyarray) -> jsonb")]
 fn jsonb_build_array(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
     let mut builder = Builder::<Vec<u8>>::new();
     builder.begin_array();
@@ -54,8 +59,13 @@ fn jsonb_build_array(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
 /// select jsonb_build_object('foo', 1, 2, 'bar');
 /// ----
 /// {"2": "bar", "foo": 1}
+///
+/// query T
+/// select jsonb_build_object(variadic array['foo', '1', '2', 'bar']);
+/// ----
+/// {"2": "bar", "foo": 1}
 /// ```
-#[function("jsonb_build_object(...) -> jsonb")]
+#[function("jsonb_build_object(variadic anyarray) -> jsonb")]
 fn jsonb_build_object(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
     if args.len() % 2 == 1 {
         return Err(ExprError::InvalidParam {

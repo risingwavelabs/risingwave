@@ -34,8 +34,7 @@ use risingwave_expr::function;
 /// ----
 /// abcde,2,22
 /// ```
-#[function("concat_ws(varchar, ...) -> varchar")]
-#[function("concat_ws_variadic(varchar, anyarray) -> varchar")]
+#[function("concat_ws(varchar, variadic anyarray) -> varchar")]
 fn concat_ws(sep: &str, vals: impl Row, writer: &mut impl Write) -> Option<()> {
     let mut string_iter = vals.iter().flatten();
     if let Some(string) = string_iter.next() {

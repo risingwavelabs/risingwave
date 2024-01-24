@@ -1388,21 +1388,21 @@ impl Binder {
         });
 
         if variadic {
-            match function_name {
-                "format" => {
-                    return Ok(FunctionCall::new(ExprType::FormatVariadic, inputs)?.into());
+            return match function_name {
+                "format" => Ok(FunctionCall::new(ExprType::FormatVariadic, inputs)?.into()),
+                "concat_ws" => Ok(FunctionCall::new(ExprType::ConcatWsVariadic, inputs)?.into()),
+                "jsonb_build_array" => {
+                    Ok(FunctionCall::new(ExprType::JsonbBuildArrayVariadic, inputs)?.into())
                 }
-                "concat_ws" => {
-                    return Ok(FunctionCall::new(ExprType::ConcatWsVariadic, inputs)?.into());
+                "jsonb_build_object" => {
+                    Ok(FunctionCall::new(ExprType::JsonbBuildObjectVariadic, inputs)?.into())
                 }
-                _ => {
-                    return Err(ErrorCode::BindError(format!(
-                        "VARIADIC argument is not allowed in function \"{}\"",
-                        function_name
-                    ))
-                    .into())
-                }
-            }
+                _ => Err(ErrorCode::BindError(format!(
+                    "VARIADIC argument is not allowed in function \"{}\"",
+                    function_name
+                ))
+                .into()),
+            };
         }
 
         match HANDLES.get(function_name) {
