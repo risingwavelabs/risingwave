@@ -96,9 +96,8 @@ impl Client {
             );
         }
 
-        let inner = reqwest::Client::builder()
-            .build()
-            .map_err(|e| invalid_option_error!("build reqwest client failed: {}", e.as_report()))?;
+        // `unwrap` as the builder is not affected by any input right now
+        let inner = reqwest::Client::builder().build().unwrap();
 
         Ok(Client {
             inner,

@@ -26,6 +26,7 @@ const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
 #[error("Invalid option: {message}")]
 pub struct InvalidOptionError {
     message: String,
+    // #[backtrace]
     // source: Option<risingwave_common::error::BoxedError>,
 }
 
@@ -42,7 +43,15 @@ pub enum SchemaFetchError {
     #[error(transparent)]
     Request(#[from] schema_registry::ConcurrentRequestError),
     #[error("schema compilation error: {0}")]
-    SchemaCompile(#[source] risingwave_common::error::BoxedError),
-    #[error(transparent)]
-    YetToMigrate(risingwave_common::error::RwError),
+    SchemaCompile(
+        #[source]
+        #[backtrace]
+        risingwave_common::error::BoxedError,
+    ),
+    #[error("{0}")] // source+{0} is effectively transparent but allows backtrace
+    YetToMigrate(
+        #[source]
+        #[backtrace]
+        risingwave_common::error::RwError,
+    ),
 }
