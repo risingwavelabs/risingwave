@@ -32,7 +32,6 @@ impl ExecutorBuilder for SubscriptionExecutorBuilder {
         params: crate::task::ExecutorParams,
         node: &Self::Node,
         state_store: impl risingwave_storage::StateStore,
-        _stream: &mut crate::task::LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let table_id = TableId::new(node.log_store_table.as_ref().unwrap().id);

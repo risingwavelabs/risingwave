@@ -105,7 +105,10 @@ impl<LS: LocalStateStore> SubscriptionLogStoreWriter<LS> {
         let watermark = watermark.into_iter().collect_vec();
         self.state_store.seal_current_epoch(
             next_epoch,
-            SealCurrentEpochOptions::new(watermark, WatermarkDirection::Ascending),
+            SealCurrentEpochOptions {
+                table_watermarks: Some((WatermarkDirection::Ascending, watermark)),
+                switch_op_consistency_level: None,
+            },
         );
         self.seq_id = FIRST_SEQ_ID;
         Ok(())
