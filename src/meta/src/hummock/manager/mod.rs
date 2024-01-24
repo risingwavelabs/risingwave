@@ -959,7 +959,7 @@ impl HummockManager {
             Some(task) => task,
         };
 
-        let target_level_id = compact_task.input.target_level;
+        let target_level_id = compact_task.input.target_level as u32;
 
         let compression_algorithm = match compact_task.compression_algorithm.as_str() {
             "Lz4" => 1,
@@ -975,15 +975,12 @@ impl HummockManager {
             watermark,
             sorted_output_ssts: vec![],
             task_id,
-            target_level: target_level_id as u32,
+            target_level: target_level_id,
             // only gc delete keys in last level because there may be older version in more bottom
             // level.
-            gc_delete_keys: target_level_id
-                == current_version
-                    .get_compaction_group_levels(compaction_group_id)
-                    .levels
-                    .len()
-                    - 1,
+            gc_delete_keys: current_version
+                .get_compaction_group_levels(compaction_group_id)
+                .is_last_level(target_level_id),
             base_level: compact_task.base_level as u32,
             task_status: TaskStatus::Pending as i32,
             compaction_group_id: group_config.group_id,
