@@ -56,6 +56,7 @@ message ColumnDesc {
 
   // deprecated, use AdditionalColumn instead
   // AdditionalColumnType additional_column_type = 9;
+  reserved "additional_column_type";
   reserved 9;
 
   ColumnDescVersion version = 10;

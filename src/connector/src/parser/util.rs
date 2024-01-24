@@ -122,7 +122,7 @@ pub fn extreact_timestamp_from_meta(meta: &SourceMeta) -> Option<Datum> {
 
 pub fn extract_headers_from_meta(meta: &SourceMeta) -> Option<Datum> {
     match meta {
-        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_headers(None, None), /* expect output of type `array[struct<varchar, bytea>]` */
+        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_headers(), /* expect output of type `array[struct<varchar, bytea>]` */
         _ => None,
     }
 }
@@ -133,7 +133,7 @@ pub fn extract_header_inner_from_meta(
     data_type: Option<&PbDataType>,
 ) -> Option<Datum> {
     match meta {
-        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_headers(Some(inner_field), data_type), /* expect output of type `bytea` or `varchar` */
+        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_header_inner(inner_field, data_type), /* expect output of type `bytea` or `varchar` */
         _ => None,
     }
 }

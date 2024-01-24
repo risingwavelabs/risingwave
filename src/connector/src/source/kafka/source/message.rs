@@ -41,50 +41,47 @@ impl KafkaMeta {
             .into()
     }
 
-    pub fn extract_headers(
+    pub fn extract_header_inner(
         &self,
-        inner_field: Option<&str>,
+        inner_field: &str,
         data_type: Option<&PbDataType>,
     ) -> Option<Datum> {
-        // return the exact header value if inner_field is specified, if not found, return None
-        if let Some(target_field) = inner_field {
-            let target_value = self
-                .headers
-                .as_ref()
-                .iter()
-                .find_map(|headers| {
-                    headers
-                        .iter()
-                        .find(|header| header.key == target_field)
-                        .map(|header| header.value)
-                })
-                .unwrap_or(None); // if not found the specified column, return None
-            if let Some(data_type) = data_type
-                && data_type.type_name == PbTypeName::Varchar as i32
-            {
-                Some(
-                    target_value.map(|byte| ScalarImpl::Utf8(String::from_utf8_lossy(byte).into())),
-                )
-            } else {
-                Some(target_value.map(|byte| ScalarImpl::Bytea(byte.into())))
-            }
-        } else {
-            self.headers.as_ref().map(|headers| {
-                let header_item: Vec<Datum> = headers
+        let target_value = self
+            .headers
+            .as_ref()
+            .iter()
+            .find_map(|headers| {
+                headers
                     .iter()
-                    .map(|header| {
-                        Some(ScalarImpl::Struct(StructValue::new(vec![
-                            Some(ScalarImpl::Utf8(header.key.to_string().into())),
-                            header.value.map(|byte| ScalarImpl::Bytea(byte.into())),
-                        ])))
-                    })
-                    .collect_vec();
-                Some(ScalarImpl::List(ListValue::from_datum_iter(
-                    &get_kafka_header_item_datatype(),
-                    header_item,
-                )))
+                    .find(|header| header.key == inner_field)
+                    .map(|header| header.value)
             })
+            .unwrap_or(None); // if not found the specified column, return None
+        if let Some(data_type) = data_type
+            && data_type.type_name == PbTypeName::Varchar as i32
+        {
+            Some(target_value.map(|byte| ScalarImpl::Utf8(String::from_utf8_lossy(byte).into())))
+        } else {
+            Some(target_value.map(|byte| ScalarImpl::Bytea(byte.into())))
         }
+    }
+
+    pub fn extract_headers(&self) -> Option<Datum> {
+        self.headers.as_ref().map(|headers| {
+            let header_item: Vec<Datum> = headers
+                .iter()
+                .map(|header| {
+                    Some(ScalarImpl::Struct(StructValue::new(vec![
+                        Some(ScalarImpl::Utf8(header.key.to_string().into())),
+                        header.value.map(|byte| ScalarImpl::Bytea(byte.into())),
+                    ])))
+                })
+                .collect_vec();
+            Some(ScalarImpl::List(ListValue::from_datum_iter(
+                &get_kafka_header_item_datatype(),
+                header_item,
+            )))
+        })
     }
 }
 
