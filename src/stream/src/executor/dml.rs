@@ -22,7 +22,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
-use risingwave_source::dml_manager::DmlManagerRef;
+use risingwave_dml::dml_manager::DmlManagerRef;
 
 use super::error::StreamExecutorError;
 use super::{
@@ -299,7 +299,7 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::transaction::transaction_id::TxnId;
     use risingwave_common::types::DataType;
-    use risingwave_source::dml_manager::DmlManager;
+    use risingwave_dml::dml_manager::DmlManager;
 
     use super::*;
     use crate::executor::test_utils::MockSource;

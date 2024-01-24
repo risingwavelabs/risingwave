@@ -116,8 +116,10 @@ pub fn gen_dummy_sst_info(
             right_exclusive: false,
         }),
         file_size,
-        table_ids: vec![],
+        table_ids: vec![table_id.table_id],
         uncompressed_file_size: file_size,
+        min_epoch: epoch,
+        max_epoch: epoch,
         ..Default::default()
     }
 }
@@ -392,6 +394,7 @@ pub fn create_small_table_cache() -> Arc<LruCache<HummockSstableObjectId, Box<Ss
 
 pub mod delete_range {
     use super::*;
+    use crate::hummock::event_handler::LocalInstanceId;
 
     #[derive(Default)]
     pub struct CompactionDeleteRangesBuilder {
@@ -413,7 +416,7 @@ pub mod delete_range {
                 size,
                 delete_ranges,
                 table_id,
-                None,
+                LocalInstanceId::default(),
                 None,
             );
             self.iter.add_batch_iter(batch.delete_range_iter());

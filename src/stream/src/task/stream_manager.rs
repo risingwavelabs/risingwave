@@ -549,11 +549,12 @@ impl LocalStreamManager {
         let mut ret = Vec::with_capacity(actors.len());
         for actor in actors {
             let actor_id = actor.actor_id;
-            let actor_context = ActorContext::create_with_metrics(
+            let actor_context = ActorContext::create(
                 &actor,
                 self.total_mem_val.clone(),
                 self.streaming_metrics.clone(),
                 env.config().unique_user_stream_errors,
+                actor.dispatcher.len(),
             );
             let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
             let expr_context = actor.expr_context.clone().unwrap();

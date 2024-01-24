@@ -1,5 +1,5 @@
 [package]
-name = "risingwave_source"
+name = "risingwave_dml"
 version = { workspace = true }
 edition = { workspace = true }
 homepage = { workspace = true }
@@ -35,10 +35,6 @@ assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio"] }
 paste = "1"
 tempfile = "3"
-
-[[bench]]
-name = "json_parser"
-harness = false
 
 [lints]
 workspace = true

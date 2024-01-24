@@ -35,6 +35,7 @@ use risingwave_hummock_sdk::table_watermark::{
     TableWatermarks, VnodeWatermark, WatermarkDirection,
 };
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
+use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
@@ -137,8 +138,8 @@ impl MergingImmTask {
         Poll::Ready(match ready!(self.join_handle.poll_unpin(cx)) {
             Ok(task_result) => task_result,
             Err(err) => Err(HummockError::other(format!(
-                "fail to join imm merge join handle: {:?}",
-                err
+                "fail to join imm merge join handle: {}",
+                err.as_report()
             ))),
         })
     }
@@ -230,8 +231,8 @@ impl UploadingTask {
                 }),
 
             Err(err) => Err(HummockError::other(format!(
-                "fail to join upload join handle: {:?}",
-                err
+                "fail to join upload join handle: {}",
+                err.as_report()
             ))),
         })
     }
@@ -244,8 +245,9 @@ impl UploadingTask {
                 Ok(sstables) => return Poll::Ready(sstables),
                 Err(e) => {
                     error!(
-                        "a flush task {:?} failed, start retry. Task info: {:?}",
-                        self.task_info, e
+                        error = %e.as_report(),
+                        task_info = ?self.task_info,
+                        "a flush task failed, start retry",
                     );
                     self.join_handle =
                         (self.spawn_upload_task)(self.payload.clone(), self.task_info.clone());
@@ -1220,7 +1222,7 @@ mod tests {
             size,
             vec![],
             TEST_TABLE_ID,
-            None,
+            LocalInstanceId::default(),
             tracker,
         )
     }
