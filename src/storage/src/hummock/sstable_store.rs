@@ -1209,9 +1209,9 @@ mod tests {
         let mut stats = StoreLocalStatistic::default();
         let holder = sstable_store.sstable(info, &mut stats).await.unwrap();
         std::mem::take(&mut meta.bloom_filter);
-        assert_eq!(holder.value().meta, meta);
+        assert_eq!(holder.meta, meta);
         let holder = sstable_store.sstable(info, &mut stats).await.unwrap();
-        assert_eq!(holder.value().meta, meta);
+        assert_eq!(holder.meta, meta);
         let mut iter = SstableIterator::new(
             holder,
             sstable_store,
