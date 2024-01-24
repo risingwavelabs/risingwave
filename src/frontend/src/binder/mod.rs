@@ -122,6 +122,10 @@ pub struct Binder {
 
     /// The sql udf context that will be used during binding phase
     udf_context: UdfContext,
+
+    /// Udf binding flag, used to distinguish between
+    /// columns and named parameters during sql udf binding
+    udf_binding_flag: bool,
 }
 
 pub struct UdfContext {
@@ -132,9 +136,6 @@ pub struct UdfContext {
     /// The global counter that records the calling stack depth
     /// of the current binding sql udf chain
     udf_global_counter: u32,
-
-    /// The runtime binder specifically used by sql udf
-    udf_runtime_stack_binder: Option<Box<Binder>>,
 }
 
 impl UdfContext {
@@ -142,20 +143,6 @@ impl UdfContext {
         Self {
             udf_param_context: HashMap::new(),
             udf_global_counter: 0,
-            udf_runtime_stack_binder: None,
-        }
-    }
-
-    pub fn named_parameter_prefix() -> String {
-        "_udf_".to_string()
-    }
-
-    pub fn runtime_stack_binder(&mut self) -> &mut Binder {
-        if let Some(ref mut binder) = self.udf_runtime_stack_binder {
-            &mut *binder
-        } else {
-            self.udf_runtime_stack_binder = Some(Box::new(Binder::new_for_system(&SessionImpl::mock())));
-            &mut *self.udf_runtime_stack_binder.as_mut().unwrap()
         }
     }
 
@@ -178,7 +165,6 @@ impl UdfContext {
     pub fn _clear(&mut self) {
         self.udf_global_counter = 0;
         self.udf_param_context.clear();
-        self.udf_runtime_stack_binder = None;
     }
 
     pub fn get_expr(&self, name: &str) -> Option<&ExprImpl> {
@@ -357,6 +343,7 @@ impl Binder {
             included_relations: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
             udf_context: UdfContext::new(),
+            udf_binding_flag: false,
         }
     }
 
@@ -505,6 +492,14 @@ impl Binder {
 
     pub fn udf_context_mut(&mut self) -> &mut UdfContext {
         &mut self.udf_context
+    }
+
+    pub fn set_udf_binding_flag(&mut self) {
+        self.udf_binding_flag = true;
+    }
+
+    pub fn unset_udf_binding_flag(&mut self) {
+        self.udf_binding_flag = false;
     }
 }
 
