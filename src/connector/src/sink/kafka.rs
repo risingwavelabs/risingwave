@@ -43,6 +43,7 @@ use crate::sink::writer::{
 use crate::sink::{DummySinkCommitCoordinator, Result, SinkWriterParam};
 use crate::source::kafka::{KafkaProperties, KafkaSplitEnumerator, PrivateLinkProducerContext};
 use crate::source::{SourceEnumeratorContext, SplitEnumerator};
+use crate::utils::DeserializeFromMap;
 use crate::{
     deserialize_duration_from_string, deserialize_u32_from_string, dispatch_sink_formatter_impl,
 };
@@ -236,8 +237,8 @@ pub struct KafkaConfig {
 
 impl KafkaConfig {
     pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
-        let config = serde_json::from_value::<KafkaConfig>(serde_json::to_value(values).unwrap())
-            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        let config =
+            Self::deserialize_from_map(&values).map_err(|e| SinkError::Config(anyhow!(e)))?;
 
         Ok(config)
     }

@@ -70,6 +70,7 @@ mod test {
     use maplit::hashmap;
 
     use super::*;
+    use crate::utils::DeserializeFromMap;
 
     #[test]
     fn test_parse_kinesis_timestamp_offset() {
@@ -80,8 +81,7 @@ mod test {
             "scan.startup.timestamp.millis".to_string() => "123456789".to_string(),
         };
 
-        let kinesis_props: KinesisProperties =
-            serde_json::from_value(serde_json::to_value(props).unwrap()).unwrap();
+        let kinesis_props = KinesisProperties::deserialize_from_map(&props).unwrap();
         assert_eq!(kinesis_props.timestamp_offset, Some(123456789));
     }
 }

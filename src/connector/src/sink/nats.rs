@@ -36,6 +36,7 @@ use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
 };
 use crate::sink::{Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY};
+use crate::utils::DeserializeFromMap;
 
 pub const NATS_SINK: &str = "nats";
 
@@ -66,8 +67,8 @@ pub struct NatsSinkWriter {
 /// Basic data types for use with the nats interface
 impl NatsConfig {
     pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
-        let config = serde_json::from_value::<NatsConfig>(serde_json::to_value(values).unwrap())
-            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        let config =
+            NatsConfig::deserialize_from_map(&values).map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY {
             Err(SinkError::Config(anyhow!(
                 "Nats sink only support append-only mode"

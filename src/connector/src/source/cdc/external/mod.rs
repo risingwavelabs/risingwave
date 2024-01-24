@@ -36,6 +36,7 @@ use crate::error::ConnectorError;
 use crate::parser::mysql_row_to_owned_row;
 use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
 use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
+use crate::utils::DeserializeFromMap;
 
 pub type ConnectorResult<T> = std::result::Result<T, ConnectorError>;
 
@@ -299,10 +300,7 @@ impl MySqlExternalTableReader {
     ) -> ConnectorResult<Self> {
         tracing::debug!(?rw_schema, "create mysql external table reader");
 
-        let config = serde_json::from_value::<ExternalTableConfig>(
-            serde_json::to_value(with_properties).unwrap(),
-        )
-        .map_err(|e| {
+        let config = ExternalTableConfig::deserialize_from_map(&with_properties).map_err(|e| {
             ConnectorError::Config(anyhow!("fail to extract mysql connector properties: {}", e))
         })?;
 

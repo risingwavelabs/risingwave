@@ -37,6 +37,7 @@ use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
 };
 use crate::sink::{DummySinkCommitCoordinator, Result};
+use crate::utils::DeserializeFromMap;
 use crate::{deserialize_duration_from_string, dispatch_sink_formatter_str_key_impl};
 
 pub const PULSAR_SINK: &str = "pulsar";
@@ -127,7 +128,7 @@ pub struct PulsarConfig {
 
 impl PulsarConfig {
     pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
-        let config = serde_json::from_value::<PulsarConfig>(serde_json::to_value(values).unwrap())
+        let config = PulsarConfig::deserialize_from_map(&values)
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
         Ok(config)

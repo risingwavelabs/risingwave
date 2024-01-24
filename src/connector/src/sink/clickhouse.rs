@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use core::fmt::Debug;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -37,6 +38,7 @@ use crate::sink::writer::{
 use crate::sink::{
     Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
+use crate::utils::DeserializeFromMap;
 
 const QUERY_ENGINE: &str =
     "select distinct ?fields from system.tables where database = ? and table = ?";
@@ -168,8 +170,7 @@ pub struct ClickHouseSink {
 impl ClickHouseConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
         let config =
-            serde_json::from_value::<ClickHouseConfig>(serde_json::to_value(properties).unwrap())
-                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+            Self::deserialize_from_map(&properties).map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(
                 "`{}` must be {}, or {}",

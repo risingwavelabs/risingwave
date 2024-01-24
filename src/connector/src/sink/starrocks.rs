@@ -38,6 +38,7 @@ use super::writer::LogSinkerOf;
 use super::{SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::sink::writer::SinkWriterExt;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
+use crate::utils::DeserializeFromMap;
 
 pub const STARROCKS_SINK: &str = "starrocks";
 const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";
@@ -72,9 +73,8 @@ pub struct StarrocksConfig {
 }
 impl StarrocksConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
-        let config =
-            serde_json::from_value::<StarrocksConfig>(serde_json::to_value(properties).unwrap())
-                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        let config = StarrocksConfig::deserialize_from_map(&properties)
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(
                 "`{}` must be {}, or {}",

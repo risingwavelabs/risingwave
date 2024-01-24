@@ -45,6 +45,7 @@ use crate::sink::writer::SinkWriterExt;
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriter, SinkWriterParam,
 };
+use crate::utils::DeserializeFromMap;
 
 pub const BIGQUERY_SINK: &str = "bigquery";
 const BIGQUERY_INSERT_MAX_NUMS: usize = 1024;
@@ -99,9 +100,8 @@ pub struct BigQueryConfig {
 }
 impl BigQueryConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
-        let config =
-            serde_json::from_value::<BigQueryConfig>(serde_json::to_value(properties).unwrap())
-                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        let config = BigQueryConfig::deserialize_from_map(&properties)
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(
                 "`{}` must be {}, or {}",

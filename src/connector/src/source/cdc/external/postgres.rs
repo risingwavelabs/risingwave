@@ -33,6 +33,7 @@ use crate::source::cdc::external::{
     CdcOffset, ConnectorResult, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
     SchemaTableName,
 };
+use crate::utils::DeserializeFromMap;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PostgresOffset {
@@ -128,10 +129,7 @@ impl PostgresExternalTableReader {
     ) -> ConnectorResult<Self> {
         tracing::debug!(?rw_schema, "create postgres external table reader");
 
-        let config = serde_json::from_value::<ExternalTableConfig>(
-            serde_json::to_value(properties).unwrap(),
-        )
-        .map_err(|e| {
+        let config = ExternalTableConfig::deserialize_from_map(&properties).map_err(|e| {
             ConnectorError::Config(anyhow!(
                 "fail to extract postgres connector properties: {}",
                 e

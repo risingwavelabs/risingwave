@@ -48,6 +48,7 @@ use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
+use crate::utils::DeserializeFromMap;
 use crate::with_options::WithOptions;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
@@ -84,8 +85,7 @@ pub trait UnknownFields {
 
 impl<P: DeserializeOwned + UnknownFields> TryFromHashmap for P {
     fn try_from_hashmap(props: HashMap<String, String>, deny_unknown_fields: bool) -> Result<Self> {
-        let json_value = serde_json::to_value(props).map_err(|e| anyhow!(e))?;
-        let res = serde_json::from_value::<P>(json_value).map_err(|e| anyhow!(e.to_string()))?;
+        let res = P::deserialize_from_map(&props).map_err(|e| anyhow!(e.to_string()))?;
 
         if !deny_unknown_fields || res.unknown_fields().is_empty() {
             Ok(res)

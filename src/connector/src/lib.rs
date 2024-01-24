@@ -43,22 +43,19 @@ use risingwave_rpc_client::ConnectorClient;
 use serde::de;
 
 pub mod aws_utils;
+pub mod common;
 pub mod error;
 mod macros;
-
 pub mod parser;
 pub mod schema;
 pub mod sink;
 pub mod source;
-
-pub mod common;
-
-pub use paste::paste;
-
+pub mod utils;
 mod with_options;
-
 #[cfg(test)]
 mod with_options_test;
+
+pub use paste::paste;
 
 #[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {

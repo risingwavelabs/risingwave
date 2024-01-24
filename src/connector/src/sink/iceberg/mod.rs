@@ -57,6 +57,7 @@ use crate::deserialize_bool_from_string;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
+use crate::utils::DeserializeFromMap;
 
 /// This iceberg sink is WIP. When it ready, we will change this name to "iceberg".
 pub const ICEBERG_SINK: &str = "iceberg";
@@ -132,9 +133,8 @@ where
 
 impl IcebergConfig {
     pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
-        let mut config =
-            serde_json::from_value::<IcebergConfig>(serde_json::to_value(&values).unwrap())
-                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        let mut config = IcebergConfig::deserialize_from_map(&values)
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(

@@ -58,6 +58,7 @@ use crate::source::{
     extract_source_struct, BoxSourceStream, ChunkSourceStream, SourceColumnDesc, SourceColumnType,
     SourceContext, SourceContextRef, SourceEncode, SourceFormat, SourceMeta,
 };
+use crate::utils::DeserializeFromMap;
 
 pub mod additional_columns;
 mod avro;
@@ -1005,10 +1006,8 @@ impl SpecificParserConfig {
                     config.client_config = SchemaRegistryAuth::from(&info.format_encode_options);
                 } else {
                     config.aws_auth_props = Some(
-                        serde_json::from_value::<AwsAuthProps>(
-                            serde_json::to_value(info.format_encode_options.clone()).unwrap(),
-                        )
-                        .map_err(|e| anyhow::anyhow!(e))?,
+                        AwsAuthProps::deserialize_from_map(&info.format_encode_options)
+                            .map_err(|e| anyhow::anyhow!(e))?,
                     );
                 }
                 EncodingProperties::Avro(config)
@@ -1037,10 +1036,8 @@ impl SpecificParserConfig {
                     config.client_config = SchemaRegistryAuth::from(&info.format_encode_options);
                 } else {
                     config.aws_auth_props = Some(
-                        serde_json::from_value::<AwsAuthProps>(
-                            serde_json::to_value(info.format_encode_options.clone()).unwrap(),
-                        )
-                        .map_err(|e| anyhow::anyhow!(e))?,
+                        AwsAuthProps::deserialize_from_map(&info.format_encode_options)
+                            .map_err(|e| anyhow::anyhow!(e))?,
                     );
                 }
                 EncodingProperties::Protobuf(config)

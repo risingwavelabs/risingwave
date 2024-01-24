@@ -45,6 +45,7 @@ use super::{
     SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
 use crate::sink::writer::SinkWriterExt;
+use crate::utils::DeserializeFromMap;
 
 pub const DELTALAKE_SINK: &str = "deltalake";
 pub const DEFAULT_REGION: &str = "us-east-1";
@@ -131,10 +132,8 @@ pub struct DeltaLakeConfig {
 
 impl DeltaLakeConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
-        let config = serde_json::from_value::<DeltaLakeConfig>(
-            serde_json::to_value(properties).map_err(|e| SinkError::DeltaLake(e.into()))?,
-        )
-        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        let config =
+            Self::deserialize_from_map(&properties).map_err(|e| SinkError::Config(anyhow!(e)))?;
         Ok(config)
     }
 }
