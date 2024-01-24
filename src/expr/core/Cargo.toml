@@ -23,6 +23,7 @@ aes-gcm = { version = "0.10.3", features = ["aes",
 anyhow = "1"
 arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
+arrow-udf-js = { workspace = true }
 arrow-udf-wasm = { workspace = true }
 async-trait = "0.1"
 auto_impl = "1"
