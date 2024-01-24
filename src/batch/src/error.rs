@@ -20,6 +20,7 @@ pub use anyhow::anyhow;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, ErrorCode, RwError};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
+use risingwave_dml::error::DmlError;
 use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
@@ -99,6 +100,13 @@ pub enum BatchError {
         #[from]
         #[backtrace]
         BoxedError,
+    ),
+
+    #[error(transparent)]
+    Dml(
+        #[from]
+        #[backtrace]
+        DmlError,
     ),
 
     // Make the ref-counted type to be a variant for easier code structuring.
