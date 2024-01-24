@@ -501,8 +501,7 @@ mod tests {
 
     // postgres-specific data-type mapping tests
     mod test3_postgres {
-        use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
-        use risingwave_pb::plan_common::{AdditionalColumn, AdditionalColumnNormal};
+        use risingwave_pb::plan_common::AdditionalColumn;
 
         use super::*;
         use crate::source::SourceColumnType;
@@ -567,9 +566,7 @@ mod tests {
                     fields: vec![],
                     column_type: SourceColumnType::Normal,
                     is_pk: false,
-                    additional_column_type: AdditionalColumn {
-                        column_type: Some(AdditionalColumnType::Normal(AdditionalColumnNormal {})),
-                    },
+                    additional_column_type: AdditionalColumn { column_type: None },
                 },
                 SourceColumnDesc::simple("o_enum", DataType::Varchar, ColumnId::from(8)),
                 SourceColumnDesc::simple("o_char", DataType::Varchar, ColumnId::from(9)),

@@ -115,9 +115,7 @@ where
                     self.access(&["key", &desc.name], Some(&desc.data_type))
                 }
             }
-            None | Some(AdditionalColumnType::Normal(_)) => {
-                self.access(&["value", &desc.name], Some(&desc.data_type))
-            }
+            None => self.access(&["value", &desc.name], Some(&desc.data_type)),
             _ => unreachable!(),
         }
     }

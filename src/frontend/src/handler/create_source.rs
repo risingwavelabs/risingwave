@@ -696,12 +696,7 @@ pub(crate) async fn bind_source_pk(
     let additional_column_names = columns
         .iter()
         .filter_map(|col| {
-            if (col.column_desc.additional_columns.column_type.is_some())
-                && (!matches!(
-                    col.column_desc.additional_columns.column_type,
-                    Some(AdditionalColumnType::Normal(_))
-                ))
-            {
+            if col.column_desc.additional_columns.column_type.is_some() {
                 Some(col.name().to_string())
             } else {
                 None

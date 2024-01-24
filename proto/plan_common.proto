@@ -185,7 +185,6 @@ message ExprContext {
   string time_zone = 1;
 }
 
-message AdditionalColumnNormal {}
 
 message AdditionalColumnKey {}
 
@@ -207,13 +206,12 @@ message AdditionalColumnHeaders {}
 
 message AdditionalColumn {
   oneof column_type {
-    AdditionalColumnNormal normal = 1;
-    AdditionalColumnKey key = 2;
-    AdditionalColumnTimestamp timestamp = 3;
-    AdditionalColumnPartition partition = 4;
-    AdditionalColumnOffset offset = 5;
-    AdditionalColumnHeader header_inner = 6;
-    AdditionalColumnFilename filename = 7;
-    AdditionalColumnHeaders headers = 8;
+    AdditionalColumnKey key = 1;
+    AdditionalColumnTimestamp timestamp = 2;
+    AdditionalColumnPartition partition = 3;
+    AdditionalColumnOffset offset = 4;
+    AdditionalColumnHeader header_inner = 5;
+    AdditionalColumnFilename filename = 6;
+    AdditionalColumnHeaders headers = 7;
   }
 }

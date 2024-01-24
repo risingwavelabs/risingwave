@@ -18,8 +18,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_common::{bail_not_implemented, not_implemented};
-use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
-use risingwave_pb::plan_common::{AdditionalColumn, AdditionalColumnNormal, ColumnDescVersion};
+use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
 use risingwave_sqlparser::ast::{
     Array, BinaryOperator, DataType as AstDataType, Expr, Function, JsonPredicateType, ObjectName,
     Query, StructField, TrimWhereField, UnaryOperator,
@@ -626,9 +625,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         type_name: "".to_string(),
         generated_or_default_column: None,
         description: None,
-        additional_columns: AdditionalColumn {
-            column_type: Some(AdditionalColumnType::Normal(AdditionalColumnNormal {})),
-        },
+        additional_columns: AdditionalColumn { column_type: None },
         version: ColumnDescVersion::Pr13707,
     })
 }

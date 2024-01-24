@@ -15,10 +15,7 @@
 use itertools::Itertools;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
-use risingwave_pb::plan_common::additional_column::ColumnType;
-use risingwave_pb::plan_common::{
-    AdditionalColumn, AdditionalColumnNormal, ColumnDesc, ColumnDescVersion,
-};
+use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 
 pub trait ColumnDescTestExt {
     /// Create a [`ColumnDesc`] with the given name and type.
@@ -38,9 +35,7 @@ impl ColumnDescTestExt for ColumnDesc {
             column_type: Some(data_type),
             column_id,
             name: name.to_string(),
-            additional_columns: Some(AdditionalColumn {
-                column_type: Some(ColumnType::Normal(AdditionalColumnNormal {})),
-            }),
+            additional_columns: Some(AdditionalColumn { column_type: None }),
             version: ColumnDescVersion::Pr13707 as i32,
             ..Default::default()
         }
@@ -65,9 +60,7 @@ impl ColumnDescTestExt for ColumnDesc {
             field_descs: fields,
             generated_or_default_column: None,
             description: None,
-            additional_columns: Some(AdditionalColumn {
-                column_type: Some(ColumnType::Normal(AdditionalColumnNormal {})),
-            }),
+            additional_columns: Some(AdditionalColumn { column_type: None }),
             version: ColumnDescVersion::Pr13707 as i32,
         }
     }

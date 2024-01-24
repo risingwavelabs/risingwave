@@ -19,8 +19,7 @@ use risingwave_common::catalog::{
     TABLE_NAME_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
-use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
-use risingwave_pb::plan_common::{AdditionalColumn, AdditionalColumnNormal, ColumnDescVersion};
+use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
 
 /// `SourceColumnDesc` is used to describe a column in the Source and is used as the column
 /// counterpart in `StreamScan`
@@ -88,9 +87,7 @@ impl SourceColumnDesc {
             fields: vec![],
             column_type: SourceColumnType::Normal,
             is_pk: false,
-            additional_column_type: AdditionalColumn {
-                column_type: Some(AdditionalColumnType::Normal(AdditionalColumnNormal {})),
-            },
+            additional_column_type: AdditionalColumn { column_type: None },
         }
     }
 
