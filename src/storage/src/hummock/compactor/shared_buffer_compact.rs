@@ -619,7 +619,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_splits_in_order() {
-        let imm1 = ImmutableMemtable::build_shared_buffer_batch(
+        let imm1 = ImmutableMemtable::build_shared_buffer_batch_for_test(
             3,
             0,
             vec![(
@@ -629,10 +629,8 @@ mod tests {
             1024 * 1024,
             vec![],
             TableId::new(1),
-            None,
-            None,
         );
-        let imm2 = ImmutableMemtable::build_shared_buffer_batch(
+        let imm2 = ImmutableMemtable::build_shared_buffer_batch_for_test(
             3,
             0,
             vec![(
@@ -642,11 +640,9 @@ mod tests {
             (1024 + 256) * 1024,
             vec![],
             TableId::new(1),
-            None,
-            None,
         );
 
-        let imm3 = ImmutableMemtable::build_shared_buffer_batch(
+        let imm3 = ImmutableMemtable::build_shared_buffer_batch_for_test(
             2,
             0,
             vec![(
@@ -656,10 +652,8 @@ mod tests {
             (1024 + 512) * 1024,
             vec![],
             TableId::new(1),
-            None,
-            None,
         );
-        let imm4 = ImmutableMemtable::build_shared_buffer_batch(
+        let imm4 = ImmutableMemtable::build_shared_buffer_batch_for_test(
             3,
             0,
             vec![(
@@ -669,11 +663,9 @@ mod tests {
             (1024 + 512) * 1024,
             vec![],
             TableId::new(1),
-            None,
-            None,
         );
 
-        let imm5 = ImmutableMemtable::build_shared_buffer_batch(
+        let imm5 = ImmutableMemtable::build_shared_buffer_batch_for_test(
             3,
             0,
             vec![(
@@ -683,8 +675,6 @@ mod tests {
             (1024 + 256) * 1024,
             vec![],
             TableId::new(2),
-            None,
-            None,
         );
 
         let storage_opts = StorageOpts {

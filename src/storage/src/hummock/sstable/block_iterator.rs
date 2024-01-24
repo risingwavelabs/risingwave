@@ -19,8 +19,9 @@ use bytes::BytesMut;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 
-use super::{KeyPrefix, LenType, RestartPoint};
+use super::{KeyPrefix, LenType, RestartPoint, HITMAP_ELEMS};
 use crate::hummock::BlockHolder;
+use crate::monitor::LocalHitmap;
 
 /// [`BlockIterator`] is used to read kv pairs in a block.
 pub struct BlockIterator {
@@ -39,10 +40,14 @@ pub struct BlockIterator {
 
     last_key_len_type: LenType,
     last_value_len_type: LenType,
+
+    /// NOTE: `hitmap` is supposed be updated every time when `value_range` is updated.
+    hitmap: LocalHitmap<HITMAP_ELEMS>,
 }
 
 impl BlockIterator {
     pub fn new(block: BlockHolder) -> Self {
+        let hitmap = block.hitmap().local();
         Self {
             block,
             offset: usize::MAX,
@@ -52,6 +57,7 @@ impl BlockIterator {
             entry_len: 0,
             last_key_len_type: LenType::u8,
             last_value_len_type: LenType::u8,
+            hitmap,
         }
     }
 
@@ -81,7 +87,6 @@ impl BlockIterator {
 
     pub fn key(&self) -> FullKey<&[u8]> {
         assert!(self.is_valid());
-
         FullKey::from_slice_without_table_id(self.table_id(), &self.key[..])
     }
 
@@ -105,13 +110,11 @@ impl BlockIterator {
 
     pub fn seek(&mut self, key: FullKey<&[u8]>) {
         self.seek_restart_point_by_key(key);
-
         self.next_until_key(key);
     }
 
     pub fn seek_le(&mut self, key: FullKey<&[u8]>) {
         self.seek_restart_point_by_key(key);
-
         self.next_until_key(key);
         if !self.is_valid() {
             self.seek_to_last();
@@ -171,6 +174,8 @@ impl BlockIterator {
         self.value_range = prefix.value_range();
         self.offset = offset;
         self.entry_len = prefix.entry_len();
+
+        self.update_hitmap();
 
         true
     }
@@ -285,6 +290,8 @@ impl BlockIterator {
         self.offset = offset;
         self.entry_len = prefix.entry_len();
         self.update_restart_point(index);
+
+        self.update_hitmap();
     }
 
     fn update_restart_point(&mut self, index: usize) {
@@ -293,6 +300,12 @@ impl BlockIterator {
 
         self.last_key_len_type = restart_point.key_len_type;
         self.last_value_len_type = restart_point.value_len_type;
+    }
+
+    /// Update the local hitmap of the block based on the current iterator position.
+    fn update_hitmap(&mut self) {
+        self.hitmap
+            .fill_with_range(self.offset, self.value_range.end, self.block.len());
     }
 }
 
