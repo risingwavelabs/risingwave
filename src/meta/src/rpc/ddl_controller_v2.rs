@@ -89,7 +89,7 @@ impl DdlController {
                 tracing::error!(id = job_id, error = ?err.as_report(), "failed to create streaming job");
                 let aborted = mgr
                     .catalog_controller
-                    .try_abort_creating_streaming_job(job_id as _)
+                    .try_abort_creating_streaming_job(job_id as _, false)
                     .await?;
                 if aborted {
                     tracing::warn!(id = job_id, "aborted streaming job");

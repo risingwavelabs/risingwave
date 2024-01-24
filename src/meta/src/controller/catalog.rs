@@ -1463,6 +1463,20 @@ impl CatalogController {
             }
         }
 
+        let creating = StreamingJob::find()
+            .filter(
+                streaming_job::Column::JobStatus
+                    .ne(JobStatus::Created)
+                    .and(streaming_job::Column::JobId.is_in(to_drop_streaming_jobs.clone())),
+            )
+            .count(&txn)
+            .await?;
+        if creating != 0 {
+            return Err(MetaError::permission_denied(format!(
+                "can not drop {creating} creating streaming job, please cancel them firstly"
+            )));
+        }
+
         let mut to_drop_state_table_ids = to_drop_table_ids.clone().collect_vec();
         let to_drop_index_ids = to_drop_objects
             .iter()

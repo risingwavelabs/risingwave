@@ -433,20 +433,6 @@ impl MetadataManager {
         }
     }
 
-    pub async fn drop_streaming_job_by_ids(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
-        match self {
-            MetadataManager::V1(mgr) => {
-                mgr.fragment_manager
-                    .drop_table_fragments_vec(table_ids)
-                    .await
-            }
-            MetadataManager::V2(_) => {
-                // Do nothing. Need to refine drop and cancel process.
-                Ok(())
-            }
-        }
-    }
-
     pub async fn update_source_rate_limit_by_source_id(
         &self,
         source_id: SourceId,

@@ -301,6 +301,33 @@ impl GlobalBarrierManagerContext {
         Ok(())
     }
 
+    /// Pre buffered drop and cancel command, return true if any.
+    async fn pre_apply_drop_cancel(
+        &self,
+        scheduled_barriers: &ScheduledBarriers,
+    ) -> MetaResult<bool> {
+        let (dropped_actors, cancelled) =
+            scheduled_barriers.pre_apply_drop_cancel_scheduled().await;
+        let applied = !dropped_actors.is_empty() || !cancelled.is_empty();
+        if !cancelled.is_empty() {
+            match &self.metadata_manager {
+                MetadataManager::V1(mgr) => {
+                    mgr.fragment_manager
+                        .drop_table_fragments_vec(&cancelled)
+                        .await?;
+                }
+                MetadataManager::V2(mgr) => {
+                    for job_id in cancelled {
+                        mgr.catalog_controller
+                            .try_abort_creating_streaming_job(job_id.table_id as _, true)
+                            .await?;
+                    }
+                }
+            }
+        }
+        Ok(applied)
+    }
+
     /// Recovery the whole cluster from the latest epoch.
     ///
     /// If `paused_reason` is `Some`, all data sources (including connectors and DMLs) will be
@@ -342,7 +369,7 @@ impl GlobalBarrierManagerContext {
             async {
                 let recovery_result: MetaResult<_> = try {
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
-                    let _ = scheduled_barriers.pre_apply_drop_scheduled().await;
+                    let _ = self.pre_apply_drop_cancel(scheduled_barriers).await?;
 
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
@@ -368,7 +395,7 @@ impl GlobalBarrierManagerContext {
                         warn!(error = %err.as_report(), "reset compute nodes failed");
                     })?;
 
-                    if scheduled_barriers.pre_apply_drop_scheduled().await {
+                    if self.pre_apply_drop_cancel(scheduled_barriers).await? {
                         info = self.resolve_actor_info().await;
                     }
 

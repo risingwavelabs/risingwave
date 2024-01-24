@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::iter::once;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -28,6 +28,7 @@ use tokio::sync::{oneshot, watch, RwLock};
 use super::notifier::{BarrierInfo, Notifier};
 use super::{Command, Scheduled};
 use crate::hummock::HummockManagerRef;
+use crate::model::ActorId;
 use crate::rpc::metrics::MetaMetrics;
 use crate::{MetaError, MetaResult};
 
@@ -392,28 +393,35 @@ impl ScheduledBarriers {
         queue.mark_ready();
     }
 
-    /// Try to pre apply drop scheduled command and return true if any.
+    /// Try to pre apply drop and cancel scheduled command and return them if any.
     /// It should only be called in recovery.
-    pub(super) async fn pre_apply_drop_scheduled(&self) -> bool {
+    pub(super) async fn pre_apply_drop_cancel_scheduled(&self) -> (Vec<ActorId>, HashSet<TableId>) {
         let mut queue = self.inner.queue.write().await;
         assert_matches!(queue.status, QueueStatus::Blocked(_));
-        let mut found = false;
+        let (mut drop_table_ids, mut cancel_table_ids) = (vec![], HashSet::new());
 
         while let Some(Scheduled {
             notifiers, command, ..
         }) = queue.queue.pop_front()
         {
-            assert_matches!(
-                command,
-                Command::DropStreamingJobs(_) | Command::CancelStreamingJob(_)
-            );
+            match command {
+                Command::DropStreamingJobs(actor_ids) => {
+                    drop_table_ids.extend(actor_ids);
+                }
+                Command::CancelStreamingJob(table_fragments) => {
+                    let table_id = table_fragments.table_id();
+                    cancel_table_ids.insert(table_id);
+                }
+                _ => {
+                    unreachable!("only drop streaming jobs should be buffered");
+                }
+            }
             notifiers.into_iter().for_each(|mut notify| {
                 notify.notify_collected();
                 notify.notify_finished();
             });
-            found = true;
         }
-        found
+        (drop_table_ids, cancel_table_ids)
     }
 
     /// Whether the barrier(checkpoint = true) should be injected.

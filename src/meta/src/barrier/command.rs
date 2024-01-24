@@ -837,7 +837,6 @@ impl CommandContext {
                     .unregister_table_ids_fail_fast(&table_ids)
                     .await;
 
-                // FIXME: this cancel_create_table_procedure might not be necessary???
                 match &self.barrier_manager_context.metadata_manager {
                     MetadataManager::V1(mgr) => {
                         // NOTE(kwannoel): At this point, catalog manager has persisted the tables already.
@@ -864,9 +863,20 @@ impl CommandContext {
                             table_ids.push(table_id);
                             mgr.catalog_manager.assert_tables_deleted(table_ids).await;
                         }
+
+                        // We need to drop table fragments here,
+                        // since this is not done in stream manager (foreground ddl)
+                        // OR barrier manager (background ddl)
+                        mgr.fragment_manager
+                            .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
+                                table_fragments.table_id(),
+                            )))
+                            .await?;
                     }
-                    MetadataManager::V2(_mgr) => {
-                        unimplemented!("implement cancel for sql backend")
+                    MetadataManager::V2(mgr) => {
+                        mgr.catalog_controller
+                            .try_abort_creating_streaming_job(table_id as _, true)
+                            .await?;
                     }
                 }
             }
