@@ -954,7 +954,7 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
     ///
     /// let table_id = TableId { table_id: 1 };
     /// let full_key1 = FullKey::new(table_id, TableKey(Bytes::from("c")), 5);
-    /// let a = FullKeyTracker::<Bytes>::new(full_key1);
+    /// let mut a = FullKeyTracker::<Bytes>::new(full_key1.clone());
     ///
     /// // Panic on non-decreasing epoch observed for the same user key.
     /// // let full_key_with_larger_epoch = FullKey::new(table_id, TableKey(Bytes::from("c")), 6);
@@ -965,10 +965,10 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
     /// // a.observe(full_key_with_smaller_user_key);
     ///
     /// let full_key2 = FullKey::new(table_id, TableKey(Bytes::from("c")), 3);
-    /// assert_eq!(a.observe(full_key1), None);
+    /// assert_eq!(a.observe(full_key1.clone()), None);
     ///
     /// let full_key3 = FullKey::new(table_id, TableKey(Bytes::from("f")), 4);
-    /// assert_eq!(a.observe(full_key1), Some(full_key1));
+    /// assert_eq!(a.observe(full_key1.clone()), Some(full_key1));
     /// ```
     ///
     /// Return:
