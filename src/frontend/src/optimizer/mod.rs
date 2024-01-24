@@ -35,7 +35,7 @@ pub use plan_visitor::{
 
 mod logical_optimization;
 mod optimizer_context;
-mod plan_expr_rewriter;
+pub mod plan_expr_rewriter;
 mod plan_expr_visitor;
 mod rule;
 
@@ -219,21 +219,6 @@ impl PlanRoot {
 
         let ctx = plan.ctx();
         // Inline session timezone mainly for rewriting now()
-        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
-
-        // Convert to physical plan node
-        plan = plan.to_batch_with_order_required(&self.required_order)?;
-        if ctx.is_explain_trace() {
-            ctx.trace("To Batch Plan:");
-            ctx.trace(plan.explain_to_string());
-        }
-
-        plan = plan.optimize_by_rules(&OptimizationStage::new(
-            "Merge BatchProject",
-            vec![BatchProjectMergeRule::create()],
-            ApplyOrder::BottomUp,
-        ));
-
         // Inline session timezone
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
@@ -249,6 +234,19 @@ impl PlanRoot {
             ctx.trace("Const eval exprs:");
             ctx.trace(plan.explain_to_string());
         }
+
+        // Convert to physical plan node
+        plan = plan.to_batch_with_order_required(&self.required_order)?;
+        if ctx.is_explain_trace() {
+            ctx.trace("To Batch Plan:");
+            ctx.trace(plan.explain_to_string());
+        }
+
+        plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Merge BatchProject",
+            vec![BatchProjectMergeRule::create()],
+            ApplyOrder::BottomUp,
+        ));
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());

@@ -740,3 +740,20 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: people_names, columns: [people_names.first_name, people_names.last_name, people_names.info], scan_ranges: [people_names.CONCAT_OP = Utf8("John Smith")], distribution: SomeShard }
+- name: funtional index const eval
+  sql: |
+    create table a(v int);
+    create index b on a((1+1)*v);
+    select * from a where 2*v >2;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: b, columns: [b.v], scan_ranges: [b.MULTIPLY > Int32(2)], distribution: SomeShard }
+- name: funtional index with timezone
+  sql: |
+    create table t(ts timestamp);
+    create index i on t(ts::timestamp with time zone);
+    select ts::timestamptz from t where ts > now();
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [AtTimeZone(i.ts, 'UTC':Varchar) as $expr1] }
+      └─BatchScan { table: i, columns: [i.ts], scan_ranges: [i.AT_TIME_ZONE > Timestamptz(Timestamptz(1617235200000000))], distribution: SomeShard }

@@ -33,9 +33,10 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::expr::{Expr, ExprImpl, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_expr_rewriter::ConstEvalRewriter;
 use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
@@ -90,6 +91,10 @@ pub(crate) fn gen_create_index_plan(
     for column in columns {
         let order_type = OrderType::from_bools(column.asc, column.nulls_first);
         let expr_impl = binder.bind_expr(column.expr)?;
+        // Do constant folding and timezone transportation on expressions so that, batch queries can match it in the same form.
+        let mut const_eval = ConstEvalRewriter { error: None };
+        let expr_impl = const_eval.rewrite_expr(expr_impl);
+        let expr_impl = context.session_timezone().rewrite_expr(expr_impl);
         match expr_impl {
             ExprImpl::InputRef(_) => {}
             ExprImpl::FunctionCall(_) => {
