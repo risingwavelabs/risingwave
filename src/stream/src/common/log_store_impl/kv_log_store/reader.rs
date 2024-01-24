@@ -27,6 +27,7 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
+use risingwave_common::util::epoch::TestEpoch;
 use risingwave_connector::sink::log_store::{
     ChunkId, LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
@@ -185,12 +186,15 @@ impl<S: StateStore> KvLogStoreReader<S> {
         last_persisted_epoch: Option<u64>,
     ) -> impl Future<Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<S::IterStream>>>>> + Send
     {
-        let range_start = if let Some(last_persisted_epoch) = last_persisted_epoch {
-            // start from the next epoch of last_persisted_epoch
-            Included(self.serde.serialize_epoch(last_persisted_epoch + 65536))
-        } else {
-            Unbounded
-        };
+        let range_start =
+            if let Some(last_persisted_epoch) = last_persisted_epoch {
+                // start from the next epoch of last_persisted_epoch
+                Included(self.serde.serialize_epoch(
+                    last_persisted_epoch + TestEpoch::new_without_offset(1).as_u64(),
+                ))
+            } else {
+                Unbounded
+            };
         let range_end = self.serde.serialize_epoch(
             self.first_write_epoch
                 .expect("should have set first write epoch"),
@@ -474,7 +478,9 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
             let persisted_epoch =
                 self.truncate_offset
                     .map(|truncate_offset| match truncate_offset {
-                        TruncateOffset::Chunk { epoch, .. } => epoch - 65536,
+                        TruncateOffset::Chunk { epoch, .. } => {
+                            epoch - TestEpoch::new_without_offset(1).as_u64()
+                        }
                         TruncateOffset::Barrier { epoch } => epoch,
                     });
             self.state_store_stream = Some(self.read_persisted_log_store(persisted_epoch).await?);

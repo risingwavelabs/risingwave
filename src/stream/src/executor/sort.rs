@@ -176,6 +176,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -235,7 +236,7 @@ mod tests {
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, store).await;
 
         // Init barrier
-        tx.push_barrier(65536 * 1, false);
+        tx.push_barrier(TestEpoch::new_without_offset(1).as_u64(), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -285,7 +286,7 @@ mod tests {
         ));
 
         // Push barrier
-        tx.push_barrier(65536 * 2, false);
+        tx.push_barrier(TestEpoch::new_without_offset(2).as_u64(), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -320,7 +321,7 @@ mod tests {
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, store.clone()).await;
 
         // Init barrier
-        tx.push_barrier(65536 * 1, false);
+        tx.push_barrier(TestEpoch::new_without_offset(1).as_u64(), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -342,7 +343,7 @@ mod tests {
         ));
 
         // Push barrier
-        tx.push_barrier(65536 * 2, false);
+        tx.push_barrier(TestEpoch::new_without_offset(2).as_u64(), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -352,7 +353,7 @@ mod tests {
             create_executor(sort_column_index, store).await;
 
         // Push barrier
-        recovered_tx.push_barrier(65536 * 3, false);
+        recovered_tx.push_barrier(TestEpoch::new_without_offset(3).as_u64(), false);
 
         // Consume the barrier
         recovered_sort_executor.expect_barrier().await;

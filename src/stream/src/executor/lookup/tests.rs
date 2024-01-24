@@ -22,6 +22,7 @@ use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::types::DataType;
+use risingwave_common::util::epoch::TestEpoch;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -105,11 +106,17 @@ async fn create_arrangement(
         schema,
         vec![0],
         vec![
-            Message::Barrier(Barrier::new_test_barrier(65536 * 2)),
+            Message::Barrier(Barrier::new_test_barrier(
+                TestEpoch::new_without_offset(2).as_u64(),
+            )),
             Message::Chunk(chunk1),
-            Message::Barrier(Barrier::new_test_barrier(65536 * 3)),
+            Message::Barrier(Barrier::new_test_barrier(
+                TestEpoch::new_without_offset(3).as_u64(),
+            )),
             Message::Chunk(chunk2),
-            Message::Barrier(Barrier::new_test_barrier(65536 * 4)),
+            Message::Barrier(Barrier::new_test_barrier(
+                TestEpoch::new_without_offset(4).as_u64(),
+            )),
         ],
     );
 
@@ -167,11 +174,17 @@ fn create_source() -> Box<dyn Executor + Send> {
         schema,
         PkIndices::new(),
         vec![
-            Message::Barrier(Barrier::new_test_barrier(65536 * 2)),
+            Message::Barrier(Barrier::new_test_barrier(
+                TestEpoch::new_without_offset(2).as_u64(),
+            )),
             Message::Chunk(chunk1),
-            Message::Barrier(Barrier::new_test_barrier(65536 * 3)),
+            Message::Barrier(Barrier::new_test_barrier(
+                TestEpoch::new_without_offset(3).as_u64(),
+            )),
             Message::Chunk(chunk2),
-            Message::Barrier(Barrier::new_test_barrier(65536 * 4)),
+            Message::Barrier(Barrier::new_test_barrier(
+                TestEpoch::new_without_offset(4).as_u64(),
+            )),
         ],
     );
 

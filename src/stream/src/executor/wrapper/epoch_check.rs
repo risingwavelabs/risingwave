@@ -77,6 +77,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::{pin_mut, StreamExt};
     use risingwave_common::array::StreamChunk;
+    use risingwave_common::util::epoch::TestEpoch;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
@@ -85,39 +86,39 @@ mod tests {
     #[tokio::test]
     async fn test_epoch_ok() {
         let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
-        tx.push_barrier(65536 * 1, false);
+        tx.push_barrier(TestEpoch::new_without_offset(1).as_u64(), false);
         tx.push_chunk(StreamChunk::default());
-        tx.push_barrier(65536 * 2, false);
-        tx.push_barrier(65536 * 3, false);
-        tx.push_barrier(65536 * 4, false);
+        tx.push_barrier(TestEpoch::new_without_offset(2).as_u64(), false);
+        tx.push_barrier(TestEpoch::new_without_offset(3).as_u64(), false);
+        tx.push_barrier(TestEpoch::new_without_offset(4).as_u64(), false);
 
         let checked = epoch_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
 
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 1*65536);
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == TestEpoch::new_without_offset(1).as_u64());
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Chunk(_));
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 2*65536);
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 3*65536);
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 4*65536);
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == TestEpoch::new_without_offset(2).as_u64());
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == TestEpoch::new_without_offset(3).as_u64());
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == TestEpoch::new_without_offset(4).as_u64());
     }
 
     #[should_panic]
     #[tokio::test]
     async fn test_epoch_bad() {
         let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
-        tx.push_barrier(100 * 65536, false);
+        tx.push_barrier(TestEpoch::new_without_offset(100).as_u64(), false);
         tx.push_chunk(StreamChunk::default());
-        tx.push_barrier(514 * 65536, false);
-        tx.push_barrier(514 * 65536, false);
-        tx.push_barrier(114 * 65536, false);
+        tx.push_barrier(TestEpoch::new_without_offset(514).as_u64(), false);
+        tx.push_barrier(TestEpoch::new_without_offset(514).as_u64(), false);
+        tx.push_barrier(TestEpoch::new_without_offset(114).as_u64(), false);
 
         let checked = epoch_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
 
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 100*65536);
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == TestEpoch::new_without_offset(100).as_u64());
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Chunk(_));
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 514*65536);
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 514*65536);
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == TestEpoch::new_without_offset(514).as_u64());
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == TestEpoch::new_without_offset(514).as_u64());
 
         checked.next().await.unwrap().unwrap(); // should panic
     }
@@ -127,7 +128,7 @@ mod tests {
     async fn test_epoch_first_not_barrier() {
         let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
         tx.push_chunk(StreamChunk::default());
-        tx.push_barrier(114 * 65536, false);
+        tx.push_barrier(TestEpoch::new_without_offset(114).as_u64(), false);
 
         let checked = epoch_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);

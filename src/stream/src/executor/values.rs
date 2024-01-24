@@ -162,6 +162,7 @@ mod tests {
     };
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, ScalarImpl, StructType};
+    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_expr::expr::{BoxedExpression, LiteralExpression, NonStrictExpression};
     use tokio::sync::mpsc::unbounded_channel;
 
@@ -225,8 +226,8 @@ mod tests {
         let mut values_executor = Box::new(values_executor_struct).execute();
 
         // Init barrier
-        let first_message =
-            Barrier::new_test_barrier(65536).with_mutation(Mutation::Add(AddMutation {
+        let first_message = Barrier::new_test_barrier(TestEpoch::new_without_offset(1).as_u64())
+            .with_mutation(Mutation::Add(AddMutation {
                 adds: Default::default(),
                 added_actors: maplit::hashset! {actor_id},
                 splits: Default::default(),
@@ -267,14 +268,20 @@ mod tests {
         assert_eq!(*result.column_at(4), I64Array::from_iter([0]).into_ref());
 
         // ValueExecutor should simply forward following barriers
-        tx.send(Barrier::new_test_barrier(65536 * 2)).unwrap();
+        tx.send(Barrier::new_test_barrier(
+            TestEpoch::new_without_offset(2).as_u64(),
+        ))
+        .unwrap();
 
         assert!(matches!(
             values_executor.next_unwrap_ready_barrier().unwrap(),
             Barrier { .. }
         ));
 
-        tx.send(Barrier::new_test_barrier(65536 * 3)).unwrap();
+        tx.send(Barrier::new_test_barrier(
+            TestEpoch::new_without_offset(3).as_u64(),
+        ))
+        .unwrap();
 
         assert!(matches!(
             values_executor.next_unwrap_ready_barrier().unwrap(),

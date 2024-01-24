@@ -761,6 +761,7 @@ mod tests {
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_hummock_sdk::key::FullKey;
     use risingwave_storage::store::StateStoreReadIterStream;
     use risingwave_storage::table::DEFAULT_VNODE;
@@ -795,7 +796,7 @@ mod tests {
         let data_chunk = builder.consume_all().unwrap();
         let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
 
-        let mut epoch = 233u64;
+        let mut epoch = TestEpoch::new_without_offset(233);
 
         let mut serialized_keys = vec![];
         let mut seq_id = 1;
@@ -803,15 +804,16 @@ mod tests {
         fn remove_vnode_prefix(key: &Bytes) -> Bytes {
             key.slice(VirtualNode::SIZE..)
         }
-        let delete_range_right1 = serde.serialize_truncation_offset_watermark((epoch, None));
+        let delete_range_right1 =
+            serde.serialize_truncation_offset_watermark((epoch.as_u64(), None));
 
         for (op, row) in stream_chunk.rows() {
-            let (_, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
+            let (_, key, value) = serde.serialize_data_row(epoch.as_u64(), seq_id, op, row);
             let key = remove_vnode_prefix(&key.0);
             assert!(key < delete_range_right1);
             serialized_keys.push(key);
             let (decoded_epoch, row_op) = serde.deserialize(value).unwrap();
-            assert_eq!(decoded_epoch, epoch);
+            assert_eq!(decoded_epoch, epoch.as_u64());
             match row_op {
                 LogStoreRowOp::Row {
                     op: deserialized_op,
@@ -825,12 +827,12 @@ mod tests {
             seq_id += 1;
         }
 
-        let (key, encoded_barrier) = serde.serialize_barrier(epoch, DEFAULT_VNODE, false);
+        let (key, encoded_barrier) = serde.serialize_barrier(epoch.as_u64(), DEFAULT_VNODE, false);
         let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(encoded_barrier).unwrap() {
             (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
                 assert!(!is_checkpoint);
-                assert_eq!(decoded_epoch, epoch);
+                assert_eq!(decoded_epoch, epoch.as_u64());
             }
             _ => unreachable!(),
         }
@@ -838,18 +840,19 @@ mod tests {
         serialized_keys.push(key);
 
         seq_id = 1;
-        epoch += 65536;
+        epoch.inc();
 
-        let delete_range_right2 = serde.serialize_truncation_offset_watermark((epoch, None));
+        let delete_range_right2 =
+            serde.serialize_truncation_offset_watermark((epoch.as_u64(), None));
 
         for (op, row) in stream_chunk.rows() {
-            let (_, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
+            let (_, key, value) = serde.serialize_data_row(epoch.as_u64(), seq_id, op, row);
             let key = remove_vnode_prefix(&key.0);
             assert!(key >= delete_range_right1);
             assert!(key < delete_range_right2);
             serialized_keys.push(key);
             let (decoded_epoch, row_op) = serde.deserialize(value).unwrap();
-            assert_eq!(decoded_epoch, epoch);
+            assert_eq!(decoded_epoch, epoch.as_u64());
             match row_op {
                 LogStoreRowOp::Row {
                     op: deserialized_op,
@@ -863,11 +866,12 @@ mod tests {
             seq_id += 1;
         }
 
-        let (key, encoded_checkpoint_barrier) = serde.serialize_barrier(epoch, DEFAULT_VNODE, true);
+        let (key, encoded_checkpoint_barrier) =
+            serde.serialize_barrier(epoch.as_u64(), DEFAULT_VNODE, true);
         let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(encoded_checkpoint_barrier).unwrap() {
             (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
-                assert_eq!(decoded_epoch, epoch);
+                assert_eq!(decoded_epoch, epoch.as_u64());
                 assert!(is_checkpoint);
             }
             _ => unreachable!(),

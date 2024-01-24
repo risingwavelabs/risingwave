@@ -20,7 +20,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::types::{DataType, Scalar, Timestamptz};
-use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::epoch::{EpochPair, TestEpoch};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
@@ -62,7 +62,7 @@ async fn test_state_table_update_insert() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let mut epoch = EpochPair::new_test_epoch(65536);
+    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
     state_table.init_epoch(epoch);
 
     state_table.insert(OwnedRow::new(vec![
@@ -240,7 +240,7 @@ async fn test_state_table_iter_with_prefix() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let mut epoch = EpochPair::new_test_epoch(65536);
+    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
     state_table.init_epoch(epoch);
 
     state_table.insert(OwnedRow::new(vec![
@@ -369,7 +369,7 @@ async fn test_state_table_iter_with_pk_range() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let mut epoch = EpochPair::new_test_epoch(65536);
+    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
     state_table.init_epoch(epoch);
 
     state_table.insert(OwnedRow::new(vec![
@@ -502,7 +502,7 @@ async fn test_mem_table_assertion() {
     let mut state_table =
         StateTable::from_table_catalog(&table, test_env.storage.clone(), None).await;
 
-    let epoch = EpochPair::new_test_epoch(65536);
+    let epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
     state_table.init_epoch(epoch);
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -545,7 +545,7 @@ async fn test_state_table_iter_with_value_indices() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let mut epoch = EpochPair::new_test_epoch(65536);
+    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
     state_table.init_epoch(epoch);
 
     state_table.insert(OwnedRow::new(vec![
@@ -712,7 +712,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let mut epoch = EpochPair::new_test_epoch(65536);
+    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
     state_table.init_epoch(epoch);
 
     state_table.insert(OwnedRow::new(vec![
@@ -953,7 +953,7 @@ async fn test_state_table_write_chunk() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let epoch = EpochPair::new_test_epoch(65536);
+    let epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
     state_table.init_epoch(epoch);
 
     let chunk = StreamChunk::from_rows(
@@ -1082,7 +1082,7 @@ async fn test_state_table_write_chunk_visibility() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let epoch = EpochPair::new_test_epoch(65536);
+    let epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
     state_table.init_epoch(epoch);
 
     let chunk = StreamChunk::from_rows(
@@ -1206,7 +1206,7 @@ async fn test_state_table_write_chunk_value_indices() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let epoch = EpochPair::new_test_epoch(65536);
+    let epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
     state_table.init_epoch(epoch);
 
     let chunk = StreamChunk::from_rows(
@@ -1315,7 +1315,7 @@ async fn test_state_table_may_exist() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let mut epoch = EpochPair::new_test_epoch(65536);
+    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
     state_table.init_epoch(epoch);
 
     state_table.insert(OwnedRow::new(vec![
@@ -1500,7 +1500,7 @@ async fn test_state_table_watermark_cache_ignore_null() {
     let mut state_table =
         WatermarkCacheStateTable::from_table_catalog(&table, test_env.storage.clone(), None).await;
 
-    let mut epoch = EpochPair::new_test_epoch(65536);
+    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
     state_table.init_epoch(epoch);
 
     let rows = vec![
@@ -1620,7 +1620,7 @@ async fn test_state_table_watermark_cache_write_chunk() {
     let mut state_table =
         WatermarkCacheStateTable::from_table_catalog(&table, test_env.storage.clone(), None).await;
 
-    let mut epoch = EpochPair::new_test_epoch(65536);
+    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
     state_table.init_epoch(epoch);
 
     let cache = state_table.get_watermark_cache();
@@ -1786,7 +1786,7 @@ async fn test_state_table_watermark_cache_refill() {
     let mut state_table =
         WatermarkCacheStateTable::from_table_catalog(&table, test_env.storage.clone(), None).await;
 
-    let mut epoch = EpochPair::new_test_epoch(65536);
+    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
     state_table.init_epoch(epoch);
 
     let rows = vec![
@@ -1876,7 +1876,7 @@ async fn test_state_table_iter_prefix_and_sub_range() {
     let mut state_table =
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
-    let mut epoch = EpochPair::new_test_epoch(65536);
+    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
     state_table.init_epoch(epoch);
 
     state_table.insert(OwnedRow::new(vec![
@@ -2071,7 +2071,7 @@ async fn test_replicated_state_table_replication() {
         )
         .await;
 
-    let mut epoch = EpochPair::new_test_epoch(65536);
+    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
     state_table.init_epoch(epoch);
     replicated_state_table.init_epoch(epoch).await.unwrap();
 

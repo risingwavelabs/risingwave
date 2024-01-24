@@ -155,6 +155,7 @@ mod tests {
     use async_stream::try_stream;
     use futures::{Stream, TryStreamExt};
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::util::epoch::TestEpoch;
     use tokio::time::sleep;
 
     use super::*;
@@ -170,16 +171,16 @@ mod tests {
     async fn test_barrier_align() {
         let left = try_stream! {
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
-            yield Message::Barrier(Barrier::new_test_barrier(65536));
+            yield Message::Barrier(Barrier::new_test_barrier(TestEpoch::new_without_offset(1).as_u64()));
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 2"));
-            yield Message::Barrier(Barrier::new_test_barrier(2*65536));
+            yield Message::Barrier(Barrier::new_test_barrier(TestEpoch::new_without_offset(2).as_u64()));
         }
         .boxed();
         let right = try_stream! {
             sleep(Duration::from_millis(1)).await;
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
-            yield Message::Barrier(Barrier::new_test_barrier(65536));
-            yield Message::Barrier(Barrier::new_test_barrier(2*65536));
+            yield Message::Barrier(Barrier::new_test_barrier(TestEpoch::new_without_offset(1).as_u64()));
+            yield Message::Barrier(Barrier::new_test_barrier(TestEpoch::new_without_offset(2).as_u64()));
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 3"));
         }
         .boxed();
@@ -192,9 +193,13 @@ mod tests {
             vec![
                 AlignedMessage::Left(StreamChunk::from_pretty("I\n + 1")),
                 AlignedMessage::Right(StreamChunk::from_pretty("I\n + 1")),
-                AlignedMessage::Barrier(Barrier::new_test_barrier(65536)),
+                AlignedMessage::Barrier(Barrier::new_test_barrier(
+                    TestEpoch::new_without_offset(1).as_u64()
+                )),
                 AlignedMessage::Left(StreamChunk::from_pretty("I\n + 2")),
-                AlignedMessage::Barrier(Barrier::new_test_barrier(2 * 65536)),
+                AlignedMessage::Barrier(Barrier::new_test_barrier(
+                    2 * TestEpoch::new_without_offset(1).as_u64()
+                )),
                 AlignedMessage::Right(StreamChunk::from_pretty("I\n + 3")),
             ]
         );
@@ -206,7 +211,7 @@ mod tests {
         let left = try_stream! {
             sleep(Duration::from_millis(1)).await;
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
-            yield Message::Barrier(Barrier::new_test_barrier(65536));
+            yield Message::Barrier(Barrier::new_test_barrier(TestEpoch::new_without_offset(1).as_u64()));
         }
         .boxed();
         let right = try_stream! {
@@ -224,7 +229,7 @@ mod tests {
     async fn left_barrier_right_end_2() {
         let left = try_stream! {
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
-            yield Message::Barrier(Barrier::new_test_barrier(65536));
+            yield Message::Barrier(Barrier::new_test_barrier(TestEpoch::new_without_offset(1).as_u64()));
         }
         .boxed();
         let right = try_stream! {

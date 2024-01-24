@@ -20,6 +20,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::field_generator::VarcharProperty;
 use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::DataType;
+use risingwave_common::util::epoch::TestEpoch;
 use risingwave_expr::aggregate::AggCall;
 use risingwave_expr::expr::*;
 use risingwave_storage::memory::MemoryStateStore;
@@ -120,11 +121,15 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
 
     // ---- Create MockSourceExecutor ----
     let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
-    tx.push_barrier(65536 * 1, false);
+    tx.push_barrier(TestEpoch::new_without_offset(1).as_u64(), false);
     for chunk in chunks {
         tx.push_chunk(chunk);
     }
-    tx.push_barrier_with_prev_epoch_for_test(65536 * 2, 65536, false);
+    tx.push_barrier_with_prev_epoch_for_test(
+        TestEpoch::new_without_offset(2).as_u64(),
+        TestEpoch::new_without_offset(1).as_u64(),
+        false,
+    );
 
     // ---- Create HashAggExecutor to be benchmarked ----
     let row_count_index = 0;

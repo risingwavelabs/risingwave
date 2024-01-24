@@ -86,6 +86,7 @@ impl Executor for BarrierRecvExecutor {
 #[cfg(test)]
 mod tests {
     use futures::pin_mut;
+    use risingwave_common::util::epoch::TestEpoch;
     use tokio::sync::mpsc;
 
     use super::*;
@@ -99,15 +100,27 @@ mod tests {
         let stream = barrier_recv.execute();
         pin_mut!(stream);
 
-        barrier_tx.send(Barrier::new_test_barrier(65536)).unwrap();
         barrier_tx
-            .send(Barrier::new_test_barrier(65536 * 2))
+            .send(Barrier::new_test_barrier(
+                TestEpoch::new_without_offset(1).as_u64(),
+            ))
+            .unwrap();
+        barrier_tx
+            .send(Barrier::new_test_barrier(
+                TestEpoch::new_without_offset(2).as_u64(),
+            ))
             .unwrap();
 
         let barrier_1 = stream.next_unwrap_ready_barrier().unwrap();
-        assert_eq!(barrier_1.epoch.curr, 65536);
+        assert_eq!(
+            barrier_1.epoch.curr,
+            TestEpoch::new_without_offset(1).as_u64()
+        );
         let barrier_2 = stream.next_unwrap_ready_barrier().unwrap();
-        assert_eq!(barrier_2.epoch.curr, 65536 * 2);
+        assert_eq!(
+            barrier_2.epoch.curr,
+            TestEpoch::new_without_offset(2).as_u64()
+        );
 
         stream.next_unwrap_pending();
 

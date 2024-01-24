@@ -279,6 +279,7 @@ mod tests {
     use risingwave_common::array::{DataChunk, StreamChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, Datum};
+    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_expr::expr::{self, Expression, ValueImpl};
 
     use super::super::test_utils::MockSource;
@@ -330,7 +331,7 @@ mod tests {
         ));
         let mut project = project.execute();
 
-        tx.push_barrier(65536 * 1, false);
+        tx.push_barrier(TestEpoch::new_without_offset(1).as_u64(), false);
         let barrier = project.next().await.unwrap().unwrap();
         barrier.as_barrier().unwrap();
 
@@ -358,7 +359,7 @@ mod tests {
             )
         );
 
-        tx.push_barrier(65536 * 2, true);
+        tx.push_barrier(TestEpoch::new_without_offset(2).as_u64(), true);
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }
 
@@ -424,7 +425,7 @@ mod tests {
         ));
         let mut project = project.execute();
 
-        tx.push_barrier(65536 * 1, false);
+        tx.push_barrier(TestEpoch::new_without_offset(1).as_u64(), false);
         tx.push_int64_watermark(0, 100);
 
         project.expect_barrier().await;
@@ -468,7 +469,7 @@ mod tests {
         ));
         project.expect_chunk().await;
 
-        tx.push_barrier(65536 * 2, false);
+        tx.push_barrier(TestEpoch::new_without_offset(2).as_u64(), false);
         let w3 = project.expect_watermark().await;
         project.expect_barrier().await;
 
@@ -480,7 +481,7 @@ mod tests {
         ));
         project.expect_chunk().await;
 
-        tx.push_barrier(65536 * 3, false);
+        tx.push_barrier(TestEpoch::new_without_offset(3).as_u64(), false);
         let w4 = project.expect_watermark().await;
         project.expect_barrier().await;
 
@@ -488,7 +489,7 @@ mod tests {
         assert!(w3.val.default_cmp(&w4.val).is_le());
 
         tx.push_int64_watermark(1, 100);
-        tx.push_barrier(65536 * 4, true);
+        tx.push_barrier(TestEpoch::new_without_offset(4).as_u64(), true);
 
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }

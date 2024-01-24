@@ -205,6 +205,8 @@ mod tests {
     use crate::executor::{Barrier, Message};
 
     mod test1 {
+        use risingwave_common::util::epoch::TestEpoch;
+
         use super::*;
         use crate::executor::ActorContext;
         fn create_stream_chunks() -> Vec<StreamChunk> {
@@ -272,15 +274,25 @@ mod tests {
                 schema,
                 pk_indices(),
                 vec![
-                    Message::Barrier(Barrier::new_test_barrier(65536)),
+                    Message::Barrier(Barrier::new_test_barrier(
+                        TestEpoch::new_without_offset(1).as_u64(),
+                    )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
-                    Message::Barrier(Barrier::new_test_barrier(65536 * 2)),
+                    Message::Barrier(Barrier::new_test_barrier(
+                        TestEpoch::new_without_offset(2).as_u64(),
+                    )),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
-                    Message::Barrier(Barrier::new_test_barrier(65536 * 3)),
+                    Message::Barrier(Barrier::new_test_barrier(
+                        TestEpoch::new_without_offset(3).as_u64(),
+                    )),
                     Message::Chunk(std::mem::take(&mut chunks[2])),
-                    Message::Barrier(Barrier::new_test_barrier(65536 * 4)),
+                    Message::Barrier(Barrier::new_test_barrier(
+                        TestEpoch::new_without_offset(4).as_u64(),
+                    )),
                     Message::Chunk(std::mem::take(&mut chunks[3])),
-                    Message::Barrier(Barrier::new_test_barrier(65536 * 5)),
+                    Message::Barrier(Barrier::new_test_barrier(
+                        TestEpoch::new_without_offset(5).as_u64(),
+                    )),
                 ],
             ))
         }
@@ -711,6 +723,7 @@ mod tests {
     }
 
     mod test2 {
+        use risingwave_common::util::epoch::TestEpoch;
         use risingwave_storage::memory::MemoryStateStore;
 
         use super::*;
@@ -750,12 +763,16 @@ mod tests {
                 schema,
                 pk_indices(),
                 vec![
-                    Message::Barrier(Barrier::new_test_barrier(65536)),
+                    Message::Barrier(Barrier::new_test_barrier(
+                        TestEpoch::new_without_offset(1).as_u64(),
+                    )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
                     Message::Chunk(std::mem::take(&mut chunks[2])),
                     Message::Chunk(std::mem::take(&mut chunks[3])),
-                    Message::Barrier(Barrier::new_test_barrier(65536 * 2)),
+                    Message::Barrier(Barrier::new_test_barrier(
+                        TestEpoch::new_without_offset(2).as_u64(),
+                    )),
                 ],
             ))
         }
@@ -783,10 +800,14 @@ mod tests {
                 schema,
                 pk_indices(),
                 vec![
-                    Message::Barrier(Barrier::new_test_barrier(65536)),
+                    Message::Barrier(Barrier::new_test_barrier(
+                        TestEpoch::new_without_offset(1).as_u64(),
+                    )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
-                    Message::Barrier(Barrier::new_test_barrier(65536 * 2)),
+                    Message::Barrier(Barrier::new_test_barrier(
+                        TestEpoch::new_without_offset(2).as_u64(),
+                    )),
                 ],
             ))
         }
@@ -816,10 +837,14 @@ mod tests {
                 schema,
                 pk_indices(),
                 vec![
-                    Message::Barrier(Barrier::new_test_barrier(65536 * 3)),
+                    Message::Barrier(Barrier::new_test_barrier(
+                        TestEpoch::new_without_offset(3).as_u64(),
+                    )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
-                    Message::Barrier(Barrier::new_test_barrier(65536 * 4)),
+                    Message::Barrier(Barrier::new_test_barrier(
+                        TestEpoch::new_without_offset(4).as_u64(),
+                    )),
                 ],
             ))
         }
@@ -1053,6 +1078,7 @@ mod tests {
     }
 
     mod test_with_ties {
+        use risingwave_common::util::epoch::TestEpoch;
         use risingwave_storage::memory::MemoryStateStore;
 
         use super::*;
@@ -1098,12 +1124,16 @@ mod tests {
                 schema,
                 pk_indices(),
                 vec![
-                    Message::Barrier(Barrier::new_test_barrier(65536)),
+                    Message::Barrier(Barrier::new_test_barrier(
+                        TestEpoch::new_without_offset(1).as_u64(),
+                    )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
                     Message::Chunk(std::mem::take(&mut chunks[2])),
                     Message::Chunk(std::mem::take(&mut chunks[3])),
-                    Message::Barrier(Barrier::new_test_barrier(65536 * 2)),
+                    Message::Barrier(Barrier::new_test_barrier(
+                        TestEpoch::new_without_offset(2).as_u64(),
+                    )),
                 ],
             ))
         }
@@ -1239,10 +1269,14 @@ mod tests {
                 schema,
                 pk_indices(),
                 vec![
-                    Message::Barrier(Barrier::new_test_barrier(65536)),
+                    Message::Barrier(Barrier::new_test_barrier(
+                        TestEpoch::new_without_offset(1).as_u64(),
+                    )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
-                    Message::Barrier(Barrier::new_test_barrier(65536 * 2)),
+                    Message::Barrier(Barrier::new_test_barrier(
+                        TestEpoch::new_without_offset(2).as_u64(),
+                    )),
                 ],
             ))
         }
@@ -1268,10 +1302,14 @@ mod tests {
                 schema,
                 pk_indices(),
                 vec![
-                    Message::Barrier(Barrier::new_test_barrier(65536 * 3)),
+                    Message::Barrier(Barrier::new_test_barrier(
+                        TestEpoch::new_without_offset(3).as_u64(),
+                    )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
-                    Message::Barrier(Barrier::new_test_barrier(65536 * 4)),
+                    Message::Barrier(Barrier::new_test_barrier(
+                        TestEpoch::new_without_offset(4).as_u64(),
+                    )),
                 ],
             ))
         }

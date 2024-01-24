@@ -17,7 +17,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
+use risingwave_common::util::epoch::{EpochPair, TestEpoch, INVALID_EPOCH};
 use risingwave_connector::sink::log_store::{
     LogReader, LogStoreFactory, LogStoreReadItem, LogStoreResult, LogWriter, TruncateOffset,
 };
@@ -133,10 +133,10 @@ impl LogReader for BoundedInMemLogStoreReader {
         assert_eq!(self.epoch_progress, UNINITIALIZED);
         self.epoch_progress = LogReaderEpochProgress::Consuming(epoch);
         self.latest_offset = TruncateOffset::Barrier {
-            epoch: epoch - 65536,
+            epoch: epoch - TestEpoch::new_without_offset(1).as_u64(),
         };
         self.truncate_offset = TruncateOffset::Barrier {
-            epoch: epoch - 65536,
+            epoch: epoch - TestEpoch::new_without_offset(1).as_u64(),
         };
         Ok(())
     }
@@ -321,7 +321,7 @@ mod tests {
     use futures::FutureExt;
     use risingwave_common::array::Op;
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_common::util::epoch::EpochPair;
+    use risingwave_common::util::epoch::{EpochPair, TestEpoch};
     use risingwave_connector::sink::log_store::{
         LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
     };
@@ -334,9 +334,9 @@ mod tests {
         let factory = BoundedInMemLogStoreFactory::new(4);
         let (mut reader, mut writer) = factory.build().await;
 
-        let init_epoch = 65536;
-        let epoch1 = init_epoch + 1 * 65536;
-        let epoch2 = init_epoch + 2 * 65536;
+        let init_epoch = TestEpoch::new_without_offset(1).as_u64();
+        let epoch1 = TestEpoch::new_without_offset(2).as_u64();
+        let epoch2 = TestEpoch::new_without_offset(3).as_u64();
 
         let ops = vec![Op::Insert, Op::Delete, Op::UpdateInsert, Op::UpdateDelete];
         let mut builder = StreamChunkBuilder::new(10000, vec![DataType::Int64, DataType::Varchar]);

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::util::epoch::TestEpoch;
 use risingwave_expr::aggregate::AggCall;
 use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
 
@@ -54,14 +55,14 @@ async fn test_hash_agg_count_sum() {
     .await;
     let mut hash_agg = hash_agg.execute();
 
-    tx.push_barrier(65536 * 1, false);
+    tx.push_barrier(TestEpoch::new_without_offset(1).as_u64(), false);
     tx.push_chunk(StreamChunk::from_pretty(
         " I I I
         + 1 1 1
         + 2 2 2
         + 2 2 2",
     ));
-    tx.push_barrier(65536 * 2, false);
+    tx.push_barrier(TestEpoch::new_without_offset(2).as_u64(), false);
     tx.push_chunk(StreamChunk::from_pretty(
         " I I I
         - 1 1 1
@@ -69,7 +70,7 @@ async fn test_hash_agg_count_sum() {
         - 2 2 2
         + 3 3 3",
     ));
-    tx.push_barrier(65536 * 3, false);
+    tx.push_barrier(TestEpoch::new_without_offset(3).as_u64(), false);
 
     check_until_pending(
         &mut hash_agg,
@@ -132,21 +133,21 @@ async fn test_hash_agg_min() {
     .await;
     let mut hash_agg = hash_agg.execute();
 
-    tx.push_barrier(65536 * 1, false);
+    tx.push_barrier(TestEpoch::new_without_offset(1).as_u64(), false);
     tx.push_chunk(StreamChunk::from_pretty(
         " I     I    I
         + 1   233 1001
         + 1 23333 1002
         + 2  2333 1003",
     ));
-    tx.push_barrier(65536 * 2, false);
+    tx.push_barrier(TestEpoch::new_without_offset(2).as_u64(), false);
     tx.push_chunk(StreamChunk::from_pretty(
         " I     I    I
         - 1   233 1001
         - 1 23333 1002 D
         - 2  2333 1003",
     ));
-    tx.push_barrier(65536 * 3, false);
+    tx.push_barrier(TestEpoch::new_without_offset(3).as_u64(), false);
 
     check_until_pending(
         &mut hash_agg,
@@ -207,7 +208,7 @@ async fn test_hash_agg_min_append_only() {
     .await;
     let mut hash_agg = hash_agg.execute();
 
-    tx.push_barrier(65536 * 1, false);
+    tx.push_barrier(TestEpoch::new_without_offset(1).as_u64(), false);
     tx.push_chunk(StreamChunk::from_pretty(
         " I  I  I
             + 2 5  1000
@@ -217,7 +218,7 @@ async fn test_hash_agg_min_append_only() {
             + 2 10 1004
             ",
     ));
-    tx.push_barrier(65536 * 2, false);
+    tx.push_barrier(TestEpoch::new_without_offset(2).as_u64(), false);
     tx.push_chunk(StreamChunk::from_pretty(
         " I  I  I
             + 1 20 1005
@@ -226,7 +227,7 @@ async fn test_hash_agg_min_append_only() {
             + 2 20 1008
             ",
     ));
-    tx.push_barrier(65536 * 3, false);
+    tx.push_barrier(TestEpoch::new_without_offset(3).as_u64(), false);
 
     check_until_pending(
         &mut hash_agg,

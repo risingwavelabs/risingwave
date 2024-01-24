@@ -131,6 +131,7 @@ mod test {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_pb::stream_plan::Dispatcher;
 
     use super::ChainExecutor;
@@ -164,17 +165,18 @@ mod test {
             PkIndices::new(),
             vec![
                 Message::Barrier(
-                    Barrier::new_test_barrier(65536).with_mutation(Mutation::Add(AddMutation {
-                        adds: maplit::hashmap! {
-                            0 => vec![Dispatcher {
-                                downstream_actor_id: vec![actor_id],
-                                ..Default::default()
-                            }],
-                        },
-                        added_actors: maplit::hashset! { actor_id },
-                        splits: Default::default(),
-                        pause: false,
-                    })),
+                    Barrier::new_test_barrier(TestEpoch::new_without_offset(1).as_u64())
+                        .with_mutation(Mutation::Add(AddMutation {
+                            adds: maplit::hashmap! {
+                                0 => vec![Dispatcher {
+                                    downstream_actor_id: vec![actor_id],
+                                    ..Default::default()
+                                }],
+                            },
+                            added_actors: maplit::hashset! { actor_id },
+                            splits: Default::default(),
+                            pause: false,
+                        })),
                 ),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 4")),

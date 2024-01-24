@@ -165,6 +165,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
     use super::AppendOnlyTopNExecutor;
@@ -230,11 +231,17 @@ mod tests {
             schema,
             pk_indices(),
             vec![
-                Message::Barrier(Barrier::new_test_barrier(65536)),
+                Message::Barrier(Barrier::new_test_barrier(
+                    TestEpoch::new_without_offset(2).as_u64(),
+                )),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
-                Message::Barrier(Barrier::new_test_barrier(65536 * 2)),
+                Message::Barrier(Barrier::new_test_barrier(
+                    TestEpoch::new_without_offset(2).as_u64(),
+                )),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier::new_test_barrier(65536 * 3)),
+                Message::Barrier(Barrier::new_test_barrier(
+                    TestEpoch::new_without_offset(3).as_u64(),
+                )),
                 Message::Chunk(std::mem::take(&mut chunks[2])),
             ],
         ))

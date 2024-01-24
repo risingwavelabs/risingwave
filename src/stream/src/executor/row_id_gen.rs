@@ -151,6 +151,7 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::TestEpoch;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
@@ -181,7 +182,7 @@ mod tests {
         let mut row_id_gen_executor = row_id_gen_executor.execute();
 
         // Init barrier
-        tx.push_barrier(65536 * 1, false);
+        tx.push_barrier(TestEpoch::new_without_offset(1).as_u64(), false);
         row_id_gen_executor.next().await.unwrap().unwrap();
 
         // Insert operation

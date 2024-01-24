@@ -618,7 +618,7 @@ mod tests {
 
     #[test]
     fn test_apply_new_table_watermark() {
-        let mut epoch1 = TestEpoch::new_without_offset(1);
+        let epoch1 = TestEpoch::new_without_offset(1);
         let direction = WatermarkDirection::Ascending;
         let watermark1 = Bytes::from("watermark1");
         let watermark2 = Bytes::from("watermark2");
@@ -632,7 +632,7 @@ mod tests {
             )],
             direction,
         );
-        let mut epoch2 = epoch1.next_epoch();
+        let epoch2 = epoch1.next_epoch();
         table_watermarks.add_new_epoch_watermarks(
             epoch2.as_u64(),
             vec![VnodeWatermark::new(
@@ -644,7 +644,7 @@ mod tests {
 
         let mut table_watermark_checkpoint = table_watermarks.clone();
 
-        let mut epoch3 = epoch2.next_epoch();
+        let epoch3 = epoch2.next_epoch();
         let mut second_table_watermark = TableWatermarks::single_epoch(
             epoch3.as_u64(),
             vec![VnodeWatermark::new(
@@ -661,7 +661,7 @@ mod tests {
             )],
             direction,
         );
-        let mut epoch4 = epoch3.next_epoch();
+        let epoch4 = epoch3.next_epoch();
         let epoch5 = epoch4.next_epoch();
         table_watermarks.add_new_epoch_watermarks(
             epoch5.as_u64(),
@@ -686,7 +686,7 @@ mod tests {
 
     #[test]
     fn test_clear_stale_epoch_watmermark() {
-        let mut epoch1 = TestEpoch::new_without_offset(1);
+        let epoch1 = TestEpoch::new_without_offset(1);
         let direction = WatermarkDirection::Ascending;
         let watermark1 = Bytes::from("watermark1");
         let watermark2 = Bytes::from("watermark2");
@@ -700,7 +700,7 @@ mod tests {
             )],
             direction,
         );
-        let mut epoch2 = epoch1.next_epoch();
+        let epoch2 = epoch1.next_epoch();
         table_watermarks.add_new_epoch_watermarks(
             epoch2.as_u64(),
             vec![VnodeWatermark::new(
@@ -709,7 +709,7 @@ mod tests {
             )],
             direction,
         );
-        let mut epoch3 = epoch2.next_epoch();
+        let epoch3 = epoch2.next_epoch();
         table_watermarks.add_new_epoch_watermarks(
             epoch3.as_u64(),
             vec![VnodeWatermark::new(
@@ -718,7 +718,7 @@ mod tests {
             )],
             direction,
         );
-        let mut epoch4 = epoch3.next_epoch();
+        let epoch4 = epoch3.next_epoch();
         let epoch5 = epoch4.next_epoch();
         table_watermarks.add_new_epoch_watermarks(
             epoch5.as_u64(),

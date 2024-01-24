@@ -301,7 +301,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::epoch::EpochPair;
+    use risingwave_common::util::epoch::{EpochPair, TestEpoch};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -382,7 +382,7 @@ mod tests {
         ];
 
         let store = MemoryStateStore::new();
-        let mut epoch = EpochPair::new_test_epoch(65536);
+        let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
         let mut dedup_tables = infer_dedup_tables(&agg_calls, &[], store).await;
         dedup_tables
             .values_mut()
@@ -562,7 +562,7 @@ mod tests {
         let group_key = GroupKey::new(OwnedRow::new(vec![Some(100.into())]), None);
 
         let store = MemoryStateStore::new();
-        let mut epoch = EpochPair::new_test_epoch(65536);
+        let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
         let mut dedup_tables = infer_dedup_tables(&agg_calls, &group_key_types, store).await;
         dedup_tables
             .values_mut()

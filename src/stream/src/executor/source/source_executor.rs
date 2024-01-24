@@ -692,6 +692,7 @@ mod tests {
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::PbRowFormatType;
@@ -763,8 +764,8 @@ mod tests {
         );
         let mut executor = Box::new(executor).execute();
 
-        let init_barrier =
-            Barrier::new_test_barrier(65536).with_mutation(Mutation::Add(AddMutation {
+        let init_barrier = Barrier::new_test_barrier(TestEpoch::new_without_offset(1).as_u64())
+            .with_mutation(Mutation::Add(AddMutation {
                 adds: HashMap::new(),
                 added_actors: HashSet::new(),
                 splits: hashmap! {
@@ -858,8 +859,8 @@ mod tests {
         );
         let mut handler = Box::new(executor).execute();
 
-        let init_barrier =
-            Barrier::new_test_barrier(65536).with_mutation(Mutation::Add(AddMutation {
+        let init_barrier = Barrier::new_test_barrier(TestEpoch::new_without_offset(1).as_u64())
+            .with_mutation(Mutation::Add(AddMutation {
                 adds: HashMap::new(),
                 added_actors: HashSet::new(),
                 splits: hashmap! {
@@ -906,11 +907,12 @@ mod tests {
             }),
         ];
 
-        let change_split_mutation = Barrier::new_test_barrier(65536 * 2).with_mutation(
-            Mutation::SourceChangeSplit(hashmap! {
-                ActorId::default() => new_assignment.clone()
-            }),
-        );
+        let change_split_mutation = Barrier::new_test_barrier(
+            TestEpoch::new_without_offset(2).as_u64(),
+        )
+        .with_mutation(Mutation::SourceChangeSplit(hashmap! {
+            ActorId::default() => new_assignment.clone()
+        }));
 
         barrier_tx.send(change_split_mutation).unwrap();
 
@@ -922,7 +924,9 @@ mod tests {
         )
         .await;
         // there must exist state for new add partition
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(65536 * 2));
+        source_state_handler.init_epoch(EpochPair::new_test_epoch(
+            TestEpoch::new_without_offset(2).as_u64(),
+        ));
         source_state_handler
             .get(new_assignment[1].id())
             .await
@@ -933,10 +937,12 @@ mod tests {
 
         let _ = ready_chunks.next().await.unwrap();
 
-        let barrier = Barrier::new_test_barrier(65536 * 3).with_mutation(Mutation::Pause);
+        let barrier = Barrier::new_test_barrier(TestEpoch::new_without_offset(3).as_u64())
+            .with_mutation(Mutation::Pause);
         barrier_tx.send(barrier).unwrap();
 
-        let barrier = Barrier::new_test_barrier(65536 * 4).with_mutation(Mutation::Resume);
+        let barrier = Barrier::new_test_barrier(TestEpoch::new_without_offset(4).as_u64())
+            .with_mutation(Mutation::Resume);
         barrier_tx.send(barrier).unwrap();
 
         // receive all
@@ -945,11 +951,12 @@ mod tests {
         let prev_assignment = new_assignment;
         let new_assignment = vec![prev_assignment[2].clone()];
 
-        let drop_split_mutation = Barrier::new_test_barrier(65536 * 5).with_mutation(
-            Mutation::SourceChangeSplit(hashmap! {
-                ActorId::default() => new_assignment.clone()
-            }),
-        );
+        let drop_split_mutation = Barrier::new_test_barrier(
+            TestEpoch::new_without_offset(5).as_u64(),
+        )
+        .with_mutation(Mutation::SourceChangeSplit(hashmap! {
+            ActorId::default() => new_assignment.clone()
+        }));
 
         barrier_tx.send(drop_split_mutation).unwrap();
 
@@ -961,7 +968,9 @@ mod tests {
         )
         .await;
 
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(5 * 65536));
+        source_state_handler.init_epoch(EpochPair::new_test_epoch(
+            5 * TestEpoch::new_without_offset(1).as_u64(),
+        ));
 
         assert!(source_state_handler
             .try_recover_from_state_store(&prev_assignment[0])
