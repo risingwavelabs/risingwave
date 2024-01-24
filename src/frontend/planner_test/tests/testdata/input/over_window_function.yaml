@@ -134,13 +134,17 @@
     create table t(x int, y int);
     select x, y, max(x) over(PARTITION BY y ORDER BY x RANGE 100 PRECEDING) from t;
   expected_outputs:
-    - binder_error
+    - logical_plan
+    - stream_error
+    - batch_error
 - id: aggregate with over clause, range frame definition with between
   sql: |
     create table t(x int, y int);
     select x, y, max(x) over(PARTITION BY y ORDER BY x RANGE BETWEEN 100 PRECEDING and UNBOUNDED FOLLOWING) from t;
   expected_outputs:
-    - binder_error
+    - logical_plan
+    - stream_error
+    - batch_error
 - id: aggregate with over clause, unbounded range, with ORDER BY
   sql: |
     create table t(x int, y int);
@@ -547,3 +551,22 @@
   expected_outputs:
     - optimized_logical_plan_for_stream
     - optimized_logical_plan_for_batch
+
+# Range frames
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by i range 1 preceding),
+        count(*) over (partition by 1::int order by bi range 1 preceding),
+        count(*) over (partition by 1::int order by d range 1.5 preceding),
+        count(*) over (partition by 1::int order by f range 1.5 preceding),
+        -- count(*) over (partition by 1::int order by da range '1 day' preceding), -- `date` not supported yet
+        -- count(*) over (partition by 1::int order by t range '1 min' preceding), -- `time` not supported yet
+        count(*) over (partition by 1::int order by ts range '1 day 1 hour' preceding),
+        count(*) over (partition by 1::int order by tstz range '1 min' preceding)
+    from t;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_error
+    - batch_error
