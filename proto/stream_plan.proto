@@ -558,6 +558,9 @@ message StreamCdcScanNode {
 
   // The external table that will be backfilled for CDC.
   plan_common.ExternalTableDesc cdc_table_desc = 5;
+
+  // The rate limit for the stream cdc scan node.
+  optional uint32 rate_limit = 6;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -763,7 +766,7 @@ message StreamNode {
     StreamFsFetchNode stream_fs_fetch = 138;
     StreamCdcScanNode stream_cdc_scan = 139;
     CdcFilterNode cdc_filter = 140;
-    SubscriptionNode Subscription = 141;
+    SubscriptionNode subscription = 141;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

@@ -203,6 +203,14 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
     pub hummock_version_checkpoint_interval_sec: u64,
 
+    /// If enabled, SSTable object file and version delta will be retained.
+    ///
+    /// SSTable object file need to be deleted via full GC.
+    ///
+    /// version delta need to be manually deleted.
+    #[serde(default = "default::meta::enable_hummock_data_archive")]
+    pub enable_hummock_data_archive: bool,
+
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected.
     #[serde(default = "default::meta::min_delta_log_num_for_hummock_version_checkpoint")]
@@ -913,9 +921,29 @@ pub struct S3ObjectStoreConfig {
     pub object_store_req_retry_max_delay_ms: u64,
     #[serde(default = "default::object_store_config::s3::object_store_req_retry_max_attempts")]
     pub object_store_req_retry_max_attempts: usize,
-    /// Whether to retry s3 sdk error from which no error metadata is provided.
-    #[serde(default = "default::object_store_config::s3::retry_unknown_service_error")]
+    /// For backwards compatibility, users should use `S3ObjectStoreDeveloperConfig` instead.
+    #[serde(
+        default = "default::object_store_config::s3::developer::object_store_retry_unknown_service_error"
+    )]
     pub retry_unknown_service_error: bool,
+    #[serde(default)]
+    pub developer: S3ObjectStoreDeveloperConfig,
+}
+
+/// The subsections `[storage.object_store.s3.developer]`.
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct S3ObjectStoreDeveloperConfig {
+    /// Whether to retry s3 sdk error from which no error metadata is provided.
+    #[serde(
+        default = "default::object_store_config::s3::developer::object_store_retry_unknown_service_error"
+    )]
+    pub object_store_retry_unknown_service_error: bool,
+    /// An array of error codes that should be retried.
+    /// e.g. `["SlowDown", "TooManyRequests"]`
+    #[serde(
+        default = "default::object_store_config::s3::developer::object_store_retryable_service_error_codes"
+    )]
+    pub object_store_retryable_service_error_codes: Vec<String>,
 }
 
 impl SystemConfig {
@@ -964,6 +992,10 @@ pub mod default {
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
             30
+        }
+
+        pub fn enable_hummock_data_archive() -> bool {
+            false
         }
 
         pub fn min_delta_log_num_for_hummock_version_checkpoint() -> u64 {
@@ -1514,8 +1546,14 @@ pub mod default {
                 DEFAULT_RETRY_MAX_ATTEMPTS
             }
 
-            pub fn retry_unknown_service_error() -> bool {
-                false
+            pub mod developer {
+                pub fn object_store_retry_unknown_service_error() -> bool {
+                    false
+                }
+
+                pub fn object_store_retryable_service_error_codes() -> Vec<String> {
+                    vec!["SlowDown".into(), "TooManyRequests".into()]
+                }
             }
         }
     }

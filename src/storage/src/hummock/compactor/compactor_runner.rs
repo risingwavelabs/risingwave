@@ -30,6 +30,7 @@ use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, Table
 use risingwave_hummock_sdk::{can_concat, EpochWithGap, HummockEpoch};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType};
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
 use super::iterator::MonitoredCompactorIterator;
@@ -327,7 +328,7 @@ pub async fn compact(
         .await
     {
         Err(e) => {
-            tracing::error!("Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error {:?}", compact_task.existing_table_ids, e);
+            tracing::error!(error = %e.as_report(), "Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error", compact_task.existing_table_ids);
             let task_status = TaskStatus::ExecuteFailed;
             return compact_done(compact_task, context.clone(), vec![], task_status);
         }
@@ -407,7 +408,7 @@ pub async fn compact(
                 }
             }
             Err(e) => {
-                tracing::warn!("Failed to generate_splits {:#?}", e);
+                tracing::warn!(error = %e.as_report(), "Failed to generate_splits");
                 task_status = TaskStatus::ExecuteFailed;
                 return compact_done(compact_task, context.clone(), vec![], task_status);
             }
@@ -527,9 +528,9 @@ pub async fn compact(
                     Err(e) => {
                         task_status = TaskStatus::ExecuteFailed;
                         tracing::warn!(
-                            "Compaction task {} failed with error: {:#?}",
+                            error = %e.as_report(),
+                            "Compaction task {} failed with error",
                             compact_task.task_id,
-                            e
                         );
                     }
                 }
@@ -597,18 +598,18 @@ pub async fn compact(
                     Some(Ok(Err(e))) => {
                         task_status = TaskStatus::ExecuteFailed;
                         tracing::warn!(
-                            "Compaction task {} failed with error: {:#?}",
+                            error = %e.as_report(),
+                            "Compaction task {} failed with error",
                             compact_task.task_id,
-                            e
                         );
                         break;
                     }
                     Some(Err(e)) => {
                         task_status = TaskStatus::JoinHandleFailed;
                         tracing::warn!(
-                            "Compaction task {} failed with join handle error: {:#?}",
+                            error = %e.as_report(),
+                            "Compaction task {} failed with join handle error",
                             compact_task.task_id,
-                            e
                         );
                         break;
                     }

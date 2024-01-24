@@ -109,7 +109,6 @@ else
 fi
 
 echo "--- testing elasticsearch sink"
-chmod +x ./ci/scripts/e2e-elasticsearch-sink-test.sh
 ./ci/scripts/e2e-elasticsearch-sink-test.sh
 if [ $? -eq 0 ]; then
   echo "elasticsearch sink check passed"

@@ -70,7 +70,7 @@ use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
 use crate::expr::TimestamptzExprFinder;
-use crate::optimizer::plan_node::generic::Union;
+use crate::optimizer::plan_node::generic::{SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
     ToStream, VisitExprsRecursive,
@@ -622,8 +622,7 @@ impl PlanRoot {
                 None,
                 columns.clone(),
                 row_id_index,
-                false,
-                true,
+                SourceNodeKind::CreateTable,
                 context.clone(),
             )
             .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;

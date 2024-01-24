@@ -21,6 +21,7 @@ periodic_compaction_interval_sec = 60
 vacuum_interval_sec = 30
 vacuum_spin_interval_ms = 10
 hummock_version_checkpoint_interval_sec = 30
+enable_hummock_data_archive = false
 min_delta_log_num_for_hummock_version_checkpoint = 10
 max_heartbeat_interval_secs = 300
 disable_recovery = false
@@ -179,6 +180,10 @@ object_store_req_retry_interval_ms = 20
 object_store_req_retry_max_delay_ms = 10000
 object_store_req_retry_max_attempts = 8
 retry_unknown_service_error = false
+
+[storage.object_store.s3.developer]
+object_store_retry_unknown_service_error = false
+object_store_retryable_service_error_codes = ["SlowDown", "TooManyRequests"]
 
 [system]
 barrier_interval_ms = 1000

@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use arrow_array::RecordBatch;
 use arrow_schema::{Field, Fields, Schema, SchemaRef};
+use arrow_udf_js::{CallMode, Runtime as JsRuntime};
 use arrow_udf_wasm::Runtime as WasmRuntime;
 use cfg_or_panic::cfg_or_panic;
 use futures_util::stream;
@@ -42,6 +43,7 @@ pub struct UserDefinedTableFunction {
 enum UdfImpl {
     External(Arc<ArrowFlightUdfClient>),
     Wasm(Arc<WasmRuntime>),
+    JavaScript(JsRuntime),
 }
 
 #[async_trait::async_trait]
@@ -67,6 +69,11 @@ impl UdfImpl {
                     .call_stream(identifier, stream::once(async { input }))
                     .await?
                 {
+                    yield res?;
+                }
+            }
+            UdfImpl::JavaScript(runtime) => {
+                for res in runtime.call_table_function(identifier, &input, 1024)? {
                     yield res?;
                 }
             }
@@ -177,28 +184,48 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
             .try_collect::<_, Fields, _>()?,
     ));
 
+    let identifier = udtf.get_identifier()?;
+    let return_type = DataType::from(prost.get_return_type()?);
+
     let client = match udtf.language.as_str() {
         "wasm" => {
+            let link = udtf.get_link()?;
             // Use `block_in_place` as an escape hatch to run async code here in sync context.
             // Calling `block_on` directly will panic.
             UdfImpl::Wasm(tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(
-                    crate::expr::expr_udf::get_or_create_wasm_runtime(&udtf.link),
-                )
+                tokio::runtime::Handle::current()
+                    .block_on(crate::expr::expr_udf::get_or_create_wasm_runtime(link))
             })?)
         }
+        "javascript" => {
+            let mut rt = JsRuntime::new()?;
+            let body = format!(
+                "export function* {}({}) {{ {} }}",
+                identifier,
+                udtf.arg_names.join(","),
+                udtf.get_body()?
+            );
+            rt.add_function(
+                identifier,
+                arrow_schema::DataType::try_from(&return_type)?,
+                CallMode::CalledOnNullInput,
+                &body,
+            )?;
+            UdfImpl::JavaScript(rt)
+        }
         // connect to UDF service
-        _ => UdfImpl::External(crate::expr::expr_udf::get_or_create_flight_client(
-            &udtf.link,
-        )?),
+        _ => {
+            let link = udtf.get_link()?;
+            UdfImpl::External(crate::expr::expr_udf::get_or_create_flight_client(link)?)
+        }
     };
 
     Ok(UserDefinedTableFunction {
         children: prost.args.iter().map(expr_build_from_prost).try_collect()?,
-        return_type: prost.return_type.as_ref().expect("no return type").into(),
+        return_type,
         arg_schema,
         client,
-        identifier: udtf.identifier.clone(),
+        identifier: identifier.clone(),
         chunk_size,
     }
     .boxed())

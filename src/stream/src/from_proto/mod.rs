@@ -45,6 +45,7 @@ mod source;
 mod stateless_simple_agg;
 mod stream_cdc_scan;
 mod stream_scan;
+mod subscription;
 mod temporal_join;
 mod top_n;
 mod union;
@@ -54,7 +55,7 @@ mod watermark_filter;
 // import for submodules
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{StreamNode, TemporalJoinNode, SubscriptionNode};
+use risingwave_pb::stream_plan::{StreamNode, TemporalJoinNode};
 use risingwave_storage::StateStore;
 
 use self::append_only_dedup::*;
@@ -93,6 +94,7 @@ use self::union::*;
 use self::watermark_filter::WatermarkFilterBuilder;
 use crate::error::StreamResult;
 use crate::executor::{BoxedExecutor, Executor, ExecutorInfo};
+use crate::from_proto::subscription::SubscriptionExecutorBuilder;
 use crate::from_proto::values::ValuesExecutorBuilder;
 use crate::task::ExecutorParams;
 
@@ -105,20 +107,6 @@ trait ExecutorBuilder {
         node: &Self::Node,
         store: impl StateStore,
     ) -> impl std::future::Future<Output = StreamResult<BoxedExecutor>> + Send;
-}
-pub struct SubscriptionExecutorBuilder{
-
-}
-impl ExecutorBuilder for SubscriptionExecutorBuilder{
-    type Node = SubscriptionNode;
-    async fn new_boxed_executor(
-        _params: ExecutorParams,
-        _node: &Self::Node,
-        _store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
-        unimplemented!()
-    }
-    
 }
 
 macro_rules! build_executor {
@@ -146,7 +134,6 @@ pub async fn create_executor(
         store,
         NodeBody::Source => SourceExecutorBuilder,
         NodeBody::Sink => SinkExecutorBuilder,
-        NodeBody::Subscription => SubscriptionExecutorBuilder,
         NodeBody::Project => ProjectExecutorBuilder,
         NodeBody::TopN => TopNExecutorBuilder::<false>,
         NodeBody::AppendOnlyTopN => TopNExecutorBuilder::<true>,
@@ -160,6 +147,7 @@ pub async fn create_executor(
         NodeBody::BatchPlan => BatchQueryExecutorBuilder,
         NodeBody::Merge => MergeExecutorBuilder,
         NodeBody::Materialize => MaterializeExecutorBuilder,
+        NodeBody::Subscription => SubscriptionExecutorBuilder,
         NodeBody::Filter => FilterExecutorBuilder,
         NodeBody::CdcFilter => CdcFilterExecutorBuilder,
         NodeBody::Arrange => ArrangeExecutorBuilder,
