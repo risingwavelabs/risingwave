@@ -13,11 +13,22 @@ export RUST_LOG="risingwave_meta::barrier::recovery=debug,\
 risingwave_meta::manager::catalog=debug,\
 risingwave_meta::rpc::ddl_controller=debug,\
 risingwave_meta::barrier::mod=debug,\
-risingwave_stream::executor::backfill=trace,\
 risingwave_simulation=debug"
 
 # Extra logs you can enable if the existing trace does not give enough info.
-#risingwave_meta::barrier::progress=debug,\
+#risingwave_stream::executor::backfill=trace,
+#risingwave_meta::barrier::progress=debug,
+
+# ========= Some tips for debugging recovery tests =========
+# 1. If materialized view failed to create after multiple retries
+#    - Check logs to see where the materialized view creation was stuck.
+#      1. Is it stuck at waiting for backfill executor response?
+#         In that case perhaps some backfill logic is flawed, add more trace in backfill to debug.
+#      2. Is it stuck at waiting for backfill executor to finish?
+#         In that case perhaps some part of the backfill loop is slow / stuck.
+#      3. Is it stuck at waiting for some executor to report progress?
+#         In that case perhaps the tracking of backfill's progress in meta is flawed.
+
 export LOGDIR=.risingwave/log
 
 mkdir -p $LOGDIR
