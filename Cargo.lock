@@ -630,7 +630,7 @@ dependencies = [
 [[package]]
 name = "arrow-udf-js"
 version = "0.1.0"
-source = "git+https://github.com/risingwavelabs/arrow-udf.git?rev=7ba1c22#7ba1c226fa2f7418a217ee064a19b90efeb7143c"
+source = "git+https://github.com/risingwavelabs/arrow-udf.git?rev=ea7664d#ea7664da1a130bdd04bc22bb5146f52b2aa89f03"
 dependencies = [
  "anyhow",
  "arrow-array 50.0.0",
@@ -1571,6 +1571,29 @@ dependencies = [
  "regex",
  "rustc-hash",
  "shlex",
+]
+
+[[package]]
+name = "bindgen"
+version = "0.66.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2b84e06fc203107bfbad243f4aba2af864eb7db3b1cf46ea0a023b0b433d2a7"
+dependencies = [
+ "bitflags 2.4.0",
+ "cexpr",
+ "clang-sys",
+ "lazy_static",
+ "lazycell",
+ "log",
+ "peeking_take_while",
+ "prettyplease 0.2.15",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash",
+ "shlex",
+ "syn 2.0.48",
+ "which",
 ]
 
 [[package]]
@@ -6251,7 +6274,7 @@ checksum = "06f19e4cfa0ab5a76b627cec2d81331c49b034988eaf302c3bafeada684eadef"
 dependencies = [
  "base64 0.21.4",
  "bigdecimal 0.4.2",
- "bindgen",
+ "bindgen 0.59.2",
  "bitflags 2.4.0",
  "bitvec",
  "btoi",
@@ -8330,6 +8353,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3cbb081b9784b07cceb8824c8583f86db4814d172ab043f3c23f7dc600bf83d"
 
 [[package]]
+name = "relative-path"
+version = "1.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e898588f33fdd5b9420719948f9f2a32c922a246964576f71ba7f24f80610fbc"
+
+[[package]]
 name = "rend"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9032,6 +9061,7 @@ dependencies = [
  "syn 1.0.109",
  "tempfile",
  "thiserror",
+ "thiserror-ext",
  "time",
  "tokio-postgres",
  "tokio-retry",
@@ -10087,6 +10117,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0db265d331ae1b1a9fdb68466a8359bc9dcc5e78a9c323f790322f8442e005ac"
 dependencies = [
  "rquickjs-core",
+ "rquickjs-macro",
 ]
 
 [[package]]
@@ -10095,7 +10126,26 @@ version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48e51f2fc99917699385bfa290b776e712e414b222d7c2a9b2cd67b8e93585f3"
 dependencies = [
+ "relative-path",
  "rquickjs-sys",
+]
+
+[[package]]
+name = "rquickjs-macro"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c508ce83e3f9daaa91e63ffcd0e2df71cbf46c52246cb45ce410a2d8fdc04df"
+dependencies = [
+ "convert_case",
+ "fnv",
+ "ident_case",
+ "indexmap 2.0.0",
+ "proc-macro-crate 1.3.1",
+ "proc-macro-error 1.0.4",
+ "proc-macro2",
+ "quote",
+ "rquickjs-core",
+ "syn 2.0.48",
 ]
 
 [[package]]
@@ -10104,6 +10154,7 @@ version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86b6865056bc4154c49bc8b2babd9232a8ba55dee4860fc74c789633aecad3ca"
 dependencies = [
+ "bindgen 0.66.1",
  "cc",
 ]
 

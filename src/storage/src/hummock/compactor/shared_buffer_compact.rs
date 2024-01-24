@@ -20,11 +20,12 @@ use bytes::{Bytes, BytesMut};
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 use itertools::Itertools;
+use more_asserts::debug_assert_lt;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::key::{FullKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, PointRange, TableKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
@@ -343,26 +344,47 @@ pub async fn merge_imms_in_memory(
     }
 
     let mut merged_payload: Vec<SharedBufferVersionedEntry> = Vec::new();
-    let mut pivot = items
+    let first_item_key = items
         .first()
         .map(|((k, _), _)| k.clone())
         .unwrap_or_default();
 
-    let mut versions: Vec<(EpochWithGap, HummockValue<Bytes>)> = Vec::new();
+    // Use first key, max epoch to initialize the tracker to ensure that the check first call to full_key_tracker.observe will succeed
+    let mut full_key_tracker = FullKeyTracker::<Bytes>::new(FullKey::new_with_gap_epoch(
+        table_id,
+        first_item_key,
+        EpochWithGap::new_max_epoch(),
+    ));
+    let mut table_key_versions: Vec<(EpochWithGap, HummockValue<Bytes>)> = Vec::new();
+    let mut table_key_last_delete_epoch = HummockEpoch::MAX;
 
-    for ((key, value), epoch) in items {
-        assert!(key >= pivot, "key should be in ascending order");
-        if key != pivot {
-            merged_payload.push((pivot, versions));
-            pivot = key;
-            versions = vec![];
+    for ((key, value), epoch_with_gap) in items {
+        let full_key = FullKey::new_with_gap_epoch(table_id, key, epoch_with_gap);
+        if let Some(last_full_key) = full_key_tracker.observe(full_key) {
+            let last_user_key = last_full_key.user_key;
+            // `epoch_with_gap` of the `last_full_key` may not reflect the real epoch in the items
+            // and should not be used because we use max epoch to initialize the tracker
+            let _epoch_with_gap = last_full_key.epoch_with_gap;
+
+            // Record kv entries
+            merged_payload.push((last_user_key.table_key, table_key_versions));
+
+            // Reset state before moving onto the new table key
+            table_key_versions = vec![];
+            table_key_last_delete_epoch = HummockEpoch::MAX;
         }
-        versions.push((epoch, value));
+        if value.is_delete() {
+            table_key_last_delete_epoch = epoch_with_gap.pure_epoch();
+        }
+        table_key_versions.push((epoch_with_gap, value));
     }
 
     // process the last key
-    if !versions.is_empty() {
-        merged_payload.push((pivot, versions));
+    if !table_key_versions.is_empty() {
+        merged_payload.push((
+            full_key_tracker.latest_full_key.user_key.table_key,
+            table_key_versions,
+        ));
     }
 
     Ok(SharedBufferBatch {

@@ -16,7 +16,7 @@ use std::ops::Bound::*;
 
 use bytes::Bytes;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
-use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
+use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey, UserKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 
 use super::DeleteRangeIterator;
@@ -31,11 +31,11 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     /// Inner table iterator.
     iterator: I,
 
-    /// Last full key.
-    last_key: FullKey<Bytes>,
+    // Track the last seen full key
+    full_key_tracker: FullKeyTracker<Bytes>,
 
     /// Last user value
-    last_val: Bytes,
+    latest_val: Bytes,
 
     /// Start and end bounds of user key.
     key_range: UserKeyRange,
@@ -71,14 +71,14 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         Self {
             iterator,
             key_range,
-            last_key: FullKey::default(),
-            last_val: Bytes::new(),
+            latest_val: Bytes::new(),
             read_epoch,
             min_epoch,
             stats: StoreLocalStatistic::default(),
             delete_range_iter,
             _version: version,
             is_current_pos_valid: false,
+            full_key_tracker: FullKeyTracker::new(FullKey::default()),
         }
     }
 
@@ -121,7 +121,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Note: before call the function you need to ensure that the iterator is valid.
     pub fn key(&self) -> &FullKey<Bytes> {
         assert!(self.is_valid());
-        &self.last_key
+        &self.full_key_tracker.latest_full_key
     }
 
     /// The returned value is in the form of user value.
@@ -129,14 +129,14 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Note: before call the function you need to ensure that the iterator is valid.
     pub fn value(&self) -> &Bytes {
         assert!(self.is_valid());
-        &self.last_val
+        &self.latest_val
     }
 
     /// Resets the iterating position to the beginning.
     pub async fn rewind(&mut self) -> HummockResult<()> {
         // Reset
         self.is_current_pos_valid = false;
-        self.last_key = FullKey::default();
+        self.full_key_tracker = FullKeyTracker::new(FullKey::default());
 
         // Handle range scan
         match &self.key_range.0 {
@@ -180,7 +180,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     pub async fn seek(&mut self, user_key: UserKey<&[u8]>) -> HummockResult<()> {
         // Reset
         self.is_current_pos_valid = false;
-        self.last_key = FullKey::default();
+        self.full_key_tracker = FullKeyTracker::new(FullKey::default());
 
         // Handle range scan when key < begin_key
         let user_key = match &self.key_range.0 {
@@ -245,14 +245,13 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             }
 
             // Skip older version entry for the same user key
-            if self.last_key.user_key.as_ref() == full_key.user_key {
+            if self.full_key_tracker.observe(full_key).is_none() {
                 self.stats.skip_multi_version_key_count += 1;
                 self.iterator.next().await?;
                 continue;
             }
 
             // A new user key is observed.
-            self.last_key = full_key.copy_into();
 
             // It is better to early return here if the user key is already
             // out of range to avoid unnecessary access on the range tomestones
@@ -271,7 +270,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                     if self.delete_range_iter.current_epoch() >= epoch {
                         self.stats.skip_delete_key_count += 1;
                     } else {
-                        self.last_val = Bytes::copy_from_slice(val);
+                        self.latest_val = Bytes::copy_from_slice(val);
                         self.stats.processed_key_count += 1;
                         self.is_current_pos_valid = true;
                         return Ok(());
