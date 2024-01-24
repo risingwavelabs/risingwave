@@ -19,7 +19,7 @@ RUN cd /risingwave/dashboard && npm i && npm run build-static && rm -rf node_mod
 
 FROM base AS rust-base
 
-RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip
+RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip clang
 
 SHELL ["/bin/bash", "-c"]
 
