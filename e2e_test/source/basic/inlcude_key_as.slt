@@ -61,6 +61,7 @@ WITH (
 	topic = 'kafka_additional_columns')
 FORMAT PLAIN ENCODE JSON
 
+# header with varchar type & non-exist header key
 statement ok
 create table additional_columns_1 (a int)
 include key as key_col
@@ -70,7 +71,7 @@ include timestamp as timestamp_col
 include header 'header1' as header_col_1
 include header 'header2' as header_col_2
 include header 'header2' varchar as header_col_3
-include header 'header3' as header_col_4 # non exist header key
+include header 'header3' as header_col_4
 WITH (
 	connector = 'kafka',
     properties.bootstrap.server = 'message_queue:29092',
