@@ -107,7 +107,7 @@ create table orders_no_backfill (
    order_status smallint,
    PRIMARY KEY (order_id)
 ) with (
-  disable_backfill = 'true'
+  snapshot = 'false'
 ) from mysql_mytest table 'mytest.orders';
 
 statement ok

@@ -33,6 +33,7 @@ use risingwave_connector::source;
 use risingwave_connector::source::cdc::external::{
     DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
+use risingwave_connector::source::cdc::CDC_BACKFILL_ENABLE_KEY;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
@@ -807,9 +808,9 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
 
-    let disable_backfill = match context.with_options().get("disable_backfill") {
+    let disable_backfill = match context.with_options().get(CDC_BACKFILL_ENABLE_KEY) {
         None => false,
-        Some(v) => v == "true",
+        Some(v) => v == "false",
     };
 
     let logical_scan = LogicalCdcScan::create(
