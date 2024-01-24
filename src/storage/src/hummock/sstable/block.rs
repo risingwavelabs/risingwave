@@ -164,7 +164,7 @@ impl Clone for Block {
             data_len: self.data_len,
             table_id: self.table_id,
             restart_points: self.restart_points.clone(),
-            hitmap: Hitmap::default(),
+            hitmap: self.hitmap.clone(),
         }
     }
 }
