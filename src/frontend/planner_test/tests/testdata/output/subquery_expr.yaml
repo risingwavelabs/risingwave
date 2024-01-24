@@ -241,7 +241,7 @@
   logical_plan: |-
     LogicalProject { exprs: [sum(*VALUES*_0.column_0), max($expr1), string_agg($expr2, ',':Varchar)] }
     └─LogicalAgg { aggs: [sum(*VALUES*_0.column_0), max($expr1), string_agg($expr2, ',':Varchar)] }
-      └─LogicalProject { exprs: [*VALUES*_0.column_0, ((*VALUES*_0.column_1 + *VALUES*_0.column_2) + 10:Int32) as $expr1, Concat(*VALUES*_0.column_2::Varchar, '~':Varchar) as $expr2, ',':Varchar] }
+      └─LogicalProject { exprs: [*VALUES*_0.column_0, ((*VALUES*_0.column_1 + *VALUES*_0.column_2) + 10:Int32) as $expr1, ConcatOp(*VALUES*_0.column_2::Varchar, '~':Varchar) as $expr2, ',':Varchar] }
         └─LogicalValues { rows: [[1:Int32, 2:Int32, 3:Int32], [4:Int32, 5:Int32, 6:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32, *VALUES*_0.column_2:Int32] } }
 - sql: |
     select 1 + (select 2 from t);

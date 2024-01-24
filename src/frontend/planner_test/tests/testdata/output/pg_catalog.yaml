@@ -229,7 +229,7 @@
 - sql: |
     select ('pg' || '_namespace')::regclass
   logical_plan: |-
-    LogicalProject { exprs: [CastRegclass(Concat('pg':Varchar, '_namespace':Varchar)) as $expr1] }
+    LogicalProject { exprs: [CastRegclass(ConcatOp('pg':Varchar, '_namespace':Varchar)) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |-
     BatchProject { exprs: [CastRegclass('pg_namespace':Varchar) as $expr1] }

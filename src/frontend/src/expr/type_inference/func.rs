@@ -335,6 +335,10 @@ fn infer_type_for_special(
             ensure_arity!("coalesce", 1 <= | inputs |);
             align_types(inputs.iter_mut()).map(Some).map_err(Into::into)
         }
+        ExprType::Concat => {
+            ensure_arity!("concat", 1 <= | inputs |);
+            Ok(Some(DataType::Varchar))
+        }
         ExprType::ConcatWs => {
             ensure_arity!("concat_ws", 2 <= | inputs |);
             // 0-th arg must be string
@@ -346,7 +350,7 @@ fn infer_type_for_special(
             }
             Ok(Some(DataType::Varchar))
         }
-        ExprType::Concat => {
+        ExprType::ConcatOp => {
             for input in inputs {
                 input.cast_explicit_mut(DataType::Varchar)?;
             }

@@ -100,8 +100,9 @@ message ExprNode {
     MD5 = 224;
     CHAR_LENGTH = 225;
     REPEAT = 226;
-    CONCAT = 227;
-    CONCAT_VARIADIC = 286;
+    CONCAT_OP = 227;
+    CONCAT = 286;
+    CONCAT_VARIADIC = 287;
     // BOOL_OUT is different from CAST-bool-to-varchar in PostgreSQL.
     BOOL_OUT = 228;
     OCTET_LENGTH = 229;

@@ -99,7 +99,7 @@ pub fn jsonb_array_element(v: JsonbRef<'_>, p: i32) -> Option<JsonbRef<'_>> {
 /// "bar"
 /// ```
 #[function("jsonb_extract_path(jsonb, variadic varchar[]) -> jsonb")]
-pub fn jsonb_extract_path<'a>(v: JsonbRef<'a>, path: impl Row) -> Option<JsonbRef<'a>> {
+pub fn jsonb_extract_path(v: JsonbRef<'_>, path: impl Row) -> Option<JsonbRef<'_>> {
     let mut jsonb = v;
     for key in path.iter() {
         // return null if any element is null

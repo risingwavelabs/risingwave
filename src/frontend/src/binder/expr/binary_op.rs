@@ -171,7 +171,9 @@ impl Binder {
                     (Some(_), Some(DataType::List { .. })) => ExprType::ArrayPrepend,
 
                     // string concatenation
-                    (Some(DataType::Varchar), _) | (_, Some(DataType::Varchar)) => ExprType::Concat,
+                    (Some(DataType::Varchar), _) | (_, Some(DataType::Varchar)) => {
+                        ExprType::ConcatOp
+                    }
 
                     (Some(DataType::Jsonb), Some(DataType::Jsonb))
                     | (Some(DataType::Jsonb), None)
@@ -188,7 +190,7 @@ impl Binder {
                     }
 
                     // string concatenation
-                    (None, _) | (_, None) => ExprType::Concat,
+                    (None, _) | (_, None) => ExprType::ConcatOp,
 
                     // invalid
                     (Some(left_type), Some(right_type)) => {

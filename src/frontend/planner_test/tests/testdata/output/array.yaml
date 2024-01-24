@@ -233,7 +233,7 @@
   sql: |
     select ('{c,' || 'd}')::varchar[];
   logical_plan: |-
-    LogicalProject { exprs: [Concat('{c,':Varchar, 'd}':Varchar)::List(Varchar) as $expr1] }
+    LogicalProject { exprs: [ConcatOp('{c,':Varchar, 'd}':Varchar)::List(Varchar) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: unknown to varchar[] in implicit context
   sql: |
