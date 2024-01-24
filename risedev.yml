@@ -570,7 +570,7 @@ profile:
     steps:
       - use: minio
         api-requests-max: 18
-        api-requests-deadline: 1s
+        api-requests-deadline: 2s
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
@@ -594,7 +594,7 @@ profile:
     steps:
       - use: minio
         api-requests-max: 18
-        api-requests-deadline: 1s
+        api-requests-deadline: 2s
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
