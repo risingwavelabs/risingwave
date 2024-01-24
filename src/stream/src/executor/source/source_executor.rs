@@ -22,12 +22,12 @@ use futures_async_stream::try_stream;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
     StreamChunkWithState,
 };
 use risingwave_connector::ConnectorParams;
-use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -111,7 +111,7 @@ impl<S: StateStore> SourceExecutor<S> {
         );
         source_desc
             .source
-            .stream_reader(state, column_ids, Arc::new(source_ctx))
+            .to_stream(state, column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)
     }
@@ -694,9 +694,9 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_connector::source::datagen::DatagenSplit;
+    use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::PbRowFormatType;
-    use risingwave_source::connector_test_utils::create_source_desc_builder;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
     use tracing_test::traced_test;
@@ -749,7 +749,7 @@ mod tests {
         let system_params_manager = LocalSystemParamsManager::for_test();
 
         let executor = SourceExecutor::new(
-            ActorContext::create(0),
+            ActorContext::for_test(0),
             ExecutorInfo {
                 schema,
                 pk_indices,
@@ -843,7 +843,7 @@ mod tests {
         let system_params_manager = LocalSystemParamsManager::for_test();
 
         let executor = SourceExecutor::new(
-            ActorContext::create(0),
+            ActorContext::for_test(0),
             ExecutorInfo {
                 schema,
                 pk_indices,

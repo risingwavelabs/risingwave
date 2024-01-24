@@ -28,7 +28,7 @@ use crate::hummock::file_cache::preclude::*;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::{
     set_foyer_metrics_registry, FileCache, FileCacheConfig, HummockError, HummockStorage,
-    RecentFilter, SstableStore,
+    RecentFilter, SstableStore, SstableStoreConfig,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -610,18 +610,19 @@ impl StateStoreImpl {
                 )
                 .await;
 
-                let sstable_store = Arc::new(SstableStore::new(
-                    Arc::new(object_store),
-                    opts.data_directory.to_string(),
-                    opts.block_cache_capacity_mb * (1 << 20),
-                    opts.meta_cache_capacity_mb * (1 << 20),
-                    opts.high_priority_ratio,
-                    opts.prefetch_buffer_capacity_mb * (1 << 20),
-                    opts.max_prefetch_block_number,
+                let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
+                    store: Arc::new(object_store),
+                    path: opts.data_directory.to_string(),
+                    block_cache_capacity: opts.block_cache_capacity_mb * (1 << 20),
+                    meta_cache_capacity: opts.meta_cache_capacity_mb * (1 << 20),
+                    high_priority_ratio: opts.high_priority_ratio,
+                    prefetch_buffer_capacity: opts.prefetch_buffer_capacity_mb * (1 << 20),
+                    max_prefetch_block_number: opts.max_prefetch_block_number,
                     data_file_cache,
                     meta_file_cache,
                     recent_filter,
-                ));
+                    state_store_metrics: state_store_metrics.clone(),
+                }));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
                 let key_filter_manager = Arc::new(RpcFilterKeyExtractorManager::new(Box::new(

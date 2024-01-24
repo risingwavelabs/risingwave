@@ -213,7 +213,7 @@ mod tests {
 
         let (tx, source) = MockSource::channel(input_schema, input_pk_indices);
         let sort_executor = SortExecutor::new(SortExecutorArgs {
-            actor_ctx: ActorContext::create(123),
+            actor_ctx: ActorContext::for_test(123),
             info: ExecutorInfo {
                 schema: source.schema().clone(),
                 pk_indices: source.pk_indices().to_vec(),

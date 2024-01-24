@@ -16,6 +16,7 @@ pub mod executor_core;
 use await_tree::InstrumentAwait;
 pub use executor_core::StreamSourceCore;
 mod fs_source_executor;
+#[expect(deprecated)]
 pub use fs_source_executor::*;
 use risingwave_common::bail;
 pub use state_table_handler::*;
