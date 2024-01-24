@@ -34,9 +34,7 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_connector::error::ConnectorError;
-use risingwave_connector::source::cdc::external::{
-    CdcOffset, ExternalTableReader, ExternalTableReaderImpl,
-};
+use risingwave_connector::source::cdc::external::{CdcOffset, CdcOffsetParseFunc};
 use risingwave_storage::table::{collect_data_chunk_with_builder, KeyedRow};
 use risingwave_storage::StateStore;
 
@@ -242,7 +240,7 @@ pub(crate) fn mark_chunk(
 }
 
 pub(crate) fn mark_cdc_chunk(
-    table_reader: &ExternalTableReaderImpl,
+    offset_parse_func: &CdcOffsetParseFunc,
     chunk: StreamChunk,
     current_pos: &OwnedRow,
     pk_in_output_indices: PkIndicesRef<'_>,
@@ -251,7 +249,7 @@ pub(crate) fn mark_cdc_chunk(
 ) -> StreamExecutorResult<StreamChunk> {
     let chunk = chunk.compact();
     mark_cdc_chunk_inner(
-        table_reader,
+        offset_parse_func,
         chunk,
         current_pos,
         last_cdc_offset,
@@ -332,7 +330,7 @@ fn mark_chunk_inner(
 }
 
 fn mark_cdc_chunk_inner(
-    table_reader: &ExternalTableReaderImpl,
+    offset_parse_func: &CdcOffsetParseFunc,
     chunk: StreamChunk,
     current_pos: &OwnedRow,
     last_cdc_offset: Option<CdcOffset>,
@@ -346,7 +344,7 @@ fn mark_cdc_chunk_inner(
     let offset_col_idx = data.dimension() - 1;
     for v in data.rows().map(|row| {
         let offset_datum = row.datum_at(offset_col_idx).unwrap();
-        let event_offset = table_reader.parse_cdc_offset(offset_datum.into_utf8())?;
+        let event_offset = (*offset_parse_func)(offset_datum.into_utf8())?;
         let visible = {
             // filter changelog events with binlog range
             let in_binlog_range = if let Some(binlog_low) = &last_cdc_offset {
@@ -532,13 +530,13 @@ pub(crate) fn get_new_pos(chunk: &StreamChunk, pk_in_output_indices: &[usize]) -
 }
 
 pub(crate) fn get_cdc_chunk_last_offset(
-    table_reader: &ExternalTableReaderImpl,
+    offset_parse_func: &CdcOffsetParseFunc,
     chunk: &StreamChunk,
 ) -> StreamExecutorResult<Option<CdcOffset>> {
     let row = chunk.rows().last().unwrap().1;
     let offset_col = row.iter().last().unwrap();
-    let output = offset_col
-        .map(|scalar| Ok::<_, ConnectorError>(table_reader.parse_cdc_offset(scalar.into_utf8()))?);
+    let output =
+        offset_col.map(|scalar| Ok::<_, ConnectorError>((*offset_parse_func)(scalar.into_utf8()))?);
     output.transpose().map_err(|e| e.into())
 }
 

@@ -21,15 +21,19 @@ use futures::{pin_mut, stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::error::ConnectorError;
 use risingwave_connector::parser::{
     DebeziumParser, EncodingProperties, JsonProperties, ProtocolProperties,
     SourceStreamChunkBuilder, SpecificParserConfig,
 };
-use risingwave_connector::source::cdc::external::CdcOffset;
+use risingwave_connector::source::cdc::external::{
+    CdcOffset, CdcOffsetParseFunc, ExternalTableReader,
+};
 use risingwave_connector::source::{SourceColumnDesc, SourceContext};
 use risingwave_storage::StateStore;
 use rw_futures_util::pausable;
@@ -41,7 +45,7 @@ use crate::executor::backfill::cdc::upstream_table::snapshot::{
     SnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
 };
 use crate::executor::backfill::utils::{
-    get_cdc_chunk_last_offset, get_new_pos, mapping_chunk, mapping_message, mark_cdc_chunk,
+    get_cdc_chunk_last_offset, get_new_pos, mapping_chunk, mark_cdc_chunk,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -160,6 +164,10 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .last_cdc_offset
             .map_or(upstream_table_reader.current_binlog_offset().await?, Some);
 
+        let offset_parse_func = upstream_table_reader
+            .inner()
+            .table_reader()
+            .get_cdc_offset_parser();
         let mut consumed_binlog_offset: Option<CdcOffset> = None;
 
         tracing::info!(
@@ -208,10 +216,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         break;
                     }
                     Message::Chunk(ref chunk) => {
-                        last_binlog_offset = get_cdc_chunk_last_offset(
-                            upstream_table_reader.inner().table_reader(),
-                            chunk,
-                        )?;
+                        last_binlog_offset = get_cdc_chunk_last_offset(&offset_parse_func, chunk)?;
                     }
                     Message::Watermark(_) => {
                         // Ignore watermark
@@ -277,12 +282,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             // record the consumed binlog offset that will be
                                             // persisted later
                                             consumed_binlog_offset = get_cdc_chunk_last_offset(
-                                                upstream_table_reader.inner().table_reader(),
+                                                &offset_parse_func,
                                                 &chunk,
                                             )?;
                                             yield Message::Chunk(mapping_chunk(
                                                 mark_cdc_chunk(
-                                                    upstream_table_reader.inner().table_reader(),
+                                                    &offset_parse_func,
                                                     chunk,
                                                     current_pos,
                                                     &pk_in_output_indices,
@@ -345,10 +350,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         continue;
                                     }
 
-                                    let chunk_binlog_offset = get_cdc_chunk_last_offset(
-                                        upstream_table_reader.inner().table_reader(),
-                                        &chunk,
-                                    )?;
+                                    let chunk_binlog_offset =
+                                        get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
 
                                     tracing::trace!(
                                         target: "events::stream::cdc_backfill",
@@ -466,7 +469,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // Wait for first barrier to come after backfill is finished.
         // So we can update our progress + persist the status.
         while let Some(Ok(msg)) = upstream.next().await {
-            if let Some(msg) = mapping_message(msg, &self.output_indices) {
+            if let Some(msg) = mapping_message(
+                msg,
+                &self.output_indices,
+                &offset_parse_func,
+                &last_binlog_offset,
+            ) {
                 // If not finished then we need to update state, otherwise no need.
                 if let Message::Barrier(barrier) = &msg {
                     // persist the backfill state
@@ -491,7 +499,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         for msg in upstream {
             // upstream offsets will be removed from the message before forwarding to
             // downstream
-            if let Some(msg) = mapping_message(msg?, &self.output_indices) {
+            if let Some(msg) = mapping_message(
+                msg?,
+                &self.output_indices,
+                &offset_parse_func,
+                &last_binlog_offset,
+            ) {
                 if let Message::Barrier(barrier) = &msg {
                     // commit state just to bump the epoch of state table
                     state_impl.commit_state(barrier.epoch).await?;
@@ -500,6 +513,62 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             }
         }
     }
+}
+
+fn mapping_message(
+    msg: Message,
+    upstream_indices: &[usize],
+    offset_parse_func: &CdcOffsetParseFunc,
+    last_cdc_offset: &Option<CdcOffset>,
+) -> Option<Message> {
+    match msg {
+        Message::Barrier(_) => Some(msg),
+        Message::Watermark(watermark) => watermark
+            .transform_with_indices(upstream_indices)
+            .map(Message::Watermark),
+        Message::Chunk(chunk) => {
+            let mark_result = mark_upstream_chunk(chunk, offset_parse_func, last_cdc_offset);
+            match mark_result {
+                Ok(chunk) => Some(Message::Chunk(mapping_chunk(chunk, upstream_indices))),
+                Err(e) => {
+                    tracing::error!("failed to mark upstream chunk: {}", e);
+                    None
+                }
+            }
+        }
+    }
+}
+
+fn mark_upstream_chunk(
+    chunk: StreamChunk,
+    offset_parse_func: &CdcOffsetParseFunc,
+    last_cdc_offset: &Option<CdcOffset>,
+) -> StreamExecutorResult<StreamChunk> {
+    let (data, ops) = chunk.into_parts();
+    let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
+
+    // `_rw_offset` must be placed at the last column right now
+    let offset_col_idx = data.dimension() - 1;
+    for v in data.rows().map(|row| {
+        let offset_datum = row.datum_at(offset_col_idx).unwrap();
+        let event_offset = (*offset_parse_func)(offset_datum.into_utf8())?;
+        // filter out upstream events < binlog_low
+        let visible = if let Some(binlog_low) = last_cdc_offset {
+            binlog_low <= &event_offset
+        } else {
+            true
+        };
+        Ok::<_, ConnectorError>(visible)
+    }) {
+        new_visibility.append(v?);
+    }
+
+    let (columns, _) = data.into_parts();
+    Ok(StreamChunk::with_visibility(
+        ops,
+        columns,
+        new_visibility.finish(),
+    ))
 }
 
 #[try_stream(ok = Message, error = StreamExecutorError)]

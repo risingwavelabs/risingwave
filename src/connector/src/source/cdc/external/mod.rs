@@ -208,12 +208,14 @@ impl MySqlOffset {
     }
 }
 
+pub type CdcOffsetParseFunc = Box<dyn Fn(&str) -> ConnectorResult<CdcOffset> + Send>;
+
 pub trait ExternalTableReader {
     fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String;
 
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset>;
 
-    fn parse_cdc_offset(&self, dbz_offset: &str) -> ConnectorResult<CdcOffset>;
+    fn get_cdc_offset_parser(&self) -> CdcOffsetParseFunc;
 
     fn snapshot_read(
         &self,
@@ -276,10 +278,12 @@ impl ExternalTableReader for MySqlExternalTableReader {
         }))
     }
 
-    fn parse_cdc_offset(&self, offset: &str) -> ConnectorResult<CdcOffset> {
-        Ok(CdcOffset::MySql(MySqlOffset::parse_debezium_offset(
-            offset,
-        )?))
+    fn get_cdc_offset_parser(&self) -> CdcOffsetParseFunc {
+        Box::new(move |offset| {
+            Ok(CdcOffset::MySql(MySqlOffset::parse_debezium_offset(
+                offset,
+            )?))
+        })
     }
 
     fn snapshot_read(
@@ -502,11 +506,11 @@ impl ExternalTableReader for ExternalTableReaderImpl {
         }
     }
 
-    fn parse_cdc_offset(&self, offset: &str) -> ConnectorResult<CdcOffset> {
+    fn get_cdc_offset_parser(&self) -> CdcOffsetParseFunc {
         match self {
-            ExternalTableReaderImpl::MySql(mysql) => mysql.parse_cdc_offset(offset),
-            ExternalTableReaderImpl::Postgres(postgres) => postgres.parse_cdc_offset(offset),
-            ExternalTableReaderImpl::Mock(mock) => mock.parse_cdc_offset(offset),
+            ExternalTableReaderImpl::MySql(mysql) => mysql.get_cdc_offset_parser(),
+            ExternalTableReaderImpl::Postgres(postgres) => postgres.get_cdc_offset_parser(),
+            ExternalTableReaderImpl::Mock(mock) => mock.get_cdc_offset_parser(),
         }
     }
 
@@ -622,6 +626,10 @@ mod tests {
             .unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();
         println!("BinlogOffset: {:?}", offset);
+
+        let off0_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000001", "pos": 105622, "snapshot": true }, "isHeartbeat": false }"#;
+        let parser = reader.get_cdc_offset_parser();
+        println!("parsed offset: {:?}", parser(off0_str).unwrap());
 
         let table_name = SchemaTableName {
             schema_name: "mytest".to_string(),

@@ -30,8 +30,8 @@ use tokio_postgres::NoTls;
 use crate::error::ConnectorError;
 use crate::parser::postgres_row_to_owned_row;
 use crate::source::cdc::external::{
-    CdcOffset, ConnectorResult, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
-    SchemaTableName,
+    CdcOffset, CdcOffsetParseFunc, ConnectorResult, DebeziumOffset, ExternalTableConfig,
+    ExternalTableReader, SchemaTableName,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -105,10 +105,12 @@ impl ExternalTableReader for PostgresExternalTableReader {
         Ok(CdcOffset::Postgres(pg_offset))
     }
 
-    fn parse_cdc_offset(&self, offset: &str) -> ConnectorResult<CdcOffset> {
-        Ok(CdcOffset::Postgres(PostgresOffset::parse_debezium_offset(
-            offset,
-        )?))
+    fn get_cdc_offset_parser(&self) -> CdcOffsetParseFunc {
+        Box::new(move |offset| {
+            Ok(CdcOffset::Postgres(PostgresOffset::parse_debezium_offset(
+                offset,
+            )?))
+        })
     }
 
     fn snapshot_read(

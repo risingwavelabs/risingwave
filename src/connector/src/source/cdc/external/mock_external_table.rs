@@ -21,7 +21,8 @@ use risingwave_common::types::ScalarImpl;
 
 use crate::error::ConnectorError;
 use crate::source::cdc::external::{
-    CdcOffset, ConnectorResult, ExternalTableReader, MySqlOffset, SchemaTableName,
+    CdcOffset, CdcOffsetParseFunc, ConnectorResult, ExternalTableReader, MySqlOffset,
+    SchemaTableName,
 };
 
 #[derive(Debug)]
@@ -102,11 +103,8 @@ impl ExternalTableReader for MockExternalTableReader {
         }
     }
 
-    fn parse_cdc_offset(&self, offset: &str) -> ConnectorResult<CdcOffset> {
-        // same as mysql offset
-        Ok(CdcOffset::MySql(MySqlOffset::parse_debezium_offset(
-            offset,
-        )?))
+    fn get_cdc_offset_parser(&self) -> CdcOffsetParseFunc {
+        Box::new(move |_| Ok(CdcOffset::MySql(MySqlOffset::default())))
     }
 
     fn snapshot_read(
