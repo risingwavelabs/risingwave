@@ -22,6 +22,7 @@ use await_tree::InstrumentAwait;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use thiserror_ext::AsReport;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, trace, warn};
@@ -140,7 +141,7 @@ async fn flush_imms(
             .add_watermark_object_id(Some(*epoch))
             .await
             .inspect_err(|e| {
-                error!("unable to set watermark sst id. epoch: {}, {:?}", epoch, e);
+                error!(epoch, error = %e.as_report(), "unable to set watermark sst id");
             });
     }
     compact(
@@ -707,6 +708,9 @@ fn to_sync_result(result: &HummockResult<SyncedData>) -> HummockResult<SyncResul
                 table_watermarks: sync_data.table_watermarks.clone(),
             })
         }
-        Err(e) => Err(HummockError::other(format!("sync task failed for {:?}", e))),
+        Err(e) => Err(HummockError::other(format!(
+            "sync task failed: {}",
+            e.as_report()
+        ))),
     }
 }

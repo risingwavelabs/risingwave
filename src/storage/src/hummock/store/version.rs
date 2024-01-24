@@ -537,22 +537,29 @@ pub fn read_filter_for_batch(
 
     let mut imm_vec = Vec::default();
     let mut sst_vec = Vec::default();
+    let mut seen_imm_ids = HashSet::new();
+    let mut seen_sst_ids = HashSet::new();
 
     // only filter the staging data that epoch greater than max_mce to avoid data duplication
     let (min_epoch, max_epoch) = (max_mce_version.max_committed_epoch(), epoch);
     // prune imm and sst with max_mce
     for (staging_imms, staging_ssts) in staging_vec {
-        imm_vec.extend(
-            staging_imms
-                .into_iter()
-                .filter(|imm| imm.min_epoch() > min_epoch && imm.min_epoch() <= max_epoch),
-        );
+        imm_vec.extend(staging_imms.into_iter().filter(|imm| {
+            // There shouldn't be duplicated IMMs because merge imm only operates on a single shard.
+            assert!(seen_imm_ids.insert(imm.batch_id()));
+            imm.min_epoch() > min_epoch && imm.min_epoch() <= max_epoch
+        }));
 
         sst_vec.extend(staging_ssts.into_iter().filter(|staging_sst| {
             assert!(
                 staging_sst.get_max_epoch() <= min_epoch || staging_sst.get_min_epoch() > min_epoch
             );
-            staging_sst.min_epoch > min_epoch
+            // Dedup staging SSTs in different shard. Duplicates can happen in the following case:
+            // - Table 1 Shard 1 produces IMM 1
+            // - Table 1 Shard 2 produces IMM 2
+            // - IMM 1 and IMM 2 are compacted into SST 1 as a Staging SST
+            // - SST 1 is added to both Shard 1's and Shard 2's read version
+            staging_sst.min_epoch > min_epoch && seen_sst_ids.insert(staging_sst.object_id)
         }));
     }
 

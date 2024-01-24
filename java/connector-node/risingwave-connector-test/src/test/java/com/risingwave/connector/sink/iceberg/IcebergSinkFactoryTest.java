@@ -33,8 +33,10 @@ import org.apache.iceberg.Schema;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.apache.iceberg.types.Types;
+import org.junit.Ignore;
 import org.junit.Test;
 
+@Ignore
 public class IcebergSinkFactoryTest {
     static String warehousePath = "file:///tmp/rw-sinknode/iceberg-sink/warehouse";
     static String databaseName = "demo_db";

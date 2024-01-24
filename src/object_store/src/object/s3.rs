@@ -47,6 +47,7 @@ use itertools::Itertools;
 use risingwave_common::config::{ObjectStoreConfig, S3ObjectStoreConfig};
 use risingwave_common::monitor::connection::monitor_connector;
 use risingwave_common::range::RangeBoundsExt;
+use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
@@ -281,7 +282,7 @@ impl StreamingUploader for S3StreamingUploader {
                 Ok(())
             }
         } else if let Err(e) = self.flush_multipart_and_complete().await {
-            tracing::warn!("Failed to upload object {}: {:?}", self.key, e);
+            tracing::warn!(key = self.key, error = %e.as_report(), "Failed to upload object");
             self.abort_multipart_upload().await?;
             Err(e)
         } else {
@@ -629,7 +630,11 @@ impl S3ObjectStore {
     }
 
     /// Creates a minio client. The server should be like `minio://key:secret@address:port/bucket`.
-    pub async fn with_minio(server: &str, metrics: Arc<ObjectStoreMetrics>) -> Self {
+    pub async fn with_minio(
+        server: &str,
+        metrics: Arc<ObjectStoreMetrics>,
+        s3_object_store_config: ObjectStoreConfig,
+    ) -> Self {
         let server = server.strip_prefix("minio://").unwrap();
         let (access_key_id, rest) = server.split_once(':').unwrap();
         let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
@@ -644,7 +649,6 @@ impl S3ObjectStore {
         };
         let (address, bucket) = rest.split_once('/').unwrap();
 
-        let s3_object_store_config = ObjectStoreConfig::default();
         #[cfg(madsim)]
         let builder = aws_sdk_s3::config::Builder::new().credentials_provider(
             Credentials::from_keys(access_key_id, secret_access_key, None),
@@ -934,12 +938,18 @@ impl From<RetryError> for ObjectError {
 
 struct RetryCondition {
     retry_unknown_service_error: bool,
+    retryable_service_error_codes: Vec<String>,
 }
 
 impl RetryCondition {
     fn new(config: &S3ObjectStoreConfig) -> Self {
         Self {
-            retry_unknown_service_error: config.retry_unknown_service_error,
+            retry_unknown_service_error: config.developer.object_store_retry_unknown_service_error
+                || config.retry_unknown_service_error,
+            retryable_service_error_codes: config
+                .developer
+                .object_store_retryable_service_error_codes
+                .clone(),
         }
     }
 }
@@ -954,12 +964,24 @@ impl tokio_retry::Condition<RetryError> for RetryCondition {
                         return true;
                     }
                 }
-                SdkError::ServiceError(e) => {
-                    if self.retry_unknown_service_error && e.err().code().is_none() {
-                        tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
-                        return true;
+                SdkError::ServiceError(e) => match e.err().code() {
+                    None => {
+                        if self.retry_unknown_service_error {
+                            tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
+                            return true;
+                        }
                     }
-                }
+                    Some(code) => {
+                        if self
+                            .retryable_service_error_codes
+                            .iter()
+                            .any(|s| s.as_str().eq_ignore_ascii_case(code))
+                        {
+                            tracing::warn!(target: "retryable_service_error", "{e:?} occurs, retry S3 get_object request.");
+                            return true;
+                        }
+                    }
+                },
                 _ => {}
             },
             Either::Right(_) => {

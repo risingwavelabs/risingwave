@@ -34,6 +34,7 @@ risingwave_storage = { workspace = true }
 risingwave_stream = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
+thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
     "rt",

@@ -167,7 +167,7 @@ mod tests {
         let row_id_generator = Bitmap::ones(VirtualNode::COUNT);
         let (mut tx, upstream) = MockSource::channel(schema.clone(), pk_indices.clone());
         let row_id_gen_executor = Box::new(RowIdGenExecutor::new(
-            ActorContext::create(233),
+            ActorContext::for_test(233),
             ExecutorInfo {
                 schema,
                 pk_indices,

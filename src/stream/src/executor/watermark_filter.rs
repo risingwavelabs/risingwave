@@ -487,7 +487,7 @@ mod tests {
 
         (
             WatermarkFilterExecutor::new(
-                ActorContext::create(123),
+                ActorContext::for_test(123),
                 info,
                 source.boxed(),
                 watermark_expr,

@@ -18,9 +18,9 @@ use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalGcs, OpendalPosixFs, OpendalS3,
 };
+use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
 use risingwave_pb::stream_plan::StreamFsFetchNode;
-use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::StateStore;
 
 use crate::error::StreamResult;
@@ -29,7 +29,7 @@ use crate::executor::{
     StreamSourceCore,
 };
 use crate::from_proto::ExecutorBuilder;
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::task::ExecutorParams;
 
 pub struct FsFetchExecutorBuilder;
 
@@ -40,7 +40,6 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
 
