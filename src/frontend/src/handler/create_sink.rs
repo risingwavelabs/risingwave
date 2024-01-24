@@ -24,7 +24,7 @@ use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::Datum;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
@@ -322,14 +322,9 @@ async fn get_partition_compute_info_for_iceberg(
     iceberg_config: &IcebergConfig,
 ) -> Result<Option<PartitionComputeInfo>> {
     let table = create_table(iceberg_config).await?;
-    let partition_spec = table
-        .current_table_metadata()
-        .current_partition_spec()
-        .map_err(|err| {
-            RwError::from(ErrorCode::SinkError(
-                format!("Failed to get icberg partition spec: {}", err).into(),
-            ))
-        })?;
+    let Some(partition_spec) = table.current_table_metadata().current_partition_spec().ok() else {
+        return Ok(None);
+    };
 
     if partition_spec.is_unpartitioned() {
         return Ok(None);
@@ -367,14 +362,30 @@ async fn get_partition_compute_info_for_iceberg(
                 "Fail to convert iceberg partition type to arrow type".into(),
             ))
         })?;
+    let Some(schema) = table.current_table_metadata().current_schema().ok() else {
+        return Ok(None);
+    };
     let partition_fields = partition_spec
         .fields
         .iter()
-        .map(|f| (f.name.clone(), f.transform))
-        .collect_vec();
+        .map(|f| {
+            let source_f = schema
+                .look_up_field_by_id(f.source_column_id)
+                .ok_or(RwError::from(ErrorCode::SinkError(
+                    "Fail to look up iceberg partition field".into(),
+                )))?;
+            Ok((source_f.name.clone(), f.transform))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let DataType::Struct(partition_type) = arrow_type.into() else {
+        return Err(RwError::from(ErrorCode::SinkError(
+            "Partition type of iceberg should be a struct type".into(),
+        )));
+    };
 
     Ok(Some(PartitionComputeInfo::Iceberg(IcebergPartitionInfo {
-        partition_type: arrow_type.into(),
+        partition_type,
         partition_fields,
     })))
 }

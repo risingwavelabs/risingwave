@@ -13,11 +13,13 @@
 // limitations under the License.
 
 mod jni_catalog;
+mod mock_catalog;
 mod prometheus;
 
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::Deref;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use arrow_schema::{
@@ -49,6 +51,7 @@ use serde_derive::Deserialize;
 use url::Url;
 use with_options::WithOptions;
 
+use self::mock_catalog::MockCatalog;
 use self::prometheus::monitored_base_file_writer::MonitoredBaseFileWriterBuilder;
 use self::prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
 use super::{
@@ -178,7 +181,7 @@ impl IcebergConfig {
         self.catalog_type.as_deref().unwrap_or("storage")
     }
 
-    pub fn build_iceberg_configs(&self) -> Result<HashMap<String, String>> {
+    fn build_iceberg_configs(&self) -> Result<HashMap<String, String>> {
         let mut iceberg_configs = HashMap::new();
 
         let catalog_type = self.catalog_type().to_string();
@@ -347,7 +350,7 @@ impl IcebergConfig {
     }
 }
 
-pub async fn create_catalog(config: &IcebergConfig) -> Result<CatalogRef> {
+async fn create_catalog(config: &IcebergConfig) -> Result<CatalogRef> {
     match config.catalog_type() {
         "storage" | "rest" => {
             let iceberg_configs = config.build_iceberg_configs()?;
@@ -369,6 +372,7 @@ pub async fn create_catalog(config: &IcebergConfig) -> Result<CatalogRef> {
 
             jni_catalog::JniCatalog::build(base_catalog_config, "risingwave", catalog_impl, java_catalog_props)
         }
+        "mock" => Ok(Arc::new(MockCatalog{})),
         _ => {
             Err(SinkError::Iceberg(anyhow!(
                 "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `sql`, `glue`, `dynamodb`",
@@ -421,7 +425,7 @@ impl Debug for IcebergSink {
 }
 
 impl IcebergSink {
-    async fn create_validated_table(&self) -> Result<Table> {
+    async fn create_and_validate_table(&self) -> Result<Table> {
         let table = create_table(&self.config).await?;
 
         let sink_schema = self.param.schema();
@@ -479,12 +483,12 @@ impl Sink for IcebergSink {
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
     async fn validate(&self) -> Result<()> {
-        let _ = self.create_validated_table().await?;
+        let _ = self.create_and_validate_table().await?;
         Ok(())
     }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        let table = self.create_validated_table().await?;
+        let table = self.create_and_validate_table().await?;
         let inner = if let Some(unique_column_ids) = &self.unique_column_ids {
             IcebergWriter::new_upsert(table, unique_column_ids.clone(), &writer_param).await?
         } else {
@@ -509,7 +513,7 @@ impl Sink for IcebergSink {
     }
 
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
-        let table = self.create_validated_table().await?;
+        let table = self.create_and_validate_table().await?;
         let partition_type = table.current_partition_type()?;
 
         Ok(IcebergSinkCommitter {

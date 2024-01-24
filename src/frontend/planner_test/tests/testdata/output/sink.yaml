@@ -172,3 +172,45 @@
     StreamSink { type: upsert, columns: [a, b, t2._row_id(hidden)], pk: [t2._row_id] }
     └─StreamEowcSort { sort_column: t2.b }
       └─StreamTableScan { table: t2, columns: [a, b, _row_id] }
+- id: create_mock_iceberg_sink_append_only_with_partition
+  sql: |
+    create table t1 (v1 int, v2 timestamp, v3 timestamp with time zone);
+    explain create sink s1 as select v1 as v1, v2 as v2, v3 as v3 from t1 WITH (
+      connector = 'iceberg',
+      type = 'append-only',
+      force_append_only = 'true',
+      catalog.type = 'mock',
+      database.name = 'demo_db',
+      table.name = 'demo_table',
+      warehouse.path = 's3://icebergdata/demo',
+      s3.endpoint = 'http://127.0.0.1:9301',
+      s3.region = 'us-east-1',
+      s3.access.key = 'hummockadmin',
+      s3.secret.key = 'hummockadmin'
+    );
+  explain_output: |
+    StreamSink { type: append-only, columns: [v1, v2, v3, t1._row_id(hidden)] }
+    └─StreamExchange { dist: HashShard($expr1) }
+      └─StreamProject { exprs: [t1.v1, t1.v2, t1.v3, t1._row_id, Row(t1.v1, IcebergTransform('bucket[1]':Varchar, t1.v1), IcebergTransform('truncate[1]':Varchar, t1.v1), IcebergTransform('year':Varchar, t1.v2), IcebergTransform('month':Varchar, t1.v2), IcebergTransform('day':Varchar, t1.v3), IcebergTransform('hour':Varchar, t1.v3), null:Int32, null:Int32) as $expr1] }
+        └─StreamTableScan { table: t1, columns: [v1, v2, v3, _row_id] }
+- id: create_mock_iceberg_sink_upsert_with_partition
+  sql: |
+    create table t1 (v1 int primary key, v2 timestamp, v3 timestamp with time zone);
+    explain create sink s1 as select v1 as v1, v2 as v2, v3 as v3 from t1 WITH (
+      connector = 'iceberg',
+      type = 'upsert',
+      catalog.type = 'mock',
+      database.name = 'demo_db',
+      table.name = 'demo_table',
+      warehouse.path = 's3://icebergdata/demo',
+      s3.endpoint = 'http://127.0.0.1:9301',
+      s3.region = 'us-east-1',
+      s3.access.key = 'hummockadmin',
+      s3.secret.key = 'hummockadmin',
+      primary_key = 'v1'
+    );
+  explain_output: |
+    StreamSink { type: upsert, columns: [v1, v2, v3], pk: [t1.v1] }
+    └─StreamExchange { dist: HashShard($expr1) }
+      └─StreamProject { exprs: [t1.v1, t1.v2, t1.v3, Row(t1.v1, IcebergTransform('bucket[1]':Varchar, t1.v1), IcebergTransform('truncate[1]':Varchar, t1.v1), IcebergTransform('year':Varchar, t1.v2), IcebergTransform('month':Varchar, t1.v2), IcebergTransform('day':Varchar, t1.v3), IcebergTransform('hour':Varchar, t1.v3), null:Int32, null:Int32) as $expr1] }
+        └─StreamTableScan { table: t1, columns: [v1, v2, v3] }

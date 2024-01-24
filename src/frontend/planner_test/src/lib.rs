@@ -833,8 +833,6 @@ impl TestCase {
                     format_desc,
                     false,
                     None,
-                    // # TODO
-                    // Fixed me. It may should not use None here.
                     None,
                 ) {
                     Ok(sink_plan) => {

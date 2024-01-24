@@ -25,6 +25,7 @@ use risingwave_common::constants::log_store::v1::{KV_LOG_STORE_PREDEFINED_COLUMN
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::{DataType, StructType};
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
@@ -42,7 +43,7 @@ use super::generic::{self, GenericPlanRef};
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill, IndicesDisplay, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject};
-use crate::expr::{Expr, ExprImpl, FunctionCall, InputRef};
+use crate::expr::{ExprImpl, FunctionCall, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -76,7 +77,7 @@ impl PartitionComputeInfo {
 }
 
 pub struct IcebergPartitionInfo {
-    pub partition_type: DataType,
+    pub partition_type: StructType,
     // (partition_field_name, partition_field_transform)
     pub partition_fields: Vec<(String, Transform)>,
 }
@@ -87,16 +88,29 @@ impl IcebergPartitionInfo {
         transform: &Transform,
         col_id: usize,
         columns: &[ColumnCatalog],
+        result_type: DataType,
     ) -> Result<ExprImpl> {
         match transform {
-            Transform::Identity => Ok(ExprImpl::InputRef(
-                InputRef::new(col_id, columns[col_id].column_desc.data_type.clone()).into(),
-            )),
-            Transform::Void => Ok(ExprImpl::literal_null(
-                columns[col_id].column_desc.data_type.clone(),
-            )),
+            Transform::Identity => {
+                if columns[col_id].column_desc.data_type != result_type {
+                    return Err(ErrorCode::SinkError(Box::new(Error::new(
+                        ErrorKind::InvalidInput,
+                        format!(
+                            "The partition field {} has type {}, but the partition field is {}",
+                            columns[col_id].column_desc.name,
+                            columns[col_id].column_desc.data_type,
+                            result_type
+                        ),
+                    )))
+                    .into());
+                }
+                Ok(ExprImpl::InputRef(
+                    InputRef::new(col_id, result_type).into(),
+                ))
+            }
+            Transform::Void => Ok(ExprImpl::literal_null(result_type)),
             _ => Ok(ExprImpl::FunctionCall(
-                FunctionCall::new(
+                FunctionCall::new_unchecked(
                     Type::IcebergTransform,
                     vec![
                         ExprImpl::literal_varchar(transform.to_string()),
@@ -105,8 +119,8 @@ impl IcebergPartitionInfo {
                                 .into(),
                         ),
                     ],
+                    result_type,
                 )
-                .unwrap()
                 .into(),
             )),
         }
@@ -116,20 +130,20 @@ impl IcebergPartitionInfo {
         let child_exprs = self
             .partition_fields
             .into_iter()
-            .map(|(field_name, transform)| {
+            .zip_eq_debug(self.partition_type.iter())
+            .map(|((field_name, transform), (_, result_type))| {
                 let col_id = find_column_idx_by_name(columns, &field_name)?;
-                Self::transform_to_expression(&transform, col_id, columns)
+                Self::transform_to_expression(&transform, col_id, columns, result_type.clone())
             })
             .collect::<Result<Vec<_>>>()?;
-        let return_type = DataType::Struct(StructType::new(
-            child_exprs
-                .iter()
-                .enumerate()
-                .map(|(id, expr)| (format!("f{id}"), expr.return_type()))
-                .collect_vec(),
-        ));
+
         Ok(ExprImpl::FunctionCall(
-            FunctionCall::new_unchecked(Type::Row, child_exprs, return_type).into(),
+            FunctionCall::new_unchecked(
+                Type::Row,
+                child_exprs,
+                DataType::Struct(self.partition_type),
+            )
+            .into(),
         ))
     }
 }
@@ -605,3 +619,98 @@ impl StreamNode for StreamSink {
 impl ExprRewritable for StreamSink {}
 
 impl ExprVisitable for StreamSink {}
+
+#[cfg(test)]
+mod test {
+    use icelake::types::Transform;
+    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+    use risingwave_common::types::{DataType, StructType};
+    use risingwave_common::util::iter_util::ZipEqDebug;
+    use risingwave_pb::expr::expr_node::Type;
+
+    use super::IcebergPartitionInfo;
+    use crate::expr::{Expr, ExprImpl};
+
+    fn create_column_catalog() -> Vec<ColumnCatalog> {
+        vec![
+            ColumnCatalog {
+                column_desc: ColumnDesc::named("v1", ColumnId::new(1), DataType::Int32),
+                is_hidden: false,
+            },
+            ColumnCatalog {
+                column_desc: ColumnDesc::named("v2", ColumnId::new(2), DataType::Timestamptz),
+                is_hidden: false,
+            },
+            ColumnCatalog {
+                column_desc: ColumnDesc::named("v3", ColumnId::new(2), DataType::Timestamp),
+                is_hidden: false,
+            },
+        ]
+    }
+    #[test]
+    fn test_iceberg_convert_to_expression() {
+        let partition_type = StructType::new(vec![
+            ("f1", DataType::Int32),
+            ("f2", DataType::Int32),
+            ("f3", DataType::Int32),
+            ("f4", DataType::Int32),
+            ("f5", DataType::Int32),
+            ("f6", DataType::Int32),
+            ("f7", DataType::Int32),
+            ("f8", DataType::Int32),
+            ("f9", DataType::Int32),
+        ]);
+        let partition_fields = vec![
+            ("v1".into(), Transform::Identity),
+            ("v1".into(), Transform::Bucket(10)),
+            ("v1".into(), Transform::Truncate(3)),
+            ("v2".into(), Transform::Year),
+            ("v2".into(), Transform::Month),
+            ("v3".into(), Transform::Day),
+            ("v3".into(), Transform::Hour),
+            ("v1".into(), Transform::Void),
+            ("v3".into(), Transform::Void),
+        ];
+        let partition_info = IcebergPartitionInfo {
+            partition_type: partition_type.clone(),
+            partition_fields: partition_fields.clone(),
+        };
+        let catalog = create_column_catalog();
+        let actual_expr = partition_info.convert_to_expression(&catalog).unwrap();
+        let actual_expr = actual_expr.as_function_call().unwrap();
+
+        assert_eq!(
+            actual_expr.return_type(),
+            DataType::Struct(partition_type.clone())
+        );
+        assert_eq!(actual_expr.inputs().len(), partition_fields.len());
+        assert_eq!(actual_expr.func_type(), Type::Row);
+
+        for ((expr, (_, transform)), (_, expect_type)) in actual_expr
+            .inputs()
+            .iter()
+            .zip_eq_debug(partition_fields.iter())
+            .zip_eq_debug(partition_type.iter())
+        {
+            match transform {
+                Transform::Identity => {
+                    assert!(expr.is_input_ref());
+                    assert_eq!(expr.return_type(), *expect_type);
+                }
+                Transform::Void => {
+                    assert!(expr.is_literal());
+                    assert_eq!(expr.return_type(), *expect_type);
+                }
+                _ => {
+                    let expr = expr.as_function_call().unwrap();
+                    assert_eq!(expr.func_type(), Type::IcebergTransform);
+                    assert_eq!(expr.inputs().len(), 2);
+                    assert_eq!(
+                        expr.inputs()[0],
+                        ExprImpl::literal_varchar(transform.to_string())
+                    );
+                }
+            }
+        }
+    }
+}
