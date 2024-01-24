@@ -32,7 +32,7 @@ use crate::executor::monitor::StreamingMetrics;
 
 mod buffer;
 mod reader;
-mod serde;
+pub(crate) mod serde;
 #[cfg(test)]
 mod test_utils;
 mod writer;
@@ -43,14 +43,14 @@ use risingwave_common::row::ArrayVec;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::OrderType;
 
-type SeqIdType = i32;
+pub(crate) type SeqIdType = i32;
 type RowOpCodeType = i16;
 
-const FIRST_SEQ_ID: SeqIdType = 0;
+pub(crate) const FIRST_SEQ_ID: SeqIdType = 0;
 
 /// Readers truncate the offset at the granularity of seq id.
 /// None `SeqIdType` means that the whole epoch is truncated.
-type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
+pub(crate) type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
 
 #[derive(Clone)]
 pub(crate) struct KvLogStoreReadMetrics {
