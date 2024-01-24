@@ -889,11 +889,7 @@ impl HummockVersionReader {
                 .instrument(tracing::trace_span!("get_sstable"))
                 .await?;
 
-            if !table_holder
-                .value()
-                .meta
-                .monotonic_tombstone_events
-                .is_empty()
+            if !table_holder.meta.monotonic_tombstone_events.is_empty()
                 && !read_options.ignore_range_tombstone
             {
                 delete_range_iter
@@ -901,7 +897,7 @@ impl HummockVersionReader {
             }
             if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
                 if !hit_sstable_bloom_filter(
-                    table_holder.value(),
+                    &table_holder,
                     &user_key_range_ref,
                     *prefix_hash,
                     &mut local_stats,
@@ -971,7 +967,7 @@ impl HummockVersionReader {
                         .sstable(&sstables[0], &mut local_stats)
                         .instrument(tracing::trace_span!("get_sstable"))
                         .await?;
-                    if !sstable.value().meta.monotonic_tombstone_events.is_empty()
+                    if !sstable.meta.monotonic_tombstone_events.is_empty()
                         && !read_options.ignore_range_tombstone
                     {
                         delete_range_iter
@@ -979,7 +975,7 @@ impl HummockVersionReader {
                     }
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
                         if !hit_sstable_bloom_filter(
-                            sstable.value(),
+                            &sstable,
                             &user_key_range_ref,
                             *dist_hash,
                             &mut local_stats,
@@ -1016,8 +1012,8 @@ impl HummockVersionReader {
                         .sstable(sstable_info, &mut local_stats)
                         .instrument(tracing::trace_span!("get_sstable"))
                         .await?;
-                    assert_eq!(sstable_info.get_object_id(), sstable.value().id);
-                    if !sstable.value().meta.monotonic_tombstone_events.is_empty()
+                    assert_eq!(sstable_info.get_object_id(), sstable.id);
+                    if !sstable.meta.monotonic_tombstone_events.is_empty()
                         && !read_options.ignore_range_tombstone
                     {
                         delete_range_iter
@@ -1025,7 +1021,7 @@ impl HummockVersionReader {
                     }
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
                         if !hit_sstable_bloom_filter(
-                            sstable.value(),
+                            &sstable,
                             &user_key_range_ref,
                             *dist_hash,
                             &mut local_stats,
@@ -1176,7 +1172,7 @@ impl HummockVersionReader {
                 self.sstable_store
                     .sstable(local_sst, &mut stats_guard.local_stats)
                     .await?
-                    .value(),
+                    .as_ref(),
                 &user_key_range_ref,
                 bloom_filter_prefix_hash,
                 &mut stats_guard.local_stats,
@@ -1203,7 +1199,7 @@ impl HummockVersionReader {
                             self.sstable_store
                                 .sstable(sstable_info, &mut stats_guard.local_stats)
                                 .await?
-                                .value(),
+                                .as_ref(),
                             &user_key_range_ref,
                             bloom_filter_prefix_hash,
                             &mut stats_guard.local_stats,
@@ -1222,7 +1218,7 @@ impl HummockVersionReader {
                             self.sstable_store
                                 .sstable(table_info, &mut stats_guard.local_stats)
                                 .await?
-                                .value(),
+                                .as_ref(),
                             &user_key_range_ref,
                             bloom_filter_prefix_hash,
                             &mut stats_guard.local_stats,
