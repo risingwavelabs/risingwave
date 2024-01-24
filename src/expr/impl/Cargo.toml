@@ -16,10 +16,6 @@ ignored = ["workspace-hack", "ctor"]
 normal = ["workspace-hack", "ctor"]
 
 [dependencies]
-aes-gcm = { version = "0.10.3", features = ["aes",
-    "alloc",
-    "getrandom"
-] }
 aho-corasick = "1"
 anyhow = "1"
 arrow-schema = { workspace = true }
@@ -38,6 +34,7 @@ itertools = "0.12"
 jsonbb = "0.1.2"
 md5 = "0.7"
 num-traits = "0.2"
+openssl = { version = "0.10", features = ["vendored"] }
 regex = "1"
 risingwave_common = { workspace = true }
 risingwave_expr = { workspace = true }

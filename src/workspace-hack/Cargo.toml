@@ -42,7 +42,6 @@ combine = { version = "4", features = ["tokio"] }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
 crypto-bigint = { version = "0.5", features = ["generic-array", "zeroize"] }
-crypto-common = { version = "0.1", default-features = false, features = ["getrandom", "std"] }
 deranged = { version = "0.3", default-features = false, features = ["powerfmt", "serde", "std"] }
 digest = { version = "0.10", features = ["mac", "oid", "std"] }
 either = { version = "1", features = ["serde"] }
@@ -87,6 +86,8 @@ num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
 num-iter = { version = "0.1", default-features = false, features = ["i128", "std"] }
 num-traits = { version = "0.2", features = ["i128", "libm"] }
+openssl = { version = "0.10", features = ["vendored"] }
+openssl-sys = { version = "0.9", default-features = false, features = ["vendored"] }
 opentelemetry_api = { version = "0.20", features = ["logs", "metrics"] }
 opentelemetry_sdk = { version = "0.20", features = ["logs", "metrics"] }
 ordered-float = { version = "3" }
@@ -162,7 +163,6 @@ auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
-crypto-common = { version = "0.1", default-features = false, features = ["getrandom", "std"] }
 deranged = { version = "0.3", default-features = false, features = ["powerfmt", "serde", "std"] }
 digest = { version = "0.10", features = ["mac", "oid", "std"] }
 either = { version = "1", features = ["serde"] }

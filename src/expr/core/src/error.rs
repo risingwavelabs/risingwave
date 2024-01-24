@@ -132,7 +132,7 @@ pub enum CryptographyStage {
 pub struct CryptographyError {
     pub stage: CryptographyStage,
     pub payload: Box<[u8]>,
-    pub reason: aes_gcm::Error,
+    pub reason: Box<str>,
 }
 
 impl Display for CryptographyError {

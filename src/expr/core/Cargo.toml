@@ -16,10 +16,6 @@ ignored = ["workspace-hack", "ctor"]
 normal = ["workspace-hack", "ctor"]
 
 [dependencies]
-aes-gcm = { version = "0.10.3", features = ["aes",
-    "alloc",
-    "getrandom"
-] }
 anyhow = "1"
 arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
