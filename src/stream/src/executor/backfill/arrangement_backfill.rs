@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::pin::pin;
 use std::sync::Arc;
 
 use either::Either;
@@ -28,7 +29,6 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
-use rw_futures_util::pausable;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 #[cfg(debug_assertions)]
@@ -225,15 +225,13 @@ where
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
-                    let (right_snapshot, valve) = pausable(Self::snapshot_read_per_vnode(
+                    let right_snapshot = pin!(Self::make_snapshot_stream(
                         &upstream_table,
                         backfill_state.clone(), // FIXME: Use mutable reference instead.
                         &mut builders,
-                    ));
-                    let right_snapshot = right_snapshot.map(Either::Right);
-                    if paused {
-                        valve.pause();
-                    }
+                        paused,
+                    )
+                    .map(Either::Right));
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.
@@ -249,22 +247,6 @@ where
                             Either::Left(msg) => {
                                 match msg? {
                                     Message::Barrier(barrier) => {
-                                        // We can process any barrier mutation here.
-                                        if let Some(mutation) = barrier.mutation.as_deref() {
-                                            use crate::executor::Mutation;
-                                            match mutation {
-                                                Mutation::Pause => {
-                                                    paused = true;
-                                                    valve.pause();
-                                                }
-                                                Mutation::Resume => {
-                                                    paused = false;
-                                                    valve.resume();
-                                                }
-                                                _ => (),
-                                            }
-                                        }
-
                                         // We have to process the barrier outside of the loop.
                                         // This is because our state_table reference is still live
                                         // here, we have to break the loop to drop it,
@@ -342,9 +324,24 @@ where
                 };
 
                 // Process barrier:
+                // - handle mutations
                 // - consume snapshot rows left in builder.
                 // - consume upstream buffer chunk
                 // - switch snapshot
+
+                // handle mutations
+                if let Some(mutation) = barrier.mutation.as_deref() {
+                    use crate::executor::Mutation;
+                    match mutation {
+                        Mutation::Pause => {
+                            paused = true;
+                        }
+                        Mutation::Resume => {
+                            paused = false;
+                        }
+                        _ => (),
+                    }
+                }
 
                 // consume snapshot rows left in builder.
                 // NOTE(kwannoel): `zip_eq_debug` does not work here,
@@ -520,6 +517,26 @@ where
                     self.state_table.commit_no_data_expected(barrier.epoch);
                 }
                 yield msg;
+            }
+        }
+    }
+
+    #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
+    async fn make_snapshot_stream<'a>(
+        upstream_table: &'a ReplicatedStateTable<S, SD>,
+        backfill_state: BackfillState,
+        builders: &'a mut [DataChunkBuilder],
+        paused: bool,
+    ) {
+        if paused {
+            #[for_await]
+            for _ in tokio_stream::pending() {
+                yield None;
+            }
+        } else {
+            #[for_await]
+            for r in Self::snapshot_read_per_vnode(upstream_table, backfill_state, builders) {
+                yield r?;
             }
         }
     }
