@@ -151,7 +151,7 @@ impl Expression for ConstantLookupExpression {
 
         for i in 0..input_len {
             let datum = column.datum_at(i);
-            let owned_row = OwnedRow::new(vec![datum]);
+            let owned_row = OwnedRow::new(vec![datum.clone()]);
 
             if let Some(expr) = self.arms.get(datum.as_ref().unwrap()) {
                 builder.append(expr.eval_row(&owned_row).await.unwrap().as_ref());
