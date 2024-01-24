@@ -178,9 +178,9 @@ async fn main() {
         etcd_timeout_rate: args.etcd_timeout_rate,
         etcd_data_path: args.etcd_data,
         per_session_queries: if args.use_arrangement_backfill {
-            vec!["SET enable_arrangement_backfill = true;".to_string()]
+            vec!["SET enable_arrangement_backfill = true;".to_string()].into()
         } else {
-            vec![]
+            vec![].into()
         },
         ..Default::default()
     };
