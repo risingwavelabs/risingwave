@@ -180,6 +180,7 @@
   expected_outputs:
   - batch_plan
   - stream_plan
+
 - sql: |
     create table t (v1 real);
     select v1, count(*) from t group by v1;
@@ -192,22 +193,29 @@
     select v1, max(v2) from mv group by v1;
   expected_outputs:
   - batch_plan
-- name: Use BatchSortAgg, when output requires order
-  sql: |
+- sql: |
     create table t(v1 int, v2 int);
     select v1, max(v2) from t group by v1 order by v1 desc;
   expected_outputs:
   - batch_plan
-- name: Use BatchSortAgg, when required order satisfies input order
-  sql: |
+- sql: |
     create table t(k1 int, k2 int, v1 int);
     SELECT max(v1), k1, k2 from t group by k1, k2 order by k1;
   expected_outputs:
   - batch_plan
-- name: Use BatchSortAgg, when output requires order with swapped output
-  sql: |
+- sql: |
     create table t(v1 int, v2 int);
     select max(v2), v1 from t group by v1 order by v1 desc;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t (a int, b int, c int, primary key (a, b, c));
+    select a, c, first_value(b order by b), count(*) from t group by a, c;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t (a int, b int, c int, primary key (a, b, c));
+    select a, c, first_value(b order by b), count(*) from t group by a, c having a = 1;;
   expected_outputs:
   - batch_plan
 - name: Not use BatchSortAgg, when input provides order
@@ -243,6 +251,7 @@
     RW_BATCH_ENABLE_SORT_AGG: 'false'
   expected_outputs:
   - batch_plan
+
 - sql: |
     create table t (v1 real);
     select count(*) from t;
