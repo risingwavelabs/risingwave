@@ -115,7 +115,6 @@ struct ConstantLookupExpression {
     return_type: DataType,
     arms: HashMap<ScalarImpl, BoxedExpression>,
     fallback: Option<BoxedExpression>,
-    const_expression: Option<BoxedExpression>,
 }
 
 impl ConstantLookupExpression {
@@ -123,13 +122,11 @@ impl ConstantLookupExpression {
         return_type: DataType,
         arms: HashMap<ScalarImpl, BoxedExpression>,
         fallback: Option<BoxedExpression>,
-        const_expression: Option<BoxedExpression>,
     ) -> Self {
         Self {
             return_type,
             arms,
             fallback,
-            const_expression,
         }
     }
 }
@@ -171,10 +168,8 @@ impl Expression for ConstantLookupExpression {
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         if input.as_inner().len() == 0 {
-            let Some(ref expr) = self.const_expression else {
-                return Ok(None);
-            };
-            expr.eval_row(input).await
+            // TODO(Zihao): const case-when expression evaluation
+            Ok(None)
         } else {
             if let Some(expr) = self.arms.get(&input.last().unwrap().into_scalar_impl()) {
                 expr.eval_row(input).await
@@ -199,16 +194,7 @@ fn build_constant_lookup_expr(
 
     let mut children = children;
 
-    let operand = children.remove(0);
-    let mut const_expression = None;
-    let mut const_eval_flag = true;
-    // To make rustc happy :)
-    let mut operand_value = ScalarImpl::Bool(true);
-    if let Ok(Some(value)) = operand.eval_const() {
-        operand_value = value;
-    } else {
-        const_eval_flag = false;
-    }
+    let _operand = children.remove(0);
 
     let mut arms = HashMap::new();
 
@@ -218,15 +204,10 @@ fn build_constant_lookup_expr(
         let Ok(Some(s)) = when.eval_const() else {
             bail!("expect when expression to be const");
         };
-        if const_eval_flag && s.clone() == operand_value {
-            const_eval_flag = false;
-            const_expression = Some(then);
-            break;
-        }
         arms.insert(s, then);
     }
 
-    let mut fallback = if let Some(else_clause) = iter.into_remainder().unwrap().next() {
+    let fallback = if let Some(else_clause) = iter.into_remainder().unwrap().next() {
         if else_clause.return_type() != return_type {
             bail!("Type mismatched between else and case.");
         }
@@ -235,16 +216,10 @@ fn build_constant_lookup_expr(
         None
     };
 
-    if const_eval_flag && const_expression.is_none() {
-        const_expression = fallback;
-        fallback = None;
-    }
-
     Ok(Box::new(ConstantLookupExpression::new(
         return_type,
         arms,
         fallback,
-        const_expression,
     )))
 }
 
