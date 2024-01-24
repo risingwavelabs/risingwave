@@ -1220,7 +1220,6 @@ mod tests {
             0,
             sorted_items,
             size,
-            vec![],
             TEST_TABLE_ID,
             LocalInstanceId::default(),
             tracker,

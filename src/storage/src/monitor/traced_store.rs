@@ -177,12 +177,9 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         res
     }
 
-    async fn flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> StorageResult<usize> {
+    async fn flush(&mut self) -> StorageResult<usize> {
         let span = TraceSpan::new_flush_span(delete_ranges.clone(), self.storage_type);
-        let res = self.inner.flush(delete_ranges).await;
+        let res = self.inner.flush().await;
         span.may_send_result(OperationResult::Flush(
             res.as_ref().map(|o: &usize| *o).into(),
         ));

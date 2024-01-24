@@ -415,14 +415,11 @@ pub mod verify {
             Ok(())
         }
 
-        async fn flush(
-            &mut self,
-            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        ) -> StorageResult<usize> {
+        async fn flush(&mut self) -> StorageResult<usize> {
             if let Some(expected) = &mut self.expected {
-                expected.flush(delete_ranges.clone()).await?;
+                expected.flush().await?;
             }
-            self.actual.flush(delete_ranges).await
+            self.actual.flush().await
         }
 
         async fn try_flush(&mut self) -> StorageResult<()> {
@@ -685,7 +682,7 @@ impl AsHummock for SledStateStore {
 #[cfg(debug_assertions)]
 pub mod boxed_state_store {
     use std::future::Future;
-    use std::ops::{Bound, Deref, DerefMut};
+    use std::ops::{Deref, DerefMut};
 
     use bytes::Bytes;
     use dyn_clone::{clone_trait_object, DynClone};
@@ -773,10 +770,7 @@ pub mod boxed_state_store {
 
         fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()>;
 
-        async fn flush(
-            &mut self,
-            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        ) -> StorageResult<usize>;
+        async fn flush(&mut self) -> StorageResult<usize>;
 
         async fn try_flush(&mut self) -> StorageResult<()>;
 
@@ -828,11 +822,8 @@ pub mod boxed_state_store {
             self.delete(key, old_val)
         }
 
-        async fn flush(
-            &mut self,
-            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        ) -> StorageResult<usize> {
-            self.flush(delete_ranges).await
+        async fn flush(&mut self) -> StorageResult<usize> {
+            self.flush().await
         }
 
         async fn try_flush(&mut self) -> StorageResult<()> {
@@ -898,11 +889,8 @@ pub mod boxed_state_store {
             self.deref_mut().delete(key, old_val)
         }
 
-        fn flush(
-            &mut self,
-            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        ) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
-            self.deref_mut().flush(delete_ranges)
+        fn flush(&mut self) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
+            self.deref_mut().flush()
         }
 
         fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_ {

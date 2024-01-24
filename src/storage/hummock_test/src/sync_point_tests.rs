@@ -296,7 +296,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
             None,
         )
         .unwrap();
-    local.flush(Vec::new()).await.unwrap();
+    local.flush().await.unwrap();
     local.seal_current_epoch(
         101,
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
@@ -393,7 +393,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
             None,
         )
         .unwrap();
-    local.flush(Vec::new()).await.unwrap();
+    local.flush().await.unwrap();
     local.seal_current_epoch(
         u64::MAX,
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),

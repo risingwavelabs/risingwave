@@ -855,9 +855,6 @@ impl HummockVersionReader {
         let mut delete_range_iter = ForwardMergeRangeIterator::new(epoch);
         local_stats.staging_imm_iter_count = imms.len() as u64;
         for imm in imms {
-            if imm.has_range_tombstone() && !read_options.ignore_range_tombstone {
-                delete_range_iter.add_batch_iter(imm.delete_range_iter());
-            }
             staging_iters.push(HummockIteratorUnion::First(imm.into_forward_iter()));
         }
 

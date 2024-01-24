@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -261,13 +260,8 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         self.inner.delete(key, old_val)
     }
 
-    fn flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
-        self.inner
-            .flush(delete_ranges)
-            .verbose_instrument_await("store_flush")
+    fn flush(&mut self) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
+        self.inner.flush().verbose_instrument_await("store_flush")
     }
 
     fn epoch(&self) -> u64 {

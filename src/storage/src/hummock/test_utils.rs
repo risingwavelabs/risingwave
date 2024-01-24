@@ -394,7 +394,7 @@ pub fn create_small_table_cache() -> Arc<LruCache<HummockSstableObjectId, Box<Ss
 
 pub mod delete_range {
     use super::*;
-    use crate::hummock::event_handler::LocalInstanceId;
+    use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferDeleteRangeIterator;
 
     #[derive(Default)]
     pub struct CompactionDeleteRangesBuilder {
@@ -408,18 +408,12 @@ pub mod delete_range {
             table_id: TableId,
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         ) {
-            let size = SharedBufferBatch::measure_delete_range_size(&delete_ranges);
-            let batch = SharedBufferBatch::build_shared_buffer_batch(
-                epoch,
-                0,
-                vec![],
-                size,
-                delete_ranges,
-                table_id,
-                LocalInstanceId::default(),
-                None,
-            );
-            self.iter.add_batch_iter(batch.delete_range_iter());
+            self.iter
+                .add_batch_iter(SharedBufferDeleteRangeIterator::new(
+                    epoch,
+                    table_id,
+                    delete_ranges,
+                ));
         }
 
         pub fn build_for_compaction(self) -> CompactionDeleteRangeIterator {
