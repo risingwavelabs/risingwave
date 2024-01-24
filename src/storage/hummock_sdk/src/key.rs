@@ -965,10 +965,10 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
     /// // a.observe(full_key_with_smaller_user_key);
     ///
     /// let full_key2 = FullKey::new(table_id, TableKey(Bytes::from("c")), 3);
-    /// assert_eq!(a.observe(full_key1.clone()), None);
+    /// assert_eq!(a.observe(full_key2), None);
     ///
     /// let full_key3 = FullKey::new(table_id, TableKey(Bytes::from("f")), 4);
-    /// assert_eq!(a.observe(full_key1.clone()), Some(full_key1));
+    /// assert_eq!(a.observe(full_key3), Some(full_key1));
     /// ```
     ///
     /// Return:
