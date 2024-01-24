@@ -26,8 +26,8 @@ use super::over_partition::CacheKey;
 // -------------------------- ↓ PUBLIC INTERFACE ↓ --------------------------
 
 /// Merge several `ROWS` frames into one super frame. The returned super frame is
-/// ensured to not be a pure preceding/following frame, which means that `CURRENT ROW`
-/// is always included in the returned frame.
+/// guaranteed to be *canonical*, which means that the `CURRENT ROW` is always
+/// included in the returned frame.
 pub(super) fn merge_rows_frames(rows_frames: &[&RowsFrameBounds]) -> RowsFrameBounds {
     if rows_frames.is_empty() {
         // this can simplify our implementation
@@ -50,12 +50,14 @@ pub(super) fn merge_rows_frames(rows_frames: &[&RowsFrameBounds]) -> RowsFrameBo
     // following `ROWS` frames into one containing the `CURRENT ROW`.
     let start = rows_frames
         .iter()
-        .map(|bounds| bounds.start.n_preceding_rows())
+        .flat_map(|bounds| [&bounds.start, &bounds.end])
+        .map(FrameBound::n_preceding_rows)
         .max_by(none_as_max_cmp)
         .unwrap();
     let end = rows_frames
         .iter()
-        .map(|bounds| bounds.end.n_following_rows())
+        .flat_map(|bounds| [&bounds.start, &bounds.end])
+        .map(FrameBound::n_following_rows)
         .max_by(none_as_max_cmp)
         .unwrap();
 
@@ -69,8 +71,9 @@ pub(super) fn merge_rows_frames(rows_frames: &[&RowsFrameBounds]) -> RowsFrameBo
     }
 }
 
-/// For a `ROWS` frame, given a key in delta, find the cache key corresponding to
-/// the CURRENT ROW of the first frame that contains the given key.
+/// For a canonical `ROWS` frame, given a key in delta, find the cache key
+/// corresponding to the CURRENT ROW of the first frame that contains the given
+/// key.
 ///
 /// ## Example
 ///
@@ -89,8 +92,9 @@ pub(super) fn find_first_curr_for_rows_frame<'cache>(
     find_curr_for_rows_frame::<true>(frame_bounds, part_with_delta, delta_key)
 }
 
-/// For a `ROWS` frame, given a key in delta, find the cache key corresponding to
-/// the CURRENT ROW of the last frame that contains the given key.
+/// For a canonical `ROWS` frame, given a key in delta, find the cache key
+/// corresponding to the CURRENT ROW of the last frame that contains the given
+/// key.
 ///
 /// This is the symmetric function of [`find_first_curr_for_rows_frame`].
 pub(super) fn find_last_curr_for_rows_frame<'cache>(
@@ -101,8 +105,9 @@ pub(super) fn find_last_curr_for_rows_frame<'cache>(
     find_curr_for_rows_frame::<false>(frame_bounds, part_with_delta, delta_key)
 }
 
-/// For a `ROWS` frame, given a key in `part_with_delta` corresponding to some
-/// CURRENT ROW, find the cache key corresponding to the start row in that frame.
+/// For a canonical `ROWS` frame, given a key in `part_with_delta` corresponding
+/// to some CURRENT ROW, find the cache key corresponding to the start row in
+/// that frame.
 pub(super) fn find_frame_start_for_rows_frame<'cache>(
     frame_bounds: &'_ RowsFrameBounds,
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
@@ -111,8 +116,9 @@ pub(super) fn find_frame_start_for_rows_frame<'cache>(
     find_boundary_for_rows_frame::<true>(frame_bounds, part_with_delta, curr_key)
 }
 
-/// For a `ROWS` frame, given a key in `part_with_delta` corresponding to some
-/// CURRENT ROW, find the cache key corresponding to the end row in that frame.
+/// For a canonical `ROWS` frame, given a key in `part_with_delta` corresponding
+/// to some CURRENT ROW, find the cache key corresponding to the end row in that
+/// frame.
 ///
 /// This is the symmetric function of [`find_frame_start_for_rows_frame`].
 pub(super) fn find_frame_end_for_rows_frame<'cache>(
@@ -130,6 +136,7 @@ fn find_curr_for_rows_frame<'cache, const LEFT: bool>(
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
     delta_key: &'cache CacheKey,
 ) -> &'cache CacheKey {
+    debug_assert!(frame_bounds.is_canonical());
     if LEFT {
         debug_assert!(
             !frame_bounds.end.is_unbounded_following(),
@@ -241,6 +248,7 @@ fn find_boundary_for_rows_frame<'cache, const LEFT: bool>(
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
     curr_key: &'cache CacheKey,
 ) -> &'cache CacheKey {
+    debug_assert!(frame_bounds.is_canonical());
     if LEFT {
         debug_assert!(
             !frame_bounds.start.is_unbounded_preceding(),
@@ -290,13 +298,564 @@ fn find_boundary_for_rows_frame<'cache, const LEFT: bool>(
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn test_find_first_curr_for_rows_frame() {
-        // TODO(): need some ut
-    }
+    use risingwave_expr::window_function::{FrameBound, RowsFrameBounds};
+
+    use super::*;
 
     #[test]
-    fn test_find_frame_start_for_rows_frame() {
-        // TODO(): need some ut
+    fn test_merge_rows_frame() {
+        fn assert_equivalent(bounds1: RowsFrameBounds, bounds2: RowsFrameBounds) {
+            assert_eq!(bounds1.start.to_offset(), bounds2.start.to_offset());
+            assert_eq!(bounds1.end.to_offset(), bounds2.end.to_offset());
+        }
+
+        assert_equivalent(
+            merge_rows_frames(&[]),
+            RowsFrameBounds {
+                start: FrameBound::CurrentRow,
+                end: FrameBound::CurrentRow,
+            },
+        );
+
+        let frames = [
+            &RowsFrameBounds {
+                start: FrameBound::Preceding(3),
+                end: FrameBound::Preceding(2),
+            },
+            &RowsFrameBounds {
+                start: FrameBound::Preceding(1),
+                end: FrameBound::Preceding(4),
+            },
+        ];
+        assert_equivalent(
+            merge_rows_frames(&frames),
+            RowsFrameBounds {
+                start: FrameBound::Preceding(4),
+                end: FrameBound::CurrentRow,
+            },
+        );
+
+        let frames = [
+            &RowsFrameBounds {
+                start: FrameBound::Preceding(3),
+                end: FrameBound::Following(2),
+            },
+            &RowsFrameBounds {
+                start: FrameBound::Preceding(2),
+                end: FrameBound::Following(3),
+            },
+        ];
+        assert_equivalent(
+            merge_rows_frames(&frames),
+            RowsFrameBounds {
+                start: FrameBound::Preceding(3),
+                end: FrameBound::Following(3),
+            },
+        );
+
+        let frames = [
+            &RowsFrameBounds {
+                start: FrameBound::UnboundedPreceding,
+                end: FrameBound::Following(2),
+            },
+            &RowsFrameBounds {
+                start: FrameBound::Preceding(2),
+                end: FrameBound::UnboundedFollowing,
+            },
+        ];
+        assert_equivalent(
+            merge_rows_frames(&frames),
+            RowsFrameBounds {
+                start: FrameBound::UnboundedPreceding,
+                end: FrameBound::UnboundedFollowing,
+            },
+        );
+    }
+
+    mod rows_frame_tests {
+        use std::collections::BTreeMap;
+
+        use delta_btree_map::Change;
+        use risingwave_common::types::{ScalarImpl, Sentinelled};
+        use risingwave_expr::window_function::FrameBound::*;
+        use risingwave_expr::window_function::StateKey;
+
+        use super::*;
+
+        macro_rules! create_cache {
+            (..., $( $pk:literal ),* , ...) => {
+                {
+                    let mut cache = create_cache!( $( $pk ),* );
+                    cache.insert(CacheKey::Smallest, OwnedRow::empty().into());
+                    cache.insert(CacheKey::Largest, OwnedRow::empty().into());
+                    cache
+                }
+            };
+            (..., $( $pk:literal ),*) => {
+                {
+                    let mut cache = create_cache!( $( $pk ),* );
+                    cache.insert(CacheKey::Smallest, OwnedRow::empty().into());
+                    cache
+                }
+            };
+            ($( $pk:literal ),* , ...) => {
+                {
+                    let mut cache = create_cache!( $( $pk ),* );
+                    cache.insert(CacheKey::Largest, OwnedRow::empty().into());
+                    cache
+                }
+            };
+            ($( $pk:literal ),*) => {
+                {
+                    #[allow(unused_mut)]
+                    let mut cache = BTreeMap::new();
+                    $(
+                        cache.insert(
+                            CacheKey::Normal(
+                                StateKey {
+                                    // order key doesn't matter here
+                                    order_key: vec![].into(),
+                                    pk: OwnedRow::new(vec![Some($pk.into())]).into(),
+                                },
+                            ),
+                            // value row doesn't matter here
+                            OwnedRow::empty(),
+                        );
+                    )*
+                    cache
+                }
+            };
+        }
+
+        macro_rules! create_change {
+            (Delete) => {
+                Change::Delete
+            };
+            (Insert) => {
+                Change::Insert(OwnedRow::empty())
+            };
+        }
+
+        macro_rules! create_delta {
+            ($(( $pk:literal, $change:ident )),+ $(,)?) => {
+                {
+                    #[allow(unused_mut)]
+                    let mut delta = BTreeMap::new();
+                    $(
+                        delta.insert(
+                            CacheKey::Normal(
+                                StateKey {
+                                    // order key doesn't matter here
+                                    order_key: vec![].into(),
+                                    pk: OwnedRow::new(vec![Some($pk.into())]).into(),
+                                },
+                            ),
+                            // value row doesn't matter here
+                            create_change!( $change ),
+                        );
+                    )*
+                    delta
+                }
+            };
+        }
+
+        fn assert_cache_key_eq(given: &CacheKey, expected: impl Into<ScalarImpl>) {
+            assert_eq!(
+                given.as_normal_expect().pk.0,
+                OwnedRow::new(vec![Some(expected.into())])
+            )
+        }
+
+        #[test]
+        fn test_insert_delta_only() {
+            let cache = create_cache!();
+            let delta = create_delta!((1, Insert), (2, Insert), (3, Insert));
+            let part_with_delta = DeltaBTreeMap::new(&cache, &delta);
+            let delta_first_key = delta.first_key_value().unwrap().0;
+            let delta_last_key = delta.last_key_value().unwrap().0;
+
+            let bounds = RowsFrameBounds {
+                start: Preceding(2),
+                end: CurrentRow,
+            };
+
+            let first_curr_key =
+                find_first_curr_for_rows_frame(&bounds, part_with_delta, delta_first_key);
+            let last_curr_key =
+                find_last_curr_for_rows_frame(&bounds, part_with_delta, delta_last_key);
+            assert_cache_key_eq(first_curr_key, 1);
+            assert_cache_key_eq(last_curr_key, 3);
+
+            let first_frame_start =
+                find_frame_start_for_rows_frame(&bounds, part_with_delta, first_curr_key);
+            let last_frame_end =
+                find_frame_end_for_rows_frame(&bounds, part_with_delta, last_curr_key);
+            assert_cache_key_eq(first_frame_start, 1);
+            assert_cache_key_eq(last_frame_end, 3);
+        }
+
+        #[test]
+        fn test_simple() {
+            let cache = create_cache!(1, 2, 3, 4, 5, 6);
+            let delta = create_delta!((2, Insert), (3, Delete));
+            let part_with_delta = DeltaBTreeMap::new(&cache, &delta);
+            let delta_first_key = delta.first_key_value().unwrap().0;
+            let delta_last_key = delta.last_key_value().unwrap().0;
+
+            {
+                let bounds = RowsFrameBounds {
+                    start: Preceding(2),
+                    end: CurrentRow,
+                };
+                let first_curr_key =
+                    find_first_curr_for_rows_frame(&bounds, part_with_delta, delta_first_key);
+                let last_curr_key =
+                    find_last_curr_for_rows_frame(&bounds, part_with_delta, delta_last_key);
+                assert_cache_key_eq(first_curr_key, 2);
+                assert_cache_key_eq(last_curr_key, 5);
+
+                let first_frame_start =
+                    find_frame_start_for_rows_frame(&bounds, part_with_delta, first_curr_key);
+                let last_frame_end =
+                    find_frame_end_for_rows_frame(&bounds, part_with_delta, last_curr_key);
+                assert_cache_key_eq(first_frame_start, 1);
+                assert_cache_key_eq(last_frame_end, 5);
+            }
+
+            {
+                let bounds = RowsFrameBounds {
+                    start: Preceding(1),
+                    end: Following(2),
+                };
+                let first_curr_key =
+                    find_first_curr_for_rows_frame(&bounds, part_with_delta, delta_first_key);
+                let last_curr_key =
+                    find_last_curr_for_rows_frame(&bounds, part_with_delta, delta_last_key);
+                assert_cache_key_eq(first_curr_key, 1);
+                assert_cache_key_eq(last_curr_key, 4);
+
+                let first_frame_start =
+                    find_frame_start_for_rows_frame(&bounds, part_with_delta, first_curr_key);
+                let last_frame_end =
+                    find_frame_end_for_rows_frame(&bounds, part_with_delta, last_curr_key);
+                assert_cache_key_eq(first_frame_start, 1);
+                assert_cache_key_eq(last_frame_end, 6);
+            }
+
+            {
+                let bounds = RowsFrameBounds {
+                    start: CurrentRow,
+                    end: Following(2),
+                };
+                let first_curr_key =
+                    find_first_curr_for_rows_frame(&bounds, part_with_delta, delta_first_key);
+                let last_curr_key =
+                    find_last_curr_for_rows_frame(&bounds, part_with_delta, delta_last_key);
+                assert_cache_key_eq(first_curr_key, 1);
+                assert_cache_key_eq(last_curr_key, 2);
+
+                let first_frame_start =
+                    find_frame_start_for_rows_frame(&bounds, part_with_delta, first_curr_key);
+                let last_frame_end =
+                    find_frame_end_for_rows_frame(&bounds, part_with_delta, last_curr_key);
+                assert_cache_key_eq(first_frame_start, 1);
+                assert_cache_key_eq(last_frame_end, 5);
+            }
+        }
+
+        #[test]
+        fn test_lag_corner_case() {
+            let cache = create_cache!(1, 2, 3, 4, 5, 6);
+            let delta = create_delta!((1, Delete), (2, Delete), (3, Delete));
+            let part_with_delta = DeltaBTreeMap::new(&cache, &delta);
+            let delta_first_key = delta.first_key_value().unwrap().0;
+            let delta_last_key = delta.last_key_value().unwrap().0;
+
+            let bounds = RowsFrameBounds {
+                start: Preceding(1),
+                end: CurrentRow,
+            };
+
+            let first_curr_key =
+                find_first_curr_for_rows_frame(&bounds, part_with_delta, delta_first_key);
+            let last_curr_key =
+                find_last_curr_for_rows_frame(&bounds, part_with_delta, delta_last_key);
+            assert_cache_key_eq(first_curr_key, 4);
+            assert_cache_key_eq(last_curr_key, 4);
+
+            let first_frame_start =
+                find_frame_start_for_rows_frame(&bounds, part_with_delta, first_curr_key);
+            let last_frame_end =
+                find_frame_end_for_rows_frame(&bounds, part_with_delta, last_curr_key);
+            assert_cache_key_eq(first_frame_start, 4);
+            assert_cache_key_eq(last_frame_end, 4);
+        }
+
+        #[test]
+        fn test_lead_corner_case() {
+            let cache = create_cache!(1, 2, 3, 4, 5, 6);
+            let delta = create_delta!((4, Delete), (5, Delete), (6, Delete));
+            let part_with_delta = DeltaBTreeMap::new(&cache, &delta);
+            let delta_first_key = delta.first_key_value().unwrap().0;
+            let delta_last_key = delta.last_key_value().unwrap().0;
+
+            let bounds = RowsFrameBounds {
+                start: CurrentRow,
+                end: Following(1),
+            };
+
+            let first_curr_key =
+                find_first_curr_for_rows_frame(&bounds, part_with_delta, delta_first_key);
+            let last_curr_key =
+                find_last_curr_for_rows_frame(&bounds, part_with_delta, delta_last_key);
+            assert_cache_key_eq(first_curr_key, 3);
+            assert_cache_key_eq(last_curr_key, 3);
+
+            let first_frame_start =
+                find_frame_start_for_rows_frame(&bounds, part_with_delta, first_curr_key);
+            let last_frame_end =
+                find_frame_end_for_rows_frame(&bounds, part_with_delta, last_curr_key);
+            assert_cache_key_eq(first_frame_start, 3);
+            assert_cache_key_eq(last_frame_end, 3);
+        }
+
+        #[test]
+        fn test_lag_lead_offset_0_corner_case_1() {
+            let cache = create_cache!(1, 2, 3, 4);
+            let delta = create_delta!((2, Delete), (3, Delete));
+            let part_with_delta = DeltaBTreeMap::new(&cache, &delta);
+            let delta_first_key = delta.first_key_value().unwrap().0;
+            let delta_last_key = delta.last_key_value().unwrap().0;
+
+            let bounds = RowsFrameBounds {
+                start: CurrentRow,
+                end: CurrentRow,
+            };
+
+            let first_curr_key =
+                find_first_curr_for_rows_frame(&bounds, part_with_delta, delta_first_key);
+            let last_curr_key =
+                find_last_curr_for_rows_frame(&bounds, part_with_delta, delta_last_key);
+            assert_cache_key_eq(first_curr_key, 4);
+            assert_cache_key_eq(last_curr_key, 1);
+
+            // first_curr_key > last_curr_key, should not continue to find frame start/end
+        }
+
+        #[test]
+        fn test_lag_lead_offset_0_corner_case_2() {
+            // Note this case is false-positive, but it does very little harm.
+
+            let cache = create_cache!(1, 2, 3, 4);
+            let delta = create_delta!((2, Delete), (3, Delete), (4, Delete));
+            let part_with_delta = DeltaBTreeMap::new(&cache, &delta);
+            let delta_first_key = delta.first_key_value().unwrap().0;
+            let delta_last_key = delta.last_key_value().unwrap().0;
+
+            let bounds = RowsFrameBounds {
+                start: CurrentRow,
+                end: CurrentRow,
+            };
+
+            let first_curr_key =
+                find_first_curr_for_rows_frame(&bounds, part_with_delta, delta_first_key);
+            let last_curr_key =
+                find_last_curr_for_rows_frame(&bounds, part_with_delta, delta_last_key);
+            assert_cache_key_eq(first_curr_key, 1);
+            assert_cache_key_eq(last_curr_key, 1);
+
+            let first_frame_start =
+                find_frame_start_for_rows_frame(&bounds, part_with_delta, first_curr_key);
+            let last_frame_end =
+                find_frame_end_for_rows_frame(&bounds, part_with_delta, last_curr_key);
+            assert_cache_key_eq(first_frame_start, 1);
+            assert_cache_key_eq(last_frame_end, 1);
+        }
+
+        #[test]
+        fn test_lag_lead_offset_0_corner_case_3() {
+            let cache = create_cache!(1, 2, 3, 4, 5);
+            let delta = create_delta!((2, Delete), (3, Insert), (4, Delete));
+            let part_with_delta = DeltaBTreeMap::new(&cache, &delta);
+            let delta_first_key = delta.first_key_value().unwrap().0;
+            let delta_last_key = delta.last_key_value().unwrap().0;
+
+            let bounds = RowsFrameBounds {
+                start: CurrentRow,
+                end: CurrentRow,
+            };
+
+            let first_curr_key =
+                find_first_curr_for_rows_frame(&bounds, part_with_delta, delta_first_key);
+            let last_curr_key =
+                find_last_curr_for_rows_frame(&bounds, part_with_delta, delta_last_key);
+            assert_cache_key_eq(first_curr_key, 3);
+            assert_cache_key_eq(last_curr_key, 3);
+
+            let first_frame_start =
+                find_frame_start_for_rows_frame(&bounds, part_with_delta, first_curr_key);
+            let last_frame_end =
+                find_frame_end_for_rows_frame(&bounds, part_with_delta, last_curr_key);
+            assert_cache_key_eq(first_frame_start, 3);
+            assert_cache_key_eq(last_frame_end, 3);
+        }
+
+        #[test]
+        fn test_empty_with_sentinels() {
+            let cache: BTreeMap<Sentinelled<StateKey>, OwnedRow> = create_cache!(..., , ...);
+            let delta = create_delta!((1, Insert), (2, Insert));
+            let part_with_delta = DeltaBTreeMap::new(&cache, &delta);
+            let delta_first_key = delta.first_key_value().unwrap().0;
+            let delta_last_key = delta.last_key_value().unwrap().0;
+
+            {
+                let bounds = RowsFrameBounds {
+                    start: CurrentRow,
+                    end: CurrentRow,
+                };
+                let first_curr_key =
+                    find_first_curr_for_rows_frame(&bounds, part_with_delta, delta_first_key);
+                let last_curr_key =
+                    find_last_curr_for_rows_frame(&bounds, part_with_delta, delta_last_key);
+                assert_cache_key_eq(first_curr_key, 1);
+                assert_cache_key_eq(last_curr_key, 2);
+
+                let first_frame_start =
+                    find_frame_start_for_rows_frame(&bounds, part_with_delta, first_curr_key);
+                let last_frame_end =
+                    find_frame_end_for_rows_frame(&bounds, part_with_delta, last_curr_key);
+                assert_cache_key_eq(first_frame_start, 1);
+                assert_cache_key_eq(last_frame_end, 2);
+            }
+
+            {
+                let bounds = RowsFrameBounds {
+                    start: Preceding(1),
+                    end: CurrentRow,
+                };
+                let first_curr_key =
+                    find_first_curr_for_rows_frame(&bounds, part_with_delta, delta_first_key);
+                let last_curr_key =
+                    find_last_curr_for_rows_frame(&bounds, part_with_delta, delta_last_key);
+                assert_cache_key_eq(first_curr_key, 1);
+                assert!(last_curr_key.is_largest());
+
+                // reaches sentinel, should not continue to find frame start/end
+            }
+
+            {
+                let bounds = RowsFrameBounds {
+                    start: CurrentRow,
+                    end: Following(3),
+                };
+
+                let first_curr_key =
+                    find_first_curr_for_rows_frame(&bounds, part_with_delta, delta_first_key);
+                let last_curr_key =
+                    find_last_curr_for_rows_frame(&bounds, part_with_delta, delta_last_key);
+                assert!(first_curr_key.is_smallest());
+                assert_cache_key_eq(last_curr_key, 2);
+
+                // reaches sentinel, should not continue to find frame start/end
+            }
+        }
+
+        #[test]
+        fn test_with_left_sentinel() {
+            let cache = create_cache!(..., 2, 4, 5, 8);
+            let delta = create_delta!((3, Insert), (4, Insert), (8, Delete));
+            let part_with_delta = DeltaBTreeMap::new(&cache, &delta);
+            let delta_first_key = delta.first_key_value().unwrap().0;
+            let delta_last_key = delta.last_key_value().unwrap().0;
+
+            {
+                let bounds = RowsFrameBounds {
+                    start: CurrentRow,
+                    end: Following(1),
+                };
+                let first_curr_key =
+                    find_first_curr_for_rows_frame(&bounds, part_with_delta, delta_first_key);
+                let last_curr_key =
+                    find_last_curr_for_rows_frame(&bounds, part_with_delta, delta_last_key);
+                assert_cache_key_eq(first_curr_key, 2);
+                assert_cache_key_eq(last_curr_key, 5);
+
+                let first_frame_start =
+                    find_frame_start_for_rows_frame(&bounds, part_with_delta, first_curr_key);
+                let last_frame_end =
+                    find_frame_end_for_rows_frame(&bounds, part_with_delta, last_curr_key);
+                assert_cache_key_eq(first_frame_start, 2);
+                assert_cache_key_eq(last_frame_end, 5);
+            }
+
+            {
+                let bounds = RowsFrameBounds {
+                    start: Preceding(1),
+                    end: Following(1),
+                };
+                let first_curr_key =
+                    find_first_curr_for_rows_frame(&bounds, part_with_delta, delta_first_key);
+                let last_curr_key =
+                    find_last_curr_for_rows_frame(&bounds, part_with_delta, delta_last_key);
+                assert_cache_key_eq(first_curr_key, 2);
+                assert_cache_key_eq(last_curr_key, 5);
+
+                let first_frame_start =
+                    find_frame_start_for_rows_frame(&bounds, part_with_delta, first_curr_key);
+                let last_frame_end =
+                    find_frame_end_for_rows_frame(&bounds, part_with_delta, last_curr_key);
+                assert!(first_frame_start.is_smallest());
+                assert_cache_key_eq(last_frame_end, 5);
+            }
+        }
+
+        #[test]
+        fn test_with_right_sentinel() {
+            let cache = create_cache!(1, 2, 4, 5, 8, ...);
+            let delta = create_delta!((3, Insert), (4, Insert), (5, Delete));
+            let part_with_delta = DeltaBTreeMap::new(&cache, &delta);
+            let delta_first_key = delta.first_key_value().unwrap().0;
+            let delta_last_key = delta.last_key_value().unwrap().0;
+
+            {
+                let bounds = RowsFrameBounds {
+                    start: Preceding(1),
+                    end: CurrentRow,
+                };
+                let first_curr_key =
+                    find_first_curr_for_rows_frame(&bounds, part_with_delta, delta_first_key);
+                let last_curr_key =
+                    find_last_curr_for_rows_frame(&bounds, part_with_delta, delta_last_key);
+                assert_cache_key_eq(first_curr_key, 3);
+                assert_cache_key_eq(last_curr_key, 8);
+
+                let first_frame_start =
+                    find_frame_start_for_rows_frame(&bounds, part_with_delta, first_curr_key);
+                let last_frame_end =
+                    find_frame_end_for_rows_frame(&bounds, part_with_delta, last_curr_key);
+                assert_cache_key_eq(first_frame_start, 2);
+                assert_cache_key_eq(last_frame_end, 8);
+            }
+
+            {
+                let bounds = RowsFrameBounds {
+                    start: Preceding(1),
+                    end: Following(1),
+                };
+                let first_curr_key =
+                    find_first_curr_for_rows_frame(&bounds, part_with_delta, delta_first_key);
+                let last_curr_key =
+                    find_last_curr_for_rows_frame(&bounds, part_with_delta, delta_last_key);
+                assert_cache_key_eq(first_curr_key, 2);
+                assert_cache_key_eq(last_curr_key, 8);
+
+                let first_frame_start =
+                    find_frame_start_for_rows_frame(&bounds, part_with_delta, first_curr_key);
+                let last_frame_end =
+                    find_frame_end_for_rows_frame(&bounds, part_with_delta, last_curr_key);
+                assert_cache_key_eq(first_frame_start, 1);
+                assert!(last_frame_end.is_largest());
+            }
+        }
     }
 }
