@@ -15,15 +15,14 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use byteorder::{BigEndian, ByteOrder};
 use reqwest::Method;
-use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
-use risingwave_common::error::{Result, RwError};
 use serde::de::DeserializeOwned;
 use serde_derive::Deserialize;
 use url::{ParseError, Url};
 
-pub fn handle_sr_list(addr: &str) -> Result<Vec<Url>> {
+use crate::schema::{bail_invalid_option_error, InvalidOptionError};
+
+pub fn handle_sr_list(addr: &str) -> Result<Vec<Url>, InvalidOptionError> {
     let segment = addr.split(',').collect::<Vec<&str>>();
     let mut errs: Vec<ParseError> = Vec::with_capacity(segment.len());
     let mut urls = Vec::with_capacity(segment.len());
@@ -34,10 +33,7 @@ pub fn handle_sr_list(addr: &str) -> Result<Vec<Url>> {
         }
     }
     if urls.is_empty() {
-        return Err(RwError::from(ProtocolError(format!(
-            "no valid url provided, got {:?}",
-            errs
-        ))));
+        bail_invalid_option_error!("no valid url provided, errs: {errs:?}");
     }
     tracing::debug!(
         "schema registry client will use url {:?} to connect, the rest failed because: {:?}",
@@ -47,30 +43,38 @@ pub fn handle_sr_list(addr: &str) -> Result<Vec<Url>> {
     Ok(urls)
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum WireFormatError {
+    #[error("fail to match a magic byte of 0")]
+    NoMagic,
+    #[error("fail to read 4-byte schema ID")]
+    NoSchemaId,
+}
+
+impl From<WireFormatError> for risingwave_common::error::RwError {
+    fn from(value: WireFormatError) -> Self {
+        anyhow::anyhow!(value).into()
+    }
+}
+
 /// extract the magic number and `schema_id` at the front of payload
 ///
 /// 0 -> magic number
 /// 1-4 -> schema id
 /// 5-... -> message payload
-pub(crate) fn extract_schema_id(payload: &[u8]) -> Result<(i32, &[u8])> {
-    let header_len = 5;
+pub(crate) fn extract_schema_id(payload: &[u8]) -> Result<(i32, &[u8]), WireFormatError> {
+    use byteorder::{BigEndian, ReadBytesExt as _};
 
-    if payload.len() < header_len {
-        return Err(RwError::from(InternalError(format!(
-            "confluent kafka message need 5 bytes header, but payload len is {}",
-            payload.len()
-        ))));
-    }
-    let magic = payload[0];
-    let schema_id = BigEndian::read_i32(&payload[1..5]);
-
-    if magic != 0 {
-        return Err(RwError::from(InternalError(
-            "confluent kafka message must have a zero magic byte".to_owned(),
-        )));
+    let mut cursor = payload;
+    if !cursor.read_u8().is_ok_and(|magic| magic == 0) {
+        return Err(WireFormatError::NoMagic);
     }
 
-    Ok((schema_id, &payload[header_len..]))
+    let schema_id = cursor
+        .read_i32::<BigEndian>()
+        .map_err(|_| WireFormatError::NoSchemaId)?;
+
+    Ok((schema_id, cursor))
 }
 
 pub(crate) struct SchemaRegistryCtx {
@@ -80,11 +84,21 @@ pub(crate) struct SchemaRegistryCtx {
     pub path: Vec<String>,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum RequestError {
+    #[error("confluent registry send req error: {0}")]
+    Send(#[source] reqwest::Error),
+    #[error("confluent registry parse resp error: {0}")]
+    Json(#[source] reqwest::Error),
+    #[error(transparent)]
+    Unsuccessful(ErrorResp),
+}
+
 pub(crate) async fn req_inner<T>(
     ctx: Arc<SchemaRegistryCtx>,
     mut url: Url,
     method: Method,
-) -> Result<T>
+) -> Result<T, RequestError>
 where
     T: DeserializeOwned + Send + Sync + 'static,
 {
@@ -101,35 +115,17 @@ where
     request(request_builder).await
 }
 
-async fn request<T>(req: reqwest::RequestBuilder) -> Result<T>
+async fn request<T>(req: reqwest::RequestBuilder) -> Result<T, RequestError>
 where
     T: DeserializeOwned,
 {
-    let res = req.send().await.map_err(|e| {
-        RwError::from(ProtocolError(format!(
-            "confluent registry send req error {}",
-            e
-        )))
-    })?;
+    let res = req.send().await.map_err(RequestError::Send)?;
     let status = res.status();
     if status.is_success() {
-        res.json().await.map_err(|e| {
-            RwError::from(ProtocolError(format!(
-                "confluent registry parse resp error {}",
-                e
-            )))
-        })
+        res.json().await.map_err(RequestError::Json)
     } else {
-        let res = res.json::<ErrorResp>().await.map_err(|e| {
-            RwError::from(ProtocolError(format!(
-                "confluent registry resp error {}",
-                e
-            )))
-        })?;
-        Err(RwError::from(ProtocolError(format!(
-            "confluent registry resp error, code: {}, msg {}",
-            res.error_code, res.message
-        ))))
+        let res = res.json().await.map_err(RequestError::Json)?;
+        Err(RequestError::Unsuccessful(res))
     }
 }
 
@@ -181,16 +177,12 @@ pub struct GetBySubjectResp {
     pub references: Vec<SchemaReference>,
 }
 
-#[derive(Debug, Deserialize)]
-struct ErrorResp {
+/// <https://docs.confluent.io/platform/7.5/schema-registry/develop/api.html#errors>
+#[derive(Debug, Deserialize, thiserror::Error)]
+#[error("confluent schema registry error {error_code}: {message}")]
+pub struct ErrorResp {
     error_code: i32,
     message: String,
-}
-
-#[derive(Debug)]
-enum ReqResp<T> {
-    Succeed(T),
-    Failed(ErrorResp),
 }
 
 #[cfg(test)]

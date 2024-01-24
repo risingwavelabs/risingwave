@@ -35,7 +35,7 @@ pub struct BackwardSstableIterator {
     cur_idx: usize,
 
     /// Reference to the sstable
-    pub sst: TableHolder,
+    sst: TableHolder,
 
     sstable_store: SstableStoreRef,
 
