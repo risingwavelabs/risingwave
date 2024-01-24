@@ -91,7 +91,7 @@ pub(crate) fn gen_create_index_plan(
     for column in columns {
         let order_type = OrderType::from_bools(column.asc, column.nulls_first);
         let expr_impl = binder.bind_expr(column.expr)?;
-        // Do constant folding and timezone transportation on expressions so that, batch queries can match it in the same form.
+        // Do constant folding and timezone transportation on expressions so that batch queries can match it in the same form.
         let mut const_eval = ConstEvalRewriter { error: None };
         let expr_impl = const_eval.rewrite_expr(expr_impl);
         let expr_impl = context.session_timezone().rewrite_expr(expr_impl);

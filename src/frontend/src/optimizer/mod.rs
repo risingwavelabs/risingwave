@@ -221,7 +221,7 @@ impl PlanRoot {
         // Inline session timezone mainly for rewriting now()
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
-        // Const eval of exprs at the last minute
+        // Const eval of exprs at the last minute, but before `to_batch` to make functional index selection happy.
         plan = const_eval_exprs(plan)?;
 
         if ctx.is_explain_trace() {
