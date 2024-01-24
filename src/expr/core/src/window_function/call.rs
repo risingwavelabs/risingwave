@@ -154,11 +154,7 @@ pub struct RowsFrameBounds {
     pub end: FrameBound<usize>,
 }
 
-impl FrameBoundsImpl for RowsFrameBounds {
-    fn validate(&self) -> Result<()> {
-        FrameBound::validate_bounds(&self.start, &self.end)
-    }
-
+impl RowsFrameBounds {
     /// Check if the `ROWS` frame is canonical.
     ///
     /// A canonical `ROWS` frame is defined as:
@@ -191,6 +187,12 @@ impl FrameBoundsImpl for RowsFrameBounds {
             (_, Following(n)) => Some(*n),
             (_, CurrentRow | Preceding(_) | UnboundedPreceding) => Some(0),
         }
+    }
+}
+
+impl FrameBoundsImpl for RowsFrameBounds {
+    fn validate(&self) -> Result<()> {
+        FrameBound::validate_bounds(&self.start, &self.end)
     }
 }
 
