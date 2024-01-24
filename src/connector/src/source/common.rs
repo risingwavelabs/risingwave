@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::{Display, Formatter};
+
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::error::RwError;
@@ -92,11 +94,17 @@ impl Serialize for SecretString {
 impl WithOptions for SecretString {}
 
 impl SecretString {
-    pub fn expose_secret(&self) -> &String {
+    pub fn expose_secret(&self) -> &str {
         self.0.expose_secret()
     }
 
     pub fn new(s: impl Into<String>) -> Self {
         Self(redact::Secret::new(s.into()))
+    }
+}
+
+impl Display for SecretString {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
     }
 }

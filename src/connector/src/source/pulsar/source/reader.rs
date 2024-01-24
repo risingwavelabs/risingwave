@@ -444,7 +444,7 @@ impl PulsarIcebergReader {
         if let Some(secret_key) = &self.props.aws_auth_props.secret_key {
             iceberg_configs.insert(
                 "iceberg.table.io.secret_access_key".to_string(),
-                secret_key.expose_secret().to_string(),
+                secret_key.expose_secret().to_owned(),
             );
         }
 
