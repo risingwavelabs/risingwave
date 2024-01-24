@@ -444,7 +444,7 @@ impl SharedBufferBatch {
     }
 
     pub fn is_merged_imm(&self) -> bool {
-        self.inner.epochs.len() > 1
+        !self.inner.imm_ids.is_empty()
     }
 
     pub fn min_epoch(&self) -> HummockEpoch {

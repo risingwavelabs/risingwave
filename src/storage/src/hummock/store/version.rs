@@ -439,20 +439,59 @@ impl HummockReadVersion {
                         break;
                     }
                     Ordering::Greater => {
-                        unreachable!("must have break in equal")
+                        let remaining_staging_imm_ids = self
+                            .staging
+                            .imm
+                            .iter()
+                            .map(|imm| imm.batch_id())
+                            .collect_vec();
+                        let earlier_imm_ids =
+                            earlier_imms.iter().map(|imm| imm.batch_id()).collect_vec();
+
+                        unreachable!(
+                            "must have break in equal: {:?} {:?} {:?}",
+                            remaining_staging_imm_ids,
+                            earlier_imm_ids,
+                            merged_imm.get_imm_ids()
+                        )
                     }
                 }
             }
             Some(earlier_imms)
         } else {
-            assert_eq!(back.batch_id(), min_imm_id);
+            assert_eq!(
+                back.batch_id(),
+                min_imm_id,
+                "{:?} {:?}",
+                {
+                    self.staging
+                        .imm
+                        .iter()
+                        .map(|imm| imm.batch_id())
+                        .collect_vec()
+                },
+                merged_imm.get_imm_ids()
+            );
             None
         };
 
         // iter from smaller imm and take the older imm at the back.
         for imm_id in merged_imm.get_imm_ids().iter().rev() {
             let imm = self.staging.imm.pop_back().expect("should exist");
-            assert_eq!(imm.batch_id(), *imm_id);
+            assert_eq!(
+                imm.batch_id(),
+                *imm_id,
+                "{:?} {:?} {}",
+                {
+                    self.staging
+                        .imm
+                        .iter()
+                        .map(|imm| imm.batch_id())
+                        .collect_vec()
+                },
+                merged_imm.get_imm_ids(),
+                imm_id,
+            );
         }
 
         self.staging.imm.push_back(merged_imm);

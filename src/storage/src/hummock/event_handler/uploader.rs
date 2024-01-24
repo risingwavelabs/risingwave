@@ -60,6 +60,26 @@ pub type SpawnUploadTask = Arc<
         + 'static,
 >;
 
+pub type SpawnMergingTask = Arc<
+    dyn Fn(
+            TableId,
+            LocalInstanceId,
+            Vec<ImmutableMemtable>,
+            Option<MemoryTracker>,
+        ) -> JoinHandle<HummockResult<ImmutableMemtable>>
+        + Send
+        + Sync
+        + 'static,
+>;
+
+pub(crate) fn default_spawn_merging_task(
+    compaction_executor: Arc<CompactionExecutor>,
+) -> SpawnMergingTask {
+    Arc::new(move |table_id, instance_id, imms, tracker| {
+        compaction_executor.spawn(merge_imms_in_memory(table_id, instance_id, imms, tracker))
+    })
+}
+
 #[derive(Clone)]
 pub struct UploadTaskInfo {
     pub task_size: usize,
@@ -121,9 +141,7 @@ impl MergingImmTask {
         context: &UploaderContext,
     ) -> Self {
         let input_imms = imms.clone();
-        let join_handle = context.compaction_executor.spawn(async move {
-            merge_imms_in_memory(table_id, instance_id, imms, memory_tracker).await
-        });
+        let join_handle = (context.spawn_merging_task)(table_id, instance_id, imms, memory_tracker);
 
         MergingImmTask {
             table_id,
@@ -626,13 +644,12 @@ struct UploaderContext {
     pinned_version: PinnedVersion,
     /// When called, it will spawn a task to flush the imm into sst and return the join handle.
     spawn_upload_task: SpawnUploadTask,
+    spawn_merging_task: SpawnMergingTask,
     buffer_tracker: BufferTracker,
     /// The number of immutable memtables that will be merged into a new imm.
     /// When the number of imms of a table shard exceeds this threshold, uploader will generate
     /// merging tasks to merge them.
     imm_merge_threshold: usize,
-
-    compaction_executor: Arc<CompactionExecutor>,
 
     stats: Arc<HummockStateStoreMetrics>,
 }
@@ -641,17 +658,17 @@ impl UploaderContext {
     fn new(
         pinned_version: PinnedVersion,
         spawn_upload_task: SpawnUploadTask,
+        spawn_merging_task: SpawnMergingTask,
         buffer_tracker: BufferTracker,
         config: &StorageOpts,
-        compaction_executor: Arc<CompactionExecutor>,
         stats: Arc<HummockStateStoreMetrics>,
     ) -> Self {
         UploaderContext {
             pinned_version,
             spawn_upload_task,
+            spawn_merging_task,
             buffer_tracker,
             imm_merge_threshold: config.imm_merge_threshold,
-            compaction_executor,
             stats,
         }
     }
@@ -702,9 +719,9 @@ impl HummockUploader {
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         pinned_version: PinnedVersion,
         spawn_upload_task: SpawnUploadTask,
+        spawn_merging_task: SpawnMergingTask,
         buffer_tracker: BufferTracker,
         config: &StorageOpts,
-        compaction_executor: Arc<CompactionExecutor>,
     ) -> Self {
         let initial_epoch = pinned_version.version().max_committed_epoch;
         Self {
@@ -718,9 +735,9 @@ impl HummockUploader {
             context: UploaderContext::new(
                 pinned_version,
                 spawn_upload_task,
+                spawn_merging_task,
                 buffer_tracker,
                 config,
-                compaction_executor,
                 state_store_metrics,
             ),
         }
@@ -1166,8 +1183,8 @@ mod tests {
     use crate::hummock::compactor::CompactionExecutor;
     use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
     use crate::hummock::event_handler::uploader::{
-        HummockUploader, MergingImmTask, UploadTaskInfo, UploadTaskOutput, UploadTaskPayload,
-        UploaderContext, UploaderEvent, UploadingTask,
+        default_spawn_merging_task, HummockUploader, MergingImmTask, UploadTaskInfo,
+        UploadTaskOutput, UploadTaskPayload, UploaderContext, UploaderEvent, UploadingTask,
     };
     use crate::hummock::event_handler::LocalInstanceId;
     use crate::hummock::iterator::test_utils::{
@@ -1267,9 +1284,9 @@ mod tests {
         UploaderContext::new(
             initial_pinned_version(),
             Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
+            default_spawn_merging_task(compaction_executor),
             BufferTracker::for_test(),
             &config,
-            compaction_executor,
             Arc::new(HummockStateStoreMetrics::unused()),
         )
     }
@@ -1288,9 +1305,9 @@ mod tests {
             Arc::new(HummockStateStoreMetrics::unused()),
             initial_pinned_version(),
             Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
+            default_spawn_merging_task(compaction_executor),
             BufferTracker::for_test(),
             &config,
-            compaction_executor,
         )
     }
 
@@ -1772,9 +1789,9 @@ mod tests {
                     })
                 }
             }),
+            default_spawn_merging_task(compaction_executor),
             buffer_tracker.clone(),
             &config,
-            compaction_executor,
         );
         (buffer_tracker, uploader, new_task_notifier)
     }
