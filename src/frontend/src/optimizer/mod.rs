@@ -60,8 +60,8 @@ use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::generic::{self, PhysicalPlanRef};
 use self::plan_node::{
     stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject, LogicalSource,
-    StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink,StreamSubscription, StreamWatermarkFilter,
-    ToStreamContext,
+    StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink, StreamSubscription,
+    StreamWatermarkFilter, ToStreamContext,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
@@ -818,6 +818,7 @@ impl PlanRoot {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     /// Optimize and generate a create sink plan.
     pub fn gen_subscription_plan(
         &mut self,
@@ -842,18 +843,17 @@ impl PlanRoot {
             dependent_relations,
             stream_plan,
             subscription_name,
-            db_name, 
-            subscription_from_table_name, 
+            db_name,
+            subscription_from_table_name,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
             self.out_names.clone(),
-            definition, 
+            definition,
             properties,
-            user_id
+            user_id,
         )
     }
-
 
     /// Set the plan root's required dist.
     pub fn set_required_dist(&mut self, required_dist: RequiredDist) {

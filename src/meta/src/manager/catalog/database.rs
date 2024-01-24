@@ -21,11 +21,14 @@ use risingwave_common::catalog::TableOption;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::{
     Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source,
-    StreamJobStatus, Table, View, Subscription,
+    StreamJobStatus, Subscription, Table, View,
 };
 use risingwave_pb::data::DataType;
 
-use super::{ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, ViewId, SubscriptionId};
+use super::{
+    ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, SubscriptionId,
+    ViewId,
+};
 use crate::manager::{IndexId, MetaSrvEnv, TableId};
 use crate::model::MetadataModel;
 use crate::{MetaError, MetaResult};
@@ -250,7 +253,10 @@ impl DatabaseManager {
                 && x.schema_id == relation_key.1
                 && x.name.eq(&relation_key.2)
         }) {
-            Err(MetaError::catalog_duplicated("subscription", &relation_key.2))
+            Err(MetaError::catalog_duplicated(
+                "subscription",
+                &relation_key.2,
+            ))
         } else if self.views.values().any(|x| {
             x.database_id == relation_key.0
                 && x.schema_id == relation_key.1
@@ -430,7 +436,10 @@ impl DatabaseManager {
         self.tables.values().all(|t| t.schema_id != schema_id)
             && self.sources.values().all(|s| s.schema_id != schema_id)
             && self.sinks.values().all(|s| s.schema_id != schema_id)
-            && self.subscriptions.values().all(|s| s.schema_id != schema_id)
+            && self
+                .subscriptions
+                .values()
+                .all(|s| s.schema_id != schema_id)
             && self.indexes.values().all(|i| i.schema_id != schema_id)
             && self.views.values().all(|v| v.schema_id != schema_id)
     }
@@ -572,7 +581,10 @@ impl DatabaseManager {
         if self.subscriptions.contains_key(&subscription_id) {
             Ok(())
         } else {
-            Err(MetaError::catalog_id_not_found("subscription", subscription_id))
+            Err(MetaError::catalog_id_not_found(
+                "subscription",
+                subscription_id,
+            ))
         }
     }
 

@@ -15,14 +15,14 @@
 use anyhow::anyhow;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model_v2::{
-    connection, database, function, index, object, schema, sink, source, table, view, subscription,
+    connection, database, function, index, object, schema, sink, source, subscription, table, view,
 };
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableType};
 use risingwave_pb::catalog::{
     PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex,
-    PbSchema, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbTable, PbView, PbSubscription,
+    PbSchema, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable, PbView,
 };
 use sea_orm::{DatabaseConnection, ModelTrait};
 

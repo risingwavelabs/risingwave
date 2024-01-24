@@ -861,6 +861,7 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_VALUES = 64;
   FRAGMENT_TYPE_FLAG_DML = 128;
   FRAGMENT_TYPE_FLAG_CDC_FILTER = 256;
+  FRAGMENT_TYPE_FLAG_SUBSCRIPTION = 512;
 }
 
 // The streaming context associated with a stream plan

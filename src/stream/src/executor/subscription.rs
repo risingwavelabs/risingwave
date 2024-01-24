@@ -49,10 +49,18 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
         info: ExecutorInfo,
         input: BoxedExecutor,
         log_store: SubscriptionLogStoreWriter<LS>,
-        properties: HashMap<String,String>,
+        properties: HashMap<String, String>,
     ) -> StreamExecutorResult<Self> {
-        let retention_seconds_str = properties.get("retention_seconds").ok_or_else(||{StreamExecutorError::serde_error("Subscription retention time not set.".to_string())})?;
-        let retention_seconds = Interval::from_str(retention_seconds_str).map_err(|_|{StreamExecutorError::serde_error("Retention needs to be set in Interval format".to_string())})?.usecs();
+        let retention_seconds_str = properties.get("retention_seconds").ok_or_else(|| {
+            StreamExecutorError::serde_error("Subscription retention time not set.".to_string())
+        })?;
+        let retention_seconds = Interval::from_str(retention_seconds_str)
+            .map_err(|_| {
+                StreamExecutorError::serde_error(
+                    "Retention needs to be set in Interval format".to_string(),
+                )
+            })?
+            .usecs();
         Ok(Self {
             actor_context,
             info,
@@ -77,7 +85,7 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
         #[for_await]
         for msg in input {
             let msg = msg?;
-            println!("{:?}",msg);
+            println!("{:?}", msg);
             yield match msg {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {

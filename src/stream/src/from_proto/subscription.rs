@@ -68,7 +68,11 @@ impl ExecutorBuilder for SubscriptionExecutorBuilder {
                 params.info,
                 input,
                 log_store,
-                node.subscription_catalog.as_ref().unwrap().properties.clone(),
+                node.subscription_catalog
+                    .as_ref()
+                    .unwrap()
+                    .properties
+                    .clone(),
             )
             .await?,
         ))

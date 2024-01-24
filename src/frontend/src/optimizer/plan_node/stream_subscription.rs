@@ -12,25 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
-use itertools::Itertools;
-use pretty_xmlish::{XmlNode, Pretty};
-use risingwave_common::catalog::{ColumnCatalog, TableId, UserId};
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use std::assert_matches::assert_matches;
 use std::collections::HashSet;
-use risingwave_common::error::Result;
 
-use crate::{WithOptions, TableCatalog};
-use crate::optimizer::property::{Order, Distribution};
-use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::{PlanRef, optimizer::property::RequiredDist};
-use crate::catalog::subscription_catalog::{SubscriptionCatalog, SubscriptionId};
+use fixedbitset::FixedBitSet;
+use itertools::Itertools;
+use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::{ColumnCatalog, TableId, UserId};
+use risingwave_common::error::Result;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+
 use super::derive::{derive_columns, derive_pk};
 use super::expr_visitable::ExprVisitable;
-use super::stream::prelude::{PhysicalPlanRef, GenericPlanRef};
-use super::utils::{Distill, IndicesDisplay, childless_record};
-use super::{PlanBase, Stream, PlanTreeNodeUnary, StreamNode, ExprRewritable, StreamSink};
+use super::stream::prelude::{GenericPlanRef, PhysicalPlanRef};
+use super::utils::{childless_record, Distill, IndicesDisplay};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, StreamSink};
+use crate::catalog::subscription_catalog::{SubscriptionCatalog, SubscriptionId};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::{PlanRef, TableCatalog, WithOptions};
 
 /// [`StreamSink`] represents a subscription at the very end of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -109,25 +109,21 @@ impl StreamSubscription {
         columns: Vec<ColumnCatalog>,
         definition: String,
         properties: WithOptions,
-        user_id: UserId
+        user_id: UserId,
     ) -> Result<(PlanRef, SubscriptionCatalog)> {
         let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
             _ => {
                 assert_matches!(user_distributed_by, RequiredDist::Any);
-                RequiredDist::shard_by_key(
-                    input.schema().len(),
-                    input.expect_stream_key(),
-                )
-                    
-                }
-            };
+                RequiredDist::shard_by_key(input.schema().len(), input.expect_stream_key())
+            }
+        };
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
         let distribution_key = input.distribution().dist_column_indices().to_vec();
         let sink_desc = SubscriptionCatalog {
-            database_id: database_id,
-            schema_id: schema_id,
+            database_id,
+            schema_id,
             dependent_relations: dependent_relations.into_iter().collect(),
             id: SubscriptionId::placeholder(),
             name,
@@ -146,7 +142,10 @@ impl StreamSubscription {
     /// The table schema is: | epoch | seq id | row op | sink columns |
     /// Pk is: | epoch | seq id |
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
-        StreamSink::infer_kv_log_store_table_catalog_inner(&self.input, &self.subscription_catalog.columns)
+        StreamSink::infer_kv_log_store_table_catalog_inner(
+            &self.input,
+            &self.subscription_catalog.columns,
+        )
     }
 }
 
@@ -199,7 +198,7 @@ impl StreamNode for StreamSubscription {
             .infer_kv_log_store_table_catalog()
             .with_id(state.gen_table_id_wrapped());
 
-        PbNodeBody::Subscription(SubscriptionNode{
+        PbNodeBody::Subscription(SubscriptionNode {
             subscription_catalog: Some(self.subscription_catalog.to_proto()),
             log_store_table: Some(table.to_internal_table_prost()),
         })

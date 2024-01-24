@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use risingwave_common::catalog::TableVersionId;
 use risingwave_common::current_cluster_version;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table, Subscription};
+use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Subscription, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use strum::EnumDiscriminants;
 
@@ -96,7 +96,7 @@ impl StreamingJob {
             }
             StreamingJob::Subscription(subscription) => {
                 subscription.created_at_epoch = created_at_epoch;
-            },
+            }
         }
     }
 
@@ -131,7 +131,7 @@ impl StreamingJob {
             }
             StreamingJob::Subscription(subscription) => {
                 subscription.initialized_at_epoch = initialized_at_epoch;
-            },
+            }
         }
     }
 }
@@ -152,7 +152,7 @@ impl StreamingJob {
             }
             StreamingJob::Subscription(subscription) => {
                 subscription.id = id;
-            },
+            }
         }
     }
 
@@ -172,7 +172,10 @@ impl StreamingJob {
             Self::Table(_, table, ..) => {
                 table.dml_fragment_id = id;
             }
-            Self::MaterializedView(_) | Self::Index(_, _) | Self::Sink(_, _) | Self::Subscription(_) => {}
+            Self::MaterializedView(_)
+            | Self::Index(_, _)
+            | Self::Sink(_, _)
+            | Self::Subscription(_) => {}
             Self::Source(_) => {}
         }
     }

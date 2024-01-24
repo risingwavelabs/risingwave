@@ -64,6 +64,7 @@ pub enum StatementType {
     DROP_FUNCTION,
     DROP_SOURCE,
     DROP_SINK,
+    DROP_SUBSCRIPTION,
     DROP_SCHEMA,
     DROP_DATABASE,
     DROP_USER,
@@ -282,6 +283,9 @@ impl StatementType {
                 risingwave_sqlparser::ast::ObjectType::User => Ok(StatementType::DROP_USER),
                 risingwave_sqlparser::ast::ObjectType::Connection => {
                     Ok(StatementType::DROP_CONNECTION)
+                }
+                risingwave_sqlparser::ast::ObjectType::Subscription => {
+                    Ok(StatementType::DROP_SUBSCRIPTION)
                 }
             },
             Statement::Explain { .. } => Ok(StatementType::EXPLAIN),

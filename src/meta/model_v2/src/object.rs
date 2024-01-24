@@ -173,7 +173,6 @@ impl Related<super::subscription::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Subscription.def()
     }
-    
 }
 
 impl Related<super::source::Entity> for Entity {

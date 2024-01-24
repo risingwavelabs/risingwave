@@ -281,7 +281,9 @@ fn build_fragment(
 
         NodeBody::Sink(_) => current_fragment.fragment_type_mask |= FragmentTypeFlag::Sink as u32,
 
-        NodeBody::Subscription(_) => current_fragment.fragment_type_mask |= FragmentTypeFlag::Subscription as u32,
+        NodeBody::Subscription(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Subscription as u32
+        }
 
         NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 

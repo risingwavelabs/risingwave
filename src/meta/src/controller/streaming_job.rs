@@ -24,9 +24,9 @@ use risingwave_meta_model_v2::prelude::{
 };
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, index, object_dependency, sink, source, streaming_job,
-    table, ActorId, ActorUpstreamActors, CreateType, DatabaseId, ExprNodeArray, FragmentId,
-    I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId, StreamNode, TableId, TableVersion,
-    UserId, subscription,
+    subscription, table, ActorId, ActorUpstreamActors, CreateType, DatabaseId, ExprNodeArray,
+    FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId, StreamNode, TableId,
+    TableVersion, UserId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableVersion};
@@ -143,7 +143,7 @@ impl CatalogController {
                     ctx,
                 )
                 .await?;
-            subscription.id = job_id as _;
+                subscription.id = job_id as _;
                 let subscription: subscription::ActiveModel = subscription.clone().into();
                 subscription.insert(&txn).await?;
             }

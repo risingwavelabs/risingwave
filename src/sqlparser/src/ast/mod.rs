@@ -1154,7 +1154,7 @@ pub enum Statement {
         stmt: CreateSinkStatement,
     },
     /// CREATE SUBSCRIPTION
-    CreateSubscription{
+    CreateSubscription {
         stmt: CreateSubscriptionStatement,
     },
     /// CREATE CONNECTION
@@ -2326,6 +2326,7 @@ pub enum ObjectType {
     Database,
     User,
     Connection,
+    Subscription,
 }
 
 impl fmt::Display for ObjectType {
@@ -2341,6 +2342,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Database => "DATABASE",
             ObjectType::User => "USER",
             ObjectType::Connection => "CONNECTION",
+            ObjectType::Subscription => "SUBSCRIPTION",
         })
     }
 }
@@ -2367,9 +2369,11 @@ impl ParseTo for ObjectType {
             ObjectType::User
         } else if parser.parse_keyword(Keyword::CONNECTION) {
             ObjectType::Connection
+        } else if parser.parse_keyword(Keyword::SUBSCRIPTION) {
+            ObjectType::Subscription
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SCHEMA, DATABASE, USER or CONNECTION after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SUBSCRIPTION SCHEMA, DATABASE, USER or CONNECTION after DROP",
                 parser.peek_token(),
             );
         };

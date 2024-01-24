@@ -1441,8 +1441,7 @@ impl DdlController {
                     .await;
             }
             StreamingJob::Subscription(subscription) => {
-                mgr
-                    .catalog_manager
+                mgr.catalog_manager
                     .cancel_create_subscription_procedure(subscription)
                     .await;
             }
@@ -1533,8 +1532,7 @@ impl DdlController {
                 version
             }
             StreamingJob::Subscription(subscription) => {
-                mgr
-                    .catalog_manager
+                mgr.catalog_manager
                     .finish_create_subscription_procedure(internal_tables, subscription)
                     .await?
             }

@@ -537,7 +537,7 @@ impl fmt::Display for CreateSinkStatement {
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct CreateSubscriptionStatement{
+pub struct CreateSubscriptionStatement {
     pub if_not_exists: bool,
     pub subscription_name: ObjectName,
     pub with_properties: WithProperties,
@@ -553,7 +553,7 @@ impl ParseTo for CreateSubscriptionStatement {
         let subscription_from = if p.parse_keyword(Keyword::FROM) {
             impl_parse_to!(from_name: ObjectName, p);
             from_name
-        }  else {
+        } else {
             p.expected("FROM after CREATE SINK sink_name", p.peek_token())?
         };
 

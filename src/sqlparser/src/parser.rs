@@ -2075,6 +2075,8 @@ impl Parser {
             self.parse_create_source(or_replace)
         } else if self.parse_keyword(Keyword::SINK) {
             self.parse_create_sink(or_replace)
+        } else if self.parse_keyword(Keyword::SUBSCRIPTION) {
+            self.parse_create_subscription(or_replace)
         } else if self.parse_keyword(Keyword::CONNECTION) {
             self.parse_create_connection()
         } else if self.parse_keyword(Keyword::FUNCTION) {
@@ -2174,6 +2176,22 @@ impl Parser {
     pub fn parse_create_sink(&mut self, _or_replace: bool) -> Result<Statement, ParserError> {
         Ok(Statement::CreateSink {
             stmt: CreateSinkStatement::parse_to(self)?,
+        })
+    }
+
+    // CREATE
+    // SUBSCRIPTION
+    // [IF NOT EXISTS]?
+    // <subscription_name: Ident>
+    // FROM
+    // <materialized_view: Ident>
+    // [WITH (properties)]?
+    pub fn parse_create_subscription(
+        &mut self,
+        _or_replace: bool,
+    ) -> Result<Statement, ParserError> {
+        Ok(Statement::CreateSubscription {
+            stmt: CreateSubscriptionStatement::parse_to(self)?,
         })
     }
 

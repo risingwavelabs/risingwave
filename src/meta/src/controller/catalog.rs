@@ -24,15 +24,15 @@ use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::table::TableType;
 use risingwave_meta_model_v2::{
-    connection, database, function, index, object, object_dependency, schema, sink, subscription, source,
-    streaming_job, table, user_privilege, view, ColumnCatalogArray, ConnectionId, CreateType,
-    DatabaseId, FunctionId, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
-    SourceId, StreamSourceInfo, TableId, UserId,
+    connection, database, function, index, object, object_dependency, schema, sink, source,
+    streaming_job, subscription, table, user_privilege, view, ColumnCatalogArray, ConnectionId,
+    CreateType, DatabaseId, FunctionId, IndexId, JobStatus, ObjectId, PrivateLinkService, Property,
+    SchemaId, SourceId, StreamSourceInfo, TableId, UserId,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
-    PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
-    PbView, PbSubscription,
+    PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
+    PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbCreatingJobInfo;
 use risingwave_pb::meta::relation::PbRelationInfo;
@@ -203,11 +203,13 @@ impl CatalogController {
         let streaming_jobs: Vec<ObjectId> = Object::find()
             .select_only()
             .column(object::Column::Oid)
-            .filter(
-                object::Column::DatabaseId
-                    .eq(Some(database_id))
-                    .and(object::Column::ObjType.is_in([ObjectType::Table, ObjectType::Sink,ObjectType::Subscription])),
-            )
+            .filter(object::Column::DatabaseId.eq(Some(database_id)).and(
+                object::Column::ObjType.is_in([
+                    ObjectType::Table,
+                    ObjectType::Sink,
+                    ObjectType::Subscription,
+                ]),
+            ))
             .into_tuple()
             .all(&txn)
             .await?;
@@ -1073,7 +1075,9 @@ impl CatalogController {
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("subscription", object_id))?;
-                relations.push(PbRelationInfo::Subscription(ObjectModel(subscription, obj).into()));
+                relations.push(PbRelationInfo::Subscription(
+                    ObjectModel(subscription, obj).into(),
+                ));
 
                 // internal tables.
                 let internal_tables: Vec<TableId> = Table::find()
@@ -1315,8 +1319,11 @@ impl CatalogController {
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("subscription", object_id))?;
-                check_relation_name_duplicate(&subscription.name, database_id, new_schema, &txn).await?;
-                relations.push(PbRelationInfo::Subscription(ObjectModel(subscription, obj).into()));
+                check_relation_name_duplicate(&subscription.name, database_id, new_schema, &txn)
+                    .await?;
+                relations.push(PbRelationInfo::Subscription(
+                    ObjectModel(subscription, obj).into(),
+                ));
 
                 // internal tables.
                 let internal_tables: Vec<TableId> = Table::find()
@@ -1493,7 +1500,11 @@ impl CatalogController {
         assert!(
             to_drop_objects.iter().all(|obj| matches!(
                 obj.obj_type,
-                ObjectType::Table | ObjectType::Index | ObjectType::Sink | ObjectType::View | ObjectType::Subscription
+                ObjectType::Table
+                    | ObjectType::Index
+                    | ObjectType::Sink
+                    | ObjectType::View
+                    | ObjectType::Subscription
             )),
             "only these objects will depends on others"
         );
@@ -1505,7 +1516,11 @@ impl CatalogController {
             .map(|obj| obj.oid);
         let mut to_drop_streaming_jobs = to_drop_objects
             .iter()
-            .filter(|obj| obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Sink || obj.obj_type == ObjectType::Subscription)
+            .filter(|obj| {
+                obj.obj_type == ObjectType::Table
+                    || obj.obj_type == ObjectType::Sink
+                    || obj.obj_type == ObjectType::Subscription
+            })
             .map(|obj| obj.oid)
             .collect_vec();
 
@@ -1804,7 +1819,9 @@ impl CatalogController {
             ObjectType::Table => rename_relation!(Table, table, table_id, object_id),
             ObjectType::Source => rename_relation!(Source, source, source_id, object_id),
             ObjectType::Sink => rename_relation!(Sink, sink, sink_id, object_id),
-            ObjectType::Subscription => rename_relation!(Subscription, subscription, subscription_id, object_id),
+            ObjectType::Subscription => {
+                rename_relation!(Subscription, subscription, subscription_id, object_id)
+            }
             ObjectType::View => rename_relation!(View, view, view_id, object_id),
             ObjectType::Index => {
                 let (mut index, obj) = Index::find_by_id(object_id)
@@ -1860,7 +1877,9 @@ impl CatalogController {
             match obj.obj_type {
                 ObjectType::Table => rename_relation_ref!(Table, table, table_id, obj.oid),
                 ObjectType::Sink => rename_relation_ref!(Sink, sink, sink_id, obj.oid),
-                ObjectType::Subscription => rename_relation_ref!(Subscription, subscription, subscription_id, obj.oid),
+                ObjectType::Subscription => {
+                    rename_relation_ref!(Subscription, subscription, subscription_id, obj.oid)
+                }
                 ObjectType::View => rename_relation_ref!(View, view, view_id, obj.oid),
                 ObjectType::Index => {
                     let index_table_id: Option<TableId> = Index::find_by_id(obj.oid)
@@ -1871,7 +1890,9 @@ impl CatalogController {
                         .await?;
                     rename_relation_ref!(Table, table, table_id, index_table_id.unwrap());
                 }
-                _ => bail!("only table, sink, subscription, view and index depend on other objects."),
+                _ => {
+                    bail!("only table, sink, subscription, view and index depend on other objects.")
+                }
             }
         }
         txn.commit().await?;
@@ -2078,20 +2099,25 @@ impl CatalogController {
             .into_tuple()
             .all(&inner.db)
             .await?;
-        // let creating_subscriptions: Vec<(ObjectId, String, DatabaseId, SchemaId)> = Subcription::find()
-        //     .select_only()
-        //     .columns([sink::Column::SinkId, sink::Column::Name])
-        //     .columns([object::Column::DatabaseId, object::Column::SchemaId])
-        //     .join(JoinType::InnerJoin, sink::Relation::Object.def())
-        //     .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-        //     .filter(streaming_job::Column::JobStatus.eq(JobStatus::Creating))
-        //     .into_tuple()
-        //     .all(&inner.db)
-        //     .await?;
+        let creating_subscriptions: Vec<(ObjectId, String, DatabaseId, SchemaId)> =
+            Subscription::find()
+                .select_only()
+                .columns([
+                    subscription::Column::SubscriptionId,
+                    subscription::Column::Name,
+                ])
+                .columns([object::Column::DatabaseId, object::Column::SchemaId])
+                .join(JoinType::InnerJoin, subscription::Relation::Object.def())
+                .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+                .filter(streaming_job::Column::JobStatus.eq(JobStatus::Creating))
+                .into_tuple()
+                .all(&inner.db)
+                .await?;
 
         let mut job_mapping: HashMap<JobKey, ObjectId> = creating_tables
             .into_iter()
             .chain(creating_sinks.into_iter())
+            .chain(creating_subscriptions.into_iter())
             .map(|(id, name, database_id, schema_id)| ((database_id, schema_id, name), id))
             .collect();
 

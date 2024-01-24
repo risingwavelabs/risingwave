@@ -16,9 +16,7 @@ use risingwave_pb::catalog::PbSubscription;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
 
-use crate::{
-    ColumnCatalogArray, ColumnOrderArray, I32Array, Property , SubscriptionId
-};
+use crate::{ColumnCatalogArray, ColumnOrderArray, I32Array, Property, SubscriptionId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "subscription")]
@@ -57,7 +55,6 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl From<PbSubscription> for ActiveModel {
     fn from(pb_subscription: PbSubscription) -> Self {
-
         Self {
             subscription_id: Set(pb_subscription.id as _),
             name: Set(pb_subscription.name),

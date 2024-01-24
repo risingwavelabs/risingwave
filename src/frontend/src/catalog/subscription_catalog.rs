@@ -13,12 +13,11 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
+
 use itertools::Itertools;
-use risingwave_common::catalog::{
-    ColumnCatalog, OBJECT_ID_PLACEHOLDER, TableId, UserId,
-};
+use risingwave_common::catalog::{ColumnCatalog, TableId, UserId, OBJECT_ID_PLACEHOLDER};
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::{PbSubscription, PbStreamJobStatus};
+use risingwave_pb::catalog::{PbStreamJobStatus, PbSubscription};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(test, derive(Default))]
@@ -51,9 +50,9 @@ pub struct SubscriptionCatalog {
     pub subscription_from_name: String,
 
     pub database_id: u32,
-    
+
     pub schema_id: u32,
-    
+
     pub dependent_relations: Vec<TableId>,
 
     pub owner: UserId,
@@ -63,7 +62,6 @@ pub struct SubscriptionCatalog {
 pub struct SubscriptionId {
     pub subscription_id: u32,
 }
-
 
 impl SubscriptionId {
     pub const fn new(subscription_id: u32) -> Self {
@@ -83,11 +81,12 @@ impl SubscriptionId {
 }
 
 impl SubscriptionCatalog {
-    pub fn add_dependent_relations(mut self, mut dependent_relations: HashSet<TableId>)-> Self{
+    pub fn add_dependent_relations(mut self, mut dependent_relations: HashSet<TableId>) -> Self {
         dependent_relations.extend(self.dependent_relations);
         self.dependent_relations = dependent_relations.into_iter().collect();
         self
     }
+
     pub fn to_proto(&self) -> PbSubscription {
         assert!(!self.dependent_relations.is_empty());
         PbSubscription {
@@ -106,7 +105,11 @@ impl SubscriptionCatalog {
             db_name: self.db_name.clone(),
             database_id: self.database_id,
             schema_id: self.schema_id,
-            dependent_relations: self.dependent_relations.iter().map(|k| k.table_id).collect_vec(),
+            dependent_relations: self
+                .dependent_relations
+                .iter()
+                .map(|k| k.table_id)
+                .collect_vec(),
             initialized_at_epoch: None,
             created_at_epoch: None,
             owner: self.owner.into(),
@@ -117,19 +120,31 @@ impl SubscriptionCatalog {
 
 impl From<&PbSubscription> for SubscriptionCatalog {
     fn from(prost: &PbSubscription) -> Self {
-        Self{
+        Self {
             id: SubscriptionId::new(prost.id),
             name: prost.name.clone(),
             definition: prost.definition.clone(),
-            columns: prost.column_catalogs.iter().map(|c| ColumnCatalog::from(c.clone())).collect_vec(),
-            plan_pk: prost.plan_pk.iter().map(|k| ColumnOrder::from_protobuf(k)).collect_vec(),
+            columns: prost
+                .column_catalogs
+                .iter()
+                .map(|c| ColumnCatalog::from(c.clone()))
+                .collect_vec(),
+            plan_pk: prost
+                .plan_pk
+                .iter()
+                .map(ColumnOrder::from_protobuf)
+                .collect_vec(),
             distribution_key: prost.distribution_key.iter().map(|k| *k as _).collect_vec(),
             subscription_from_name: prost.subscription_from_name.clone(),
             properties: prost.properties.clone().into_iter().collect(),
             db_name: prost.db_name.clone(),
             database_id: prost.database_id,
             schema_id: prost.schema_id,
-            dependent_relations: prost.dependent_relations.iter().map(|k| TableId::new(k.clone())).collect_vec(),
+            dependent_relations: prost
+                .dependent_relations
+                .iter()
+                .map(|k| TableId::new(*k))
+                .collect_vec(),
             owner: prost.owner.into(),
         }
     }

@@ -21,8 +21,8 @@ use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId};
 use risingwave_common::error::Result;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{
-    PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
-    PbView, PbSubscription,
+    PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
+    PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
@@ -30,7 +30,7 @@ use risingwave_pb::ddl_service::{
     PbTableJobType, ReplaceTablePlan,
 };
 use risingwave_pb::meta::PbTableParallelism;
-use risingwave_pb::stream_plan::{StreamFragmentGraph};
+use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
@@ -331,7 +331,7 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         subscription: PbSubscription,
         graph: StreamFragmentGraph,
-    ) -> Result<()>{
+    ) -> Result<()> {
         let version = self
             .meta_client
             .create_subscription(subscription, graph)

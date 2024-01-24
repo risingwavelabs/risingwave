@@ -128,7 +128,8 @@ async fn do_handle_explain(
                     }
 
                     Statement::CreateSubscription { stmt } => {
-                        gen_subscription_plan(&session, context.clone(), stmt).map(|plan| plan.subscription_plan)
+                        gen_subscription_plan(&session, context.clone(), stmt)
+                            .map(|plan| plan.subscription_plan)
                     }
 
                     Statement::CreateIndex {

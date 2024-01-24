@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_pb::catalog::{
-    Connection, Database, Function, Index, Schema, Sink, Source, Table, View, Subscription,
+    Connection, Database, Function, Index, Schema, Sink, Source, Subscription, Table, View,
 };
 
 use crate::model::{MetadataModel, MetadataModelResult};
@@ -74,7 +74,6 @@ impl_model_for_catalog!(Table, CATALOG_TABLE_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Schema, CATALOG_SCHEMA_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Database, CATALOG_DATABASE_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Subscription, CATALOG_SUBSCRIPTION_CF_NAME, u32, get_id);
-
 
 #[cfg(test)]
 mod tests {

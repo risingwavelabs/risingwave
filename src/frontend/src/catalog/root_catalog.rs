@@ -21,14 +21,15 @@ use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::catalog::{
-    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, PbSubscription,
+    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbSubscription,
+    PbTable, PbView,
 };
 use risingwave_pb::hummock::HummockVersionStats;
 
 use super::function_catalog::FunctionCatalog;
 use super::source_catalog::SourceCatalog;
 use super::view_catalog::ViewCatalog;
-use super::{CatalogError, CatalogResult, ConnectionId, SinkId, SourceId, ViewId, SubscriptionId};
+use super::{CatalogError, CatalogResult, ConnectionId, SinkId, SourceId, SubscriptionId, ViewId};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
@@ -195,7 +196,7 @@ impl Catalog {
             .create_sink(proto);
     }
 
-    pub fn create_subscription(&mut self, proto: &PbSubscription){
+    pub fn create_subscription(&mut self, proto: &PbSubscription) {
         self.get_database_mut(proto.database_id)
             .unwrap()
             .get_schema_mut(proto.schema_id)
@@ -397,7 +398,12 @@ impl Catalog {
         }
     }
 
-    pub fn drop_subscription(&mut self, db_id: DatabaseId, schema_id: SchemaId, subscription_id: SubscriptionId) {
+    pub fn drop_subscription(
+        &mut self,
+        db_id: DatabaseId,
+        schema_id: SchemaId,
+        subscription_id: SubscriptionId,
+    ) {
         self.get_database_mut(db_id)
             .unwrap()
             .get_schema_mut(schema_id)
@@ -416,13 +422,13 @@ impl Catalog {
             database
                 .iter_schemas_mut()
                 .find(|schema| {
-                    schema.id() != proto.schema_id && schema.get_subscription_by_id(&proto.id).is_some()
+                    schema.id() != proto.schema_id
+                        && schema.get_subscription_by_id(&proto.id).is_some()
                 })
                 .unwrap()
                 .drop_subscription(proto.id);
         }
     }
-
 
     pub fn drop_index(&mut self, db_id: DatabaseId, schema_id: SchemaId, index_id: IndexId) {
         self.get_database_mut(db_id)

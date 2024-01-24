@@ -273,9 +273,11 @@ impl FrontendObserverNode {
                         },
                         RelationInfo::Subscription(subscription) => match resp.operation() {
                             Operation::Add => catalog_guard.create_subscription(subscription),
-                            Operation::Delete => {
-                                catalog_guard.drop_subscription(subscription.database_id, subscription.schema_id, subscription.id)
-                            }
+                            Operation::Delete => catalog_guard.drop_subscription(
+                                subscription.database_id,
+                                subscription.schema_id,
+                                subscription.id,
+                            ),
                             Operation::Update => catalog_guard.update_subscription(subscription),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },

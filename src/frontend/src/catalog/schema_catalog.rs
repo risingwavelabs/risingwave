@@ -22,11 +22,11 @@ use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
 pub use risingwave_expr::sig::*;
 use risingwave_pb::catalog::{
-    PbConnection, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, PbSubscription,
+    PbConnection, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbSubscription, PbTable, PbView,
 };
 
-use super::{OwnedByUserCatalog, SubscriptionId};
 use super::subscription_catalog::SubscriptionCatalog;
+use super::{OwnedByUserCatalog, SubscriptionId};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
@@ -303,12 +303,16 @@ impl SchemaCatalog {
         self.subscription_by_name
             .try_insert(name, subscription_ref.clone())
             .unwrap();
-        self.subscription_by_id.try_insert(id, subscription_ref).unwrap();
+        self.subscription_by_id
+            .try_insert(id, subscription_ref)
+            .unwrap();
     }
 
     pub fn drop_subscription(&mut self, id: SubscriptionId) {
         let subscription_ref = self.subscription_by_id.remove(&id).unwrap();
-        self.subscription_by_name.remove(&subscription_ref.name).unwrap();
+        self.subscription_by_name
+            .remove(&subscription_ref.name)
+            .unwrap();
     }
 
     pub fn update_subscription(&mut self, prost: &PbSubscription) {
@@ -323,7 +327,8 @@ impl SchemaCatalog {
             self.subscription_by_name.remove(&old_subscription.name);
         }
 
-        self.subscription_by_name.insert(name, subscription_ref.clone());
+        self.subscription_by_name
+            .insert(name, subscription_ref.clone());
         self.subscription_by_id.insert(id, subscription_ref);
     }
 

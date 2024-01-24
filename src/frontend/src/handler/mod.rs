@@ -55,6 +55,7 @@ pub mod create_schema;
 pub mod create_sink;
 pub mod create_source;
 pub mod create_sql_function;
+pub mod create_subscription;
 pub mod create_table;
 pub mod create_table_as;
 pub mod create_user;
@@ -83,7 +84,6 @@ mod transaction;
 pub mod util;
 pub mod variable;
 mod wait;
-pub mod create_subscription;
 
 /// The [`PgResponseBuilder`] used by RisingWave.
 pub type RwPgResponseBuilder = PgResponseBuilder<PgResponseStream>;
@@ -202,7 +202,9 @@ pub async fn handle(
             create_source::handle_create_source(handler_args, stmt).await
         }
         Statement::CreateSink { stmt } => create_sink::handle_create_sink(handler_args, stmt).await,
-        Statement::CreateSubscription { stmt } => create_subscription::handle_create_subscription(handler_args, stmt).await,
+        Statement::CreateSubscription { stmt } => {
+            create_subscription::handle_create_subscription(handler_args, stmt).await
+        }
         Statement::CreateConnection { stmt } => {
             create_connection::handle_create_connection(handler_args, stmt).await
         }
@@ -338,6 +340,7 @@ pub async fn handle(
                     | ObjectType::View
                     | ObjectType::Sink
                     | ObjectType::Source
+                    | ObjectType::Subscription
                     | ObjectType::Index
                     | ObjectType::Table => {
                         cascade = true;
@@ -368,6 +371,9 @@ pub async fn handle(
                 }
                 ObjectType::Sink => {
                     drop_sink::handle_drop_sink(handler_args, object_name, if_exists, cascade).await
+                }
+                ObjectType::Subscription => {
+                    unimplemented!()
                 }
                 ObjectType::Database => {
                     drop_database::handle_drop_database(

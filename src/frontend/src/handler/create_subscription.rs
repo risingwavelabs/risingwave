@@ -13,15 +13,24 @@
 // limitations under the License.
 
 use std::rc::Rc;
+
 use either::Either;
-use pgwire::pg_response::{StatementType, PgResponse};
+use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::UserId;
+use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
-use risingwave_sqlparser::ast::{CreateSubscriptionStatement,Query};
+use risingwave_sqlparser::ast::{CreateSubscriptionStatement, Query};
 
-use crate::{session::SessionImpl, OptimizerContextRef, Binder, Planner, PlanRef, optimizer::RelationCollectorVisitor, Explain, catalog::subscription_catalog::SubscriptionCatalog, OptimizerContext, build_graph, scheduler::streaming_manager::CreatingStreamingJobInfo};
-
-use super::{create_sink::gen_sink_query_from_name, privilege::resolve_query_privileges, HandlerArgs, RwPgResponse};
-use risingwave_common::{error::{Result}, catalog::UserId};
+use super::create_sink::gen_sink_query_from_name;
+use super::privilege::resolve_query_privileges;
+use super::{HandlerArgs, RwPgResponse};
+use crate::catalog::subscription_catalog::SubscriptionCatalog;
+use crate::optimizer::RelationCollectorVisitor;
+use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
+use crate::session::SessionImpl;
+use crate::{
+    build_graph, Binder, Explain, OptimizerContext, OptimizerContextRef, PlanRef, Planner,
+};
 
 // used to store result of `gen_sink_plan`
 pub struct SubscriptionPlanContext {
@@ -36,10 +45,17 @@ pub fn gen_subscription_plan(
     stmt: CreateSubscriptionStatement,
 ) -> Result<SubscriptionPlanContext> {
     let db_name = session.database();
-    let (schema_name, subscription_name) = Binder::resolve_schema_qualified_name(db_name, stmt.subscription_name.clone())?;
-    let subscription_from_table_name = stmt.subscription_from.0.last().unwrap().real_value().clone();
+    let (schema_name, subscription_name) =
+        Binder::resolve_schema_qualified_name(db_name, stmt.subscription_name.clone())?;
+    let subscription_from_table_name = stmt
+        .subscription_from
+        .0
+        .last()
+        .unwrap()
+        .real_value()
+        .clone();
     let query = Box::new(gen_sink_query_from_name(stmt.subscription_from)?);
-    
+
     let (database_id, schema_id) =
         session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
@@ -55,7 +71,7 @@ pub fn gen_subscription_plan(
     session.check_privileges(&check_items)?;
 
     let with_options = context.with_options().clone();
-    
+    println!("{:?}", with_options);
     let mut plan_root = Planner::new(context).plan_query(bound)?;
 
     let subscription_plan = plan_root.gen_subscription_plan(
@@ -84,7 +100,7 @@ pub fn gen_subscription_plan(
 
     let dependent_relations =
         RelationCollectorVisitor::collect_with(dependent_relations, subscription_plan.clone());
-        
+
     let subscription_catalog = subscription_catalog.add_dependent_relations(dependent_relations);
     Ok(SubscriptionPlanContext {
         query,
@@ -111,7 +127,7 @@ pub async fn handle_create_subscription(
         let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
 
         let SubscriptionPlanContext {
-            query:_,
+            query: _,
             subscription_plan,
             subscription_catalog,
         } = gen_subscription_plan(&session, context.clone(), stmt)?;
@@ -139,7 +155,7 @@ pub async fn handle_create_subscription(
                 subscription_catalog.schema_id,
                 subscription_catalog.name.clone(),
             ));
-    
+
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_subscription(subscription_catalog.to_proto(), graph)

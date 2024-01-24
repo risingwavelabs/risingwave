@@ -342,13 +342,15 @@ impl StreamSink {
         Self::infer_kv_log_store_table_catalog_inner(&self.input, &self.sink_desc.columns)
     }
 
-    pub fn infer_kv_log_store_table_catalog_inner(input:&PlanRef, columns: &Vec<ColumnCatalog>) -> TableCatalog{
+    pub fn infer_kv_log_store_table_catalog_inner(
+        input: &PlanRef,
+        columns: &Vec<ColumnCatalog>,
+    ) -> TableCatalog {
         let mut table_catalog_builder =
             TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
 
-        let mut value_indices = Vec::with_capacity(
-            KV_LOG_STORE_PREDEFINED_COLUMNS.len() + columns.len(),
-        );
+        let mut value_indices =
+            Vec::with_capacity(KV_LOG_STORE_PREDEFINED_COLUMNS.len() + columns.len());
 
         for (name, data_type) in KV_LOG_STORE_PREDEFINED_COLUMNS {
             let indice = table_catalog_builder.add_column(&Field::with_name(data_type, name));
@@ -361,7 +363,7 @@ impl StreamSink {
 
         let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
 
-        let payload_indices = table_catalog_builder.extend_columns(&columns);
+        let payload_indices = table_catalog_builder.extend_columns(columns);
 
         value_indices.extend(payload_indices);
         table_catalog_builder.set_value_indices(value_indices);

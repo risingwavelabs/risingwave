@@ -44,8 +44,8 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
-    Connection, PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
-    PbView, Table, PbSubscription,
+    Connection, PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
+    PbSubscription, PbTable, PbView, Table,
 };
 use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;

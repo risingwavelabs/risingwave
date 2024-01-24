@@ -36,7 +36,7 @@ use risingwave_connector::source::{should_copy_to_format_encode_options, UPSTREA
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType};
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, Index, PbSource, PbStreamJobStatus,
-    Schema, Sink, Source, StreamJobStatus, Table, View, Subscription,
+    Schema, Sink, Source, StreamJobStatus, Subscription, Table, View,
 };
 use risingwave_pb::ddl_service::{alter_owner_request, alter_set_schema_request};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -397,7 +397,11 @@ impl CatalogManager {
                 .chain(schemas_to_drop.iter().map(|schema| schema.owner))
                 .chain(sources_to_drop.iter().map(|source| source.owner))
                 .chain(sinks_to_drop.iter().map(|sink| sink.owner))
-                .chain(subscriptions_to_drop.iter().map(|subscription| subscription.owner))
+                .chain(
+                    subscriptions_to_drop
+                        .iter()
+                        .map(|subscription| subscription.owner),
+                )
                 .chain(
                     tables_to_drop
                         .iter()
@@ -707,7 +711,9 @@ impl CatalogManager {
                     .await
             }
             StreamingJob::Sink(sink, _) => self.start_create_sink_procedure(sink).await,
-            StreamingJob::Subscription(subscription) => self.start_create_subscription_procedure(subscription).await,
+            StreamingJob::Subscription(subscription) => {
+                self.start_create_subscription_procedure(subscription).await
+            }
             StreamingJob::Index(index, index_table) => {
                 self.start_create_index_procedure(index, index_table).await
             }
@@ -1544,7 +1550,10 @@ impl CatalogManager {
 
                     all_internal_table_ids.extend(table_fragments.internal_table_ids());
 
-                    if let Some(ref_count) = database_core.relation_ref_count.get(&subscription.id).cloned()
+                    if let Some(ref_count) = database_core
+                        .relation_ref_count
+                        .get(&subscription.id)
+                        .cloned()
                     {
                         if ref_count > 0 {
                             // Other relations depend on it.
@@ -1556,7 +1565,8 @@ impl CatalogManager {
                                     )));
                                 }
                                 DropMode::Cascade => {
-                                    for relation_info in relations_depend_on(subscription.id as RelationId)
+                                    for relation_info in
+                                        relations_depend_on(subscription.id as RelationId)
                                     {
                                         deque.push_back(relation_info);
                                     }
@@ -1592,7 +1602,7 @@ impl CatalogManager {
             .iter()
             .map(|sink_id| sinks.remove(*sink_id).unwrap())
             .collect_vec();
-        let subcriptions_removed = all_subscription_ids
+        let subscriptions_removed = all_subscription_ids
             .iter()
             .map(|subscription_id| subscriptions.remove(*subscription_id).unwrap())
             .collect_vec();
@@ -1654,7 +1664,16 @@ impl CatalogManager {
             )
         };
 
-        commit_meta!(self, tables, indexes, sources, views, sinks, users,subscriptions)?;
+        commit_meta!(
+            self,
+            tables,
+            indexes,
+            sources,
+            views,
+            sinks,
+            users,
+            subscriptions
+        )?;
 
         for index in &indexes_removed {
             user_core.decrease_ref(index.owner);
@@ -1678,7 +1697,7 @@ impl CatalogManager {
             user_core.decrease_ref(sink.owner);
         }
 
-        for subscription in &subcriptions_removed {
+        for subscription in &subscriptions_removed {
             user_core.decrease_ref(subscription.owner);
         }
 
@@ -1710,7 +1729,7 @@ impl CatalogManager {
             }
         }
 
-        for subscription in &subcriptions_removed {
+        for subscription in &subscriptions_removed {
             for dependent_relation_id in &subscription.dependent_relations {
                 database_core.decrease_ref_count(*dependent_relation_id);
             }
@@ -1740,9 +1759,13 @@ impl CatalogManager {
                         .chain(sinks_removed.into_iter().map(|sink| Relation {
                             relation_info: RelationInfo::Sink(sink).into(),
                         }))
-                        .chain(subcriptions_removed.into_iter().map(|subscription| Relation {
-                            relation_info: RelationInfo::Subscription(subscription).into(),
-                        }))
+                        .chain(
+                            subscriptions_removed
+                                .into_iter()
+                                .map(|subscription| Relation {
+                                    relation_info: RelationInfo::Subscription(subscription).into(),
+                                }),
+                        )
                         .collect_vec(),
                 }),
             )
@@ -1845,7 +1868,8 @@ impl CatalogManager {
         for subscription in database_mgr.subscriptions.values() {
             if subscription.dependent_relations.contains(&relation_id) {
                 let mut subscription = subscription.clone();
-                subscription.definition = alter_relation_rename_refs(&subscription.definition, from, to);
+                subscription.definition =
+                    alter_relation_rename_refs(&subscription.definition, from, to);
                 to_update_subscriptions.push(subscription);
             }
         }
@@ -1854,7 +1878,8 @@ impl CatalogManager {
         let mut tables = BTreeMapTransaction::new(&mut database_mgr.tables);
         let mut views = BTreeMapTransaction::new(&mut database_mgr.views);
         let mut sinks = BTreeMapTransaction::new(&mut database_mgr.sinks);
-        let mut subscriptions: BTreeMapTransaction<'_, u32, risingwave_pb::catalog::Subscription> = BTreeMapTransaction::new(&mut database_mgr.subscriptions);
+        let mut subscriptions: BTreeMapTransaction<'_, u32, risingwave_pb::catalog::Subscription> =
+            BTreeMapTransaction::new(&mut database_mgr.subscriptions);
         let mut sources = BTreeMapTransaction::new(&mut database_mgr.sources);
         to_update_tables.iter().for_each(|table| {
             tables.insert(table.id, table.clone());
@@ -1896,9 +1921,13 @@ impl CatalogManager {
                         .chain(to_update_sinks.into_iter().map(|sink| Relation {
                             relation_info: RelationInfo::Sink(sink).into(),
                         }))
-                        .chain(to_update_subscriptions.into_iter().map(|subscription| Relation {
-                            relation_info: RelationInfo::Subscription(subscription).into(),
-                        }))
+                        .chain(
+                            to_update_subscriptions
+                                .into_iter()
+                                .map(|subscription| Relation {
+                                    relation_info: RelationInfo::Subscription(subscription).into(),
+                                }),
+                        )
                         .chain(to_update_source.into_iter().map(|source| Relation {
                             relation_info: RelationInfo::Source(source).into(),
                         }))
@@ -1990,7 +2019,11 @@ impl CatalogManager {
         database_core.ensure_subscription_id(subscription_id)?;
 
         // 1. validate new subscription name.
-        let mut subscription = database_core.subscriptions.get(&subscription_id).unwrap().clone();
+        let mut subscription = database_core
+            .subscriptions
+            .get(&subscription_id)
+            .unwrap()
+            .clone();
         database_core.check_relation_name_duplicated(&(
             subscription.database_id,
             subscription.schema_id,
@@ -1999,7 +2032,8 @@ impl CatalogManager {
 
         // 2. rename subscription and its definition.
         subscription.name = subscription_name.to_string();
-        subscription.definition = alter_relation_rename(&subscription.definition, subscription_name);
+        subscription.definition =
+            alter_relation_rename(&subscription.definition, subscription_name);
 
         // 3. commit meta.
         let mut subscriptions = BTreeMapTransaction::new(&mut database_core.subscriptions);
@@ -2007,7 +2041,10 @@ impl CatalogManager {
         commit_meta!(self, subscriptions)?;
 
         let version = self
-            .notify_frontend_relation_info(Operation::Update, RelationInfo::Subscription(subscription))
+            .notify_frontend_relation_info(
+                Operation::Update,
+                RelationInfo::Subscription(subscription),
+            )
             .await;
 
         Ok(version)
@@ -2295,7 +2332,7 @@ impl CatalogManager {
                 user_core.increase_ref(owner_id);
                 user_core.decrease_ref(old_owner_id);
             }
-            //todo subscription
+            // todo subscription
             alter_owner_request::Object::DatabaseId(database_id) => {
                 database_core.ensure_database_id(database_id)?;
                 let mut databases = BTreeMapTransaction::new(&mut database_core.databases);
@@ -3072,7 +3109,10 @@ impl CatalogManager {
         }
     }
 
-    pub async fn start_create_subscription_procedure(&self, subscription: &Subscription) -> MetaResult<()> {
+    pub async fn start_create_subscription_procedure(
+        &self,
+        subscription: &Subscription,
+    ) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -3081,7 +3121,11 @@ impl CatalogManager {
         for dependent_id in &subscription.dependent_relations {
             database_core.ensure_table_view_or_source_id(dependent_id)?;
         }
-        let key = (subscription.database_id, subscription.schema_id, subscription.name.clone());
+        let key = (
+            subscription.database_id,
+            subscription.schema_id,
+            subscription.name.clone(),
+        );
         database_core.check_relation_name_duplicated(&key)?;
         #[cfg(not(test))]
         user_core.ensure_user_id(subscription.owner)?;
@@ -3099,13 +3143,18 @@ impl CatalogManager {
         }
     }
 
-    pub async fn finish_create_subscription_procedure(&self,
+    pub async fn finish_create_subscription_procedure(
+        &self,
         mut internal_tables: Vec<Table>,
         mut subscription: Subscription,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        let key = (subscription.database_id, subscription.schema_id, subscription.name.clone());
+        let key = (
+            subscription.database_id,
+            subscription.schema_id,
+            subscription.name.clone(),
+        );
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let mut subscriptions = BTreeMapTransaction::new(&mut database_core.subscriptions);
         assert!(
@@ -3146,14 +3195,15 @@ impl CatalogManager {
         Ok(version)
     }
 
-    pub async fn cancel_create_subscription_procedure(
-        &self,
-        subscription: &Subscription,
-    ) {
+    pub async fn cancel_create_subscription_procedure(&self, subscription: &Subscription) {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
-        let key = (subscription.database_id, subscription.schema_id, subscription.name.clone());
+        let key = (
+            subscription.database_id,
+            subscription.schema_id,
+            subscription.name.clone(),
+        );
         assert!(
             !database_core.subscriptions.contains_key(&subscription.id),
             "subscription must be in creating procedure"
@@ -3467,11 +3517,7 @@ impl CatalogManager {
     }
 
     pub async fn list_subscriptions(&self) -> Vec<Subscription> {
-        self.core
-            .lock()
-            .await
-            .database
-            .list_subscriptions()
+        self.core.lock().await.database.list_subscriptions()
     }
 
     pub async fn list_views(&self) -> Vec<View> {
