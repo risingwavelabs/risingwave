@@ -668,6 +668,13 @@ impl Levels {
         &mut self.levels[level_idx - 1]
     }
 
+    pub fn is_last_level(&self, level_idx: u32) -> bool {
+        self.levels
+            .last()
+            .as_ref()
+            .map_or(false, |level| level.level_idx == level_idx)
+    }
+
     pub fn count_ssts(&self) -> usize {
         self.get_level0()
             .get_sub_levels()
