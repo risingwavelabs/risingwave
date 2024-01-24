@@ -110,6 +110,7 @@ pub enum BatchError {
     ),
 
     // Make the ref-counted type to be a variant for easier code structuring.
+    // TODO(error-handling): replace with `thiserror_ext::Arc`
     #[error(transparent)]
     Shared(
         #[from]
