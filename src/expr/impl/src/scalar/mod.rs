@@ -35,7 +35,7 @@ mod case;
 mod cast;
 mod cmp;
 mod coalesce;
-mod concat_op;
+mod concat;
 mod concat_ws;
 mod conjunction;
 mod date_trunc;

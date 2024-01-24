@@ -98,7 +98,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Md5
             | expr_node::Type::CharLength
             | expr_node::Type::Repeat
-            | expr_node::Type::ConcatOp
+            | expr_node::Type::Concat
+            | expr_node::Type::ConcatVariadic
             | expr_node::Type::BoolOut
             | expr_node::Type::OctetLength
             | expr_node::Type::BitLength

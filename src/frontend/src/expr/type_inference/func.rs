@@ -346,7 +346,7 @@ fn infer_type_for_special(
             }
             Ok(Some(DataType::Varchar))
         }
-        ExprType::ConcatOp => {
+        ExprType::Concat => {
             for input in inputs {
                 input.cast_explicit_mut(DataType::Varchar)?;
             }

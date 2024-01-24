@@ -1362,6 +1362,7 @@ impl Binder {
         if variadic {
             let func = match function_name {
                 "format" => ExprType::FormatVariadic,
+                "concat" => ExprType::ConcatVariadic,
                 "concat_ws" => ExprType::ConcatWsVariadic,
                 "jsonb_build_array" => ExprType::JsonbBuildArrayVariadic,
                 "jsonb_build_object" => ExprType::JsonbBuildObjectVariadic,
