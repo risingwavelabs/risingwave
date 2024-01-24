@@ -552,8 +552,8 @@ impl CatalogController {
         streaming_job: StreamingJob,
         merge_updates: Vec<PbMergeUpdate>,
         table_col_index_mapping: Option<ColIndexMapping>,
-        _creating_sink_id: Option<SinkId>,
-        _dropping_sink_id: Option<SinkId>,
+        creating_sink_id: Option<SinkId>,
+        dropping_sink_id: Option<SinkId>,
     ) -> MetaResult<NotificationVersion> {
         // Question: The source catalog should be remain unchanged?
         let StreamingJob::Table(_, table, ..) = streaming_job else {
@@ -564,7 +564,22 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
         let job_id = table.id as ObjectId;
 
-        let table = table::ActiveModel::from(table).update(&txn).await?;
+        let mut table = table::ActiveModel::from(table);
+        let mut incoming_sinks = table.incoming_sinks.as_ref().inner_ref().clone();
+        if let Some(sink_id) = creating_sink_id {
+            debug_assert!(!incoming_sinks.contains(&(sink_id as i32)));
+            incoming_sinks.push(sink_id as _);
+        }
+
+        if let Some(sink_id) = dropping_sink_id {
+            let drained = incoming_sinks
+                .extract_if(|id| *id == sink_id as i32)
+                .collect_vec();
+            debug_assert_eq!(drained, vec![sink_id as i32]);
+        }
+
+        table.incoming_sinks = Set(incoming_sinks.into());
+        let table = table.update(&txn).await?;
 
         // let old_fragment_mappings = get_fragment_mappings(&txn, job_id).await?;
         // 1. replace old fragments/actors with new ones.

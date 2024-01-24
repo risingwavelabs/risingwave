@@ -26,10 +26,13 @@ use thiserror_ext::AsReport;
 
 use crate::controller::catalog::ReleaseContext;
 use crate::manager::{
-    MetadataManagerV2, NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION,
+    MetadataManager, MetadataManagerV2, NotificationVersion, StreamingJob,
+    IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{MetadataModel, StreamContext};
-use crate::rpc::ddl_controller::{fill_table_stream_graph_info, DdlController, DropMode};
+use crate::rpc::ddl_controller::{
+    fill_table_stream_graph_info, DdlController, DropMode, ReplaceTableInfo,
+};
 use crate::stream::{validate_sink, StreamFragmentGraph};
 use crate::MetaResult;
 
@@ -38,6 +41,7 @@ impl DdlController {
         &self,
         mut streaming_job: StreamingJob,
         mut fragment_graph: StreamFragmentGraphProto,
+        affected_table_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<NotificationVersion> {
         let mgr = self.metadata_manager.as_v2_ref();
 
@@ -80,7 +84,13 @@ impl DdlController {
 
         // create streaming job.
         match self
-            .create_streaming_job_inner_v2(mgr, ctx, &mut streaming_job, fragment_graph)
+            .create_streaming_job_inner_v2(
+                mgr,
+                ctx,
+                &mut streaming_job,
+                fragment_graph,
+                affected_table_replace_info,
+            )
             .await
         {
             Ok(version) => Ok(version),
@@ -110,6 +120,7 @@ impl DdlController {
         ctx: StreamContext,
         streaming_job: &mut StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
+        affected_table_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<NotificationVersion> {
         let mut fragment_graph =
             StreamFragmentGraph::new(&self.env, fragment_graph, streaming_job).await?;
@@ -124,10 +135,32 @@ impl DdlController {
             .await?;
         fragment_graph.refill_internal_table_ids(table_id_map);
 
+        let affected_table_replace_info = match affected_table_replace_info {
+            Some(replace_table_info) => {
+                let mgr = self.metadata_manager.as_v2_ref();
+
+                let ReplaceTableInfo {
+                    mut streaming_job,
+                    fragment_graph,
+                    ..
+                } = replace_table_info;
+
+                // todo
+
+                Some((streaming_job, fragment_graph))
+            }
+            None => None,
+        };
+
         // create fragment and actor catalogs.
         tracing::debug!(id = streaming_job.id(), "building streaming job");
         let (ctx, table_fragments) = self
-            .build_stream_job(ctx, streaming_job, fragment_graph, None)
+            .build_stream_job(
+                ctx,
+                streaming_job,
+                fragment_graph,
+                affected_table_replace_info,
+            )
             .await?;
 
         match streaming_job {
@@ -139,9 +172,12 @@ impl DdlController {
                 self.source_manager.register_source(source).await?;
             }
             StreamingJob::Sink(sink, target_table) => {
-                if target_table.is_some() {
-                    unimplemented!("support create sink into table in v2");
+                if let Some((StreamingJob::Table(source, table, _), ..)) =
+                    &ctx.replace_table_job_info
+                {
+                    *target_table = Some((table.clone(), source.clone()));
                 }
+
                 // Validate the sink on the connector node.
                 validate_sink(sink).await?;
             }
@@ -160,13 +196,31 @@ impl DdlController {
         let stream_job_id = streaming_job.id();
         match streaming_job.create_type() {
             CreateType::Unspecified | CreateType::Foreground => {
+                let replace_table_job_info = ctx.replace_table_job_info.clone();
+
                 self.stream_manager
                     .create_streaming_job(table_fragments, ctx)
                     .await?;
-                let version = mgr
+
+                let mut version = mgr
                     .catalog_controller
                     .finish_streaming_job(stream_job_id as _)
                     .await?;
+
+                if let Some((streaming_job, ctx, table_fragments)) = replace_table_job_info {
+                    version = mgr
+                        .catalog_controller
+                        .finish_replace_streaming_job(
+                            table_fragments.table_id().table_id as _,
+                            streaming_job,
+                            ctx.merge_updates.clone(),
+                            None,
+                            Some(stream_job_id),
+                            None,
+                        )
+                        .await?;
+                }
+
                 Ok(version)
             }
             CreateType::Background => {

@@ -571,6 +571,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Table::Description).string())
                     .col(ColumnDef::new(Table::Version).json())
                     .col(ColumnDef::new(Table::RetentionSeconds).integer())
+                    .col(ColumnDef::new(Table::IncomingSinks).json().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_table_object_id")
@@ -1034,6 +1035,7 @@ enum Table {
     Description,
     Version,
     RetentionSeconds,
+    IncomingSinks,
 }
 
 #[derive(DeriveIden)]

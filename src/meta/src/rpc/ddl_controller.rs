@@ -616,7 +616,7 @@ impl DdlController {
     ) -> MetaResult<NotificationVersion> {
         let MetadataManager::V1(mgr) = &self.metadata_manager else {
             return self
-                .create_streaming_job_v2(stream_job, fragment_graph)
+                .create_streaming_job_v2(stream_job, fragment_graph, affected_table_replace_info)
                 .await;
         };
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
@@ -845,7 +845,7 @@ impl DdlController {
     // Meanwhile, the Dispatcher corresponding to the upstream of the merge will also be added to the replace table context here.
     async fn inject_replace_table_job_for_table_sink(
         &self,
-        mgr: &MetadataManagerV1,
+        mgr: &MetadataManager,
         stream_ctx: StreamContext,
         sink: Option<&Sink>,
         creating_sink_table_fragments: Option<&TableFragments>,
@@ -901,17 +901,14 @@ impl DdlController {
         }
 
         let [table_catalog]: [_; 1] = mgr
-            .catalog_manager
-            .get_tables(&[table.id])
-            .await
+            .get_table_catalog_by_ids(vec![table.id])
+            .await?
             .try_into()
             .expect("Target table should exist in sink into table");
 
         assert_eq!(table_catalog.incoming_sinks, table.incoming_sinks);
 
         {
-            let guard = mgr.fragment_manager.get_fragment_read_guard().await;
-
             for sink_id in &table_catalog.incoming_sinks {
                 if let Some(dropping_sink_id) = dropping_sink_id
                     && *sink_id == dropping_sink_id
@@ -919,10 +916,9 @@ impl DdlController {
                     continue;
                 };
 
-                let sink_table_fragments = guard
-                    .table_fragments()
-                    .get(&risingwave_common::catalog::TableId::new(*sink_id))
-                    .unwrap();
+                let sink_table_fragments = mgr
+                    .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(*sink_id))
+                    .await?;
 
                 let sink_fragment = sink_table_fragments.sink_fragment().unwrap();
 
@@ -1210,6 +1206,7 @@ impl DdlController {
             } = replace_table_info;
             let fragment_graph = self
                 .prepare_replace_table(
+
                     mgr.catalog_manager.clone(),
                     &mut streaming_job,
                     fragment_graph,
@@ -1220,7 +1217,7 @@ impl DdlController {
                 tracing::debug!(id = streaming_job.id(), "replacing table for dropped sink");
                 let (context, table_fragments) = self
                     .inject_replace_table_job_for_table_sink(
-                        mgr,
+                        &self.metadata_manager,
                         stream_ctx,
                         None,
                         None,
@@ -1387,13 +1384,10 @@ impl DdlController {
                 let StreamingJob::Sink(s, _) = stream_job else {
                     bail!("additional replace table event only occurs when sinking into table");
                 };
-                let MetadataManager::V1(mgr) = &self.metadata_manager else {
-                    unimplemented!("support create sink into table in v2");
-                };
 
                 let (context, table_fragments) = self
                     .inject_replace_table_job_for_table_sink(
-                        mgr,
+                        &self.metadata_manager,
                         stream_ctx,
                         Some(s),
                         Some(&table_fragments),
