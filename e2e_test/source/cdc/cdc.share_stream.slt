@@ -96,6 +96,7 @@ create table orders_test (
    PRIMARY KEY (order_id)
 ) from mysql_mytest table 'mytest.orders';
 
+# Should not contain records inserted before the table is created (e.g. 'Bob' inserted above)
 statement ok
 create table orders_no_backfill (
    order_id int,
