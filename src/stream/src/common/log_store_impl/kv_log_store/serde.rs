@@ -781,7 +781,6 @@ mod tests {
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         check_rows_eq, gen_test_data, gen_test_log_store_table, TEST_TABLE_ID,
     };
-    use crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO;
     use crate::common::log_store_impl::kv_log_store::{
         KvLogStorePkInfo, KvLogStoreReadMetrics, SeqIdType, KV_LOG_STORE_V2_INFO,
     };
@@ -792,7 +791,8 @@ mod tests {
 
     #[test]
     fn test_serde_v1() {
-        test_serde_inner(&KV_LOG_STORE_V1_INFO);
+        #[expect(deprecated)]
+        test_serde_inner(&crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO);
     }
 
     #[test]
@@ -932,7 +932,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_deserialize_stream_chunk_v1() {
-        test_deserialize_stream_chunk_inner(&KV_LOG_STORE_V1_INFO).await
+        #[expect(deprecated)]
+        test_deserialize_stream_chunk_inner(
+            &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
+        )
+        .await
     }
 
     #[tokio::test]
@@ -1082,7 +1086,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_row_stream_basic_v1() {
-        test_row_stream_basic_inner(&KV_LOG_STORE_V1_INFO).await
+        #[expect(deprecated)]
+        test_row_stream_basic_inner(
+            &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
+        )
+        .await
     }
 
     #[tokio::test]
@@ -1187,7 +1195,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_log_store_stream_basic_v1() {
-        test_log_store_stream_basic_inner(&KV_LOG_STORE_V1_INFO).await
+        #[expect(deprecated)]
+        test_log_store_stream_basic_inner(
+            &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
+        )
+        .await
     }
 
     #[tokio::test]

@@ -29,8 +29,7 @@ use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
 use super::*;
 use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
 use crate::common::log_store_impl::kv_log_store::{
-    KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo, KV_LOG_STORE_V1_INFO,
-    KV_LOG_STORE_V2_INFO,
+    KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo, KV_LOG_STORE_V2_INFO,
 };
 use crate::executor::SinkExecutor;
 
@@ -42,8 +41,14 @@ fn resolve_pk_info(
 ) -> StreamResult<&'static KvLogStorePkInfo> {
     let predefined_column_len = log_store_table.columns.len() - input_schema.fields.len();
 
+    #[expect(deprecated)]
     let info = match predefined_column_len {
-        len if len == KV_LOG_STORE_V1_INFO.predefined_column_len() => Ok(&KV_LOG_STORE_V1_INFO),
+        len if len
+            == crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V1_INFO
+                .predefined_column_len() =>
+        {
+            Ok(&crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V1_INFO)
+        }
         len if len == KV_LOG_STORE_V2_INFO.predefined_column_len() => Ok(&KV_LOG_STORE_V2_INFO),
         other_len => Err(anyhow!(
             "invalid log store predefined len {}. log store table: {:?}, input_schema: {:?}",

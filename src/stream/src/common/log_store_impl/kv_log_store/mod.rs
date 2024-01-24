@@ -221,6 +221,7 @@ impl KvLogStorePkInfo {
     }
 }
 
+#[expect(deprecated)]
 pub(crate) use v1::KV_LOG_STORE_V1_INFO;
 
 mod v1 {
@@ -236,6 +237,7 @@ mod v1 {
     use super::{KvLogStorePkInfo, KvLogStorePkRow};
     use crate::common::log_store_impl::kv_log_store::SeqIdType;
 
+    #[deprecated]
     pub(crate) static KV_LOG_STORE_V1_INFO: LazyLock<KvLogStorePkInfo> = LazyLock::new(|| {
         fn compute_pk(
             _vnode: VirtualNode,
@@ -420,7 +422,6 @@ mod tests {
         gen_multi_vnode_stream_chunks, gen_stream_chunk_with_info, gen_test_log_store_table,
         TEST_DATA_SIZE,
     };
-    use crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO;
     use crate::common::log_store_impl::kv_log_store::{
         KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo, KV_LOG_STORE_V2_INFO,
     };
@@ -428,7 +429,12 @@ mod tests {
     #[tokio::test]
     async fn test_basic() {
         for count in (0..20).step_by(5) {
-            test_basic_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V1_INFO).await;
+            #[expect(deprecated)]
+            test_basic_inner(
+                count * TEST_DATA_SIZE,
+                &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
+            )
+            .await;
             test_basic_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V2_INFO).await;
         }
     }
@@ -524,7 +530,12 @@ mod tests {
     #[tokio::test]
     async fn test_recovery() {
         for count in (0..20).step_by(5) {
-            test_recovery_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V1_INFO).await;
+            #[expect(deprecated)]
+            test_recovery_inner(
+                count * TEST_DATA_SIZE,
+                &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
+            )
+            .await;
             test_recovery_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V2_INFO).await;
         }
     }
@@ -690,7 +701,12 @@ mod tests {
     #[tokio::test]
     async fn test_truncate() {
         for count in (2..10).step_by(3) {
-            test_truncate_inner(count, &KV_LOG_STORE_V1_INFO).await;
+            #[expect(deprecated)]
+            test_truncate_inner(
+                count,
+                &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
+            )
+            .await;
             test_truncate_inner(count, &KV_LOG_STORE_V2_INFO).await;
         }
     }
