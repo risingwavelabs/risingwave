@@ -861,7 +861,7 @@ mod tests {
                 10,
                 vec![],
                 table_id,
-                Some(instance_id),
+                instance_id,
                 None,
             )
         };
