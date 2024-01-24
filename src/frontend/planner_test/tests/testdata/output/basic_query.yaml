@@ -28,8 +28,7 @@
     select * from t where 1>2 and 1=1 and 3<1 and 4<>1 or 1=1 and 2>=1 and 1<=2;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: true }
-      └─BatchScan { table: t, columns: [], distribution: SomeShard }
+    └─BatchScan { table: t, columns: [], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamFilter { predicate: true }

@@ -50,7 +50,7 @@ CREATE INDEX tab_idx ON tab(a, (b + c + (1 + 1))) INCLUDE(d) CREATE INDEX tab_id
 query T
 select pg_get_indexdef('tab_idx'::regclass, 1, true), pg_get_indexdef('tab_idx'::regclass, 2, true);
 ----
-a ((b + c) + (1:Int32 + 1:Int32))
+a ((b + c) + 2:Int32)
 
 query T
 select pg_get_indexdef('tab_idx'::regclass, 3, true);
