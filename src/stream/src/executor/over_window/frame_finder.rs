@@ -370,6 +370,24 @@ mod tests {
                 end: FrameBound::UnboundedFollowing,
             },
         );
+
+        let frames = [
+            &RowsFrameBounds {
+                start: FrameBound::UnboundedPreceding,
+                end: FrameBound::Following(2),
+            },
+            &RowsFrameBounds {
+                start: FrameBound::Following(5),
+                end: FrameBound::Following(2),
+            },
+        ];
+        assert_equivalent(
+            merge_rows_frames(&frames),
+            RowsFrameBounds {
+                start: FrameBound::UnboundedPreceding,
+                end: FrameBound::Following(5),
+            },
+        );
     }
 
     mod rows_frame_tests {
