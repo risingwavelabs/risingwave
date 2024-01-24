@@ -139,6 +139,18 @@ fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {
 
             avro_type_mapping(nested_schema)?
         }
+        Schema::Ref { name } => {
+            if name.name == DBZ_VARIABLE_SCALE_DECIMAL_NAME
+                && name.namespace == Some(DBZ_VARIABLE_SCALE_DECIMAL_NAMESPACE.into())
+            {
+                DataType::Decimal
+            } else {
+                return Err(anyhow::format_err!(
+                    "unsupported type in Avro: {:?}",
+                    schema
+                ));
+            }
+        }
         _ => {
             return Err(anyhow::format_err!(
                 "unsupported type in Avro: {:?}",
