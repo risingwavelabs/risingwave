@@ -569,8 +569,8 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-        api-requests-max: 18
-        api-requests-deadline: 1s
+        api-requests-max: 30
+        api-requests-deadline: 2s
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
@@ -593,8 +593,8 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-        api-requests-max: 18
-        api-requests-deadline: 1s
+        api-requests-max: 30
+        api-requests-deadline: 2s
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
