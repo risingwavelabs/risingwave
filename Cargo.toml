@@ -13,6 +13,7 @@ members = [
   "src/connector",
   "src/connector/with_options",
   "src/ctl",
+  "src/dml",
   "src/error",
   "src/expr/core",
   "src/expr/impl",
@@ -33,7 +34,6 @@ members = [
   "src/risedevtool",
   "src/risedevtool/config",
   "src/rpc_client",
-  "src/source",
   "src/sqlparser",
   "src/sqlparser/test_runner",
   "src/storage",
@@ -133,7 +133,7 @@ arrow-flight = "50"
 arrow-select = "50"
 arrow-ord = "50"
 arrow-row = "50"
-arrow-udf-js = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "7ba1c22" }
+arrow-udf-js = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "ea7664d" }
 arrow-udf-wasm = "0.1"
 arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
 arrow-buffer-deltalake = { package = "arrow-buffer", version = "48.0.1" }
@@ -164,6 +164,7 @@ risingwave_compactor = { path = "./src/storage/compactor" }
 risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }
 risingwave_connector = { path = "./src/connector" }
+risingwave_dml = { path = "./src/dml" }
 risingwave_error = { path = "./src/error" }
 risingwave_expr = { path = "./src/expr/core" }
 risingwave_expr_impl = { path = "./src/expr/impl" }
@@ -181,7 +182,6 @@ risingwave_object_store = { path = "./src/object_store" }
 risingwave_pb = { path = "./src/prost" }
 risingwave_rpc_client = { path = "./src/rpc_client" }
 risingwave_rt = { path = "./src/utils/runtime" }
-risingwave_source = { path = "./src/source" }
 risingwave_sqlparser = { path = "./src/sqlparser" }
 risingwave_sqlsmith = { path = "./src/tests/sqlsmith" }
 risingwave_storage = { path = "./src/storage" }

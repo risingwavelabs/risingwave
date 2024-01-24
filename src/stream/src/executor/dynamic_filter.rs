@@ -576,7 +576,7 @@ mod tests {
         };
 
         let executor = DynamicFilterExecutor::<MemoryStateStore, false>::new(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             info,
             Box::new(source_l),
             Box::new(source_r),

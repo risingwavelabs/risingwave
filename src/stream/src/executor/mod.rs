@@ -90,6 +90,7 @@ mod sort_buffer;
 pub mod source;
 mod stateless_simple_agg;
 mod stream_reader;
+mod subscription;
 pub mod subtask;
 mod temporal_join;
 mod top_n;
@@ -139,6 +140,7 @@ pub use sink::SinkExecutor;
 pub use sort::*;
 pub use source::*;
 pub use stateless_simple_agg::StatelessSimpleAggExecutor;
+pub use subscription::SubscriptionExecutor;
 pub use temporal_join::*;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,

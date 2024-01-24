@@ -686,7 +686,7 @@ steps:
 
   - label: "Backfill tests"
     key: "backfill-tests"
-    command: "ci/scripts/backfill-test.sh -p ci-release"
+    command: "BUILDKITE=${BUILDKITE:-} ci/scripts/backfill-test.sh -p ci-release"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-backfill-tests"

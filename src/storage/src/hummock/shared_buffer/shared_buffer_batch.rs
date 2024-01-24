@@ -587,7 +587,7 @@ impl SharedBufferBatch {
         size: usize,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         table_id: TableId,
-        instance_id: Option<LocalInstanceId>,
+        instance_id: LocalInstanceId,
         tracker: Option<MemoryTracker>,
     ) -> Self {
         let inner = SharedBufferBatchInner::new(
@@ -602,7 +602,7 @@ impl SharedBufferBatch {
         SharedBufferBatch {
             inner: Arc::new(inner),
             table_id,
-            instance_id: instance_id.unwrap_or_default(),
+            instance_id,
         }
     }
 
@@ -644,6 +644,31 @@ impl SharedBufferBatch {
             next_vnode_id = current_vnode_id + 1;
         }
         vnodes
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn build_shared_buffer_batch_for_test(
+        epoch: HummockEpoch,
+        spill_offset: u16,
+        sorted_items: Vec<SharedBufferItem>,
+        size: usize,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+        table_id: TableId,
+    ) -> Self {
+        let inner = SharedBufferBatchInner::new(
+            table_id,
+            epoch,
+            spill_offset,
+            sorted_items,
+            delete_ranges,
+            size,
+            None,
+        );
+        SharedBufferBatch {
+            inner: Arc::new(inner),
+            table_id,
+            instance_id: LocalInstanceId::default(),
+        }
     }
 }
 
@@ -994,7 +1019,7 @@ mod tests {
         output.reverse();
         assert_eq!(output, shared_buffer_items);
 
-        let batch = SharedBufferBatch::build_shared_buffer_batch(
+        let batch = SharedBufferBatch::build_shared_buffer_batch_for_test(
             epoch,
             0,
             vec![],
@@ -1010,8 +1035,6 @@ mod tests {
                 ),
             ],
             TableId::new(0),
-            None,
-            None,
         );
         assert_eq!(batch.start_table_key().as_ref(), "a".as_bytes());
         assert_eq!(
@@ -1177,15 +1200,13 @@ mod tests {
                 Bound::Excluded(Bytes::from(b"eee".to_vec())),
             ),
         ];
-        let shared_buffer_batch = SharedBufferBatch::build_shared_buffer_batch(
+        let shared_buffer_batch = SharedBufferBatch::build_shared_buffer_batch_for_test(
             epoch,
             0,
             vec![],
             0,
             delete_ranges,
             Default::default(),
-            None,
-            None,
         );
         assert_eq!(
             epoch,
@@ -1470,15 +1491,13 @@ mod tests {
         ];
         let sorted_items1 = transform_shared_buffer(shared_buffer_items1);
         let size = SharedBufferBatch::measure_batch_size(&sorted_items1);
-        let imm1 = SharedBufferBatch::build_shared_buffer_batch(
+        let imm1 = SharedBufferBatch::build_shared_buffer_batch_for_test(
             epoch,
             0,
             sorted_items1,
             size,
             delete_ranges,
             table_id,
-            None,
-            None,
         );
 
         let epoch = 2;
@@ -1516,15 +1535,13 @@ mod tests {
         ];
         let sorted_items2 = transform_shared_buffer(shared_buffer_items2);
         let size = SharedBufferBatch::measure_batch_size(&sorted_items2);
-        let imm2 = SharedBufferBatch::build_shared_buffer_batch(
+        let imm2 = SharedBufferBatch::build_shared_buffer_batch_for_test(
             epoch,
             0,
             sorted_items2,
             size,
             delete_ranges,
             table_id,
-            None,
-            None,
         );
 
         let imms = vec![imm2, imm1];

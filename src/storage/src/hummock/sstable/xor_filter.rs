@@ -503,11 +503,11 @@ mod tests {
             .await
             .unwrap();
         let mut stat = StoreLocalStatistic::default();
-        if let XorFilter::BlockXor16(reader) = &sstable.value().filter_reader.filter {
-            for idx in 0..sstable.value().meta.block_metas.len() {
+        if let XorFilter::BlockXor16(reader) = &sstable.filter_reader.filter {
+            for idx in 0..sstable.meta.block_metas.len() {
                 let resp = sstable_store
                     .get_block_response(
-                        sstable.value(),
+                        &sstable,
                         idx,
                         CachePolicy::Fill(CachePriority::High),
                         &mut stat,

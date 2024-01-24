@@ -126,7 +126,7 @@ impl SinkFormatterImpl {
                         let descriptor =
                             crate::schema::protobuf::fetch_descriptor(&format_desc.options, None)
                                 .await
-                                .map_err(|e| SinkError::Config(anyhow!("{e:?}")))?;
+                                .map_err(|e| SinkError::Config(anyhow!(e)))?;
                         let val_encoder = ProtoEncoder::new(schema, None, descriptor)?;
                         let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::AppendOnlyProto(formatter))
@@ -240,7 +240,7 @@ impl SinkFormatterImpl {
                         let (key_schema, val_schema) =
                             crate::schema::avro::fetch_schema(&format_desc.options, topic)
                                 .await
-                                .map_err(|e| SinkError::Config(anyhow!("{e:?}")))?;
+                                .map_err(|e| SinkError::Config(anyhow!(e)))?;
                         let key_encoder = AvroEncoder::new(
                             schema.clone(),
                             Some(pk_indices),

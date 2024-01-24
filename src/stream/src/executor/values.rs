@@ -213,7 +213,7 @@ mod tests {
             identity: "ValuesExecutor".to_string(),
         };
         let values_executor_struct = ValuesExecutor::new(
-            ActorContext::create(actor_id),
+            ActorContext::for_test(actor_id),
             info,
             progress,
             vec![exprs

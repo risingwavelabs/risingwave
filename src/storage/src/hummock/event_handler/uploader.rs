@@ -1245,7 +1245,7 @@ mod tests {
             size,
             vec![],
             TEST_TABLE_ID,
-            None,
+            LocalInstanceId::default(),
             tracker,
         )
     }
