@@ -16,7 +16,7 @@ use std::pin::pin;
 use std::sync::Arc;
 
 use either::Either;
-use futures::stream::select_with_strategy;
+use futures::stream::{select_all, select_with_strategy};
 use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -27,6 +27,7 @@ use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
@@ -372,8 +373,8 @@ where
                         ));
                     }
 
-                    // FIXME(kwannoel): Replicate
-                    // upstream_table.write_chunk(chunk);
+                    // Replicate
+                    upstream_table.write_chunk(chunk);
                 }
 
                 if upstream_chunk_buffer_is_empty {
@@ -533,6 +534,7 @@ where
         backfill_state: BackfillState,
         builders: &'a mut [DataChunkBuilder],
     ) {
+        let mut iterators = vec![];
         for (vnode, builder) in upstream_table
             .vnodes()
             .iter_vnodes()
@@ -558,7 +560,11 @@ where
                 "iter_with_vnode_and_output_indices"
             );
             let vnode_row_iter = upstream_table
-                .iter_with_vnode_and_output_indices(vnode, &range_bounds, Default::default())
+                .iter_with_vnode_and_output_indices(
+                    vnode,
+                    &range_bounds,
+                    PrefetchOptions::prefetch_for_small_range_scan(),
+                )
                 .await?;
 
             let vnode_row_iter = Box::pin(owned_row_iter(vnode_row_iter));
@@ -566,11 +572,17 @@ where
             let vnode_chunk_iter =
                 iter_chunks(vnode_row_iter, builder).map_ok(move |chunk| (vnode, chunk));
 
-            // This means we iterate serially rather than in parallel across vnodes.
-            #[for_await]
-            for chunk in vnode_chunk_iter {
-                yield Some(chunk?);
-            }
+            let vnode_chunk_iter = Box::pin(vnode_chunk_iter);
+
+            iterators.push(vnode_chunk_iter);
+        }
+
+        let vnode_chunk_iter = select_all(iterators);
+
+        // This means we iterate serially rather than in parallel across vnodes.
+        #[for_await]
+        for chunk in vnode_chunk_iter {
+            yield Some(chunk?);
         }
         yield None;
         return Ok(());

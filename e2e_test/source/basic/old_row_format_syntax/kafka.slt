@@ -280,8 +280,8 @@ with (
 ) row format avro
 row schema location confluent schema registry 'http://127.0.0.1:8081'
 
-# we cannot create debezium source with generated column
-statement error
+# create debezium source with generated column
+statement ok
 create table s20 (
   id integer primary key,
   first_name varchar,
@@ -735,6 +735,9 @@ drop source s17
 
 statement ok
 drop source s18
+
+statement ok
+drop table s20
 
 statement ok
 drop table s21

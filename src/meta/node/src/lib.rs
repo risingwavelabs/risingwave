@@ -248,6 +248,28 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             ui_path: opts.dashboard_ui_path,
         };
 
+        const MIN_TIMEOUT_INTERVAL_SEC: u64 = 20;
+        let compaction_task_max_progress_interval_secs = {
+            config
+                .storage
+                .object_store
+                .object_store_read_timeout_ms
+                .max(config.storage.object_store.object_store_upload_timeout_ms)
+                .max(
+                    config
+                        .storage
+                        .object_store
+                        .object_store_streaming_read_timeout_ms,
+                )
+                .max(
+                    config
+                        .storage
+                        .object_store
+                        .object_store_streaming_upload_timeout_ms,
+                )
+                .max(config.meta.compaction_task_max_progress_interval_secs)
+        } + MIN_TIMEOUT_INTERVAL_SEC;
+
         let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
             add_info,
             backend,
@@ -269,6 +291,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 hummock_version_checkpoint_interval_sec: config
                     .meta
                     .hummock_version_checkpoint_interval_sec,
+                enable_hummock_data_archive: config.meta.enable_hummock_data_archive,
                 min_delta_log_num_for_hummock_version_checkpoint: config
                     .meta
                     .min_delta_log_num_for_hummock_version_checkpoint,
@@ -310,6 +333,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 compaction_task_max_heartbeat_interval_secs: config
                     .meta
                     .compaction_task_max_heartbeat_interval_secs,
+                compaction_task_max_progress_interval_secs,
                 compaction_config: Some(config.meta.compaction_config),
                 cut_table_size_limit: config.meta.cut_table_size_limit,
                 hybird_partition_vnode_count: config.meta.hybird_partition_vnode_count,

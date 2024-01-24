@@ -15,13 +15,13 @@
 use risingwave_common::catalog::{
     default_key_column_name_version_mapping, ColumnId, TableId, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
+use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 use risingwave_pb::plan_common::{
     AdditionalColumnType, ColumnDescVersion, FormatType, PbEncodeType,
 };
 use risingwave_pb::stream_plan::SourceNode;
-use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::panic_store::PanicStateStore;
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -29,7 +29,7 @@ use super::*;
 use crate::executor::source::{FsListExecutor, StreamSourceCore};
 use crate::executor::source_executor::SourceExecutor;
 use crate::executor::state_table_handler::SourceStateTableHandler;
-use crate::executor::{FlowControlExecutor, FsSourceExecutor};
+use crate::executor::FlowControlExecutor;
 
 const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
@@ -41,12 +41,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let (sender, barrier_receiver) = unbounded_channel();
-        stream
-            .context
-            .barrier_manager()
+        params
+            .local_barrier_manager
             .register_sender(params.actor_context.id, sender);
         let system_params = params.env.system_params_manager_ref().get_params();
 
@@ -162,7 +160,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     ConnectorProperties::is_new_fs_connector_hash_map(&source.with_properties);
 
                 if is_fs_connector {
-                    FsSourceExecutor::new(
+                    #[expect(deprecated)]
+                    crate::executor::FsSourceExecutor::new(
                         params.actor_context.clone(),
                         params.info,
                         stream_source_core,

@@ -105,18 +105,15 @@ impl StreamManagerService for StreamServiceImpl {
         request: Request<ApplyThrottleRequest>,
     ) -> Result<Response<ApplyThrottleResponse>, Status> {
         let request = request.into_inner();
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            return Err(Status::unimplemented("not supported in v2"));
-        };
 
         let actor_to_apply = match request.kind() {
             ThrottleTarget::Source => {
-                mgr.fragment_manager
+                self.metadata_manager
                     .update_source_rate_limit_by_source_id(request.id as SourceId, request.rate)
                     .await?
             }
             ThrottleTarget::Mv => {
-                mgr.fragment_manager
+                self.metadata_manager
                     .update_mv_rate_limit_by_table_id(TableId::from(request.id), request.rate)
                     .await?
             }

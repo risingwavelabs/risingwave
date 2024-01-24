@@ -241,6 +241,7 @@ pub async fn unregister_workers(
     workers: Vec<String>,
     yes: bool,
     ignore_not_found: bool,
+    check_fragment_occupied: bool,
 ) -> Result<()> {
     let meta_client = context.meta_client().await?;
 
@@ -320,7 +321,7 @@ pub async fn unregister_workers(
                 .intersection(&target_worker_ids)
                 .collect();
 
-            if !intersection_worker_ids.is_empty() {
+            if check_fragment_occupied && !intersection_worker_ids.is_empty() {
                 println!(
                     "worker ids {:?} are still occupied by fragment #{}",
                     intersection_worker_ids, fragment_id

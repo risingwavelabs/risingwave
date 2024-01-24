@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use thiserror_ext::AsReport;
 
@@ -46,7 +48,7 @@ impl DdlController {
         let job_id = streaming_job.id();
 
         match &mut streaming_job {
-            StreamingJob::Table(Some(src), table, job_type) => {
+            StreamingJob::Table(src, table, job_type) => {
                 // If we're creating a table with connector, we should additionally fill its ID first.
                 fill_table_stream_graph_info(src, table, *job_type, &mut fragment_graph);
             }
@@ -151,7 +153,7 @@ impl DdlController {
         }
 
         mgr.catalog_controller
-            .prepare_streaming_job(table_fragments.to_protobuf(), streaming_job)
+            .prepare_streaming_job(table_fragments.to_protobuf(), streaming_job, false)
             .await?;
 
         // create streaming jobs.
@@ -188,6 +190,87 @@ impl DdlController {
                 };
                 tokio::spawn(fut);
                 Ok(IGNORED_NOTIFICATION_VERSION)
+            }
+        }
+    }
+
+    /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
+    pub async fn replace_table_v2(
+        &self,
+        mut streaming_job: StreamingJob,
+        fragment_graph: StreamFragmentGraphProto,
+        table_col_index_mapping: Option<ColIndexMapping>,
+    ) -> MetaResult<NotificationVersion> {
+        let MetadataManager::V2(mgr) = &self.metadata_manager else {
+            unreachable!("MetadataManager should be V2")
+        };
+        let job_id = streaming_job.id();
+
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
+
+        // 1. build fragment graph.
+        let fragment_graph =
+            StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job).await?;
+        streaming_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+        streaming_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
+        let streaming_job = streaming_job;
+
+        let StreamingJob::Table(_, table, ..) = &streaming_job else {
+            unreachable!("unexpected job: {streaming_job:?}")
+        };
+        let dummy_id = mgr
+            .catalog_controller
+            .create_job_catalog_for_replace(&streaming_job, &ctx, table.get_version()?)
+            .await?;
+
+        tracing::debug!(id = streaming_job.id(), "building replace streaming job");
+        let result: MetaResult<Vec<PbMergeUpdate>> = try {
+            let (ctx, table_fragments) = self
+                .build_replace_table(
+                    ctx,
+                    &streaming_job,
+                    fragment_graph,
+                    table_col_index_mapping.clone(),
+                    dummy_id as _,
+                )
+                .await?;
+            let merge_updates = ctx.merge_updates.clone();
+
+            mgr.catalog_controller
+                .prepare_streaming_job(table_fragments.to_protobuf(), &streaming_job, true)
+                .await?;
+
+            self.stream_manager
+                .replace_table(table_fragments, ctx)
+                .await?;
+            merge_updates
+        };
+
+        match result {
+            Ok(merge_updates) => {
+                let version = mgr
+                    .catalog_controller
+                    .finish_replace_streaming_job(
+                        dummy_id,
+                        streaming_job,
+                        merge_updates,
+                        table_col_index_mapping,
+                        None,
+                        None,
+                    )
+                    .await?;
+                Ok(version)
+            }
+            Err(err) => {
+                tracing::error!(id = job_id, error = ?err.as_report(), "failed to replace table");
+                let _ = mgr
+                    .catalog_controller
+                    .try_abort_replacing_streaming_job(dummy_id)
+                    .await.inspect_err(|err| {
+                        tracing::error!(id = job_id, error = ?err.as_report(), "failed to abort replacing table");
+                    });
+                Err(err)
             }
         }
     }

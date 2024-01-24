@@ -29,6 +29,7 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::WatermarkDirection;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tracing::error;
 
 use crate::error::{StorageError, StorageResult};
@@ -609,6 +610,9 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
 
     fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
         assert!(!self.is_dirty());
+        if let Some(value_checker) = opts.switch_op_consistency_level {
+            self.mem_table.op_consistency_level.update(&value_checker);
+        }
         let prev_epoch = self
             .epoch
             .replace(next_epoch)
@@ -649,7 +653,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                     table_id: self.table_id,
                 },
             ) {
-                error!(err = ?e, "failed to write delete ranges of table watermark");
+                error!(error = %e.as_report(), "failed to write delete ranges of table watermark");
             }
         }
     }
