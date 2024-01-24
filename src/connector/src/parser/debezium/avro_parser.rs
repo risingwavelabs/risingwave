@@ -306,7 +306,7 @@ mod tests {
 "#;
         let schema = Schema::parse_str(test_schema_str).unwrap();
         let columns = avro_schema_to_column_descs(&schema).unwrap();
-        for col in columns.iter() {
+        for col in &columns {
             let dtype = col.column_type.as_ref().unwrap();
             println!("name = {}, type = {:?}", col.name, dtype.type_name);
             if col.name.contains("unconstrained") {
