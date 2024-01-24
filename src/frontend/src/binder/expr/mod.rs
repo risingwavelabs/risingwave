@@ -497,12 +497,6 @@ impl Binder {
         }
 
         for (condition, result) in zip_eq_fast(conditions, results_expr) {
-            // If the result expression is not const
-            // we will also not conduct the optimization
-            if !result.is_const() {
-                return false;
-            }
-
             if let Expr::Value(_) = condition.clone() {
                 let Ok(input) = self.bind_expr_inner(condition.clone()) else {
                     return false;
@@ -519,13 +513,7 @@ impl Binder {
 
         // The fallback arm for case-when expression
         if let Some(expr) = fallback {
-            // We assume fallback arm must be const
-            // to enable optimization (if exists)
-            if expr.is_const() {
-                constant_lookup_inputs.push(expr);
-            } else {
-                return false;
-            }
+            constant_lookup_inputs.push(expr);
         }
 
         true

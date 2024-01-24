@@ -150,21 +150,16 @@ impl Expression for ConstantLookupExpression {
         let column = input.column_at(column_len - 1);
 
         for i in 0..input_len {
-            if let Some(expr) = self.arms.get(column.datum_at(i).as_ref().unwrap()) {
-                // Now we assume that the expr in `arms` is const
-                // Also be separated out of the scoping context
-                builder.append(expr.eval_row(&OwnedRow::empty()).await.unwrap().as_ref());
+            let datum = column.datum_at(i);
+            let owned_row = OwnedRow::new(vec![datum]);
+
+            if let Some(expr) = self.arms.get(datum.as_ref().unwrap()) {
+                builder.append(expr.eval_row(&owned_row).await.unwrap().as_ref());
             } else {
                 // Otherwise this should goes to the fallback arm
                 // The fallback arm should also be const
                 if let Some(ref fallback) = self.fallback {
-                    builder.append(
-                        fallback
-                            .eval_row(&OwnedRow::empty())
-                            .await
-                            .unwrap()
-                            .as_ref(),
-                    );
+                    builder.append(fallback.eval_row(&owned_row).await.unwrap().as_ref());
                 } else {
                     builder.append_null();
                 }
