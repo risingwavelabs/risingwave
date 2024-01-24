@@ -110,6 +110,7 @@ where
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
+        tracing::debug!("Arrangement Backfill Executor started");
         // The primary key columns, in the output columns of the upstream_table scan.
         // Table scan scans a subset of the columns of the upstream table.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
@@ -451,39 +452,51 @@ where
                     "backfill_finished_wait_for_barrier"
                 );
                 // If not finished then we need to update state, otherwise no need.
-                if let Message::Barrier(barrier) = &msg
-                    && !is_completely_finished
-                {
-                    // If snapshot was empty, we do not need to backfill,
-                    // but we still need to persist the finished state.
-                    // We currently persist it on the second barrier here rather than first.
-                    // This is because we can't update state table in first epoch,
-                    // since it expects to have been initialized in previous epoch
-                    // (there's no epoch before the first epoch).
-                    for vnode in upstream_table.vnodes().iter_vnodes() {
-                        backfill_state.finish_progress(vnode, upstream_table.pk_indices().len());
-                    }
+                if let Message::Barrier(barrier) = &msg {
+                    if is_completely_finished {
+                        // If already finished, no need to persist any state.
+                    } else {
+                        // If snapshot was empty, we do not need to backfill,
+                        // but we still need to persist the finished state.
+                        // We currently persist it on the second barrier here rather than first.
+                        // This is because we can't update state table in first epoch,
+                        // since it expects to have been initialized in previous epoch
+                        // (there's no epoch before the first epoch).
+                        for vnode in upstream_table.vnodes().iter_vnodes() {
+                            backfill_state
+                                .finish_progress(vnode, upstream_table.pk_indices().len());
+                        }
 
-                    persist_state_per_vnode(
-                        barrier.epoch,
-                        &mut self.state_table,
-                        &mut backfill_state,
-                        #[cfg(debug_assertions)]
-                        state_len,
-                        vnodes.iter_vnodes(),
-                    )
-                    .await?;
+                        persist_state_per_vnode(
+                            barrier.epoch,
+                            &mut self.state_table,
+                            &mut backfill_state,
+                            #[cfg(debug_assertions)]
+                            state_len,
+                            vnodes.iter_vnodes(),
+                        )
+                        .await?;
+                    }
 
                     self.progress
                         .finish(barrier.epoch.curr, total_snapshot_processed_rows);
+                    tracing::trace!(
+                        epoch = ?barrier.epoch,
+                        "Updated CreateMaterializedTracker"
+                    );
                     yield msg;
                     break;
-                } else {
-                    // Allow other messages to pass through.
-                    yield msg;
                 }
+                // Allow other messages to pass through.
+                // We won't yield twice here, since if there's a barrier,
+                // we will always break out of the loop.
+                yield msg;
             }
         }
+
+        tracing::trace!(
+            "Arrangement Backfill has already finished and forward messages directly to the downstream"
+        );
 
         // After progress finished + state persisted,
         // we can forward messages directly to the downstream,
@@ -491,14 +504,6 @@ where
         #[for_await]
         for msg in upstream {
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
-                tracing::trace!(
-                    actor = self.actor_id,
-                    message = ?msg,
-                    "backfill_finished_after_barrier"
-                );
-                if let Message::Barrier(barrier) = &msg {
-                    self.state_table.commit_no_data_expected(barrier.epoch);
-                }
                 yield msg;
             }
         }
