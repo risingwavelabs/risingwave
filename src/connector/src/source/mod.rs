@@ -32,6 +32,7 @@ pub use kinesis::KINESIS_CONNECTOR;
 pub use nats::NATS_CONNECTOR;
 mod common;
 mod manager;
+pub mod reader;
 pub mod test_source;
 
 pub use manager::{SourceColumnDesc, SourceColumnType};

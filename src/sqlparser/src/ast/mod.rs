@@ -1117,6 +1117,8 @@ pub enum Statement {
         name: ObjectName,
         /// Optional schema
         columns: Vec<ColumnDef>,
+        // The wildchar position in columns defined in sql. Only exist when using external schema.
+        wildcard_idx: Option<usize>,
         constraints: Vec<TableConstraint>,
         with_options: Vec<SqlOption>,
         /// Optional schema of the external source with which the table is created
@@ -1606,6 +1608,7 @@ impl fmt::Display for Statement {
             Statement::CreateTable {
                 name,
                 columns,
+                wildcard_idx,
                 constraints,
                 with_options,
                 or_replace,
@@ -1634,7 +1637,7 @@ impl fmt::Display for Statement {
                     name = name,
                 )?;
                 if !columns.is_empty() || !constraints.is_empty() {
-                    write!(f, " {}", fmt_create_items(columns, constraints, source_watermarks)?)?;
+                    write!(f, " {}", fmt_create_items(columns, constraints, source_watermarks, *wildcard_idx)?)?;
                 } else if query.is_none() {
                     // PostgreSQL allows `CREATE TABLE t ();`, but requires empty parens
                     write!(f, " ()")?;
@@ -1643,12 +1646,12 @@ impl fmt::Display for Statement {
                     write!(f, " APPEND ONLY")?;
                 }
                 if !include_column_options.is_empty() { // (Ident, Option<Ident>)
-                    write!(f, " INCLUDE {}", display_comma_separated(
+                    write!(f, "{}", display_comma_separated(
                         include_column_options.iter().map(|(a, b)| {
                             if let Some(b) = b {
-                                format!("{} AS {}", a, b)
+                                format!("INCLUDE {} AS {}", a, b)
                             } else {
-                                a.to_string()
+                                format!("INCLUDE {}", a)
                             }
                         }).collect_vec().as_slice()
                     ))?;
@@ -2712,6 +2715,7 @@ impl fmt::Display for CreateFunctionBody {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CreateFunctionUsing {
     Link(String),
+    Base64(String),
 }
 
 impl fmt::Display for CreateFunctionUsing {
@@ -2719,6 +2723,9 @@ impl fmt::Display for CreateFunctionUsing {
         write!(f, "USING ")?;
         match self {
             CreateFunctionUsing::Link(uri) => write!(f, "LINK '{uri}'"),
+            CreateFunctionUsing::Base64(s) => {
+                write!(f, "BASE64 '{s}'")
+            }
         }
     }
 }

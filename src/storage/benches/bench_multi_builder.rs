@@ -23,17 +23,17 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::ObjectStoreConfig;
+use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_object_store::object::{ObjectStore, ObjectStoreImpl, S3ObjectStore};
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     BatchSstableWriterFactory, CachePolicy, FileCache, HummockResult, MemoryLimiter,
-    SstableBuilder, SstableBuilderOptions, SstableStore, SstableWriterFactory,
+    SstableBuilder, SstableBuilderOptions, SstableStore, SstableStoreConfig, SstableWriterFactory,
     SstableWriterOptions, StreamingSstableWriterFactory, Xor16FilterBuilder,
 };
-use risingwave_storage::monitor::ObjectStoreMetrics;
+use risingwave_storage::monitor::{global_hummock_state_store_metrics, ObjectStoreMetrics};
 
 const RANGE: Range<u64> = 0..1500000;
 const VALUE: &[u8] = &[0; 400];
@@ -141,17 +141,19 @@ fn bench_builder(
         .monitored(metrics)
     });
     let object_store = Arc::new(ObjectStoreImpl::S3(object_store));
-    let sstable_store = Arc::new(SstableStore::new(
-        object_store,
-        "test".to_string(),
-        64 << 20,
-        128 << 20,
-        0,
-        64 << 20,
-        FileCache::none(),
-        FileCache::none(),
-        None,
-    ));
+    let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
+        store: object_store,
+        path: "test".to_string(),
+        block_cache_capacity: 64 << 20,
+        meta_cache_capacity: 128 << 20,
+        high_priority_ratio: 0,
+        prefetch_buffer_capacity: 64 << 20,
+        max_prefetch_block_number: 16,
+        data_file_cache: FileCache::none(),
+        meta_file_cache: FileCache::none(),
+        recent_filter: None,
+        state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
+    }));
 
     let mut group = c.benchmark_group("bench_multi_builder");
     group

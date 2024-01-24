@@ -22,12 +22,11 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
 use risingwave_meta_model_v2::{
-    actor, actor_dispatcher, fragment, sink, streaming_job, ActorId, ConnectorSplits, ExprContext,
-    FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId, SinkId, SourceId, StreamNode,
-    TableId, VnodeBitmap, WorkerId,
+    actor, actor_dispatcher, fragment, object, sink, streaming_job, ActorId, ConnectorSplits,
+    ExprContext, FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId, SinkId, SourceId,
+    StreamNode, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
-use risingwave_pb::ddl_service::PbTableJobType;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
@@ -57,16 +56,19 @@ use crate::controller::utils::{
 };
 use crate::manager::{ActorInfos, LocalNotification};
 use crate::stream::SplitAssignment;
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 impl CatalogControllerInner {
-    /// List all fragment vnode mapping info
+    /// List all fragment vnode mapping info for all CREATED streaming jobs.
     pub async fn all_running_fragment_mappings(
         &self,
     ) -> MetaResult<impl Iterator<Item = FragmentParallelUnitMapping> + '_> {
         let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
+            .join(JoinType::InnerJoin, fragment::Relation::Object.def())
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
             .select_only()
             .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
+            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
             .into_tuple()
             .all(&self.db)
             .await?;
@@ -812,22 +814,20 @@ impl CatalogController {
         Ok(fragment_state_tables)
     }
 
-    /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
+    /// Used in [`crate::barrier::GlobalBarrierManager`], load all running actor that need to be sent or
     /// collected
     pub async fn load_all_actors(
         &self,
         parallel_units_map: &HashMap<u32, PbParallelUnit>,
-        check_state: impl Fn(PbActorState, ObjectId, ActorId) -> bool,
     ) -> MetaResult<ActorInfos> {
         let inner = self.inner.read().await;
-        let actor_info: Vec<(ActorId, ActorStatus, i32, ObjectId, i32)> = Actor::find()
+        let actor_info: Vec<(ActorId, i32, i32)> = Actor::find()
             .select_only()
             .column(actor::Column::ActorId)
-            .column(actor::Column::Status)
             .column(actor::Column::ParallelUnitId)
-            .column(fragment::Column::JobId)
             .column(fragment::Column::FragmentTypeMask)
             .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
+            .filter(actor::Column::Status.eq(ActorStatus::Running))
             .into_tuple()
             .all(&inner.db)
             .await?;
@@ -835,24 +835,21 @@ impl CatalogController {
         let mut actor_maps = HashMap::new();
         let mut barrier_inject_actor_maps = HashMap::new();
 
-        for (actor_id, status, parallel_unit_id, job_id, type_mask) in actor_info {
-            let status = PbActorState::from(status);
+        for (actor_id, parallel_unit_id, type_mask) in actor_info {
             // FIXME: since worker might have gone, it's not safe to unwrap here.
             let worker_id = parallel_units_map
                 .get(&(parallel_unit_id as _))
                 .unwrap()
                 .worker_node_id;
-            if check_state(status, job_id, actor_id) {
-                actor_maps
+            actor_maps
+                .entry(worker_id)
+                .or_insert_with(Vec::new)
+                .push(actor_id as _);
+            if Self::is_injectable(type_mask as _) {
+                barrier_inject_actor_maps
                     .entry(worker_id)
                     .or_insert_with(Vec::new)
                     .push(actor_id as _);
-                if Self::is_injectable(type_mask as _) {
-                    barrier_inject_actor_maps
-                        .entry(worker_id)
-                        .or_insert_with(Vec::new)
-                        .push(actor_id as _);
-                }
             }
         }
 
@@ -983,15 +980,58 @@ impl CatalogController {
         Ok(node_actors)
     }
 
+    pub async fn get_worker_actor_ids(
+        &self,
+        job_ids: Vec<ObjectId>,
+    ) -> MetaResult<BTreeMap<WorkerId, Vec<ActorId>>> {
+        let inner = self.inner.read().await;
+        let parallel_units_map = get_parallel_unit_mapping(&inner.db).await?;
+        let actor_pu: Vec<(ActorId, i32)> = Actor::find()
+            .select_only()
+            .columns([actor::Column::ActorId, actor::Column::ParallelUnitId])
+            .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
+            .filter(fragment::Column::JobId.is_in(job_ids))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        let mut worker_actors = BTreeMap::new();
+        for (actor_id, pu_id) in actor_pu {
+            let worker_id = parallel_units_map
+                .get(&(pu_id as _))
+                .unwrap()
+                .worker_node_id as WorkerId;
+            worker_actors
+                .entry(worker_id)
+                .or_insert_with(Vec::new)
+                .push(actor_id);
+        }
+
+        Ok(worker_actors)
+    }
+
     pub async fn update_actor_splits(&self, split_assignment: &SplitAssignment) -> MetaResult<()> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
         for assignments in split_assignment.values() {
             for (actor_id, splits) in assignments {
+                let actor_splits: Option<ConnectorSplits> = Actor::find_by_id(*actor_id as ActorId)
+                    .select_only()
+                    .column(actor::Column::Splits)
+                    .into_tuple()
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("actor_id", actor_id))?;
+
+                let mut actor_splits = actor_splits
+                    .map(|splits| splits.0.splits)
+                    .unwrap_or_default();
+                actor_splits.extend(splits.iter().map(Into::into));
+
                 Actor::update(actor::ActiveModel {
                     actor_id: Set(*actor_id as _),
                     splits: Set(Some(ConnectorSplits(PbConnectorSplits {
-                        splits: splits.iter().map(Into::into).collect(),
+                        splits: actor_splits,
                     }))),
                     ..Default::default()
                 })
@@ -1034,31 +1074,30 @@ impl CatalogController {
         Ok(actors)
     }
 
-    /// Get and filter the upstream `Materialize` or `Source` fragments of the specified relations.
     pub async fn get_upstream_root_fragments(
         &self,
         upstream_job_ids: Vec<ObjectId>,
-        job_type: Option<PbTableJobType>,
     ) -> MetaResult<HashMap<ObjectId, PbFragment>> {
         let inner = self.inner.read().await;
 
-        let mut fragments = Fragment::find()
+        let all_upstream_fragments = Fragment::find()
             .filter(fragment::Column::JobId.is_in(upstream_job_ids))
             .all(&inner.db)
             .await?;
-        fragments.retain(|f| match job_type {
-            Some(PbTableJobType::SharedCdcSource) => {
-                f.fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0
+        // job_id -> fragment
+        let mut fragments = HashMap::<ObjectId, fragment::Model>::new();
+        for fragment in all_upstream_fragments {
+            if fragment.fragment_type_mask & PbFragmentTypeFlag::Mview as i32 != 0 {
+                _ = fragments.insert(fragment.job_id, fragment);
+            } else if fragment.fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0 {
+                // look for Source fragment if there's no MView fragment
+                _ = fragments.try_insert(fragment.job_id, fragment);
             }
-            // MV on MV, and other kinds of table job
-            None | Some(PbTableJobType::General) | Some(PbTableJobType::Unspecified) => {
-                f.fragment_type_mask & PbFragmentTypeFlag::Mview as i32 != 0
-            }
-        });
+        }
 
         let parallel_units_map = get_parallel_unit_mapping(&inner.db).await?;
         let mut root_fragments = HashMap::new();
-        for fragment in fragments {
+        for (_, fragment) in fragments {
             let actors = fragment.find_related(Actor).all(&inner.db).await?;
             let actor_dispatchers = get_actor_dispatchers(
                 &inner.db,

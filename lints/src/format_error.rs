@@ -17,7 +17,9 @@ use clippy_utils::macros::{
     find_format_arg_expr, find_format_args, is_format_macro, macro_backtrace,
 };
 use clippy_utils::ty::implements_trait;
-use clippy_utils::{is_in_cfg_test, is_in_test_function, is_trait_method, match_function_call};
+use clippy_utils::{
+    is_in_cfg_test, is_in_test_function, is_trait_method, match_def_path, match_function_call,
+};
 use rustc_ast::FormatArgsPiece;
 use rustc_hir::{Expr, ExprKind};
 use rustc_lint::{LateContext, LateLintPass};
@@ -60,6 +62,7 @@ impl_lint_pass!(FormatError => [FORMAT_ERROR]);
 
 const TRACING_FIELD_DEBUG: [&str; 3] = ["tracing_core", "field", "debug"];
 const TRACING_FIELD_DISPLAY: [&str; 3] = ["tracing_core", "field", "display"];
+const TRACING_MACRO_EVENT: [&str; 3] = ["tracing", "macros", "event"];
 
 impl<'tcx> LateLintPass<'tcx> for FormatError {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
@@ -77,6 +80,9 @@ impl<'tcx> LateLintPass<'tcx> for FormatError {
         }
 
         // `{}`, `{:?}` in format macros.
+        let in_tracing_macro_event = macro_backtrace(expr.span)
+            .any(|macro_call| match_def_path(cx, macro_call.def_id, &TRACING_MACRO_EVENT));
+
         for macro_call in macro_backtrace(expr.span) {
             if is_format_macro(cx, macro_call.def_id)
                 && let Some(format_args) = find_format_args(cx, expr, macro_call.expn)
@@ -87,7 +93,11 @@ impl<'tcx> LateLintPass<'tcx> for FormatError {
                         && let Some(arg) = format_args.arguments.all_args().get(index)
                         && let Ok(arg_expr) = find_format_arg_expr(expr, arg)
                     {
-                        check_fmt_arg(cx, arg_expr);
+                        if in_tracing_macro_event {
+                            check_fmt_arg_in_tracing_event(cx, arg_expr);
+                        } else {
+                            check_fmt_arg(cx, arg_expr);
+                        }
                     }
                 }
             }
@@ -108,6 +118,17 @@ fn check_fmt_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
         arg_expr,
         arg_expr.span,
         "consider importing `thiserror_ext::AsReport` and using `.as_report()` instead",
+    );
+}
+
+fn check_fmt_arg_in_tracing_event(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
+    // TODO: replace `<error>` with the actual code snippet.
+    check_arg(
+        cx,
+        arg_expr,
+        arg_expr.span,
+        "consider importing `thiserror_ext::AsReport` and recording the error as a field
+with `error = %<error>.as_report()` instead",
     );
 }
 

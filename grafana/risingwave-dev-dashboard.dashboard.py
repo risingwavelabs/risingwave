@@ -833,6 +833,28 @@ def section_streaming(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_rowsps(
+                    "Arrangement Backfill Snapshot Read Throughput(rows)",
+                    "Total number of rows that have been read from the backfill snapshot",
+                    [
+                        panels.target(
+                            f"rate({table_metric('stream_arrangement_backfill_snapshot_read_row_count')}[$__rate_interval])",
+                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
+                            % NODE_LABEL,
+                            ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Arrangement Backfill Upstream Throughput(rows)",
+                    "Total number of rows that have been output from the backfill upstream",
+                    [
+                        panels.target(
+                            f"rate({table_metric('stream_arrangement_backfill_upstream_output_row_count')}[$__rate_interval])",
+                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
+                            % NODE_LABEL,
+                            ),
+                    ],
+                ),
                 panels.timeseries_count(
                     "Barrier Number",
                     "The number of barriers that have been ingested but not completely processed. This metric reflects the "
@@ -992,11 +1014,11 @@ def section_streaming_cdc(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Connector Errors",
+                    "CDC Source Errors",
                     "",
                     [
                         panels.target(
-                            f"sum({metric('cdc_connector_error')}) by (connector_name, source_id, error_msg)",
+                            f"sum({metric('cdc_source_error')}) by (connector_name, source_id, error_msg)",
                             "{{connector_name}}: {{error_msg}} ({{source_id}})",
                         ),
                     ],

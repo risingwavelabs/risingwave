@@ -17,6 +17,7 @@ use std::collections::HashSet;
 use std::ops::DerefMut;
 use std::time::Duration;
 
+use anyhow::Context;
 use function_name::named;
 use futures::{stream, StreamExt};
 use itertools::Itertools;
@@ -26,11 +27,13 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::FullScanTask;
 
 use crate::hummock::error::{Error, Result};
-use crate::hummock::manager::{commit_multi_var, read_lock, write_lock, ResponseEvent};
+use crate::hummock::manager::{
+    commit_multi_var, create_trx_wrapper, read_lock, write_lock, ResponseEvent,
+};
 use crate::hummock::HummockManager;
 use crate::manager::MetadataManager;
-use crate::model::{BTreeMapTransaction, ValTransaction};
-use crate::storage::Transaction;
+use crate::model::{BTreeMapTransaction, BTreeMapTransactionWrapper, ValTransaction};
+use crate::storage::MetaStore;
 
 impl HummockManager {
     /// Gets SST objects that is safe to be deleted from object store.
@@ -79,8 +82,11 @@ impl HummockManager {
         if !versioning.version_safe_points.is_empty() {
             return Ok((0, deltas_to_delete.len()));
         }
-        let mut hummock_version_deltas =
-            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
+        let mut hummock_version_deltas = create_trx_wrapper!(
+            self.sql_meta_store(),
+            BTreeMapTransactionWrapper,
+            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas,)
+        );
         let batch = deltas_to_delete
             .iter()
             .take(batch_size)
@@ -92,7 +98,11 @@ impl HummockManager {
         for delta_id in &batch {
             hummock_version_deltas.remove(*delta_id);
         }
-        commit_multi_var!(self, None, Transaction::default(), hummock_version_deltas)?;
+        commit_multi_var!(
+            self.env.meta_store(),
+            self.sql_meta_store(),
+            hummock_version_deltas
+        )?;
         #[cfg(test)]
         {
             drop(versioning_guard);
@@ -257,8 +267,7 @@ pub async fn collect_global_gc_watermark(
     }
     let mut buffered = stream::iter(worker_futures).buffer_unordered(workers.len());
     while let Some(worker_result) = buffered.next().await {
-        let worker_watermark = worker_result
-            .map_err(|e| anyhow::anyhow!("Failed to collect GC watermark: {:#?}", e))?;
+        let worker_watermark = worker_result.context("Failed to collect GC watermark")?;
         // None means either the worker has gone or the worker has not set a watermark.
         global_watermark = cmp::min(
             global_watermark,

@@ -214,7 +214,7 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
                     yield msgs;
                 }
                 Err(e) => {
-                    GLOBAL_ERROR_METRICS.cdc_connector_error.report([
+                    GLOBAL_ERROR_METRICS.cdc_source_error.report([
                         source_type.as_str_name().into(),
                         source_id.clone(),
                         e.to_string(),

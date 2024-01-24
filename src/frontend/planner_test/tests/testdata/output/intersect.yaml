@@ -34,24 +34,21 @@
             └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck } { materialized table: 4294967294 }
+    StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck } { tables: [ Materialize: 4294967294 ] }
     └── StreamProject { exprs: [t1.a, t1.b, t1.c] }
-        └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] } { intermediate state table: 0, state tables: [], distinct tables: [] }
+        └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] } { tables: [ HashAggState: 0 ] }
             └── StreamHashJoin { type: LeftSemi, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
-                ├── left table: 1
-                ├── right table: 3
-                ├── left degree table: 2
-                ├── right degree table: 4
+                ├── tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ]
                 ├── StreamExchange Hash([0, 1, 2]) from 1
                 └── StreamExchange Hash([0, 1, 2]) from 2
 
     Fragment 1
-    StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) } { state table: 5 }
+    StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) } { tables: [ StreamScan: 5 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 2
-    StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) } { state table: 6 }
+    StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) } { tables: [ StreamScan: 6 ] }
     ├── Upstream
     └── BatchPlanNode
 
@@ -131,30 +128,25 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c], stream_key: [a], pk_columns: [a], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [t1.a, internal_last_seen_value(t1.b), internal_last_seen_value(t1.c)] }
         └── StreamHashAgg { group_key: [t1.a], aggs: [internal_last_seen_value(t1.b), internal_last_seen_value(t1.c), count] }
-            ├── intermediate state table: 0
-            ├── state tables: []
-            ├── distinct tables: []
+            ├── tables: [ HashAggState: 0 ]
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
     StreamHashJoin { type: LeftSemi, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
-    ├── left table: 1
-    ├── right table: 3
-    ├── left degree table: 2
-    ├── right degree table: 4
+    ├── tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ]
     ├── StreamExchange Hash([0, 1, 2]) from 2
     └── StreamExchange Hash([0, 1, 2]) from 3
 
     Fragment 2
-    StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) } { state table: 5 }
+    StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) } { tables: [ StreamScan: 5 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) } { state table: 6 }
+    StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) } { tables: [ StreamScan: 6 ] }
     ├── Upstream
     └── BatchPlanNode
 

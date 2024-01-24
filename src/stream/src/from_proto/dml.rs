@@ -21,7 +21,7 @@ use super::ExecutorBuilder;
 use crate::error::StreamResult;
 use crate::executor::dml::DmlExecutor;
 use crate::executor::BoxedExecutor;
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::task::ExecutorParams;
 
 pub struct DmlExecutorBuilder;
 
@@ -32,7 +32,6 @@ impl ExecutorBuilder for DmlExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         _store: impl StateStore,
-        _stream_manager: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
         let table_id = TableId::new(node.table_id);

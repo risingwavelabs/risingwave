@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{default_key_column_name_version_mapping, ColumnId, TableId};
+use risingwave_common::catalog::{
+    default_key_column_name_version_mapping, ColumnId, TableId, KAFKA_TIMESTAMP_COLUMN_NAME,
+};
+use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 use risingwave_pb::plan_common::{
     AdditionalColumnType, ColumnDescVersion, FormatType, PbEncodeType,
 };
 use risingwave_pb::stream_plan::SourceNode;
-use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::panic_store::PanicStateStore;
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -27,7 +29,7 @@ use super::*;
 use crate::executor::source::{FsListExecutor, StreamSourceCore};
 use crate::executor::source_executor::SourceExecutor;
 use crate::executor::state_table_handler::SourceStateTableHandler;
-use crate::executor::{FlowControlExecutor, FsSourceExecutor};
+use crate::executor::FlowControlExecutor;
 
 const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
@@ -39,12 +41,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let (sender, barrier_receiver) = unbounded_channel();
-        stream
-            .context
-            .barrier_manager()
+        params
+            .local_barrier_manager
             .register_sender(params.actor_context.id, sender);
         let system_params = params.env.system_params_manager_ref().get_params();
 
@@ -81,6 +81,31 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             });
                         });
                     }
+                }
+
+                {
+                    // compatible code: handle legacy column `_rw_kafka_timestamp`
+                    // the column is auto added for all kafka source to empower batch query on source
+                    // solution: rewrite the column `additional_column_type` to Timestamp
+
+                    let _ = source_columns.iter_mut().map(|c| {
+                        let _ = c.column_desc.as_mut().map(|desc| {
+                            let is_timestamp = desc
+                                .get_column_type()
+                                .map(|col_type| {
+                                    col_type.type_name == PbTypeName::Timestamptz as i32
+                                })
+                                .unwrap();
+                            if desc.name == KAFKA_TIMESTAMP_COLUMN_NAME
+                                && is_timestamp
+                                // the column is from a legacy version
+                                && desc.version == ColumnDescVersion::Unspecified as i32
+                            {
+                                desc.additional_column_type =
+                                    AdditionalColumnType::Timestamp as i32;
+                            }
+                        });
+                    });
                 }
 
                 let source_desc_builder = SourceDescBuilder::new(
@@ -135,7 +160,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     ConnectorProperties::is_new_fs_connector_hash_map(&source.with_properties);
 
                 if is_fs_connector {
-                    FsSourceExecutor::new(
+                    #[expect(deprecated)]
+                    crate::executor::FsSourceExecutor::new(
                         params.actor_context.clone(),
                         params.info,
                         stream_source_core,

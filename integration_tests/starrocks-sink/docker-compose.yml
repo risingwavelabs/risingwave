@@ -52,6 +52,12 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
+  postgres:
+    image: postgres:latest
+    command: tail -f /dev/null
+    volumes:
+      - "./update_delete.sql:/update_delete.sql"
+    restart: on-failure
 volumes:
   risingwave-standalone:
     external: false

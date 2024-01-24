@@ -24,11 +24,11 @@ use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::util::pending_on_none;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::stream_plan::{Barrier, BarrierMutation};
 use risingwave_pb::stream_service::{BarrierCompleteRequest, InjectBarrierRequest};
 use risingwave_rpc_client::StreamClientPoolRef;
+use rw_futures_util::pending_on_none;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -98,9 +98,9 @@ impl GlobalBarrierManagerContext {
         }
         rx.map(move |result| match result {
             Ok(completion) => completion,
-            Err(e) => BarrierCompletion {
+            Err(_e) => BarrierCompletion {
                 prev_epoch,
-                result: Err(anyhow!("failed to receive barrier completion result: {:?}", e).into()),
+                result: Err(anyhow!("failed to receive barrier completion result").into()),
             },
         })
     }

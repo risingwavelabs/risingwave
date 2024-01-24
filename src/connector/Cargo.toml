@@ -34,6 +34,7 @@ aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
 aws-smithy-runtime-api = { workspace = true }
 aws-smithy-types = { workspace = true }
+aws-smithy-types-convert = { version = "0.60.1", features = ["convert-chrono"] }
 aws-types = { workspace = true }
 base64 = "0.21"
 byteorder = "1"
@@ -109,6 +110,7 @@ risingwave_jni_core = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 rust_decimal = "1"
+rw_futures_util = { workspace = true }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
@@ -143,9 +145,11 @@ yup-oauth2 = "8.3"
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
+assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 deltalake = { workspace = true, features = ["datafusion"] }
 expect-test = "1"
+paste = "1"
 pretty_assertions = "1"
 quote = "1"
 rand = "0.8"
@@ -167,6 +171,10 @@ harness = false
 
 [[bench]]
 name = "nexmark_integration"
+harness = false
+
+[[bench]]
+name = "json_parser"
 harness = false
 
 [lints]

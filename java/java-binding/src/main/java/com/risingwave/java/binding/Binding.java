@@ -69,13 +69,15 @@ public class Binding {
 
     static native String iteratorGetStringValue(long pointer, int index);
 
-    static native java.sql.Timestamp iteratorGetTimestampValue(long pointer, int index);
+    static native java.time.LocalDateTime iteratorGetTimestampValue(long pointer, int index);
+
+    static native java.time.OffsetDateTime iteratorGetTimestamptzValue(long pointer, int index);
 
     static native java.math.BigDecimal iteratorGetDecimalValue(long pointer, int index);
 
-    static native java.sql.Time iteratorGetTimeValue(long pointer, int index);
+    static native java.time.LocalTime iteratorGetTimeValue(long pointer, int index);
 
-    static native java.sql.Date iteratorGetDateValue(long pointer, int index);
+    static native java.time.LocalDate iteratorGetDateValue(long pointer, int index);
 
     static native String iteratorGetIntervalValue(long pointer, int index);
 

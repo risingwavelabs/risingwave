@@ -26,12 +26,12 @@ use risingwave_pb::hummock::ValidationTask;
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::{
-    commit_multi_var, read_lock, start_measure_real_process_timer, write_lock,
+    commit_multi_var, create_trx_wrapper, read_lock, start_measure_real_process_timer, write_lock,
 };
 use crate::hummock::HummockManager;
 use crate::manager::META_NODE_ID;
-use crate::model::{BTreeMapTransaction, ValTransaction};
-use crate::storage::Transaction;
+use crate::model::{BTreeMapTransaction, BTreeMapTransactionWrapper, ValTransaction};
+use crate::storage::MetaStore;
 
 impl HummockManager {
     /// Release resources pinned by these contexts, including:
@@ -51,16 +51,23 @@ impl HummockManager {
 
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
-        let mut pinned_versions = BTreeMapTransaction::new(&mut versioning.pinned_versions);
-        let mut pinned_snapshots = BTreeMapTransaction::new(&mut versioning.pinned_snapshots);
+        let mut pinned_versions = create_trx_wrapper!(
+            self.sql_meta_store(),
+            BTreeMapTransactionWrapper,
+            BTreeMapTransaction::new(&mut versioning.pinned_versions,)
+        );
+        let mut pinned_snapshots = create_trx_wrapper!(
+            self.sql_meta_store(),
+            BTreeMapTransactionWrapper,
+            BTreeMapTransaction::new(&mut versioning.pinned_snapshots,)
+        );
         for context_id in context_ids.as_ref() {
             pinned_versions.remove(*context_id);
             pinned_snapshots.remove(*context_id);
         }
         commit_multi_var!(
-            self,
-            None,
-            Transaction::default(),
+            self.env.meta_store(),
+            self.sql_meta_store(),
             pinned_versions,
             pinned_snapshots
         )?;
