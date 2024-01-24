@@ -124,7 +124,6 @@ pub struct Binder {
     udf_context: UdfContext,
 }
 
-#[derive(Clone, Debug, Default)]
 pub struct UdfContext {
     /// The mapping from `sql udf parameters` to a bound `ExprImpl` generated from `ast expressions`
     /// Note: The expressions are constructed during runtime, correspond to the actual users' input
@@ -133,6 +132,9 @@ pub struct UdfContext {
     /// The global counter that records the calling stack depth
     /// of the current binding sql udf chain
     udf_global_counter: u32,
+
+    /// The runtime binder specifically used by sql udf
+    udf_runtime_stack_binder: Option<Box<Binder>>,
 }
 
 impl UdfContext {
@@ -140,6 +142,20 @@ impl UdfContext {
         Self {
             udf_param_context: HashMap::new(),
             udf_global_counter: 0,
+            udf_runtime_stack_binder: None,
+        }
+    }
+
+    pub fn named_parameter_prefix() -> String {
+        "_udf_".to_string()
+    }
+
+    pub fn runtime_stack_binder(&mut self) -> &mut Binder {
+        if let Some(ref mut binder) = self.udf_runtime_stack_binder {
+            &mut *binder
+        } else {
+            self.udf_runtime_stack_binder = Some(Box::new(Binder::new_for_system(&SessionImpl::mock())));
+            &mut *self.udf_runtime_stack_binder.as_mut().unwrap()
         }
     }
 
@@ -162,6 +178,7 @@ impl UdfContext {
     pub fn _clear(&mut self) {
         self.udf_global_counter = 0;
         self.udf_param_context.clear();
+        self.udf_runtime_stack_binder = None;
     }
 
     pub fn get_expr(&self, name: &str) -> Option<&ExprImpl> {

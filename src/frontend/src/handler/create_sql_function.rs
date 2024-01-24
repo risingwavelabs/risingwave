@@ -133,7 +133,9 @@ pub async fn handle_create_sql_function(
     let mut arg_names = vec![];
     let mut arg_types = vec![];
     for arg in args.unwrap_or_default() {
-        arg_names.push(arg.name.map_or("".to_string(), |n| n.real_value()));
+        arg_names.push(arg.name.map_or("".to_string(), |n| {
+            format!("{}{}", UdfContext::named_parameter_prefix(), n.real_value())
+        }));
         arg_types.push(bind_data_type(&arg.data_type)?);
     }
 

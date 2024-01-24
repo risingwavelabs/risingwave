@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
-#[cfg(test)]
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
@@ -37,7 +36,6 @@ use rand::RngCore;
 use risingwave_batch::task::{ShutdownSender, ShutdownToken};
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
-#[cfg(test)]
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
@@ -596,7 +594,6 @@ impl SessionImpl {
         }
     }
 
-    #[cfg(test)]
     pub fn mock() -> Self {
         Self {
             env: FrontendEnv::mock(),
