@@ -32,6 +32,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::window_function::{
     create_window_state, StateKey, WindowFuncCall, WindowStates,
 };
+use risingwave_storage::row_serde::row_serde_util::serialize_pk_with_vnode;
 use risingwave_storage::StateStore;
 
 use super::over_partition::{
@@ -324,7 +325,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
         }
 
         // `input pk` => `Record`
-        let mut key_change_update_buffer = BTreeMap::new();
+        let mut key_change_update_buffer: BTreeMap<DefaultOrdered<OwnedRow>, Record<OwnedRow>> =
+            BTreeMap::new();
         let mut chunk_builder =
             StreamChunkBuilder::new(this.chunk_size, this.info.schema.data_types());
 
@@ -382,7 +384,15 @@ impl<S: StateStore> OverWindowExecutor<S> {
                                     yield chunk;
                                 }
                             }
-                            _ => panic!("other cases should not exist"),
+                            (existed, record) => {
+                                let vnode = this.state_table.compute_vnode_by_pk(&key.pk);
+                                let raw_key = serialize_pk_with_vnode(
+                                    &key.pk,
+                                    this.state_table.pk_serde(),
+                                    vnode,
+                                );
+                                panic!("other cases should not exist. raw_key: {:?}, existed: {:?}, new: {:?}", raw_key, existed, record);
+                            }
                         }
                     } else {
                         key_change_update_buffer.insert(pk, record);
