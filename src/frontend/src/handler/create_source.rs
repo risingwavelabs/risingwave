@@ -28,6 +28,9 @@ use risingwave_common::catalog::{
 use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, NotSupported, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_connector::parser::additional_columns::{
+    build_additional_column_catalog, COMPATIBLE_ADDITIONAL_COLUMNS,
+};
 use risingwave_connector::parser::{
     schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
     SpecificParserConfig,
@@ -44,9 +47,8 @@ use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
-    get_connector_compatible_additional_columns, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR,
-    KAFKA_CONNECTOR, KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR,
-    POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
+    GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NATS_CONNECTOR,
+    NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
 };
 use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
@@ -502,36 +504,16 @@ pub fn handle_addition_columns(
 ) -> Result<()> {
     let connector_name = get_connector(with_properties).unwrap(); // there must be a connector in source
 
-    let addition_col_list =
-        match get_connector_compatible_additional_columns(connector_name.as_str()) {
-            Some(cols) => cols,
-            // early return if there are no accepted additional columns for the connector
-            None => {
-                return if additional_columns.is_empty() {
-                    Ok(())
-                } else {
-                    Err(RwError::from(ProtocolError(format!(
-                        "Connector {} accepts no additional column but got {:?}",
-                        connector_name, additional_columns
-                    ))))
-                }
-            }
-        };
-    let gen_default_column_name =
-        |connector_name: &str,
-         addi_column_name: &str,
-         inner_field: Option<&String>,
-         data_type: Option<&risingwave_sqlparser::ast::DataType>| {
-            if let Some(inner) = inner_field {
-                let mut name = format!("_rw_{}_{}_{}", connector_name, addi_column_name, inner);
-                if let Some(data_type) = data_type {
-                    name.push_str(format!("_{:?}", data_type).as_str())
-                }
-                name
-            } else {
-                format!("_rw_{}_{}", connector_name, addi_column_name)
-            }
-        };
+    if COMPATIBLE_ADDITIONAL_COLUMNS
+        .get(connector_name.as_str())
+        .is_none()
+        && !additional_columns.is_empty()
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "Connector {} accepts no additional column but got {:?}",
+            connector_name, additional_columns
+        ))));
+    }
 
     let latest_col_id: ColumnId = columns
         .iter()
@@ -552,56 +534,17 @@ pub fn handle_addition_columns(
             }
         }
 
-        let (_, gen_column_catalog_fn) = addition_col_list
-            // todo: refactor `addition_col_hashmap` to HashMap<&str, CompatibleAdditionalColumnsFn>
-            .iter()
-            .find(|ele| {
-                ele.0
-                    .eq_ignore_ascii_case(item.column_type.real_value().as_str())
-            })
-            .ok_or_else(|| {
-                RwError::from(ProtocolError(format!(
-                    "Unknown additional column type {:?}",
-                    item.column_type.real_value()
-                )))
-            })?;
-
-        columns.push(gen_column_catalog_fn(
+        let data_type_name: Option<String> = item
+            .header_inner_expect_type
+            .map(|dt| format!("{:?}", dt).to_lowercase());
+        columns.push(build_additional_column_catalog(
             latest_col_id.next(),
-            item.column_alias
-                .map(|alias| alias.real_value())
-                .unwrap_or_else(|| {
-                    gen_default_column_name(
-                        connector_name.as_str(),
-                        item.column_type.real_value().as_str(),
-                        item.inner_field.as_ref(),
-                        item.header_inner_expect_type.as_ref(),
-                    )
-                })
-                .as_str(),
+            connector_name.as_str(),
+            item.column_type.real_value().as_str(),
+            item.column_alias.map(|alias| alias.real_value()),
             item.inner_field.as_deref(),
-            {
-                if let Some(data_type) = item.header_inner_expect_type.as_ref() {
-                    match data_type {
-                        risingwave_sqlparser::ast::DataType::Varchar => {
-                            Some(risingwave_pb::data::DataType {
-                                type_name: risingwave_pb::data::data_type::TypeName::Varchar as i32,
-                                ..Default::default()
-                            })
-                        }
-                        risingwave_sqlparser::ast::DataType::Bytea => {
-                            Some(risingwave_pb::data::DataType {
-                                type_name: risingwave_pb::data::data_type::TypeName::Bytea as i32,
-                                ..Default::default()
-                            })
-                        }
-                        _ => unreachable!(),
-                    }
-                } else {
-                    None
-                }
-            },
-        ))
+            data_type_name.as_deref(),
+        )?);
     }
 
     Ok(())
@@ -918,17 +861,15 @@ fn check_and_add_timestamp_column(
         }
 
         // add a hidden column `_rw_kafka_timestamp` to each message from Kafka source
-        let mut catalog = get_connector_compatible_additional_columns(KAFKA_CONNECTOR)
-            .unwrap()
-            .iter()
-            .find(|(col_name, _)| col_name.eq(&"timestamp"))
-            .unwrap()
-            .1(
+        let mut catalog = build_additional_column_catalog(
             ColumnId::placeholder(),
-            KAFKA_TIMESTAMP_COLUMN_NAME,
+            KAFKA_CONNECTOR,
+            "timestamp",
+            Some(KAFKA_TIMESTAMP_COLUMN_NAME.to_string()),
             None,
             None,
-        );
+        )
+        .unwrap();
         catalog.is_hidden = true;
 
         columns.push(catalog);
