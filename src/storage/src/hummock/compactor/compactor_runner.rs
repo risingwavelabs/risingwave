@@ -1037,7 +1037,7 @@ mod tests {
                 .sstable(&sst_info, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap();
-            ret.append(&mut sst.value().meta.monotonic_tombstone_events.clone());
+            ret.append(&mut sst.meta.monotonic_tombstone_events.clone());
         }
         let expected_result = create_monotonic_events(vec![tombstone]);
 
