@@ -154,11 +154,7 @@ pub struct RowsFrameBounds {
     pub end: FrameBound<usize>,
 }
 
-impl FrameBoundsImpl for RowsFrameBounds {
-    fn validate(&self) -> Result<()> {
-        FrameBound::validate_bounds(&self.start, &self.end)
-    }
-
+impl RowsFrameBounds {
     /// Check if the `ROWS` frame is canonical.
     ///
     /// A canonical `ROWS` frame is defined as:
@@ -171,6 +167,12 @@ impl FrameBoundsImpl for RowsFrameBounds {
             let end = self.end.to_offset();
             start.unwrap_or(0) <= 0 && end.unwrap_or(0) >= 0
         }
+    }
+}
+
+impl FrameBoundsImpl for RowsFrameBounds {
+    fn validate(&self) -> Result<()> {
+        FrameBound::validate_bounds(&self.start, &self.end)
     }
 }
 
