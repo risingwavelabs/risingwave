@@ -38,6 +38,7 @@ use risingwave_connector::source::cdc::external::{
 use risingwave_connector::source::{SourceColumnDesc, SourceContext};
 use risingwave_storage::StateStore;
 use rw_futures_util::pausable;
+use thiserror_ext::AsReport;
 
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::cdc::state::CdcBackfillState;
@@ -538,11 +539,11 @@ fn mapping_message(
             match mark_result {
                 Ok(chunk) => Some(Message::Chunk(mapping_chunk(chunk, upstream_indices))),
                 Err(e) => {
-                    tracing::error!("failed to mark upstream chunk: {}", e);
+                    tracing::error!("failed to mark upstream chunk: {:?}", e.as_report());
                     GLOBAL_ERROR_METRICS.cdc_source_error.report([
                         upstream_table_name.into(),
                         upstream_table_id.to_string(),
-                        e.to_string().into(),
+                        e.to_report_string(),
                     ]);
                     None
                 }
@@ -551,6 +552,7 @@ fn mapping_message(
     }
 }
 
+/// filter out upstream events occurred before `last_cdc_offset`
 fn mark_upstream_chunk(
     chunk: StreamChunk,
     offset_parse_func: &CdcOffsetParseFunc,

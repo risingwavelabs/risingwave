@@ -78,4 +78,4 @@ SELECT * FROM rw.products_test order by id limit 3
 query TTTT
 select order_date,customer_name,product_id,order_status from orders_no_backfill order by order_id;
 ----
-2022-12-01 15:08:22 Sam 110 false
+2022-12-01 15:08:22 Sam 110 0
