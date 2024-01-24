@@ -1067,7 +1067,7 @@ mod tests {
             |x| x * 3,
             sstable_store.clone(),
             TEST_KEYS_COUNT,
-            TestEpoch::new_without_offset(1).as_u64(),
+            1,
         )
         .await;
 
@@ -1082,7 +1082,7 @@ mod tests {
         while ui.is_valid() {
             let key = ui.key();
             let key_epoch = key.epoch_with_gap.pure_epoch();
-            assert!(key_epoch > min_epoch as u64);
+            assert!(key_epoch > min_epoch);
 
             i += 1;
             ui.next().await.unwrap();

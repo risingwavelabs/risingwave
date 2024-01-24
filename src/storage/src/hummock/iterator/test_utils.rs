@@ -271,7 +271,7 @@ pub async fn gen_iterator_test_sstable_with_incr_epoch(
             (
                 iterator_test_key_of_epoch(
                     idx_mapping(i),
-                    TestEpoch::new_without_offset((epoch_base + i as u64)).as_u64(),
+                    TestEpoch::new_without_offset(epoch_base + i as u64).as_u64(),
                 ),
                 HummockValue::put(iterator_test_value_of(idx_mapping(i))),
             )
