@@ -68,8 +68,7 @@ pub struct SinkDesc {
     /// Id of the target table for sink into table.
     pub target_table: Option<TableId>,
 
-    /// Indicate whether the sink accepts the data chunk with extra partition column.
-    /// For more detil of partition column, see `PartitionComputeInfo`
+    /// See the same name field in `SinkWriterParam`.
     pub extra_partition_col_idx: Option<usize>,
 }
 
