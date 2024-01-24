@@ -25,7 +25,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::TestEpoch;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{
-    EpochWithGap, HummockEpoch, HummockReadEpoch, HummockSstableObjectId, LocalSstableInfo,
+    EpochWithGap, HummockReadEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;

@@ -163,7 +163,7 @@ impl EpochPair {
 
     pub fn new_test_epoch(curr: u64) -> Self {
         assert!(curr > 65535);
-        Self::new(curr, curr - 65536)
+        Self::new(curr, curr - TestEpoch::new_without_offset(1).as_u64())
     }
 }
 
@@ -254,7 +254,7 @@ impl TestEpochWithGap {
         // We only use 48 high bit to store epoch and use 16 low bit to store spill offset. But for MAX epoch,
         // we still keep `u64::MAX` because we have use it in delete range and persist this value to sstable files.
         //  So for compatibility, we must skip checking it for u64::MAX. See bug description in https://github.com/risingwavelabs/risingwave/issues/13717
-        if risingwave_common::util::epoch::is_max_epoch(epoch) {
+        if is_max_epoch(epoch) {
             TestEpochWithGap::new_max_epoch()
         } else {
             debug_assert!((epoch & EPOCH_SPILL_TIME_MASK) == 0);
@@ -277,11 +277,6 @@ impl TestEpochWithGap {
     // return the epoch_with_gap(epoch + spill_offset)
     pub(crate) fn _as_u64(&self) -> u64 {
         self.0
-    }
-
-    // return the epoch_with_gap(epoch + spill_offset)
-    pub(crate) fn _from_u64(epoch_with_gap: u64) -> Self {
-        TestEpochWithGap(epoch_with_gap)
     }
 
     // return the pure epoch without spill offset

@@ -24,7 +24,7 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::range::RangeBoundsExt;
-use risingwave_common::util::epoch::{self, TestEpoch};
+use risingwave_common::util::epoch::TestEpoch;
 use risingwave_hummock_sdk::key::{
     gen_key_from_bytes, prefix_slice_with_vnode, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN,
 };
@@ -100,7 +100,7 @@ async fn test_storage_basic() {
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
     // epoch 0 is reserved by storage service
-    let mut epoch1 = TestEpoch::new_without_offset(1);
+    let epoch1 = TestEpoch::new_without_offset(1);
     hummock_storage
         .init_for_test(epoch1.as_u64())
         .await
@@ -168,7 +168,7 @@ async fn test_storage_basic() {
         .unwrap();
     assert_eq!(value, None);
 
-    let mut epoch2 = epoch1.next_epoch();
+    let epoch2 = epoch1.next_epoch();
     hummock_storage.seal_current_epoch(epoch2.as_u64(), SealCurrentEpochOptions::for_test());
     hummock_storage
         .ingest_batch(
@@ -459,7 +459,7 @@ async fn test_state_store_sync() {
     let read_version = hummock_storage.read_version();
 
     let base_epoch = read_version.read().committed().max_committed_epoch();
-    let mut epoch1 = TestEpoch::new_without_offset(base_epoch + 1);
+    let epoch1 = TestEpoch::new_without_offset(base_epoch + 1);
     hummock_storage
         .init_for_test(epoch1.as_u64())
         .await
@@ -518,7 +518,7 @@ async fn test_state_store_sync() {
         .await
         .unwrap();
 
-    let mut epoch2 = epoch1.next_epoch();
+    let epoch2 = epoch1.next_epoch();
     hummock_storage.seal_current_epoch(epoch2.as_u64(), SealCurrentEpochOptions::for_test());
 
     // ingest more 8B then will trigger a sync behind the scene
@@ -798,7 +798,7 @@ async fn test_delete_get() {
         .committed()
         .max_committed_epoch();
 
-    let mut epoch1 = TestEpoch::new_without_offset(initial_epoch + 1);
+    let epoch1 = TestEpoch::new_without_offset(initial_epoch + 1);
 
     hummock_storage
         .init_for_test(epoch1.as_u64())
@@ -899,7 +899,7 @@ async fn test_multiple_epoch_sync() {
         .committed()
         .max_committed_epoch();
 
-    let mut epoch1 = TestEpoch::new_without_offset(initial_epoch + 1);
+    let epoch1 = TestEpoch::new_without_offset(initial_epoch + 1);
     hummock_storage
         .init_for_test(epoch1.as_u64())
         .await
@@ -926,7 +926,7 @@ async fn test_multiple_epoch_sync() {
         .await
         .unwrap();
 
-    let mut epoch2 = epoch1.next_epoch();
+    let epoch2 = epoch1.next_epoch();
     hummock_storage.seal_current_epoch(epoch2.as_u64(), SealCurrentEpochOptions::for_test());
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),

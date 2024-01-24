@@ -304,7 +304,9 @@ async fn run_compare_result(
     test_count: u64,
     test_delete_ratio: u32,
 ) -> Result<(), String> {
-    let init_epoch = hummock.get_pinned_version().max_committed_epoch() + 65536;
+    let init_epoch =
+        TestEpoch::new_without_offset(hummock.get_pinned_version().max_committed_epoch() + 1)
+            .as_u64();
 
     let mut normal = NormalState::new(hummock, 1, init_epoch).await;
     let mut delete_range = DeleteRangeState::new(hummock, 2, init_epoch).await;
@@ -319,7 +321,7 @@ async fn run_compare_result(
     let mut rng = StdRng::seed_from_u64(seed);
     let mut overlap_ranges = vec![];
     for epoch_idx in 0..test_count {
-        let epoch = TestEpoch::new_without_offset(init_epoch + epoch_idx);
+        let epoch = TestEpoch::new_without_offset(init_epoch / 65536 + epoch_idx);
         for idx in 0..1000 {
             let op = rng.next_u32() % 50;
             let key_number = rng.next_u64() % test_range;
@@ -377,7 +379,7 @@ async fn run_compare_result(
             .commit_epoch(epoch.as_u64(), ret.uncommitted_ssts)
             .await
             .map_err(|e| format!("{:?}", e))?;
-        if epoch.as_u64() % 200 == 0 {
+        if (epoch.as_u64() / 65536) % 200 == 0 {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
@@ -630,7 +632,7 @@ mod tests {
 
     use super::compaction_test;
 
-    // #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
     async fn test_small_data() {
         let config = RwConfig::default();
         let mut compaction_config = CompactionConfigBuilder::new().build();

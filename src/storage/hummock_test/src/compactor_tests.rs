@@ -444,7 +444,7 @@ pub(crate) mod tests {
             &key,
             1 << 20,
             (1..SST_COUNT + 1)
-                .map(|v| TestEpoch::new_without_offset(v))
+                .map(TestEpoch::new_without_offset)
                 .collect_vec(),
         )
         .await;
@@ -1569,15 +1569,18 @@ pub(crate) mod tests {
         );
         let mut data1 = Vec::with_capacity(KEY_COUNT / 2);
         let mut data = Vec::with_capacity(KEY_COUNT);
-        let mut last_epoch = 400 * 65536;
+        let mut last_epoch = TestEpoch::new_without_offset(400).as_u64();
         for _ in 0..KEY_COUNT {
             let rand_v = rng.next_u32() % 100;
             let (k, epoch) = if rand_v == 0 {
-                (last_k + 2000, 400 * 65536)
+                (last_k + 2000, TestEpoch::new_without_offset(400).as_u64())
             } else if rand_v < 5 {
-                (last_k, last_epoch - 1 * 65536)
+                (
+                    last_k,
+                    last_epoch - TestEpoch::new_without_offset(1).as_u64(),
+                )
             } else {
-                (last_k + 1, 400 * 65536)
+                (last_k + 1, TestEpoch::new_without_offset(400).as_u64())
             };
             let key = k.to_be_bytes().to_vec();
             let key = FullKey::new(TableId::new(1), TableKey(key), epoch);
@@ -1598,7 +1601,10 @@ pub(crate) mod tests {
         let mut data3 = Vec::with_capacity(KEY_COUNT);
         let mut data = Vec::with_capacity(KEY_COUNT);
         let mut last_k: u64 = 0;
-        let max_epoch = std::cmp::min(300 * 65536, last_epoch - 1 * 65536);
+        let max_epoch = std::cmp::min(
+            TestEpoch::new_without_offset(300).as_u64(),
+            last_epoch - TestEpoch::new_without_offset(1).as_u64(),
+        );
         last_epoch = max_epoch;
 
         for _ in 0..KEY_COUNT * 4 {
@@ -1606,7 +1612,10 @@ pub(crate) mod tests {
             let (k, epoch) = if rand_v == 0 {
                 (last_k + 1000, max_epoch)
             } else if rand_v < 5 {
-                (last_k, last_epoch - 1 * 65536)
+                (
+                    last_k,
+                    last_epoch - TestEpoch::new_without_offset(1).as_u64(),
+                )
             } else {
                 (last_k + 1, max_epoch)
             };
@@ -1713,7 +1722,7 @@ pub(crate) mod tests {
                 None,
             );
             let mut last_k: u64 = 1;
-            let init_epoch = 100 * 65536 * object_id;
+            let init_epoch = TestEpoch::new_without_offset(100 * object_id).as_u64();
             let mut last_epoch = init_epoch;
 
             for idx in 0..KEY_COUNT {

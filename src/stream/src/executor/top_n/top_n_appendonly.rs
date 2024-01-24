@@ -232,7 +232,7 @@ mod tests {
             pk_indices(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(2).as_u64(),
+                    TestEpoch::new_without_offset(1).as_u64(),
                 )),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Barrier(Barrier::new_test_barrier(

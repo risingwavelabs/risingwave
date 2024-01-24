@@ -667,7 +667,6 @@ mod tests {
     use rand::{thread_rng, Rng};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
     use risingwave_hummock_sdk::EpochWithGap;
 

@@ -1088,7 +1088,7 @@ mod tests {
             ui.next().await.unwrap();
         }
 
-        let expect_count = (TEST_KEYS_COUNT - (min_epoch / 65536) as usize) as usize;
+        let expect_count = TEST_KEYS_COUNT - (min_epoch / 65536) as usize;
         assert_eq!(i, expect_count);
     }
 }

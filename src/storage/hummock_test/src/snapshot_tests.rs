@@ -111,7 +111,7 @@ async fn test_snapshot_inner(
         .new_local(NewLocalOptions::for_test(Default::default()))
         .await;
 
-    let mut epoch1 = TestEpoch::new_without_offset(1);
+    let epoch1 = TestEpoch::new_without_offset(1);
     local.init_for_test(epoch1.as_u64()).await.unwrap();
     local
         .ingest_batch(

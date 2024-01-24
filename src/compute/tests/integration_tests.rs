@@ -463,7 +463,7 @@ async fn test_row_seq_scan() -> Result<()> {
         vec![0, 1, 2],
     );
 
-    let mut epoch = EpochPair::new_test_epoch(65536);
+    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
     state.init_epoch(epoch);
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
