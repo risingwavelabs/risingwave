@@ -374,9 +374,6 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     let pk = key.pk.clone();
                     let record = record.clone();
                     if let Some(existed) = key_change_update_buffer.remove(&key.pk) {
-                        let tp1 = existed.to_record_type();
-                        let tp2 = record.to_record_type();
-
                         match (existed, record) {
                             (Record::Insert { new_row }, Record::Delete { old_row })
                             | (Record::Delete { old_row }, Record::Insert { new_row }) => {
@@ -387,14 +384,14 @@ impl<S: StateStore> OverWindowExecutor<S> {
                                     yield chunk;
                                 }
                             }
-                            _ => {
+                            (existed, record) => {
                                 let vnode = this.state_table.compute_vnode_by_pk(&key.pk);
                                 let raw_key = serialize_pk_with_vnode(
                                     &key.pk,
                                     this.state_table.pk_serde(),
                                     vnode,
                                 );
-                                panic!("other cases should not exist. raw_key: {:?}, existed: {:?}, new: {:?}", raw_key, tp1, tp2);
+                                panic!("other cases should not exist. raw_key: {:?}, existed: {:?}, new: {:?}", raw_key, existed, record);
                             }
                         }
                     } else {
