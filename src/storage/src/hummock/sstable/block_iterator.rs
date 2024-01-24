@@ -25,6 +25,12 @@ use crate::monitor::LocalHitmap;
 
 /// [`BlockIterator`] is used to read kv pairs in a block.
 pub struct BlockIterator {
+    /// NOTE:
+    ///
+    /// - `hitmap` is priorer than `block` in source code order, will be dropped before `block`.
+    /// - `hitmap` is supposed be updated every time when `value_range` is updated.
+    hitmap: LocalHitmap<HITMAP_ELEMS>,
+
     /// Block that iterates on.
     block: BlockHolder,
     /// Current restart point index.
@@ -40,9 +46,6 @@ pub struct BlockIterator {
 
     last_key_len_type: LenType,
     last_value_len_type: LenType,
-
-    /// NOTE: `hitmap` is supposed be updated every time when `value_range` is updated.
-    hitmap: LocalHitmap<HITMAP_ELEMS>,
 }
 
 impl BlockIterator {
