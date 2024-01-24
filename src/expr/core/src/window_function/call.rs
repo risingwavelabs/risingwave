@@ -154,6 +154,20 @@ impl RowsFrameBounds {
     fn validate(&self) -> Result<()> {
         FrameBound::validate_bounds(&self.start, &self.end)
     }
+
+    /// Check if the `ROWS` frame is canonical.
+    ///
+    /// A canonical `ROWS` frame is defined as:
+    ///
+    /// - It is valid.
+    /// - It is a crossing frame, i.e. it contains the current row.
+    pub fn is_canonical(&self) -> bool {
+        self.validate().is_ok() && {
+            let start = self.start.to_offset();
+            let end = self.end.to_offset();
+            start.unwrap_or(0) <= 0 && end.unwrap_or(0) >= 0
+        }
+    }
 }
 
 #[derive(Display, Debug, Clone, Eq, PartialEq, Hash, EnumAsInner)]
