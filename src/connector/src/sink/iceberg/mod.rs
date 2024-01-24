@@ -39,7 +39,7 @@ use icelake::transaction::Transaction;
 use icelake::types::{data_file_from_json, data_file_to_json, Any, DataFile};
 use icelake::{Table, TableIdentifier};
 use itertools::Itertools;
-use risingwave_common::array::{to_record_batch_with_schema, Op, StreamChunk};
+use risingwave_common::array::{to_iceberg_record_batch_with_schema, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::anyhow_error;
@@ -724,13 +724,14 @@ impl SinkWriter for IcebergWriter {
                 let filters =
                     chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
                 chunk.set_visibility(filters);
-                let chunk = to_record_batch_with_schema(self.schema.clone(), &chunk.compact())
-                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+                let chunk =
+                    to_iceberg_record_batch_with_schema(self.schema.clone(), &chunk.compact())
+                        .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
                 writer.write(chunk).await?;
             }
             IcebergWriterEnum::Upsert(writer) => {
-                let chunk = to_record_batch_with_schema(self.schema.clone(), &chunk)
+                let chunk = to_iceberg_record_batch_with_schema(self.schema.clone(), &chunk)
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
                 writer

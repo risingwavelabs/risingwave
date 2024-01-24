@@ -8,7 +8,7 @@ init_sqls = [
     v2 long,
     v3 string
     ) USING iceberg
-    PARTITIONED BY (v1,v2)
+    PARTITIONED BY (v1,v2,truncate(2,v3))
     TBLPROPERTIES ('format-version'='2');
     '''
 ]
