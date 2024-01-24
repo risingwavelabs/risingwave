@@ -58,7 +58,7 @@ impl KafkaMeta {
                         .find(|header| header.key == target_field)
                         .map(|header| header.value)
                 })
-                .unwrap();
+                .unwrap_or(None); // if not found the specified column, return None
             if let Some(data_type) = data_type
                 && data_type.type_name == PbTypeName::Varchar as i32
             {

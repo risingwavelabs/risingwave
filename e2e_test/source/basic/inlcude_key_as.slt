@@ -70,6 +70,7 @@ include timestamp as timestamp_col
 include header 'header1' as header_col_1
 include header 'header2' as header_col_2
 include header 'header2' varchar as header_col_3
+include header 'header3' as header_col_4 # non exist header key
 WITH (
 	connector = 'kafka',
     properties.bootstrap.server = 'message_queue:29092',
@@ -116,10 +117,10 @@ FROM   additional_columns limit 1;
 ----
 header1 \x7631
 
-query TTT
-select header_col_1, header_col_2, header_col_3 from additional_columns_1 limit 1
+query TTTT
+select header_col_1, header_col_2, header_col_3, header_col_4 from additional_columns_1 limit 1
 ----
-\x7631 \x7632 v2
+\x7631 \x7632 v2 NULL
 
 statement ok
 drop table upsert_students_default_key
