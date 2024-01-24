@@ -186,7 +186,6 @@ message ExprContext {
   string time_zone = 1;
 }
 
-
 message AdditionalColumnKey {}
 
 message AdditionalColumnTimestamp {}
