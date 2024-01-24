@@ -195,7 +195,7 @@ KinesisProperties:
     required: false
     alias: kinesis.credentials.access
   - name: aws.credentials.secret_access_key
-    field_type: String
+    field_type: SecretString
     required: false
     alias: kinesis.credentials.secret
   - name: aws.credentials.session_token
@@ -447,7 +447,7 @@ OpendalS3Properties:
     required: false
     default: Default::default
   - name: s3.credentials.secret
-    field_type: String
+    field_type: SecretString
     required: false
     default: Default::default
   - name: s3.endpoint_url
@@ -535,7 +535,7 @@ PulsarProperties:
     field_type: String
     required: false
   - name: secret_key
-    field_type: String
+    field_type: SecretString
     required: false
   - name: session_token
     field_type: String
@@ -574,7 +574,7 @@ S3Properties:
     required: false
     default: Default::default
   - name: s3.credentials.secret
-    field_type: String
+    field_type: SecretString
     required: false
     default: Default::default
   - name: s3.endpoint_url

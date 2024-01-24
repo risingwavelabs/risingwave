@@ -77,30 +77,26 @@ pub(crate) async fn into_chunk_stream(
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
-pub struct SecretString {
-    inner: redact::Secret<String>,
-}
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct SecretString(redact::Secret<String>);
 
 impl Serialize for SecretString {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        format!("{:?}", self.inner).serialize(serializer)
+        format!("{:?}", self.0).serialize(serializer)
     }
 }
 
-impl WithOptions for redact::Secret<String> {}
+impl WithOptions for SecretString {}
 
 impl SecretString {
     pub fn expose_secret(&self) -> &String {
-        self.inner.expose_secret()
+        self.0.expose_secret()
     }
 
     pub fn new(s: impl Into<String>) -> Self {
-        Self {
-            inner: redact::Secret::new(s.into()),
-        }
+        Self(redact::Secret::new(s.into()))
     }
 }
