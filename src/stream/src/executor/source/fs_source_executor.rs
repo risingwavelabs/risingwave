@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// *** NOTICE: TO BE DEPRECATED *** //
+#![deprecated = "will be replaced by new fs source (list + fetch)"]
+#![expect(deprecated)]
 
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
@@ -24,11 +25,11 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_connector::source::reader::desc::{FsSourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
     SplitMetaData, StreamChunkWithState,
 };
-use risingwave_source::source_desc::{FsSourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
@@ -109,7 +110,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         );
         source_desc
             .source
-            .stream_reader(state, column_ids, Arc::new(source_ctx))
+            .to_stream(state, column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)
     }
