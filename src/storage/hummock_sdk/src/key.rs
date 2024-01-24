@@ -950,24 +950,25 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
     /// ```
     /// use bytes::Bytes;
     /// use risingwave_common::catalog::TableId;
+    /// use risingwave_hummock_sdk::EpochWithGap;
     /// use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, TableKey};
     ///
     /// let table_id = TableId { table_id: 1 };
-    /// let full_key1 = FullKey::new(table_id, TableKey(Bytes::from("c")), 5);
+    /// let full_key1 = FullKey::new_with_gap_epoch(table_id, TableKey(Bytes::from("c")), EpochWithGap::new(0, 5));
     /// let mut a = FullKeyTracker::<Bytes>::new(full_key1.clone());
     ///
     /// // Panic on non-decreasing epoch observed for the same user key.
-    /// // let full_key_with_larger_epoch = FullKey::new(table_id, TableKey(Bytes::from("c")), 6);
+    /// // let full_key_with_larger_epoch = FullKey::new_with_gap_epoch(table_id, TableKey(Bytes::from("c")), EpochWithGap::new(0, 6));
     /// // a.observe(full_key_with_larger_epoch);
     ///
     /// // Panic on non-increasing user key observed.
-    /// // let full_key_with_smaller_user_key = FullKey::new(table_id, TableKey(Bytes::from("b")), 3);
+    /// // let full_key_with_smaller_user_key = FullKey::new_with_gap_epoch(table_id, TableKey(Bytes::from("b")), EpochWithGap::new(0, 3));
     /// // a.observe(full_key_with_smaller_user_key);
     ///
-    /// let full_key2 = FullKey::new(table_id, TableKey(Bytes::from("c")), 3);
+    /// let full_key2 = FullKey::new_with_gap_epoch(table_id, TableKey(Bytes::from("c")), EpochWithGap::new(0, 3));
     /// assert_eq!(a.observe(full_key2), None);
     ///
-    /// let full_key3 = FullKey::new(table_id, TableKey(Bytes::from("f")), 4);
+    /// let full_key3 = FullKey::new_with_gap_epoch(table_id, TableKey(Bytes::from("f")), EpochWithGap::new(0, 4));
     /// assert_eq!(a.observe(full_key3), Some(full_key1));
     /// ```
     ///
