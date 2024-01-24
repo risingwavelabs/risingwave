@@ -219,13 +219,7 @@ impl PlanRoot {
 
         let ctx = plan.ctx();
         // Inline session timezone mainly for rewriting now()
-        // Inline session timezone
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
-
-        if ctx.is_explain_trace() {
-            ctx.trace("Inline Session Timezone:");
-            ctx.trace(plan.explain_to_string());
-        }
 
         // Const eval of exprs at the last minute
         plan = const_eval_exprs(plan)?;
@@ -247,6 +241,14 @@ impl PlanRoot {
             vec![BatchProjectMergeRule::create()],
             ApplyOrder::BottomUp,
         ));
+
+        // Inline session timezone
+        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
+
+        if ctx.is_explain_trace() {
+            ctx.trace("Inline Session Timezone:");
+            ctx.trace(plan.explain_to_string());
+        }
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
