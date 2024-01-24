@@ -250,12 +250,20 @@ impl FrameBound<usize> {
 
     /// View the bound as frame start, and get the number of preceding rows.
     pub fn n_preceding_rows(&self) -> Option<usize> {
-        self.to_offset().map(|x| x.min(0).unsigned_abs())
+        match self {
+            UnboundedPreceding => None,
+            Preceding(n) => Some(*n),
+            CurrentRow | Following(_) | UnboundedFollowing => Some(0),
+        }
     }
 
     /// View the bound as frame end, and get the number of following rows.
     pub fn n_following_rows(&self) -> Option<usize> {
-        self.to_offset().map(|x| x.max(0) as usize)
+        match self {
+            UnboundedFollowing => None,
+            Following(n) => Some(*n),
+            CurrentRow | Preceding(_) | UnboundedPreceding => Some(0),
+        }
     }
 }
 
