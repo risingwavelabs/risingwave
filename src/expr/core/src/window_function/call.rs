@@ -168,6 +168,26 @@ impl RowsFrameBounds {
             start.unwrap_or(0) <= 0 && end.unwrap_or(0) >= 0
         }
     }
+
+    /// Get the number of preceding rows.
+    pub fn n_preceding_rows(&self) -> Option<usize> {
+        match (&self.start, &self.end) {
+            (UnboundedPreceding, _) => None,
+            (Preceding(n1), Preceding(n2)) => Some(*n1.max(n2)),
+            (Preceding(n), _) => Some(*n),
+            (CurrentRow | Following(_) | UnboundedFollowing, _) => Some(0),
+        }
+    }
+
+    /// Get the number of following rows.
+    pub fn n_following_rows(&self) -> Option<usize> {
+        match (&self.start, &self.end) {
+            (_, UnboundedFollowing) => None,
+            (Following(n1), Following(n2)) => Some(*n1.max(n2)),
+            (_, Following(n)) => Some(*n),
+            (_, CurrentRow | Preceding(_) | UnboundedPreceding) => Some(0),
+        }
+    }
 }
 
 #[derive(Display, Debug, Clone, Eq, PartialEq, Hash, EnumAsInner)]
@@ -247,24 +267,6 @@ impl FrameBound<usize> {
             Following(n) => Some(*n as isize),
         }
     }
-
-    /// View the bound as frame start, and get the number of preceding rows.
-    pub fn n_preceding_rows(&self) -> Option<usize> {
-        match self {
-            UnboundedPreceding => None,
-            Preceding(n) => Some(*n),
-            CurrentRow | Following(_) | UnboundedFollowing => Some(0),
-        }
-    }
-
-    /// View the bound as frame end, and get the number of following rows.
-    pub fn n_following_rows(&self) -> Option<usize> {
-        match self {
-            UnboundedFollowing => None,
-            Following(n) => Some(*n),
-            CurrentRow | Preceding(_) | UnboundedPreceding => Some(0),
-        }
-    }
 }
 
 #[derive(Display, Debug, Copy, Clone, Eq, PartialEq, Hash, Default, EnumAsInner)]
@@ -292,5 +294,94 @@ impl FrameExclusion {
             Self::CurrentRow => PbExclusion::CurrentRow,
             Self::NoOthers => PbExclusion::NoOthers,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn test_rows_frame_bounds() {
+        let bounds = RowsFrameBounds {
+            start: Preceding(1),
+            end: CurrentRow,
+        };
+        assert!(bounds.validate().is_ok());
+        assert!(bounds.is_canonical());
+        assert_eq!(bounds.start.to_offset(), Some(-1));
+        assert_eq!(bounds.end.to_offset(), Some(0));
+        assert_eq!(bounds.n_preceding_rows(), Some(1));
+        assert_eq!(bounds.n_following_rows(), Some(0));
+
+        let bounds = RowsFrameBounds {
+            start: CurrentRow,
+            end: Following(1),
+        };
+        assert!(bounds.validate().is_ok());
+        assert!(bounds.is_canonical());
+        assert_eq!(bounds.start.to_offset(), Some(0));
+        assert_eq!(bounds.end.to_offset(), Some(1));
+        assert_eq!(bounds.n_preceding_rows(), Some(0));
+        assert_eq!(bounds.n_following_rows(), Some(1));
+
+        let bounds = RowsFrameBounds {
+            start: UnboundedPreceding,
+            end: Following(10),
+        };
+        assert!(bounds.validate().is_ok());
+        assert!(bounds.is_canonical());
+        assert_eq!(bounds.start.to_offset(), None);
+        assert_eq!(bounds.end.to_offset(), Some(10));
+        assert_eq!(bounds.n_preceding_rows(), None);
+        assert_eq!(bounds.n_following_rows(), Some(10));
+
+        let bounds = RowsFrameBounds {
+            start: Preceding(10),
+            end: UnboundedFollowing,
+        };
+        assert!(bounds.validate().is_ok());
+        assert!(bounds.is_canonical());
+        assert_eq!(bounds.start.to_offset(), Some(-10));
+        assert_eq!(bounds.end.to_offset(), None);
+        assert_eq!(bounds.n_preceding_rows(), Some(10));
+        assert_eq!(bounds.n_following_rows(), None);
+
+        let bounds = RowsFrameBounds {
+            start: Preceding(1),
+            end: Preceding(10),
+        };
+        assert!(bounds.validate().is_ok());
+        assert!(!bounds.is_canonical());
+        assert_eq!(bounds.start.to_offset(), Some(-1));
+        assert_eq!(bounds.end.to_offset(), Some(-10));
+        assert_eq!(bounds.n_preceding_rows(), Some(10));
+        assert_eq!(bounds.n_following_rows(), Some(0));
+
+        let bounds = RowsFrameBounds {
+            start: Following(10),
+            end: Following(1),
+        };
+        assert!(bounds.validate().is_ok());
+        assert!(!bounds.is_canonical());
+        assert_eq!(bounds.start.to_offset(), Some(10));
+        assert_eq!(bounds.end.to_offset(), Some(1));
+        assert_eq!(bounds.n_preceding_rows(), Some(0));
+        assert_eq!(bounds.n_following_rows(), Some(10));
+
+        let bounds = RowsFrameBounds {
+            start: UnboundedFollowing,
+            end: Following(10),
+        };
+        assert!(bounds.validate().is_err());
+        assert!(!bounds.is_canonical());
+
+        let bounds = RowsFrameBounds {
+            start: Preceding(10),
+            end: UnboundedPreceding,
+        };
+        assert!(bounds.validate().is_err());
+        assert!(!bounds.is_canonical());
     }
 }

@@ -50,14 +50,12 @@ pub(super) fn merge_rows_frames(rows_frames: &[&RowsFrameBounds]) -> RowsFrameBo
     // following `ROWS` frames into one containing the `CURRENT ROW`.
     let start = rows_frames
         .iter()
-        .flat_map(|bounds| [&bounds.start, &bounds.end])
-        .map(FrameBound::n_preceding_rows)
+        .map(|bounds| bounds.n_preceding_rows())
         .max_by(none_as_max_cmp)
         .unwrap();
     let end = rows_frames
         .iter()
-        .flat_map(|bounds| [&bounds.start, &bounds.end])
-        .map(FrameBound::n_following_rows)
+        .map(|bounds| bounds.n_following_rows())
         .max_by(none_as_max_cmp)
         .unwrap();
 
@@ -200,9 +198,9 @@ fn find_curr_for_rows_frame<'cache, const LEFT: bool>(
         part_with_delta.upper_bound(Bound::Included(delta_key))
     };
     let n_rows_to_move = if LEFT {
-        frame_bounds.end.n_following_rows().unwrap()
+        frame_bounds.n_following_rows().unwrap()
     } else {
-        frame_bounds.start.n_preceding_rows().unwrap()
+        frame_bounds.n_preceding_rows().unwrap()
     };
 
     if n_rows_to_move == 0 {
@@ -269,9 +267,9 @@ fn find_boundary_for_rows_frame<'cache, const LEFT: bool>(
     assert!(!cursor.position().is_ghost());
 
     let n_rows_to_move = if LEFT {
-        frame_bounds.start.n_preceding_rows().unwrap()
+        frame_bounds.n_preceding_rows().unwrap()
     } else {
-        frame_bounds.end.n_following_rows().unwrap()
+        frame_bounds.n_following_rows().unwrap()
     };
 
     for _ in 0..n_rows_to_move {
