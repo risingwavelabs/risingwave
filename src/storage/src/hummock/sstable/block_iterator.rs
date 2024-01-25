@@ -257,9 +257,6 @@ impl BlockIterator {
 
     /// Searches the restart point index that the given `key` belongs to.
     fn search_restart_point_index_by_key(&mut self, key: FullKey<&[u8]>) -> usize {
-        // Create a temporary local hitmap.
-        let mut hitmap = LocalHitmap::default();
-
         // Find the largest restart point that restart key equals or less than the given key.
         let res = self
             .block
@@ -269,13 +266,18 @@ impl BlockIterator {
                      key_len_type,
                      value_len_type,
                  }| {
-                    let prefix =
-                        self.decode_prefix_at(probe as usize, key_len_type, value_len_type);
+                    let probe = probe as usize;
+                    let prefix = KeyPrefix::decode(
+                        &mut &self.block.data()[probe..],
+                        probe,
+                        key_len_type,
+                        value_len_type,
+                    );
                     let probe_key = &self.block.data()[prefix.diff_key_range()];
                     let full_probe_key =
                         FullKey::from_slice_without_table_id(self.block.table_id(), probe_key);
-                    hitmap.fill_with_range(
-                        probe as usize,
+                    self.hitmap.fill_with_range(
+                        probe,
                         prefix.diff_key_range().end,
                         self.block.len(),
                     );
@@ -287,8 +289,6 @@ impl BlockIterator {
             )
             // Prevent from underflowing when given is smaller than the first.
             .saturating_sub(1);
-
-        self.hitmap.merge(&mut hitmap);
 
         res
     }
