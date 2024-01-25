@@ -99,14 +99,12 @@ impl<I: HummockIterator> MergeIterator<I> {
 
 impl MergeIterator<SharedBufferBatchIterator<Forward>> {
     /// Used in `merge_imms_in_memory` to merge immutable memtables.
-    pub fn current_item(&self) -> (TableKey<Bytes>, (EpochWithGap, HummockValue<Bytes>)) {
-        let item = self
-            .heap
+    pub fn current_item(&self) -> (&TableKey<Bytes>, &(EpochWithGap, HummockValue<Bytes>)) {
+        self.heap
             .peek()
             .expect("no inner iter for imm merge")
             .iter
-            .current_item();
-        (item.0.clone(), (item.1 .0, item.1 .1.clone()))
+            .current_item()
     }
 }
 

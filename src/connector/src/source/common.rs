@@ -14,10 +14,11 @@
 
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::error::RwError;
 
 use crate::parser::ParserConfig;
-use crate::source::{SourceContextRef, SourceMessage, SplitReader, StreamChunkWithState};
+use crate::source::{SourceContextRef, SourceMessage, SplitReader};
 
 pub(crate) trait CommonSplitReader: SplitReader + 'static {
     fn into_data_stream(
@@ -25,7 +26,7 @@ pub(crate) trait CommonSplitReader: SplitReader + 'static {
     ) -> impl Stream<Item = Result<Vec<SourceMessage>, anyhow::Error>> + Send;
 }
 
-#[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
+#[try_stream(boxed, ok = StreamChunk, error = RwError)]
 pub(crate) async fn into_chunk_stream(
     reader: impl CommonSplitReader,
     parser_config: ParserConfig,

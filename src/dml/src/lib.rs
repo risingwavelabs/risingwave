@@ -20,15 +20,11 @@
 #![feature(type_alias_impl_trait)]
 #![feature(box_patterns)]
 #![feature(stmt_expr_attributes)]
+#![feature(error_generic_member_access)]
 
 pub use table::*;
 
 pub mod dml_manager;
-
-mod common;
-pub mod connector_source;
-pub mod source_desc;
-pub use source_desc::test_utils as connector_test_utils;
-pub mod fs_connector_source;
+pub mod error;
 mod table;
 mod txn_channel;

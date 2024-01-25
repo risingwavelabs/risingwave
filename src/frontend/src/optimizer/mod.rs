@@ -35,7 +35,7 @@ pub use plan_visitor::{
 
 mod logical_optimization;
 mod optimizer_context;
-mod plan_expr_rewriter;
+pub mod plan_expr_rewriter;
 mod plan_expr_visitor;
 mod rule;
 
@@ -221,6 +221,14 @@ impl PlanRoot {
         // Inline session timezone mainly for rewriting now()
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
+        // Const eval of exprs at the last minute, but before `to_batch` to make functional index selection happy.
+        plan = const_eval_exprs(plan)?;
+
+        if ctx.is_explain_trace() {
+            ctx.trace("Const eval exprs:");
+            ctx.trace(plan.explain_to_string());
+        }
+
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
         if ctx.is_explain_trace() {
@@ -239,14 +247,6 @@ impl PlanRoot {
 
         if ctx.is_explain_trace() {
             ctx.trace("Inline Session Timezone:");
-            ctx.trace(plan.explain_to_string());
-        }
-
-        // Const eval of exprs at the last minute
-        plan = const_eval_exprs(plan)?;
-
-        if ctx.is_explain_trace() {
-            ctx.trace("Const eval exprs:");
             ctx.trace(plan.explain_to_string());
         }
 

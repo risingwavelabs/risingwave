@@ -669,6 +669,10 @@ where
     fn is_dirty(&self) -> bool {
         self.local_store.is_dirty() || self.state_clean_watermark.is_some()
     }
+
+    pub fn is_consistent_op(&self) -> bool {
+        self.is_consistent_op
+    }
 }
 
 impl<S, SD, W, const USE_WATERMARK_CACHE: bool> StateTableInner<S, SD, true, W, USE_WATERMARK_CACHE>
@@ -1232,7 +1236,7 @@ where
             self.watermark_cache.clear();
         }
 
-        self.local_store.flush(vec![]).await?;
+        self.local_store.flush().await?;
         let table_watermarks =
             seal_watermark.map(|(direction, watermark)| (direction, vec![watermark]));
 
