@@ -7,7 +7,7 @@ See [cargo dylint](https://github.com/trailofbits/dylint) for more information.
 ## Install `cargo-dylint`
 
 ```bash
-cargo install dylint
+cargo install cargo-dylint dylint-link
 ```
 
 ## Run lints

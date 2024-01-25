@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use await_tree::InstrumentAwait;
 pub use executor_core::StreamSourceCore;
 mod fs_source_executor;
+#[expect(deprecated)]
 pub use fs_source_executor::*;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;

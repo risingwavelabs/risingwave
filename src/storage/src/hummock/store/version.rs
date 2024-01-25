@@ -537,22 +537,29 @@ pub fn read_filter_for_batch(
 
     let mut imm_vec = Vec::default();
     let mut sst_vec = Vec::default();
+    let mut seen_imm_ids = HashSet::new();
+    let mut seen_sst_ids = HashSet::new();
 
     // only filter the staging data that epoch greater than max_mce to avoid data duplication
     let (min_epoch, max_epoch) = (max_mce_version.max_committed_epoch(), epoch);
     // prune imm and sst with max_mce
     for (staging_imms, staging_ssts) in staging_vec {
-        imm_vec.extend(
-            staging_imms
-                .into_iter()
-                .filter(|imm| imm.min_epoch() > min_epoch && imm.min_epoch() <= max_epoch),
-        );
+        imm_vec.extend(staging_imms.into_iter().filter(|imm| {
+            // There shouldn't be duplicated IMMs because merge imm only operates on a single shard.
+            assert!(seen_imm_ids.insert(imm.batch_id()));
+            imm.min_epoch() > min_epoch && imm.min_epoch() <= max_epoch
+        }));
 
         sst_vec.extend(staging_ssts.into_iter().filter(|staging_sst| {
             assert!(
                 staging_sst.get_max_epoch() <= min_epoch || staging_sst.get_min_epoch() > min_epoch
             );
-            staging_sst.min_epoch > min_epoch
+            // Dedup staging SSTs in different shard. Duplicates can happen in the following case:
+            // - Table 1 Shard 1 produces IMM 1
+            // - Table 1 Shard 2 produces IMM 2
+            // - IMM 1 and IMM 2 are compacted into SST 1 as a Staging SST
+            // - SST 1 is added to both Shard 1's and Shard 2's read version
+            staging_sst.min_epoch > min_epoch && seen_sst_ids.insert(staging_sst.object_id)
         }));
     }
 
@@ -882,11 +889,7 @@ impl HummockVersionReader {
                 .instrument(tracing::trace_span!("get_sstable"))
                 .await?;
 
-            if !table_holder
-                .value()
-                .meta
-                .monotonic_tombstone_events
-                .is_empty()
+            if !table_holder.meta.monotonic_tombstone_events.is_empty()
                 && !read_options.ignore_range_tombstone
             {
                 delete_range_iter
@@ -894,7 +897,7 @@ impl HummockVersionReader {
             }
             if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
                 if !hit_sstable_bloom_filter(
-                    table_holder.value(),
+                    &table_holder,
                     &user_key_range_ref,
                     *prefix_hash,
                     &mut local_stats,
@@ -964,7 +967,7 @@ impl HummockVersionReader {
                         .sstable(&sstables[0], &mut local_stats)
                         .instrument(tracing::trace_span!("get_sstable"))
                         .await?;
-                    if !sstable.value().meta.monotonic_tombstone_events.is_empty()
+                    if !sstable.meta.monotonic_tombstone_events.is_empty()
                         && !read_options.ignore_range_tombstone
                     {
                         delete_range_iter
@@ -972,7 +975,7 @@ impl HummockVersionReader {
                     }
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
                         if !hit_sstable_bloom_filter(
-                            sstable.value(),
+                            &sstable,
                             &user_key_range_ref,
                             *dist_hash,
                             &mut local_stats,
@@ -1009,8 +1012,8 @@ impl HummockVersionReader {
                         .sstable(sstable_info, &mut local_stats)
                         .instrument(tracing::trace_span!("get_sstable"))
                         .await?;
-                    assert_eq!(sstable_info.get_object_id(), sstable.value().id);
-                    if !sstable.value().meta.monotonic_tombstone_events.is_empty()
+                    assert_eq!(sstable_info.get_object_id(), sstable.id);
+                    if !sstable.meta.monotonic_tombstone_events.is_empty()
                         && !read_options.ignore_range_tombstone
                     {
                         delete_range_iter
@@ -1018,7 +1021,7 @@ impl HummockVersionReader {
                     }
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
                         if !hit_sstable_bloom_filter(
-                            sstable.value(),
+                            &sstable,
                             &user_key_range_ref,
                             *dist_hash,
                             &mut local_stats,
@@ -1169,7 +1172,7 @@ impl HummockVersionReader {
                 self.sstable_store
                     .sstable(local_sst, &mut stats_guard.local_stats)
                     .await?
-                    .value(),
+                    .as_ref(),
                 &user_key_range_ref,
                 bloom_filter_prefix_hash,
                 &mut stats_guard.local_stats,
@@ -1196,7 +1199,7 @@ impl HummockVersionReader {
                             self.sstable_store
                                 .sstable(sstable_info, &mut stats_guard.local_stats)
                                 .await?
-                                .value(),
+                                .as_ref(),
                             &user_key_range_ref,
                             bloom_filter_prefix_hash,
                             &mut stats_guard.local_stats,
@@ -1215,7 +1218,7 @@ impl HummockVersionReader {
                             self.sstable_store
                                 .sstable(table_info, &mut stats_guard.local_stats)
                                 .await?
-                                .value(),
+                                .as_ref(),
                             &user_key_range_ref,
                             bloom_filter_prefix_hash,
                             &mut stats_guard.local_stats,

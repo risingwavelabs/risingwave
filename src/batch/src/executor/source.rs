@@ -22,11 +22,11 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::SpecificParserConfig;
 use risingwave_connector::source::monitor::SourceMetrics;
+use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
     ConnectorProperties, SourceColumnDesc, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_source::connector_source::ConnectorSource;
 
 use super::Executor;
 use crate::error::{BatchError, Result};
@@ -34,7 +34,7 @@ use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 use crate::task::BatchTaskContext;
 
 pub struct SourceExecutor {
-    connector_source: ConnectorSource,
+    source: SourceReader,
 
     // used to create reader
     column_ids: Vec<ColumnId>,
@@ -75,7 +75,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
             .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
 
-        let connector_source = ConnectorSource {
+        let source_reader = SourceReader {
             config,
             columns,
             parser_config,
@@ -110,7 +110,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
         let schema = Schema::new(fields);
 
         Ok(Box::new(SourceExecutor {
-            connector_source,
+            source: source_reader,
             column_ids,
             metrics: source.context().source_metrics(),
             source_id: TableId::new(source_node.source_id),
@@ -149,8 +149,8 @@ impl SourceExecutor {
             ConnectorProperties::default(),
         ));
         let stream = self
-            .connector_source
-            .stream_reader(Some(vec![self.split]), self.column_ids, source_ctx)
+            .source
+            .to_stream(Some(vec![self.split]), self.column_ids, source_ctx)
             .await?;
 
         #[for_await]

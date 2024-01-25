@@ -46,7 +46,7 @@ fn create_executor(output_indices: Vec<usize>) -> (MessageSender, BoxedMessageSt
     (
         tx,
         HopWindowExecutor::new(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             ExecutorInfo {
                 schema,
                 pk_indices,

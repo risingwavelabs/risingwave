@@ -353,7 +353,7 @@ pub(crate) mod tests {
                 .sstable(&output_sst, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap();
-            table_key_count += table.value().meta.key_count;
+            table_key_count += table.meta.key_count;
         }
 
         // we have removed these 31 keys before watermark 32.
@@ -489,9 +489,9 @@ pub(crate) mod tests {
                 .unwrap();
             let target_table_size = storage.storage_opts().sstable_size_mb * (1 << 20);
             assert!(
-                table.value().meta.estimated_size > target_table_size,
+                table.meta.estimated_size > target_table_size,
                 "table.meta.estimated_size {} <= target_table_size {}",
-                table.value().meta.estimated_size,
+                table.meta.estimated_size,
                 target_table_size
             );
         }
@@ -819,7 +819,6 @@ pub(crate) mod tests {
                 .sstable(&table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap()
-                .value()
                 .meta
                 .key_count;
         }
@@ -1014,7 +1013,6 @@ pub(crate) mod tests {
                 .sstable(&table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap()
-                .value()
                 .meta
                 .key_count;
         }
@@ -1204,7 +1202,6 @@ pub(crate) mod tests {
                 .sstable(table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap()
-                .value()
                 .meta
                 .key_count;
         }
@@ -1361,7 +1358,7 @@ pub(crate) mod tests {
             .last()
             .unwrap();
         assert_eq!(1, output_level_info.table_infos.len());
-        assert_eq!(254, output_level_info.table_infos[0].total_key_count);
+        assert_eq!(252, output_level_info.table_infos[0].total_key_count);
     }
 
     type KeyValue = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>);
@@ -1427,14 +1424,10 @@ pub(crate) mod tests {
             assert_eq!(normal_iter.value(), fast_iter.value());
             let key_ref = fast_iter.key().user_key.as_ref();
             assert!(normal_tables.iter().any(|table| {
-                table
-                    .value()
-                    .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
+                table.may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
             }));
             assert!(fast_tables.iter().any(|table| {
-                table
-                    .value()
-                    .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
+                table.may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
             }));
             normal_iter.next().await.unwrap();
             fast_iter.next().await.unwrap();

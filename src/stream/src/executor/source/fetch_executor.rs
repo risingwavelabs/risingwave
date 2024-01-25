@@ -30,11 +30,11 @@ use risingwave_connector::source::filesystem::opendal_source::{
     OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
 use risingwave_connector::source::filesystem::OpendalFsSplit;
+use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
     BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
 use risingwave_connector::ConnectorParams;
-use risingwave_source::source_desc::SourceDesc;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
@@ -158,7 +158,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     ) -> StreamExecutorResult<BoxChunkSourceStream> {
         source_desc
             .source
-            .stream_reader(batch, column_ids, Arc::new(source_ctx))
+            .to_stream(batch, column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)
     }

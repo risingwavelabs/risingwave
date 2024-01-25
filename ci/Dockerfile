@@ -13,7 +13,7 @@ RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://us-east-2.ec2.archive.ubun
 RUN apt-get update -yy && \
     DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl parallel python3 python3-pip \
     openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-11-jdk wget unzip git tmux lld postgresql-client kafkacat netcat mysql-client \
-    maven zstd libzstd-dev locales -yy \
+    maven zstd libzstd-dev locales clang -yy \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 SHELL ["/bin/bash", "-c"]
@@ -54,4 +54,5 @@ RUN cargo binstall -y --no-symlinks cargo-llvm-cov cargo-nextest cargo-hakari ca
     && rm -rf "/root/.cargo/registry/index" \
     && rm -rf "/root/.cargo/registry/cache" \
     && rm -rf "/root/.cargo/git/db"
+RUN cargo install cargo-dylint@2.6.0 dylint-link@2.6.0
 RUN cargo uninstall cargo-binstall cargo-cache

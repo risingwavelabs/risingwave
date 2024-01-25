@@ -400,7 +400,7 @@ async fn test_failpoints_compactor_iterator_recreate() {
 
     let table = sstable_store.sstable(&info, &mut stats).await.unwrap();
     let mut sstable_iter = SstableStreamIterator::new(
-        table.value().meta.block_metas.clone(),
+        table.meta.block_metas.clone(),
         info,
         HashSet::from_iter(std::iter::once(0)),
         0,

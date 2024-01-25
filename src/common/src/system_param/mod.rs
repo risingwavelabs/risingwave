@@ -21,6 +21,7 @@
 //! - Add a new method to [`reader::SystemParamsReader`].
 
 pub mod common;
+pub mod diff;
 pub mod local_manager;
 pub mod reader;
 
@@ -30,6 +31,8 @@ use std::str::FromStr;
 
 use paste::paste;
 use risingwave_pb::meta::PbSystemParams;
+
+use self::diff::SystemParamsDiff;
 
 pub type SystemParamsError = String;
 
@@ -300,28 +303,48 @@ macro_rules! impl_default_from_other_params {
 
 macro_rules! impl_set_system_param {
     ($({ $field:ident, $type:ty, $default:expr, $($rest:tt)* },)*) => {
-        /// Set a system parameter with the given value or default one, returns the new value.
-        pub fn set_system_param(params: &mut PbSystemParams, key: &str, value: Option<String>) -> Result<String> {
-             match key {
+        /// Set a system parameter with the given value or default one.
+        ///
+        /// Returns the new value if changed, or an error if the parameter is unrecognized
+        /// or the value is invalid.
+        pub fn set_system_param(
+            params: &mut PbSystemParams,
+            key: &str,
+            value: Option<impl AsRef<str>>,
+        ) -> Result<Option<(String, SystemParamsDiff)>> {
+            use crate::system_param::reader::{SystemParamsReader, SystemParamsRead};
+
+            match key {
                 $(
                     key_of!($field) => {
                         let v = if let Some(v) = value {
-                            v.parse().map_err(|_| format!("cannot parse parameter value"))?
+                            v.as_ref().parse().map_err(|_| format!("cannot parse parameter value"))?
                         } else {
                             $default.ok_or_else(|| format!("{} does not have a default value", key))?
                         };
                         OverrideValidateOnSet::$field(&v)?;
-                        params.$field = Some(v.clone());
-                        return Ok(v.to_string())
+
+                        let changed = SystemParamsReader::new(&*params).$field() != v;
+                        if changed {
+                            let new_value = v.to_string();
+                            let diff = SystemParamsDiff {
+                                $field: Some(v.to_owned()),
+                                ..Default::default()
+                            };
+                            params.$field = Some(v);
+                            Ok(Some((new_value, diff)))
+                        } else {
+                            Ok(None)
+                        }
                     },
                 )*
                 _ => {
-                    return Err(format!(
+                    Err(format!(
                         "unrecognized system param {:?}",
                         key
-                    ));
+                    ))
                 }
-            };
+            }
         }
     };
 }
@@ -433,7 +456,7 @@ mod tests {
 
     #[test]
     fn test_set() {
-        let mut p = PbSystemParams::default();
+        let mut p = system_params_for_test();
         // Unrecognized param.
         assert!(set_system_param(&mut p, "?", Some("?".to_string())).is_err());
         // Value out of range.
