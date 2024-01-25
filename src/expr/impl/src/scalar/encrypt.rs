@@ -39,22 +39,8 @@ enum Padding {
 pub struct CipherConfig {
     algorithm: Algorithm,
     mode: Mode,
-    _padding: Padding,
+    padding: Padding,
 }
-
-// fn padding_or_truncate_key(key: &[u8], cipher: &Cipher) -> Vec<u8> {
-//     let key_len = key.len();
-//     let block_size = cipher.block_size();
-//     if key_len > block_size {
-//         key[..block_size].to_vec()
-//     } else if key_len < block_size {
-//         let mut padded = vec![0; block_size];
-//         padded[..key_len].copy_from_slice(key);
-//         padded
-//     } else {
-//         key.to_vec()
-//     }
-// }
 
 impl CipherConfig {
     fn parse_cipher_config(input: &str) -> Result<CipherConfig> {
@@ -89,7 +75,7 @@ impl CipherConfig {
         Ok(CipherConfig {
             algorithm,
             mode,
-            _padding: padding,
+            padding,
         })
     }
 
@@ -115,6 +101,13 @@ impl CipherConfig {
             }),
         }
     }
+
+    fn enable_padding(&self) -> bool {
+        match self.padding {
+            Padding::Pkcs => true,
+            Padding::None => false,
+        }
+    }
 }
 
 /// from [pg doc](https://www.postgresql.org/docs/current/pgcrypto.html#PGCRYPTO-RAW-ENC-FUNCS)
@@ -123,8 +116,6 @@ impl CipherConfig {
     prebuild = "CipherConfig::parse_cipher_config($2)?"
 )]
 pub fn decrypt(data: &[u8], key: &[u8], config: &CipherConfig) -> Result<Box<[u8]>> {
-    let cipher = config.build_cipher(key)?;
-
     let report_error = |e: ErrorStack| {
         ExprError::Cryptography(Box::new(CryptographyError {
             stage: CryptographyStage::Decrypt,
@@ -133,14 +124,16 @@ pub fn decrypt(data: &[u8], key: &[u8], config: &CipherConfig) -> Result<Box<[u8
         }))
     };
 
+    let cipher = config.build_cipher(key)?;
     let mut decrypter =
         Crypter::new(cipher, CipherMode::Decrypt, key, None).map_err(report_error)?;
+    decrypter.pad(config.enable_padding());
     let mut decrypt = vec![0; data.len() + cipher.block_size()];
     let count = decrypter.update(data, &mut decrypt).map_err(report_error)?;
-    // let rest = decrypter
-    //     .finalize(&mut decrypt[count..])
-    //     .map_err(report_error)?;
-    decrypt.truncate(count);
+    let rest = decrypter
+        .finalize(&mut decrypt[count..])
+        .map_err(report_error)?;
+    decrypt.truncate(count + rest);
     Ok(decrypt.into())
 }
 
@@ -160,12 +153,13 @@ pub fn encrypt(data: &[u8], key: &[u8], config: &CipherConfig) -> Result<Box<[u8
     let cipher = config.build_cipher(key)?;
     let mut encryptor =
         Crypter::new(cipher, CipherMode::Encrypt, key, None).map_err(report_error)?;
+    encryptor.pad(config.enable_padding());
     let mut encrypt = vec![0; data.len() + cipher.block_size()];
     let count = encryptor.update(data, &mut encrypt).map_err(report_error)?;
-    // let rest = encryptor
-    //     .finalize(&mut encrypt[count..])
-    //     .map_err(report_error)?;
-    encrypt.truncate(count);
+    let rest = encryptor
+        .finalize(&mut encrypt[count..])
+        .map_err(report_error)?;
+    encrypt.truncate(count + rest);
     Ok(encrypt.into())
 }
 
@@ -185,23 +179,15 @@ mod test {
         let decrypted = decrypt(&encrypted, key, &config).unwrap();
         assert_eq!(decrypted, (*data).into());
     }
-    // #[test]
-    // fn test_cipher_config() {
-    //     let config = "bf-cbc/pad:pkcs";
-    //
-    //   let parsed = parse_cipher_config(config).unwrap();
-    // }
 
     #[test]
     fn encrypt_testcase() {
         let encrypt_wrapper = |data: &[u8], key: &[u8], mode: &str| -> Result<Box<[u8]>> {
             let config = CipherConfig::parse_cipher_config(mode)?;
-            println!("config: {:?}", config);
             encrypt(data, key, &config)
         };
         let decrypt_wrapper = |data: &[u8], key: &[u8], mode: &str| -> Result<Box<[u8]>> {
             let config = CipherConfig::parse_cipher_config(mode)?;
-            println!("config: {:?}", config);
             decrypt(data, key, &config)
         };
 
@@ -211,7 +197,6 @@ mod test {
             "aes-ecb/pad:none",
         )
         .unwrap();
-        encrypted.iter().for_each(|b| print!("{:02x}", b));
 
         let decrypted = decrypt_wrapper(
             &encrypted,
@@ -219,22 +204,9 @@ mod test {
             "aes-ecb/pad:none",
         )
         .unwrap();
-
-        decrypted.iter().for_each(|b| print!("{:02x}", b));
-    }
-
-    #[test]
-    fn test() {
-        let data = b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff";
-        let key = b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f";
-        let cipher = Cipher::aes_128_ecb();
-        let mut encrypter =
-            Crypter::new(cipher, CipherMode::Encrypt, key, None).expect("encrypter");
-        let mut encrypt = vec![0; data.len() + cipher.block_size()];
-        let count = encrypter.update(data, &mut encrypt).expect("update");
-        // let rest = encrypter.finalize(&mut encrypt[count..]).expect("finalize");
-        encrypt.truncate(count);
-        encrypt.iter().for_each(|b| print!("{:02x}", b));
-        println!();
+        assert_eq!(
+            decrypted,
+            b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff"
+        )
     }
 }
