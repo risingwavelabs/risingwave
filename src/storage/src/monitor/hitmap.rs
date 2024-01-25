@@ -103,7 +103,7 @@ impl<const N: usize> LocalHitmap<N> {
     pub fn fill(&mut self, start_bit: usize, end_bit: usize) {
         const MASK: usize = (1 << 6) - 1;
 
-        let end_bit = std::cmp::min(end_bit, Self::bits());
+        let end_bit = end_bit.clamp(start_bit + 1, Self::bits());
 
         let head_bits = start_bit & MASK;
         let tail_bits_rev = end_bit & MASK;
