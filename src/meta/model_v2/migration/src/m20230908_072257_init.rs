@@ -540,7 +540,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Table::DistributionKey).json().not_null())
                     .col(ColumnDef::new(Table::StreamKey).json().not_null())
                     .col(ColumnDef::new(Table::AppendOnly).boolean().not_null())
-                    .col(ColumnDef::new(Table::Properties).json().not_null())
                     .col(ColumnDef::new(Table::FragmentId).integer())
                     .col(ColumnDef::new(Table::VnodeColIndex).integer())
                     .col(ColumnDef::new(Table::RowIdIndex).integer())
@@ -567,6 +566,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Table::Description).string())
                     .col(ColumnDef::new(Table::Version).json())
+                    .col(ColumnDef::new(Table::RetentionSeconds).integer())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_table_object_id")
@@ -1009,7 +1009,6 @@ enum Table {
     DistributionKey,
     StreamKey,
     AppendOnly,
-    Properties,
     FragmentId,
     VnodeColIndex,
     RowIdIndex,
@@ -1024,6 +1023,7 @@ enum Table {
     CleanedByWatermark,
     Description,
     Version,
+    RetentionSeconds
 }
 
 #[derive(DeriveIden)]
