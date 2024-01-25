@@ -96,11 +96,7 @@ mod test {
                             generated_or_default_column: None,
                             description: None,
                             additional_columns: AdditionalColumn {
-                                column_type: Some(
-                                    Normal(
-                                        AdditionalColumnNormal,
-                                    ),
-                                ),
+                                column_type: None,
                             },
                             version: Pr13707,
                         },
@@ -113,11 +109,7 @@ mod test {
                             generated_or_default_column: None,
                             description: None,
                             additional_columns: AdditionalColumn {
-                                column_type: Some(
-                                    Normal(
-                                        AdditionalColumnNormal,
-                                    ),
-                                ),
+                                column_type: None,
                             },
                             version: Pr13707,
                         },
@@ -150,11 +142,7 @@ mod test {
                             generated_or_default_column: None,
                             description: None,
                             additional_columns: AdditionalColumn {
-                                column_type: Some(
-                                    Normal(
-                                        AdditionalColumnNormal,
-                                    ),
-                                ),
+                                column_type: None,
                             },
                             version: Pr13707,
                         },
@@ -167,11 +155,7 @@ mod test {
                             generated_or_default_column: None,
                             description: None,
                             additional_columns: AdditionalColumn {
-                                column_type: Some(
-                                    Normal(
-                                        AdditionalColumnNormal,
-                                    ),
-                                ),
+                                column_type: None,
                             },
                             version: Pr13707,
                         },
