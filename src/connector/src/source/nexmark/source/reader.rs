@@ -21,6 +21,7 @@ use futures_async_stream::try_stream;
 use nexmark::config::NexmarkConfig;
 use nexmark::event::EventType;
 use nexmark::EventGenerator;
+use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::error::RwError;
 use risingwave_common::estimate_size::EstimateSize;
@@ -116,15 +117,15 @@ impl SplitReader for NexmarkSplitReader {
         const BUFFER_SIZE: usize = 4;
         spawn_data_generation_stream(
             self.into_native_stream()
-                .inspect_ok(move |chunk_with_states: &StreamChunk| {
+                .inspect_ok(move |chunk: &StreamChunk| {
                     metrics
                         .partition_input_count
                         .with_label_values(&[&actor_id, &source_id, &split_id])
-                        .inc_by(chunk_with_states.cardinality() as u64);
+                        .inc_by(chunk.cardinality() as u64);
                     metrics
                         .partition_input_bytes
                         .with_label_values(&[&actor_id, &source_id, &split_id])
-                        .inc_by(chunk_with_states.estimated_size() as u64);
+                        .inc_by(chunk.estimated_size() as u64);
                 }),
             BUFFER_SIZE,
         )
@@ -133,6 +134,23 @@ impl SplitReader for NexmarkSplitReader {
 }
 
 impl NexmarkSplitReader {
+    async fn sleep_til_next_event(&self, start_time: Instant, start_offset: u64, start_ts: u64) {
+        if self.use_real_time {
+            tokio::time::sleep_until(
+                start_time + Duration::from_millis(self.generator.timestamp() - start_ts),
+            )
+            .await;
+        } else if self.min_event_gap_in_ns > 0 {
+            tokio::time::sleep_until(
+                start_time
+                    + Duration::from_nanos(
+                        self.min_event_gap_in_ns * (self.generator.global_offset() - start_offset),
+                    ),
+            )
+            .await;
+        }
+    }
+
     #[try_stream(boxed, ok = StreamChunk, error = RwError)]
     async fn into_native_stream(mut self) {
         let start_time = Instant::now();
@@ -141,45 +159,35 @@ impl NexmarkSplitReader {
         let mut event_dtypes_with_offset = get_event_data_types(self.event_type, self.row_id_index);
         event_dtypes_with_offset.extend([DataType::Varchar, DataType::Varchar]);
 
+        let mut chunk_builder =
+            StreamChunkBuilder::new(self.max_chunk_size as usize, event_dtypes_with_offset);
         loop {
-            let mut rows = vec![];
-            while (rows.len() as u64) < self.max_chunk_size {
-                if self.generator.global_offset() >= self.event_num {
-                    break;
-                }
-                let event = self.generator.next().unwrap();
-                let mut fields = match self.event_type {
-                    Some(_) => event_to_row(event, self.row_id_index),
-                    None => combined_event_to_row(new_combined_event(event), self.row_id_index),
-                };
-                fields.extend([
-                    Some(ScalarImpl::Utf8(self.split_id.as_ref().into())),
-                    Some(ScalarImpl::Utf8(
-                        self.generator.offset().to_string().into_boxed_str(),
-                    )),
-                ]);
-                rows.push((Op::Insert, OwnedRow::new(fields)));
-            }
-            if rows.is_empty() {
+            if self.generator.global_offset() >= self.event_num {
                 break;
             }
-            if self.use_real_time {
-                tokio::time::sleep_until(
-                    start_time + Duration::from_millis(self.generator.timestamp() - start_ts),
-                )
-                .await;
-            } else if self.min_event_gap_in_ns > 0 {
-                tokio::time::sleep_until(
-                    start_time
-                        + Duration::from_nanos(
-                            self.min_event_gap_in_ns
-                                * (self.generator.global_offset() - start_offset),
-                        ),
-                )
-                .await;
-            }
+            let event = self.generator.next().unwrap();
+            let mut fields = match self.event_type {
+                Some(_) => event_to_row(event, self.row_id_index),
+                None => combined_event_to_row(new_combined_event(event), self.row_id_index),
+            };
+            fields.extend([
+                Some(ScalarImpl::Utf8(self.split_id.as_ref().into())),
+                Some(ScalarImpl::Utf8(
+                    self.generator.offset().to_string().into_boxed_str(),
+                )),
+            ]);
 
-            yield StreamChunk::from_rows(&rows, &event_dtypes_with_offset);
+            if let Some(chunk) = chunk_builder.append_row(Op::Insert, OwnedRow::new(fields)) {
+                self.sleep_til_next_event(start_time, start_offset, start_ts)
+                    .await;
+                yield chunk;
+            }
+        }
+
+        if let Some(chunk) = chunk_builder.take() {
+            self.sleep_til_next_event(start_time, start_offset, start_ts)
+                .await;
+            yield chunk;
         }
 
         tracing::debug!(?self.event_type, "nexmark generator finished");
@@ -223,6 +231,47 @@ mod tests {
             .await?
             .into_stream();
             let _chunk = reader.next().await.unwrap()?;
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_nexmark_event_num() -> Result<()> {
+        let max_chunk_size = 32;
+        let event_num = max_chunk_size * 128 + 1;
+        let props = NexmarkProperties {
+            split_num: 1,
+            min_event_gap_in_ns: 0,
+            table_type: None,
+            max_chunk_size,
+            event_num,
+            ..Default::default()
+        };
+
+        let mut enumerator =
+            NexmarkSplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
+                .await?;
+        let list_splits_resp: Vec<_> = enumerator.list_splits().await?.into_iter().collect();
+
+        for split in list_splits_resp {
+            let state = vec![split];
+            let reader = NexmarkSplitReader::new(
+                props.clone(),
+                state,
+                Default::default(),
+                Default::default(),
+                None,
+            )
+            .await?
+            .into_stream();
+            let (rows_count, chunk_count) = reader
+                .fold((0, 0), |acc, x| async move {
+                    (acc.0 + x.unwrap().cardinality(), acc.1 + 1)
+                })
+                .await;
+            assert_eq!(rows_count as u64, event_num);
+            assert_eq!(chunk_count as u64, event_num / max_chunk_size + 1);
         }
 
         Ok(())
