@@ -12,19 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(clippy::derive_partial_eq_without_eq)]
-#![feature(trait_alias)]
-#![feature(lint_reasons)]
-#![feature(coroutines)]
-#![feature(hash_extract_if)]
-#![feature(type_alias_impl_trait)]
-#![feature(box_patterns)]
-#![feature(stmt_expr_attributes)]
-#![feature(error_generic_member_access)]
+/// The error type for DML operations.
+#[derive(thiserror::Error, Debug)]
+pub enum DmlError {
+    #[error("table schema has changed, please try again later")]
+    SchemaChanged,
 
-pub use table::*;
+    #[error("no available table reader in streaming executors")]
+    NoReader,
 
-pub mod dml_manager;
-pub mod error;
-mod table;
-mod txn_channel;
+    #[error("table reader closed")]
+    ReaderClosed,
+}
+
+pub type Result<T> = std::result::Result<T, DmlError>;

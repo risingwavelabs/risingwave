@@ -18,8 +18,8 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use either::Either;
-use futures::pin_mut;
 use futures::stream::{self, StreamExt};
+use futures::{pin_mut, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
@@ -147,7 +147,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             *splits_on_fetch += batch.len();
             let batch_reader =
                 Self::build_batched_stream_reader(column_ids, source_ctx, source_desc, Some(batch))
-                    .await?;
+                    .await?
+                    .map_err(StreamExecutorError::connector_error);
             stream.replace_data_stream(batch_reader);
         }
 
