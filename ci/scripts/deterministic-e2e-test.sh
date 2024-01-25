@@ -47,7 +47,7 @@ mkdir -p $LOGDIR
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, batch"
 # seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation -j 16 ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/parallel-batch-{}.log && rm $LOGDIR/parallel-batch-{}.log'
-MADSIM_TEST_SEED=12 ./risingwave_simulation -j 16 ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/parallel-batch-12.log
+MADSIM_TEST_SEED=12 timeout 5m ./risingwave_simulation -j 16 ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/parallel-batch-12.log
 
 #
 #echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (pre-generated-queries)"
