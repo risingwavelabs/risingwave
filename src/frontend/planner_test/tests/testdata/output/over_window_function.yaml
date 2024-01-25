@@ -1163,3 +1163,36 @@
   stream_error: |-
     Feature is not yet implemented: Window function with `RANGE` frame is not supported yet
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by da range '1 day' preceding) -- `date` not supported yet
+    from t;
+  binder_error: |
+    Failed to bind expression: count(*) OVER (PARTITION BY CAST(1 AS INT) ORDER BY da RANGE '1 day' PRECEDING)
+
+    Caused by:
+      Feature is not yet implemented: `RANGE` frame with offset of type `date` is not implemented yet, please manually cast the `ORDER BY` column to `timestamp`
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by t range '1 min' preceding) -- `time` not supported yet
+    from t;
+  binder_error: |
+    Failed to bind expression: count(*) OVER (PARTITION BY CAST(1 AS INT) ORDER BY t RANGE '1 min' PRECEDING)
+
+    Caused by:
+      Feature is not yet implemented: `RANGE` frame with offset of type `time without time zone` is not implemented yet, please manually cast the `ORDER BY` column to `timestamp`
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by tstz range '1 day 1 hour' preceding) -- `timestamptz` +/- 'x month x day' not supported yet
+    from t;
+  binder_error: |
+    Failed to bind expression: count(*) OVER (PARTITION BY CAST(1 AS INT) ORDER BY tstz RANGE '1 day 1 hour' PRECEDING)
+
+    Caused by these errors (recent errors listed first):
+      1: Expr error
+      2: for frame order column of type `timestamptz`, offset should not have non-zero `month` and `day`
