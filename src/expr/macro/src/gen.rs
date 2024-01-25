@@ -519,6 +519,7 @@ impl FunctionAttr {
                 let context = Context {
                     return_type,
                     arg_types: children.iter().map(|c| c.return_type()).collect(),
+                    variadic: #variadic,
                 };
 
                 #[derive(Debug)]
@@ -869,6 +870,7 @@ impl FunctionAttr {
                 let context = Context {
                     return_type: agg.return_type.clone(),
                     arg_types: agg.args.arg_types().to_owned(),
+                    variadic: false,
                 };
 
                 struct Agg {

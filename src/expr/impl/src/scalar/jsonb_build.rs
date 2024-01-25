@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Either;
 use jsonbb::Builder;
 use risingwave_common::row::Row;
 use risingwave_common::types::{JsonbVal, ScalarRefImpl};
@@ -41,8 +42,15 @@ use super::{ToJsonb, ToTextDisplay};
 fn jsonb_build_array(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
     let mut builder = Builder::<Vec<u8>>::new();
     builder.begin_array();
-    for (value, ty) in args.iter().zip_eq_debug(&ctx.arg_types) {
-        value.add_to(ty, &mut builder)?;
+    if ctx.variadic {
+        for (value, ty) in args.iter().zip_eq_debug(&ctx.arg_types) {
+            value.add_to(ty, &mut builder)?;
+        }
+    } else {
+        let ty = ctx.arg_types[0].as_list();
+        for value in args.iter() {
+            value.add_to(ty, &mut builder)?;
+        }
     }
     builder.end_array();
     Ok(builder.finish().into())
@@ -75,9 +83,13 @@ fn jsonb_build_object(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
     }
     let mut builder = Builder::<Vec<u8>>::new();
     builder.begin_object();
+    let arg_types = match ctx.variadic {
+        true => Either::Left(ctx.arg_types.iter()),
+        false => Either::Right(itertools::repeat_n(ctx.arg_types[0].as_list(), args.len())),
+    };
     for (i, [(key, _), (value, value_type)]) in args
         .iter()
-        .zip_eq_debug(&ctx.arg_types)
+        .zip_eq_debug(arg_types)
         .array_chunks()
         .enumerate()
     {
