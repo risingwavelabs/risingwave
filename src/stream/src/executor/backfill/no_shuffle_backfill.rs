@@ -330,7 +330,8 @@ where
                     // Before processing barrier, if did not snapshot read,
                     // do a snapshot read first.
                     // This is so we don't lose the tombstone iteration progress.
-                    if !has_snapshot_read {
+                    // If paused, we also can't read any snapshot records.
+                    if !has_snapshot_read && !paused {
                         assert!(builder.is_empty());
                         let (_, snapshot) = backfill_stream.into_inner();
                         #[for_await]
