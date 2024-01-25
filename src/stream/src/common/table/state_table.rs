@@ -1236,7 +1236,7 @@ where
             self.watermark_cache.clear();
         }
 
-        self.local_store.flush(vec![]).await?;
+        self.local_store.flush().await?;
         let table_watermarks =
             seal_watermark.map(|(direction, watermark)| (direction, vec![watermark]));
 
