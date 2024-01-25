@@ -18,6 +18,7 @@ use reqwest::Url;
 use risingwave_common::error::ErrorCode::{InvalidParameterValue, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
+use risingwave_pb::data::DataType as PbDataType;
 
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::common::AwsAuthProps;
@@ -121,7 +122,18 @@ pub fn extreact_timestamp_from_meta(meta: &SourceMeta) -> Option<Datum> {
 
 pub fn extract_headers_from_meta(meta: &SourceMeta) -> Option<Datum> {
     match meta {
-        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_headers(),
+        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_headers(), /* expect output of type `array[struct<varchar, bytea>]` */
+        _ => None,
+    }
+}
+
+pub fn extract_header_inner_from_meta(
+    meta: &SourceMeta,
+    inner_field: &str,
+    data_type: Option<&PbDataType>,
+) -> Option<Datum> {
+    match meta {
+        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_header_inner(inner_field, data_type), /* expect output of type `bytea` or `varchar` */
         _ => None,
     }
 }
