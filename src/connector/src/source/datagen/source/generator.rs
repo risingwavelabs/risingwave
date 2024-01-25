@@ -175,7 +175,7 @@ impl DatagenEventGenerator {
                     MAX_ROWS_PER_YIELD,
                     self.partition_rows_per_second - rows_generated_this_second,
                 );
-                'outer: for i in 0..num_rows_to_generate {
+                'outer: for _ in 0..num_rows_to_generate {
                     let mut row = Vec::with_capacity(self.data_types.len());
                     for (field_generator, field_name) in
                         self.fields_vec.iter_mut().zip_eq_fast(&self.field_names)
