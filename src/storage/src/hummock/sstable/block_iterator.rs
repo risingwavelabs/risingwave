@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::mem::ManuallyDrop;
 use std::ops::Range;
 
 use bytes::BytesMut;
@@ -25,12 +26,6 @@ use crate::monitor::LocalHitmap;
 
 /// [`BlockIterator`] is used to read kv pairs in a block.
 pub struct BlockIterator {
-    /// NOTE:
-    ///
-    /// - `hitmap` is priorer than `block` in source code order, will be dropped before `block`.
-    /// - `hitmap` is supposed be updated every time when `value_range` is updated.
-    hitmap: LocalHitmap<HITMAP_ELEMS>,
-
     /// Block that iterates on.
     block: BlockHolder,
     /// Current restart point index.
@@ -46,11 +41,27 @@ pub struct BlockIterator {
 
     last_key_len_type: LenType,
     last_value_len_type: LenType,
+
+    /// NOTE:
+    ///
+    /// - `hitmap` is supposed to be updated each time accessing the block data in a new position.
+    /// - `hitmap` is supposed to be dropped before `block`
+    hitmap: ManuallyDrop<LocalHitmap<HITMAP_ELEMS>>,
+}
+
+impl Drop for BlockIterator {
+    fn drop(&mut self) {
+        // Make sure `hitmap` is dropped before `block` to avoid metrics losing.
+        //
+        // Although the drop order in a struct can be guaranteed by the source code order,
+        // manually write drop here can make it much clearer and avoid becoming a footgun in future.
+        unsafe { ManuallyDrop::drop(&mut self.hitmap) };
+    }
 }
 
 impl BlockIterator {
     pub fn new(block: BlockHolder) -> Self {
-        let hitmap = block.hitmap().local();
+        let hitmap = ManuallyDrop::new(block.hitmap().local());
         Self {
             block,
             offset: usize::MAX,
