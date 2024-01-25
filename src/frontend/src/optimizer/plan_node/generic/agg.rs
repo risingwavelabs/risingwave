@@ -314,7 +314,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     /// - column mapping from upstream to table
     fn create_table_builder(
         &self,
-        ctx: OptimizerContextRef,
+        _ctx: OptimizerContextRef,
         window_col_idx: Option<usize>,
     ) -> (TableCatalogBuilder, Vec<usize>, BTreeMap<usize, usize>) {
         // NOTE: this function should be called to get a table builder, so that all state tables

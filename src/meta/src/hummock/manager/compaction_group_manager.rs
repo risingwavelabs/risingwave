@@ -987,7 +987,7 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::BTreeMap;
 
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;

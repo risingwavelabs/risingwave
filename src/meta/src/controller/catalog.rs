@@ -26,8 +26,8 @@ use risingwave_meta_model_v2::table::TableType;
 use risingwave_meta_model_v2::{
     connection, database, function, index, object, object_dependency, schema, sink, source,
     streaming_job, table, user_privilege, view, ColumnCatalogArray, ConnectionId, CreateType,
-    DatabaseId, FunctionId, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
-    SourceId, StreamSourceInfo, TableId, UserId,
+    DatabaseId, FunctionId, IndexId, JobStatus, ObjectId, PrivateLinkService, SchemaId, SourceId,
+    StreamSourceInfo, TableId, UserId,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{

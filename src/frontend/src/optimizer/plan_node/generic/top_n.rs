@@ -41,7 +41,7 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
     pub fn infer_internal_table_catalog(
         &self,
         schema: &Schema,
-        ctx: OptimizerContextRef,
+        _ctx: OptimizerContextRef,
         input_stream_key: &[usize],
         vnode_col_idx: Option<usize>,
     ) -> TableCatalog {

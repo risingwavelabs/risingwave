@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::collections::HashMap;
+
 use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
@@ -26,7 +26,7 @@ use super::GenericPlanNode;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::{TableCatalog, WithOptions};
+use crate::TableCatalog;
 
 /// [`Source`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone, Educe)]

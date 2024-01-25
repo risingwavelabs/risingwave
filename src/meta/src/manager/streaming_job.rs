@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use risingwave_common::catalog::TableVersionId;
 use risingwave_common::current_cluster_version;
 use risingwave_common::util::epoch::Epoch;

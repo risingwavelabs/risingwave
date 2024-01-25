@@ -155,7 +155,7 @@ impl StreamTableScan {
         &self,
         state: &mut BuildFragmentGraphState,
     ) -> TableCatalog {
-        let properties = self.ctx().with_options().internal_table_subset();
+        let _properties = self.ctx().with_options().internal_table_subset();
         let mut catalog_builder = TableCatalogBuilder::default();
         let upstream_schema = &self.core.get_table_columns();
 

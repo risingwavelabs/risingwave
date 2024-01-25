@@ -28,7 +28,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use crate::catalog::table_catalog::{CreateType, TableType};
 use crate::catalog::{ColumnId, TableCatalog, TableId};
 use crate::optimizer::property::{Cardinality, Order, RequiredDist};
-use crate::utils::{Condition, IndexSet, WithOptions};
+use crate::utils::{Condition, IndexSet};
 
 #[derive(Default)]
 pub struct TableCatalogBuilder {

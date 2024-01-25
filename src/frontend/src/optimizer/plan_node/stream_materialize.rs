@@ -18,6 +18,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, TableId, OBJECT_ID_PLACEHOLDER};
+use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
@@ -253,7 +254,8 @@ impl StreamMaterialize {
             incoming_sinks: vec![],
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
-            retention_seconds: todo!(),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/14791
+            retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
         })
     }
 

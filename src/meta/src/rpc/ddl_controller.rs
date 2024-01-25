@@ -1376,7 +1376,8 @@ impl DdlController {
             create_type: stream_job.create_type(),
             ddl_type: stream_job.into(),
             replace_table_job_info,
-            new_independent_compaction_group: todo!(),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/14793
+            new_independent_compaction_group: false,
         };
 
         // 4. Mark tables as creating, including internal tables and the table of the stream job.
