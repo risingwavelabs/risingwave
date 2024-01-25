@@ -42,6 +42,20 @@ pub struct CipherConfig {
     _padding: Padding,
 }
 
+// fn padding_or_truncate_key(key: &[u8], cipher: &Cipher) -> Vec<u8> {
+//     let key_len = key.len();
+//     let block_size = cipher.block_size();
+//     if key_len > block_size {
+//         key[..block_size].to_vec()
+//     } else if key_len < block_size {
+//         let mut padded = vec![0; block_size];
+//         padded[..key_len].copy_from_slice(key);
+//         padded
+//     } else {
+//         key.to_vec()
+//     }
+// }
+
 impl CipherConfig {
     fn parse_cipher_config(input: &str) -> Result<CipherConfig> {
         let parts: Vec<&str> = input.split(&['-', '/'][..]).collect();
@@ -123,10 +137,10 @@ pub fn decrypt(data: &[u8], key: &[u8], config: &CipherConfig) -> Result<Box<[u8
         Crypter::new(cipher, CipherMode::Decrypt, key, None).map_err(report_error)?;
     let mut decrypt = vec![0; data.len() + cipher.block_size()];
     let count = decrypter.update(data, &mut decrypt).map_err(report_error)?;
-    let rest = decrypter
-        .finalize(&mut decrypt[count..])
-        .map_err(report_error)?;
-    decrypt.truncate(count + rest);
+    // let rest = decrypter
+    //     .finalize(&mut decrypt[count..])
+    //     .map_err(report_error)?;
+    decrypt.truncate(count);
     Ok(decrypt.into())
 }
 
@@ -148,10 +162,10 @@ pub fn encrypt(data: &[u8], key: &[u8], config: &CipherConfig) -> Result<Box<[u8
         Crypter::new(cipher, CipherMode::Encrypt, key, None).map_err(report_error)?;
     let mut encrypt = vec![0; data.len() + cipher.block_size()];
     let count = encryptor.update(data, &mut encrypt).map_err(report_error)?;
-    let rest = encryptor
-        .finalize(&mut encrypt[count..])
-        .map_err(report_error)?;
-    encrypt.truncate(count + rest);
+    // let rest = encryptor
+    //     .finalize(&mut encrypt[count..])
+    //     .map_err(report_error)?;
+    encrypt.truncate(count);
     Ok(encrypt.into())
 }
 
@@ -177,4 +191,50 @@ mod test {
     //
     //   let parsed = parse_cipher_config(config).unwrap();
     // }
+
+    #[test]
+    fn encrypt_testcase() {
+        let encrypt_wrapper = |data: &[u8], key: &[u8], mode: &str| -> Result<Box<[u8]>> {
+            let config = CipherConfig::parse_cipher_config(mode)?;
+            println!("config: {:?}", config);
+            encrypt(data, key, &config)
+        };
+        let decrypt_wrapper = |data: &[u8], key: &[u8], mode: &str| -> Result<Box<[u8]>> {
+            let config = CipherConfig::parse_cipher_config(mode)?;
+            println!("config: {:?}", config);
+            decrypt(data, key, &config)
+        };
+
+        let encrypted = encrypt_wrapper(
+            b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff",
+            b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f",
+            "aes-ecb/pad:none",
+        )
+        .unwrap();
+        encrypted.iter().for_each(|b| print!("{:02x}", b));
+
+        let decrypted = decrypt_wrapper(
+            &encrypted,
+            b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0e",
+            "aes-ecb/pad:none",
+        )
+        .unwrap();
+
+        decrypted.iter().for_each(|b| print!("{:02x}", b));
+    }
+
+    #[test]
+    fn test() {
+        let data = b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff";
+        let key = b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f";
+        let cipher = Cipher::aes_128_ecb();
+        let mut encrypter =
+            Crypter::new(cipher, CipherMode::Encrypt, key, None).expect("encrypter");
+        let mut encrypt = vec![0; data.len() + cipher.block_size()];
+        let count = encrypter.update(data, &mut encrypt).expect("update");
+        // let rest = encrypter.finalize(&mut encrypt[count..]).expect("finalize");
+        encrypt.truncate(count);
+        encrypt.iter().for_each(|b| print!("{:02x}", b));
+        println!();
+    }
 }
