@@ -196,13 +196,29 @@ select print_add_one(1), print_add_one(114513), print_add_two(2);
 ----
 2 114514 4
 
-# Create a mock table
+# Create a mock table for anonymous sql udf
 statement ok
 create table t1 (c1 INT, c2 INT);
+
+# Create a mock table for named sql udf
+statement ok
+create table t3 (a INT, b INT);
 
 # Insert some data into the mock table
 statement ok
 insert into t1 values (1, 1), (2, 2), (3, 3), (4, 4), (5, 5);
+
+statement ok
+insert into t3 values (1, 1), (2, 2), (3, 3), (4, 4), (5, 5);
+
+query I
+select add_named(a, b) from t3 order by a asc;
+----
+2
+4
+6
+8
+10
 
 query III
 select sub(c1, c2), c1, c2, add(c1, c2) from t1 order by c1 asc;
@@ -362,3 +378,6 @@ drop table t1;
 
 statement ok
 drop table t2;
+
+statement ok
+drop table t3;
