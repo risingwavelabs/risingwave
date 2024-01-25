@@ -20,8 +20,10 @@ use risingwave_connector::source::{
     should_copy_to_format_encode_options, ConnectorProperties, SourceCtrlOpts, UPSTREAM_SOURCE_KEY,
 };
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
+use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{
-    AdditionalColumnType, ColumnDescVersion, FormatType, PbEncodeType,
+    AdditionalColumn, AdditionalColumnKey, AdditionalColumnTimestamp, ColumnDescVersion,
+    FormatType, PbEncodeType,
 };
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_storage::panic_store::PanicStateStore;
@@ -94,7 +96,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                                     // the column is from a legacy version
                                     && desc.version == ColumnDescVersion::Unspecified as i32
                                 {
-                                    desc.additional_column_type = AdditionalColumnType::Key as i32;
+                                    desc.additional_columns = Some(AdditionalColumn {
+                                        column_type: Some(AdditionalColumnType::Key(
+                                            AdditionalColumnKey {},
+                                        )),
+                                    });
                                 }
                             });
                         });
@@ -104,7 +110,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 {
                     // compatible code: handle legacy column `_rw_kafka_timestamp`
                     // the column is auto added for all kafka source to empower batch query on source
-                    // solution: rewrite the column `additional_column_type` to Timestamp
+                    // solution: rewrite the column `additional_columns` to Timestamp
 
                     let _ = source_columns.iter_mut().map(|c| {
                         let _ = c.column_desc.as_mut().map(|desc| {
@@ -119,8 +125,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                                 // the column is from a legacy version
                                 && desc.version == ColumnDescVersion::Unspecified as i32
                             {
-                                desc.additional_column_type =
-                                    AdditionalColumnType::Timestamp as i32;
+                                desc.additional_columns = Some(AdditionalColumn {
+                                    column_type: Some(AdditionalColumnType::Timestamp(
+                                        AdditionalColumnTimestamp {},
+                                    )),
+                                });
                             }
                         });
                     });

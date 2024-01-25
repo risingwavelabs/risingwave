@@ -80,6 +80,17 @@ pub enum IsLateral {
 
 use IsLateral::*;
 
+pub type IncludeOption = Vec<IncludeOptionItem>;
+
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Eq, Clone, Debug, PartialEq, Hash)]
+pub struct IncludeOptionItem {
+    pub column_type: Ident,
+    pub column_alias: Option<Ident>,
+    pub inner_field: Option<String>,
+    pub header_inner_expect_type: Option<DataType>,
+}
+
 #[derive(Debug)]
 pub enum WildcardOrExpr {
     Expr(Expr),
@@ -2527,16 +2538,46 @@ impl Parser {
         })
     }
 
-    pub fn parse_include_options(&mut self) -> Result<Vec<(Ident, Option<Ident>)>, ParserError> {
+    pub fn parse_include_options(&mut self) -> Result<IncludeOption, ParserError> {
         let mut options = vec![];
         while self.parse_keyword(Keyword::INCLUDE) {
-            let add_column = self.parse_identifier()?;
-            if self.parse_keyword(Keyword::AS) {
-                let column_alias = self.parse_identifier()?;
-                options.push((add_column, Some(column_alias)));
-            } else {
-                options.push((add_column, None));
+            let column_type = self.parse_identifier()?;
+
+            let mut column_inner_field = None;
+            let mut header_inner_expect_type = None;
+            if let Token::SingleQuotedString(inner_field) = self.peek_token().token {
+                self.next_token();
+                column_inner_field = Some(inner_field);
+
+                if let Token::Word(w) = self.peek_token().token {
+                    match w.keyword {
+                        Keyword::BYTEA => {
+                            header_inner_expect_type = Some(DataType::Bytea);
+                            self.next_token();
+                        }
+                        Keyword::VARCHAR => {
+                            header_inner_expect_type = Some(DataType::Varchar);
+                            self.next_token();
+                        }
+                        _ => {
+                            // default to bytea
+                            header_inner_expect_type = Some(DataType::Bytea);
+                        }
+                    }
+                }
             }
+
+            let mut column_alias = None;
+            if self.parse_keyword(Keyword::AS) {
+                column_alias = Some(self.parse_identifier()?);
+            }
+
+            options.push(IncludeOptionItem {
+                column_type,
+                inner_field: column_inner_field,
+                column_alias,
+                header_inner_expect_type,
+            });
         }
         Ok(options)
     }
