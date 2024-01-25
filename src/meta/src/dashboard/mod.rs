@@ -29,6 +29,7 @@ use axum::routing::{get, get_service};
 use axum::Router;
 use hyper::Request;
 use parking_lot::Mutex;
+use risingwave_pb::stream_service::GetBackPressureResponse;
 use risingwave_rpc_client::ComputeClientPool;
 use tower::{ServiceBuilder, ServiceExt};
 use tower_http::add_extension::AddExtensionLayer;
@@ -364,12 +365,21 @@ pub(super) mod handlers {
     pub async fn get_back_pressure_rate(
         // Path(worker_id): Path<WorkerId>,
         Extension(srv): Extension<Service>,
-    ) -> Result<String> {
-        let result = match &srv.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.cluster_manager.get_back_pressure_rate().await,
-            MetadataManager::V2(mgr) => mgr.cluster_controller.get_back_pressure_rate().await,
+    ) -> Result<Json<GetBackPressureResponse>> {
+        let back_pressure_infos = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => mgr
+                .cluster_manager
+                .get_back_pressure_rate()
+                .await
+                .map_err(err)?,
+            MetadataManager::V2(mgr) => mgr
+                .cluster_controller
+                .get_back_pressure_rate()
+                .await
+                .map_err(err)?,
         };
-        Ok("198".to_string())
+
+        Ok(back_pressure_infos.into())
     }
 }
 
