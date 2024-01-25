@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::bail;
-use risingwave_common::row::OwnedRow;
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_expr::expr::{BoxedExpression, Expression};
 use risingwave_expr::{build_function, Result};
@@ -115,6 +115,8 @@ struct ConstantLookupExpression {
     return_type: DataType,
     arms: HashMap<ScalarImpl, BoxedExpression>,
     fallback: Option<BoxedExpression>,
+    /// `operand` must exist at present
+    operand: BoxedExpression,
 }
 
 impl ConstantLookupExpression {
@@ -122,11 +124,13 @@ impl ConstantLookupExpression {
         return_type: DataType,
         arms: HashMap<ScalarImpl, BoxedExpression>,
         fallback: Option<BoxedExpression>,
+        operand: BoxedExpression,
     ) -> Self {
         Self {
             return_type,
             arms,
             fallback,
+            operand,
         }
     }
 }
@@ -141,14 +145,22 @@ impl Expression for ConstantLookupExpression {
         let input_len = input.capacity();
         let mut builder = self.return_type().create_array_builder(input_len);
 
-        // TODO: Ensure if the last column matches the actual result generated from the operand
-        // Get the last column
-        let column_len = input.columns().len();
-        let column = input.column_at(column_len - 1);
+        // Evaluate the input DataChunk at first
+        let eval_result = self.operand.eval(input).await?;
 
         for i in 0..input_len {
-            let datum = column.datum_at(i);
-            let owned_row = OwnedRow::new(vec![datum.clone()]);
+            let datum = eval_result.datum_at(i);
+            let (row, vis) = input.row_at(i);
+
+            // Check for visibility
+            if !vis {
+                builder.append_null();
+                continue;
+            }
+
+            // Note that the `owned_row` here is extracted from input
+            // rather than from `eval_result`
+            let owned_row = row.into_owned_row();
 
             if let Some(expr) = self.arms.get(datum.as_ref().unwrap()) {
                 builder.append(expr.eval_row(&owned_row).await.unwrap().as_ref());
@@ -194,7 +206,7 @@ fn build_constant_lookup_expr(
 
     let mut children = children;
 
-    let _operand = children.remove(0);
+    let operand = children.remove(0);
 
     let mut arms = HashMap::new();
 
@@ -220,6 +232,7 @@ fn build_constant_lookup_expr(
         return_type,
         arms,
         fallback,
+        operand,
     )))
 }
 
