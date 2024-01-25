@@ -432,14 +432,13 @@ pub type FilterKeyExtractorManagerRef = Arc<RpcFilterKeyExtractorManager>;
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
     use std::mem;
     use std::sync::Arc;
 
     use bytes::{BufMut, BytesMut};
     use itertools::Itertools;
     use risingwave_common::catalog::ColumnDesc;
-    use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::DataType;
@@ -530,10 +529,7 @@ mod tests {
             optional_associated_source_id: None,
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            properties: HashMap::from([(
-                String::from(PROPERTIES_RETENTION_SECOND_KEY),
-                String::from("300"),
-            )]),
+            retention_seconds: 300,
             fragment_id: 0,
             dml_fragment_id: None,
             initialized_at_epoch: None,

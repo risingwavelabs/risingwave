@@ -105,12 +105,8 @@ impl HummockManager {
         &self,
         mv_table: Option<u32>,
         mut internal_tables: Vec<u32>,
-        table_properties: &HashMap<String, String>,
+        new_independent_compaction_group: bool,
     ) -> Result<Vec<StateTableId>> {
-        let is_independent_compaction_group = table_properties
-            .get("independent_compaction_group")
-            .map(|s| s == "1")
-            == Some(true);
         let mut pairs = vec![];
         if let Some(mv_table) = mv_table {
             if internal_tables.extract_if(|t| *t == mv_table).count() > 0 {
@@ -119,7 +115,7 @@ impl HummockManager {
             // materialized_view
             pairs.push((
                 mv_table,
-                if is_independent_compaction_group {
+                if new_independent_compaction_group {
                     CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
                 } else {
                     CompactionGroupId::from(StaticCompactionGroupId::MaterializedView)
@@ -130,7 +126,7 @@ impl HummockManager {
         for table_id in internal_tables {
             pairs.push((
                 table_id,
-                if is_independent_compaction_group {
+                if new_independent_compaction_group {
                     CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
                 } else {
                     CompactionGroupId::from(StaticCompactionGroupId::StateDefault)
@@ -995,7 +991,6 @@ mod tests {
 
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
-    use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
     use risingwave_pb::meta::table_fragments::Fragment;
 
@@ -1098,16 +1093,12 @@ mod tests {
         let group_number =
             || async { compaction_group_manager.list_compaction_group().await.len() };
         assert_eq!(registered_number().await, 0);
-        let mut table_properties = HashMap::from([(
-            String::from(PROPERTIES_RETENTION_SECOND_KEY),
-            String::from("300"),
-        )]);
 
         compaction_group_manager
             .register_table_fragments(
                 Some(table_fragment_1.table_id().table_id),
                 table_fragment_1.internal_table_ids(),
-                &table_properties,
+                false,
             )
             .await
             .unwrap();
@@ -1116,7 +1107,7 @@ mod tests {
             .register_table_fragments(
                 Some(table_fragment_2.table_id().table_id),
                 table_fragment_2.internal_table_ids(),
-                &table_properties,
+                false,
             )
             .await
             .unwrap();
@@ -1138,15 +1129,12 @@ mod tests {
 
         // Test `StaticCompactionGroupId::NewCompactionGroup` in `register_table_fragments`
         assert_eq!(group_number().await, 2);
-        table_properties.insert(
-            String::from("independent_compaction_group"),
-            String::from("1"),
-        );
+
         compaction_group_manager
             .register_table_fragments(
                 Some(table_fragment_1.table_id().table_id),
                 table_fragment_1.internal_table_ids(),
-                &table_properties,
+                true,
             )
             .await
             .unwrap();

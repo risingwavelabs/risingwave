@@ -2009,16 +2009,16 @@ impl CatalogController {
 
     pub async fn get_all_table_options(&self) -> MetaResult<HashMap<TableId, TableOption>> {
         let inner = self.inner.read().await;
-        let table_options: Vec<(TableId, Property)> = Table::find()
+        let table_options: Vec<(TableId, Option<u32>)> = Table::find()
             .select_only()
-            .columns([table::Column::TableId, table::Column::Properties])
-            .into_tuple::<(TableId, Property)>()
+            .columns([table::Column::TableId, table::Column::RetentionSeconds])
+            .into_tuple::<(TableId, Option<u32>)>()
             .all(&inner.db)
             .await?;
 
         Ok(table_options
             .into_iter()
-            .map(|(id, property)| (id, TableOption::build_table_option(&property.into_inner())))
+            .map(|(id, retention_seconds)| (id, TableOption { retention_seconds }))
             .collect())
     }
 

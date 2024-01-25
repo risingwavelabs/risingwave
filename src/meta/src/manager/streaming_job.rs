@@ -245,16 +245,6 @@ impl StreamingJob {
         }
     }
 
-    pub fn properties(&self) -> HashMap<String, String> {
-        match self {
-            Self::MaterializedView(table) => table.properties.clone(),
-            Self::Sink(sink, _) => sink.properties.clone(),
-            Self::Table(_, table, ..) => table.properties.clone(),
-            Self::Index(_, index_table) => index_table.properties.clone(),
-            Self::Source(source) => source.with_properties.clone(),
-        }
-    }
-
     /// Returns the [`TableVersionId`] if this job is `Table`.
     pub fn table_version_id(&self) -> Option<TableVersionId> {
         if let Self::Table(_, table, ..) = self {

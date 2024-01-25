@@ -70,7 +70,7 @@ impl StreamCdcTableScan {
         state: &mut BuildFragmentGraphState,
     ) -> TableCatalog {
         let properties = self.ctx().with_options().internal_table_subset();
-        let mut catalog_builder = TableCatalogBuilder::new(properties);
+        let mut catalog_builder = TableCatalogBuilder::default();
         let upstream_schema = &self.core.get_table_columns();
 
         // Use `split_id` as primary key in state table.

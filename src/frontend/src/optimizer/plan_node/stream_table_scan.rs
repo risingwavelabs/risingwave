@@ -156,7 +156,7 @@ impl StreamTableScan {
         state: &mut BuildFragmentGraphState,
     ) -> TableCatalog {
         let properties = self.ctx().with_options().internal_table_subset();
-        let mut catalog_builder = TableCatalogBuilder::new(properties);
+        let mut catalog_builder = TableCatalogBuilder::default();
         let upstream_schema = &self.core.get_table_columns();
 
         // We use vnode as primary key in state table.

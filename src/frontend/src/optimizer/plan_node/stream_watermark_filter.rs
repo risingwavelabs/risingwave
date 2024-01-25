@@ -114,7 +114,7 @@ impl PlanTreeNodeUnary for StreamWatermarkFilter {
 impl_plan_tree_node_for_unary! {StreamWatermarkFilter}
 
 pub fn infer_internal_table_catalog(watermark_type: DataType) -> TableCatalog {
-    let mut builder = TableCatalogBuilder::new(WithOptions::new(HashMap::default()));
+    let mut builder = TableCatalogBuilder::default();
 
     let key = Field {
         data_type: DataType::Int16,

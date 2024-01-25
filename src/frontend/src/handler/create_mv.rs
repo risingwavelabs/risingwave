@@ -119,12 +119,7 @@ pub fn gen_create_mv_plan(
     let materialize =
         plan_root.gen_materialize_plan(table_name, definition, emit_on_window_close)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
-    if session.config().create_compaction_group_for_mv() {
-        table.properties.insert(
-            String::from("independent_compaction_group"),
-            String::from("1"),
-        );
-    }
+
     let plan: PlanRef = materialize.into();
     let dependent_relations =
         RelationCollectorVisitor::collect_with(dependent_relations, plan.clone());

@@ -63,10 +63,6 @@ pub struct CreateStreamingJobContext {
     /// The locations of the existing actors, essentially the upstream mview actors to update.
     pub existing_locations: Locations,
 
-    /// The properties of the streaming job.
-    // TODO: directly store `StreamingJob` here.
-    pub table_properties: HashMap<String, String>,
-
     /// DDL definition.
     pub definition: String,
 
@@ -78,6 +74,8 @@ pub struct CreateStreamingJobContext {
 
     /// Context provided for potential replace table, typically used when sinking into a table.
     pub replace_table_job_info: Option<(StreamingJob, ReplaceTableContext, TableFragments)>,
+
+    pub new_independent_compaction_group: bool,
 }
 
 impl CreateStreamingJobContext {
@@ -176,10 +174,6 @@ pub struct ReplaceTableContext {
 
     /// The locations of the existing actors, essentially the downstream chain actors to update.
     pub existing_locations: Locations,
-
-    /// The properties of the streaming job.
-    // TODO: directly store `StreamingJob here.
-    pub table_properties: HashMap<String, String>,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -453,7 +447,6 @@ impl GlobalStreamManager {
         CreateStreamingJobContext {
             dispatchers,
             upstream_mview_actors,
-            table_properties,
             building_locations,
             existing_locations,
             definition,
@@ -462,6 +455,7 @@ impl GlobalStreamManager {
             create_type,
             ddl_type,
             replace_table_job_info,
+            new_independent_compaction_group,
         }: CreateStreamingJobContext,
     ) -> MetaResult<()> {
         let mut replace_table_command = None;
@@ -473,7 +467,7 @@ impl GlobalStreamManager {
             .register_table_fragments(
                 mv_table_id,
                 internal_tables.keys().copied().collect(),
-                &table_properties,
+                new_independent_compaction_group,
             )
             .await?;
         debug_assert_eq!(
@@ -563,7 +557,6 @@ impl GlobalStreamManager {
             dispatchers,
             building_locations,
             existing_locations,
-            table_properties: _,
         }: ReplaceTableContext,
     ) -> MetaResult<()> {
         self.build_actors(&table_fragments, &building_locations, &existing_locations)

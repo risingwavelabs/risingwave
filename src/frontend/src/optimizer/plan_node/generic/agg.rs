@@ -319,8 +319,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     ) -> (TableCatalogBuilder, Vec<usize>, BTreeMap<usize, usize>) {
         // NOTE: this function should be called to get a table builder, so that all state tables
         // created for Agg node have the same group key columns and pk ordering.
-        let mut table_builder =
-            TableCatalogBuilder::new(ctx.with_options().internal_table_subset());
+        let mut table_builder = TableCatalogBuilder::default();
 
         assert!(table_builder.columns().is_empty());
         assert_eq!(table_builder.get_current_pk_len(), 0);

@@ -301,7 +301,7 @@ impl DatabaseManager {
     pub fn get_all_table_options(&self) -> HashMap<TableId, TableOption> {
         self.tables
             .iter()
-            .map(|(id, table)| (*id, TableOption::build_table_option(&table.properties)))
+            .map(|(id, table)| (*id, TableOption::new(Some(table.retention_seconds))))
             .collect()
     }
 

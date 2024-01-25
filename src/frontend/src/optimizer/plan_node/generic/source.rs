@@ -103,7 +103,7 @@ impl Source {
         // state in source.
         // Source state doesn't maintain retention_seconds, internal_table_subset function only
         // returns retention_seconds so default is used here
-        let mut builder = TableCatalogBuilder::new(WithOptions::new(HashMap::default()));
+        let mut builder = TableCatalogBuilder::default();
 
         let key = Field {
             data_type: DataType::Varchar,

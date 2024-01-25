@@ -32,7 +32,6 @@ use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId, Sink
 use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
 use crate::user::UserId;
-use crate::WithOptions;
 
 /// Includes full information about a table.
 ///
@@ -102,8 +101,7 @@ pub struct TableCatalog {
     /// Owner of the table.
     pub owner: UserId,
 
-    /// Properties of the table. For example, `appendonly` or `retention_seconds`.
-    pub properties: WithOptions,
+    pub retention_seconds: u32,
 
     /// The fragment id of the `Materialize` operator for this table.
     pub fragment_id: FragmentId,
@@ -356,8 +354,7 @@ impl TableCatalog {
     pub fn table_desc(&self) -> TableDesc {
         use risingwave_common::catalog::TableOption;
 
-        let table_options =
-            TableOption::build_table_option(&self.properties.inner().clone().into_iter().collect());
+        let table_options = TableOption::new(Some(self.retention_seconds));
 
         TableDesc {
             table_id: self.id,
@@ -430,7 +427,6 @@ impl TableCatalog {
                 .collect_vec(),
             append_only: self.append_only,
             owner: self.owner,
-            properties: self.properties.inner().clone().into_iter().collect(),
             fragment_id: self.fragment_id,
             dml_fragment_id: self.dml_fragment_id,
             vnode_col_index: self.vnode_col_index.map(|i| i as _),
@@ -452,6 +448,7 @@ impl TableCatalog {
             incoming_sinks: self.incoming_sinks.clone(),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
+            retention_seconds: self.retention_seconds,
         }
     }
 
@@ -545,7 +542,6 @@ impl From<PbTable> for TableCatalog {
             stream_key: tb.stream_key.iter().map(|x| *x as _).collect(),
             append_only: tb.append_only,
             owner: tb.owner,
-            properties: WithOptions::new(tb.properties),
             fragment_id: tb.fragment_id,
             dml_fragment_id: tb.dml_fragment_id,
             vnode_col_index: tb.vnode_col_index.map(|x| x as usize),
@@ -569,6 +565,7 @@ impl From<PbTable> for TableCatalog {
             incoming_sinks: tb.incoming_sinks.clone(),
             created_at_cluster_version: tb.created_at_cluster_version.clone(),
             initialized_at_cluster_version: tb.initialized_at_cluster_version.clone(),
+            retention_seconds: tb.retention_seconds,
         }
     }
 }
@@ -587,12 +584,10 @@ impl OwnedByUserCatalog for TableCatalog {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
 
     use risingwave_common::catalog::{
         row_id_column_desc, ColumnCatalog, ColumnDesc, ColumnId, TableId,
     };
-    use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
@@ -603,7 +598,6 @@ mod tests {
 
     use super::*;
     use crate::catalog::table_catalog::{TableCatalog, TableType};
-    use crate::WithOptions;
 
     #[test]
     fn test_into_table_catalog() {
@@ -639,10 +633,7 @@ mod tests {
                 .into(),
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            properties: HashMap::from([(
-                String::from(PROPERTIES_RETENTION_SECOND_KEY),
-                String::from("300"),
-            )]),
+            retention_seconds: 300,
             fragment_id: 0,
             dml_fragment_id: None,
             initialized_at_epoch: None,
@@ -705,10 +696,7 @@ mod tests {
                 distribution_key: vec![],
                 append_only: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-                properties: WithOptions::new(HashMap::from([(
-                    String::from(PROPERTIES_RETENTION_SECOND_KEY),
-                    String::from("300")
-                )])),
+                retention_seconds: 300,
                 fragment_id: 0,
                 dml_fragment_id: None,
                 vnode_col_index: None,

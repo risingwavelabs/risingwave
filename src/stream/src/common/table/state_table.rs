@@ -357,7 +357,7 @@ where
             OpConsistencyLevel::Inconsistent
         };
 
-        let table_option = TableOption::build_table_option(table_catalog.get_properties());
+        let table_option = TableOption::new(Some(table_catalog.retention_seconds));
         let new_local_options = if IS_REPLICATED {
             NewLocalOptions::new_replicated(table_id, op_consistency_level, table_option)
         } else {

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::future::Future;
 use std::ops::{Bound, RangeBounds};
 use std::pin::{pin, Pin};
@@ -25,7 +24,6 @@ use futures::StreamExt;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use risingwave_common::cache::CachePriority;
-use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, RwConfig,
@@ -134,10 +132,7 @@ async fn compaction_test(
         distribution_key: vec![],
         stream_key: vec![],
         owner: 0,
-        properties: HashMap::<String, String>::from([(
-            PROPERTIES_RETENTION_SECOND_KEY.to_string(),
-            0.to_string(),
-        )]),
+        retention_seconds: 0,
         fragment_id: 0,
         dml_fragment_id: None,
         initialized_at_epoch: None,

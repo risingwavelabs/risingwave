@@ -339,8 +339,7 @@ impl StreamSink {
     /// The table schema is: | epoch | seq id | row op | sink columns |
     /// Pk is: | epoch | seq id |
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
-        let mut table_catalog_builder =
-            TableCatalogBuilder::new(self.input.ctx().with_options().internal_table_subset());
+        let mut table_catalog_builder = TableCatalogBuilder::default();
 
         let mut value_indices = Vec::with_capacity(
             KV_LOG_STORE_PREDEFINED_COLUMNS.len() + self.sink_desc.columns.len(),

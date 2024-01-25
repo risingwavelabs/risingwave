@@ -1371,12 +1371,12 @@ impl DdlController {
             internal_tables,
             building_locations,
             existing_locations,
-            table_properties: stream_job.properties(),
             definition: stream_job.definition(),
             mv_table_id: stream_job.mv_table(),
             create_type: stream_job.create_type(),
             ddl_type: stream_job.into(),
             replace_table_job_info,
+            new_independent_compaction_group: todo!(),
         };
 
         // 4. Mark tables as creating, including internal tables and the table of the stream job.
@@ -1781,7 +1781,6 @@ impl DdlController {
             dispatchers,
             building_locations,
             existing_locations,
-            table_properties: stream_job.properties(),
         };
 
         Ok((ctx, table_fragments))

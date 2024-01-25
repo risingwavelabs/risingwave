@@ -463,7 +463,6 @@ pub(crate) mod tests {
     use std::sync::{Arc, RwLock};
 
     use fixedbitset::FixedBitSet;
-    use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::catalog::{
         ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SUPER_USER_ID,
     };
@@ -494,7 +493,7 @@ pub(crate) mod tests {
     use crate::session::SessionImpl;
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
-    use crate::{TableCatalog, WithOptions};
+    use crate::TableCatalog;
 
     #[tokio::test]
     async fn test_query_should_not_hang_with_empty_worker() {
@@ -565,14 +564,7 @@ pub(crate) mod tests {
             distribution_key: vec![],
             append_only: false,
             owner: DEFAULT_SUPER_USER_ID,
-            properties: WithOptions::new(
-                [(
-                    PROPERTIES_RETENTION_SECOND_KEY.into(),
-                    TABLE_OPTION_DUMMY_RETENTION_SECOND.to_string(),
-                )]
-                .into_iter()
-                .collect(),
-            ),
+            retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
             fragment_id: 0,        // FIXME
             dml_fragment_id: None, // FIXME
             vnode_col_index: None,
