@@ -32,6 +32,10 @@ use crate::source::{
     S3_CONNECTOR,
 };
 
+// Hidden additional columns connectors which do not support `include` syntax.
+pub static COMMON_COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| HashSet::from(["partition", "offset"]));
+
 pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet<&'static str>>> =
     LazyLock::new(|| {
         HashMap::from([
@@ -53,7 +57,7 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
         ])
     });
 
-fn gen_default_name(
+pub fn gen_default_addition_col_name(
     connector_name: &str,
     additional_col_type: &str,
     inner_field_name: Option<&str>,
@@ -81,8 +85,23 @@ pub fn build_additional_column_catalog(
     column_alias: Option<String>,
     inner_field_name: Option<&str>,
     data_type: Option<&str>,
+    reject_unknown_connector: bool,
 ) -> Result<ColumnCatalog> {
-    let compatible_columns = COMPATIBLE_ADDITIONAL_COLUMNS.get(connector_name).unwrap();
+    let compatible_columns = match (
+        COMPATIBLE_ADDITIONAL_COLUMNS.get(connector_name),
+        reject_unknown_connector,
+    ) {
+        (Some(compat_cols), _) => compat_cols,
+        (None, false) => &COMMON_COMPATIBLE_ADDITIONAL_COLUMNS,
+        (None, true) => {
+            return Err(format!(
+                "additional column is not supported for connector {}, acceptable connectors: {:?}",
+                connector_name,
+                COMPATIBLE_ADDITIONAL_COLUMNS.keys(),
+            )
+            .into())
+        }
+    };
     if !compatible_columns.contains(additional_col_type) {
         return Err(format!(
             "additional column type {} is not supported for connector {}, acceptable column types: {:?}",
@@ -91,7 +110,7 @@ pub fn build_additional_column_catalog(
     }
 
     let column_name = column_alias.unwrap_or_else(|| {
-        gen_default_name(
+        gen_default_addition_col_name(
             connector_name,
             additional_col_type,
             inner_field_name,
@@ -241,17 +260,17 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_gen_default_name() {
+    fn test_gen_default_addition_col_name() {
         assert_eq!(
-            gen_default_name("kafka", "key", None, None),
+            gen_default_addition_col_name("kafka", "key", None, None),
             "_rw_kafka_key"
         );
         assert_eq!(
-            gen_default_name("kafka", "header", Some("inner"), None),
+            gen_default_addition_col_name("kafka", "header", Some("inner"), None),
             "_rw_kafka_header_inner"
         );
         assert_eq!(
-            gen_default_name("kafka", "header", Some("inner"), Some("varchar")),
+            gen_default_addition_col_name("kafka", "header", Some("inner"), Some("varchar")),
             "_rw_kafka_header_inner_varchar"
         );
     }
