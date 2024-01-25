@@ -240,9 +240,7 @@ impl UdfContext {
                         ret.insert(catalog.arg_names[i].clone(), e.clone());
                     }
                 }
-                _ => return Err(
-                    ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into()
-                ),
+                _ => return Err(ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into()),
             }
         }
         Ok(ret)

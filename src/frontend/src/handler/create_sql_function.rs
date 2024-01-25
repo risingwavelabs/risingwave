@@ -183,7 +183,10 @@ pub async fn handle_create_sql_function(
 
         binder
             .udf_context_mut()
-            .update_context(create_mock_udf_context(arg_types.clone(), arg_names.clone()));
+            .update_context(create_mock_udf_context(
+                arg_types.clone(),
+                arg_names.clone(),
+            ));
 
         binder.set_udf_binding_flag();
 
