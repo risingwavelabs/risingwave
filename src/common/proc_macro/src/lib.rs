@@ -275,13 +275,13 @@ pub fn session_config(input: TokenStream) -> TokenStream {
 /// #[derive(ConfigDoc)]
 /// pub struct Foo {
 ///   /// Description for `a`.
-///   a i32,
+///   a: i32,
 ///
 ///   #[config_doc(nested)]
-///   b Bar,
+///   b: Bar,
 ///
 ///   #[config_doc(omitted)]
-///   dummy (),
+///   dummy: (),
 /// }
 /// ```
 ///
