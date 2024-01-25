@@ -654,8 +654,8 @@ impl<T: AsRef<[u8]>> Debug for FullKey<T> {
             f,
             "FullKey {{ {:?}, epoch: {}, epoch_with_gap: {}}}",
             self.user_key,
+            self.epoch_with_gap.pure_epoch(),
             self.epoch_with_gap.as_u64(),
-            self.epoch_with_gap.pure_epoch()
         )
     }
 }
