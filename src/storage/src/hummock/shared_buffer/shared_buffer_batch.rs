@@ -96,10 +96,8 @@ impl SharedBufferBatchInner {
             }
         }
         if let Some(item) = payload.first() {
-            if item.0.as_ref().lt(smallest_table_key.as_ref()) {
-                smallest_table_key.clear();
-                smallest_table_key.extend_from_slice(item.0.as_ref());
-            }
+            smallest_table_key.clear();
+            smallest_table_key.extend_from_slice(item.0.as_ref());
         }
         let kv_count = payload.len();
         let epoch_with_gap = EpochWithGap::new(epoch, spill_offset);
