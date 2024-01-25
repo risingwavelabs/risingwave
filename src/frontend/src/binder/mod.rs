@@ -128,6 +128,7 @@ pub struct Binder {
     udf_binding_flag: bool,
 }
 
+#[derive(Clone, Debug, Default)]
 pub struct UdfContext {
     /// The mapping from `sql udf parameters` to a bound `ExprImpl` generated from `ast expressions`
     /// Note: The expressions are constructed during runtime, correspond to the actual users' input
