@@ -16,6 +16,7 @@ use std::cmp::Ordering;
 use std::collections::vec_deque::VecDeque;
 use std::collections::HashSet;
 use std::iter::once;
+use std::ops::Bound::Included;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -173,7 +174,7 @@ impl StagingVersion {
                     && range_overlap(
                         &(left, right),
                         &imm.start_table_key(),
-                        imm.end_table_key().as_ref(),
+                        Included(&imm.end_table_key()),
                     )
             });
 

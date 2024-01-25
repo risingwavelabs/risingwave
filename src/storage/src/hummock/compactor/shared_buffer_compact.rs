@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound;
 use std::sync::Arc;
 
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 use itertools::Itertools;
@@ -291,10 +291,6 @@ pub async fn merge_imms_in_memory(
     let mut merged_size = 0;
     let mut merged_imm_ids = Vec::with_capacity(imms.len());
 
-    let mut smallest_table_key = BytesMut::new();
-    let mut smallest_empty = true;
-    let mut largest_table_key = Bound::Included(Bytes::new());
-
     let mut imm_iters = Vec::with_capacity(imms.len());
     for imm in imms {
         assert!(imm.kv_count() > 0, "imm should not be empty");
@@ -309,25 +305,6 @@ pub async fn merge_imms_in_memory(
         kv_count += imm.kv_count();
         merged_size += imm.size();
 
-        if smallest_empty || smallest_table_key.as_ref().gt(imm.raw_smallest_key()) {
-            smallest_table_key.clear();
-            smallest_table_key.extend_from_slice(imm.raw_smallest_key());
-            smallest_empty = false;
-        }
-        let imm_raw_largest_key = imm.raw_largest_key();
-        if match (&largest_table_key, imm_raw_largest_key) {
-            (_, Bound::Unbounded) => true,
-            (Bound::Included(x), Bound::Included(y)) | (Bound::Included(x), Bound::Excluded(y)) => {
-                x < y
-            }
-            (Bound::Excluded(x), Bound::Included(y)) | (Bound::Excluded(x), Bound::Excluded(y)) => {
-                x <= y
-            }
-            (Bound::Unbounded, _) => false,
-        } {
-            largest_table_key = imm_raw_largest_key.as_ref().cloned();
-        }
-
         imm_iters.push(imm.into_forward_iter());
     }
     epochs.sort();
@@ -335,18 +312,11 @@ pub async fn merge_imms_in_memory(
     // use merge iterator to merge input imms
     let mut mi = MergeIterator::new(imm_iters);
     mi.rewind().await?;
-    let mut items = Vec::with_capacity(kv_count);
-    while mi.is_valid() {
-        let (key, (epoch, value)) = mi.current_item();
-        items.push(((key, value), epoch));
-        mi.next().await?;
-    }
+    assert!(mi.is_valid());
+
+    let first_item_key = mi.current_item().0.clone();
 
     let mut merged_payload: Vec<SharedBufferVersionedEntry> = Vec::new();
-    let first_item_key = items
-        .first()
-        .map(|((k, _), _)| k.clone())
-        .unwrap_or_default();
 
     // Use first key, max epoch to initialize the tracker to ensure that the check first call to full_key_tracker.observe will succeed
     let mut full_key_tracker = FullKeyTracker::<Bytes>::new(FullKey::new_with_gap_epoch(
@@ -356,8 +326,9 @@ pub async fn merge_imms_in_memory(
     ));
     let mut table_key_versions: Vec<(EpochWithGap, HummockValue<Bytes>)> = Vec::new();
 
-    for ((key, value), epoch_with_gap) in items {
-        let full_key = FullKey::new_with_gap_epoch(table_id, key, epoch_with_gap);
+    while mi.is_valid() {
+        let (key, (epoch_with_gap, value)) = mi.current_item();
+        let full_key = FullKey::new_with_gap_epoch(table_id, key.clone(), *epoch_with_gap);
         if let Some(last_full_key) = full_key_tracker.observe(full_key) {
             let last_user_key = last_full_key.user_key;
             // `epoch_with_gap` of the `last_full_key` may not reflect the real epoch in the items
@@ -370,7 +341,8 @@ pub async fn merge_imms_in_memory(
             // Reset state before moving onto the new table key
             table_key_versions = vec![];
         }
-        table_key_versions.push((epoch_with_gap, value));
+        table_key_versions.push((*epoch_with_gap, value.clone()));
+        mi.next().await?;
     }
 
     // process the last key
@@ -385,8 +357,6 @@ pub async fn merge_imms_in_memory(
         inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
             epochs,
             merged_payload,
-            smallest_table_key.freeze(),
-            largest_table_key,
             kv_count,
             merged_imm_ids,
             merged_size,

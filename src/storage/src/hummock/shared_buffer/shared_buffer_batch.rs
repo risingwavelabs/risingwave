@@ -16,12 +16,13 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::future::Future;
 use std::marker::PhantomData;
+use std::ops::Bound::Included;
 use std::ops::{Bound, Deref, RangeBounds};
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
 
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
@@ -40,17 +41,6 @@ use crate::mem_table::ImmId;
 use crate::storage_value::StorageValue;
 use crate::store::ReadOptions;
 
-fn whether_update_largest_key<P: AsRef<[u8]>, Q: AsRef<[u8]>>(
-    current_largest_key: &Bound<P>,
-    key_to_update: &Q,
-) -> bool {
-    match current_largest_key {
-        Bound::Excluded(x) => x.as_ref() <= key_to_update.as_ref(),
-        Bound::Included(x) => x.as_ref() < key_to_update.as_ref(),
-        Bound::Unbounded => false,
-    }
-}
-
 /// The key is `table_key`, which does not contain table id or epoch.
 pub(crate) type SharedBufferItem = (TableKey<Bytes>, HummockValue<Bytes>);
 pub type SharedBufferBatchId = u64;
@@ -68,8 +58,6 @@ pub(crate) struct SharedBufferBatchInner {
     imm_ids: Vec<ImmId>,
     /// The epochs of the data in batch, sorted in ascending order (old to new)
     epochs: Vec<HummockEpoch>,
-    largest_table_key: Bound<Bytes>,
-    smallest_table_key: Bytes,
     kv_count: usize,
     /// Total size of all key-value items (excluding the `epoch` of value versions)
     size: usize,
@@ -87,18 +75,9 @@ impl SharedBufferBatchInner {
         size: usize,
         _tracker: Option<MemoryTracker>,
     ) -> Self {
-        let mut largest_table_key = Bound::Included(Bytes::new());
-        let mut smallest_table_key = BytesMut::new();
+        assert!(!payload.is_empty());
+        debug_assert!(payload.iter().is_sorted_by_key(|(key, _)| key));
 
-        if let Some(item) = payload.last() {
-            if whether_update_largest_key(&largest_table_key, &item.0) {
-                largest_table_key = Bound::Included(item.0.clone().0);
-            }
-        }
-        if let Some(item) = payload.first() {
-            smallest_table_key.clear();
-            smallest_table_key.extend_from_slice(item.0.as_ref());
-        }
         let kv_count = payload.len();
         let epoch_with_gap = EpochWithGap::new(epoch, spill_offset);
         let items = payload
@@ -113,8 +92,6 @@ impl SharedBufferBatchInner {
             epochs: vec![epoch],
             kv_count,
             size,
-            largest_table_key,
-            smallest_table_key: smallest_table_key.freeze(),
             _tracker,
             batch_id,
         }
@@ -124,13 +101,17 @@ impl SharedBufferBatchInner {
     pub(crate) fn new_with_multi_epoch_batches(
         epochs: Vec<HummockEpoch>,
         payload: Vec<SharedBufferVersionedEntry>,
-        smallest_table_key: Bytes,
-        largest_table_key: Bound<Bytes>,
         num_items: usize,
         imm_ids: Vec<ImmId>,
         size: usize,
         tracker: Option<MemoryTracker>,
     ) -> Self {
+        assert!(!payload.is_empty());
+        debug_assert!(payload.iter().is_sorted_by_key(|(key, _)| key));
+        debug_assert!(payload.iter().all(|(_, values)| values
+            .iter()
+            .rev()
+            .is_sorted_by_key(|(epoch_with_gap, _)| epoch_with_gap)));
         debug_assert!(!imm_ids.is_empty());
         debug_assert!(!epochs.is_empty());
         debug_assert!(epochs.is_sorted());
@@ -141,8 +122,6 @@ impl SharedBufferBatchInner {
             payload,
             epochs,
             imm_ids,
-            largest_table_key,
-            smallest_table_key,
             kv_count: num_items,
             size,
             _tracker: tracker,
@@ -272,7 +251,7 @@ impl SharedBufferBatch {
             && range_overlap(
                 &(left, right),
                 &self.start_table_key(),
-                self.end_table_key().as_ref(),
+                Included(&self.end_table_key()),
             )
     }
 
@@ -355,25 +334,17 @@ impl SharedBufferBatch {
 
     #[inline(always)]
     pub fn start_table_key(&self) -> TableKey<&[u8]> {
-        TableKey(&self.inner.smallest_table_key)
+        TableKey(self.inner.payload.first().expect("non-empty").0.as_ref())
     }
 
     #[inline(always)]
-    pub fn raw_smallest_key(&self) -> &Bytes {
-        &self.inner.smallest_table_key
+    pub fn end_table_key(&self) -> TableKey<&[u8]> {
+        TableKey(self.inner.payload.last().expect("non-empty").0.as_ref())
     }
 
     #[inline(always)]
-    pub fn end_table_key(&self) -> Bound<TableKey<&[u8]>> {
-        self.inner
-            .largest_table_key
-            .as_ref()
-            .map(|largest_key| TableKey(largest_key.as_ref()))
-    }
-
-    #[inline(always)]
-    pub fn raw_largest_key(&self) -> &Bound<Bytes> {
-        &self.inner.largest_table_key
+    pub fn raw_largest_key(&self) -> &TableKey<Bytes> {
+        &self.inner.payload.last().expect("non-empty").0
     }
 
     /// return inclusive left endpoint, which means that all data in this batch should be larger or
@@ -665,6 +636,7 @@ pub struct SharedBufferDeleteRangeIterator {
 }
 
 impl SharedBufferDeleteRangeIterator {
+    #[cfg(any(test, feature = "test"))]
     pub(crate) fn new(
         epoch: HummockEpoch,
         table_id: TableId,
@@ -777,7 +749,6 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
 mod tests {
     use std::ops::Bound::{Excluded, Included};
 
-    use risingwave_common::must_match;
     use risingwave_hummock_sdk::key::map_table_key_range;
 
     use super::*;
@@ -815,7 +786,7 @@ mod tests {
             shared_buffer_items[0].0
         );
         assert_eq!(
-            must_match!(shared_buffer_batch.end_table_key(), Bound::Included(table_key) => *table_key),
+            *shared_buffer_batch.end_table_key(),
             shared_buffer_items[2].0
         );
 
