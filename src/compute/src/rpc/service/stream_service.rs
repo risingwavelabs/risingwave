@@ -269,7 +269,6 @@ impl StreamService for StreamServiceImpl {
             back_pressure_infos.push(back_pressure_info);
         }
 
-
         Ok(Response::new(GetBackPressureResponse {
             back_pressure_infos,
         }))

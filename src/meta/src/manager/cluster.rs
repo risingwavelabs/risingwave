@@ -494,7 +494,7 @@ impl ClusterManager {
         self.core.read().await.get_worker_by_id(worker_id)
     }
 
-    pub async fn get_back_pressure_rate(&self) -> MetaResult<GetBackPressureResponse> {
+    pub async fn get_back_pressure(&self) -> MetaResult<GetBackPressureResponse> {
         let mut core = self.core.write().await;
         let mut back_pressure_infos: Vec<BackPressureInfo> = Vec::new();
         for worker in core.workers.values_mut() {

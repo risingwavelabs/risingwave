@@ -371,7 +371,7 @@ impl ClusterController {
             .get_worker_extra_info_by_id(worker_id)
     }
 
-    pub async fn get_back_pressure_rate(&self) -> MetaResult<GetBackPressureResponse> {
+    pub async fn get_back_pressure(&self) -> MetaResult<GetBackPressureResponse> {
         let nodes = self
             .inner
             .read()
