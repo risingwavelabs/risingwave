@@ -170,7 +170,6 @@ impl DatagenEventGenerator {
             let mut chunk_builder =
                 StreamChunkBuilder::new(MAX_ROWS_PER_YIELD as usize, self.data_types.clone());
             while rows_generated_this_second < self.partition_rows_per_second {
-                self.offset += 1;
                 let num_rows_to_generate = std::cmp::min(
                     MAX_ROWS_PER_YIELD,
                     self.partition_rows_per_second - rows_generated_this_second,
@@ -209,6 +208,7 @@ impl DatagenEventGenerator {
                         row.push(datum);
                     }
 
+                    self.offset += 1;
                     rows_generated_this_second += 1;
                     if let Some(chunk) = chunk_builder.append_row(Op::Insert, OwnedRow::new(row)) {
                         yield chunk;
