@@ -179,18 +179,15 @@ impl Expression for ConstantLookupExpression {
     }
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        if input.as_inner().len() == 0 {
-            // TODO(Zihao): const case-when expression evaluation
-            Ok(None)
+        let datum = self.operand.eval_row(input).await?;
+
+        if let Some(expr) = self.arms.get(datum.as_ref().unwrap()) {
+            expr.eval_row(input).await
         } else {
-            if let Some(expr) = self.arms.get(&input.last().unwrap().into_scalar_impl()) {
-                expr.eval_row(input).await
-            } else {
-                let Some(ref expr) = self.fallback else {
-                    return Ok(None);
-                };
-                expr.eval_row(input).await
-            }
+            let Some(ref expr) = self.fallback else {
+                return Ok(None);
+            };
+            expr.eval_row(input).await
         }
     }
 }
