@@ -69,6 +69,7 @@ pub mod drop_mv;
 mod drop_schema;
 pub mod drop_sink;
 pub mod drop_source;
+pub mod drop_subscription;
 pub mod drop_table;
 pub mod drop_user;
 mod drop_view;
@@ -373,7 +374,13 @@ pub async fn handle(
                     drop_sink::handle_drop_sink(handler_args, object_name, if_exists, cascade).await
                 }
                 ObjectType::Subscription => {
-                    unimplemented!()
+                    drop_subscription::handle_drop_subscription(
+                        handler_args,
+                        object_name,
+                        if_exists,
+                        cascade,
+                    )
+                    .await
                 }
                 ObjectType::Database => {
                     drop_database::handle_drop_database(

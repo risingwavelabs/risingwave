@@ -19,6 +19,8 @@ use risingwave_common::catalog::{ColumnCatalog, TableId, UserId, OBJECT_ID_PLACE
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{PbStreamJobStatus, PbSubscription};
 
+use super::OwnedByUserCatalog;
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(test, derive(Default))]
 pub struct SubscriptionCatalog {
@@ -147,5 +149,11 @@ impl From<&PbSubscription> for SubscriptionCatalog {
                 .collect_vec(),
             owner: prost.owner.into(),
         }
+    }
+}
+
+impl OwnedByUserCatalog for SubscriptionCatalog {
+    fn owner(&self) -> u32 {
+        self.owner.user_id
     }
 }

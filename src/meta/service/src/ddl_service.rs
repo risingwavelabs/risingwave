@@ -339,6 +339,28 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    async fn drop_subscription(
+        &self,
+        request: Request<DropSubscriptionRequest>,
+    ) -> Result<Response<DropSubscriptionResponse>, Status> {
+        let request = request.into_inner();
+        let subscription_id = request.subscription_id;
+        let drop_mode = DropMode::from_request_setting(request.cascade);
+
+        let command = DdlCommand::DropStreamingJob(
+            StreamingJobId::Subscription(subscription_id),
+            drop_mode,
+            None,
+        );
+
+        let version = self.ddl_controller.run_command(command).await?;
+
+        Ok(Response::new(DropSubscriptionResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn create_materialized_view(
         &self,
         request: Request<CreateMaterializedViewRequest>,

@@ -69,7 +69,7 @@ use crate::manager::{
     CatalogManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId, IdCategory,
     IdCategoryType, IndexId, LocalNotification, MetaSrvEnv, MetadataManager, MetadataManagerV1,
     NotificationVersion, RelationIdEnum, SchemaId, SinkId, SourceId, StreamingClusterInfo,
-    StreamingJob, TableId, UserId, ViewId, IGNORED_NOTIFICATION_VERSION,
+    StreamingJob, SubscriptionId, TableId, UserId, ViewId, IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
 use crate::rpc::cloud_provider::AwsEc2Client;
@@ -101,6 +101,7 @@ pub enum StreamingJobId {
     Sink(SinkId),
     Table(Option<SourceId>, TableId),
     Index(IndexId),
+    Subscription(SubscriptionId),
 }
 
 impl StreamingJobId {
@@ -109,6 +110,7 @@ impl StreamingJobId {
         match self {
             StreamingJobId::MaterializedView(id)
             | StreamingJobId::Sink(id)
+            | StreamingJobId::Subscription(id)
             | StreamingJobId::Table(_, id)
             | StreamingJobId::Index(id) => *id,
         }
@@ -1173,6 +1175,15 @@ impl DdlController {
                 mgr.catalog_manager
                     .drop_relation(
                         RelationIdEnum::Index(index_id),
+                        mgr.fragment_manager.clone(),
+                        drop_mode,
+                    )
+                    .await?
+            }
+            StreamingJobId::Subscription(subscription_id) => {
+                mgr.catalog_manager
+                    .drop_relation(
+                        RelationIdEnum::Subscription(subscription_id),
                         mgr.fragment_manager.clone(),
                         drop_mode,
                     )

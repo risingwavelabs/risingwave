@@ -465,6 +465,21 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()> {
+        if cascade {
+            return Err(ErrorCode::NotSupported(
+                "drop cascade in MockCatalogWriter is unsupported".to_string(),
+                "use drop instead".to_string(),
+            )
+            .into());
+        }
+        let (database_id, schema_id) = self.drop_table_or_subscription_id(subscription_id);
+        self.catalog
+            .write()
+            .drop_subscription(database_id, schema_id, subscription_id);
+        Ok(())
+    }
+
     async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
@@ -675,6 +690,17 @@ impl MockCatalogWriter {
             .insert(table_id, schema_id);
     }
 
+    fn add_table_or_subscription_id(
+        &self,
+        table_id: u32,
+        schema_id: SchemaId,
+        _database_id: DatabaseId,
+    ) {
+        self.table_id_to_schema_id
+            .write()
+            .insert(table_id, schema_id);
+    }
+
     fn add_table_or_index_id(&self, table_id: u32, schema_id: SchemaId, _database_id: DatabaseId) {
         self.table_id_to_schema_id
             .write()
@@ -682,6 +708,15 @@ impl MockCatalogWriter {
     }
 
     fn drop_table_or_sink_id(&self, table_id: u32) -> (DatabaseId, SchemaId) {
+        let schema_id = self
+            .table_id_to_schema_id
+            .write()
+            .remove(&table_id)
+            .unwrap();
+        (self.get_database_id_by_schema(schema_id), schema_id)
+    }
+
+    fn drop_table_or_subscription_id(&self, table_id: u32) -> (DatabaseId, SchemaId) {
         let schema_id = self
             .table_id_to_schema_id
             .write()
@@ -722,7 +757,7 @@ impl MockCatalogWriter {
     fn create_sink_inner(&self, mut sink: PbSink, _graph: StreamFragmentGraph) -> Result<()> {
         sink.id = self.gen_id();
         self.catalog.write().create_sink(&sink);
-        self.add_table_or_sink_id(sink.id, sink.schema_id, sink.database_id);
+        self.add_table_or_subscription_id(sink.id, sink.schema_id, sink.database_id);
         Ok(())
     }
 

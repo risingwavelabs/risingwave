@@ -580,6 +580,19 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn drop_subscription(
+        &self,
+        subscription_id: u32,
+        cascade: bool,
+    ) -> Result<CatalogVersion> {
+        let request = DropSubscriptionRequest {
+            subscription_id,
+            cascade,
+        };
+        let resp = self.inner.drop_subscription(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<CatalogVersion> {
         let request = DropIndexRequest {
             index_id: index_id.index_id,
@@ -1879,6 +1892,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_view, DropViewRequest, DropViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
             ,{ ddl_client, drop_sink, DropSinkRequest, DropSinkResponse }
+            ,{ ddl_client, drop_subscription, DropSubscriptionRequest, DropSubscriptionResponse }
             ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }

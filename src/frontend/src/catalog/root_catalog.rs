@@ -28,6 +28,7 @@ use risingwave_pb::hummock::HummockVersionStats;
 
 use super::function_catalog::FunctionCatalog;
 use super::source_catalog::SourceCatalog;
+use super::subscription_catalog::SubscriptionCatalog;
 use super::view_catalog::ViewCatalog;
 use super::{CatalogError, CatalogResult, ConnectionId, SinkId, SourceId, SubscriptionId, ViewId};
 use crate::catalog::connection_catalog::ConnectionCatalog;
@@ -725,6 +726,21 @@ impl Catalog {
                     .get_sink_by_name(sink_name))
             })?
             .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_string()))
+    }
+
+    pub fn get_subscription_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        subscription_name: &str,
+    ) -> CatalogResult<(&Arc<SubscriptionCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_subscription_by_name(subscription_name))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("subscription", subscription_name.to_string()))
     }
 
     pub fn get_index_by_name<'a>(

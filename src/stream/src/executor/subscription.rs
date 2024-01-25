@@ -54,13 +54,14 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
         let retention_seconds_str = properties.get("retention_seconds").ok_or_else(|| {
             StreamExecutorError::serde_error("Subscription retention time not set.".to_string())
         })?;
-        let retention_seconds = Interval::from_str(retention_seconds_str)
+        let retention_seconds = (Interval::from_str(retention_seconds_str)
             .map_err(|_| {
                 StreamExecutorError::serde_error(
                     "Retention needs to be set in Interval format".to_string(),
                 )
             })?
-            .usecs();
+            .epoch_in_micros() / 1000000) as i64;
+
         Ok(Self {
             actor_context,
             info,
@@ -85,7 +86,6 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
         #[for_await]
         for msg in input {
             let msg = msg?;
-            println!("{:?}", msg);
             yield match msg {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
