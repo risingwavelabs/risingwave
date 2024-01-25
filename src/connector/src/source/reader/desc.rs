@@ -90,6 +90,8 @@ impl SourceDescBuilder {
         }
     }
 
+    /// This function builds SourceColumnDesc from ColumnCatalog, and handle the creation
+    /// of hidden columns like partition/file, offset that are not specified by user.
     pub fn column_catalogs_to_source_column_descs(&self) -> Vec<SourceColumnDesc> {
         let mut columns_exist = [false; 2];
         let mut last_column_id = self
