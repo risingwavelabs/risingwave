@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use either::Either;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
@@ -196,7 +196,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
         // Replace the source reader with a new one of the new state.
         let reader = self
             .build_stream_source_reader(source_desc, Some(target_state.clone()))
-            .await?;
+            .await?
+            .map_err(StreamExecutorError::connector_error);
         stream.replace_data_stream(reader);
 
         self.stream_source_core.stream_source_splits = target_state
@@ -342,7 +343,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
             .instrument_await("fs_source_start_reader")
-            .await?;
+            .await?
+            .map_err(StreamExecutorError::connector_error);
 
         // Merge the chunks from source and the barriers into a single stream. We prioritize
         // barriers over source data chunks here.

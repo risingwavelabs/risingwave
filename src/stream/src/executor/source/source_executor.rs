@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
@@ -284,7 +284,8 @@ impl<S: StateStore> SourceExecutor<S> {
         // Replace the source reader with a new one of the new state.
         let reader = self
             .build_stream_source_reader(source_desc, Some(target_state.clone()))
-            .await?;
+            .await?
+            .map_err(StreamExecutorError::connector_error);
 
         stream.replace_data_stream(reader);
 
@@ -424,7 +425,8 @@ impl<S: StateStore> SourceExecutor<S> {
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
             .instrument_await("source_build_reader")
-            .await?;
+            .await?
+            .map_err(StreamExecutorError::connector_error);
 
         // Merge the chunks from source and the barriers into a single stream. We prioritize
         // barriers over source data chunks here.

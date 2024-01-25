@@ -14,16 +14,15 @@
 
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
 use futures_async_stream::try_stream;
 use parking_lot::RwLock;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
 use tokio::sync::oneshot;
 
+use crate::error::{DmlError, Result};
 use crate::txn_channel::{txn_channel, Receiver, Sender};
 
 pub type TableDmlHandleRef = Arc<TableDmlHandle>;
@@ -88,9 +87,7 @@ impl TableDmlHandle {
         loop {
             let guard = self.core.read();
             if guard.changes_txs.is_empty() {
-                return Err(RwError::from(anyhow!(
-                    "no available table reader in streaming source executors"
-                )));
+                return Err(DmlError::NoReader);
             }
             let len = guard.changes_txs.len();
             // Use session id instead of txn_id to choose channel so that we can preserve transaction order in the same session.
@@ -98,7 +95,7 @@ impl TableDmlHandle {
             let sender = guard
                 .changes_txs
                 .get((session_id % len as u32) as usize)
-                .context("no available table reader in streaming source executors")?
+                .unwrap()
                 .clone();
 
             drop(guard);
@@ -182,7 +179,8 @@ impl WriteHandle {
     pub async fn write_chunk(&self, chunk: StreamChunk) -> Result<()> {
         assert_eq!(self.txn_state, TxnState::Begin);
         // Ignore the notifier.
-        self.write_txn_data_msg(TxnMsg::Data(self.txn_id, chunk))
+        let _notifier = self
+            .write_txn_data_msg(TxnMsg::Data(self.txn_id, chunk))
             .await?;
         Ok(())
     }
@@ -191,9 +189,8 @@ impl WriteHandle {
         assert_eq!(self.txn_state, TxnState::Begin);
         self.txn_state = TxnState::Committed;
         // Await the notifier.
-        self.write_txn_control_msg(TxnMsg::End(self.txn_id))?
-            .await
-            .context("failed to wait the end message")?;
+        let notifier = self.write_txn_control_msg(TxnMsg::End(self.txn_id))?;
+        notifier.await.map_err(|_| DmlError::ReaderClosed)?;
         Ok(())
     }
 
@@ -220,7 +217,7 @@ impl WriteHandle {
 
             // It's possible that the source executor is scaled in or migrated, so the channel
             // is closed. To guarantee the transactional atomicity, bail out.
-            Err(_) => Err(RwError::from("write txn_msg channel closed".to_string())),
+            Err(_) => Err(DmlError::ReaderClosed),
         }
     }
 
@@ -234,7 +231,7 @@ impl WriteHandle {
 
             // It's possible that the source executor is scaled in or migrated, so the channel
             // is closed. To guarantee the transactional atomicity, bail out.
-            Err(_) => Err(RwError::from("write txn_msg channel closed".to_string())),
+            Err(_) => Err(DmlError::ReaderClosed),
         }
     }
 }
@@ -250,7 +247,7 @@ pub struct TableStreamReader {
 }
 
 impl TableStreamReader {
-    #[try_stream(boxed, ok = StreamChunk, error = RwError)]
+    #[try_stream(boxed, ok = StreamChunk, error = DmlError)]
     pub async fn into_data_stream_for_test(mut self) {
         while let Some((txn_msg, notifier)) = self.rx.recv().await {
             // Notify about that we've taken the chunk.
@@ -266,7 +263,7 @@ impl TableStreamReader {
         }
     }
 
-    #[try_stream(boxed, ok = TxnMsg, error = RwError)]
+    #[try_stream(boxed, ok = TxnMsg, error = DmlError)]
     pub async fn into_stream(mut self) {
         while let Some((txn_msg, notifier)) = self.rx.recv().await {
             // Notify about that we've taken the chunk.

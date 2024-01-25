@@ -9118,7 +9118,6 @@ dependencies = [
 name = "risingwave_dml"
 version = "1.7.0-alpha"
 dependencies = [
- "anyhow",
  "assert_matches",
  "criterion",
  "futures",
@@ -9133,6 +9132,8 @@ dependencies = [
  "risingwave_pb",
  "rw_futures_util",
  "tempfile",
+ "thiserror",
+ "thiserror-ext",
  "tracing",
  "workspace-hack",
 ]
