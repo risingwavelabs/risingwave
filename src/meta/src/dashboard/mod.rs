@@ -407,7 +407,7 @@ impl DashboardService {
                 "/metrics/actor/back_pressures",
                 get(prometheus::list_prometheus_actor_back_pressure),
             )
-            .route("/metrics/back_pressures_rate", get(get_back_pressure))
+            .route("/metrics/back_pressures", get(get_back_pressure))
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
             .route("/monitor/await_tree/", get(dump_await_tree_all))
             .route("/monitor/dump_heap_profile/:worker_id", get(heap_profile))
