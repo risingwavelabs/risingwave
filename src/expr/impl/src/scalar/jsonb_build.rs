@@ -71,7 +71,7 @@ fn jsonb_build_array(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
 /// query T
 /// select jsonb_build_object(variadic array['foo', '1', '2', 'bar']);
 /// ----
-/// {"2": "bar", "foo": 1}
+/// {"2": "bar", "foo": "1"}
 /// ```
 #[function("jsonb_build_object(variadic anyarray) -> jsonb")]
 fn jsonb_build_object(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
