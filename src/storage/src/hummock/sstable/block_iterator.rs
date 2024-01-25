@@ -13,14 +13,13 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::mem::ManuallyDrop;
 use std::ops::Range;
 
 use bytes::BytesMut;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 
-use super::{KeyPrefix, LenType, RestartPoint, HITMAP_ELEMS};
+use super::{Block, KeyPrefix, LenType, RestartPoint};
 use crate::hummock::BlockHolder;
 use crate::monitor::LocalHitmap;
 
@@ -45,23 +44,19 @@ pub struct BlockIterator {
     /// NOTE:
     ///
     /// - `hitmap` is supposed to be updated each time accessing the block data in a new position.
-    /// - `hitmap` is supposed to be dropped before `block`
-    hitmap: ManuallyDrop<LocalHitmap<HITMAP_ELEMS>>,
+    /// - `hitmap` must be reported to the block hitmap before drop.
+    hitmap: LocalHitmap<{ Block::HITMAP_ELEMS }>,
 }
 
 impl Drop for BlockIterator {
     fn drop(&mut self) {
-        // Make sure `hitmap` is dropped before `block` to avoid metrics losing.
-        //
-        // Although the drop order in a struct can be guaranteed by the source code order,
-        // manually write drop here can make it much clearer and avoid becoming a footgun in future.
-        unsafe { ManuallyDrop::drop(&mut self.hitmap) };
+        self.block.hitmap().report(&mut self.hitmap);
     }
 }
 
 impl BlockIterator {
     pub fn new(block: BlockHolder) -> Self {
-        let hitmap = ManuallyDrop::new(block.hitmap().local());
+        let hitmap = LocalHitmap::default();
         Self {
             block,
             offset: usize::MAX,
@@ -263,10 +258,11 @@ impl BlockIterator {
     /// Searches the restart point index that the given `key` belongs to.
     fn search_restart_point_index_by_key(&mut self, key: FullKey<&[u8]>) -> usize {
         // Create a temporary local hitmap.
-        let mut hitmap = self.block.hitmap().local();
+        let mut hitmap = LocalHitmap::default();
 
         // Find the largest restart point that restart key equals or less than the given key.
-        self.block
+        let res = self
+            .block
             .search_restart_partition_point(
                 |&RestartPoint {
                      offset: probe,
@@ -289,7 +285,12 @@ impl BlockIterator {
                     }
                 },
             )
-            .saturating_sub(1) // Prevent from underflowing when given is smaller than the first.
+            // Prevent from underflowing when given is smaller than the first.
+            .saturating_sub(1);
+
+        self.hitmap.merge(&mut hitmap);
+
+        res
     }
 
     /// Seeks to the restart point that the given `key` belongs to.
