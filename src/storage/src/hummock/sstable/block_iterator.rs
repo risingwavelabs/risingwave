@@ -178,7 +178,8 @@ impl BlockIterator {
         self.offset = offset;
         self.entry_len = prefix.entry_len();
 
-        self.update_hitmap();
+        self.hitmap
+            .fill_with_range(self.offset, self.value_range.end, self.block.len());
 
         true
     }
@@ -249,7 +250,10 @@ impl BlockIterator {
     }
 
     /// Searches the restart point index that the given `key` belongs to.
-    fn search_restart_point_index_by_key(&self, key: FullKey<&[u8]>) -> usize {
+    fn search_restart_point_index_by_key(&mut self, key: FullKey<&[u8]>) -> usize {
+        // Create a temporary local hitmap.
+        let mut hitmap = self.block.hitmap().local();
+
         // Find the largest restart point that restart key equals or less than the given key.
         self.block
             .search_restart_partition_point(
@@ -263,6 +267,11 @@ impl BlockIterator {
                     let probe_key = &self.block.data()[prefix.diff_key_range()];
                     let full_probe_key =
                         FullKey::from_slice_without_table_id(self.block.table_id(), probe_key);
+                    hitmap.fill_with_range(
+                        probe as usize,
+                        prefix.diff_key_range().end,
+                        self.block.len(),
+                    );
                     match full_probe_key.cmp(&key) {
                         Ordering::Less | Ordering::Equal => true,
                         Ordering::Greater => false,
@@ -294,7 +303,8 @@ impl BlockIterator {
         self.entry_len = prefix.entry_len();
         self.update_restart_point(index);
 
-        self.update_hitmap();
+        self.hitmap
+            .fill_with_range(self.offset, self.value_range.end, self.block.len());
     }
 
     fn update_restart_point(&mut self, index: usize) {
@@ -303,12 +313,6 @@ impl BlockIterator {
 
         self.last_key_len_type = restart_point.key_len_type;
         self.last_value_len_type = restart_point.value_len_type;
-    }
-
-    /// Update the local hitmap of the block based on the current iterator position.
-    fn update_hitmap(&mut self) {
-        self.hitmap
-            .fill_with_range(self.offset, self.value_range.end, self.block.len());
     }
 }
 
