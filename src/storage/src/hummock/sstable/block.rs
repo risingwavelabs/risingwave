@@ -206,9 +206,9 @@ impl Block {
         let buf = match compression {
             CompressionAlgorithm::None => {
                 if copy {
-                    buf.slice(0..(buf.len() - 9))
-                } else {
                     Bytes::copy_from_slice(&buf[0..(buf.len() - 9)])
+                } else {
+                    buf.slice(0..(buf.len() - 9))
                 }
             }
             CompressionAlgorithm::Lz4 => {

@@ -54,7 +54,9 @@ pub type SharedBufferVersionedEntry = (TableKey<Bytes>, Vec<(EpochWithGap, Hummo
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferVersionedEntry>,
     /// The list of imm ids that are merged into this batch
-    /// This field is immutable
+    /// This field is immutable.
+    ///
+    /// Larger imm id at the front.
     imm_ids: Vec<ImmId>,
     /// The epochs of the data in batch, sorted in ascending order (old to new)
     epochs: Vec<HummockEpoch>,
@@ -113,6 +115,7 @@ impl SharedBufferBatchInner {
             .rev()
             .is_sorted_by_key(|(epoch_with_gap, _)| epoch_with_gap)));
         debug_assert!(!imm_ids.is_empty());
+        debug_assert!(imm_ids.iter().rev().is_sorted());
         debug_assert!(!epochs.is_empty());
         debug_assert!(epochs.is_sorted());
 
@@ -260,7 +263,7 @@ impl SharedBufferBatch {
     }
 
     pub fn is_merged_imm(&self) -> bool {
-        self.inner.epochs.len() > 1
+        !self.inner.imm_ids.is_empty()
     }
 
     pub fn min_epoch(&self) -> HummockEpoch {

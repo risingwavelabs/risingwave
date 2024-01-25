@@ -17,14 +17,12 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 
-use anyhow::Context;
 use parking_lot::RwLock;
-use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
-use risingwave_common::error::Result;
 use risingwave_common::transaction::transaction_id::{TxnId, TxnIdGenerator};
 use risingwave_common::util::worker_util::WorkerNodeId;
 
+use crate::error::{DmlError, Result};
 use crate::{TableDmlHandle, TableDmlHandleRef};
 
 pub type DmlManagerRef = Arc<DmlManager>;
@@ -112,9 +110,7 @@ impl DmlManager {
                                 "dml handler registers with same version but different schema"
                             )
                         })
-                        .with_context(|| {
-                            format!("fail to register reader for table with key `{table_id:?}`")
-                        })?,
+                        .expect("the first dml executor is gone"), // this should never happen
 
                     // A new version of the table is activated, overwrite the old reader.
                     Ordering::Greater => new_handle!(o),
@@ -139,7 +135,7 @@ impl DmlManager {
                         // A new version of the table is activated, but the DML request is still on
                         // the old version.
                         Ordering::Less => {
-                            bail!("schema changed for table `{table_id:?}`, please retry later")
+                            return Err(DmlError::SchemaChanged);
                         }
 
                         // Write the chunk of correct version to the table.
@@ -155,7 +151,7 @@ impl DmlManager {
                 None => None,
             }
         }
-        .with_context(|| format!("no reader for dml in table `{table_id:?}`"))?;
+        .ok_or(DmlError::NoReader)?;
 
         Ok(table_dml_handle)
     }

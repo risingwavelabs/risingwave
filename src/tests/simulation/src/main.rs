@@ -144,6 +144,10 @@ pub struct Args {
     /// The probability of background ddl for a ddl query.
     #[clap(long, default_value = "0.0")]
     background_ddl_rate: f64,
+
+    /// Use arrangement backfill by default
+    #[clap(long, default_value = "false")]
+    use_arrangement_backfill: bool,
 }
 
 #[tokio::main]
@@ -173,6 +177,11 @@ async fn main() {
         meta_nodes: args.meta_nodes,
         etcd_timeout_rate: args.etcd_timeout_rate,
         etcd_data_path: args.etcd_data,
+        per_session_queries: if args.use_arrangement_backfill {
+            vec!["SET enable_arrangement_backfill = true;".to_string()].into()
+        } else {
+            vec![].into()
+        },
         ..Default::default()
     };
     let kill_opts = KillOpts {

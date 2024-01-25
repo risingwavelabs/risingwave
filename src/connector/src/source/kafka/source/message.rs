@@ -16,6 +16,8 @@ use itertools::Itertools;
 use rdkafka::message::{BorrowedMessage, Headers, OwnedHeaders};
 use rdkafka::Message;
 use risingwave_common::types::{Datum, ListValue, Scalar, ScalarImpl, StructValue};
+use risingwave_pb::data::data_type::TypeName as PbTypeName;
+use risingwave_pb::data::DataType as PbDataType;
 
 use crate::parser::additional_columns::get_kafka_header_item_datatype;
 use crate::source::base::SourceMessage;
@@ -37,6 +39,31 @@ impl KafkaMeta {
                     .to_scalar_value()
             })
             .into()
+    }
+
+    pub fn extract_header_inner(
+        &self,
+        inner_field: &str,
+        data_type: Option<&PbDataType>,
+    ) -> Option<Datum> {
+        let target_value = self
+            .headers
+            .as_ref()
+            .iter()
+            .find_map(|headers| {
+                headers
+                    .iter()
+                    .find(|header| header.key == inner_field)
+                    .map(|header| header.value)
+            })
+            .unwrap_or(None); // if not found the specified column, return None
+        if let Some(data_type) = data_type
+            && data_type.type_name == PbTypeName::Varchar as i32
+        {
+            Some(target_value.map(|byte| ScalarImpl::Utf8(String::from_utf8_lossy(byte).into())))
+        } else {
+            Some(target_value.map(|byte| ScalarImpl::Bytea(byte.into())))
+        }
     }
 
     pub fn extract_headers(&self) -> Option<Datum> {

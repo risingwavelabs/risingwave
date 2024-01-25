@@ -38,14 +38,15 @@ use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, Table, Waterma
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
-    AdditionalColumnType, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
+    AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
 };
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
-    CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Format, Ident,
+    CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Format,
     ObjectName, SourceWatermark, TableConstraint,
 };
+use risingwave_sqlparser::parser::IncludeOption;
 
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field, Clause};
@@ -211,7 +212,7 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
                 type_name: "".to_string(),
                 generated_or_default_column: None,
                 description: None,
-                additional_column_type: AdditionalColumnType::Normal,
+                additional_columns: AdditionalColumn { column_type: None },
                 version: ColumnDescVersion::Pr13707,
             },
             is_hidden: false,
@@ -459,7 +460,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     source_watermarks: Vec<SourceWatermark>,
     mut col_id_gen: ColumnIdGenerator,
     append_only: bool,
-    include_column_options: Vec<(Ident, Option<Ident>)>,
+    include_column_options: IncludeOption,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     if append_only
         && source_schema.format != Format::Plain
@@ -896,7 +897,7 @@ pub(super) async fn handle_create_table_plan(
     constraints: Vec<TableConstraint>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
-    include_column_options: Vec<(Ident, Option<Ident>)>,
+    include_column_options: IncludeOption,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable, TableJobType)> {
     let source_schema = check_create_table_with_source(
         context.with_options(),
@@ -970,7 +971,7 @@ pub async fn handle_create_table(
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
     cdc_table_info: Option<CdcTableInfo>,
-    include_column_options: Vec<(Ident, Option<Ident>)>,
+    include_column_options: IncludeOption,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
@@ -1032,7 +1033,7 @@ pub async fn handle_create_table(
 pub fn check_create_table_with_source(
     with_options: &WithOptions,
     source_schema: Option<ConnectorSchema>,
-    include_column_options: &[(Ident, Option<Ident>)],
+    include_column_options: &IncludeOption,
 ) -> Result<Option<ConnectorSchema>> {
     let defined_source = with_options.inner().contains_key(UPSTREAM_SOURCE_KEY);
     if !include_column_options.is_empty() && !defined_source {
