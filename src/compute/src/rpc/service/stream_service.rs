@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use itertools::Itertools;
+use prometheus::core::Collector;
 use risingwave_common::config::MetricLevel;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::LocalSstableInfo;
@@ -246,9 +247,31 @@ impl StreamService for StreamServiceImpl {
         &self,
         _request: Request<GetBackPressureRequest>,
     ) -> Result<Response<GetBackPressureResponse>, Status> {
-        let back_pressure = global_streaming_metrics(MetricLevel::Info);
+        let metric_family = global_streaming_metrics(MetricLevel::Info)
+            .actor_output_buffer_blocking_duration_ns
+            .collect();
+        let metrics = metric_family.get(0).unwrap().get_metric();
+        let mut back_pressure_infos: Vec<BackPressureInfo> = Vec::new();
+        for label_pairs in metrics {
+            let mut back_pressure_info = BackPressureInfo::default();
+            for label_pair in label_pairs.get_label() {
+                if label_pair.get_name() == "actor_id" {
+                    back_pressure_info.actor_id = label_pair.get_value().to_string();
+                }
+                if label_pair.get_name() == "fragment_id" {
+                    back_pressure_info.fragment_id = label_pair.get_value().to_string();
+                }
+                if label_pair.get_name() == "downstream_fragment_id" {
+                    back_pressure_info.downstream_fragment_id = label_pair.get_value().to_string();
+                }
+            }
+            back_pressure_info.value = label_pairs.get_counter().get_value();
+            back_pressure_infos.push(back_pressure_info);
+        }
+
+
         Ok(Response::new(GetBackPressureResponse {
-            back_pressure: 199,
+            back_pressure_infos,
         }))
     }
 }

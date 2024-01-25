@@ -36,6 +36,7 @@ use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
+use risingwave_pb::stream_service::BackPressureInfo;
 use sea_orm::prelude::Expr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -378,11 +379,11 @@ impl ClusterController {
             .list_active_serving_workers()
             .await
             .unwrap();
+        let mut back_pressures : Vec<BackPressureInfo> = Vec::new();
         for node in nodes {
             let client = self.env.stream_client_pool().get(&node).await.unwrap();
             let request = risingwave_pb::stream_service::GetBackPressureRequest {};
-            let back_pressure = client.get_back_pressure(request).await.unwrap();
-            break;
+            back_pressures.extend(client.get_back_pressure(request).await.unwrap().back_pressure_infos);
         }
 
         Ok(196)

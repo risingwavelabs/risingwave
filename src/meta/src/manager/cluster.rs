@@ -31,6 +31,7 @@ use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
+use risingwave_pb::stream_service::BackPressureInfo;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -493,9 +494,13 @@ impl ClusterManager {
         self.core.read().await.get_worker_by_id(worker_id)
     }
 
-    pub async fn get_back_pressure_rate(&self) -> MetaResult<u64>  {
+    pub async fn get_back_pressure_rate(&self) -> MetaResult<u64> {
         let mut core = self.core.write().await;
+        let mut back_pressures: Vec<BackPressureInfo> = Vec::new();
         for worker in core.workers.values_mut() {
+            if worker.worker_type() != WorkerType::ComputeNode {
+                continue;
+            }
             let client = self
                 .env
                 .stream_client_pool()
@@ -503,8 +508,13 @@ impl ClusterManager {
                 .await
                 .unwrap();
             let request = risingwave_pb::stream_service::GetBackPressureRequest {};
-            let result = client.get_back_pressure(request).await.unwrap();
-            break;
+            back_pressures.extend(
+                client
+                    .get_back_pressure(request)
+                    .await
+                    .unwrap()
+                    .back_pressure_infos,
+            );
         }
         Ok(197)
     }
