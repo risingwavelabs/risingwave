@@ -25,7 +25,8 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::row::Row;
 use risingwave_connector::source::{SourceColumnDesc, SplitId};
-use risingwave_pb::plan_common::AdditionalColumnType;
+use risingwave_pb::plan_common::additional_column::ColumnType;
+use risingwave_pb::plan_common::AdditionalColumn;
 pub use state_table_handler::*;
 pub mod fetch_executor;
 pub use fetch_executor::*;
@@ -71,10 +72,14 @@ pub fn get_split_offset_col_idx(
     let mut offset_idx = None;
     for (idx, column) in column_descs.iter().enumerate() {
         match column.additional_column_type {
-            AdditionalColumnType::Partition | AdditionalColumnType::Filename => {
+            AdditionalColumn {
+                column_type: Some(ColumnType::Partition(_) | ColumnType::Filename(_)),
+            } => {
                 split_idx = Some(idx);
             }
-            AdditionalColumnType::Offset => {
+            AdditionalColumn {
+                column_type: Some(ColumnType::Offset(_)),
+            } => {
                 offset_idx = Some(idx);
             }
             _ => (),

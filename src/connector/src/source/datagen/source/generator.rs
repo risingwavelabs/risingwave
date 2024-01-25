@@ -180,6 +180,7 @@ impl DatagenEventGenerator {
                         self.fields_vec.iter_mut().zip_eq_fast(&self.field_names)
                     {
                         let datum = match field_generator {
+                            // TODO: avoid distinguishing hidden partition/offset columns by name
                             FieldDesc::Invisible => match field_name.as_str() {
                                 "_rw_datagen_partition" => {
                                     Some(ScalarImpl::Utf8(self.split_id.as_ref().into()))
