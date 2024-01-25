@@ -239,7 +239,7 @@ impl UploadingTask {
                         debug!(task_info = ?self.task_info, "upload task finish");
                     }
                 })
-                .inspect_err(|e| error!(task_info = ?self.task_info, ?e, "upload task failed"))
+                .inspect_err(|e| error!(task_info = ?self.task_info, err = ?e.as_report(), "upload task failed"))
                 .map(|ssts| {
                     StagingSstableInfo::new(
                         ssts,
