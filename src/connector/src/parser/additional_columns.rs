@@ -258,6 +258,7 @@ fn s3_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColumnsF
     ]
 }
 
+/// For sources that do not support include clause, we still need to add hidden columns `partition` and `offset`.
 pub fn common_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColumnsFn)> {
     vec![
         (
