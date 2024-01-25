@@ -15,6 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use futures_async_stream::try_stream;
+use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::error::RwError;
 use risingwave_common::field_generator::FieldGeneratorImpl;
@@ -24,10 +25,6 @@ use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use crate::source::{SourceMessage, SourceMeta, SplitId};
-
-fn get_addition_key_name(field_name: &str) -> Option<&str> {
-    field_name.strip_prefix("_rw_datagen_")
-}
 
 pub enum FieldDesc {
     // field is invisible, generate None
@@ -170,23 +167,25 @@ impl DatagenEventGenerator {
             // generate `partition_rows_per_second` rows per second
             interval.tick().await;
             let mut rows_generated_this_second = 0;
+            let mut chunk_builder =
+                StreamChunkBuilder::new(MAX_ROWS_PER_YIELD as usize, self.data_types.clone());
             while rows_generated_this_second < self.partition_rows_per_second {
-                let mut rows = vec![];
+                self.offset += 1;
                 let num_rows_to_generate = std::cmp::min(
                     MAX_ROWS_PER_YIELD,
                     self.partition_rows_per_second - rows_generated_this_second,
                 );
-                'outer: for _ in 0..num_rows_to_generate {
+                'outer: for i in 0..num_rows_to_generate {
                     let mut row = Vec::with_capacity(self.data_types.len());
                     for (field_generator, field_name) in
                         self.fields_vec.iter_mut().zip_eq_fast(&self.field_names)
                     {
                         let datum = match field_generator {
-                            FieldDesc::Invisible => match get_addition_key_name(field_name) {
-                                Some("partition") => {
+                            FieldDesc::Invisible => match field_name.as_str() {
+                                "_rw_datagen_partition" => {
                                     Some(ScalarImpl::Utf8(self.split_id.as_ref().into()))
                                 }
-                                Some("offset") => {
+                                "_rw_datagen_offset" => {
                                     Some(ScalarImpl::Utf8(self.offset.to_string().into_boxed_str()))
                                 }
                                 _ => None,
@@ -210,13 +209,14 @@ impl DatagenEventGenerator {
                         row.push(datum);
                     }
 
-                    self.offset += 1;
-                    rows.push((Op::Insert, OwnedRow::new(row)));
                     rows_generated_this_second += 1;
+                    if let Some(chunk) = chunk_builder.append_row(Op::Insert, OwnedRow::new(row)) {
+                        yield chunk;
+                    }
                 }
 
-                if !rows.is_empty() {
-                    yield StreamChunk::from_rows(&rows, &self.data_types);
+                if let Some(chunk) = chunk_builder.take() {
+                    yield chunk;
                 }
 
                 if reach_end {
