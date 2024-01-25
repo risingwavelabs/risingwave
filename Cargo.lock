@@ -5682,6 +5682,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
 
 [[package]]
+name = "linkme"
+version = "0.3.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b53ad6a33de58864705954edb5ad5d571a010f9e296865ed43dc72a5621b430"
+dependencies = [
+ "linkme-impl",
+]
+
+[[package]]
+name = "linkme-impl"
+version = "0.3.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04e542a18c94a9b6fcc7adb090fa3ba6b79ee220a16404f325672729f32a66ff"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.48",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9159,7 +9179,6 @@ dependencies = [
  "await-tree",
  "cfg-or-panic",
  "chrono",
- "ctor",
  "downcast-rs",
  "easy-ext",
  "either",
@@ -9168,6 +9187,7 @@ dependencies = [
  "futures-async-stream",
  "futures-util",
  "itertools 0.12.0",
+ "linkme",
  "madsim-tokio",
  "moka",
  "num-traits",
@@ -9205,6 +9225,7 @@ dependencies = [
  "icelake",
  "itertools 0.12.0",
  "jsonbb",
+ "linkme",
  "madsim-tokio",
  "md5",
  "num-traits",
@@ -9265,6 +9286,7 @@ dependencies = [
  "iana-time-zone",
  "icelake",
  "itertools 0.12.0",
+ "linkme",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
