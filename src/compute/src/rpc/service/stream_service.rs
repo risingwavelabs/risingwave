@@ -256,13 +256,14 @@ impl StreamService for StreamServiceImpl {
             let mut back_pressure_info = BackPressureInfo::default();
             for label_pair in label_pairs.get_label() {
                 if label_pair.get_name() == "actor_id" {
-                    back_pressure_info.actor_id = label_pair.get_value().to_string();
+                    back_pressure_info.actor_id = label_pair.get_value().parse::<u32>().unwrap();
                 }
                 if label_pair.get_name() == "fragment_id" {
-                    back_pressure_info.fragment_id = label_pair.get_value().to_string();
+                    back_pressure_info.fragment_id = label_pair.get_value().parse::<u32>().unwrap();
                 }
                 if label_pair.get_name() == "downstream_fragment_id" {
-                    back_pressure_info.downstream_fragment_id = label_pair.get_value().to_string();
+                    back_pressure_info.downstream_fragment_id =
+                        label_pair.get_value().parse::<u32>().unwrap();
                 }
             }
             back_pressure_info.value = label_pairs.get_counter().get_value();
