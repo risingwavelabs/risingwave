@@ -78,6 +78,12 @@ pub async fn await_future_with_monitor_error_stream<T, E, F: Future>(
     }
 }
 
+/// Attach an item of type `T` to the future `F`. When the future is polled with ready,
+/// the item will be attached to the output of future as `(F::Output, item)`.
+///
+/// The generated future will be similar to `future.map(|output| (output, item))`. The
+/// only difference is that the `Map` future does not provide method `into_inner` to
+/// get the original inner future.
 pub struct AttachedFuture<F, T> {
     inner: F,
     item: Option<T>,
