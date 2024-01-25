@@ -552,7 +552,7 @@ fn generate_splits(
                 split_weight_by_vnode /= 2;
                 avg_vnode_size *= 2;
             }
-            sub_compaction_sstable_size = compact_data_size;
+            sub_compaction_sstable_size = std::cmp::min(sstable_size, compact_data_size * 6 / 5);
         }
     }
     (
