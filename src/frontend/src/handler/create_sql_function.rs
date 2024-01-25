@@ -33,14 +33,24 @@ use crate::expr::{ExprImpl, Literal};
 use crate::{bind_data_type, Binder};
 
 /// Create a mock `udf_context`, which is used for semantic check
-fn create_mock_udf_context(arg_types: Vec<DataType>) -> HashMap<String, ExprImpl> {
-    (1..=arg_types.len())
+fn create_mock_udf_context(
+    arg_types: Vec<DataType>,
+    arg_names: Vec<String>,
+) -> HashMap<String, ExprImpl> {
+    let mut ret: HashMap<String, ExprImpl> = (1..=arg_types.len())
         .map(|i| {
             let mock_expr =
                 ExprImpl::Literal(Box::new(Literal::new(None, arg_types[i - 1].clone())));
-            (format!("${i}"), mock_expr.clone())
+            (format!("${i}"), mock_expr)
         })
-        .collect()
+        .collect();
+
+    for (i, arg_name) in arg_names.into_iter().enumerate() {
+        let mock_expr = ExprImpl::Literal(Box::new(Literal::new(None, arg_types[i].clone())));
+        ret.insert(arg_name, mock_expr);
+    }
+
+    ret
 }
 
 pub async fn handle_create_sql_function(
@@ -173,7 +183,9 @@ pub async fn handle_create_sql_function(
 
         binder
             .udf_context_mut()
-            .update_context(create_mock_udf_context(arg_types.clone()));
+            .update_context(create_mock_udf_context(arg_types.clone(), arg_names.clone()));
+
+        binder.set_udf_binding_flag();
 
         if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
             if let Err(e) = binder.bind_expr(expr) {
@@ -191,6 +203,8 @@ pub async fn handle_create_sql_function(
             )
             .into());
         }
+
+        binder.unset_udf_binding_flag();
     }
 
     // Create the actual function, will be stored in function catalog

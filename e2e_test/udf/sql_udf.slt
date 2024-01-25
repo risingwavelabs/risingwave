@@ -13,6 +13,31 @@ create function sub(INT, INT) returns int language sql as 'select $1 - $2';
 statement ok
 create function add_sub_binding() returns int language sql as 'select add(1, 1) + sub(2, 2)';
 
+# Create a named sql udf
+statement ok
+create function add_named(a INT, b INT) returns int language sql as 'select a + b';
+
+# Create another named sql udf
+statement ok
+create function sub_named(a INT, b INT) returns int language sql as 'select a - b';
+
+# Mix parameter with named / anonymous parameters
+statement ok
+create function add_sub_mix(INT, a INT, INT) returns int language sql as 'select $1 + a + $3';
+
+# Named sql udf with corner case
+statement ok
+create function corner_case(INT, a INT, INT) returns varchar language sql as $$select '$1 + a + $3'$$;
+
+# Named sql udf with invalid parameter in body definition
+# Will be rejected at creation time
+statement error failed to find named parameter aa
+create function unknown_parameter(a INT) returns int language sql as 'select a + aa + a';
+
+# Call anonymous sql udf inside named sql udf
+statement ok
+create function add_named_wrapper(a INT, b INT) returns int language sql as 'select add(a, b)';
+
 # Create an anonymous function that calls built-in functions
 # Note that double dollar signs should be used otherwise the parsing will fail, as illutrates below
 statement ok
@@ -81,7 +106,7 @@ create function print_add_two(INT) returns int language sql as 'select print($1 
 statement error failed to conduct semantic check, please see if you are calling non-existence functions
 create function non_exist(INT) returns int language sql as 'select yo(114514)';
 
-# Call the defined sql udf
+# Call the defined anonymous sql udfs
 query I
 select add(1, -1);
 ----
@@ -89,6 +114,32 @@ select add(1, -1);
 
 query I
 select sub(1, 1);
+----
+0
+
+# Call the defined named sql udfs
+query I
+select add_named(1, -1);
+----
+0
+
+query I
+select sub_named(1, 1);
+----
+0
+
+query I
+select add_sub_mix(1, 2, 3);
+----
+6
+
+query T
+select corner_case(1, 2, 3);
+----
+$1 + a + $3
+
+query I
+select add_named_wrapper(1, -1);
 ----
 0
 
@@ -289,6 +340,21 @@ drop function print_add_two;
 
 statement ok
 drop function regexp_replace_wrapper;
+
+statement ok
+drop function corner_case;
+
+statement ok
+drop function add_named;
+
+statement ok
+drop function sub_named;
+
+statement ok
+drop function add_sub_mix;
+
+statement ok
+drop function add_named_wrapper;
 
 # Drop the mock table
 statement ok
