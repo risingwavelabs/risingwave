@@ -21,7 +21,7 @@ create function add_named(a INT, b INT) returns int language sql as 'select a + 
 statement ok
 create function sub_named(a INT, b INT) returns int language sql as 'select a - b';
 
-# Mix parameter with named / anonymous parameters
+# Mixed parameter with named / anonymous parameters
 statement ok
 create function add_sub_mix(INT, a INT, INT) returns int language sql as 'select $1 + a + $3';
 
