@@ -406,6 +406,12 @@ pub struct MetaDeveloperConfig {
     /// in the meta node.
     #[serde(default = "default::developer::meta_cached_traces_memory_limit_bytes")]
     pub cached_traces_memory_limit_bytes: usize,
+
+    /// Compaction picker config
+    #[serde(default = "default::developer::enable_trivial_move")]
+    pub enable_trivial_move: bool,
+    #[serde(default = "default::developer::enable_check_task_level_overlap")]
+    pub enable_check_task_level_overlap: bool,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -1406,6 +1412,14 @@ pub mod default {
         pub fn stream_hash_agg_max_dirty_groups_heap_size() -> usize {
             64 << 20 // 64MB
         }
+
+        pub fn enable_trivial_move() -> bool {
+            true
+        }
+
+        pub fn enable_check_task_level_overlap() -> bool {
+            false
+        }
     }
 
     pub use crate::system_param::default as system;
@@ -1490,14 +1504,6 @@ pub mod default {
 
         pub fn enable_emergency_picker() -> bool {
             DEFAULT_EMERGENCY_PICKER
-        }
-
-        pub fn enable_trivial_move() -> bool {
-            true
-        }
-
-        pub fn enable_check_task_level_overlap() -> bool {
-            false
         }
     }
 
@@ -1652,10 +1658,6 @@ pub struct CompactionConfig {
     pub tombstone_reclaim_ratio: u32,
     #[serde(default = "default::compaction_config::enable_emergency_picker")]
     pub enable_emergency_picker: bool,
-    #[serde(default = "default::compaction_config::enable_trivial_move")]
-    pub enable_trivial_move: bool,
-    #[serde(default = "default::compaction_config::enable_check_task_level_overlap")]
-    pub enable_check_task_level_overlap: bool,
 }
 
 #[cfg(test)]

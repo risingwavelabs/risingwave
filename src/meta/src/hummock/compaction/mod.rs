@@ -104,6 +104,7 @@ impl CompactStatus {
         stats: &mut LocalSelectorStatistic,
         selector: &mut Box<dyn CompactionSelector>,
         table_id_to_options: HashMap<u32, TableOption>,
+        developer_config: Arc<CompactionDeveloperConfig>,
     ) -> Option<CompactionTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
@@ -115,6 +116,7 @@ impl CompactStatus {
             &mut self.level_handlers,
             stats,
             table_id_to_options,
+            developer_config,
         )
     }
 
@@ -214,5 +216,22 @@ pub fn get_compression_algorithm(
     } else {
         let idx = level - base_level + 1;
         compaction_config.compression_algorithm[idx].clone()
+    }
+}
+
+pub struct CompactionDeveloperConfig {
+    /// l0 picker whether to select trivial move task
+    pub enable_trivial_move: bool,
+
+    /// l0 multi level picker whether to check the overlap accuracy between sub levels
+    pub enable_check_task_level_overlap: bool,
+}
+
+impl Default for CompactionDeveloperConfig {
+    fn default() -> Self {
+        Self {
+            enable_trivial_move: true,
+            enable_check_task_level_overlap: true,
+        }
     }
 }

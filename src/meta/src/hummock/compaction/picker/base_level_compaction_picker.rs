@@ -24,14 +24,15 @@ use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
     ValidationRuleType,
 };
-use crate::hummock::compaction::create_overlap_strategy;
 use crate::hummock::compaction::picker::TrivialMovePicker;
+use crate::hummock::compaction::{create_overlap_strategy, CompactionDeveloperConfig};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct LevelCompactionPicker {
     target_level: usize,
     config: Arc<CompactionConfig>,
     compaction_task_validator: Arc<CompactionTaskValidator>,
+    developer_config: Arc<CompactionDeveloperConfig>,
 }
 
 impl CompactionPicker for LevelCompactionPicker {
@@ -87,11 +88,16 @@ impl CompactionPicker for LevelCompactionPicker {
 
 impl LevelCompactionPicker {
     #[cfg(test)]
-    pub fn new(target_level: usize, config: Arc<CompactionConfig>) -> LevelCompactionPicker {
+    pub fn new(
+        target_level: usize,
+        config: Arc<CompactionConfig>,
+        developer_config: Arc<CompactionDeveloperConfig>,
+    ) -> LevelCompactionPicker {
         LevelCompactionPicker {
             target_level,
             compaction_task_validator: Arc::new(CompactionTaskValidator::new(config.clone())),
             config,
+            developer_config,
         }
     }
 
@@ -99,11 +105,13 @@ impl LevelCompactionPicker {
         target_level: usize,
         config: Arc<CompactionConfig>,
         compaction_task_validator: Arc<CompactionTaskValidator>,
+        developer_config: Arc<CompactionDeveloperConfig>,
     ) -> LevelCompactionPicker {
         LevelCompactionPicker {
             target_level,
             config,
             compaction_task_validator,
+            developer_config,
         }
     }
 
@@ -119,7 +127,7 @@ impl LevelCompactionPicker {
             0,
             self.target_level,
             overlap_strategy.clone(),
-            self.config.enable_trivial_move,
+            self.developer_config.enable_trivial_move,
         );
 
         trivial_move_picker.pick_trivial_move_task(
@@ -152,7 +160,7 @@ impl LevelCompactionPicker {
             // The maximum number of sub_level compact level per task
             self.config.level0_max_compact_file_number,
             overlap_strategy.clone(),
-            self.config.enable_check_task_level_overlap,
+            self.developer_config.enable_check_task_level_overlap,
         );
 
         let mut max_vnode_partition_idx = 0;
@@ -269,7 +277,9 @@ pub mod tests {
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::selector::tests::*;
-    use crate::hummock::compaction::{CompactionMode, TierCompactionPicker};
+    use crate::hummock::compaction::{
+        CompactionDeveloperConfig, CompactionMode, TierCompactionPicker,
+    };
 
     fn create_compaction_picker_for_test() -> LevelCompactionPicker {
         let config = Arc::new(
@@ -278,7 +288,7 @@ pub mod tests {
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
-        LevelCompactionPicker::new(1, config)
+        LevelCompactionPicker::new(1, config, Arc::new(CompactionDeveloperConfig::default()))
     }
 
     #[test]
@@ -378,7 +388,8 @@ pub mod tests {
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
-        let mut picker = LevelCompactionPicker::new(1, config);
+        let mut picker =
+            LevelCompactionPicker::new(1, config, Arc::new(CompactionDeveloperConfig::default()));
 
         let levels = vec![Level {
             level_idx: 1,
@@ -502,7 +513,11 @@ pub mod tests {
             .max_bytes_for_level_multiplier(1)
             .level0_sub_level_compact_level_count(2)
             .build();
-        let mut picker = LevelCompactionPicker::new(1, Arc::new(config));
+        let mut picker = LevelCompactionPicker::new(
+            1,
+            Arc::new(config),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
 
         let mut levels = Levels {
             levels: vec![Level {
@@ -576,7 +591,8 @@ pub mod tests {
         );
         // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
         // So all sub-levels are included to make write amplification < MAX_WRITE_AMPLIFICATION.
-        let mut picker = LevelCompactionPicker::new(1, config);
+        let mut picker =
+            LevelCompactionPicker::new(1, config, Arc::new(CompactionDeveloperConfig::default()));
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
@@ -602,7 +618,8 @@ pub mod tests {
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
-        let mut picker = LevelCompactionPicker::new(1, config);
+        let mut picker =
+            LevelCompactionPicker::new(1, config, Arc::new(CompactionDeveloperConfig::default()));
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
@@ -668,7 +685,11 @@ pub mod tests {
 
         // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
         // But stopped by pending sub-level when trying to include more sub-levels.
-        let mut picker = LevelCompactionPicker::new(1, config.clone());
+        let mut picker = LevelCompactionPicker::new(
+            1,
+            config.clone(),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
         assert!(ret.is_none());
 
@@ -678,7 +699,8 @@ pub mod tests {
         }
 
         // No more pending sub-level so we can get a task now.
-        let mut picker = LevelCompactionPicker::new(1, config);
+        let mut picker =
+            LevelCompactionPicker::new(1, config, Arc::new(CompactionDeveloperConfig::default()));
         picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
@@ -711,7 +733,8 @@ pub mod tests {
                 .build(),
         );
 
-        let mut picker = LevelCompactionPicker::new(1, config);
+        let mut picker =
+            LevelCompactionPicker::new(1, config, Arc::new(CompactionDeveloperConfig::default()));
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();

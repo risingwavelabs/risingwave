@@ -79,7 +79,7 @@ use crate::hummock::compaction::selector::{
     DynamicLevelSelector, LocalSelectorStatistic, ManualCompactionOption, ManualCompactionSelector,
     SpaceReclaimCompactionSelector, TombstoneCompactionSelector, TtlCompactionSelector,
 };
-use crate::hummock::compaction::CompactStatus;
+use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
     build_compact_task_level_type_metrics_label, trigger_delta_log_stats, trigger_lsm_stat,
@@ -955,6 +955,10 @@ impl HummockManager {
             &mut stats,
             selector,
             table_id_to_option.clone(),
+            Arc::new(CompactionDeveloperConfig {
+                enable_trivial_move: self.env.opts.enable_trivial_move,
+                enable_check_task_level_overlap: self.env.opts.enable_check_task_level_overlap,
+            }),
         );
         stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
         let compact_task = match compact_task {
