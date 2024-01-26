@@ -34,9 +34,9 @@ use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 #[cfg(debug_assertions)]
 use crate::executor::backfill::utils::METADATA_STATE_LEN;
 use crate::executor::backfill::utils::{
-    compute_bounds, create_builder, get_progress_per_vnode, iter_chunks, mapping_chunk,
-    mapping_message, mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode,
-    update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
+    compute_bounds, create_builder, get_progress_per_vnode, iter_chunks, make_snapshot_stream,
+    mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, owned_row_iter,
+    persist_state_per_vnode, update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -225,13 +225,16 @@ where
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
-                    let right_snapshot = pin!(Self::make_snapshot_stream(
-                        &upstream_table,
-                        backfill_state.clone(), // FIXME: Use mutable reference instead.
-                        &mut builders,
+                    let right_snapshot = make_snapshot_stream(
                         paused,
+                        Self::snapshot_read_per_vnode(
+                            &upstream_table,
+                            backfill_state.clone(), // FIXME: Use mutable reference instead.
+                            &mut builders,
+                        ),
                     )
-                    .map(Either::Right));
+                    .map(Either::Right);
+                    let right_snapshot = pin!(right_snapshot);
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.
@@ -517,26 +520,6 @@ where
                     self.state_table.commit_no_data_expected(barrier.epoch);
                 }
                 yield msg;
-            }
-        }
-    }
-
-    #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
-    async fn make_snapshot_stream<'a>(
-        upstream_table: &'a ReplicatedStateTable<S, SD>,
-        backfill_state: BackfillState,
-        builders: &'a mut [DataChunkBuilder],
-        paused: bool,
-    ) {
-        if paused {
-            #[for_await]
-            for _ in tokio_stream::pending() {
-                yield None;
-            }
-        } else {
-            #[for_await]
-            for r in Self::snapshot_read_per_vnode(upstream_table, backfill_state, builders) {
-                yield r?;
             }
         }
     }

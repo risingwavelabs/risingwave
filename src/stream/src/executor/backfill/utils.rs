@@ -733,3 +733,25 @@ pub fn create_builder(
         DataChunkBuilder::new(data_types, chunk_size)
     }
 }
+
+/// Used to never return any records from a snapshot stream, if it should be paused.
+/// NOTE(kwannoel): This means we will always construct the rhs stream, even if it's paused.
+/// perhaps we should use a macro to lazily instantiate the stream instead.
+#[try_stream(ok = T, error = StreamExecutorError)]
+pub(crate) async fn make_snapshot_stream<T>(
+    paused: bool,
+    stream: impl Stream<Item = Result<T, StreamExecutorError>>,
+) {
+    if paused {
+        let mut stream = tokio_stream::pending();
+        yield stream
+            .next()
+            .await
+            .expect("Pending future should never complete");
+    } else {
+        #[for_await]
+        for r in stream {
+            yield r?;
+        }
+    }
+}

@@ -34,8 +34,9 @@ use risingwave_storage::StateStore;
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
-    compute_bounds, construct_initial_finished_state, create_builder, get_new_pos, mapping_chunk,
-    mapping_message, mark_chunk, owned_row_iter, METADATA_STATE_LEN,
+    compute_bounds, construct_initial_finished_state, create_builder, get_new_pos,
+    make_snapshot_stream, mapping_chunk, mapping_message, mark_chunk, owned_row_iter,
+    METADATA_STATE_LEN,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -233,13 +234,14 @@ where
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
-                    let right_snapshot = pin!(Self::make_snapshot_stream(
+                    let right_snapshot = Self::snapshot_read(
                         &self.upstream_table,
                         snapshot_read_epoch,
                         current_pos.clone(),
-                        paused
-                    )
-                    .map(Either::Right));
+                    );
+                    let right_snapshot =
+                        make_snapshot_stream(paused, right_snapshot).map(Either::Right);
+                    let right_snapshot = pin!(right_snapshot);
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.
@@ -620,26 +622,6 @@ where
             is_finished,
             row_count,
             old_state: Some(old_state),
-        }
-    }
-
-    #[try_stream(ok = Option<OwnedRow>, error = StreamExecutorError)]
-    async fn make_snapshot_stream(
-        upstream_table: &StorageTable<S>,
-        epoch: u64,
-        current_pos: Option<OwnedRow>,
-        paused: bool,
-    ) {
-        if paused {
-            #[for_await]
-            for _ in tokio_stream::pending() {
-                yield None;
-            }
-        } else {
-            #[for_await]
-            for r in Self::snapshot_read(upstream_table, epoch, current_pos) {
-                yield r?;
-            }
         }
     }
 
