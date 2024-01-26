@@ -625,8 +625,8 @@ impl Value for CachedSstable {
 
     fn read(mut buf: &[u8]) -> CodingResult<Self> {
         let id = buf.get_u64();
-        let meta = SstableMeta::decode(buf).unwrap();
-        let sstable = Arc::new(Sstable::new(id, meta));
+        let (meta, filter_reader) = SstableMeta::decode(buf).unwrap();
+        let sstable = Arc::new(Sstable::with_filter_reader(id, meta, filter_reader));
         Ok(Self(sstable))
     }
 

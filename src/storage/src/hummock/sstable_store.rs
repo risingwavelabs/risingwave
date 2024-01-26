@@ -638,9 +638,9 @@ impl SstableStore {
 
                         let now = Instant::now();
                         let buf = store.read(&meta_path, range).await?;
-                        let meta = SstableMeta::decode(&buf[..])?;
+                        let (meta, filter_reader) = SstableMeta::decode(&buf[..])?;
 
-                        let sst = Sstable::new(object_id, meta);
+                        let sst = Sstable::with_filter_reader(object_id, meta, filter_reader);
                         let charge = sst.estimate_size();
                         let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
                         stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
