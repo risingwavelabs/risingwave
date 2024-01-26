@@ -297,12 +297,14 @@ pub fn get_sys_views_in_schema(schema_name: &str) -> Option<Vec<Arc<ViewCatalog>
 
 /// The global registry of all builtin catalogs.
 pub static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
-    // SAFETY: this function is called after all `#[ctor]` functions are called.
     let mut table_by_schema_name = HashMap::new();
     let mut table_name_by_id = HashMap::new();
     let mut view_by_schema_name = HashMap::new();
-    tracing::info!("found {} catalogs", unsafe { SYS_CATALOGS_INIT.len() });
-    for (id, catalog) in unsafe { SYS_CATALOGS_INIT.drain(..) } {
+    tracing::info!("found {} catalogs", SYS_CATALOGS_SLICE.len());
+    for (id, catalog) in SYS_CATALOGS_SLICE.iter().enumerate() {
+        let id = (id + 1) as u32;
+        let catalog = catalog();
+        assert!(id < NON_RESERVED_SYS_CATALOG_ID as u32);
         match catalog {
             BuiltinCatalog::Table(table) => {
                 let sys_table: SystemTableCatalog = table.into();
@@ -328,28 +330,19 @@ pub static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
     }
 });
 
-pub static mut SYS_CATALOGS_INIT: Vec<(u32, BuiltinCatalog)> = vec![];
-
-/// Register the catalog to global registry.
-///
-/// Note: The function is used by macro generated code. Don't call it directly.
-#[doc(hidden)]
-pub(super) unsafe fn _register(id: u32, builtin_catalog: BuiltinCatalog) {
-    assert!(id < NON_RESERVED_SYS_CATALOG_ID as u32);
-
-    SYS_CATALOGS_INIT.push((id, builtin_catalog));
-}
+#[linkme::distributed_slice]
+pub static SYS_CATALOGS_SLICE: [fn() -> BuiltinCatalog];
 
 macro_rules! prepare_sys_catalog {
     ($( { $builtin_catalog:expr $(, $func:ident $($await:ident)?)? } ),* $(,)?) => {
-        paste::paste! {
-            $(
-                #[ctor::ctor]
-                unsafe fn [<register_${index()}>]() {
-                    _register((${index()} + 1) as u32, $builtin_catalog);
+        $(
+            const _: () = {
+                #[linkme::distributed_slice(crate::catalog::system_catalog::SYS_CATALOGS_SLICE)]
+                fn catalog() -> BuiltinCatalog {
+                    $builtin_catalog
                 }
-            )*
-        }
+            };
+        )*
 
         #[async_trait]
         impl SysCatalogReader for SysCatalogReaderImpl {
