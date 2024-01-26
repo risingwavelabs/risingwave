@@ -315,6 +315,7 @@ message Table {
   optional string initialized_at_cluster_version = 35;
   optional string created_at_cluster_version = 36;
 
+  // TTL of the record in the table, to ensure the consistency with other tables in the streaming plan, it only applies to append-only tables.
   uint32 retention_seconds = 37;
 
   // Per-table catalog version, used by schema change. `None` for internal tables and tests.
