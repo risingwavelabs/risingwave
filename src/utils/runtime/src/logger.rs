@@ -62,17 +62,19 @@ impl LoggerSettings {
     /// as the default tracing endpoint, which means that the embedded tracing
     /// collector will be used.
     pub fn from_opts<O: risingwave_common::opts::Opts>(opts: &O) -> Self {
-        let mut settings = Self::new(O::name());
-        if settings.tracing_endpoint.is_none() // no explicit endpoint
-            && let Some(addr) = opts.meta_addr().exactly_one()
-        // meta address is valid
-        {
-            // Use embedded collector in the meta service.
-            // TODO: when there's multiple meta nodes for high availability, we may send
-            // to a wrong node here.
-            settings.tracing_endpoint = Some(addr.to_string());
-        }
-        settings
+        // let mut settings = Self::new(O::name());
+        // if settings.tracing_endpoint.is_none() // no explicit endpoint
+        //     && let Some(addr) = opts.meta_addr().exactly_one()
+        // // meta address is valid
+        // {
+        //     // Use embedded collector in the meta service.
+        //     // TODO: when there's multiple meta nodes for high availability, we may send
+        //     // to a wrong node here.
+        //     settings.tracing_endpoint = Some(addr.to_string());
+        // }
+        // settings
+
+        Self::new(O::name())
     }
 
     /// Create a new logger settings with the given service name.
