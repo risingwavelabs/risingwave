@@ -220,7 +220,7 @@ pub struct CompactionDeveloperConfig {
 }
 
 impl CompactionDeveloperConfig {
-    pub fn new_from_meta_opts(opts: &MetaOpts) {
+    pub fn new_from_meta_opts(opts: &MetaOpts) -> Self {
         Self {
             enable_trivial_move: opts.enable_trivial_move,
             enable_check_task_level_overlap: opts.enable_check_task_level_overlap,

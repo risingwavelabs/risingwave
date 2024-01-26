@@ -355,6 +355,10 @@ impl NonOverlapSubLevelPicker {
         });
 
         if self.enable_check_task_level_overlap {
+            use std::fmt::Write;
+
+            use itertools::Itertools;
+
             use crate::hummock::compaction::overlap_strategy::OverlapInfo;
             let mut overlap_info: Option<Box<dyn OverlapInfo>> = None;
             for (level_idx, ssts) in ret.sstable_infos.iter().enumerate().rev() {
@@ -378,15 +382,19 @@ impl NonOverlapSubLevelPicker {
                                 append_sstable_info_to_string(&mut expected_sst_infos, s)
                             });
                         let mut ret_sst_infos = String::new();
-                        ret.sstable_infos.iter().enumerate().for_each(|idx, ssts| {
-                            writeln!(
-                                ret_sst_infos,
-                                "sub level {}",
-                                levels.get(idx).unwrap().sub_level_id
-                            );
-                            ssts.iter()
-                                .for_each(|s| append_sstable_info_to_string(&mut ret_sst_infos, s));
-                        });
+                        ret.sstable_infos
+                            .iter()
+                            .enumerate()
+                            .for_each(|(idx, ssts)| {
+                                writeln!(
+                                    ret_sst_infos,
+                                    "sub level {}",
+                                    levels.get(idx).unwrap().sub_level_id
+                                );
+                                ssts.iter().for_each(|s| {
+                                    append_sstable_info_to_string(&mut ret_sst_infos, s)
+                                });
+                            });
                         panic!("Compact task overlap check fails. Actual: {:?} Expected: {:?} Ret {:?}", actual_sst_infos, expected_sst_infos, ret_sst_infos);
                     }
                 } else if !ssts.is_empty() {
