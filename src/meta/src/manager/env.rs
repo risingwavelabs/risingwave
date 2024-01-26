@@ -117,6 +117,7 @@ pub struct MetaOpts {
     pub vacuum_spin_interval_ms: u64,
     /// Interval of hummock version checkpoint.
     pub hummock_version_checkpoint_interval_sec: u64,
+    pub enable_hummock_data_archive: bool,
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected. Greater value reduces object store IO, meanwhile it results in
     /// more loss of in memory `HummockVersionCheckpoint::stale_objects` state when meta node is
@@ -228,6 +229,7 @@ impl MetaOpts {
             vacuum_interval_sec: 30,
             vacuum_spin_interval_ms: 0,
             hummock_version_checkpoint_interval_sec: 30,
+            enable_hummock_data_archive: false,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             full_gc_interval_sec: 3600 * 24 * 7,
@@ -322,7 +324,6 @@ impl MetaSrvEnv {
         let hummock_seq = meta_store_sql
             .clone()
             .map(|m| Arc::new(SequenceGenerator::new(m.conn)));
-
         let sql_id_gen_manager = if let Some(store) = &meta_store_sql {
             Some(Arc::new(SqlIdGeneratorManager::new(&store.conn).await?))
         } else {

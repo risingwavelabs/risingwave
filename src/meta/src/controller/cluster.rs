@@ -36,12 +36,14 @@ use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
+use risingwave_pb::stream_service::{BackPressureInfo, GetBackPressureResponse};
 use sea_orm::prelude::Expr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect,
     TransactionTrait,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
@@ -268,7 +270,7 @@ impl ClusterController {
                 {
                     Ok(keys) => keys,
                     Err(err) => {
-                        tracing::warn!("Failed to load expire worker info from db: {}", err);
+                        tracing::warn!(error = %err.as_report(), "Failed to load expire worker info from db");
                         continue;
                     }
                 };
@@ -278,7 +280,7 @@ impl ClusterController {
                     .exec(&inner.db)
                     .await
                 {
-                    tracing::warn!("Failed to delete expire workers from db: {}", err);
+                    tracing::warn!(error = %err.as_report(), "Failed to delete expire workers from db");
                     continue;
                 }
 
@@ -367,6 +369,32 @@ impl ClusterController {
             .read()
             .await
             .get_worker_extra_info_by_id(worker_id)
+    }
+
+    pub async fn get_back_pressure(&self) -> MetaResult<GetBackPressureResponse> {
+        let nodes = self
+            .inner
+            .read()
+            .await
+            .list_active_serving_workers()
+            .await
+            .unwrap();
+        let mut back_pressure_infos: Vec<BackPressureInfo> = Vec::new();
+        for node in nodes {
+            let client = self.env.stream_client_pool().get(&node).await.unwrap();
+            let request = risingwave_pb::stream_service::GetBackPressureRequest {};
+            back_pressure_infos.extend(
+                client
+                    .get_back_pressure(request)
+                    .await
+                    .unwrap()
+                    .back_pressure_infos,
+            );
+        }
+
+        Ok(GetBackPressureResponse {
+            back_pressure_infos,
+        })
     }
 }
 

@@ -292,7 +292,7 @@ mod tests {
         .unwrap();
 
         super::HopWindowExecutor::new(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             ExecutorInfo {
                 // TODO: the schema is incorrect, but it seems useless here.
                 schema,

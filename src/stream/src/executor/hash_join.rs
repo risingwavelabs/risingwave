@@ -1404,7 +1404,7 @@ mod tests {
         };
 
         let executor = HashJoinExecutor::<Key64, MemoryStateStore, T>::new(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             info,
             Box::new(source_l),
             Box::new(source_r),
@@ -1494,7 +1494,7 @@ mod tests {
         };
 
         let executor = HashJoinExecutor::<Key128, MemoryStateStore, T>::new(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             info,
             Box::new(source_l),
             Box::new(source_r),

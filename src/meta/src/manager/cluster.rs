@@ -31,6 +31,8 @@ use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
+use risingwave_pb::stream_service::{BackPressureInfo, GetBackPressureResponse};
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
@@ -400,11 +402,11 @@ impl ClusterManager {
                         }
                         Err(err) => {
                             tracing::warn!(
-                                "Failed to delete expired worker {} {:#?}, current timestamp {}. {:?}",
+                                error = %err.as_report(),
+                                "Failed to delete expired worker {} {:#?}, current timestamp {}",
                                 worker_id,
                                 key,
                                 now,
-                                err,
                             );
                         }
                     }
@@ -490,6 +492,33 @@ impl ClusterManager {
 
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> Option<Worker> {
         self.core.read().await.get_worker_by_id(worker_id)
+    }
+
+    pub async fn get_back_pressure(&self) -> MetaResult<GetBackPressureResponse> {
+        let mut core = self.core.write().await;
+        let mut back_pressure_infos: Vec<BackPressureInfo> = Vec::new();
+        for worker in core.workers.values_mut() {
+            if worker.worker_type() != WorkerType::ComputeNode {
+                continue;
+            }
+            let client = self
+                .env
+                .stream_client_pool()
+                .get(&worker.worker_node)
+                .await
+                .unwrap();
+            let request = risingwave_pb::stream_service::GetBackPressureRequest {};
+            back_pressure_infos.extend(
+                client
+                    .get_back_pressure(request)
+                    .await
+                    .unwrap()
+                    .back_pressure_infos,
+            );
+        }
+        Ok(GetBackPressureResponse {
+            back_pressure_infos,
+        })
     }
 }
 

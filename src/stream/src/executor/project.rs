@@ -22,8 +22,8 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::{RwFutureExt, RwTryStreamExt};
 use risingwave_expr::expr::NonStrictExpression;
+use rw_futures_util::{RwFutureExt, RwTryStreamExt};
 
 use super::*;
 
@@ -320,7 +320,7 @@ mod tests {
         };
 
         let project = Box::new(ProjectExecutor::new(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             info,
             Box::new(source),
             vec![test_expr],
@@ -414,7 +414,7 @@ mod tests {
         };
 
         let project = Box::new(ProjectExecutor::new(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             info,
             Box::new(source),
             vec![a_expr, b_expr, c_expr],

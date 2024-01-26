@@ -24,7 +24,7 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Datum, Decimal, JsonbVal, ScalarImpl, F32, F64};
-use risingwave_pb::plan_common::{AdditionalColumnType, ColumnDesc, ColumnDescVersion};
+use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 
 use super::schema_resolver::*;
 use crate::parser::unified::protobuf::ProtobufAccess;
@@ -175,7 +175,7 @@ impl ProtobufParserConfig {
                 type_name: m.full_name().to_string(),
                 generated_or_default_column: None,
                 description: None,
-                additional_column_type: AdditionalColumnType::Normal as i32,
+                additional_columns: Some(AdditionalColumn { column_type: None }),
                 version: ColumnDescVersion::Pr13707 as i32,
             })
         } else {
@@ -184,7 +184,7 @@ impl ProtobufParserConfig {
                 column_id: *index,
                 name: field_descriptor.name().to_string(),
                 column_type: Some(field_type.to_protobuf()),
-                additional_column_type: AdditionalColumnType::Normal as i32,
+                additional_columns: Some(AdditionalColumn { column_type: None }),
                 version: ColumnDescVersion::Pr13707 as i32,
                 ..Default::default()
             })
@@ -525,19 +525,24 @@ fn protobuf_type_mapping(
     Ok(t)
 }
 
+/// Reference: <https://docs.confluent.io/platform/current/schema-registry/fundamentals/serdes-develop/index.html#wire-format>
+/// Wire format for Confluent pb header is:
+/// | 0          | 1-4        | 5-x             | x+1-end
+/// | magic-byte | schema-id  | message-indexes | protobuf-payload
 pub(crate) fn resolve_pb_header(payload: &[u8]) -> Result<&[u8]> {
     // there's a message index array at the front of payload
     // if it is the first message in proto def, the array is just and `0`
     // TODO: support parsing more complex index array
     let (_, remained) = extract_schema_id(payload)?;
+    // The message indexes are encoded as int using variable-length zig-zag encoding,
+    // prefixed by the length of the array.
+    // Note that if the first byte is 0, it is equivalent to (1, 0) as an optimization.
     match remained.first() {
         Some(0) => Ok(&remained[1..]),
-        Some(i) => {
-            Err(RwError::from(ProtocolError(format!("The payload message must be the first message in protobuf schema def, but the message index is {}", i))))
-        }
-        None => {
-            Err(RwError::from(ProtocolError("The proto payload is empty".to_owned())))
-        }
+        Some(i) => Ok(&remained[(*i as usize)..]),
+        None => Err(RwError::from(ProtocolError(
+            "The proto payload is empty".to_owned(),
+        ))),
     }
 }
 
