@@ -336,8 +336,6 @@ async fn get_partition_compute_info_for_iceberg(
     // Only compute the partition and shuffle by them for the sparse partition.
     let has_sparse_partition = partition_spec.fields.iter().any(|f| match f.transform {
         // Sparse partition
-        // # TODO
-        // `Identity`` transform may need to depends on the input type.
         icelake::types::Transform::Identity
         | icelake::types::Transform::Truncate(_)
         | icelake::types::Transform::Bucket(_) => true,
