@@ -63,6 +63,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::ToTimestamp
             | expr_node::Type::AtTimeZone
             | expr_node::Type::DateTrunc
+            | expr_node::Type::MakeDate
+            | expr_node::Type::MakeTime
+            | expr_node::Type::MakeTimestamp
             | expr_node::Type::ToTimestamp1
             | expr_node::Type::CharToDate
             | expr_node::Type::CastWithTimeZone

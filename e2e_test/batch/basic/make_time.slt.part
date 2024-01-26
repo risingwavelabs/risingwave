@@ -11,17 +11,20 @@ SELECT make_timestamptz(-1973, 07, 15, 08, 15, 55.33);
 ----
 -1973-07-15 08:15:55.330+00:00
 
-query error Invalid parameter sec: invalid sec
+query error Invalid parameter sec: invalid sec: -55.33
 SELECT make_timestamptz(1973, 07, 15, 08, 15, -55.33);
 
-query error Invalid parameter hour, min, sec: invalid time
+query error Invalid parameter hour, min, sec: invalid time: 8:-15:55.33
 SELECT make_timestamptz(1973, 07, 15, 08, -15, 55.33);
 
-query error Invalid parameter year, month, day: invalid date
+query error Invalid parameter year, month, day: invalid date: 1973--7-15
 SELECT make_timestamptz(1973, -07, 15, 08, 15, 55.33);
 
-query error Invalid parameter year, month, day: invalid date
+query error Invalid parameter year, month, day: invalid date: 1973-6-31
 SELECT make_timestamptz(1973, 06, 31, 08, 15, 55.33);
+
+query error Invalid parameter year, month, day: invalid date: 0-6-31
+SELECT make_timestamptz(0, 06, 31, 08, 15, 55.33);
 
 statement ok
 set TimeZone to 'America/New_York';
@@ -88,3 +91,54 @@ SELECT make_timestamptz(2013, 7, 15, 8, 15, 23.5, 'America/New_York');
 
 statement ok
 set timezone to 'UTC';
+
+query T
+SELECT make_date(2024, 1, 26);
+----
+2024-01-26
+
+query T
+SELECT make_date(-2024, 1, 26);
+----
+2024-01-26 BC
+
+query error Invalid parameter year, month, day: invalid date: -4-2-29
+SELECT make_date(-4, 2, 29);
+
+query T
+SELECT make_date(-5, 2, 29);
+----
+0005-02-29 BC
+
+query error Invalid parameter year, month, day: invalid date: 0-7-15
+select make_date(0, 7, 15);
+
+query error Invalid parameter year, month, day: invalid date: 2013-2-30
+select make_date(2013, 2, 30);
+
+query error Invalid parameter year, month, day: invalid date: 2013-13-1
+select make_date(2013, 13, 1);
+
+query error Invalid parameter year, month, day: invalid date: 2013-11--1
+select make_date(2013, 11, -1);
+
+query error Invalid parameter hour, min, sec: invalid time: 10:55:100.1
+select make_time(10, 55, 100.1);
+
+query T
+SELECT make_time(14, 20, 26);
+----
+14:20:26
+
+query error Invalid parameter hour, min, sec: invalid time: 24:0:2.1
+select make_time(24, 0, 2.1);
+
+query T
+SELECT make_timestamp(2024, 1, 26, 14, 20, 26);
+----
+2024-01-26 14:20:26
+
+query T
+SELECT make_timestamp(-1973, 07, 15, 08, 15, 55.33);
+----
+-1973-07-15 08:15:55.330
