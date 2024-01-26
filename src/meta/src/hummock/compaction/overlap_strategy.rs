@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp;
+use std::fmt::Debug;
 use std::ops::Range;
 
 use itertools::Itertools;

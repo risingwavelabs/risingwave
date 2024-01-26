@@ -21,7 +21,6 @@ use risingwave_pb::hummock::compact_task::{self, TaskType};
 
 mod picker;
 pub mod selector;
-
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
@@ -38,6 +37,7 @@ use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlap
 use crate::hummock::compaction::picker::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
+use crate::MetaOpts;
 
 #[derive(Clone)]
 pub struct CompactStatus {
