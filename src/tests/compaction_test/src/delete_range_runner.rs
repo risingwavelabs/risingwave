@@ -132,7 +132,7 @@ async fn compaction_test(
         distribution_key: vec![],
         stream_key: vec![],
         owner: 0,
-        retention_seconds: 0,
+        retention_seconds: None,
         fragment_id: 0,
         dml_fragment_id: None,
         initialized_at_epoch: None,

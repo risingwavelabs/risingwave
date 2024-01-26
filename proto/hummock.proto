@@ -278,7 +278,8 @@ message KeyRange {
 }
 
 message TableOption {
-  uint32 retention_seconds = 1;
+  reserved 1;
+  optional uint32 retention_seconds = 2;
 }
 
 message CompactTask {

@@ -466,7 +466,6 @@ pub(crate) mod tests {
     use risingwave_common::catalog::{
         ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SUPER_USER_ID,
     };
-    use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_common::types::DataType;
     use risingwave_pb::common::worker_node::Property;
@@ -564,7 +563,7 @@ pub(crate) mod tests {
             distribution_key: vec![],
             append_only: false,
             owner: DEFAULT_SUPER_USER_ID,
-            retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
+            retention_seconds: None,
             fragment_id: 0,        // FIXME
             dml_fragment_id: None, // FIXME
             vnode_col_index: None,

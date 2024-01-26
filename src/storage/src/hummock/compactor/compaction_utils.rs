@@ -134,7 +134,6 @@ pub struct TaskConfig {
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {
-    use risingwave_common::catalog::TableOption;
     let mut multi_filter = MultiCompactionFilter::default();
     let compaction_filter_flag =
         CompactionFilterFlag::from_bits(compact_task.compaction_filter_mask).unwrap_or_default();
@@ -150,11 +149,11 @@ pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompact
         let id_to_ttl = compact_task
             .table_options
             .iter()
-            .filter(|id_to_option| {
-                let table_option: TableOption = id_to_option.1.into();
-                table_option.retention_seconds.is_some()
+            .filter_map(|(id, option)| {
+                option
+                    .retention_seconds
+                    .and_then(|ttl| if ttl > 0 { Some((*id, ttl)) } else { None })
             })
-            .map(|id_to_option| (*id_to_option.0, id_to_option.1.retention_seconds))
             .collect();
 
         let ttl_filter = Box::new(TtlCompactionFilter::new(
@@ -322,7 +321,7 @@ pub async fn check_compaction_result(
     let has_ttl = compact_task
         .table_options
         .iter()
-        .any(|(_, table_option)| table_option.retention_seconds > 0);
+        .any(|(_, table_option)| table_option.retention_seconds.is_some_and(|ttl| ttl > 0));
 
     let mut compact_table_ids = compact_task
         .input_ssts

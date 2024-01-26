@@ -31,7 +31,6 @@ use risingwave_pb::catalog::HandleConflictBehavior as PbHandleConflictBehavior;
 use risingwave_pb::plan_common::ColumnDescVersion;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
 
-use self::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 pub use crate::constants::hummock;
 use crate::error::BoxedError;
 use crate::row::OwnedRow;
@@ -272,23 +271,16 @@ pub struct TableOption {
 
 impl From<&risingwave_pb::hummock::TableOption> for TableOption {
     fn from(table_option: &risingwave_pb::hummock::TableOption) -> Self {
-        let retention_seconds =
-            if table_option.retention_seconds == hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND {
-                None
-            } else {
-                Some(table_option.retention_seconds)
-            };
-
-        Self { retention_seconds }
+        Self {
+            retention_seconds: table_option.retention_seconds,
+        }
     }
 }
 
 impl From<&TableOption> for risingwave_pb::hummock::TableOption {
     fn from(table_option: &TableOption) -> Self {
         Self {
-            retention_seconds: table_option
-                .retention_seconds
-                .unwrap_or(hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND),
+            retention_seconds: table_option.retention_seconds,
         }
     }
 }
@@ -296,15 +288,7 @@ impl From<&TableOption> for risingwave_pb::hummock::TableOption {
 impl TableOption {
     pub fn new(retention_seconds: Option<u32>) -> Self {
         // now we only support ttl for TableOption
-        TableOption {
-            retention_seconds: retention_seconds.and_then(|ttl| {
-                if ttl == TABLE_OPTION_DUMMY_RETENTION_SECOND {
-                    None
-                } else {
-                    Some(ttl)
-                }
-            }),
-        }
+        TableOption { retention_seconds }
     }
 }
 

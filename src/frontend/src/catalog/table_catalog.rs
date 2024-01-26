@@ -19,7 +19,6 @@ use itertools::Itertools;
 use risingwave_common::catalog::{
     ColumnCatalog, ConflictBehavior, TableDesc, TableId, TableVersionId,
 };
-use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -101,7 +100,8 @@ pub struct TableCatalog {
     /// Owner of the table.
     pub owner: UserId,
 
-    pub retention_seconds: u32,
+    // TTL of the record in the table, to ensure the consistency with other tables in the streaming plan, it only applies to append-only tables.
+    pub retention_seconds: Option<u32>,
 
     /// The fragment id of the `Materialize` operator for this table.
     pub fragment_id: FragmentId,
@@ -354,7 +354,7 @@ impl TableCatalog {
     pub fn table_desc(&self) -> TableDesc {
         use risingwave_common::catalog::TableOption;
 
-        let table_options = TableOption::new(Some(self.retention_seconds));
+        let table_options = TableOption::new(self.retention_seconds);
 
         TableDesc {
             table_id: self.id,
@@ -363,9 +363,7 @@ impl TableCatalog {
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
             append_only: self.append_only,
-            retention_seconds: table_options
-                .retention_seconds
-                .unwrap_or(TABLE_OPTION_DUMMY_RETENTION_SECOND),
+            retention_seconds: table_options.retention_seconds,
             value_indices: self.value_indices.clone(),
             read_prefix_len_hint: self.read_prefix_len_hint,
             watermark_columns: self.watermark_columns.clone(),
@@ -633,7 +631,7 @@ mod tests {
                 .into(),
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            retention_seconds: 300,
+            retention_seconds: Some(300),
             fragment_id: 0,
             dml_fragment_id: None,
             initialized_at_epoch: None,
@@ -696,7 +694,7 @@ mod tests {
                 distribution_key: vec![],
                 append_only: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-                retention_seconds: 300,
+                retention_seconds: Some(300),
                 fragment_id: 0,
                 dml_fragment_id: None,
                 vnode_col_index: None,

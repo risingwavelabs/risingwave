@@ -22,7 +22,6 @@ use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, Schema, OBJECT_ID_PLACEHOLDER,
 };
-use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::{CreateType, TableType};
@@ -175,7 +174,7 @@ impl TableCatalogBuilder {
             incoming_sinks: vec![],
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
-            retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
+            retention_seconds: None,
         }
     }
 

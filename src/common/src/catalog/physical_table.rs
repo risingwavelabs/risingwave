@@ -47,7 +47,8 @@ pub struct TableDesc {
     /// Whether the table source is append-only
     pub append_only: bool,
 
-    pub retention_seconds: u32,
+    // TTL of the record in the table, to ensure the consistency with other tables in the streaming plan, it only applies to append-only tables.
+    pub retention_seconds: Option<u32>,
 
     pub value_indices: Vec<usize>,
 

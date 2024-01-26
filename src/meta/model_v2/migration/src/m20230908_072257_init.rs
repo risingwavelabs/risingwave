@@ -1023,7 +1023,7 @@ enum Table {
     CleanedByWatermark,
     Description,
     Version,
-    RetentionSeconds
+    RetentionSeconds,
 }
 
 #[derive(DeriveIden)]

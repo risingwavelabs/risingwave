@@ -93,7 +93,7 @@ message StorageTableDesc {
   // TODO: may refactor primary key representations
   repeated common.ColumnOrder pk = 3;
   repeated uint32 dist_key_in_pk_indices = 4;
-  uint32 retention_seconds = 5;
+  reserved 5;
   repeated uint32 value_indices = 6;
   uint32 read_prefix_len_hint = 7;
   // Whether the table is versioned. If `true`, column-aware row encoding will
@@ -101,6 +101,7 @@ message StorageTableDesc {
   bool versioned = 8;
   repeated uint32 stream_key = 9;
   optional uint32 vnode_col_idx_in_pk = 10;
+  optional uint32 retention_seconds = 11;
 }
 
 // Represents a table in external database for CDC scenario

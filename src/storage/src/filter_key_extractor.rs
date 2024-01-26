@@ -529,7 +529,7 @@ mod tests {
             optional_associated_source_id: None,
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            retention_seconds: 300,
+            retention_seconds: Some(300),
             fragment_id: 0,
             dml_fragment_id: None,
             initialized_at_epoch: None,

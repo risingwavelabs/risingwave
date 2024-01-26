@@ -122,7 +122,7 @@ pub struct Model {
     pub cleaned_by_watermark: bool,
     pub description: Option<String>,
     pub version: Option<TableVersion>,
-    pub retention_seconds: u32,
+    pub retention_seconds: Option<i32>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -231,7 +231,7 @@ impl From<PbTable> for ActiveModel {
             cleaned_by_watermark: Set(pb_table.cleaned_by_watermark),
             description: Set(pb_table.description),
             version: Set(pb_table.version.map(|v| v.into())),
-            retention_seconds: Set(pb_table.retention_seconds),
+            retention_seconds: Set(pb_table.retention_seconds.map(|i| i as _)),
         }
     }
 }
