@@ -149,10 +149,30 @@ impl ClusterManager {
                         .await?;
                     new_worker.worker_node.parallel_units.extend(parallel_units);
                 }
-                Ordering::Greater => new_worker
-                    .worker_node
-                    .parallel_units
-                    .truncate(new_worker_parallelism),
+                Ordering::Greater => {
+                    if self.env.opts.enable_scale_in_when_recovery {
+                        // Handing over to the subsequent recovery loop for a forced reschedule.
+                        tracing::info!(
+                            "worker {} parallelism reduced from {} to {}",
+                            new_worker.worker_node.id,
+                            old_worker_parallelism,
+                            new_worker_parallelism
+                        );
+                        new_worker
+                            .worker_node
+                            .parallel_units
+                            .truncate(new_worker_parallelism)
+                    } else {
+                        // Warn and keep the original parallelism if the worker registered with a
+                        // smaller parallelism, entering compatibility mode.
+                        tracing::warn!(
+                            "worker {} parallelism is less than current, current is {}, but received {}",
+                            new_worker.worker_id(),
+                            new_worker_parallelism,
+                            old_worker_parallelism,
+                        );
+                    }
+                }
                 Ordering::Equal => {}
             }
             if property != new_worker.worker_node.property {
@@ -572,7 +592,7 @@ impl ClusterManagerCore {
                     None => {
                         return Err(MetaError::unavailable(
                             "no available transactional id for worker",
-                        ))
+                        ));
                     }
                     Some(id) => id,
                 };

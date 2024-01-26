@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -22,6 +22,7 @@ use futures::stream::FuturesUnordered;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::ParallelUnitId;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::PausedReason;
@@ -34,7 +35,7 @@ use risingwave_pb::stream_service::{
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tracing::{debug, warn, Instrument};
+use tracing::{debug, info, warn, Instrument};
 use uuid::Uuid;
 
 use super::TracedEpoch;
@@ -603,17 +604,35 @@ impl GlobalBarrierManagerContext {
         };
         debug!("start scaling-in offline actors.");
 
-        let expired_workers: HashSet<WorkerId> = info
-            .actor_map
+        let prev_worker_parallel_units = mgr.fragment_manager.all_worker_parallel_units().await;
+
+        let curr_worker_parallel_units: HashMap<WorkerId, HashSet<ParallelUnitId>> = info
+            .node_map
             .iter()
-            .filter(|(&worker, actors)| !actors.is_empty() && !info.node_map.contains_key(&worker))
-            .map(|(&worker, _)| worker)
+            .map(|(worker_id, worker_node)| {
+                (
+                    *worker_id,
+                    worker_node
+                        .parallel_units
+                        .iter()
+                        .map(|parallel_unit| parallel_unit.id)
+                        .collect(),
+                )
+            })
             .collect();
 
-        if expired_workers.is_empty() {
-            debug!("no expired workers, skipping.");
+        // todo: maybe we can only check the reduced workers
+        if curr_worker_parallel_units == prev_worker_parallel_units {
+            debug!("no changed workers, skipping.");
             return Ok(false);
         }
+
+        info!("parallel unit has changed, triggering a forced reschedule.");
+
+        debug!(
+            "previous worker parallel units {:?}, current worker parallel units {:?}",
+            prev_worker_parallel_units, curr_worker_parallel_units
+        );
 
         let table_parallelisms = {
             let guard = mgr.fragment_manager.get_fragment_read_guard().await;
