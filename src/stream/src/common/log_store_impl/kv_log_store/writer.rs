@@ -117,7 +117,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                 self.state_store.insert(key, value, None)?;
             }
             flush_info.report(&self.metrics);
-            self.state_store.flush(Vec::new()).await?;
+            self.state_store.flush().await?;
 
             let vnode_bitmap = vnode_bitmap_builder.finish();
             self.tx
@@ -150,15 +150,14 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                 Ok(())
             })?;
         flush_info.report(&self.metrics);
-        let mut watermark = None;
-        if let Some(truncation_offset) = self.tx.pop_truncation(epoch) {
-            watermark = Some(VnodeWatermark::new(
+        let watermark = self.tx.pop_truncation(epoch).map(|truncation_offset| {
+            VnodeWatermark::new(
                 self.serde.vnodes().clone(),
                 self.serde
                     .serialize_truncation_offset_watermark(truncation_offset),
-            ));
-        }
-        self.state_store.flush(vec![]).await?;
+            )
+        });
+        self.state_store.flush().await?;
         let watermark = watermark.into_iter().collect_vec();
         self.state_store.seal_current_epoch(
             next_epoch,

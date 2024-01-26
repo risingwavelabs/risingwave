@@ -22,5 +22,36 @@ const SCHEMA_LOCATION_KEY: &str = "schema.location";
 const SCHEMA_REGISTRY_KEY: &str = "schema.registry";
 const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
 
-#[derive(Debug)]
-pub struct SchemaFetchError(pub String);
+#[derive(Debug, thiserror::Error, thiserror_ext::Macro)]
+#[error("Invalid option: {message}")]
+pub struct InvalidOptionError {
+    message: String,
+    // #[backtrace]
+    // source: Option<risingwave_common::error::BoxedError>,
+}
+
+impl From<InvalidOptionError> for risingwave_common::error::RwError {
+    fn from(value: InvalidOptionError) -> Self {
+        anyhow::anyhow!(value).into()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SchemaFetchError {
+    #[error(transparent)]
+    InvalidOption(#[from] InvalidOptionError),
+    #[error(transparent)]
+    Request(#[from] schema_registry::ConcurrentRequestError),
+    #[error("schema compilation error: {0}")]
+    SchemaCompile(
+        #[source]
+        #[backtrace]
+        risingwave_common::error::BoxedError,
+    ),
+    #[error("{0}")] // source+{0} is effectively transparent but allows backtrace
+    YetToMigrate(
+        #[source]
+        #[backtrace]
+        risingwave_common::error::RwError,
+    ),
+}

@@ -1013,6 +1013,16 @@ def section_streaming_cdc(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "CDC Source Errors",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('cdc_source_error')}) by (connector_name, source_id, error_msg)",
+                            "{{connector_name}}: {{error_msg}} ({{source_id}})",
+                        ),
+                    ],
+                ),
             ],
         ),
     ]

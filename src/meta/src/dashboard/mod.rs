@@ -29,6 +29,7 @@ use axum::routing::{get, get_service};
 use axum::Router;
 use hyper::Request;
 use parking_lot::Mutex;
+use risingwave_pb::stream_service::GetBackPressureResponse;
 use risingwave_rpc_client::ComputeClientPool;
 use tower::{ServiceBuilder, ServiceExt};
 use tower_http::add_extension::AddExtensionLayer;
@@ -360,6 +361,24 @@ pub(super) mod handlers {
 
         Ok(report)
     }
+
+    pub async fn get_back_pressure(
+        // Path(worker_id): Path<WorkerId>,
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<GetBackPressureResponse>> {
+        let back_pressure_infos = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                mgr.cluster_manager.get_back_pressure().await.map_err(err)?
+            }
+            MetadataManager::V2(mgr) => mgr
+                .cluster_controller
+                .get_back_pressure()
+                .await
+                .map_err(err)?,
+        };
+
+        Ok(back_pressure_infos.into())
+    }
 }
 
 impl DashboardService {
@@ -388,6 +407,7 @@ impl DashboardService {
                 "/metrics/actor/back_pressures",
                 get(prometheus::list_prometheus_actor_back_pressure),
             )
+            .route("/metrics/back_pressures", get(get_back_pressure))
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
             .route("/monitor/await_tree/", get(dump_await_tree_all))
             .route("/monitor/dump_heap_profile/:worker_id", get(heap_profile))

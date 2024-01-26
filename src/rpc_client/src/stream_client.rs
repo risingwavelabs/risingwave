@@ -72,6 +72,7 @@ macro_rules! for_all_stream_rpc {
             ,{ 0, inject_barrier, InjectBarrierRequest, InjectBarrierResponse }
             ,{ 0, barrier_complete, BarrierCompleteRequest, BarrierCompleteResponse }
             ,{ 0, wait_epoch_commit, WaitEpochCommitRequest, WaitEpochCommitResponse }
+            ,{ 0, get_back_pressure, GetBackPressureRequest, GetBackPressureResponse }
         }
     };
 }

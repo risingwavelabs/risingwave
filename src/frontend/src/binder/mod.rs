@@ -122,6 +122,10 @@ pub struct Binder {
 
     /// The sql udf context that will be used during binding phase
     udf_context: UdfContext,
+
+    /// Udf binding flag, used to distinguish between
+    /// columns and named parameters during sql udf binding
+    udf_binding_flag: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -340,6 +344,7 @@ impl Binder {
             included_relations: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
             udf_context: UdfContext::new(),
+            udf_binding_flag: false,
         }
     }
 
@@ -488,6 +493,14 @@ impl Binder {
 
     pub fn udf_context_mut(&mut self) -> &mut UdfContext {
         &mut self.udf_context
+    }
+
+    pub fn set_udf_binding_flag(&mut self) {
+        self.udf_binding_flag = true;
+    }
+
+    pub fn unset_udf_binding_flag(&mut self) {
+        self.udf_binding_flag = false;
     }
 }
 

@@ -241,7 +241,7 @@ impl MockDatagenSource {
         loop {
             for i in &mut readers {
                 let item = i.next().await.unwrap().unwrap();
-                yield Message::Chunk(item.chunk);
+                yield Message::Chunk(item);
             }
         }
     }

@@ -35,7 +35,7 @@ use crate::source::filesystem::opendal_source::{
 };
 use crate::source::filesystem::FsPageItem;
 use crate::source::{
-    create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties,
+    create_split_reader, BoxChunkSourceStream, BoxTryStream, Column, ConnectorProperties,
     ConnectorState, SourceColumnDesc, SourceContext, SplitReader,
 };
 
@@ -107,7 +107,7 @@ impl SourceReader {
         state: ConnectorState,
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
-    ) -> Result<BoxSourceWithStateStream> {
+    ) -> Result<BoxChunkSourceStream> {
         let Some(splits) = state else {
             return Ok(pending().boxed());
         };
