@@ -452,3 +452,36 @@ RedisConfig:
   - name: redis.url
     field_type: String
     required: true
+StarrocksConfig:
+  fields:
+  - name: starrocks.host
+    field_type: String
+    comments: The StarRocks host address.
+    required: true
+  - name: starrocks.mysqlport
+    field_type: String
+    comments: The address that connects to the MySQL client of the frontend. By default, this is 9030.
+    required: true
+  - name: starrocks.httpport
+    field_type: String
+    comments: The http port for data import. By default, this is 8030.
+    required: true
+  - name: starrocks.user
+    field_type: String
+    comments: The user name used to access the StarRocks database.
+    required: true
+  - name: starrocks.password
+    field_type: String
+    comments: The password associated with the user.
+    required: true
+  - name: starrocks.database
+    field_type: String
+    comments: The StarRocks database where the target table is located
+    required: true
+  - name: starrocks.table
+    field_type: String
+    comments: The StarRocks table you want to sink data to.
+    required: true
+  - name: r#type
+    field_type: String
+    required: true

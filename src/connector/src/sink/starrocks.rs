@@ -29,6 +29,7 @@ use serde::Deserialize;
 use serde_derive::Serialize;
 use serde_json::Value;
 use serde_with::serde_as;
+use with_options::WithOptions;
 
 use super::doris_starrocks_connector::{
     HeaderBuilder, InserterInner, InserterInnerBuilder, DORIS_SUCCESS_STATUS, STARROCKS_DELETE_SIGN,
@@ -44,26 +45,33 @@ const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";
 const STARROCK_MYSQL_MAX_ALLOWED_PACKET: usize = 1024;
 const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct StarrocksCommon {
+    /// The StarRocks host address.
     #[serde(rename = "starrocks.host")]
     pub host: String,
+    /// The address that connects to the MySQL client of the frontend. By default, this is 9030.
     #[serde(rename = "starrocks.mysqlport")]
     pub mysql_port: String,
+    /// The http port for data import. By default, this is 8030.
     #[serde(rename = "starrocks.httpport")]
     pub http_port: String,
+    /// The user name used to access the StarRocks database.
     #[serde(rename = "starrocks.user")]
     pub user: String,
+    /// The password associated with the user.
     #[serde(rename = "starrocks.password")]
     pub password: String,
+    /// The StarRocks database where the target table is located
     #[serde(rename = "starrocks.database")]
     pub database: String,
+    /// The StarRocks table you want to sink data to.
     #[serde(rename = "starrocks.table")]
     pub table: String,
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct StarrocksConfig {
     #[serde(flatten)]
     pub common: StarrocksCommon,
