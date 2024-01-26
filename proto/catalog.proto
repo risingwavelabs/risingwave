@@ -168,7 +168,7 @@ message Subscription {
   map<string, string> properties = 7;
   repeated plan_common.ColumnCatalog column_catalogs = 8;
   string db_name = 9;
-  // If the sink is from table or mv, this is name of the table/mv. Otherwise
+  // If the subscription is from table or mv, this is name of the table/mv. Otherwise
   // it is the name of the sink itself.
   string subscription_from_name = 10;
   uint32 database_id = 11;

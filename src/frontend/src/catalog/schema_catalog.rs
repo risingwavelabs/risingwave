@@ -529,6 +529,10 @@ impl SchemaCatalog {
         self.sink_by_name.values()
     }
 
+    pub fn iter_subscription(&self) -> impl Iterator<Item = &Arc<SubscriptionCatalog>> {
+        self.subscription_by_name.values()
+    }
+
     pub fn iter_view(&self) -> impl Iterator<Item = &Arc<ViewCatalog>> {
         self.view_by_name.values()
     }

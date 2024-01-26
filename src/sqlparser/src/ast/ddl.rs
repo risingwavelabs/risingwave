@@ -143,6 +143,17 @@ pub enum AlterSinkOperation {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterSubscriptionOperation {
+    RenameSubscription { subscription_name: ObjectName },
+    ChangeOwner { new_owner_name: Ident },
+    SetSchema { new_schema_name: ObjectName },
+    // TODO! `SET PARALLELISM TO <parallelism>`
+    SetParallelism { parallelism: SetVariableValue },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSourceOperation {
     RenameSource { source_name: ObjectName },
     AddColumn { column_def: ColumnDef },
@@ -298,6 +309,25 @@ impl fmt::Display for AlterSinkOperation {
                 write!(f, "SET SCHEMA {}", new_schema_name)
             }
             AlterSinkOperation::SetParallelism { parallelism } => {
+                write!(f, "SET PARALLELISM TO {}", parallelism)
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterSubscriptionOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterSubscriptionOperation::RenameSubscription { subscription_name } => {
+                write!(f, "RENAME TO {subscription_name}")
+            }
+            AlterSubscriptionOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {}", new_owner_name)
+            }
+            AlterSubscriptionOperation::SetSchema { new_schema_name } => {
+                write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+            AlterSubscriptionOperation::SetParallelism { parallelism } => {
                 write!(f, "SET PARALLELISM TO {}", parallelism)
             }
         }

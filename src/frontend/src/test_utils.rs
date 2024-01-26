@@ -606,6 +606,10 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
+    async fn alter_subscription_name(&self, _sink_id: u32, _sink_name: &str) -> Result<()> {
+        unreachable!()
+    }
+
     async fn alter_source_name(&self, _source_id: u32, _source_name: &str) -> Result<()> {
         unreachable!()
     }

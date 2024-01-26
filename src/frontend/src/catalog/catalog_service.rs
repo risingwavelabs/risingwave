@@ -176,6 +176,12 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn alter_sink_name(&self, sink_id: u32, sink_name: &str) -> Result<()>;
 
+    async fn alter_subscription_name(
+        &self,
+        subscription_id: u32,
+        subscription_name: &str,
+    ) -> Result<()>;
+
     async fn alter_source_name(&self, source_id: u32, source_name: &str) -> Result<()>;
 
     async fn alter_schema_name(&self, schema_id: u32, schema_name: &str) -> Result<()>;
@@ -477,6 +483,21 @@ impl CatalogWriter for CatalogWriterImpl {
         let version = self
             .meta_client
             .alter_name(alter_name_request::Object::SinkId(sink_id), sink_name)
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_subscription_name(
+        &self,
+        subscription_id: u32,
+        subscription_name: &str,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_name(
+                alter_name_request::Object::SubscriptionId(subscription_id),
+                subscription_name,
+            )
             .await?;
         self.wait_version(version).await
     }

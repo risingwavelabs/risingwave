@@ -819,7 +819,7 @@ impl PlanRoot {
     }
 
     #[allow(clippy::too_many_arguments)]
-    /// Optimize and generate a create sink plan.
+    /// Optimize and generate a create subscription plan.
     pub fn gen_subscription_plan(
         &mut self,
         database_id: u32,

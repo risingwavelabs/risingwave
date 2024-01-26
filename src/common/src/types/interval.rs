@@ -1471,7 +1471,6 @@ mod tests {
     use interval::test_utils::IntervalTestExt;
 
     use super::*;
-    use crate::field_generator::ChronoFieldInner;
     use crate::types::ordered_float::OrderedFloat;
     use crate::util::panic::rw_catch_unwind;
 

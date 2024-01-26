@@ -1879,6 +1879,11 @@ impl DdlController {
                         .alter_database_name(database_id, new_name)
                         .await
                 }
+                alter_name_request::Object::SubscriptionId(sink_id) => {
+                    mgr.catalog_manager
+                        .alter_subscription_name(sink_id, new_name)
+                        .await
+                }
             },
             MetadataManager::V2(mgr) => {
                 let (obj_type, id) = match relation {
@@ -1894,6 +1899,9 @@ impl DdlController {
                     }
                     alter_name_request::Object::DatabaseId(id) => {
                         (ObjectType::Database, id as ObjectId)
+                    }
+                    alter_name_request::Object::SubscriptionId(id) => {
+                        (ObjectType::Subscription, id as ObjectId)
                     }
                 };
                 mgr.catalog_controller
@@ -1922,6 +1930,7 @@ impl DdlController {
                     Object::SinkId(id) => (ObjectType::Sink, id as ObjectId),
                     Object::SchemaId(id) => (ObjectType::Schema, id as ObjectId),
                     Object::DatabaseId(id) => (ObjectType::Database, id as ObjectId),
+                    Object::SubscriptionId(id) => (ObjectType::Subscription, id as ObjectId),
                 };
                 mgr.catalog_controller
                     .alter_owner(obj_type, id, owner_id as _)
@@ -1960,6 +1969,9 @@ impl DdlController {
                     }
                     alter_set_schema_request::Object::ConnectionId(id) => {
                         (ObjectType::Connection, id as ObjectId)
+                    }
+                    alter_set_schema_request::Object::SubscriptionId(id) => {
+                        (ObjectType::Subscription, id as ObjectId)
                     }
                 };
                 mgr.catalog_controller

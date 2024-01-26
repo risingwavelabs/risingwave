@@ -43,20 +43,25 @@ pub struct SubscriptionCatalog {
     /// distribution keys will be `columns[1]` and `columns[2]`.
     pub distribution_key: Vec<usize>,
 
-    /// The properties of the sink.
+    /// The properties of the subscription, only `retention`.
     pub properties: BTreeMap<String, String>,
 
     /// Name of the database
     pub db_name: String,
 
+    /// The upstream table name on which the subscription depends
     pub subscription_from_name: String,
 
+    /// The database id
     pub database_id: u32,
 
+    /// The schema id
     pub schema_id: u32,
 
+    /// The subscription depends on the upstream list
     pub dependent_relations: Vec<TableId>,
 
+    /// The user id
     pub owner: UserId,
 }
 

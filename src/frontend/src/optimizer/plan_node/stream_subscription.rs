@@ -174,7 +174,6 @@ impl Distill for StreamSubscription {
         let column_names = Pretty::Array(column_names);
         let mut vec = Vec::with_capacity(2);
         vec.push(("columns", column_names));
-        // 111
         let pk = IndicesDisplay {
             indices: &self
                 .subscription_catalog
@@ -193,7 +192,7 @@ impl StreamNode for StreamSubscription {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
-        // We need to create a table for sink with a kv log store.
+        // We need to create a table for subscription with a kv log store.
         let table = self
             .infer_kv_log_store_table_catalog()
             .with_id(state.gen_table_id_wrapped());

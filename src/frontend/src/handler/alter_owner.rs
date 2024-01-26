@@ -127,6 +127,22 @@ pub async fn handle_alter_owner(
                     }
                     Object::SinkId(sink.id.sink_id)
                 }
+                StatementType::ALTER_SUBSCRIPTION => {
+                    let (subscription, schema_name) = catalog_reader.get_subscription_by_name(
+                        db_name,
+                        schema_path,
+                        &real_obj_name,
+                    )?;
+                    session.check_privilege_for_drop_alter(schema_name, &**subscription)?;
+                    let schema_id = catalog_reader
+                        .get_schema_by_name(db_name, schema_name)?
+                        .id();
+                    check_schema_create_privilege(&session, new_owner, schema_id)?;
+                    if subscription.owner() == owner_id {
+                        return Ok(RwPgResponse::empty_result(stmt_type));
+                    }
+                    Object::SubscriptionId(subscription.id.subscription_id)
+                }
                 StatementType::ALTER_DATABASE => {
                     let database = catalog_reader.get_database_by_name(&obj_name.real_value())?;
                     session.check_privilege_for_drop_alter_db_schema(database)?;

@@ -32,7 +32,7 @@ use crate::{
     build_graph, Binder, Explain, OptimizerContext, OptimizerContextRef, PlanRef, Planner,
 };
 
-// used to store result of `gen_sink_plan`
+// used to store result of `gen_subscription_plan`
 pub struct SubscriptionPlanContext {
     pub query: Box<Query>,
     pub subscription_plan: PlanRef,

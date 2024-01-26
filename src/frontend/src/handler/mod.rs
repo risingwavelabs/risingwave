@@ -707,6 +707,47 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterSubscription {
+            name,
+            operation: AlterSubscriptionOperation::RenameSubscription { subscription_name },
+        } => alter_rename::handle_rename_subscription(handler_args, name, subscription_name).await,
+        Statement::AlterSubscription {
+            name,
+            operation: AlterSubscriptionOperation::ChangeOwner { new_owner_name },
+        } => {
+            alter_owner::handle_alter_owner(
+                handler_args,
+                name,
+                new_owner_name,
+                StatementType::ALTER_SUBSCRIPTION,
+            )
+            .await
+        }
+        Statement::AlterSubscription {
+            name,
+            operation: AlterSubscriptionOperation::SetSchema { new_schema_name },
+        } => {
+            alter_set_schema::handle_alter_set_schema(
+                handler_args,
+                name,
+                new_schema_name,
+                StatementType::ALTER_SUBSCRIPTION,
+                None,
+            )
+            .await
+        }
+        Statement::AlterSubscription {
+            name,
+            operation: AlterSubscriptionOperation::SetParallelism { parallelism },
+        } => {
+            alter_parallelism::handle_alter_parallelism(
+                handler_args,
+                name,
+                parallelism,
+                StatementType::ALTER_SUBSCRIPTION,
+            )
+            .await
+        }
         Statement::AlterSource {
             name,
             operation: AlterSourceOperation::RenameSource { source_name },

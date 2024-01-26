@@ -166,6 +166,12 @@ pub async fn handle_show_object(
             .iter_sink()
             .map(|t| t.name.clone())
             .collect(),
+        ShowObject::Subscription { schema } => catalog_reader
+            .read_guard()
+            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .iter_subscription()
+            .map(|t| t.name.clone())
+            .collect(),
         ShowObject::Columns { table } => {
             let Ok(columns) = get_columns_from_table(&session, table.clone())
                 .or(get_columns_from_sink(&session, table.clone()))

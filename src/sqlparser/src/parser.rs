@@ -80,6 +80,8 @@ pub enum IsLateral {
 
 use IsLateral::*;
 
+use self::ddl::AlterSubscriptionOperation;
+
 #[derive(Debug)]
 pub enum WildcardOrExpr {
     Expr(Expr),
@@ -2879,9 +2881,11 @@ impl Parser {
             self.parse_alter_user()
         } else if self.parse_keyword(Keyword::SYSTEM) {
             self.parse_alter_system()
+        } else if self.parse_keyword(Keyword::SUBSCRIPTION) {
+            self.parse_alter_subscription()
         } else {
             self.expected(
-                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SOURCE, FUNCTION, USER or SYSTEM after ALTER",
+                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER or SYSTEM after ALTER",
                 self.peek_token(),
             )
         }
@@ -3185,6 +3189,55 @@ impl Parser {
 
         Ok(Statement::AlterSink {
             name: sink_name,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_subscription(&mut self) -> Result<Statement, ParserError> {
+        let subscription_name = self.parse_object_name()?;
+        let operation = if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let subscription_name = self.parse_object_name()?;
+                AlterSubscriptionOperation::RenameSubscription { subscription_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterSubscriptionOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
+        } else if self.parse_keyword(Keyword::SET) {
+            if self.parse_keyword(Keyword::SCHEMA) {
+                let schema_name = self.parse_object_name()?;
+                AlterSubscriptionOperation::SetSchema {
+                    new_schema_name: schema_name,
+                }
+            } else if self.parse_keyword(Keyword::PARALLELISM) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected(
+                        "TO or = after ALTER TABLE SET PARALLELISM",
+                        self.peek_token(),
+                    );
+                }
+
+                let value = self.parse_set_variable()?;
+
+                AlterSubscriptionOperation::SetParallelism { parallelism: value }
+            } else {
+                return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
+            }
+        } else {
+            return self.expected(
+                "RENAME or OWNER TO or SET after ALTER SUBSCRIPTION",
+                self.peek_token(),
+            );
+        };
+
+        Ok(Statement::AlterSubscription {
+            name: subscription_name,
             operation,
         })
     }
@@ -4246,6 +4299,14 @@ impl Parser {
                 Keyword::SINKS => {
                     return Ok(Statement::ShowObjects {
                         object: ShowObject::Sink {
+                            schema: self.parse_from_and_identifier()?,
+                        },
+                        filter: self.parse_show_statement_filter()?,
+                    });
+                }
+                Keyword::SUBSCRIPTIONS => {
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Subscription {
                             schema: self.parse_from_and_identifier()?,
                         },
                         filter: self.parse_show_statement_filter()?,

@@ -242,6 +242,11 @@ impl Binder {
         Self::resolve_single_name(name.0, "sink name")
     }
 
+    /// return the `subscription_name`
+    pub fn resolve_subscription_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "subscription name")
+    }
+
     /// return the `table_name`
     pub fn resolve_table_name(name: ObjectName) -> Result<String> {
         Self::resolve_single_name(name.0, "table name")

@@ -554,7 +554,10 @@ impl ParseTo for CreateSubscriptionStatement {
             impl_parse_to!(from_name: ObjectName, p);
             from_name
         } else {
-            p.expected("FROM after CREATE SINK sink_name", p.peek_token())?
+            p.expected(
+                "FROM after CREATE SUBSCRIPTION subscription_name",
+                p.peek_token(),
+            )?
         };
 
         // let emit_mode = p.parse_emit_mode()?;
@@ -568,7 +571,7 @@ impl ParseTo for CreateSubscriptionStatement {
 
         if with_properties.0.is_empty() {
             return Err(ParserError::ParserError(
-                "sink properties not provided".to_string(),
+                "subscription properties not provided".to_string(),
             ));
         }
 
@@ -585,10 +588,7 @@ impl fmt::Display for CreateSubscriptionStatement {
         let mut v: Vec<String> = vec![];
         impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
         impl_fmt_display!(subscription_name, v, self);
-        impl_fmt_display!(subscription_from, v, self);
-        // if let Some(ref emit_mode) = self.emit_mode {
-        //     v.push(format!("EMIT {}", emit_mode));
-        // }
+        v.push(format!("FROM {}", self.subscription_from));
         impl_fmt_display!(with_properties, v, self);
         v.iter().join(" ").fmt(f)
     }

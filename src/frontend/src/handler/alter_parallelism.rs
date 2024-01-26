@@ -82,6 +82,13 @@ pub async fn handle_alter_parallelism(
                 session.check_privilege_for_drop_alter(schema_name, &**sink)?;
                 sink.id.sink_id()
             }
+            StatementType::ALTER_SUBSCRIPTION => {
+                let (subscription, schema_name) =
+                    reader.get_subscription_by_name(db_name, schema_path, &real_table_name)?;
+
+                session.check_privilege_for_drop_alter(schema_name, &**subscription)?;
+                subscription.id.subscription_id()
+            }
             _ => bail!(
                 "invalid statement type for alter parallelism: {:?}",
                 stmt_type

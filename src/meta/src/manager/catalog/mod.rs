@@ -2332,7 +2332,6 @@ impl CatalogManager {
                 user_core.increase_ref(owner_id);
                 user_core.decrease_ref(old_owner_id);
             }
-            // todo subscription
             alter_owner_request::Object::DatabaseId(database_id) => {
                 database_core.ensure_database_id(database_id)?;
                 let mut databases = BTreeMapTransaction::new(&mut database_core.databases);
@@ -2383,6 +2382,40 @@ impl CatalogManager {
                 schema.owner = owner_id;
                 relation_info = Info::Schema(schema.clone());
                 commit_meta!(self, schemas)?;
+                user_core.increase_ref(owner_id);
+                user_core.decrease_ref(old_owner_id);
+            }
+            alter_owner_request::Object::SubscriptionId(subscription_id) => {
+                database_core.ensure_subscription_id(subscription_id)?;
+                let mut subscriptions = BTreeMapTransaction::new(&mut database_core.subscriptions);
+                let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+                let mut subscription = subscriptions.get_mut(subscription_id).unwrap();
+                let old_owner_id = subscription.owner;
+                if old_owner_id == owner_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+                subscription.owner = owner_id;
+
+                let mut relations = vec![Relation {
+                    relation_info: Some(RelationInfo::Subscription(subscription.clone())),
+                }];
+
+                // internal tables
+                let internal_table_ids = fragment_manager
+                    .select_table_fragments_by_table_id(&(subscription_id.into()))
+                    .await?
+                    .internal_table_ids();
+                for id in internal_table_ids {
+                    let mut table = tables.get_mut(id).unwrap();
+                    assert_eq!(old_owner_id, table.owner);
+                    table.owner = owner_id;
+                    relations.push(Relation {
+                        relation_info: Some(RelationInfo::Table(table.clone())),
+                    });
+                }
+
+                relation_info = Info::RelationGroup(RelationGroup { relations });
+                commit_meta!(self, subscriptions, tables)?;
                 user_core.increase_ref(owner_id);
                 user_core.decrease_ref(old_owner_id);
             }
@@ -2609,6 +2642,42 @@ impl CatalogManager {
                 commit_meta!(self, functions)?;
                 let version = self.notify_frontend(Operation::Update, notify_info).await;
                 return Ok(version);
+            }
+            alter_set_schema_request::Object::SubscriptionId(subscription_id) => {
+                database_core.ensure_subscription_id(subscription_id)?;
+                let Subscription {
+                    name, schema_id, ..
+                } = database_core.subscriptions.get(&subscription_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                // internal tables.
+                let to_update_internal_table_ids = Vec::from_iter(
+                    fragment_manager
+                        .select_table_fragments_by_table_id(&(subscription_id.into()))
+                        .await?
+                        .internal_table_ids(),
+                );
+
+                database_core.check_relation_name_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                ))?;
+                let mut subscriptions = BTreeMapTransaction::new(&mut database_core.subscriptions);
+                let mut subscription = subscriptions.get_mut(subscription_id).unwrap();
+                subscription.schema_id = new_schema_id;
+                relation_infos.push(Some(RelationInfo::Subscription(subscription.clone())));
+
+                let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+                for table_id in to_update_internal_table_ids {
+                    let mut table = tables.get_mut(table_id).unwrap();
+                    table.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Table(table.clone())));
+                }
+
+                commit_meta!(self, subscriptions, tables)?;
             }
         }
 

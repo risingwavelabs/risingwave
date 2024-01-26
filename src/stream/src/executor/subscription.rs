@@ -51,7 +51,7 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
         log_store: SubscriptionLogStoreWriter<LS>,
         properties: HashMap<String, String>,
     ) -> StreamExecutorResult<Self> {
-        let retention_seconds_str = properties.get("retention_seconds").ok_or_else(|| {
+        let retention_seconds_str = properties.get("retention").ok_or_else(|| {
             StreamExecutorError::serde_error("Subscription retention time not set.".to_string())
         })?;
         let retention_seconds = (Interval::from_str(retention_seconds_str)
@@ -60,7 +60,8 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
                     "Retention needs to be set in Interval format".to_string(),
                 )
             })?
-            .epoch_in_micros() / 1000000) as i64;
+            .epoch_in_micros()
+            / 1000000) as i64;
 
         Ok(Self {
             actor_context,
