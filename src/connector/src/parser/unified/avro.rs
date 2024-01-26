@@ -444,19 +444,23 @@ mod tests {
         assert_eq!(rust_decimal, rust_decimal::Decimal::try_from(28.1).unwrap());
 
         // 1.1234567891
-        let value = BigInt::from(11234567891 as i64);
+        let value = BigInt::from(11234567891_i64);
         let negative = value.sign() == Sign::Minus;
         let (lo, mid, hi) = extract_decimal(value.to_bytes_be().1).unwrap();
-        let decimal =
-            rust_decimal::Decimal::from_parts(lo, mid, hi, negative, 10);
-        assert_eq!(decimal, rust_decimal::Decimal::try_from(1.1234567891).unwrap());
-
+        let decimal = rust_decimal::Decimal::from_parts(lo, mid, hi, negative, 10);
+        assert_eq!(
+            decimal,
+            rust_decimal::Decimal::try_from(1.1234567891).unwrap()
+        );
 
         // 1.123456789123456789123456789
         let v = vec![3, 161, 77, 58, 146, 180, 49, 220, 100, 4, 95, 21];
         let avro_decimal = AvroDecimal::from(v);
         let rust_decimal = avro_decimal_to_rust_decimal(avro_decimal, 28, 27).unwrap();
-        assert_eq!(rust_decimal, rust_decimal::Decimal::from_str("1.123456789123456789123456789").unwrap());
+        assert_eq!(
+            rust_decimal,
+            rust_decimal::Decimal::from_str("1.123456789123456789123456789").unwrap()
+        );
     }
 
     /// Convert Avro value to datum.For now, support the following [Avro type](https://avro.apache.org/docs/current/spec.html).
