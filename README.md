@@ -127,7 +127,7 @@ RisingWave is fundamentally a database that **extends beyond basic streaming dat
 Within your data stack, RisingWave can assist with:
 
 * Processing and transforming event streaming data in real time
-* Offloading event-driven queries (e.g., materialized views, triggers) from operational databases 
+* Offloading event-driven queries (e.g., materialized views, triggers) from operational databases
 * Performing real-time ETL (Extract, Transform, Load)
 
 RisingWave is extensively utilized in real-time applications such as monitoring, alerting, dashboard reporting, ML feature engineering, among others. It has already been adopted in fields such as financial trading, manufacturing, new media, logistics, gaming, and more. Check out [customer stories](https://www.risingwave.com/use-cases/).
