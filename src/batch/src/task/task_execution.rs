@@ -196,12 +196,6 @@ pub struct TaskOutput {
     failure: Arc<Mutex<Option<Arc<BatchError>>>>,
 }
 
-impl Drop for TaskOutput {
-    fn drop(&mut self) {
-        println!("drop TaskOutput {:?}", self.output_id);
-    }
-}
-
 impl std::fmt::Debug for TaskOutput {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TaskOutput")
