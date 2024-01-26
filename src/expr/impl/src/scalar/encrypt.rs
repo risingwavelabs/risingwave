@@ -40,10 +40,18 @@ pub struct CipherConfig {
     algorithm: Algorithm,
     mode: Mode,
     padding: Padding,
+    crypt_key: Vec<u8>,
 }
 
 impl CipherConfig {
-    fn parse_cipher_config(input: &str) -> Result<CipherConfig> {
+    fn parse_cipher_config(key: &[u8], input: &str) -> Result<CipherConfig> {
+        if key.len() != 16 && key.len() != 24 && key.len() != 32 {
+            return Err(ExprError::InvalidParam {
+                name: "key",
+                reason: format!("invalid key length: {}, expect 16, 24 or 32", key.len()).into(),
+            });
+        }
+
         let parts: Vec<&str> = input.split(&['-', '/'][..]).collect();
 
         let algorithm = match parts.get(0) {
@@ -76,13 +84,14 @@ impl CipherConfig {
             algorithm,
             mode,
             padding,
+            crypt_key: key.to_vec(),
         })
     }
 
     // postgres example can be found [here](https://github.com/postgres/postgres/blob/master/contrib/pgcrypto/sql/rijndael.sql)
-    fn build_cipher(&self, key: &[u8]) -> Result<Cipher> {
+    fn build_cipher(&self) -> Result<Cipher> {
         // match config's algorithm, mode, padding to openssl's cipher
-        match (&self.algorithm, key.len(), &self.mode) {
+        match (&self.algorithm, self.crypt_key.len(), &self.mode) {
             (Algorithm::Blowfish, _, Mode::Cbc) => Ok(Cipher::bf_cbc()),
             (Algorithm::Blowfish, _, Mode::Ecb) => Ok(Cipher::bf_ecb()),
             (Algorithm::Aes, 16, Mode::Cbc) => Ok(Cipher::aes_128_cbc()),
@@ -113,9 +122,9 @@ impl CipherConfig {
 /// from [pg doc](https://www.postgresql.org/docs/current/pgcrypto.html#PGCRYPTO-RAW-ENC-FUNCS)
 #[function(
     "decrypt(bytea, bytea, varchar) -> bytea",
-    prebuild = "CipherConfig::parse_cipher_config($2)?"
+    prebuild = "CipherConfig::parse_cipher_config($1, $2)?"
 )]
-pub fn decrypt(data: &[u8], key: &[u8], config: &CipherConfig) -> Result<Box<[u8]>> {
+pub fn decrypt(data: &[u8], config: &CipherConfig) -> Result<Box<[u8]>> {
     let report_error = |e: ErrorStack| {
         ExprError::Cryptography(Box::new(CryptographyError {
             stage: CryptographyStage::Decrypt,
@@ -124,9 +133,9 @@ pub fn decrypt(data: &[u8], key: &[u8], config: &CipherConfig) -> Result<Box<[u8
         }))
     };
 
-    let cipher = config.build_cipher(key)?;
-    let mut decrypter =
-        Crypter::new(cipher, CipherMode::Decrypt, key, None).map_err(report_error)?;
+    let cipher = config.build_cipher()?;
+    let mut decrypter = Crypter::new(cipher, CipherMode::Decrypt, config.crypt_key.as_ref(), None)
+        .map_err(report_error)?;
     decrypter.pad(config.enable_padding());
     let mut decrypt = vec![0; data.len() + cipher.block_size()];
     let count = decrypter.update(data, &mut decrypt).map_err(report_error)?;
@@ -139,9 +148,9 @@ pub fn decrypt(data: &[u8], key: &[u8], config: &CipherConfig) -> Result<Box<[u8
 
 #[function(
     "encrypt(bytea, bytea, varchar) -> bytea",
-    prebuild = "CipherConfig::parse_cipher_config($2)?"
+    prebuild = "CipherConfig::parse_cipher_config($1, $2)?"
 )]
-pub fn encrypt(data: &[u8], key: &[u8], config: &CipherConfig) -> Result<Box<[u8]>> {
+pub fn encrypt(data: &[u8], config: &CipherConfig) -> Result<Box<[u8]>> {
     let report_error = |e: ErrorStack| {
         ExprError::Cryptography(Box::new(CryptographyError {
             stage: CryptographyStage::Encrypt,
@@ -150,9 +159,9 @@ pub fn encrypt(data: &[u8], key: &[u8], config: &CipherConfig) -> Result<Box<[u8
         }))
     };
 
-    let cipher = config.build_cipher(key)?;
-    let mut encryptor =
-        Crypter::new(cipher, CipherMode::Encrypt, key, None).map_err(report_error)?;
+    let cipher = config.build_cipher()?;
+    let mut encryptor = Crypter::new(cipher, CipherMode::Encrypt, config.crypt_key.as_ref(), None)
+        .map_err(report_error)?;
     encryptor.pad(config.enable_padding());
     let mut encrypt = vec![0; data.len() + cipher.block_size()];
     let count = encryptor.update(data, &mut encrypt).map_err(report_error)?;
@@ -170,25 +179,28 @@ mod test {
     #[test]
     fn test_decrypt() {
         let data = b"hello world";
-        let key = b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F";
         let mode = "aes";
 
-        let config = CipherConfig::parse_cipher_config(mode).unwrap();
-        let encrypted = encrypt(data, key, &config).unwrap();
+        let config = CipherConfig::parse_cipher_config(
+            b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F" as &[u8],
+            mode,
+        )
+        .unwrap();
+        let encrypted = encrypt(data, &config).unwrap();
 
-        let decrypted = decrypt(&encrypted, key, &config).unwrap();
+        let decrypted = decrypt(&encrypted, &config).unwrap();
         assert_eq!(decrypted, (*data).into());
     }
 
     #[test]
     fn encrypt_testcase() {
         let encrypt_wrapper = |data: &[u8], key: &[u8], mode: &str| -> Result<Box<[u8]>> {
-            let config = CipherConfig::parse_cipher_config(mode)?;
-            encrypt(data, key, &config)
+            let config = CipherConfig::parse_cipher_config(key, mode)?;
+            encrypt(data, &config)
         };
         let decrypt_wrapper = |data: &[u8], key: &[u8], mode: &str| -> Result<Box<[u8]>> {
-            let config = CipherConfig::parse_cipher_config(mode)?;
-            decrypt(data, key, &config)
+            let config = CipherConfig::parse_cipher_config(key, mode)?;
+            decrypt(data, &config)
         };
 
         let encrypted = encrypt_wrapper(
@@ -206,7 +218,7 @@ mod test {
         .unwrap();
         assert_eq!(
             decrypted,
-            b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff"
+            (*b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff").into()
         )
     }
 }
