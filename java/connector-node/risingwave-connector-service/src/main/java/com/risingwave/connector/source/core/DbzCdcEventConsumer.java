@@ -152,8 +152,9 @@ public class DbzCdcEventConsumer
                 case DATA:
                     {
                         // Topic naming conventions
-                        // - PG: serverName.schemaName.tableName
-                        // - MySQL: serverName.databaseName.tableName
+                        // - PG: topicPrefix.schemaName.tableName
+                        // - MySQL: topicPrefix.databaseName.tableName
+                        // - Mongo: topicPrefix.databaseName.collectionName
                         // We can extract the full table name from the topic
                         var fullTableName =
                                 record.topic().substring(record.topic().indexOf('.') + 1);
