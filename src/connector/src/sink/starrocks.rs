@@ -50,10 +50,10 @@ pub struct StarrocksCommon {
     /// The StarRocks host address.
     #[serde(rename = "starrocks.host")]
     pub host: String,
-    /// The address that connects to the MySQL client of the frontend. By default, this is 9030.
+    /// The address that connects to the MySQL client of the frontend.
     #[serde(rename = "starrocks.mysqlport")]
     pub mysql_port: String,
-    /// The http port for data import. By default, this is 8030.
+    /// The http port for data import.
     #[serde(rename = "starrocks.httpport")]
     pub http_port: String,
     /// The user name used to access the StarRocks database.
