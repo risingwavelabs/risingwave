@@ -354,9 +354,10 @@ impl DdlController {
         &self,
         table_id: u32,
         parallelism: PbTableParallelism,
+        deferred: bool,
     ) -> MetaResult<()> {
         self.stream_manager
-            .alter_table_parallelism(table_id, parallelism.into())
+            .alter_table_parallelism(table_id, parallelism.into(), deferred)
             .await
     }
 

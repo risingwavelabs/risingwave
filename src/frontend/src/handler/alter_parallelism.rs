@@ -32,6 +32,7 @@ pub async fn handle_alter_parallelism(
     obj_name: ObjectName,
     parallelism: SetVariableValue,
     stmt_type: StatementType,
+    deferred: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = session.database();
@@ -93,10 +94,16 @@ pub async fn handle_alter_parallelism(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_parallelism(table_id, target_parallelism)
+        .alter_parallelism(table_id, target_parallelism, deferred)
         .await?;
 
-    Ok(RwPgResponse::empty_result(stmt_type))
+    let mut builder = RwPgResponse::builder(stmt_type);
+
+    if deferred {
+        builder = builder.notice("DEFERRED is used, please ensure that automatic parallelism control is enabled on the meta, otherwise, the alter will not take effect.".to_string());
+    }
+
+    Ok(builder.into())
 }
 
 fn extract_table_parallelism(parallelism: SetVariableValue) -> Result<TableParallelism> {

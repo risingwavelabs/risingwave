@@ -737,6 +737,7 @@ impl GlobalStreamManager {
         &self,
         table_id: u32,
         parallelism: TableParallelism,
+        deferred: bool,
     ) -> MetaResult<()> {
         let MetadataManager::V1(mgr) = &self.metadata_manager else {
             unimplemented!("support alter table parallelism in v2");
@@ -754,15 +755,18 @@ impl GlobalStreamManager {
             .map(|node| node.id)
             .collect::<BTreeSet<_>>();
 
-        let reschedules = self
-            .scale_controller
-            .as_ref()
-            .unwrap()
-            .generate_table_resize_plan(TableResizePolicy {
-                worker_ids,
-                table_parallelisms: vec![(table_id, parallelism)].into_iter().collect(),
-            })
-            .await?;
+        let reschedules = if deferred {
+            HashMap::new()
+        } else {
+            self.scale_controller
+                .as_ref()
+                .unwrap()
+                .generate_table_resize_plan(TableResizePolicy {
+                    worker_ids,
+                    table_parallelisms: vec![(table_id, parallelism)].into_iter().collect(),
+                })
+                .await?
+        };
 
         self.reschedule_actors(
             reschedules,

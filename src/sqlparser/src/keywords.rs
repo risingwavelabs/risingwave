@@ -183,6 +183,7 @@ define_keywords!(
     DECLARE,
     DEFAULT,
     DEFERRABLE,
+    DEFERRED,
     DELETE,
     DELIMITED,
     DENSE_RANK,
