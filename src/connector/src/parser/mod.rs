@@ -55,9 +55,8 @@ use crate::parser::util::{
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
-    extract_source_struct, BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
-    SourceContextRef, SourceEncode, SourceFormat, SourceMeta, SourceWithStateStream, SplitId,
-    StreamChunkWithState,
+    extract_source_struct, BoxSourceStream, ChunkSourceStream, SourceColumnDesc, SourceColumnType,
+    SourceContext, SourceContextRef, SourceEncode, SourceFormat, SourceMeta,
 };
 
 pub mod additional_columns;
@@ -567,8 +566,8 @@ impl<P: ByteStreamSourceParser> P {
     ///
     /// # Returns
     ///
-    /// A [`SourceWithStateStream`] which is a stream of parsed messages.
-    pub fn into_stream(self, data_stream: BoxSourceStream) -> impl SourceWithStateStream {
+    /// A [`ChunkSourceStream`] which is a stream of parsed messages.
+    pub fn into_stream(self, data_stream: BoxSourceStream) -> impl ChunkSourceStream {
         // Enable tracing to provide more information for parsing failures.
         let source_info = self.source_ctx().source_info;
 
@@ -590,12 +589,11 @@ const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
 
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
-#[try_stream(ok = StreamChunkWithState, error = RwError)]
+#[try_stream(ok = StreamChunk, error = RwError)]
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
     let columns = parser.columns().to_vec();
 
     let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
-    let mut split_offset_mapping = HashMap::<SplitId, String>::new();
 
     struct Transaction {
         id: Box<str>,
@@ -620,10 +618,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                 );
                 *len = 0; // reset `len` while keeping `id`
                 yield_asap = false;
-                yield StreamChunkWithState {
-                    chunk: builder.take(batch_len),
-                    split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
-                };
+                yield builder.take(batch_len);
             } else {
                 // Normal transaction. After the transaction is committed, we should yield the last
                 // batch immediately, so set `yield_asap` to true.
@@ -633,7 +628,6 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
             // Clean state. Reserve capacity for the builder.
             assert!(builder.is_empty());
             assert!(!yield_asap);
-            assert!(split_offset_mapping.is_empty());
             let _ = builder.take(batch_len);
         }
 
@@ -641,12 +635,6 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
         for (i, msg) in batch.into_iter().enumerate() {
             if msg.key.is_none() && msg.payload.is_none() {
                 tracing::debug!(offset = msg.offset, "skip parsing of heartbeat message");
-                // assumes an empty message as a heartbeat
-                // heartbeat message offset should not overwrite data messages offset
-                split_offset_mapping
-                    .entry(msg.split_id)
-                    .or_insert(msg.offset.clone());
-
                 continue;
             }
 
@@ -659,8 +647,6 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     .with_label_values(&[&msg_meta.full_table_name])
                     .observe(lag_ms as f64);
             }
-
-            split_offset_mapping.insert(msg.split_id.clone(), msg.offset.clone());
 
             let old_op_num = builder.op_num();
             match parser
@@ -727,10 +713,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     // chunk now.
                     if current_transaction.is_none() && yield_asap {
                         yield_asap = false;
-                        yield StreamChunkWithState {
-                            chunk: builder.take(batch_len - (i + 1)),
-                            split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
-                        };
+                        yield builder.take(batch_len - (i + 1));
                     }
                 }
             }
@@ -740,10 +723,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
         if current_transaction.is_none() {
             yield_asap = false;
 
-            yield StreamChunkWithState {
-                chunk: builder.take(0),
-                split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
-            };
+            yield builder.take(0);
         }
     }
 }
@@ -815,7 +795,7 @@ pub enum ByteStreamSourceParserImpl {
     CanalJson(CanalJsonParser),
 }
 
-pub type ParsedStreamImpl = impl SourceWithStateStream + Unpin;
+pub type ParsedStreamImpl = impl ChunkSourceStream + Unpin;
 
 impl ByteStreamSourceParserImpl {
     /// Converts this parser into a stream of [`StreamChunk`].

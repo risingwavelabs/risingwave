@@ -101,7 +101,7 @@ impl<LS: LocalStateStore> SubscriptionLogStoreWriter<LS> {
                     .serialize_truncation_offset_watermark(truncate_offset),
             )
         });
-        self.state_store.flush(vec![]).await?;
+        self.state_store.flush().await?;
         let watermark = watermark.into_iter().collect_vec();
         self.state_store.seal_current_epoch(
             next_epoch,

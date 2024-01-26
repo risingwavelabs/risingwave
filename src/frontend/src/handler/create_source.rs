@@ -544,6 +544,7 @@ pub fn handle_addition_columns(
             item.column_alias.map(|alias| alias.real_value()),
             item.inner_field.as_deref(),
             data_type_name.as_deref(),
+            true,
         )?);
     }
 
@@ -863,6 +864,7 @@ fn check_and_add_timestamp_column(
             Some(KAFKA_TIMESTAMP_COLUMN_NAME.to_string()),
             None,
             None,
+            true,
         )
         .unwrap();
         catalog.is_hidden = true;

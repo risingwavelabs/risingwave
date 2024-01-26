@@ -27,8 +27,8 @@ use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_connector::source::reader::desc::{FsSourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
-    BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
-    SplitMetaData, StreamChunkWithState,
+    BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
+    SplitMetaData,
 };
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -92,7 +92,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         &mut self,
         source_desc: &FsSourceDesc,
         state: ConnectorState,
-    ) -> StreamExecutorResult<BoxSourceWithStateStream> {
+    ) -> StreamExecutorResult<BoxChunkSourceStream> {
         let column_ids = source_desc
             .columns
             .iter()
@@ -118,7 +118,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     async fn apply_split_change<const BIASED: bool>(
         &mut self,
         source_desc: &FsSourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
         if let Some(target_splits) = mapping.get(&self.actor_ctx.id).cloned() {
@@ -184,7 +184,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     async fn replace_stream_reader_with_target_state<const BIASED: bool>(
         &mut self,
         source_desc: &FsSourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
         tracing::info!(
@@ -283,6 +283,11 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .build_fs_source_desc()
             .map_err(StreamExecutorError::connector_error)?;
 
+        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
+        else {
+            unreachable!("Partition and offset columns must be set.");
+        };
+
         // If the first barrier requires us to pause on startup, pause the stream.
         let start_with_paused = barrier.is_pause_on_startup();
 
@@ -344,10 +349,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
         // Merge the chunks from source and the barriers into a single stream. We prioritize
         // barriers over source data chunks here.
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
-        let mut stream = StreamReaderWithPause::<true, StreamChunkWithState>::new(
-            barrier_stream,
-            source_chunk_reader,
-        );
+        let mut stream =
+            StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_chunk_reader);
         if start_with_paused {
             stream.pause_stream();
         }
@@ -412,10 +415,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     }
                 },
 
-                Either::Right(StreamChunkWithState {
-                    chunk,
-                    split_offset_mapping,
-                }) => {
+                Either::Right(chunk) => {
+                    // TODO: confirm when split_offset_mapping is None
+                    let split_offset_mapping =
+                        get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx);
                     if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
                         // Exceeds the max wait barrier time, the source will be paused. Currently
                         // we can guarantee the source is not paused since it received stream
@@ -455,7 +458,11 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             self.actor_ctx.id.to_string().as_str(),
                         ])
                         .inc_by(chunk.cardinality() as u64);
+
+                    let chunk =
+                        prune_additional_cols(&chunk, split_idx, offset_idx, &source_desc.columns);
                     yield Message::Chunk(chunk);
+
                     self.try_flush_data().await?;
                 }
             }
