@@ -22,8 +22,8 @@ aws s3 cp s3://ci-deps-dist/llvm-lld-manylinux2014_x86_64.tar.gz .
 tar -zxvf llvm-lld-manylinux2014_x86_64.tar.gz --directory=/usr/local
 ld.lld --version
 
-echo "--- Install dependencies for openssl"
-yum install -y perl-core
+echo "--- Install dependencies for openssl and clang"
+yum install -y perl-core clang
 
 echo "--- Install java and maven"
 yum install -y java-11-openjdk java-11-openjdk-devel wget python3 cyrus-sasl-devel
