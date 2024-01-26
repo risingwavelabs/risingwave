@@ -108,7 +108,7 @@ impl ClusterManager {
         property: AddNodeProperty,
         resource: risingwave_pb::common::worker_node::Resource,
     ) -> MetaResult<WorkerNode> {
-        let worker_node_parallelism = property.worker_node_parallelism as usize;
+        let new_worker_parallelism = property.worker_node_parallelism as usize;
         let mut property = self.parse_property(r#type, property);
         let mut core = self.core.write().await;
 
@@ -124,8 +124,8 @@ impl ClusterManager {
                     .unwrap_or_default();
             }
 
-            let current_parallelism = worker.worker_node.parallel_units.len();
-            if current_parallelism == worker_node_parallelism
+            let old_worker_parallelism = worker.worker_node.parallel_units.len();
+            if old_worker_parallelism == new_worker_parallelism
                 && worker.worker_node.property == property
             {
                 worker.update_expire_at(self.max_heartbeat_interval);
@@ -133,32 +133,26 @@ impl ClusterManager {
             }
 
             let mut new_worker = worker.clone();
-            match current_parallelism.cmp(&worker_node_parallelism) {
+            match old_worker_parallelism.cmp(&new_worker_parallelism) {
                 Ordering::Less => {
                     tracing::info!(
                         "worker {} parallelism updated from {} to {}",
                         new_worker.worker_node.id,
-                        current_parallelism,
-                        worker_node_parallelism
+                        old_worker_parallelism,
+                        new_worker_parallelism
                     );
                     let parallel_units = self
                         .generate_cn_parallel_units(
-                            worker_node_parallelism - current_parallelism,
+                            new_worker_parallelism - old_worker_parallelism,
                             new_worker.worker_id(),
                         )
                         .await?;
                     new_worker.worker_node.parallel_units.extend(parallel_units);
                 }
-                Ordering::Greater => {
-                    // Warn and keep the original parallelism if the worker registered with a
-                    // smaller parallelism.
-                    tracing::warn!(
-                        "worker {} parallelism is less than current, current is {}, but received {}",
-                        new_worker.worker_id(),
-                        current_parallelism,
-                        worker_node_parallelism
-                    );
-                }
+                Ordering::Greater => new_worker
+                    .worker_node
+                    .parallel_units
+                    .truncate(new_worker_parallelism),
                 Ordering::Equal => {}
             }
             if property != new_worker.worker_node.property {
@@ -194,7 +188,7 @@ impl ClusterManager {
 
         // Generate parallel units.
         let parallel_units = if r#type == WorkerType::ComputeNode {
-            self.generate_cn_parallel_units(worker_node_parallelism, worker_id)
+            self.generate_cn_parallel_units(new_worker_parallelism, worker_id)
                 .await?
         } else {
             vec![]
