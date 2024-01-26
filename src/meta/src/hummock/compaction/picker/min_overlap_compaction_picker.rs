@@ -390,7 +390,8 @@ impl NonOverlapSubLevelPicker {
                                     ret_sst_infos,
                                     "sub level {}",
                                     levels.get(idx).unwrap().sub_level_id
-                                );
+                                )
+                                .unwrap();
                                 ssts.iter().for_each(|s| {
                                     append_sstable_info_to_string(&mut ret_sst_infos, s)
                                 });
