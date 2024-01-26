@@ -39,6 +39,7 @@ use crate::hummock::compaction::picker::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 
+#[derive(Clone)]
 pub struct CompactStatus {
     pub compaction_group_id: CompactionGroupId,
     pub level_handlers: Vec<LevelHandler>,
@@ -57,15 +58,6 @@ impl PartialEq for CompactStatus {
     fn eq(&self, other: &Self) -> bool {
         self.level_handlers.eq(&other.level_handlers)
             && self.compaction_group_id == other.compaction_group_id
-    }
-}
-
-impl Clone for CompactStatus {
-    fn clone(&self) -> Self {
-        Self {
-            compaction_group_id: self.compaction_group_id,
-            level_handlers: self.level_handlers.clone(),
-        }
     }
 }
 
@@ -225,6 +217,15 @@ pub struct CompactionDeveloperConfig {
 
     /// l0 multi level picker whether to check the overlap accuracy between sub levels
     pub enable_check_task_level_overlap: bool,
+}
+
+impl CompactionDeveloperConfig {
+    pub fn new_from_meta_opts(opts: &MetaOpts) {
+        Self {
+            enable_trivial_move: opts.enable_trivial_move,
+            enable_check_task_level_overlap: opts.enable_check_task_level_overlap,
+        }
+    }
 }
 
 impl Default for CompactionDeveloperConfig {

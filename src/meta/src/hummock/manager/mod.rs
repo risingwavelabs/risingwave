@@ -955,10 +955,9 @@ impl HummockManager {
             &mut stats,
             selector,
             table_id_to_option.clone(),
-            Arc::new(CompactionDeveloperConfig {
-                enable_trivial_move: self.env.opts.enable_trivial_move,
-                enable_check_task_level_overlap: self.env.opts.enable_check_task_level_overlap,
-            }),
+            Arc::new(CompactionDeveloperConfig::new_from_meta_opts(
+                &self.env.opts,
+            )),
         );
         stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
         let compact_task = match compact_task {

@@ -20,13 +20,11 @@ use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
-pub trait OverlapInfo {
+pub trait OverlapInfo: Debug {
     fn check_overlap(&self, a: &SstableInfo) -> bool;
     fn check_multiple_overlap(&self, others: &[SstableInfo]) -> Range<usize>;
     fn check_multiple_include(&self, others: &[SstableInfo]) -> Range<usize>;
     fn update(&mut self, table: &SstableInfo);
-
-    fn debug_info(&self) -> String;
 }
 
 pub trait OverlapStrategy: Send + Sync {
@@ -69,7 +67,7 @@ pub trait OverlapStrategy: Send + Sync {
     fn create_overlap_info(&self) -> Box<dyn OverlapInfo>;
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct RangeOverlapInfo {
     target_range: Option<KeyRange>,
 }
@@ -145,10 +143,6 @@ impl OverlapInfo for RangeOverlapInfo {
             return;
         }
         self.target_range = Some(other.clone());
-    }
-
-    fn debug_info(&self) -> String {
-        format!("range {:?}", self.target_range)
     }
 }
 

@@ -435,6 +435,7 @@ pub fn trigger_lsm_stat(
 ) {
     let group_label = compaction_group_id.to_string();
     // compact_pending_bytes
+    // we don't actually generate a compaction task here so developer config can be ignored.
     let dynamic_level_core = DynamicLevelSelectorCore::new(
         compaction_config.clone(),
         Arc::new(CompactionDeveloperConfig::default()),

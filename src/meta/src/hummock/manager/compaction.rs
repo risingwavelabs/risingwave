@@ -80,7 +80,7 @@ impl HummockManager {
         &self,
         compaction_group_id: CompactionGroupId,
     ) -> Vec<PickerInfo> {
-        let (status, levels, config) = {
+        let (status, levels, group) = {
             let compaction = read_lock!(self, compaction).await;
             let versioning = read_lock!(self, versioning).await;
             let config_manager = self.compaction_group_manager.read().await;
@@ -96,7 +96,7 @@ impl HummockManager {
             }
         };
         let dynamic_level_core = DynamicLevelSelectorCore::new(
-            config.compaction_config,
+            group.compaction_config,
             Arc::new(CompactionDeveloperConfig::default()),
         );
         let ctx = dynamic_level_core.get_priority_levels(&levels, &status.level_handlers);
