@@ -460,11 +460,11 @@ StarrocksConfig:
     required: true
   - name: starrocks.mysqlport
     field_type: String
-    comments: The address that connects to the MySQL client of the frontend. By default, this is 9030.
+    comments: The port to the MySQL server of StarRocks FE.
     required: true
   - name: starrocks.httpport
     field_type: String
-    comments: The http port for data import. By default, this is 8030.
+    comments: The port to the HTTP server of StarRocks FE.
     required: true
   - name: starrocks.user
     field_type: String
