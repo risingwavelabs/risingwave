@@ -133,7 +133,7 @@ arrow-flight = "50"
 arrow-select = "50"
 arrow-ord = "50"
 arrow-row = "50"
-arrow-udf-js = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "ea7664d" }
+arrow-udf-js = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "7ba1c22" }
 arrow-udf-wasm = "0.1"
 arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
 arrow-buffer-deltalake = { package = "arrow-buffer", version = "48.0.1" }
@@ -282,6 +282,8 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
+# need binding on aarch64-unknown-linux-gnu, waiting for new release
+rquickjs-sys = { git = "https://github.com/DelSkayn/rquickjs.git", rev = "60696e8" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]
