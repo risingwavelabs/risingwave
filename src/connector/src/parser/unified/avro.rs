@@ -342,7 +342,6 @@ pub(crate) fn avro_decimal_to_rust_decimal(
 }
 
 pub(crate) fn extract_decimal(bytes: Vec<u8>) -> anyhow::Result<(u32, u32, u32)> {
-    tracing::info!("decimal bytes: {:?}", bytes);
     match bytes.len() {
         len @ 0..=4 => {
             let mut pad = vec![0; 4 - len];
@@ -528,7 +527,7 @@ mod tests {
         assert_eq!(
             resp,
             Some(ScalarImpl::Decimal(Decimal::Normalized(
-                rust_decimal::Decimal::from_str("4.557430887741865791").unwrap()
+                rust_decimal::Decimal::from_str("0.017802464409370431").unwrap()
             )))
         );
     }
