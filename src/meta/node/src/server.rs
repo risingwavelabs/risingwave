@@ -28,6 +28,7 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
+use risingwave_meta::barrier::StreamRpcManager;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
 use risingwave_meta::manager::MetadataManager;
@@ -537,6 +538,8 @@ pub async fn start_service_as_election_leader(
     let (sink_manager, shutdown_handle) = SinkCoordinatorManager::start_worker();
     let mut sub_tasks = vec![shutdown_handle];
 
+    let stream_rpc_manager = StreamRpcManager::new(env.clone());
+
     let barrier_manager = GlobalBarrierManager::new(
         scheduled_barriers,
         env.clone(),
@@ -545,6 +548,7 @@ pub async fn start_service_as_election_leader(
         source_manager.clone(),
         sink_manager.clone(),
         meta_metrics.clone(),
+        stream_rpc_manager.clone(),
     );
 
     {
@@ -561,6 +565,7 @@ pub async fn start_service_as_election_leader(
             barrier_scheduler.clone(),
             source_manager.clone(),
             hummock_manager.clone(),
+            stream_rpc_manager,
         )
         .unwrap(),
     );

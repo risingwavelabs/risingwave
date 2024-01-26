@@ -71,6 +71,7 @@ mod state;
 mod trace;
 
 pub use self::command::{Command, ReplaceTablePlan, Reschedule};
+pub use self::rpc::StreamRpcManager;
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
 
@@ -148,6 +149,8 @@ pub struct GlobalBarrierManagerContext {
     sink_manager: SinkCoordinatorManager,
 
     metrics: Arc<MetaMetrics>,
+
+    stream_rpc_manager: StreamRpcManager,
 
     env: MetaSrvEnv,
 }
@@ -381,6 +384,7 @@ impl GlobalBarrierManager {
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         metrics: Arc<MetaMetrics>,
+        stream_rpc_manager: StreamRpcManager,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
@@ -398,6 +402,7 @@ impl GlobalBarrierManager {
             MetadataManager::V1(_) => Some(Arc::new(ScaleController::new(
                 &metadata_manager,
                 source_manager.clone(),
+                stream_rpc_manager.clone(),
                 env.clone(),
             ))),
             MetadataManager::V2(_) => None,
@@ -411,6 +416,7 @@ impl GlobalBarrierManager {
             sink_manager,
             metrics,
             tracker: Arc::new(Mutex::new(tracker)),
+            stream_rpc_manager,
             env: env.clone(),
         };
 

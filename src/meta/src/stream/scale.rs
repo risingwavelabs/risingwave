@@ -39,17 +39,13 @@ use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
 use risingwave_pb::meta::FragmentParallelUnitMappings;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatcherType, FragmentTypeFlag, StreamActor, StreamNode};
-use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, UpdateActorsRequest,
-};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
-use uuid::Uuid;
 
-use crate::barrier::{Command, Reschedule};
+use crate::barrier::{Command, Reschedule, StreamRpcManager};
 use crate::manager::{
     ClusterManagerRef, FragmentManagerRef, IdCategory, LocalNotification, MetaSrvEnv,
     MetadataManager, WorkerId,
@@ -375,6 +371,8 @@ pub struct ScaleController {
 
     pub source_manager: SourceManagerRef,
 
+    pub stream_rpc_manager: StreamRpcManager,
+
     pub env: MetaSrvEnv,
 }
 
@@ -382,6 +380,7 @@ impl ScaleController {
     pub fn new(
         metadata_manager: &MetadataManager,
         source_manager: SourceManagerRef,
+        stream_rpc_manager: StreamRpcManager,
         env: MetaSrvEnv,
     ) -> Self {
         match metadata_manager {
@@ -389,6 +388,7 @@ impl ScaleController {
                 fragment_manager: mgr.fragment_manager.clone(),
                 cluster_manager: mgr.cluster_manager.clone(),
                 source_manager,
+                stream_rpc_manager,
                 env,
             },
             MetadataManager::V2(_) => unimplemented!("support v2 in scale controller"),
@@ -699,48 +699,41 @@ impl ScaleController {
         node_actors_to_create: HashMap<WorkerId, Vec<StreamActor>>,
         broadcast_worker_ids: HashSet<u32>,
     ) -> MetaResult<()> {
-        for worker_id in &broadcast_worker_ids {
-            let node = worker_nodes.get(worker_id).unwrap();
-            let client = self.env.stream_client_pool().get(node).await?;
+        let actor_infos_to_broadcast = actor_infos_to_broadcast.values().cloned().collect();
+        self.stream_rpc_manager
+            .broadcast_actor_info(
+                broadcast_worker_ids
+                    .iter()
+                    .map(|worker_id| worker_nodes.get(worker_id).unwrap()),
+                &actor_infos_to_broadcast,
+            )
+            .await?;
 
-            let actor_infos_to_broadcast = actor_infos_to_broadcast.values().cloned().collect();
+        self.stream_rpc_manager
+            .update_actors(
+                node_actors_to_create
+                    .iter()
+                    .map(|(node_id, stream_actors)| {
+                        (worker_nodes.get(node_id).unwrap(), stream_actors.clone())
+                    }),
+            )
+            .await?;
 
-            client
-                .to_owned()
-                .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
-                    info: actor_infos_to_broadcast,
-                })
-                .await?;
-        }
-
-        for (node_id, stream_actors) in &node_actors_to_create {
-            let node = worker_nodes.get(node_id).unwrap();
-            let client = self.env.stream_client_pool().get(node).await?;
-            let request_id = Uuid::new_v4().to_string();
-            let request = UpdateActorsRequest {
-                request_id,
-                actors: stream_actors.clone(),
-            };
-
-            client.to_owned().update_actors(request).await?;
-        }
-
-        for (node_id, stream_actors) in node_actors_to_create {
-            let node = worker_nodes.get(&node_id).unwrap();
-            let client = self.env.stream_client_pool().get(node).await?;
-            let request_id = Uuid::new_v4().to_string();
-
-            client
-                .to_owned()
-                .build_actors(BuildActorsRequest {
-                    request_id,
-                    actor_id: stream_actors
-                        .iter()
-                        .map(|stream_actor| stream_actor.actor_id)
-                        .collect(),
-                })
-                .await?;
-        }
+        self.stream_rpc_manager
+            .build_actors(
+                node_actors_to_create
+                    .iter()
+                    .map(|(node_id, stream_actors)| {
+                        (
+                            worker_nodes.get(node_id).unwrap(),
+                            stream_actors
+                                .iter()
+                                .map(|actor| actor.actor_id)
+                                .collect_vec(),
+                        )
+                    }),
+            )
+            .await?;
 
         Ok(())
     }

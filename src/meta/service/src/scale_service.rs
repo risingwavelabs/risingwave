@@ -52,6 +52,7 @@ impl ScaleServiceImpl {
             MetadataManager::V1(_) => Some(Arc::new(ScaleController::new(
                 &metadata_manager,
                 source_manager.clone(),
+                stream_manager.stream_rpc_manager.clone(),
                 stream_manager.env.clone(),
             ))),
             MetadataManager::V2(_) => None,

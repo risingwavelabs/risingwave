@@ -34,9 +34,8 @@ use risingwave_pb::stream_plan::{
     PauseMutation, ResumeMutation, SourceChangeSplitMutation, StopMutation, ThrottleMutation,
     UpdateMutation,
 };
-use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
+use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
-use uuid::Uuid;
 
 use super::info::{ActorDesc, CommandActorChanges, InflightActorInfo};
 use super::trace::TracedEpoch;
@@ -744,30 +743,18 @@ impl CommandContext {
         &self,
         actors_to_clean: impl IntoIterator<Item = (WorkerId, Vec<ActorId>)>,
     ) -> MetaResult<()> {
-        let futures = actors_to_clean.into_iter().map(|(node_id, actors)| {
-            let node = self.info.node_map.get(&node_id).unwrap();
-            let request_id = Uuid::new_v4().to_string();
-
-            async move {
-                let client = self
-                    .barrier_manager_context
-                    .env
-                    .stream_client_pool()
-                    .get(node)
-                    .await?;
-                let request = DropActorsRequest {
-                    request_id,
-                    actor_ids: actors.to_owned(),
-                };
-                client.drop_actors(request).await
-            }
-        });
-
-        try_join_all(futures).await?;
-        Ok(())
+        self.barrier_manager_context
+            .stream_rpc_manager
+            .drop_actors(
+                actors_to_clean
+                    .into_iter()
+                    .map(|(node_id, actors)| (self.info.node_map.get(&node_id).unwrap(), actors)),
+            )
+            .await
     }
 
     pub async fn wait_epoch_commit(&self, epoch: HummockEpoch) -> MetaResult<()> {
+        self.barrier_manager_context.stream_rpc_manager
         let futures = self.info.node_map.values().map(|worker_node| async {
             let client = self
                 .barrier_manager_context
