@@ -234,9 +234,10 @@ impl<S: StateStore> SourceExecutor<S> {
     ) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
         tracing::warn!(
-            "stream source reader error, actor: {:?}, source: {:?}",
-            self.actor_ctx.id,
-            core.source_id,
+            error = ?e.as_report(),
+            actor_id = self.actor_ctx.id,
+            source_id = %core.source_id,
+            "stream source reader error",
         );
         GLOBAL_ERROR_METRICS.user_source_reader_error.report([
             "SourceReaderError".to_owned(),
