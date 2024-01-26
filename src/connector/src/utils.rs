@@ -20,17 +20,17 @@ where
     T: serde::de::DeserializeOwned,
 {
     /// Deserialize from a `&HashMap` or `&BTreeMap` of string-like keys and values.
-    pub fn deserialize_from_map<'a, M, K, V>(map: &'a M) -> Result<Self, serde::de::value::Error>
+    pub fn deserialize_from_map<'a, M, K, V>(map: &'a M) -> Result<Self, simd_json::Error>
     where
         &'a M: IntoIterator<Item = (&'a K, &'a V)>,
         K: AsRef<str> + 'a,
         V: AsRef<str> + 'a,
     {
-        Self::deserialize(serde::de::value::MapDeserializer::<
-            _,
-            serde::de::value::Error,
-        >::new(
-            map.into_iter().map(|(k, v)| (k.as_ref(), v.as_ref()))
+        // The deserializing itself has nothing to do with `simd_json`. We just use it to
+        // provide a correct implementation of `deserialize_option` for optional fields.
+        Self::deserialize(serde::de::value::MapDeserializer::new(
+            map.into_iter()
+                .map(|(k, v)| (k.as_ref(), simd_json::BorrowedValue::from(v.as_ref()))),
         ))
     }
 }
