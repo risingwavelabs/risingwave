@@ -80,3 +80,7 @@ app.get("/metrics/actor/back_pressures", (req, res, next) => {
 app.get("/monitor/await_tree/1", (req, res, next) => {
   res.json(require("./mock/await_tree_1.json"))
 })
+
+app.get("/metrics/back_pressures", (req, res, next) => {
+  res.json(require("./mock/back_pressures.json"))
+})

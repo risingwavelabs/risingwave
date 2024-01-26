@@ -15,17 +15,55 @@
  *
  */
 import { Metrics, MetricsSample } from "../../components/metrics"
+import { Field } from "../../proto/gen/plan_common"
 import api from "./api"
 
 export interface BackPressuresMetrics {
   outputBufferBlockingDuration: Metrics[]
 }
 
+// Get back pressure from meta node -> prometheus
 export async function getActorBackPressures() {
   const res: BackPressuresMetrics = await api.get(
     "/metrics/actor/back_pressures"
   )
   return res
+}
+
+export interface BackPressureInfo {
+  id: number;
+  name: string;
+  owner: number;
+  columns: Field[];
+  actorId: number,
+  fragementId: number,
+  donwStreamFragmentId: number,
+  value: number,
+}
+
+export const BackPressureInfo = {
+  fromJSON: (object: any) => {
+    return {
+      id: 0,
+      name: "",
+      owner: 0,
+      columns: [],
+      actorId: isSet(object.actorId) ? Number(object.actorId) : 0,
+      fragementId: isSet(object.fragementId) ? Number(object.fragementId) : 0,
+      donwStreamFragmentId: isSet(object.donwStreamFragmentId) ? Number(object.donwStreamFragmentId) : 0,
+      value: isSet(object.value) ? Number(object.value) : 0,
+    }
+  },
+}
+
+// Get back pressure from meta node -> compute node
+export async function getComputeBackPressures() {
+  const response = await api.get("/metrics/back_pressures");
+
+  let back_pressure_infos: BackPressureInfo[] = response.backPressureInfos.map(BackPressureInfo.fromJSON)
+
+  back_pressure_infos = back_pressure_infos.sort((a, b) => a.actorId - b.actorId)
+  return back_pressure_infos
 }
 
 function calculatePercentile(samples: MetricsSample[], percentile: number) {
@@ -48,4 +86,8 @@ export function p95(samples: MetricsSample[]) {
 
 export function p99(samples: MetricsSample[]) {
   return calculatePercentile(samples, 0.99)
+}
+
+function isSet(value: any): boolean {
+  return value !== null && value !== undefined;
 }
