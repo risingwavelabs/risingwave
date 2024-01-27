@@ -19,7 +19,7 @@ services:
                  --compute-opts=\" \
                     --config-path /risingwave.toml \
                     --listen-addr 0.0.0.0:5688 \
-                    --prometheus-listener-addr 0.0.0.0:1222 \
+                    --prometheus-listener-addr 0.0.0.0:1250 \
                     --advertise-addr 0.0.0.0:5688 \
                     --async-stack-trace verbose \
                     --connector-rpc-endpoint 0.0.0.0:50051 \
@@ -31,32 +31,26 @@ services:
                    --config-path /risingwave.toml \
                    --listen-addr 0.0.0.0:4566 \
                    --advertise-addr 0.0.0.0:4566 \
-                   --prometheus-listener-addr 0.0.0.0:2222 \
+                   --prometheus-listener-addr 0.0.0.0:1250 \
                    --health-check-listener-addr 0.0.0.0:6786 \
                    --meta-addr http://0.0.0.0:5690\" \
                  --compactor-opts=\" \
                    --listen-addr 0.0.0.0:6660 \
-                   --prometheus-listener-addr 0.0.0.0:1260 \
+                   --prometheus-listener-addr 0.0.0.0:1250 \
                    --advertise-addr 0.0.0.0:6660 \
                    --meta-address http://0.0.0.0:5690\""
     expose:
       - "6660"
-      - "1260"
       - "4566"
       - "5688"
-      - "1222"
       - "5690"
       - "1250"
       - "5691"
-      - "2222"
     ports:
       - "4566:4566"
       - "5690:5690"
       - "5691:5691"
-      - "1222:1222"
       - "1250:1250"
-      - "1260:1260"
-      - "2222:2222"
     depends_on:
       - etcd-0
     env_file: aws.env
