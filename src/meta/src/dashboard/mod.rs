@@ -29,7 +29,6 @@ use axum::routing::{get, get_service};
 use axum::Router;
 use hyper::Request;
 use parking_lot::Mutex;
-use risingwave_pb::stream_service::GetBackPressureResponse;
 use risingwave_rpc_client::ComputeClientPool;
 use tower::{ServiceBuilder, ServiceExt};
 use tower_http::add_extension::AddExtensionLayer;
@@ -64,7 +63,8 @@ pub(super) mod handlers {
     use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::meta::{ActorLocation, PbTableFragments};
     use risingwave_pb::monitor_service::{
-        HeapProfilingResponse, ListHeapProfilingResponse, StackTraceResponse,
+        GetBackPressureResponse, HeapProfilingResponse, ListHeapProfilingResponse,
+        StackTraceResponse,
     };
     use serde_json::json;
     use thiserror_ext::AsReport;
@@ -363,21 +363,27 @@ pub(super) mod handlers {
     }
 
     pub async fn get_back_pressure(
-        // Path(worker_id): Path<WorkerId>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<GetBackPressureResponse>> {
-        let back_pressure_infos = match &srv.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                mgr.cluster_manager.get_back_pressure().await.map_err(err)?
-            }
-            MetadataManager::V2(mgr) => mgr
-                .cluster_controller
-                .get_back_pressure()
-                .await
-                .map_err(err)?,
-        };
+        let worker_nodes = srv
+            .metadata_manager
+            .list_active_streaming_compute_nodes()
+            .await
+            .map_err(err)?;
+        let mut all = Default::default();
 
-        Ok(back_pressure_infos.into())
+        fn merge(a: &mut GetBackPressureResponse, b: GetBackPressureResponse) {
+            a.back_pressure_infos.extend(b.back_pressure_infos);
+        }
+
+        for worker_node in worker_nodes {
+            let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+            let result = client.get_back_pressure().await.map_err(err)?;
+
+            merge(&mut all, result);
+        }
+
+        Ok(all.into())
     }
 }
 
