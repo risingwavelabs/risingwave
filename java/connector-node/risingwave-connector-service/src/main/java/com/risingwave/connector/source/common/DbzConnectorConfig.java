@@ -61,6 +61,7 @@ public class DbzConnectorConfig {
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
     private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
+    private static final String MONGODB_CONFIG_FILE = "mongodb.properties";
 
     private static final String DBZ_PROPERTY_PREFIX = "debezium.";
 
@@ -217,6 +218,18 @@ public class DbzConnectorConfig {
                         ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
             }
             dbzProps.putAll(postgresProps);
+        } else if (source == SourceTypeE.MONGODB) {
+            var mongodbProps = initiateDbConfig(MONGODB_CONFIG_FILE, substitutor);
+
+            // if snapshot phase is finished and offset is specified, we will continue reading
+            // changes from the given offset
+            if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
+                mongodbProps.setProperty("snapshot.mode", "never");
+                mongodbProps.setProperty(
+                        ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+            }
+            dbzProps.putAll(mongodbProps);
+
         } else {
             throw new RuntimeException("unsupported source type: " + source);
         }
