@@ -755,27 +755,51 @@ impl GlobalStreamManager {
             .map(|node| node.id)
             .collect::<BTreeSet<_>>();
 
-        let reschedules = if deferred {
-            HashMap::new()
-        } else {
+        let table_parallelism_assignment = HashMap::from([(TableId::new(table_id), parallelism)]);
+
+        if deferred {
+            tracing::debug!(
+                "deferred mode enabled for job {}, set the parallelism directly to {:?}",
+                table_id,
+                parallelism
+            );
             self.scale_controller
+                .as_ref()
+                .unwrap()
+                .post_apply_reschedule(&HashMap::new(), &table_parallelism_assignment)
+                .await?;
+        } else {
+            let reschedules = self
+                .scale_controller
                 .as_ref()
                 .unwrap()
                 .generate_table_resize_plan(TableResizePolicy {
                     worker_ids,
-                    table_parallelisms: vec![(table_id, parallelism)].into_iter().collect(),
+                    table_parallelisms: table_parallelism_assignment
+                        .iter()
+                        .map(|(id, parallelism)| (id.table_id, *parallelism))
+                        .collect(),
                 })
-                .await?
-        };
+                .await?;
 
-        self.reschedule_actors(
-            reschedules,
-            RescheduleOptions {
-                resolve_no_shuffle_upstream: false,
-            },
-            Some(HashMap::from([(TableId::new(table_id), parallelism)])),
-        )
-        .await?;
+            if reschedules.is_empty() {
+                tracing::debug!("empty reschedule plan generated for job {}, set the parallelism directly to {:?}", table_id, parallelism);
+                self.scale_controller
+                    .as_ref()
+                    .unwrap()
+                    .post_apply_reschedule(&HashMap::new(), &table_parallelism_assignment)
+                    .await?;
+            } else {
+                self.reschedule_actors(
+                    reschedules,
+                    RescheduleOptions {
+                        resolve_no_shuffle_upstream: false,
+                    },
+                    Some(table_parallelism_assignment),
+                )
+                .await?;
+            }
+        };
 
         Ok(())
     }

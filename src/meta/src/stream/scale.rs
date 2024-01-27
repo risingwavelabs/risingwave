@@ -2435,11 +2435,14 @@ impl GlobalStreamManager {
                 .await;
         }));
 
+        tracing::debug!("pausing tick lock in source manager");
         let _source_pause_guard = self.source_manager.paused.lock().await;
 
         self.barrier_scheduler
             .run_config_change_command_with_pause(command)
             .await?;
+
+        tracing::info!("reschedule done");
 
         Ok(())
     }
