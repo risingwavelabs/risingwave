@@ -1,0 +1,3 @@
+--
+-- TEST_FREE --- drops the tables created during setup that other tests may use
+--
