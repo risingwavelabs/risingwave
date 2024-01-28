@@ -17,6 +17,7 @@ use std::collections::{BinaryHeap, LinkedList};
 use std::ops::{Deref, DerefMut};
 
 use bytes::Bytes;
+use futures::FutureExt;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::EpochWithGap;
 
@@ -99,12 +100,12 @@ impl<I: HummockIterator> MergeIterator<I> {
 
 impl MergeIterator<SharedBufferBatchIterator<Forward>> {
     /// Used in `merge_imms_in_memory` to merge immutable memtables.
-    pub fn current_item(&self) -> (&TableKey<Bytes>, &(EpochWithGap, HummockValue<Bytes>)) {
+    pub fn current_key_items(&self) -> (&TableKey<Bytes>, &[(EpochWithGap, HummockValue<Bytes>)]) {
         self.heap
             .peek()
             .expect("no inner iter for imm merge")
             .iter
-            .current_item()
+            .current_key_items()
     }
 }
 
@@ -194,6 +195,23 @@ impl<'a, T: Ord> Drop for PeekMutGuard<'a, T> {
             let top = PeekMut::pop(peek);
             self.unused.push_back(top);
         }
+    }
+}
+
+impl MergeIterator<SharedBufferBatchIterator<Forward>> {
+    pub(crate) fn advance_peek_to_next_key(&mut self) {
+        self.heap
+            .peek_mut()
+            .expect("should exist")
+            .iter
+            .advance_to_next_key();
+    }
+
+    pub(crate) fn rewind_no_await(&mut self) {
+        self.rewind()
+            .now_or_never()
+            .expect("should not pending")
+            .expect("should not err")
     }
 }
 

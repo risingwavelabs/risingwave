@@ -66,7 +66,7 @@ pub type SpawnMergingTask = Arc<
             LocalInstanceId,
             Vec<ImmutableMemtable>,
             Option<MemoryTracker>,
-        ) -> JoinHandle<HummockResult<ImmutableMemtable>>
+        ) -> JoinHandle<ImmutableMemtable>
         + Send
         + Sync
         + 'static,
@@ -119,6 +119,8 @@ struct UploadingTask {
 }
 
 pub struct MergeImmTaskOutput {
+    /// Input imm ids of the merging task. Larger imm ids at the front.
+    pub imm_ids: Vec<ImmId>,
     pub table_id: TableId,
     pub instance_id: LocalInstanceId,
     pub merged_imm: ImmutableMemtable,
@@ -129,7 +131,17 @@ struct MergingImmTask {
     table_id: TableId,
     instance_id: LocalInstanceId,
     input_imms: Vec<ImmutableMemtable>,
-    join_handle: JoinHandle<HummockResult<ImmutableMemtable>>,
+    join_handle: JoinHandle<ImmutableMemtable>,
+}
+
+impl Debug for MergingImmTask {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MergingImmTask")
+            .field("table_id", &self.table_id)
+            .field("instance_id", &self.instance_id)
+            .field("input_imms", &self.input_imms)
+            .finish()
+    }
 }
 
 impl MergingImmTask {
@@ -140,6 +152,7 @@ impl MergingImmTask {
         memory_tracker: Option<MemoryTracker>,
         context: &UploaderContext,
     ) -> Self {
+        assert!(imms.iter().rev().map(|imm| imm.batch_id()).is_sorted());
         let input_imms = imms.clone();
         let join_handle = (context.spawn_merging_task)(table_id, instance_id, imms, memory_tracker);
 
@@ -152,19 +165,18 @@ impl MergingImmTask {
     }
 
     /// Poll the result of the merge task
-    fn poll_result(&mut self, cx: &mut Context<'_>) -> Poll<HummockResult<ImmutableMemtable>> {
+    fn poll_result(&mut self, cx: &mut Context<'_>) -> Poll<ImmutableMemtable> {
         Poll::Ready(match ready!(self.join_handle.poll_unpin(cx)) {
             Ok(task_result) => task_result,
-            Err(err) => Err(HummockError::other(format!(
-                "fail to join imm merge join handle: {}",
-                err.as_report()
-            ))),
+            Err(err) => {
+                panic!("failed to join merging task: {:?} {:?}", err, self);
+            }
         })
     }
 }
 
 impl Future for MergingImmTask {
-    type Output = HummockResult<ImmutableMemtable>;
+    type Output = ImmutableMemtable;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.poll_result(cx)
@@ -510,7 +522,6 @@ impl SealedData {
     }
 
     fn add_merged_imm(&mut self, merged_imm: &ImmutableMemtable) {
-        debug_assert!(merged_imm.is_merged_imm());
         // add merged_imm to merged_imms
         self.merged_imms.push_front(merged_imm.clone());
     }
@@ -573,15 +584,16 @@ impl SealedData {
     fn poll_success_merge_imm(&mut self, cx: &mut Context<'_>) -> Poll<Option<MergeImmTaskOutput>> {
         // only poll the oldest merge task if there is any
         if let Some(task) = self.merging_tasks.back_mut() {
-            let merge_result = ready!(task.poll_unpin(cx));
+            let merged_imm = ready!(task.poll_unpin(cx));
 
             // pop the finished task
             let task = self.merging_tasks.pop_back().expect("must exist");
 
             Poll::Ready(Some(MergeImmTaskOutput {
+                imm_ids: task.input_imms.iter().map(|imm| imm.batch_id()).collect(),
                 table_id: task.table_id,
                 instance_id: task.instance_id,
-                merged_imm: merge_result.unwrap(),
+                merged_imm,
             }))
         } else {
             Poll::Ready(None)
@@ -1655,17 +1667,10 @@ mod tests {
             _ = sleep => {
                 println!("sleep timeout")
             }
-            res = &mut task => {
-                match res {
-                    Ok(imm) => {
-                        println!("merging task success");
-                        assert_eq!(table_id, imm.table_id);
-                        assert_eq!(9, imm.kv_count());
-                    }
-                    Err(err) => {
-                        println!("merging task failed: {:?}", err);
-                    }
-                }
+            imm = &mut task => {
+                println!("merging task success");
+                assert_eq!(table_id, imm.table_id);
+                assert_eq!(9, imm.kv_count());
             }
         }
         task.join_handle.abort();

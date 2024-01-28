@@ -53,11 +53,6 @@ pub type SharedBufferVersionedEntry = (TableKey<Bytes>, Vec<(EpochWithGap, Hummo
 #[derive(Debug)]
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferVersionedEntry>,
-    /// The list of imm ids that are merged into this batch
-    /// This field is immutable.
-    ///
-    /// Larger imm id at the front.
-    imm_ids: Vec<ImmId>,
     /// The epochs of the data in batch, sorted in ascending order (old to new)
     epochs: Vec<HummockEpoch>,
     kv_count: usize,
@@ -90,7 +85,6 @@ impl SharedBufferBatchInner {
         let batch_id = SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed);
         SharedBufferBatchInner {
             payload: items,
-            imm_ids: vec![batch_id],
             epochs: vec![epoch],
             kv_count,
             size,
@@ -104,8 +98,8 @@ impl SharedBufferBatchInner {
         epochs: Vec<HummockEpoch>,
         payload: Vec<SharedBufferVersionedEntry>,
         num_items: usize,
-        imm_ids: Vec<ImmId>,
         size: usize,
+        imm_id: ImmId,
         tracker: Option<MemoryTracker>,
     ) -> Self {
         assert!(!payload.is_empty());
@@ -114,21 +108,16 @@ impl SharedBufferBatchInner {
             .iter()
             .rev()
             .is_sorted_by_key(|(epoch_with_gap, _)| epoch_with_gap)));
-        debug_assert!(!imm_ids.is_empty());
-        debug_assert!(imm_ids.iter().rev().is_sorted());
         debug_assert!(!epochs.is_empty());
         debug_assert!(epochs.is_sorted());
-
-        let max_imm_id = *imm_ids.iter().max().unwrap();
 
         Self {
             payload,
             epochs,
-            imm_ids,
             kv_count: num_items,
             size,
             _tracker: tracker,
-            batch_id: max_imm_id,
+            batch_id: imm_id,
         }
     }
 
@@ -262,21 +251,12 @@ impl SharedBufferBatch {
         self.table_id
     }
 
-    pub fn is_merged_imm(&self) -> bool {
-        !self.inner.imm_ids.is_empty()
-    }
-
     pub fn min_epoch(&self) -> HummockEpoch {
         *self.inner.epochs.first().unwrap()
     }
 
     pub fn max_epoch(&self) -> HummockEpoch {
         *self.inner.epochs.last().unwrap()
-    }
-
-    pub fn get_imm_ids(&self) -> &Vec<ImmId> {
-        debug_assert!(!self.inner.imm_ids.is_empty());
-        &self.inner.imm_ids
     }
 
     pub fn kv_count(&self) -> usize {
@@ -499,6 +479,22 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
         let cur_entry = self.inner.get(idx).unwrap();
         let value = &cur_entry.1[version_idx as usize];
         (&cur_entry.0, value)
+    }
+}
+
+impl SharedBufferBatchIterator<Forward> {
+    pub(crate) fn advance_to_next_key(&mut self) {
+        assert_eq!(self.current_version_idx, 0);
+        self.current_idx += 1;
+    }
+
+    pub(crate) fn current_key_items(
+        &self,
+    ) -> (&TableKey<Bytes>, &[(EpochWithGap, HummockValue<Bytes>)]) {
+        assert!(self.is_valid(), "iterator is not valid");
+        assert_eq!(self.current_version_idx, 0);
+        let (key, values) = &self.inner.payload[self.current_idx];
+        (key, &values)
     }
 }
 
@@ -1116,9 +1112,7 @@ mod tests {
         ];
         // newer data comes first
         let imms = vec![imm3, imm2, imm1];
-        let merged_imm = merge_imms_in_memory(table_id, 0, imms.clone(), None)
-            .await
-            .unwrap();
+        let merged_imm = merge_imms_in_memory(table_id, 0, imms.clone(), None).await;
 
         // Point lookup
         for (i, items) in batch_items.iter().enumerate() {
