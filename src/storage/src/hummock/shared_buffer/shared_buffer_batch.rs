@@ -48,7 +48,17 @@ pub type SharedBufferBatchId = u64;
 /// A shared buffer may contain data from multiple epochs,
 /// there are multiple versions for a given key (`table_key`), we put those versions into a vector
 /// and sort them in descending order, aka newest to oldest.
-pub type SharedBufferVersionedEntry = (TableKey<Bytes>, Vec<(EpochWithGap, HummockValue<Bytes>)>);
+#[derive(PartialEq, Debug)]
+pub struct SharedBufferVersionedEntry {
+    pub(crate) key: TableKey<Bytes>,
+    pub(crate) new_values: Vec<(EpochWithGap, HummockValue<Bytes>)>,
+}
+
+impl SharedBufferVersionedEntry {
+    pub fn new(key: TableKey<Bytes>, new_values: Vec<(EpochWithGap, HummockValue<Bytes>)>) -> Self {
+        Self { key, new_values }
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct SharedBufferBatchInner {
@@ -79,7 +89,7 @@ impl SharedBufferBatchInner {
         let epoch_with_gap = EpochWithGap::new(epoch, spill_offset);
         let items = payload
             .into_iter()
-            .map(|(k, v)| (k, vec![(epoch_with_gap, v)]))
+            .map(|(k, v)| SharedBufferVersionedEntry::new(k, vec![(epoch_with_gap, v)]))
             .collect_vec();
 
         let batch_id = SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed);
@@ -103,8 +113,9 @@ impl SharedBufferBatchInner {
         tracker: Option<MemoryTracker>,
     ) -> Self {
         assert!(!payload.is_empty());
-        debug_assert!(payload.iter().is_sorted_by_key(|(key, _)| key));
-        debug_assert!(payload.iter().all(|(_, values)| values
+        debug_assert!(payload.iter().is_sorted_by_key(|entry| &entry.key));
+        debug_assert!(payload.iter().all(|entry| entry
+            .new_values
             .iter()
             .rev()
             .is_sorted_by_key(|(epoch_with_gap, _)| epoch_with_gap)));
@@ -129,11 +140,14 @@ impl SharedBufferBatchInner {
         read_epoch: HummockEpoch,
     ) -> Option<(HummockValue<Bytes>, EpochWithGap)> {
         // Perform binary search on table key to find the corresponding entry
-        if let Ok(i) = self.payload.binary_search_by(|m| (m.0[..]).cmp(*table_key)) {
+        if let Ok(i) = self
+            .payload
+            .binary_search_by(|m| (m.key.as_ref()).cmp(*table_key))
+        {
             let item = &self.payload[i];
-            assert_eq!(item.0.as_ref(), *table_key);
+            assert_eq!(item.key.as_ref(), *table_key);
             // Scan to find the first version <= epoch
-            for (e, v) in &item.1 {
+            for (e, v) in &item.new_values {
                 // skip invisible versions
                 if read_epoch < e.pure_epoch() {
                     continue;
@@ -275,7 +289,7 @@ impl SharedBufferBatch {
     pub fn range_exists(&self, table_key_range: &TableKeyRange) -> bool {
         self.inner
             .binary_search_by(|m| {
-                let key = &m.0;
+                let key = &m.key;
                 let too_left = match &table_key_range.0 {
                     std::ops::Bound::Included(range_start) => range_start.as_ref() > key.as_ref(),
                     std::ops::Bound::Excluded(range_start) => range_start.as_ref() >= key.as_ref(),
@@ -317,17 +331,17 @@ impl SharedBufferBatch {
 
     #[inline(always)]
     pub fn start_table_key(&self) -> TableKey<&[u8]> {
-        TableKey(self.inner.payload.first().expect("non-empty").0.as_ref())
+        TableKey(self.inner.payload.first().expect("non-empty").key.as_ref())
     }
 
     #[inline(always)]
     pub fn end_table_key(&self) -> TableKey<&[u8]> {
-        TableKey(self.inner.payload.last().expect("non-empty").0.as_ref())
+        TableKey(self.inner.payload.last().expect("non-empty").key.as_ref())
     }
 
     #[inline(always)]
     pub fn raw_largest_key(&self) -> &TableKey<Bytes> {
-        &self.inner.payload.last().expect("non-empty").0
+        &self.inner.payload.last().expect("non-empty").key
     }
 
     /// return inclusive left endpoint, which means that all data in this batch should be larger or
@@ -386,7 +400,7 @@ impl SharedBufferBatch {
             let idx = match self
                 .inner
                 .payload
-                .binary_search_by(|m| (m.0[..]).cmp(seek_key.as_slice()))
+                .binary_search_by(|m| (m.key.as_ref()).cmp(seek_key.as_slice()))
             {
                 Ok(idx) => idx,
                 Err(idx) => idx,
@@ -395,11 +409,11 @@ impl SharedBufferBatch {
                 break;
             }
             let item = &self.inner.payload[idx];
-            if item.0.len() <= VirtualNode::SIZE {
+            if item.key.len() <= VirtualNode::SIZE {
                 break;
             }
             let current_vnode_id = VirtualNode::from_be_bytes(
-                item.0.as_ref()[..VirtualNode::SIZE]
+                item.key.as_ref()[..VirtualNode::SIZE]
                     .try_into()
                     .expect("slice with incorrect length"),
             )
@@ -456,7 +470,7 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
             DirectionEnum::Forward => self.current_idx,
             DirectionEnum::Backward => self.inner.len() - self.current_idx - 1,
         };
-        &self.inner.get(idx).unwrap().1
+        &self.inner.get(idx).unwrap().new_values
     }
 
     fn current_versions_len(&self) -> i32 {
@@ -477,8 +491,7 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
             ),
         };
         let cur_entry = self.inner.get(idx).unwrap();
-        let value = &cur_entry.1[version_idx as usize];
-        (&cur_entry.0, value)
+        (&cur_entry.key, &cur_entry.new_values[version_idx as usize])
     }
 }
 
@@ -488,13 +501,10 @@ impl SharedBufferBatchIterator<Forward> {
         self.current_idx += 1;
     }
 
-    pub(crate) fn current_key_items(
-        &self,
-    ) -> (&TableKey<Bytes>, &[(EpochWithGap, HummockValue<Bytes>)]) {
+    pub(crate) fn current_key_entry(&self) -> &SharedBufferVersionedEntry {
         assert!(self.is_valid(), "iterator is not valid");
         assert_eq!(self.current_version_idx, 0);
-        let (key, values) = &self.inner.payload[self.current_idx];
-        (key, &values)
+        &self.inner.payload[self.current_idx]
     }
 }
 
@@ -563,7 +573,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
         // by table key.
         let partition_point = self
             .inner
-            .binary_search_by(|probe| probe.0[..].cmp(*key.user_key.table_key));
+            .binary_search_by(|probe| probe.key.as_ref().cmp(*key.user_key.table_key));
         let seek_key_epoch = key.epoch_with_gap;
         match D::direction() {
             DirectionEnum::Forward => match partition_point {

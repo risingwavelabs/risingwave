@@ -16,14 +16,14 @@ use std::collections::binary_heap::PeekMut;
 use std::collections::{BinaryHeap, LinkedList};
 use std::ops::{Deref, DerefMut};
 
-use bytes::Bytes;
 use futures::FutureExt;
-use risingwave_hummock_sdk::key::{FullKey, TableKey};
-use risingwave_hummock_sdk::EpochWithGap;
+use risingwave_hummock_sdk::key::FullKey;
 
 use super::Forward;
 use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
+use crate::hummock::shared_buffer::shared_buffer_batch::{
+    SharedBufferBatchIterator, SharedBufferVersionedEntry,
+};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
@@ -100,12 +100,12 @@ impl<I: HummockIterator> MergeIterator<I> {
 
 impl MergeIterator<SharedBufferBatchIterator<Forward>> {
     /// Used in `merge_imms_in_memory` to merge immutable memtables.
-    pub fn current_key_items(&self) -> (&TableKey<Bytes>, &[(EpochWithGap, HummockValue<Bytes>)]) {
+    pub fn current_key_entry(&self) -> &SharedBufferVersionedEntry {
         self.heap
             .peek()
             .expect("no inner iter for imm merge")
             .iter
-            .current_key_items()
+            .current_key_entry()
     }
 }
 

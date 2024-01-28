@@ -314,7 +314,7 @@ pub async fn merge_imms_in_memory(
     mi.rewind_no_await();
     assert!(mi.is_valid());
 
-    let first_item_key = mi.current_key_items().0.clone();
+    let first_item_key = mi.current_key_entry().key.clone();
 
     let mut merged_payload: Vec<SharedBufferVersionedEntry> = Vec::new();
 
@@ -327,14 +327,17 @@ pub async fn merge_imms_in_memory(
     let mut table_key_versions: Vec<(EpochWithGap, HummockValue<Bytes>)> = Vec::new();
 
     while mi.is_valid() {
-        let (key, values) = mi.current_key_items();
+        let key_entry = mi.current_key_entry();
         let user_key = UserKey {
             table_id,
-            table_key: key.clone(),
+            table_key: key_entry.key.clone(),
         };
         if let Some(last_full_key) = full_key_tracker.observe_multi_version(
             user_key,
-            values.iter().map(|(epoch_with_gap, _)| *epoch_with_gap),
+            key_entry
+                .new_values
+                .iter()
+                .map(|(epoch_with_gap, _)| *epoch_with_gap),
         ) {
             let last_user_key = last_full_key.user_key;
             // `epoch_with_gap` of the `last_full_key` may not reflect the real epoch in the items
@@ -342,13 +345,17 @@ pub async fn merge_imms_in_memory(
             let _epoch_with_gap = last_full_key.epoch_with_gap;
 
             // Record kv entries
-            merged_payload.push((last_user_key.table_key, table_key_versions));
+            merged_payload.push(SharedBufferVersionedEntry::new(
+                last_user_key.table_key,
+                table_key_versions,
+            ));
 
             // Reset state before moving onto the new table key
             table_key_versions = vec![];
         }
         table_key_versions.extend(
-            values
+            key_entry
+                .new_values
                 .iter()
                 .map(|(epoch_with_gap, value)| (*epoch_with_gap, value.clone())),
         );
@@ -358,7 +365,7 @@ pub async fn merge_imms_in_memory(
 
     // process the last key
     if !table_key_versions.is_empty() {
-        merged_payload.push((
+        merged_payload.push(SharedBufferVersionedEntry::new(
             full_key_tracker.latest_full_key.user_key.table_key,
             table_key_versions,
         ));
