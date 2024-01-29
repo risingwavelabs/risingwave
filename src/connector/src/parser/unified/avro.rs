@@ -197,8 +197,7 @@ impl<'a> AvroParseOptions<'a> {
             (Some(DataType::Timestamptz), Value::TimestampMillis(ms)) => {
                 Timestamptz::from_millis(*ms)
                     .ok_or(AccessError::Other(anyhow!(
-                        "timestamp with milliseconds {:?} * 1000 is out of range",
-                        ms
+                        "timestamptz with milliseconds {ms} * 1000 is out of range",
                     )))?
                     .into()
             }
