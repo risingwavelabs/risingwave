@@ -2694,7 +2694,6 @@ impl HummockManager {
         *self.group_to_table_vnode_partition.write() = group_to_table_vnode_partition;
     }
 
-    #[named]
     pub fn compaction_event_loop(
         hummock_manager: Arc<Self>,
         mut compactor_streams_change_rx: UnboundedReceiver<(
@@ -2712,134 +2711,14 @@ impl HummockManager {
 
         let mut join_handle_vec = Vec::default();
 
-        async fn compact_task_event_handler(
-            hummock_manager: Arc<HummockManager>,
-            mut rx: UnboundedReceiver<(u32, subscribe_compaction_event_request::Event)>,
-            shutdown_rx_shared: Shared<OneShotReceiver<()>>,
-        ) {
-            let mut compaction_selectors = init_selectors();
-
-            tokio::select! {
-                _ = shutdown_rx_shared => {}
-
-                _ = async {
-                    while let Some((context_id, event)) = rx.recv().await {
-                        match event {
-                            RequestEvent::PullTask(PullTask { pull_task_count }) => {
-                                assert_ne!(0, pull_task_count);
-                                if let Some(compactor) =
-                                    hummock_manager.compactor_manager.get_compactor(context_id)
-                                {
-                                    if let Some((group, task_type)) =
-                                        hummock_manager.auto_pick_compaction_group_and_type().await
-                                    {
-                                        let selector: &mut Box<dyn CompactionSelector> = {
-                                            let versioning_guard =
-                                                read_lock!(hummock_manager, versioning).await;
-                                            let versioning = versioning_guard.deref();
-
-                                            if versioning.write_limit.contains_key(&group) {
-                                                let enable_emergency_picker = match hummock_manager
-                                                    .compaction_group_manager
-                                                    .read()
-                                                    .await
-                                                    .try_get_compaction_group_config(group)
-                                                {
-                                                    Some(config) => {
-                                                        config.compaction_config.enable_emergency_picker
-                                                    }
-                                                    None => {
-                                                        unreachable!("compaction-group {} not exist", group)
-                                                    }
-                                                };
-
-                                                if enable_emergency_picker {
-                                                    compaction_selectors
-                                                        .get_mut(&TaskType::Emergency)
-                                                        .unwrap()
-                                                } else {
-                                                    compaction_selectors.get_mut(&task_type).unwrap()
-                                                }
-                                            } else {
-                                                compaction_selectors.get_mut(&task_type).unwrap()
-                                            }
-                                        };
-                                        for _ in 0..pull_task_count {
-                                            let compact_task =
-                                                hummock_manager.get_compact_task(group, selector).await;
-
-                                            match compact_task {
-                                                Ok(Some(compact_task)) => {
-                                                    let task_id = compact_task.task_id;
-                                                    if let Err(e) = compactor.send_event(
-                                                        ResponseEvent::CompactTask(compact_task),
-                                                    ) {
-                                                        tracing::warn!(
-                                                            "Failed to send task {} to {}. {:#?}",
-                                                            task_id,
-                                                            compactor.context_id(),
-                                                            e
-                                                        );
-                                                        break;
-                                                    }
-                                                }
-                                                Ok(None) => {
-                                                    // no compact_task to be picked
-                                                    hummock_manager
-                                                        .compaction_state
-                                                        .unschedule(group, task_type);
-                                                    break;
-                                                }
-                                                Err(err) => {
-                                                    tracing::warn!(
-                                                        "Failed to get compaction task: {:#?}.",
-                                                        err
-                                                    );
-                                                    break;
-                                                }
-                                            };
-                                        }
-                                    }
-
-                                    // ack to compactor
-                                    if let Err(e) =
-                                        compactor.send_event(ResponseEvent::PullTaskAck(PullTaskAck {}))
-                                    {
-                                        tracing::warn!("Failed to send ask to {}. {:#?}", context_id, e);
-                                    }
-                                }
-                            }
-
-                            RequestEvent::ReportTask(ReportTask {
-                                task_id,
-                                task_status,
-                                sorted_output_ssts,
-                                table_stats_change,
-                            }) => {
-                                if let Err(e) = hummock_manager
-                                    .report_compact_task(
-                                        task_id,
-                                        TaskStatus::try_from(task_status).unwrap(),
-                                        sorted_output_ssts,
-                                        Some(table_stats_change),
-                                    )
-                                    .await
-                                {
-                                    tracing::error!(error = %e.as_report(), "report compact_tack fail")
-                                }
-                            }
-
-                            _ => unreachable!(),
-                        }
-                    }
-                } => {}
-            }
-        }
-
         let hummock_manager_dedicated = hummock_manager.clone();
         let compact_task_event_handler_join_handle = tokio::spawn(async move {
-            compact_task_event_handler(hummock_manager_dedicated, rx, shutdown_rx_dedicated_shared)
-                .await;
+            Self::compact_task_dedicated_event_handler(
+                hummock_manager_dedicated,
+                rx,
+                shutdown_rx_dedicated_shared,
+            )
+            .await;
         });
 
         join_handle_vec.push((
@@ -3212,6 +3091,132 @@ impl HummockManager {
         }
 
         Ok(())
+    }
+
+    /// dedicated event runtime for CPU/IO bound event
+    #[named]
+    async fn compact_task_dedicated_event_handler(
+        hummock_manager: Arc<HummockManager>,
+        mut rx: UnboundedReceiver<(u32, subscribe_compaction_event_request::Event)>,
+        shutdown_rx_shared: Shared<OneShotReceiver<()>>,
+    ) {
+        let mut compaction_selectors = init_selectors();
+
+        tokio::select! {
+            _ = shutdown_rx_shared => {}
+
+            _ = async {
+                while let Some((context_id, event)) = rx.recv().await {
+                    match event {
+                        RequestEvent::PullTask(PullTask { pull_task_count }) => {
+                            assert_ne!(0, pull_task_count);
+                            if let Some(compactor) =
+                                hummock_manager.compactor_manager.get_compactor(context_id)
+                            {
+                                if let Some((group, task_type)) =
+                                    hummock_manager.auto_pick_compaction_group_and_type().await
+                                {
+                                    let selector: &mut Box<dyn CompactionSelector> = {
+                                        let versioning_guard =
+                                            read_lock!(hummock_manager, versioning).await;
+                                        let versioning = versioning_guard.deref();
+
+                                        if versioning.write_limit.contains_key(&group) {
+                                            let enable_emergency_picker = match hummock_manager
+                                                .compaction_group_manager
+                                                .read()
+                                                .await
+                                                .try_get_compaction_group_config(group)
+                                            {
+                                                Some(config) => {
+                                                    config.compaction_config.enable_emergency_picker
+                                                }
+                                                None => {
+                                                    unreachable!("compaction-group {} not exist", group)
+                                                }
+                                            };
+
+                                            if enable_emergency_picker {
+                                                compaction_selectors
+                                                    .get_mut(&TaskType::Emergency)
+                                                    .unwrap()
+                                            } else {
+                                                compaction_selectors.get_mut(&task_type).unwrap()
+                                            }
+                                        } else {
+                                            compaction_selectors.get_mut(&task_type).unwrap()
+                                        }
+                                    };
+                                    for _ in 0..pull_task_count {
+                                        let compact_task =
+                                            hummock_manager.get_compact_task(group, selector).await;
+
+                                        match compact_task {
+                                            Ok(Some(compact_task)) => {
+                                                let task_id = compact_task.task_id;
+                                                if let Err(e) = compactor.send_event(
+                                                    ResponseEvent::CompactTask(compact_task),
+                                                ) {
+                                                    tracing::warn!(
+                                                        "Failed to send task {} to {}. {:#?}",
+                                                        task_id,
+                                                        compactor.context_id(),
+                                                        e
+                                                    );
+                                                    break;
+                                                }
+                                            }
+                                            Ok(None) => {
+                                                // no compact_task to be picked
+                                                hummock_manager
+                                                    .compaction_state
+                                                    .unschedule(group, task_type);
+                                                break;
+                                            }
+                                            Err(err) => {
+                                                tracing::warn!(
+                                                    "Failed to get compaction task: {:#?}.",
+                                                    err
+                                                );
+                                                break;
+                                            }
+                                        };
+                                    }
+                                }
+
+                                // ack to compactor
+                                if let Err(e) =
+                                    compactor.send_event(ResponseEvent::PullTaskAck(PullTaskAck {}))
+                                {
+                                    tracing::warn!("Failed to send ask to {}. {:#?}", context_id, e);
+                                }
+                            }
+                        }
+
+                        RequestEvent::ReportTask(ReportTask {
+                            task_id,
+                            task_status,
+                            sorted_output_ssts,
+                            table_stats_change,
+                        }) => {
+                            if let Err(e) = hummock_manager
+                                .report_compact_task(
+                                    task_id,
+                                    TaskStatus::try_from(task_status).unwrap(),
+                                    sorted_output_ssts,
+                                    Some(table_stats_change),
+                                )
+                                .await
+                            {
+                                tracing::error!(error = %e.as_report(), "report compact_tack fail")
+                            }
+                        }
+
+                        _ => unreachable!(),
+                    }
+                }
+            } => {}
+        }
     }
 }
 
