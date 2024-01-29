@@ -413,7 +413,7 @@ impl ScheduledBarriers {
                     cancel_table_ids.insert(table_id);
                 }
                 _ => {
-                    unreachable!("only drop streaming jobs should be buffered");
+                    unreachable!("only drop and cancel streaming jobs should be buffered");
                 }
             }
             notifiers.into_iter().for_each(|mut notify| {
