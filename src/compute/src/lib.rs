@@ -135,16 +135,6 @@ pub struct ComputeNodeOpts {
     pub heap_profiling_dir: Option<String>,
 }
 
-impl risingwave_common::opts::Opts for ComputeNodeOpts {
-    fn name() -> &'static str {
-        "compute"
-    }
-
-    fn meta_addr(&self) -> MetaAddressStrategy {
-        self.meta_address.clone()
-    }
-}
-
 #[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
 pub enum Role {
     Serving,

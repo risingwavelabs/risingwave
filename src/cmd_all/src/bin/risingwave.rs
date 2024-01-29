@@ -192,7 +192,7 @@ fn main() -> Result<()> {
 }
 
 fn playground(opts: PlaygroundOpts) {
-    let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
+    let settings = risingwave_rt::LoggerSettings::new("playground")
         .with_target("risingwave_storage", Level::WARN)
         .with_thread_name(true);
     risingwave_rt::init_risingwave_logger(settings);
@@ -200,8 +200,7 @@ fn playground(opts: PlaygroundOpts) {
 }
 
 fn standalone(opts: StandaloneOpts) {
-    let opts = risingwave_cmd_all::parse_standalone_opt_args(&opts);
-    let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
+    let settings = risingwave_rt::LoggerSettings::new("standalone")
         .with_target("risingwave_storage", Level::WARN)
         .with_thread_name(true);
     risingwave_rt::init_risingwave_logger(settings);

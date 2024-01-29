@@ -42,22 +42,22 @@ risingwave_expr_impl::enable!();
 // Entry point functions.
 
 pub fn compute(opts: ComputeNodeOpts) {
-    init_risingwave_logger(LoggerSettings::from_opts(&opts));
+    init_risingwave_logger(LoggerSettings::new("compute"));
     main_okk(risingwave_compute::start(opts));
 }
 
 pub fn meta(opts: MetaNodeOpts) {
-    init_risingwave_logger(LoggerSettings::from_opts(&opts));
+    init_risingwave_logger(LoggerSettings::new("meta"));
     main_okk(risingwave_meta_node::start(opts));
 }
 
 pub fn frontend(opts: FrontendOpts) {
-    init_risingwave_logger(LoggerSettings::from_opts(&opts));
+    init_risingwave_logger(LoggerSettings::new("frontend"));
     main_okk(risingwave_frontend::start(opts));
 }
 
 pub fn compactor(opts: CompactorOpts) {
-    init_risingwave_logger(LoggerSettings::from_opts(&opts));
+    init_risingwave_logger(LoggerSettings::new("compactor"));
     main_okk(risingwave_compactor::start(opts));
 }
 

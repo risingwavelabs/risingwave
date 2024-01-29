@@ -14,7 +14,6 @@
 
 use anyhow::Result;
 use clap::Parser;
-use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
 use risingwave_frontend::FrontendOpts;
@@ -67,27 +66,7 @@ pub struct ParsedStandaloneOpts {
     pub compactor_opts: Option<CompactorOpts>,
 }
 
-impl risingwave_common::opts::Opts for ParsedStandaloneOpts {
-    fn name() -> &'static str {
-        "standalone"
-    }
-
-    fn meta_addr(&self) -> MetaAddressStrategy {
-        if let Some(opts) = self.meta_opts.as_ref() {
-            opts.meta_addr()
-        } else if let Some(opts) = self.compute_opts.as_ref() {
-            opts.meta_addr()
-        } else if let Some(opts) = self.frontend_opts.as_ref() {
-            opts.meta_addr()
-        } else if let Some(opts) = self.compactor_opts.as_ref() {
-            opts.meta_addr()
-        } else {
-            unreachable!("at least one service should be specified as checked during parsing")
-        }
-    }
-}
-
-pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
+fn parse_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
     let meta_opts = opts.meta_opts.as_ref().map(|s| {
         let mut s = split(s).unwrap();
         s.insert(0, "meta-node".into());
@@ -144,15 +123,6 @@ pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts 
             meta_opts.prometheus_host = Some(prometheus_listener_addr.clone());
         }
     }
-
-    if meta_opts.is_none()
-        && compute_opts.is_none()
-        && frontend_opts.is_none()
-        && compactor_opts.is_none()
-    {
-        panic!("No service is specified to start.");
-    }
-
     ParsedStandaloneOpts {
         meta_opts,
         compute_opts,
@@ -161,15 +131,15 @@ pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts 
     }
 }
 
-pub async fn standalone(
-    ParsedStandaloneOpts {
+pub async fn standalone(opts: StandaloneOpts) -> Result<()> {
+    tracing::info!("launching Risingwave in standalone mode");
+
+    let ParsedStandaloneOpts {
         meta_opts,
         compute_opts,
         frontend_opts,
         compactor_opts,
-    }: ParsedStandaloneOpts,
-) -> Result<()> {
-    tracing::info!("launching Risingwave in standalone mode");
+    } = parse_opt_args(&opts);
 
     if let Some(opts) = meta_opts {
         tracing::info!("starting meta-node thread with cli args: {:?}", opts);
@@ -245,7 +215,7 @@ mod test {
         assert_eq!(actual, opts);
 
         // Test parsing into node-level opts.
-        let actual = parse_standalone_opt_args(&opts);
+        let actual = parse_opt_args(&opts);
         check(
             actual,
             expect![[r#"

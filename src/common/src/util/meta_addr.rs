@@ -82,22 +82,6 @@ impl fmt::Display for MetaAddressStrategy {
     }
 }
 
-impl MetaAddressStrategy {
-    /// Returns `Some` if there's exactly one address.
-    pub fn exactly_one(&self) -> Option<&http::Uri> {
-        match self {
-            MetaAddressStrategy::LoadBalance(lb) => Some(lb),
-            MetaAddressStrategy::List(list) => {
-                if list.len() == 1 {
-                    list.first()
-                } else {
-                    None
-                }
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

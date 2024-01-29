@@ -161,9 +161,6 @@ function Layout({ children }: { children: React.ReactNode }) {
             <NavButton href="/api/monitor/diagnose" external>
               Diagnose
             </NavButton>
-            <NavButton href="/trace/search" external>
-              Traces
-            </NavButton>
           </Section>
           <Section>
             <NavTitle>Settings</NavTitle>
