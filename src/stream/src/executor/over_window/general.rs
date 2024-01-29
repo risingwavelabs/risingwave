@@ -171,9 +171,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             .calls
             .iter()
             .any(|call| call.frame.bounds.is_unbounded());
-        // TODO(rc): only support full cache for `RANGE` frame for now, for the sake of simplicity
-        let has_range_frame = args.calls.iter().any(|call| call.frame.bounds.is_range());
-        let cache_policy = if has_unbounded_frame || has_range_frame {
+        let cache_policy = if has_unbounded_frame {
             // For unbounded frames, we finally need all entries of the partition in the cache,
             // so for simplicity we just use full cache policy for these cases.
             CachePolicy::Full
