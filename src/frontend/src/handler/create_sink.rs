@@ -60,7 +60,7 @@ use crate::stream_fragmenter::build_graph;
 use crate::utils::resolve_privatelink_in_with_option;
 use crate::{Planner, TableCatalog, WithOptions};
 
-pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
+pub fn gen_sink_subscription_query_from_name(from_name: ObjectName) -> Result<Query> {
     let table_factor = TableFactor::Table {
         name: from_name,
         alias: None,
@@ -112,7 +112,7 @@ pub fn gen_sink_plan(
         CreateSink::From(from_name) => {
             sink_from_table_name = from_name.0.last().unwrap().real_value();
             direct_sink = true;
-            Box::new(gen_sink_query_from_name(from_name)?)
+            Box::new(gen_sink_subscription_query_from_name(from_name)?)
         }
         CreateSink::AsQuery(query) => {
             sink_from_table_name = sink_table_name.clone();
