@@ -59,7 +59,11 @@ impl ExecutorBuilder for SubscriptionExecutorBuilder {
             // TODO: Use V2 after pr #14599
             &KV_LOG_STORE_V1_INFO,
         );
-        let log_store_identity = format!("subscription-executor[{}]", params.executor_id);
+        let log_store_identity = format!(
+            "subscription[{}]-executor[{}]",
+            node.subscription_catalog.as_ref().unwrap().id,
+            params.executor_id
+        );
         let log_store =
             SubscriptionLogStoreWriter::new(table_id, local_state_store, serde, log_store_identity);
         Ok(Box::new(

@@ -1,5 +1,3 @@
-use std::assert_matches::assert_matches;
-use std::collections::{HashMap, HashSet};
 // Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -38,6 +36,9 @@ mod optimizer_context;
 pub mod plan_expr_rewriter;
 mod plan_expr_visitor;
 mod rule;
+
+use std::assert_matches::assert_matches;
+use std::collections::{HashMap, HashSet};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
