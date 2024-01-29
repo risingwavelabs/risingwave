@@ -3158,10 +3158,10 @@ impl HummockManager {
                                                     ResponseEvent::CompactTask(compact_task),
                                                 ) {
                                                     tracing::warn!(
-                                                        "Failed to send task {} to {}. {:#?}",
+                                                        error = %e.as_report(),
+                                                        "Failed to send task {} to {}",
                                                         task_id,
                                                         compactor.context_id(),
-                                                        e
                                                     );
                                                     break;
                                                 }
@@ -3174,10 +3174,7 @@ impl HummockManager {
                                                 break;
                                             }
                                             Err(err) => {
-                                                tracing::warn!(
-                                                    "Failed to get compaction task: {:#?}.",
-                                                    err
-                                                );
+                                                tracing::warn!(error = %err.as_report(), "Failed to get compaction task");
                                                 break;
                                             }
                                         };
@@ -3188,7 +3185,11 @@ impl HummockManager {
                                 if let Err(e) =
                                     compactor.send_event(ResponseEvent::PullTaskAck(PullTaskAck {}))
                                 {
-                                    tracing::warn!("Failed to send ask to {}. {:#?}", context_id, e);
+                                    tracing::warn!(
+                                        error = %e.as_report(),
+                                        "Failed to send ask to {}",
+                                        context_id,
+                                    );
                                 }
                             }
                         }
