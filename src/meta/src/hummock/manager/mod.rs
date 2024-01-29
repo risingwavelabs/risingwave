@@ -2760,6 +2760,8 @@ impl HummockManager {
                     },
 
                     result = pending_on_none(compactor_request_streams.next()) => {
+                        let mut compactor_alive = true;
+
                         let (context_id, compactor_stream_req): (_, (std::option::Option<std::result::Result<SubscribeCompactionEventRequest, _>>, _)) = result;
                         let (event, create_at, stream) = match compactor_stream_req {
                             (Some(Ok(req)), stream) => {
@@ -2799,30 +2801,29 @@ impl HummockManager {
                             }) => {
                                 let compactor_manager = hummock_manager.compactor_manager.clone();
                                 let cancel_tasks = compactor_manager.update_task_heartbeats(&progress);
-
-                                // TODO: task cancellation can be batched
-                                for task in cancel_tasks {
-                                    tracing::info!(
-                                        "Task with group_id {} task_id {} with context_id {} has expired due to lack of visible progress",
-                                        task.compaction_group_id,
-                                        task.task_id,
-                                        context_id,
-                                    );
-
-                                    if let Err(e) =
-                                        hummock_manager
-                                        .cancel_compact_task(task.task_id, TaskStatus::HeartbeatCanceled)
-                                        .await
-                                    {
-                                        tracing::error!(
-                                            task_id = task.task_id,
-                                            error = %e.as_report(),
-                                            "Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
-                                            until we can successfully report its status."
+                                if let Some(compactor) = compactor_manager.get_compactor(context_id) {
+                                    // TODO: task cancellation can be batched
+                                    for task in cancel_tasks {
+                                        tracing::info!(
+                                            "Task with group_id {} task_id {} with context_id {} has expired due to lack of visible progress",
+                                            task.compaction_group_id,
+                                            task.task_id,
+                                            context_id,
                                         );
-                                    }
 
-                                    if let Some(compactor) = compactor_manager.get_compactor(context_id) {
+                                        if let Err(e) =
+                                            hummock_manager
+                                            .cancel_compact_task(task.task_id, TaskStatus::HeartbeatCanceled)
+                                            .await
+                                        {
+                                            tracing::error!(
+                                                task_id = task.task_id,
+                                                error = %e.as_report(),
+                                                "Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
+                                                until we can successfully report its status."
+                                            );
+                                        }
+
                                         // Forcefully cancel the task so that it terminates
                                         // early on the compactor
                                         // node.
@@ -2833,6 +2834,10 @@ impl HummockManager {
                                             task.task_id
                                         );
                                     }
+                                } else {
+                                    // Determine the validity of the compactor streaming rpc. When the compactor no longer exists in the manager, the stream will be removed.
+                                    // Tip: Connectivity to the compactor will be determined through the `send_event` operation. When send fails, it will be removed from the manager
+                                    compactor_alive = false;
                                 }
                             },
 
@@ -2845,7 +2850,13 @@ impl HummockManager {
                             }
                         }
 
-                        push_stream(context_id, stream, &mut compactor_request_streams);
+                        if compactor_alive {
+                            push_stream(context_id, stream, &mut compactor_request_streams);
+                        } else {
+                            tracing::warn!("compactor {} leaving the cluster since it's not alive", context_id);
+                            hummock_manager.compactor_manager
+                                .remove_compactor(context_id);
+                        }
                     },
                 }
             }
@@ -3163,6 +3174,8 @@ impl HummockManager {
                                                         task_id,
                                                         compactor.context_id(),
                                                     );
+
+                                                    hummock_manager.compactor_manager.remove_compactor(context_id);
                                                     break;
                                                 }
                                             }
@@ -3190,6 +3203,7 @@ impl HummockManager {
                                         "Failed to send ask to {}",
                                         context_id,
                                     );
+                                    hummock_manager.compactor_manager.remove_compactor(context_id);
                                 }
                             }
                         }
