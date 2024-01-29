@@ -1142,6 +1142,21 @@ cargo fmt --all
 test $? -eq 0 || exit 1
 """
 
+[tasks.check-dylint]
+# private = true
+category = "RiseDev - Check"
+description = "Run dylint check (dev, all features) and attempt to fix"
+install_crate = { min_version = "2.6.1", crate_name = "dylint-link", binary = "cargo", test_arg = [
+  "--help",
+], install_command = "binstall" }
+script = """
+#!/usr/bin/env bash
+
+echo "Running $(tput setaf 4)cargo dylint$(tput sgr0) checks and attempting to fix"
+DYLINT_RUSTFLAGS="-A warnings -D rw_warnings" cargo dylint --all -- --all-targets --all-features --locked
+test $? -eq 0 || exit 1
+"""
+
 [tasks.check-clippy]
 private = true
 category = "RiseDev - Check"
@@ -1230,6 +1245,7 @@ dependencies = [
   "check-fmt",
   "check-trailing-spaces",
   "check-typos",
+  "check-dylint",
 ]
 description = "Perform part of the pre-CI checks that are fast to run"
 
