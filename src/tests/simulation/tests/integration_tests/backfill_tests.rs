@@ -19,6 +19,8 @@ use itertools::Itertools;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use tokio::time::{sleep, timeout};
 
+use crate::utils::kill_cn_and_wait_recover;
+
 const SET_PARALLELISM: &str = "SET STREAMING_PARALLELISM=1;";
 const ROOT_TABLE_CREATE: &str = "create table t1 (_id int, data jsonb);";
 const INSERT_SEED_SQL: &str =
@@ -47,13 +49,6 @@ select
     order_customer_id
 from p2;
 "#;
-
-async fn kill_cn_and_wait_recover(cluster: &Cluster) {
-    cluster
-        .kill_nodes(["compute-1", "compute-2", "compute-3"], 0)
-        .await;
-    sleep(Duration::from_secs(10)).await;
-}
 
 #[tokio::test]
 async fn test_backfill_with_upstream_and_snapshot_read() -> Result<()> {
