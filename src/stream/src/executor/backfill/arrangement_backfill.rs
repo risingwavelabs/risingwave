@@ -222,7 +222,7 @@ where
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
-                let mut snapshot_read_complete = true;
+                let mut snapshot_read_complete = false;
                 let mut has_snapshot_read = false;
 
                 // NOTE(kwannoel): Scope it so that immutable reference to `upstream_table` can be
