@@ -218,6 +218,13 @@ impl BackfillState {
         ));
         *committed_state = current_state.clone();
     }
+
+    pub(crate) fn get_snapshot_row_count(&self) -> u64 {
+        self.inner
+            .values()
+            .map(|p| p.get_snapshot_row_count())
+            .sum()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -243,6 +250,10 @@ impl BackfillStatePerVnode {
 
     pub(crate) fn current_state(&self) -> &BackfillProgressPerVnode {
         &self.current_state
+    }
+
+    pub(crate) fn get_snapshot_row_count(&self) -> u64 {
+        self.current_state().get_snapshot_row_count()
     }
 }
 
@@ -272,6 +283,20 @@ pub enum BackfillProgressPerVnode {
         /// Number of snapshot records read for this vnode.
         snapshot_row_count: u64,
     },
+}
+
+impl BackfillProgressPerVnode {
+    fn get_snapshot_row_count(&self) -> u64 {
+        match self {
+            BackfillProgressPerVnode::NotStarted => 0,
+            BackfillProgressPerVnode::InProgress {
+                snapshot_row_count, ..
+            }
+            | BackfillProgressPerVnode::Completed {
+                snapshot_row_count, ..
+            } => *snapshot_row_count,
+        }
+    }
 }
 
 pub(crate) fn mark_chunk(

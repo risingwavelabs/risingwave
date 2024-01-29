@@ -185,7 +185,7 @@ where
         let mut snapshot_read_epoch;
 
         // Keep track of rows from the snapshot.
-        let mut total_snapshot_processed_rows: u64 = 0;
+        let mut total_snapshot_processed_rows: u64 = backfill_state.get_snapshot_row_count();
 
         // Arrangement Backfill Algorithm:
         //
@@ -278,9 +278,8 @@ where
                                         // mark.
                                         for chunk in upstream_chunk_buffer.drain(..) {
                                             let chunk_cardinality = chunk.cardinality() as u64;
-                                            cur_barrier_snapshot_processed_rows +=
+                                            cur_barrier_upstream_processed_rows +=
                                                 chunk_cardinality;
-                                            total_snapshot_processed_rows += chunk_cardinality;
                                             yield Message::Chunk(mapping_chunk(
                                                 chunk,
                                                 &self.output_indices,
