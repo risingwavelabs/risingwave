@@ -24,6 +24,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::row::OwnedRow;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
@@ -219,6 +220,8 @@ where
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
+                let mut snapshot_read_complete = true;
+                let mut has_snapshot_read = false;
 
                 // NOTE(kwannoel): Scope it so that immutable reference to `upstream_table` can be
                 // dropped. Then we can write to `upstream_table` on barrier in the
@@ -229,20 +232,19 @@ where
                     let right_snapshot = pin!(Self::make_snapshot_stream(
                         &upstream_table,
                         backfill_state.clone(), // FIXME: Use mutable reference instead.
-                        &mut builders,
                         paused,
                     )
                     .map(Either::Right));
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.
-                    let backfill_stream =
+                    let mut backfill_stream =
                         select_with_strategy(left_upstream, right_snapshot, |_: &mut ()| {
                             stream::PollNext::Left
                         });
 
                     #[for_await]
-                    for either in backfill_stream {
+                    for either in &mut backfill_stream {
                         match either {
                             // Upstream
                             Either::Left(msg) => {
@@ -268,8 +270,39 @@ where
                             }
                             // Snapshot read
                             Either::Right(msg) => {
+                                has_snapshot_read = true;
                                 match msg? {
                                     None => {
+                                        // Consume remaining rows in the builder.
+                                        for (vnode, builder) in builders.iter_mut().enumerate() {
+                                            if let Some(data_chunk) = builder.consume_all() {
+                                                let vnode = VirtualNode::from_index(vnode);
+                                                let chunk = StreamChunk::from_parts(
+                                                    vec![Op::Insert; data_chunk.capacity()],
+                                                    data_chunk,
+                                                );
+                                                // Raise the current position.
+                                                // As snapshot read streams are ordered by pk, so we can
+                                                // just use the last row to update `current_pos`.
+                                                update_pos_by_vnode(
+                                                    vnode,
+                                                    &chunk,
+                                                    &pk_in_output_indices,
+                                                    &mut backfill_state,
+                                                )?;
+
+                                                let chunk_cardinality = chunk.cardinality() as u64;
+                                                cur_barrier_snapshot_processed_rows +=
+                                                    chunk_cardinality;
+                                                total_snapshot_processed_rows += chunk_cardinality;
+                                                let chunk = Message::Chunk(mapping_chunk(
+                                                    chunk,
+                                                    &self.output_indices,
+                                                ));
+                                                yield chunk;
+                                            }
+                                        }
+
                                         // End of the snapshot read stream.
                                         // We should not mark the chunk anymore,
                                         // otherwise, we will ignore some rows
@@ -289,7 +322,67 @@ where
 
                                         break 'backfill_loop;
                                     }
-                                    Some((vnode, chunk)) => {
+                                    Some((vnode, row)) => {
+                                        let builder = builders.get_mut(vnode.to_index()).unwrap();
+                                        if let Some(chunk) = builder.append_one_row(row) {
+                                            let chunk = StreamChunk::from_parts(
+                                                vec![Op::Insert; chunk.capacity()],
+                                                chunk,
+                                            );
+                                            // Raise the current position.
+                                            // As snapshot read streams are ordered by pk, so we can
+                                            // just use the last row to update `current_pos`.
+                                            update_pos_by_vnode(
+                                                vnode,
+                                                &chunk,
+                                                &pk_in_output_indices,
+                                                &mut backfill_state,
+                                            )?;
+
+                                            let chunk_cardinality = chunk.cardinality() as u64;
+                                            cur_barrier_snapshot_processed_rows +=
+                                                chunk_cardinality;
+                                            total_snapshot_processed_rows += chunk_cardinality;
+                                            let chunk = Message::Chunk(mapping_chunk(
+                                                chunk,
+                                                &self.output_indices,
+                                            ));
+                                            yield chunk;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Before processing barrier, if did not snapshot read,
+                    // do a snapshot read first.
+                    // This is so we don't lose the tombstone iteration progress.
+                    // If paused, we also can't read any snapshot records.
+                    if !has_snapshot_read && !paused {
+                        // If we have not snapshot read, builders must all be empty.
+                        assert!(builders.iter().all(|b| b.is_empty()));
+                        let (_, snapshot) = backfill_stream.into_inner();
+                        #[for_await]
+                        for msg in snapshot {
+                            let Either::Right(msg) = msg else {
+                                bail!("BUG: snapshot_read contains upstream messages");
+                            };
+                            match msg? {
+                                None => {
+                                    // End of the snapshot read stream.
+                                    // We let the barrier handling logic take care of upstream updates.
+                                    // But we still want to exit backfill loop, so we mark snapshot read complete.
+                                    snapshot_read_complete = true;
+                                    break;
+                                }
+                                Some((vnode, row)) => {
+                                    let builder = builders.get_mut(vnode.to_index()).unwrap();
+                                    if let Some(chunk) = builder.append_one_row(row) {
+                                        let chunk = StreamChunk::from_parts(
+                                            vec![Op::Insert; chunk.capacity()],
+                                            chunk,
+                                        );
                                         // Raise the current position.
                                         // As snapshot read streams are ordered by pk, so we can
                                         // just use the last row to update `current_pos`.
@@ -309,6 +402,8 @@ where
                                         ));
                                         yield chunk;
                                     }
+
+                                    break;
                                 }
                             }
                         }
@@ -526,11 +621,10 @@ where
         }
     }
 
-    #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
+    #[try_stream(ok = Option<(VirtualNode, OwnedRow)>, error = StreamExecutorError)]
     async fn make_snapshot_stream<'a>(
         upstream_table: &'a ReplicatedStateTable<S, SD>,
         backfill_state: BackfillState,
-        builders: &'a mut [DataChunkBuilder],
         paused: bool,
     ) {
         if paused {
@@ -540,7 +634,7 @@ where
             }
         } else {
             #[for_await]
-            for r in Self::snapshot_read_per_vnode(upstream_table, backfill_state, builders) {
+            for r in Self::snapshot_read_per_vnode(upstream_table, backfill_state) {
                 yield r?;
             }
         }
@@ -570,18 +664,13 @@ where
     /// remaining data in `builder` must be flushed manually.
     /// Otherwise when we scan a new snapshot, it is possible the rows in the `builder` would be
     /// present, Then when we flush we contain duplicate rows.
-    #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
+    #[try_stream(ok = Option<(VirtualNode, OwnedRow)>, error = StreamExecutorError)]
     async fn snapshot_read_per_vnode<'a>(
         upstream_table: &'a ReplicatedStateTable<S, SD>,
         backfill_state: BackfillState,
-        builders: &'a mut [DataChunkBuilder],
     ) {
         let mut iterators = vec![];
-        for (vnode, builder) in upstream_table
-            .vnodes()
-            .iter_vnodes()
-            .zip_eq_debug(builders.iter_mut())
-        {
+        for vnode in upstream_table.vnodes().iter_vnodes() {
             let backfill_progress = backfill_state.get_progress(&vnode)?;
             let current_pos = match backfill_progress {
                 BackfillProgressPerVnode::NotStarted => None,
@@ -611,20 +700,19 @@ where
 
             let vnode_row_iter = Box::pin(owned_row_iter(vnode_row_iter));
 
-            let vnode_chunk_iter =
-                iter_chunks(vnode_row_iter, builder).map_ok(move |chunk| (vnode, chunk));
+            let vnode_row_iter = vnode_row_iter.map_ok(move |row| (vnode, row));
 
-            let vnode_chunk_iter = Box::pin(vnode_chunk_iter);
+            let vnode_row_iter = Box::pin(vnode_row_iter);
 
-            iterators.push(vnode_chunk_iter);
+            iterators.push(vnode_row_iter);
         }
 
         // TODO(kwannoel): We can provide an option between snapshot read in parallel vs serial.
-        let vnode_chunk_iter = select_all(iterators);
+        let vnode_row_iter = select_all(iterators);
 
         #[for_await]
-        for chunk in vnode_chunk_iter {
-            yield Some(chunk?);
+        for vnode_and_row in vnode_row_iter {
+            yield Some(vnode_and_row?);
         }
         yield None;
         return Ok(());
