@@ -619,9 +619,9 @@ where
             iterators.push(vnode_chunk_iter);
         }
 
+        // TODO(kwannoel): We can provide an option between snapshot read in parallel vs serial.
         let vnode_chunk_iter = select_all(iterators);
 
-        // This means we iterate serially rather than in parallel across vnodes.
         #[for_await]
         for chunk in vnode_chunk_iter {
             yield Some(chunk?);
