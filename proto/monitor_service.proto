@@ -62,7 +62,6 @@ message GetBackPressureResponse {
   repeated BackPressureInfo back_pressure_infos = 1;
 }
 
-
 service MonitorService {
   rpc StackTrace(StackTraceRequest) returns (StackTraceResponse);
   rpc Profiling(ProfilingRequest) returns (ProfilingResponse);

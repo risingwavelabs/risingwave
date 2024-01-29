@@ -369,7 +369,6 @@ impl ClusterController {
             .await
             .get_worker_extra_info_by_id(worker_id)
     }
-
 }
 
 #[derive(Default, Clone)]
