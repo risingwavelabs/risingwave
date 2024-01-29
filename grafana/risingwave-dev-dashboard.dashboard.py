@@ -683,9 +683,8 @@ def section_streaming(outer_panels):
                     "The figure shows the number of rows read by each source per second.",
                     [
                         panels.target(
-                            f"rate({metric('stream_source_output_rows_counts')}[$__rate_interval])",
-                            "source={{source_name}} actor={{actor_id}} @ {{%s}}"
-                            % NODE_LABEL,
+                            f"sum(rate({metric('stream_source_output_rows_counts')}[$__rate_interval])) by (source_id, source_name, fragment_id)",
+                            "{{source_name}} (fragment {{fragment_id}})",
                         ),
                     ],
                 ),

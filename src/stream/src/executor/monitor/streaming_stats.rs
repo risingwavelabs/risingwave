@@ -211,7 +211,7 @@ impl StreamingMetrics {
         let source_output_row_count = register_int_counter_vec_with_registry!(
             "stream_source_output_rows_counts",
             "Total number of rows that have been output from source",
-            &["source_id", "source_name", "actor_id"],
+            &["source_id", "source_name", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -219,7 +219,7 @@ impl StreamingMetrics {
         let source_row_per_barrier = register_int_counter_vec_with_registry!(
             "stream_source_rows_per_barrier_counts",
             "Total number of rows that have been output from source per barrier",
-            &["actor_id", "executor_id"],
+            &["actor_id", "executor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -227,7 +227,7 @@ impl StreamingMetrics {
         let source_split_change_count = register_int_counter_vec_with_registry!(
             "stream_source_split_change_event_count",
             "Total number of split change events that have been operated by source",
-            &["source_id", "source_name", "actor_id"],
+            &["source_id", "source_name", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
