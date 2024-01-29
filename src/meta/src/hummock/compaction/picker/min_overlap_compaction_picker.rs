@@ -366,37 +366,55 @@ impl NonOverlapSubLevelPicker {
                     // skip the check if `overlap_info` is not initialized (i.e. the first non-empty level is not met)
                     let level = levels.get(level_idx).unwrap();
                     let overlap_sst_range = overlap_info.check_multiple_overlap(&level.table_infos);
-                    let expected_sst_ids = level.table_infos[overlap_sst_range.clone()]
-                        .iter()
-                        .map(|s| s.object_id)
-                        .collect_vec();
-                    let actual_sst_ids = ssts.iter().map(|s| s.object_id).collect_vec();
-                    if actual_sst_ids != expected_sst_ids {
-                        let mut actual_sst_infos = String::new();
-                        ssts.iter()
-                            .for_each(|s| append_sstable_info_to_string(&mut actual_sst_infos, s));
-                        let mut expected_sst_infos = String::new();
-                        level.table_infos[overlap_sst_range.clone()]
+                    if !overlap_sst_range.is_empty() {
+                        let expected_sst_ids = level.table_infos[overlap_sst_range.clone()]
                             .iter()
-                            .for_each(|s| {
-                                append_sstable_info_to_string(&mut expected_sst_infos, s)
+                            .map(|s| s.object_id)
+                            .collect_vec();
+                        let actual_sst_ids = ssts.iter().map(|s| s.object_id).collect_vec();
+                        // `actual_sst_ids` can be larger than `expected_sst_ids` because we may use a larger key range to select SSTs.
+                        // `expected_sst_ids` must be a sub-range of `actual_sst_ids` to ensure correctness.
+                        let start_idx = actual_sst_ids
+                            .iter()
+                            .position(|sst_id| sst_id == expected_sst_ids.first().unwrap());
+                        if start_idx.is_none()
+                            || actual_sst_ids[start_idx.unwrap()..] != expected_sst_ids
+                        {
+                            // Print SstableInfo for `actual_sst_ids`
+                            let mut actual_sst_infos = String::new();
+                            ssts.iter().for_each(|s| {
+                                append_sstable_info_to_string(&mut actual_sst_infos, s)
                             });
-                        let mut ret_sst_infos = String::new();
-                        ret.sstable_infos
-                            .iter()
-                            .enumerate()
-                            .for_each(|(idx, ssts)| {
-                                writeln!(
-                                    ret_sst_infos,
-                                    "sub level {}",
-                                    levels.get(idx).unwrap().sub_level_id
-                                )
-                                .unwrap();
-                                ssts.iter().for_each(|s| {
-                                    append_sstable_info_to_string(&mut ret_sst_infos, s)
+
+                            // Print SstableInfo for `expected_sst_ids`
+                            let mut expected_sst_infos = String::new();
+                            level.table_infos[overlap_sst_range.clone()]
+                                .iter()
+                                .for_each(|s| {
+                                    append_sstable_info_to_string(&mut expected_sst_infos, s)
                                 });
-                            });
-                        panic!("Compact task overlap check fails. Actual: {:?} Expected: {:?} Ret {:?}", actual_sst_infos, expected_sst_infos, ret_sst_infos);
+
+                            // Print SstableInfo for selected ssts in all sub-levels
+                            let mut ret_sst_infos = String::new();
+                            ret.sstable_infos
+                                .iter()
+                                .enumerate()
+                                .for_each(|(idx, ssts)| {
+                                    writeln!(
+                                        ret_sst_infos,
+                                        "sub level {}",
+                                        levels.get(idx).unwrap().sub_level_id
+                                    )
+                                    .unwrap();
+                                    ssts.iter().for_each(|s| {
+                                        append_sstable_info_to_string(&mut ret_sst_infos, s)
+                                    });
+                                });
+                            panic!(
+                                "Compact task overlap check fails. Actual: {} Expected: {} Ret {}",
+                                actual_sst_infos, expected_sst_infos, ret_sst_infos
+                            );
+                        }
                     }
                 } else if !ssts.is_empty() {
                     // init the `overlap_info` when meeting the first non-empty level.

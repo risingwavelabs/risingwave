@@ -24,7 +24,6 @@ pub struct TrivialMovePicker {
     level: usize,
     target_level: usize,
     overlap_strategy: Arc<dyn OverlapStrategy>,
-    enable: bool,
 }
 
 impl TrivialMovePicker {
@@ -32,13 +31,11 @@ impl TrivialMovePicker {
         level: usize,
         target_level: usize,
         overlap_strategy: Arc<dyn OverlapStrategy>,
-        enable: bool,
     ) -> Self {
         Self {
             level,
             target_level,
             overlap_strategy,
-            enable,
         }
     }
 
@@ -49,10 +46,6 @@ impl TrivialMovePicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<SstableInfo> {
-        if !self.enable {
-            return None;
-        }
-
         let mut skip_by_pending = false;
         for sst in select_tables {
             if level_handlers[self.level].is_pending_compact(&sst.sst_id) {

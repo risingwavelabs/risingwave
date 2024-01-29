@@ -295,6 +295,10 @@ impl IntraCompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
+        if !self.developer_config.enable_trivial_move {
+            return None;
+        }
+
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
 
         for (idx, level) in l0.sub_levels.iter().enumerate() {
@@ -312,12 +316,7 @@ impl IntraCompactionPicker {
                 continue;
             }
 
-            let trivial_move_picker = TrivialMovePicker::new(
-                0,
-                0,
-                overlap_strategy.clone(),
-                self.developer_config.enable_trivial_move,
-            );
+            let trivial_move_picker = TrivialMovePicker::new(0, 0, overlap_strategy.clone());
 
             let select_sst = trivial_move_picker.pick_trivial_move_sst(
                 &l0.sub_levels[idx + 1].table_infos,
