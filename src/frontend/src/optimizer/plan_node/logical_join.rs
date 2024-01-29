@@ -1063,7 +1063,7 @@ impl LogicalJoin {
                 .map(|pos| left_eq_indexes[*pos])
                 .collect_vec();
 
-            RequiredDist::shard_by_key(self.left().schema().len(), &left_dist_key)
+            RequiredDist::hash_shard(&left_dist_key)
         };
 
         let left = self.left().to_stream(ctx)?;
