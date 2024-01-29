@@ -195,7 +195,6 @@ impl<'a> AvroParseOptions<'a> {
 
             // ---- TimestampTz -----
             (Some(DataType::Timestamptz), Value::TimestampMillis(ms)) => {
-                tracing::debug!("timestamp milliseconds {:?}", ms);
                 Timestamptz::from_millis(*ms)
                     .ok_or(AccessError::Other(anyhow!(
                         "timestamp with milliseconds {:?} * 1000 is out of range",
