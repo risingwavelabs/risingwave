@@ -21,7 +21,7 @@ pub use avro::AvroParserConfig;
 pub use canal::*;
 use csv_parser::CsvParser;
 pub use debezium::*;
-use futures::{Future, TryFutureExt};
+use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 pub use json_parser::*;
 pub use protobuf::*;
@@ -573,13 +573,15 @@ impl<P: ByteStreamSourceParser> P {
 
         // The parser stream will be long-lived. We use `instrument_with` here to create
         // a new span for the polling of each chunk.
-        into_chunk_stream(self, data_stream).instrument_with(move || {
-            tracing::info_span!(
-                "source_parse_chunk",
-                actor_id = source_info.actor_id,
-                source_id = source_info.source_id.table_id()
-            )
-        })
+        into_chunk_stream(self, data_stream)
+            .inspect_ok(|chunk| tracing::info!(card = chunk.cardinality(), "parsed chunk"))
+            .instrument_with(move || {
+                tracing::info_span!(
+                    "source_parse_chunk",
+                    actor_id = source_info.actor_id,
+                    source_id = source_info.source_id.table_id()
+                )
+            })
     }
 }
 
