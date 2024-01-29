@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use anyhow::Context;
 use itertools::Itertools;
 use prost_reflect::{
     Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor,
@@ -22,11 +23,12 @@ use prost_reflect::{
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Datum, Decimal, JsonbVal, ScalarImpl, F32, F64};
+use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 
 use super::schema_resolver::*;
+use crate::error::NewResult;
 use crate::parser::unified::protobuf::ProtobufAccess;
 use crate::parser::unified::AccessImpl;
 use crate::parser::util::bytes_from_url;
@@ -86,17 +88,15 @@ pub struct ProtobufParserConfig {
 }
 
 impl ProtobufParserConfig {
-    pub async fn new(encoding_properties: EncodingProperties) -> Result<Self> {
+    pub async fn new(encoding_properties: EncodingProperties) -> NewResult<Self> {
         let protobuf_config = try_match_expand!(encoding_properties, EncodingProperties::Protobuf)?;
         let location = &protobuf_config.row_schema_location;
         let message_name = &protobuf_config.message_name;
         let url = handle_sr_list(location.as_str())?;
 
-        if let Some(name) = protobuf_config.key_message_name {
+        if protobuf_config.key_message_name.is_some() {
             // https://docs.confluent.io/platform/7.5/control-center/topics/schema.html#c3-schemas-best-practices-key-value-pairs
-            return Err(RwError::from(ProtocolError(format!(
-                "key.message = {name} not used. Protobuf key unsupported."
-            ))));
+            bail!("protobuf key is not supported");
         }
         let schema_bytes = if protobuf_config.use_schema_registry {
             let schema_value = get_subject_by_strategy(
@@ -114,18 +114,14 @@ impl ProtobufParserConfig {
             bytes_from_url(url, protobuf_config.aws_auth_props.as_ref()).await?
         };
 
-        let pool = DescriptorPool::decode(schema_bytes.as_slice()).map_err(|e| {
-            ProtocolError(format!(
-                "cannot build descriptor pool from schema: {}, error: {}",
-                location, e
-            ))
-        })?;
+        let pool = DescriptorPool::decode(schema_bytes.as_slice())
+            .with_context(|| format!("cannot build descriptor pool from schema `{}`", location))?;
 
-        let message_descriptor = pool.get_message_by_name(message_name).ok_or_else(|| {
-            ProtocolError(format!(
-                "Cannot find message {} in schema: {}.\nDescriptor pool is {:?}",
-                message_name, location, pool
-            ))
+        let message_descriptor = pool.get_message_by_name(message_name).with_context(|| {
+            format!(
+                "cannot find message `{}` in schema `{}`",
+                message_name, location,
+            )
         })?;
 
         Ok(Self {
@@ -192,15 +188,15 @@ impl ProtobufParserConfig {
     }
 }
 
-fn detect_loop_and_push(trace: &mut Vec<String>, fd: &FieldDescriptor) -> Result<()> {
+fn detect_loop_and_push(trace: &mut Vec<String>, fd: &FieldDescriptor) -> NewResult<()> {
     let identifier = format!("{}({})", fd.name(), fd.full_name());
     if trace.iter().any(|s| s == identifier.as_str()) {
-        return Err(RwError::from(ProtocolError(format!(
+        bail!(
             "circular reference detected: {}, conflict with {}, kind {:?}",
             trace.iter().join("->"),
             identifier,
             fd.kind(),
-        ))));
+        );
     }
     trace.push(identifier);
     Ok(())
@@ -337,6 +333,7 @@ fn recursive_parse_json(
     serde_json::Value::Object(ret)
 }
 
+// TODO(eh): should use `AccessError`
 pub fn from_protobuf_value(
     field_desc: &FieldDescriptor,
     value: &Value,
@@ -476,7 +473,7 @@ pub fn from_protobuf_value(
 fn protobuf_type_mapping(
     field_descriptor: &FieldDescriptor,
     parse_trace: &mut Vec<String>,
-) -> Result<DataType> {
+) -> NewResult<DataType> {
     detect_loop_and_push(parse_trace, field_descriptor)?;
     let field_type = field_descriptor.kind();
     let mut t = match field_type {
@@ -494,7 +491,7 @@ fn protobuf_type_mapping(
             let fields = m
                 .fields()
                 .map(|f| protobuf_type_mapping(&f, parse_trace))
-                .collect::<Result<Vec<_>>>()?;
+                .try_collect()?;
             let field_names = m.fields().map(|f| f.name().to_string()).collect_vec();
 
             // Note that this part is useful for actual parsing
@@ -513,10 +510,10 @@ fn protobuf_type_mapping(
         Kind::Bytes => DataType::Bytea,
     };
     if field_descriptor.is_map() {
-        return Err(RwError::from(ProtocolError(format!(
-            "map type is unsupported (field: '{}')",
+        bail!(
+            "protobuf map type (on field `{}`) is not supported",
             field_descriptor.full_name()
-        ))));
+        );
     }
     if field_descriptor.cardinality() == Cardinality::Repeated {
         t = DataType::List(Box::new(t))

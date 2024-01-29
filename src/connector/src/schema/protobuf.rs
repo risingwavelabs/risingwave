@@ -55,6 +55,6 @@ pub async fn fetch_descriptor(
     // This reversed dependency will be fixed when we support schema registry.
     let conf = ProtobufParserConfig::new(enc)
         .await
-        .map_err(SchemaFetchError::YetToMigrate)?;
+        .map_err(SchemaFetchError::NewError)?;
     Ok(conf.message_descriptor)
 }

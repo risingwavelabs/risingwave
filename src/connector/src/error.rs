@@ -15,6 +15,30 @@
 use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
 
+use crate::schema::InvalidOptionError;
+
+#[derive(Error, Debug)]
+#[error(transparent)]
+pub struct NewError(
+    #[from]
+    #[backtrace]
+    anyhow::Error,
+);
+
+impl From<InvalidOptionError> for NewError {
+    fn from(value: InvalidOptionError) -> Self {
+        Self(anyhow::anyhow!(value))
+    }
+}
+
+pub type NewResult<T> = Result<T, NewError>;
+
+impl From<NewError> for RwError {
+    fn from(s: NewError) -> Self {
+        ErrorCode::ConnectorError(Box::new(s)).into()
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum ConnectorError {
     #[error("Parse error: {0}")]

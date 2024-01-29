@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{Date, Decimal, Time, Timestamp, Timestamptz};
 
 use super::unified::{AccessError, AccessResult};
