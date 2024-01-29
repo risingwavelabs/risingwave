@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::TryFutureExt;
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
@@ -237,6 +236,7 @@ impl DdlController {
         for conn in connections {
             let _ = self
                 .delete_vpc_endpoint_v2(conn.into_inner())
+                .await
                 .inspect_err(|err| {
                     tracing::warn!(err = ?err.as_report(), "failed to delete vpc endpoint");
                 });
