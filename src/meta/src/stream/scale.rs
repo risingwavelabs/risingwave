@@ -2420,7 +2420,7 @@ impl GlobalStreamManager {
             .prepare_reschedule_command(reschedules, options, table_parallelism.as_mut())
             .await?;
 
-        tracing::debug!("reschedule plan: {:#?}", reschedule_fragment);
+        tracing::debug!("reschedule plan: {:?}", reschedule_fragment);
 
         let command = Command::RescheduleFragment {
             reschedules: reschedule_fragment,
