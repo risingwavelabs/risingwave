@@ -119,7 +119,6 @@ impl CipherConfig {
         })
     }
 
-    // postgres example can be found [here](https://github.com/postgres/postgres/blob/master/contrib/pgcrypto/sql/rijndael.sql)
     fn build_cipher(&self) -> Result<Cipher> {
         // match config's algorithm, mode, padding to openssl's cipher
         match (&self.algorithm, self.crypt_key.len(), &self.mode) {
