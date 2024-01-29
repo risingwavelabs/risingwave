@@ -155,6 +155,7 @@ where
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
+        let mut paused = first_barrier.is_pause_on_startup();
         let init_epoch = first_barrier.epoch.prev;
         if let Some(state_table) = self.state_table.as_mut() {
             state_table.init_epoch(first_barrier.epoch);
@@ -232,12 +233,13 @@ where
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
-                    let right_snapshot = pin!(Self::snapshot_read(
+                    let right_snapshot = pin!(Self::make_snapshot_stream(
                         &self.upstream_table,
                         snapshot_read_epoch,
                         current_pos.clone(),
+                        paused
                     )
-                    .map(Either::Right),);
+                    .map(Either::Right));
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.
@@ -328,7 +330,8 @@ where
                     // Before processing barrier, if did not snapshot read,
                     // do a snapshot read first.
                     // This is so we don't lose the tombstone iteration progress.
-                    if !has_snapshot_read {
+                    // If paused, we also can't read any snapshot records.
+                    if !has_snapshot_read && !paused {
                         assert!(builder.is_empty());
                         let (_, snapshot) = backfill_stream.into_inner();
                         #[for_await]
@@ -447,23 +450,32 @@ where
                 );
 
                 // Update snapshot read chunk builder.
-                if let Some(mutation) = barrier.mutation.as_ref() {
-                    if let Mutation::Throttle(actor_to_apply) = mutation.as_ref() {
-                        let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
-                        if let Some(new_rate_limit) = new_rate_limit_entry {
-                            rate_limit = new_rate_limit.as_ref().map(|x| *x as _);
-                            tracing::info!(
-                                id = self.actor_id,
-                                new_rate_limit = ?self.rate_limit,
-                                "actor rate limit changed",
-                            );
-                            assert!(builder.is_empty());
-                            builder = create_builder(
-                                rate_limit,
-                                self.chunk_size,
-                                self.upstream_table.schema().data_types(),
-                            );
+                if let Some(mutation) = barrier.mutation.as_deref() {
+                    match mutation {
+                        Mutation::Pause => {
+                            paused = true;
                         }
+                        Mutation::Resume => {
+                            paused = false;
+                        }
+                        Mutation::Throttle(actor_to_apply) => {
+                            let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
+                            if let Some(new_rate_limit) = new_rate_limit_entry {
+                                rate_limit = new_rate_limit.as_ref().map(|x| *x as _);
+                                tracing::info!(
+                                    id = self.actor_id,
+                                    new_rate_limit = ?self.rate_limit,
+                                    "actor rate limit changed",
+                                );
+                                assert!(builder.is_empty());
+                                builder = create_builder(
+                                    rate_limit,
+                                    self.chunk_size,
+                                    self.upstream_table.schema().data_types(),
+                                );
+                            }
+                        }
+                        _ => (),
                     }
                 }
 
@@ -611,6 +623,26 @@ where
             is_finished,
             row_count,
             old_state: Some(old_state),
+        }
+    }
+
+    #[try_stream(ok = Option<OwnedRow>, error = StreamExecutorError)]
+    async fn make_snapshot_stream(
+        upstream_table: &StorageTable<S>,
+        epoch: u64,
+        current_pos: Option<OwnedRow>,
+        paused: bool,
+    ) {
+        if paused {
+            #[for_await]
+            for _ in tokio_stream::pending() {
+                yield None;
+            }
+        } else {
+            #[for_await]
+            for r in Self::snapshot_read(upstream_table, epoch, current_pos) {
+                yield r?;
+            }
         }
     }
 
