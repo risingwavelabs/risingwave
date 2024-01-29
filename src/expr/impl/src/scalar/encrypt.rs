@@ -16,20 +16,21 @@ use std::fmt::Debug;
 
 use openssl::error::ErrorStack;
 use openssl::symm::{Cipher, Crypter, Mode as CipherMode};
+use regex::Regex;
 use risingwave_expr::{function, CryptographyError, CryptographyStage, ExprError, Result};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum Algorithm {
     Blowfish,
     Aes,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum Mode {
     Cbc,
     Ecb,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum Padding {
     Pkcs,
     None,
@@ -45,39 +46,69 @@ pub struct CipherConfig {
 
 impl CipherConfig {
     fn parse_cipher_config(key: &[u8], input: &str) -> Result<CipherConfig> {
-        if key.len() != 16 && key.len() != 24 && key.len() != 32 {
+        let re = Regex::new(r"^(aes|bf)(?:-(cbc|ecb))?(?:/pad:(pkcs|none))?$").unwrap();
+        let (algorithm, mode, padding) = {
+            if let Some(caps) = re.captures(input) {
+                let algorithm = match caps.get(1).map(|s| s.as_str()) {
+                    Some("bf") => Algorithm::Blowfish,
+                    Some("aes") => Algorithm::Aes,
+                    algo => {
+                        return Err(ExprError::InvalidParam {
+                            name: "mode",
+                            reason: format!("expect bf or aes for algorithm, but got: {:?}", algo)
+                                .into(),
+                        })
+                    }
+                };
+
+                let mode = match caps.get(2).map(|m| m.as_str()) {
+                    Some("cbc") | None => Mode::Cbc,
+                    Some("ecb") => Mode::Ecb, // Default to Ecb if not specified
+                    mode => {
+                        return Err(ExprError::InvalidParam {
+                            name: "mode",
+                            reason: format!(
+                                "expect cbc or ecb for mode, but got: {}",
+                                mode.unwrap()
+                            )
+                            .into(),
+                        })
+                    }
+                };
+
+                let padding = match caps.get(3).map(|m| m.as_str()) {
+                    Some("pkcs") | None => Padding::Pkcs, // Default to Pkcs if not specified
+                    Some("none") => Padding::None,
+                    padding => {
+                        return Err(ExprError::InvalidParam {
+                            name: "mode",
+                            reason: format!(
+                                "expect cbc or ecb for padding, but got: {}",
+                                padding.unwrap()
+                            )
+                            .into(),
+                        })
+                    }
+                };
+
+                (algorithm, mode, padding)
+            } else {
+                return Err(ExprError::InvalidParam {
+                    name: "mode",
+                    reason: format!(
+                        "invalid mode: {}, expect pattern algorithm[-mode][/pad:padding]",
+                        input
+                    )
+                    .into(),
+                });
+            }
+        };
+
+        if algorithm == Algorithm::Aes && key.len() != 16 && key.len() != 24 && key.len() != 32 {
             return Err(ExprError::InvalidParam {
                 name: "key",
                 reason: format!("invalid key length: {}, expect 16, 24 or 32", key.len()).into(),
             });
-        }
-
-        let parts: Vec<&str> = input.split(&['-', '/'][..]).collect();
-
-        let algorithm = match parts.get(0) {
-            Some(&"bf") => Algorithm::Blowfish,
-            Some(&"aes") => Algorithm::Aes,
-            algo => {
-                return Err(ExprError::InvalidParam {
-                    name: "mode",
-                    reason: format!("expect bf or aes, but got: {:?}", algo).into(),
-                })
-            }
-        };
-
-        let mut mode = Mode::Cbc; // default to CBC
-        let mut padding = Padding::Pkcs; // default to PKCS
-
-        for part in parts.iter().skip(1) {
-            if part.starts_with("cbc") {
-                mode = Mode::Cbc;
-            } else if part.starts_with("ecb") {
-                mode = Mode::Ecb;
-            } else if part.starts_with("pad:pkcs") {
-                padding = Padding::Pkcs;
-            } else if part.starts_with("pad:none") {
-                padding = Padding::None;
-            }
         }
 
         Ok(CipherConfig {
@@ -128,8 +159,7 @@ pub fn decrypt(data: &[u8], config: &CipherConfig) -> Result<Box<[u8]>> {
     let report_error = |e: ErrorStack| {
         ExprError::Cryptography(Box::new(CryptographyError {
             stage: CryptographyStage::Decrypt,
-            payload: data.into(),
-            reason: e.to_string().into(),
+            reason: e,
         }))
     };
 
@@ -154,8 +184,7 @@ pub fn encrypt(data: &[u8], config: &CipherConfig) -> Result<Box<[u8]>> {
     let report_error = |e: ErrorStack| {
         ExprError::Cryptography(Box::new(CryptographyError {
             stage: CryptographyStage::Encrypt,
-            payload: data.into(),
-            reason: e.to_string().into(),
+            reason: e,
         }))
     };
 
@@ -220,5 +249,37 @@ mod test {
             decrypted,
             (*b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff").into()
         )
+    }
+
+    #[test]
+    fn test_parse_cipher_config() {
+        let key = b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f";
+
+        let mode_1 = "aes-ecb/pad:none";
+        let config = CipherConfig::parse_cipher_config(key, mode_1).unwrap();
+        assert_eq!(config.algorithm, Algorithm::Aes);
+        assert_eq!(config.mode, Mode::Ecb);
+        assert_eq!(config.padding, Padding::None);
+
+        let mode_2 = "aes-cbc/pad:pkcs";
+        let config = CipherConfig::parse_cipher_config(key, mode_2).unwrap();
+        assert_eq!(config.algorithm, Algorithm::Aes);
+        assert_eq!(config.mode, Mode::Cbc);
+        assert_eq!(config.padding, Padding::Pkcs);
+
+        let mode_3 = "aes";
+        let config = CipherConfig::parse_cipher_config(key, mode_3).unwrap();
+        assert_eq!(config.algorithm, Algorithm::Aes);
+        assert_eq!(config.mode, Mode::Cbc);
+        assert_eq!(config.padding, Padding::Pkcs);
+
+        let mode_4 = "bf/pad:none";
+        let config = CipherConfig::parse_cipher_config(key, mode_4).unwrap();
+        assert_eq!(config.algorithm, Algorithm::Blowfish);
+        assert_eq!(config.mode, Mode::Cbc);
+        assert_eq!(config.padding, Padding::None);
+
+        let mode_5 = "cbc";
+        assert!(CipherConfig::parse_cipher_config(key, mode_5).is_err());
     }
 }

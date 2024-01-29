@@ -9194,6 +9194,7 @@ dependencies = [
  "madsim-tokio",
  "moka",
  "num-traits",
+ "openssl",
  "parse-display",
  "paste",
  "risingwave_common",

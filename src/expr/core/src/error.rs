@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Debug, Display, Formatter, Write};
+use std::fmt::{Debug, Display};
 
 use risingwave_common::array::{ArrayError, ArrayRef};
 use risingwave_common::error::{ErrorCode, RwError};
@@ -128,26 +128,12 @@ pub enum CryptographyStage {
     Decrypt,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{stage:?} stage, reason: {reason:?}")]
 pub struct CryptographyError {
     pub stage: CryptographyStage,
-    pub payload: Box<[u8]>,
-    pub reason: Box<str>,
-}
-
-impl Display for CryptographyError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let payload_hex = self.payload.iter().fold(String::new(), |mut output, b| {
-            let _ = write!(output, "{b:02X}");
-            output
-        });
-
-        write!(
-            f,
-            "{:?} stage, payload: {}, reason: {:?}",
-            self.stage, payload_hex, self.reason
-        )
-    }
+    #[source]
+    pub reason: openssl::error::ErrorStack,
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);
