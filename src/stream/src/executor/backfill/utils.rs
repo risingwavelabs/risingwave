@@ -90,16 +90,27 @@ impl BackfillState {
         &mut self,
         vnode: VirtualNode,
         new_pos: OwnedRow,
+        snapshot_row_count_delta: u64,
     ) -> StreamExecutorResult<()> {
         let state = self.get_current_state(&vnode);
-        let new_state = BackfillProgressPerVnode::InProgress {
-            current_pos: new_pos,
-            snapshot_row_count: 0,
-        };
         match state {
-            BackfillProgressPerVnode::NotStarted => *state = new_state,
-            BackfillProgressPerVnode::InProgress { .. } => *state = new_state,
-            BackfillProgressPerVnode::Completed { .. } => unreachable!(),
+            BackfillProgressPerVnode::NotStarted => {
+                *state = BackfillProgressPerVnode::InProgress {
+                    current_pos: new_pos,
+                    snapshot_row_count: snapshot_row_count_delta,
+                };
+            }
+            BackfillProgressPerVnode::InProgress {
+                snapshot_row_count, ..
+            } => {
+                *state = BackfillProgressPerVnode::InProgress {
+                    current_pos: new_pos,
+                    snapshot_row_count: *snapshot_row_count + snapshot_row_count_delta,
+                };
+            }
+            BackfillProgressPerVnode::Completed {
+                snapshot_row_count, ..
+            } => unreachable!(),
         }
         Ok(())
     }
@@ -107,16 +118,19 @@ impl BackfillState {
     pub(crate) fn finish_progress(&mut self, vnode: VirtualNode, pos_len: usize) {
         let finished_placeholder_position = construct_initial_finished_state(pos_len);
         let current_state = self.get_current_state(&vnode);
-        let new_pos = match current_state {
-            BackfillProgressPerVnode::NotStarted => finished_placeholder_position,
-            BackfillProgressPerVnode::InProgress { current_pos, .. } => current_pos.clone(),
+        let (new_pos, snapshot_row_count) = match current_state {
+            BackfillProgressPerVnode::NotStarted => (finished_placeholder_position, 0),
+            BackfillProgressPerVnode::InProgress {
+                current_pos,
+                snapshot_row_count,
+            } => (current_pos.clone(), *snapshot_row_count),
             BackfillProgressPerVnode::Completed { .. } => {
                 return;
             }
         };
         *current_state = BackfillProgressPerVnode::Completed {
             current_pos: new_pos,
-            snapshot_row_count: 0,
+            snapshot_row_count,
         };
     }
 
@@ -543,10 +557,11 @@ pub(crate) fn update_pos_by_vnode(
     chunk: &StreamChunk,
     pk_in_output_indices: &[usize],
     backfill_state: &mut BackfillState,
+    snapshot_row_count_delta: u64,
 ) -> StreamExecutorResult<()> {
     let new_pos = get_new_pos(chunk, pk_in_output_indices);
     assert_eq!(new_pos.len(), pk_in_output_indices.len());
-    backfill_state.update_progress(vnode, new_pos)?;
+    backfill_state.update_progress(vnode, new_pos, snapshot_row_count_delta)?;
     Ok(())
 }
 

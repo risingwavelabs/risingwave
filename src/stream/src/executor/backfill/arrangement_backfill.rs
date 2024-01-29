@@ -290,6 +290,8 @@ where
                                         break 'backfill_loop;
                                     }
                                     Some((vnode, chunk)) => {
+                                        let chunk_cardinality = chunk.cardinality() as u64;
+
                                         // Raise the current position.
                                         // As snapshot read streams are ordered by pk, so we can
                                         // just use the last row to update `current_pos`.
@@ -298,9 +300,9 @@ where
                                             &chunk,
                                             &pk_in_output_indices,
                                             &mut backfill_state,
+                                            chunk_cardinality,
                                         )?;
 
-                                        let chunk_cardinality = chunk.cardinality() as u64;
                                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
                                         total_snapshot_processed_rows += chunk_cardinality;
                                         let chunk = Message::Chunk(mapping_chunk(
@@ -354,6 +356,7 @@ where
                     })
                 })) {
                     if let Some(chunk) = chunk {
+                        let chunk_cardinality = chunk.cardinality() as u64;
                         // Raise the current position.
                         // As snapshot read streams are ordered by pk, so we can
                         // just use the last row to update `current_pos`.
@@ -362,9 +365,9 @@ where
                             &chunk,
                             &pk_in_output_indices,
                             &mut backfill_state,
+                            chunk_cardinality,
                         )?;
 
-                        let chunk_cardinality = chunk.cardinality() as u64;
                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
                         total_snapshot_processed_rows += chunk_cardinality;
                         yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
