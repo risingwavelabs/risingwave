@@ -39,15 +39,7 @@ pub static RW_STREAMING_PARALLELISM_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDe
             (DataType::Int32, "id"),
             (DataType::Varchar, "name"),
             (DataType::Varchar, "relation_type"),
-            (DataType::Int32, "fragment_id"),
-            (DataType::Varchar, "distribution_type"),
-            (DataType::List(Box::new(DataType::Int32)), "state_table_ids"),
-            (
-                DataType::List(Box::new(DataType::Int32)),
-                "upstream_fragment_ids",
-            ),
-            (DataType::List(Box::new(DataType::Varchar)), "flags"),
-            (DataType::Int32, "parallelism"),
+            (DataType::Varchar, "parallelism"),
         ]
     });
 pub static RW_STREAMING_PARALLELISM: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
@@ -67,15 +59,9 @@ pub static RW_STREAMING_PARALLELISM: LazyLock<BuiltinView> = LazyLock::new(|| Bu
             job.id, \
             job.name, \
             job.relation_type, \
-            f.fragment_id, \
-            f.distribution_type, \
-            f.state_table_ids, \
-            f.upstream_fragment_ids, \
-            f.flags, \
-            f.parallelism \
+            tf.parallelism \
         FROM all_streaming_jobs job \
-        INNER JOIN rw_fragments f ON job.id = f.table_id \
-        WHERE job.relation_type in ('table', 'materialized view', 'sink', 'index') \
+        INNER JOIN rw_table_fragments tf ON job.id = tf.table_id \
         ORDER BY job.id\
         "
     .to_string(),

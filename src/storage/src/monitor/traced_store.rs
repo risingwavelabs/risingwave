@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
-
 use bytes::Bytes;
 use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -177,12 +175,9 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         res
     }
 
-    async fn flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> StorageResult<usize> {
-        let span = TraceSpan::new_flush_span(delete_ranges.clone(), self.storage_type);
-        let res = self.inner.flush(delete_ranges).await;
+    async fn flush(&mut self) -> StorageResult<usize> {
+        let span = TraceSpan::new_flush_span(self.storage_type);
+        let res = self.inner.flush().await;
         span.may_send_result(OperationResult::Flush(
             res.as_ref().map(|o: &usize| *o).into(),
         ));

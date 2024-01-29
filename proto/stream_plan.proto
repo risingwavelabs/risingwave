@@ -717,7 +717,7 @@ message OverWindowNode {
   OverWindowCachePolicy cache_policy = 5;
 }
 
-message SubscriptionNode{
+message SubscriptionNode {
   catalog.Subscription subscription_catalog = 1;
   // log store should have a table.
   catalog.Table log_store_table = 2;

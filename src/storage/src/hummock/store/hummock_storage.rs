@@ -16,7 +16,6 @@ use std::future::Future;
 use std::ops::{Bound, Deref};
 use std::sync::atomic::{AtomicU64, Ordering as MemOrdering};
 use std::sync::Arc;
-use std::time::Duration;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
@@ -41,7 +40,6 @@ use crate::filter_key_extractor::{FilterKeyExtractorManager, RpcFilterKeyExtract
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::CompactorContext;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
-use crate::hummock::event_handler::refiller::CacheRefillConfig;
 use crate::hummock::event_handler::{
     HummockEvent, HummockEventHandler, HummockVersionUpdate, ReadVersionMappingType,
 };
@@ -198,17 +196,6 @@ impl HummockStorage {
             filter_key_extractor_manager.clone(),
             sstable_object_id_manager.clone(),
             state_store_metrics.clone(),
-            CacheRefillConfig {
-                timeout: Duration::from_millis(options.cache_refill_timeout_ms),
-                data_refill_levels: options
-                    .cache_refill_data_refill_levels
-                    .iter()
-                    .copied()
-                    .collect(),
-                concurrency: options.cache_refill_concurrency,
-                unit: options.cache_refill_unit,
-                threshold: options.cache_refill_threshold,
-            },
         );
 
         let instance = Self {

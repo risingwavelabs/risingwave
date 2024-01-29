@@ -23,8 +23,8 @@ use super::schema_registry::{
     SchemaRegistryAuth,
 };
 use super::{
-    SchemaFetchError, KEY_MESSAGE_NAME_KEY, MESSAGE_NAME_KEY, NAME_STRATEGY_KEY,
-    SCHEMA_REGISTRY_KEY,
+    invalid_option_error, InvalidOptionError, SchemaFetchError, KEY_MESSAGE_NAME_KEY,
+    MESSAGE_NAME_KEY, NAME_STRATEGY_KEY, SCHEMA_REGISTRY_KEY,
 };
 
 pub struct SchemaWithId {
@@ -36,8 +36,8 @@ impl TryFrom<ConfluentSchema> for SchemaWithId {
     type Error = SchemaFetchError;
 
     fn try_from(fetched: ConfluentSchema) -> Result<Self, Self::Error> {
-        let parsed =
-            AvroSchema::parse_str(&fetched.content).map_err(|e| SchemaFetchError(e.to_string()))?;
+        let parsed = AvroSchema::parse_str(&fetched.content)
+            .map_err(|e| SchemaFetchError::SchemaCompile(e.into()))?;
         Ok(Self {
             schema: Arc::new(parsed),
             id: fetched.id,
@@ -52,14 +52,14 @@ pub async fn fetch_schema(
 ) -> Result<(SchemaWithId, SchemaWithId), SchemaFetchError> {
     let schema_location = format_options
         .get(SCHEMA_REGISTRY_KEY)
-        .ok_or_else(|| SchemaFetchError(format!("{SCHEMA_REGISTRY_KEY} required")))?
+        .ok_or_else(|| invalid_option_error!("{SCHEMA_REGISTRY_KEY} required"))?
         .clone();
     let client_config = format_options.into();
     let name_strategy = format_options
         .get(NAME_STRATEGY_KEY)
         .map(|s| {
             name_strategy_from_str(s)
-                .ok_or_else(|| SchemaFetchError(format!("unrecognized strategy {s}")))
+                .ok_or_else(|| invalid_option_error!("unrecognized strategy {s}"))
         })
         .transpose()?
         .unwrap_or_default();
@@ -78,8 +78,7 @@ pub async fn fetch_schema(
         key_record_name,
         val_record_name,
     )
-    .await
-    .map_err(|e| SchemaFetchError(e.to_string()))?;
+    .await?;
 
     Ok((key_schema.try_into()?, val_schema.try_into()?))
 }
@@ -91,7 +90,7 @@ async fn fetch_schema_inner(
     topic: &str,
     key_record_name: Option<&str>,
     val_record_name: Option<&str>,
-) -> Result<(ConfluentSchema, ConfluentSchema), risingwave_common::error::RwError> {
+) -> Result<(ConfluentSchema, ConfluentSchema), SchemaFetchError> {
     let urls = handle_sr_list(schema_location)?;
     let client = Client::new(urls, client_config)?;
 
