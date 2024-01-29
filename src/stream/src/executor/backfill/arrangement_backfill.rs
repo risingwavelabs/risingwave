@@ -147,6 +147,7 @@ where
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
+        let mut paused = first_barrier.is_pause_on_startup();
         let first_epoch = first_barrier.epoch;
         self.state_table.init_epoch(first_barrier.epoch);
 
@@ -225,12 +226,13 @@ where
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
-                    let right_snapshot = pin!(Self::snapshot_read_per_vnode(
+                    let right_snapshot = pin!(Self::make_snapshot_stream(
                         &upstream_table,
                         backfill_state.clone(), // FIXME: Use mutable reference instead.
                         &mut builders,
+                        paused,
                     )
-                    .map(Either::Right),);
+                    .map(Either::Right));
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.
@@ -323,9 +325,24 @@ where
                 };
 
                 // Process barrier:
+                // - handle mutations
                 // - consume snapshot rows left in builder.
                 // - consume upstream buffer chunk
                 // - switch snapshot
+
+                // handle mutations
+                if let Some(mutation) = barrier.mutation.as_deref() {
+                    use crate::executor::Mutation;
+                    match mutation {
+                        Mutation::Pause => {
+                            paused = true;
+                        }
+                        Mutation::Resume => {
+                            paused = false;
+                        }
+                        _ => (),
+                    }
+                }
 
                 // consume snapshot rows left in builder.
                 // NOTE(kwannoel): `zip_eq_debug` does not work here,
@@ -505,6 +522,26 @@ where
         for msg in upstream {
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
                 yield msg;
+            }
+        }
+    }
+
+    #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
+    async fn make_snapshot_stream<'a>(
+        upstream_table: &'a ReplicatedStateTable<S, SD>,
+        backfill_state: BackfillState,
+        builders: &'a mut [DataChunkBuilder],
+        paused: bool,
+    ) {
+        if paused {
+            #[for_await]
+            for _ in tokio_stream::pending() {
+                yield None;
+            }
+        } else {
+            #[for_await]
+            for r in Self::snapshot_read_per_vnode(upstream_table, backfill_state, builders) {
+                yield r?;
             }
         }
     }

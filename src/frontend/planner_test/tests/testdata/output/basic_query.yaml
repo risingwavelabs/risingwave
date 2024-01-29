@@ -189,7 +189,7 @@
     select * from t limit 1
   batch_plan: |-
     BatchLimit { limit: 1, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    └─BatchExchange { order: [], dist: Single, sequential: true }
       └─BatchLimit { limit: 1, offset: 0 }
         └─BatchScan { table: t, columns: [t.v1, t.v2], limit: 1, distribution: SomeShard }
 - sql: |
