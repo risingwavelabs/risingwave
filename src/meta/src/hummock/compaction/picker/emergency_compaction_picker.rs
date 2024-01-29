@@ -21,18 +21,25 @@ use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LevelCompactionPicker,
     LocalPickerStatistic, TierCompactionPicker,
 };
+use crate::hummock::compaction::CompactionDeveloperConfig;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct EmergencyCompactionPicker {
     target_level: usize,
     config: Arc<CompactionConfig>,
+    developer_config: Arc<CompactionDeveloperConfig>,
 }
 
 impl EmergencyCompactionPicker {
-    pub fn new(target_level: usize, config: Arc<CompactionConfig>) -> Self {
+    pub fn new(
+        target_level: usize,
+        config: Arc<CompactionConfig>,
+        developer_config: Arc<CompactionDeveloperConfig>,
+    ) -> Self {
         Self {
             target_level,
             config,
+            developer_config,
         }
     }
 
@@ -48,6 +55,7 @@ impl EmergencyCompactionPicker {
             self.target_level,
             self.config.clone(),
             unused_validator.clone(),
+            self.developer_config.clone(),
         );
 
         if let Some(ret) =

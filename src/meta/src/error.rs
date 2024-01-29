@@ -119,6 +119,10 @@ impl MetaError {
         matches!(self.inner(), MetaErrorInner::FragmentNotFound(..))
     }
 
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self.inner(), MetaErrorInner::Cancelled(..))
+    }
+
     pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {
         MetaErrorInner::Duplicated(relation, name.into()).into()
     }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -25,11 +25,13 @@ use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
     object_dependency, schema, sink, source, table, user, user_privilege, view, worker_property,
     ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId,
-    PrivilegeId, SchemaId, UserId, WorkerId,
+    PrivilegeId, SchemaId, SourceId, StreamNode, UserId, WorkerId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::meta::PbFragmentParallelUnitMapping;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
 use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
 use sea_orm::sea_query::{
@@ -709,4 +711,69 @@ where
         .await?;
 
     Ok(fragment_actors.into_iter().into_group_map())
+}
+
+/// Find the external stream source info inside the stream node, if any.
+pub fn find_stream_source(stream_node: &PbStreamNode) -> Option<&StreamSource> {
+    if let Some(NodeBody::Source(source)) = &stream_node.node_body {
+        if let Some(inner) = &source.source_inner {
+            return Some(inner);
+        }
+    }
+
+    for child in &stream_node.input {
+        if let Some(source) = find_stream_source(child) {
+            return Some(source);
+        }
+    }
+
+    None
+}
+
+/// Resolve fragment list that are subscribing to sources and actor lists.
+pub async fn resolve_source_register_info_for_jobs<C>(
+    db: &C,
+    streaming_jobs: Vec<ObjectId>,
+) -> MetaResult<(HashMap<SourceId, BTreeSet<FragmentId>>, HashSet<ActorId>)>
+where
+    C: ConnectionTrait,
+{
+    if streaming_jobs.is_empty() {
+        return Ok((HashMap::default(), HashSet::default()));
+    }
+
+    let mut fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+        .select_only()
+        .columns([
+            fragment::Column::FragmentId,
+            fragment::Column::FragmentTypeMask,
+            fragment::Column::StreamNode,
+        ])
+        .filter(fragment::Column::JobId.is_in(streaming_jobs))
+        .into_tuple()
+        .all(db)
+        .await?;
+    let actors: Vec<ActorId> = Actor::find()
+        .select_only()
+        .column(actor::Column::ActorId)
+        .filter(
+            actor::Column::FragmentId.is_in(fragments.iter().map(|(id, _, _)| *id).collect_vec()),
+        )
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    fragments.retain(|(_, mask, _)| *mask & PbFragmentTypeFlag::Source as i32 != 0);
+
+    let mut source_fragment_ids = HashMap::new();
+    for (fragment_id, _, stream_node) in fragments {
+        if let Some(source) = find_stream_source(stream_node.inner_ref()) {
+            source_fragment_ids
+                .entry(source.source_id as SourceId)
+                .or_insert_with(BTreeSet::new)
+                .insert(fragment_id);
+        }
+    }
+
+    Ok((source_fragment_ids, actors.into_iter().collect()))
 }

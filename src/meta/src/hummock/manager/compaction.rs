@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use function_name::named;
 use itertools::Itertools;
@@ -21,7 +22,7 @@ use risingwave_pb::hummock::{CompactStatus as PbCompactStatus, CompactTaskAssign
 
 use crate::hummock::compaction::selector::level_selector::PickerInfo;
 use crate::hummock::compaction::selector::DynamicLevelSelectorCore;
-use crate::hummock::compaction::CompactStatus;
+use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig};
 use crate::hummock::manager::read_lock;
 use crate::hummock::HummockManager;
 
@@ -79,7 +80,7 @@ impl HummockManager {
         &self,
         compaction_group_id: CompactionGroupId,
     ) -> Vec<PickerInfo> {
-        let (status, levels, config) = {
+        let (status, levels, group) = {
             let compaction = read_lock!(self, compaction).await;
             let versioning = read_lock!(self, versioning).await;
             let config_manager = self.compaction_group_manager.read().await;
@@ -94,7 +95,10 @@ impl HummockManager {
                 }
             }
         };
-        let dynamic_level_core = DynamicLevelSelectorCore::new(config.compaction_config);
+        let dynamic_level_core = DynamicLevelSelectorCore::new(
+            group.compaction_config,
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
         let ctx = dynamic_level_core.get_priority_levels(&levels, &status.level_handlers);
         ctx.score_levels
     }
