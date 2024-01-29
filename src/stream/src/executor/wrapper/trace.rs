@@ -40,8 +40,7 @@ pub async fn trace(
         tracing::info_span!(
             "executor",
             "otel.name" = span_name,
-            "message" = tracing::field::Empty,    // record later
-            "chunk_size" = tracing::field::Empty, // record later
+            "actor_id" = actor_ctx.id
         )
     };
     let mut span = new_span();
@@ -49,58 +48,57 @@ pub async fn trace(
     pin_mut!(input);
 
     while let Some(message) = input.next().instrument(span.clone()).await.transpose()? {
-        // Emit a debug event and record the message type.
-        match &message {
+        // Trace the message in the span's scope.
+        span.in_scope(|| match &message {
             Message::Chunk(chunk) => {
-                if enable_executor_row_count {
-                    actor_ctx
-                        .streaming_metrics
-                        .executor_row_count
-                        .with_label_values(&[&actor_id_str, &fragment_id_str, &info.identity])
-                        .inc_by(chunk.cardinality() as u64);
+                if chunk.cardinality() > 0 {
+                    if enable_executor_row_count {
+                        actor_ctx
+                            .streaming_metrics
+                            .executor_row_count
+                            .with_label_values(&[&actor_id_str, &fragment_id_str, &info.identity])
+                            .inc_by(chunk.cardinality() as u64);
+                    }
+                    tracing::debug!(
+                        target: "events::stream::message::chunk",
+                        cardinality = chunk.cardinality(),
+                        capacity = chunk.capacity(),
+                        "\n{}\n", chunk.to_pretty_with_schema(&info.schema),
+                    );
                 }
-                tracing::debug!(
-                    target: "events::stream::message::chunk",
-                    parent: &span,
-                    cardinality = chunk.cardinality(),
-                    capacity = chunk.capacity(),
-                    "\n{}\n", chunk.to_pretty_with_schema(&info.schema),
-                );
-                span.record("message", "chunk");
-                span.record("chunk_size", chunk.cardinality());
             }
             Message::Watermark(watermark) => {
                 tracing::debug!(
                     target: "events::stream::message::watermark",
-                    parent: &span,
                     value = ?watermark.val,
                     col_idx = watermark.col_idx,
                 );
-                span.record("message", "watermark");
             }
             Message::Barrier(barrier) => {
                 tracing::debug!(
                     target: "events::stream::message::barrier",
-                    parent: &span,
                     prev_epoch = barrier.epoch.prev,
                     curr_epoch = barrier.epoch.curr,
                     kind = ?barrier.kind,
                 );
-                span.record("message", "barrier");
             }
-        };
+        });
 
-        // Drop the span as the inner executor has yielded a new message.
-        //
-        // This is essentially similar to `.instrument(new_span())`, but it allows us to
-        // emit the debug event and record the message type.
-        let _ = std::mem::replace(&mut span, Span::none());
+        // Yield the message and update the span.
+        match &message {
+            Message::Chunk(_) | Message::Watermark(_) => yield message,
+            Message::Barrier(_) => {
+                // Drop the span as the inner executor has finished processing the barrier (then all
+                // data from the previous epoch).
+                let _ = std::mem::replace(&mut span, Span::none());
 
-        yield message;
+                yield message;
 
-        // Create a new span after we're called again. The parent span may also have been
-        // updated.
-        span = new_span();
+                // Create a new span after we're called again. Now we're in a new epoch and the
+                // parent of the span is updated.
+                span = new_span();
+            }
+        }
     }
 }
 

@@ -386,22 +386,16 @@ impl StreamConsumer for DispatchExecutor {
             #[for_await]
             for msg in input {
                 let msg: Message = msg?;
-                let (barrier, span, tracing_span) = match msg {
-                    Message::Chunk(_) => (
-                        None,
-                        "dispatch_chunk",
-                        tracing::info_span!("dispatch_chunk"),
-                    ),
-                    Message::Barrier(ref barrier) => (
-                        Some(barrier.clone()),
-                        "dispatch_barrier",
-                        tracing::info_span!("dispatch_barrier"),
-                    ),
-                    Message::Watermark(_) => (
-                        None,
-                        "dispatch_watermark",
-                        tracing::info_span!("dispatch_watermark"),
-                    ),
+                let (barrier, span) = match msg {
+                    Message::Chunk(_) => (None, "dispatch_chunk"),
+                    Message::Barrier(ref barrier) => (Some(barrier.clone()), "dispatch_barrier"),
+                    Message::Watermark(_) => (None, "dispatch_watermark"),
+                };
+
+                let tracing_span = if let Some(_barrier) = &barrier {
+                    tracing::info_span!("dispatch_barrier")
+                } else {
+                    tracing::Span::none()
                 };
 
                 self.inner
