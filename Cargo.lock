@@ -7997,6 +7997,7 @@ dependencies = [
  "futures-io",
  "futures-timer",
  "log",
+ "lz4",
  "native-tls",
  "nom",
  "oauth2",
@@ -8015,6 +8016,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "zstd 0.12.4",
 ]
 
 [[package]]
