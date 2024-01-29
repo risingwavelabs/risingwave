@@ -103,6 +103,8 @@ fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {
             DataType::Decimal
         }
         Schema::Date => DataType::Date,
+        Schema::LocalTimestampMillis => DataType::Timestamp,
+        Schema::LocalTimestampMicros => DataType::Timestamp,
         Schema::TimestampMillis => DataType::Timestamptz,
         Schema::TimestampMicros => DataType::Timestamptz,
         Schema::Duration => DataType::Interval,
