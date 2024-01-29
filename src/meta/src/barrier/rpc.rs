@@ -290,66 +290,87 @@ impl StreamRpcManager {
 
     pub async fn build_actors(
         &self,
-        node_actors: impl Iterator<Item = (&WorkerNode, Vec<ActorId>)>,
+        node_map: &HashMap<WorkerId, WorkerNode>,
+        node_actors: impl Iterator<Item = (WorkerId, Vec<ActorId>)>,
     ) -> MetaResult<()> {
-        self.make_request(node_actors, |client, actors| async move {
-            let request_id = Self::new_request_id();
-            tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
-            client
-                .build_actors(BuildActorsRequest {
-                    request_id,
-                    actor_id: actors,
-                })
-                .await
-        })
-        .await?;
-        Ok(())
-    }
-
-    pub async fn update_actors(
-        &self,
-        node_actors: impl Iterator<Item = (&WorkerNode, Vec<StreamActor>)>,
-    ) -> MetaResult<()> {
-        self.make_request(node_actors, |client, actors| async move {
-            let request_id = Self::new_request_id();
-            tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
-            client
-                .update_actors(UpdateActorsRequest { request_id, actors })
-                .await
-        })
-        .await?;
-        Ok(())
-    }
-
-    pub async fn broadcast_actor_info(
-        &self,
-        nodes: impl Iterator<Item = &WorkerNode>,
-        actor_infos: &Vec<ActorInfo>,
-    ) -> MetaResult<()> {
-        self.broadcast(nodes, |client| {
-            let info = actor_infos.clone();
-            async move {
+        self.make_request(
+            node_actors.map(|(worker_id, actors)| (node_map.get(&worker_id).unwrap(), actors)),
+            |client, actors| async move {
+                let request_id = Self::new_request_id();
+                tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
                 client
-                    .broadcast_actor_info_table(BroadcastActorInfoTableRequest { info })
+                    .build_actors(BuildActorsRequest {
+                        request_id,
+                        actor_id: actors,
+                    })
                     .await
-            }
-        })
+            },
+        )
         .await?;
+        Ok(())
+    }
+
+    /// Broadcast and update actor info in CN.
+    /// `node_actors_to_create` must be a subset of `broadcast_worker_ids`.
+    pub async fn broadcast_update_actor_info(
+        &self,
+        worker_nodes: &HashMap<WorkerId, WorkerNode>,
+        broadcast_worker_ids: impl Iterator<Item = WorkerId>,
+        actor_infos_to_broadcast: impl Iterator<Item = ActorInfo>,
+        node_actors_to_create: impl Iterator<Item = (WorkerId, Vec<StreamActor>)>,
+    ) -> MetaResult<()> {
+        let actor_infos = actor_infos_to_broadcast.collect_vec();
+        let mut node_actors_to_create = node_actors_to_create.collect::<HashMap<_, _>>();
+        self.make_request(
+            broadcast_worker_ids
+                .map(|worker_id| {
+                    let node = worker_nodes.get(&worker_id).unwrap();
+                    let actors = node_actors_to_create.remove(&worker_id);
+                    (node, actors)
+                }),
+            |client, actors| {
+                let info = actor_infos.clone();
+                async move {
+                    client
+                        .broadcast_actor_info_table(BroadcastActorInfoTableRequest { info })
+                        .await?;
+                    if let Some(actors) = actors {
+                        let request_id = Self::new_request_id();
+                        tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
+                        client
+                            .update_actors(UpdateActorsRequest { request_id, actors })
+                            .await?;
+                    }
+                    Ok(())
+                }
+            },
+        )
+        .await?;
+        assert!(
+            node_actors_to_create.is_empty(),
+            "remaining uncreated actors: {:?}",
+            node_actors_to_create
+        );
         Ok(())
     }
 
     pub async fn drop_actors(
         &self,
-        node_actors: impl Iterator<Item = (&WorkerNode, Vec<ActorId>)>,
+        node_map: &HashMap<WorkerId, WorkerNode>,
+        node_actors: impl Iterator<Item = (WorkerId, Vec<ActorId>)>,
     ) -> MetaResult<()> {
-        self.make_request(node_actors, |client, actor_ids| async move {
-            client
-                .drop_actors(DropActorsRequest {
-                    request_id: Self::new_request_id(),
-                    actor_ids,
-                })
-                .await
-        })
+        self.make_request(
+            node_actors
+                .map(|(worker_id, actor_ids)| (node_map.get(&worker_id).unwrap(), actor_ids)),
+            |client, actor_ids| async move {
+                client
+                    .drop_actors(DropActorsRequest {
+                        request_id: Self::new_request_id(),
+                        actor_ids,
+                    })
+                    .await
+            },
+        )
         .await?;
         Ok(())
     }

@@ -832,20 +832,17 @@ impl GlobalBarrierManagerContext {
         }
 
         self.stream_rpc_manager
-            .broadcast_actor_info(
-                info.actor_map
-                    .keys()
-                    .map(|node_id| info.node_map.get(node_id).unwrap()),
-                &actor_infos,
+            .broadcast_update_actor_info(
+                &info.node_map,
+                info.actor_map.keys().cloned(),
+                actor_infos.into_iter(),
+                info.actor_map.keys().map(|node_id| {
+                    (
+                        *node_id,
+                        all_node_actors.remove(node_id).unwrap_or_default(),
+                    )
+                }),
             )
-            .await?;
-
-        self.stream_rpc_manager
-            .update_actors(info.actor_map.keys().map(|node_id| {
-                let node = info.node_map.get(node_id).unwrap();
-                let node_actors = all_node_actors.remove(node_id).unwrap_or_default();
-                (node, node_actors)
-            }))
             .await?;
 
         Ok(())
@@ -859,11 +856,13 @@ impl GlobalBarrierManagerContext {
         }
 
         self.stream_rpc_manager
-            .build_actors(info.actor_map.iter().map(|(node_id, actors)| {
-                let actors = actors.iter().cloned().collect();
-                let node = info.node_map.get(node_id).unwrap();
-                (node, actors)
-            }))
+            .build_actors(
+                &info.node_map,
+                info.actor_map.iter().map(|(node_id, actors)| {
+                    let actors = actors.iter().cloned().collect();
+                    (*node_id, actors)
+                }),
+            )
             .await?;
 
         Ok(())
@@ -871,6 +870,7 @@ impl GlobalBarrierManagerContext {
 
     /// Reset all compute nodes by calling `force_stop_actors`.
     async fn reset_compute_nodes(&self, info: &InflightActorInfo) -> MetaResult<()> {
+        debug!(worker = ?info.node_map.keys().collect_vec(), "force stop actors");
         self.stream_rpc_manager
             .force_stop_actors(info.node_map.values())
             .await?;

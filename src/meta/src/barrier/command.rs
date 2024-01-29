@@ -745,16 +745,11 @@ impl CommandContext {
     ) -> MetaResult<()> {
         self.barrier_manager_context
             .stream_rpc_manager
-            .drop_actors(
-                actors_to_clean
-                    .into_iter()
-                    .map(|(node_id, actors)| (self.info.node_map.get(&node_id).unwrap(), actors)),
-            )
+            .drop_actors(&self.info.node_map, actors_to_clean.into_iter())
             .await
     }
 
     pub async fn wait_epoch_commit(&self, epoch: HummockEpoch) -> MetaResult<()> {
-        self.barrier_manager_context.stream_rpc_manager
         let futures = self.info.node_map.values().map(|worker_node| async {
             let client = self
                 .barrier_manager_context

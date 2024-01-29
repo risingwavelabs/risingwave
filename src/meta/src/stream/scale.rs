@@ -695,40 +695,29 @@ impl ScaleController {
     async fn create_actors_on_compute_node(
         &self,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
-        actor_infos_to_broadcast: BTreeMap<u32, ActorInfo>,
+        actor_infos_to_broadcast: BTreeMap<WorkerId, ActorInfo>,
         node_actors_to_create: HashMap<WorkerId, Vec<StreamActor>>,
-        broadcast_worker_ids: HashSet<u32>,
     ) -> MetaResult<()> {
-        let actor_infos_to_broadcast = actor_infos_to_broadcast.values().cloned().collect();
         self.stream_rpc_manager
-            .broadcast_actor_info(
-                broadcast_worker_ids
-                    .iter()
-                    .map(|worker_id| worker_nodes.get(worker_id).unwrap()),
-                &actor_infos_to_broadcast,
-            )
-            .await?;
-
-        self.stream_rpc_manager
-            .update_actors(
-                node_actors_to_create
-                    .iter()
-                    .map(|(node_id, stream_actors)| {
-                        (worker_nodes.get(node_id).unwrap(), stream_actors.clone())
-                    }),
+            .broadcast_update_actor_info(
+                worker_nodes,
+                actor_infos_to_broadcast.keys().cloned(),
+                actor_infos_to_broadcast.values().cloned(),
+                node_actors_to_create.clone().into_iter(),
             )
             .await?;
 
         self.stream_rpc_manager
             .build_actors(
+                worker_nodes,
                 node_actors_to_create
                     .iter()
                     .map(|(node_id, stream_actors)| {
                         (
-                            worker_nodes.get(node_id).unwrap(),
+                            *node_id,
                             stream_actors
                                 .iter()
-                                .map(|actor| actor.actor_id)
+                                .map(|stream_actor| stream_actor.actor_id)
                                 .collect_vec(),
                         )
                     }),
@@ -1006,7 +995,6 @@ impl ScaleController {
         // have been modified
         let mut actor_infos_to_broadcast = BTreeMap::new();
         let mut node_actors_to_create: HashMap<WorkerId, Vec<_>> = HashMap::new();
-        let mut broadcast_worker_ids = HashSet::new();
 
         for actors_to_create in fragment_actors_to_create.values() {
             for (new_actor_id, new_parallel_unit_id) in actors_to_create {
@@ -1033,8 +1021,6 @@ impl ScaleController {
                             host: upstream_worker.host.clone(),
                         },
                     );
-
-                    broadcast_worker_ids.insert(upstream_worker_id);
                 }
 
                 for dispatcher in &new_actor.dispatcher {
@@ -1059,8 +1045,6 @@ impl ScaleController {
                                 host: downstream_worker.host.clone(),
                             },
                         );
-
-                        broadcast_worker_ids.insert(downstream_worker_id);
                     }
                 }
 
@@ -1070,8 +1054,6 @@ impl ScaleController {
                     .entry(worker.id)
                     .or_default()
                     .push(new_actor.clone());
-
-                broadcast_worker_ids.insert(worker.id);
 
                 actor_infos_to_broadcast.insert(
                     *new_actor_id,
@@ -1087,7 +1069,6 @@ impl ScaleController {
             &ctx.worker_nodes,
             actor_infos_to_broadcast,
             node_actors_to_create,
-            broadcast_worker_ids,
         )
         .await?;
 

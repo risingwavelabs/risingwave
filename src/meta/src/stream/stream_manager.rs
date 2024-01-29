@@ -311,9 +311,10 @@ impl GlobalStreamManager {
                                 let cluster_info =
                                     self.metadata_manager.get_streaming_cluster_info().await?;
                                 self.stream_rpc_manager
-                                    .drop_actors(node_actors.into_iter().map(|(id, actor_ids)| {
-                                        (cluster_info.worker_nodes.get(&id).unwrap(), actor_ids)
-                                    }))
+                                    .drop_actors(
+                                        &cluster_info.worker_nodes,
+                                        node_actors.into_iter(),
+                                    )
                                     .await?;
 
                                 self.metadata_manager
@@ -366,8 +367,7 @@ impl GlobalStreamManager {
         // 2. all upstream actors.
         let actor_infos_to_broadcast = building_locations
             .actor_infos()
-            .chain(existing_locations.actor_infos())
-            .collect_vec();
+            .chain(existing_locations.actor_infos());
 
         let building_worker_actors = building_locations.worker_actors();
 
@@ -376,34 +376,27 @@ impl GlobalStreamManager {
         // different WorkerNodes. Such that each WorkerNode knows the overall actor
         // allocation, but not actually builds it. We initialize all channels in this stage.
         self.stream_rpc_manager
-            .broadcast_actor_info(
-                building_worker_actors
-                    .keys()
-                    .map(|worker_id| building_locations.worker_locations.get(worker_id).unwrap()),
-                &actor_infos_to_broadcast,
+            .broadcast_update_actor_info(
+                &building_locations.worker_locations,
+                building_worker_actors.keys().cloned(),
+                actor_infos_to_broadcast,
+                building_worker_actors.iter().map(|(worker_id, actors)| {
+                    let stream_actors = actors
+                        .iter()
+                        .map(|actor_id| actor_map[actor_id].clone())
+                        .collect::<Vec<_>>();
+                    (*worker_id, stream_actors)
+                }),
             )
-            .await?;
-
-        self.stream_rpc_manager
-            .update_actors(building_worker_actors.iter().map(|(worker_id, actors)| {
-                let worker_node = building_locations.worker_locations.get(worker_id).unwrap();
-                let actors = actors
-                    .iter()
-                    .map(|actor_id| actor_map[actor_id].clone())
-                    .collect::<Vec<_>>();
-                (worker_node, actors)
-            }))
             .await?;
 
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
         self.stream_rpc_manager
-            .build_actors(building_worker_actors.iter().map(|(worker_id, actors)| {
-                (
-                    building_locations.worker_locations.get(worker_id).unwrap(),
-                    actors.clone(),
-                )
-            }))
+            .build_actors(
+                &building_locations.worker_locations,
+                building_worker_actors.into_iter(),
+            )
             .await?;
 
         Ok(())
