@@ -445,57 +445,71 @@ pub(crate) fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Optio
 }
 
 /// Recovers progress per vnode, so we know which to backfill.
+/// See how it decodes the state with the inline comments.
 pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
     state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
 ) -> StreamExecutorResult<Vec<(VirtualNode, BackfillStatePerVnode)>> {
     debug_assert!(!state_table.vnodes().is_empty());
     let vnodes = state_table.vnodes().iter_vnodes();
     let mut result = Vec::with_capacity(state_table.vnodes().len());
+    // 1. Get the vnode keys, so we can get the state per vnode.
     let vnode_keys = vnodes.map(|vnode| {
         let datum: [Datum; 1] = [Some(vnode.to_scalar().into())];
         datum
     });
     let tasks = vnode_keys.map(|vnode_key| state_table.get_row(vnode_key));
-    let states_for_vnode_keys = try_join_all(tasks).await?;
-    for (vnode, state_for_vnode_key) in state_table
+    // 2. Fetch the state for each vnode.
+    //    It should have the following schema, it should not contain vnode:
+    //    | pk | `backfill_finished` | `row_count` |
+    let state_for_vnodes = try_join_all(tasks).await?;
+    for (vnode, state_for_vnode) in state_table
         .vnodes()
         .iter_vnodes()
-        .zip_eq_debug(states_for_vnode_keys)
+        .zip_eq_debug(state_for_vnodes)
     {
-        // NOTE(kwannoel): state_for_vnode_key does not include the vnode prefix.
-        let backfill_progress = match state_for_vnode_key {
+        let backfill_progress = match state_for_vnode {
+            // There's some state, means there was progress made. It's either finished / in progress.
             Some(row) => {
+                // 3. Decode the `snapshot_row_count`. Decode from the back, since
+                //    pk is variable length.
+                let snapshot_row_count = row.as_inner().get(row.len() - 1).unwrap();
+                let snapshot_row_count = (*snapshot_row_count.as_ref().unwrap().as_int64()) as u64;
+
+                // 4. Decode the `is_finished` flag (whether backfill has finished).
+                //    Decode from the back, since pk is variable length.
                 let vnode_is_finished = row.as_inner().get(row.len() - 2).unwrap();
                 let vnode_is_finished = vnode_is_finished.as_ref().unwrap();
 
-                // Only the current pos should be contained in the in-memory backfill state.
-                // Row count will be added later.
+                // 5. Decode the `current_pos`.
                 let current_pos = row.as_inner().get(..row.len() - 2).unwrap();
                 let current_pos = current_pos.into_owned_row();
+
+                // 6. Construct the in-memory state per vnode, based on the decoded state.
                 if *vnode_is_finished.as_bool() {
                     BackfillStatePerVnode::new(
                         BackfillProgressPerVnode::Completed {
                             current_pos: current_pos.clone(),
-                            snapshot_row_count: 0,
+                            snapshot_row_count,
                         },
                         BackfillProgressPerVnode::Completed {
                             current_pos,
-                            snapshot_row_count: 0,
+                            snapshot_row_count,
                         },
                     )
                 } else {
                     BackfillStatePerVnode::new(
                         BackfillProgressPerVnode::InProgress {
                             current_pos: current_pos.clone(),
-                            snapshot_row_count: 0,
+                            snapshot_row_count,
                         },
                         BackfillProgressPerVnode::InProgress {
                             current_pos,
-                            snapshot_row_count: 0,
+                            snapshot_row_count,
                         },
                     )
                 }
             }
+            // No state, means no progress made.
             None => BackfillStatePerVnode::new(
                 BackfillProgressPerVnode::NotStarted,
                 BackfillProgressPerVnode::NotStarted,
