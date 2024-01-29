@@ -2750,7 +2750,7 @@ impl HummockManager {
                 event_loop_iteration_now = Instant::now();
 
                 tokio::select! {
-                    _ = shutdown_rx_shared => {},
+                    _ = shutdown_rx_shared => { return; },
 
                     compactor_stream = compactor_streams_change_rx.recv() => {
                         if let Some((context_id, stream)) = compactor_stream {
