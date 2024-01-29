@@ -695,13 +695,14 @@ impl ScaleController {
     async fn create_actors_on_compute_node(
         &self,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
-        actor_infos_to_broadcast: BTreeMap<WorkerId, ActorInfo>,
+        actor_infos_to_broadcast: BTreeMap<ActorId, ActorInfo>,
         node_actors_to_create: HashMap<WorkerId, Vec<StreamActor>>,
+        broadcast_worker_ids: HashSet<WorkerId>,
     ) -> MetaResult<()> {
         self.stream_rpc_manager
             .broadcast_update_actor_info(
                 worker_nodes,
-                actor_infos_to_broadcast.keys().cloned(),
+                broadcast_worker_ids.into_iter(),
                 actor_infos_to_broadcast.values().cloned(),
                 node_actors_to_create.clone().into_iter(),
             )
@@ -995,6 +996,7 @@ impl ScaleController {
         // have been modified
         let mut actor_infos_to_broadcast = BTreeMap::new();
         let mut node_actors_to_create: HashMap<WorkerId, Vec<_>> = HashMap::new();
+        let mut broadcast_worker_ids = HashSet::new();
 
         for actors_to_create in fragment_actors_to_create.values() {
             for (new_actor_id, new_parallel_unit_id) in actors_to_create {
@@ -1021,6 +1023,8 @@ impl ScaleController {
                             host: upstream_worker.host.clone(),
                         },
                     );
+
+                    broadcast_worker_ids.insert(upstream_worker_id);
                 }
 
                 for dispatcher in &new_actor.dispatcher {
@@ -1045,6 +1049,8 @@ impl ScaleController {
                                 host: downstream_worker.host.clone(),
                             },
                         );
+
+                        broadcast_worker_ids.insert(downstream_worker_id);
                     }
                 }
 
@@ -1054,6 +1060,8 @@ impl ScaleController {
                     .entry(worker.id)
                     .or_default()
                     .push(new_actor.clone());
+
+                broadcast_worker_ids.insert(worker.id);
 
                 actor_infos_to_broadcast.insert(
                     *new_actor_id,
@@ -1069,6 +1077,7 @@ impl ScaleController {
             &ctx.worker_nodes,
             actor_infos_to_broadcast,
             node_actors_to_create,
+            broadcast_worker_ids,
         )
         .await?;
 
