@@ -883,7 +883,7 @@ impl DdlController {
             .await? as u32;
 
         let (mut replace_table_ctx, mut table_fragments) = self
-            .build_replace_table(stream_ctx, &streaming_job, fragment_graph, None, dummy_id)
+            .build_replace_table(stream_ctx, streaming_job, fragment_graph, None, dummy_id)
             .await?;
 
         let mut union_fragment_id = None;
