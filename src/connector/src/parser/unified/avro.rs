@@ -434,7 +434,7 @@ pub(crate) fn unix_epoch_days() -> i32 {
 mod tests {
     use apache_avro::Decimal as AvroDecimal;
     use risingwave_common::error::{ErrorCode, RwError};
-    use risingwave_common::types::{Decimal, Timestamp};
+    use risingwave_common::types::{Decimal, Timestamptz};
 
     use super::*;
 
@@ -496,24 +496,24 @@ mod tests {
     }
 
     #[test]
-    fn test_avro_timestamp_micros() {
-        let v1 = Value::TimestampMicros(1620000000000);
-        let v2 = Value::TimestampMillis(1620000000);
+    fn test_avro_timestamptz_micros() {
+        let v1 = Value::TimestampMicros(1620000000000000);
+        let v2 = Value::TimestampMillis(1620000000000);
         let value_schema1 = Schema::TimestampMicros;
         let value_schema2 = Schema::TimestampMillis;
-        let datum1 = from_avro_value(v1, &value_schema1, &DataType::Timestamp).unwrap();
-        let datum2 = from_avro_value(v2, &value_schema2, &DataType::Timestamp).unwrap();
+        let datum1 = from_avro_value(v1, &value_schema1, &DataType::Timestamptz).unwrap();
+        let datum2 = from_avro_value(v2, &value_schema2, &DataType::Timestamptz).unwrap();
         assert_eq!(
             datum1,
-            Some(ScalarImpl::Timestamp(Timestamp::new(
-                "2021-05-03T00:00:00".parse().unwrap()
-            )))
+            Some(ScalarImpl::Timestamptz(
+                Timestamptz::from_str("2021-05-03T00:00:00Z").unwrap()
+            ))
         );
         assert_eq!(
             datum2,
-            Some(ScalarImpl::Timestamp(Timestamp::new(
-                "2021-05-03T00:00:00".parse().unwrap()
-            )))
+            Some(ScalarImpl::Timestamptz(
+                Timestamptz::from_str("2021-05-03T00:00:00Z").unwrap()
+            ))
         );
     }
 
