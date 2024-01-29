@@ -323,6 +323,9 @@ where
                                         break 'backfill_loop;
                                     }
                                     Some((vnode, row)) => {
+                                        println!("vnode: {}", vnode);
+                                        println!("vnode as index {}", vnode.to_index());
+                                        println!("builder len {}", builders.len());
                                         let builder = builders.get_mut(vnode.to_index()).unwrap();
                                         if let Some(chunk) = builder.append_one_row(row) {
                                             let chunk = StreamChunk::from_parts(
