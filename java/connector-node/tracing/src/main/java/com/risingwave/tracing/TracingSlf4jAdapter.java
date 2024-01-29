@@ -52,8 +52,12 @@ public class TracingSlf4jAdapter implements Logger {
 
     private void logIfEnabled(int level, String format, Object... arguments) {
         if (TracingSlf4jImpl.isEnabled(level)) {
-            TracingSlf4jImpl.event(
-                    name, level, new ParameterizedMessage(format, arguments).getFormattedMessage());
+            var pm = new ParameterizedMessage(format, arguments);
+            if (null != pm.getThrowable()) {
+                logIfEnabled(level, pm.getFormattedMessage(), pm.getThrowable());
+            } else {
+                TracingSlf4jImpl.event(name, level, pm.getFormattedMessage());
+            }
         }
     }
 

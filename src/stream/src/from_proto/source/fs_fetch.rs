@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalGcs, OpendalPosixFs, OpendalS3,
 };
@@ -63,10 +63,10 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             chunk_size: params.env.config().developer.chunk_size,
         };
 
-        let source_column_ids: Vec<_> = source
-            .columns
+        let source_column_ids: Vec<_> = source_desc_builder
+            .column_catalogs_to_source_column_descs()
             .iter()
-            .map(|column| ColumnId::from(column.get_column_desc().unwrap().column_id))
+            .map(|column| column.column_id)
             .collect();
 
         let vnodes = Some(Arc::new(

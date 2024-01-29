@@ -110,6 +110,7 @@ where
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
+        tracing::debug!("Arrangement Backfill Executor started");
         // The primary key columns, in the output columns of the upstream_table scan.
         // Table scan scans a subset of the columns of the upstream table.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
@@ -146,6 +147,7 @@ where
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
+        let mut paused = first_barrier.is_pause_on_startup();
         let first_epoch = first_barrier.epoch;
         self.state_table.init_epoch(first_barrier.epoch);
 
@@ -224,12 +226,13 @@ where
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
-                    let right_snapshot = pin!(Self::snapshot_read_per_vnode(
+                    let right_snapshot = pin!(Self::make_snapshot_stream(
                         &upstream_table,
                         backfill_state.clone(), // FIXME: Use mutable reference instead.
                         &mut builders,
+                        paused,
                     )
-                    .map(Either::Right),);
+                    .map(Either::Right));
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.
@@ -322,9 +325,24 @@ where
                 };
 
                 // Process barrier:
+                // - handle mutations
                 // - consume snapshot rows left in builder.
                 // - consume upstream buffer chunk
                 // - switch snapshot
+
+                // handle mutations
+                if let Some(mutation) = barrier.mutation.as_deref() {
+                    use crate::executor::Mutation;
+                    match mutation {
+                        Mutation::Pause => {
+                            paused = true;
+                        }
+                        Mutation::Resume => {
+                            paused = false;
+                        }
+                        _ => (),
+                    }
+                }
 
                 // consume snapshot rows left in builder.
                 // NOTE(kwannoel): `zip_eq_debug` does not work here,
@@ -451,39 +469,51 @@ where
                     "backfill_finished_wait_for_barrier"
                 );
                 // If not finished then we need to update state, otherwise no need.
-                if let Message::Barrier(barrier) = &msg
-                    && !is_completely_finished
-                {
-                    // If snapshot was empty, we do not need to backfill,
-                    // but we still need to persist the finished state.
-                    // We currently persist it on the second barrier here rather than first.
-                    // This is because we can't update state table in first epoch,
-                    // since it expects to have been initialized in previous epoch
-                    // (there's no epoch before the first epoch).
-                    for vnode in upstream_table.vnodes().iter_vnodes() {
-                        backfill_state.finish_progress(vnode, upstream_table.pk_indices().len());
-                    }
+                if let Message::Barrier(barrier) = &msg {
+                    if is_completely_finished {
+                        // If already finished, no need to persist any state.
+                    } else {
+                        // If snapshot was empty, we do not need to backfill,
+                        // but we still need to persist the finished state.
+                        // We currently persist it on the second barrier here rather than first.
+                        // This is because we can't update state table in first epoch,
+                        // since it expects to have been initialized in previous epoch
+                        // (there's no epoch before the first epoch).
+                        for vnode in upstream_table.vnodes().iter_vnodes() {
+                            backfill_state
+                                .finish_progress(vnode, upstream_table.pk_indices().len());
+                        }
 
-                    persist_state_per_vnode(
-                        barrier.epoch,
-                        &mut self.state_table,
-                        &mut backfill_state,
-                        #[cfg(debug_assertions)]
-                        state_len,
-                        vnodes.iter_vnodes(),
-                    )
-                    .await?;
+                        persist_state_per_vnode(
+                            barrier.epoch,
+                            &mut self.state_table,
+                            &mut backfill_state,
+                            #[cfg(debug_assertions)]
+                            state_len,
+                            vnodes.iter_vnodes(),
+                        )
+                        .await?;
+                    }
 
                     self.progress
                         .finish(barrier.epoch.curr, total_snapshot_processed_rows);
+                    tracing::trace!(
+                        epoch = ?barrier.epoch,
+                        "Updated CreateMaterializedTracker"
+                    );
                     yield msg;
                     break;
-                } else {
-                    // Allow other messages to pass through.
-                    yield msg;
                 }
+                // Allow other messages to pass through.
+                // We won't yield twice here, since if there's a barrier,
+                // we will always break out of the loop.
+                yield msg;
             }
         }
+
+        tracing::trace!(
+            "Arrangement Backfill has already finished and forward messages directly to the downstream"
+        );
 
         // After progress finished + state persisted,
         // we can forward messages directly to the downstream,
@@ -491,15 +521,27 @@ where
         #[for_await]
         for msg in upstream {
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
-                tracing::trace!(
-                    actor = self.actor_id,
-                    message = ?msg,
-                    "backfill_finished_after_barrier"
-                );
-                if let Message::Barrier(barrier) = &msg {
-                    self.state_table.commit_no_data_expected(barrier.epoch);
-                }
                 yield msg;
+            }
+        }
+    }
+
+    #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
+    async fn make_snapshot_stream<'a>(
+        upstream_table: &'a ReplicatedStateTable<S, SD>,
+        backfill_state: BackfillState,
+        builders: &'a mut [DataChunkBuilder],
+        paused: bool,
+    ) {
+        if paused {
+            #[for_await]
+            for _ in tokio_stream::pending() {
+                yield None;
+            }
+        } else {
+            #[for_await]
+            for r in Self::snapshot_read_per_vnode(upstream_table, backfill_state, builders) {
+                yield r?;
             }
         }
     }

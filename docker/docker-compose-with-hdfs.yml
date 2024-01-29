@@ -206,6 +206,8 @@ services:
       - "0.0.0.0:5691"
       - "--prometheus-host"
       - "0.0.0.0:1250"
+      - "--prometheus-endpoint"
+      - "http://prometheus-0:9500"
       - "--backend"
       - etcd
       - "--etcd-endpoints"

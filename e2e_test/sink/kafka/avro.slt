@@ -65,7 +65,7 @@ select
 t Rising \x6130   3.5 4.25 22 24 23 NULL   {{NULL,3},NULL,{7,NULL,2}} 2006-01-02 22:04:05+00:00 NULL                      NULL       12:34:56.123456 NULL
 f Wave   \x5a4446 1.5 NULL 11 13 12 (,foo) NULL                       NULL                      2006-01-02 22:04:05+00:00 2021-04-01 NULL            23:45:16.654
 
-statement error SchemaFetchError
+statement error test-rw-sink-upsert-avro-err-key
 create sink sink_err from into_kafka with (
   connector = 'kafka',
   topic = 'test-rw-sink-upsert-avro-err',

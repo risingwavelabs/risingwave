@@ -218,18 +218,18 @@ mod tests {
         let output = output
             .unwrap()
             .into_iter()
-            .filter(|c| c.chunk.cardinality() > 0)
+            .filter(|c| c.cardinality() > 0)
             .enumerate()
             .map(|(i, c)| {
                 if i == 0 {
                     // begin + 3 data messages
-                    assert_eq!(4, c.chunk.cardinality());
+                    assert_eq!(4, c.cardinality());
                 }
                 if i == 1 {
                     // 2 data messages + 1 end
-                    assert_eq!(3, c.chunk.cardinality());
+                    assert_eq!(3, c.cardinality());
                 }
-                c.chunk
+                c
             })
             .collect_vec();
 
@@ -255,11 +255,11 @@ mod tests {
         let output = output
             .unwrap()
             .into_iter()
-            .filter(|c| c.chunk.cardinality() > 0)
+            .filter(|c| c.cardinality() > 0)
             .map(|c| {
                 // 5 data messages in a single chunk
-                assert_eq!(5, c.chunk.cardinality());
-                c.chunk
+                assert_eq!(5, c.cardinality());
+                c
             })
             .collect_vec();
 

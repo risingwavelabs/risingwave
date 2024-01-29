@@ -41,14 +41,11 @@ impl<const N: usize> Hitmap<N> {
         N * 8
     }
 
-    pub fn local(&self) -> LocalHitmap<N> {
-        LocalHitmap::new(self)
-    }
-
-    pub fn apply(&self, local: &LocalHitmap<N>) {
+    pub fn report(&self, local: &mut LocalHitmap<N>) {
         for (global, local) in self.data.iter().zip_eq_fast(local.data.iter()) {
             global.fetch_or(*local, Ordering::Relaxed);
         }
+        local.reset();
     }
 
     pub fn ones(&self) -> usize {
@@ -80,8 +77,13 @@ impl<const N: usize> Hitmap<N> {
 
 #[derive(Debug)]
 pub struct LocalHitmap<const N: usize> {
-    owner: Hitmap<N>,
     data: Box<[u64; N]>,
+}
+
+impl<const N: usize> Default for LocalHitmap<N> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<const N: usize> LocalHitmap<N> {
@@ -93,17 +95,29 @@ impl<const N: usize> LocalHitmap<N> {
         N * 8
     }
 
-    pub fn new(owner: &Hitmap<N>) -> Self {
+    pub fn new() -> Self {
         Self {
-            owner: owner.clone(),
             data: Box::new([0; N]),
         }
+    }
+
+    pub fn reset(&mut self) {
+        for elem in &mut *self.data {
+            *elem = 0;
+        }
+    }
+
+    pub fn merge(&mut self, other: &mut Self) {
+        for (elem, e) in self.data.iter_mut().zip_eq_fast(other.data.iter()) {
+            *elem |= *e;
+        }
+        other.reset();
     }
 
     pub fn fill(&mut self, start_bit: usize, end_bit: usize) {
         const MASK: usize = (1 << 6) - 1;
 
-        let end_bit = std::cmp::min(end_bit, Self::bits());
+        let end_bit = end_bit.clamp(start_bit + 1, Self::bits());
 
         let head_bits = start_bit & MASK;
         let tail_bits_rev = end_bit & MASK;
@@ -153,9 +167,12 @@ impl<const N: usize> LocalHitmap<N> {
     }
 }
 
+#[cfg(debug_assertions)]
 impl<const N: usize> Drop for LocalHitmap<N> {
     fn drop(&mut self) {
-        self.owner.apply(self);
+        if self.ones() > 0 {
+            panic!("LocalHitmap is not reported!");
+        }
     }
 }
 
@@ -168,7 +185,7 @@ mod tests {
         // hex: high <== low
         let g = Hitmap::<4>::default();
 
-        let mut h = g.local();
+        let mut h = LocalHitmap::new();
         assert_eq!(
             h.to_hex_vec(),
             vec![
@@ -223,7 +240,7 @@ mod tests {
             ]
         );
         assert_eq!(h.ones(), 256);
-        drop(h);
+        g.report(&mut h);
         assert_eq!(
             g.to_hex_vec(),
             vec![

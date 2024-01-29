@@ -34,8 +34,6 @@ pub const DEFAULT_BLOCK_SIZE: usize = 4 * 1024;
 pub const DEFAULT_RESTART_INTERVAL: usize = 16;
 pub const DEFAULT_ENTRY_SIZE: usize = 24; // table_id(u64) + primary_key(u64) + epoch(u64)
 
-pub const HITMAP_ELEMS: usize = 4;
-
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum LenType {
@@ -154,7 +152,7 @@ pub struct Block {
     /// Restart points.
     restart_points: Vec<RestartPoint>,
 
-    hitmap: Hitmap<HITMAP_ELEMS>,
+    hitmap: Hitmap<{ Self::HITMAP_ELEMS }>,
 }
 
 impl Clone for Block {
@@ -164,7 +162,7 @@ impl Clone for Block {
             data_len: self.data_len,
             table_id: self.table_id,
             restart_points: self.restart_points.clone(),
-            hitmap: Hitmap::default(),
+            hitmap: self.hitmap.clone(),
         }
     }
 }
@@ -180,6 +178,8 @@ impl Debug for Block {
 }
 
 impl Block {
+    pub const HITMAP_ELEMS: usize = 4;
+
     pub fn get_algorithm(buf: &Bytes) -> HummockResult<CompressionAlgorithm> {
         let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 9..buf.len() - 8])?;
         Ok(compression)
@@ -206,9 +206,9 @@ impl Block {
         let buf = match compression {
             CompressionAlgorithm::None => {
                 if copy {
-                    buf.slice(0..(buf.len() - 9))
-                } else {
                     Bytes::copy_from_slice(&buf[0..(buf.len() - 9)])
+                } else {
+                    buf.slice(0..(buf.len() - 9))
                 }
             }
             CompressionAlgorithm::Lz4 => {
@@ -335,7 +335,7 @@ impl Block {
         &self.data[..]
     }
 
-    pub fn hitmap(&self) -> &Hitmap<HITMAP_ELEMS> {
+    pub fn hitmap(&self) -> &Hitmap<{ Self::HITMAP_ELEMS }> {
         &self.hitmap
     }
 

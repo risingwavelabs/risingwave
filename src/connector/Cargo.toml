@@ -92,6 +92,8 @@ pulsar = { version = "6.1", default-features = false, features = [
     "tokio-runtime",
     "telemetry",
     "auth-oauth2",
+    "lz4",
+    "zstd",
 ] }
 rdkafka = { workspace = true, features = [
     "cmake-build",
@@ -120,6 +122,7 @@ strum = "0.25"
 strum_macros = "0.25"
 tempfile = "3"
 thiserror = "1"
+thiserror-ext = { workspace = true }
 time = "0.3.30"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

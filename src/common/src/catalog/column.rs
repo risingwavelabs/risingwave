@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_pb::expr::ExprNode;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
-    AdditionalColumnType, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
+    AdditionalColumn, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
 };
 
 use super::row_id_column_desc;
@@ -103,7 +103,7 @@ pub struct ColumnDesc {
     pub type_name: String,
     pub generated_or_default_column: Option<GeneratedOrDefaultColumn>,
     pub description: Option<String>,
-    pub additional_column_type: AdditionalColumnType,
+    pub additional_columns: AdditionalColumn,
     pub version: ColumnDescVersion,
 }
 
@@ -117,7 +117,7 @@ impl ColumnDesc {
             type_name: String::new(),
             generated_or_default_column: None,
             description: None,
-            additional_column_type: AdditionalColumnType::Normal,
+            additional_columns: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
         }
     }
@@ -131,7 +131,7 @@ impl ColumnDesc {
             type_name: String::new(),
             generated_or_default_column: None,
             description: None,
-            additional_column_type: AdditionalColumnType::Normal,
+            additional_columns: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
         }
     }
@@ -140,7 +140,7 @@ impl ColumnDesc {
         name: impl Into<String>,
         column_id: ColumnId,
         data_type: DataType,
-        additional_column_type: AdditionalColumnType,
+        additional_column_type: AdditionalColumn,
     ) -> ColumnDesc {
         ColumnDesc {
             data_type,
@@ -150,7 +150,7 @@ impl ColumnDesc {
             type_name: String::new(),
             generated_or_default_column: None,
             description: None,
-            additional_column_type,
+            additional_columns: additional_column_type,
             version: ColumnDescVersion::Pr13707,
         }
     }
@@ -170,7 +170,7 @@ impl ColumnDesc {
             type_name: self.type_name.clone(),
             generated_or_default_column: self.generated_or_default_column.clone(),
             description: self.description.clone(),
-            additional_column_type: self.additional_column_type as i32,
+            additional_columns: Some(self.additional_columns.clone()),
             version: self.version as i32,
         }
     }
@@ -198,7 +198,7 @@ impl ColumnDesc {
             type_name: "".to_string(),
             generated_or_default_column: None,
             description: None,
-            additional_column_type: AdditionalColumnType::Normal,
+            additional_columns: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
         }
     }
@@ -221,7 +221,7 @@ impl ColumnDesc {
             type_name: type_name.to_string(),
             generated_or_default_column: None,
             description: None,
-            additional_column_type: AdditionalColumnType::Normal,
+            additional_columns: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
         }
     }
@@ -239,7 +239,7 @@ impl ColumnDesc {
             type_name: field.type_name.clone(),
             description: None,
             generated_or_default_column: None,
-            additional_column_type: AdditionalColumnType::Normal,
+            additional_columns: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
         }
     }
@@ -265,7 +265,10 @@ impl ColumnDesc {
 
 impl From<PbColumnDesc> for ColumnDesc {
     fn from(prost: PbColumnDesc) -> Self {
-        let additional_column_type = prost.additional_column_type();
+        let additional_columns = prost
+            .get_additional_columns()
+            .unwrap_or(&AdditionalColumn { column_type: None })
+            .clone();
         let version = prost.version();
         let field_descs: Vec<ColumnDesc> = prost
             .field_descs
@@ -280,7 +283,7 @@ impl From<PbColumnDesc> for ColumnDesc {
             field_descs,
             generated_or_default_column: prost.generated_or_default_column,
             description: prost.description.clone(),
-            additional_column_type,
+            additional_columns,
             version,
         }
     }
@@ -302,7 +305,7 @@ impl From<&ColumnDesc> for PbColumnDesc {
             type_name: c.type_name.clone(),
             generated_or_default_column: c.generated_or_default_column.clone(),
             description: c.description.clone(),
-            additional_column_type: c.additional_column_type as i32,
+            additional_columns: c.additional_columns.clone().into(),
             version: c.version as i32,
         }
     }
