@@ -194,14 +194,14 @@ impl<'a> AvroParseOptions<'a> {
             }
 
             // ---- TimestampTz -----
-            (Some(DataType::Timestamptz), Value::TimestampMillis(ms)) => {
+            (Some(DataType::Timestamptz) | None, Value::TimestampMillis(ms)) => {
                 Timestamptz::from_millis(*ms)
                     .ok_or(AccessError::Other(anyhow!(
                         "timestamptz with milliseconds {ms} * 1000 is out of range",
                     )))?
                     .into()
             }
-            (Some(DataType::Timestamptz), Value::TimestampMicros(us)) => {
+            (Some(DataType::Timestamptz) | None, Value::TimestampMicros(us)) => {
                 Timestamptz::from_micros(*us).into()
             }
 
