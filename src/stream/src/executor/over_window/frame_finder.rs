@@ -520,7 +520,12 @@ fn find_for_range_frames<'cache, const LEFT: bool>(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_expr::window_function::{FrameBound, RowsFrameBounds};
+    use std::collections::BTreeMap;
+
+    use delta_btree_map::Change;
+    use risingwave_common::types::{ScalarImpl, Sentinelled};
+    use risingwave_expr::window_function::FrameBound::*;
+    use risingwave_expr::window_function::{RowsFrameBounds, StateKey};
 
     use super::*;
 
@@ -534,170 +539,227 @@ mod tests {
         assert_equivalent(
             merge_rows_frames(&[]),
             RowsFrameBounds {
-                start: FrameBound::CurrentRow,
-                end: FrameBound::CurrentRow,
+                start: CurrentRow,
+                end: CurrentRow,
             },
         );
 
         let frames = [
             &RowsFrameBounds {
-                start: FrameBound::Preceding(3),
-                end: FrameBound::Preceding(2),
+                start: Preceding(3),
+                end: Preceding(2),
             },
             &RowsFrameBounds {
-                start: FrameBound::Preceding(1),
-                end: FrameBound::Preceding(4),
+                start: Preceding(1),
+                end: Preceding(4),
             },
         ];
         assert_equivalent(
             merge_rows_frames(&frames),
             RowsFrameBounds {
-                start: FrameBound::Preceding(4),
-                end: FrameBound::CurrentRow,
+                start: Preceding(4),
+                end: CurrentRow,
             },
         );
 
         let frames = [
             &RowsFrameBounds {
-                start: FrameBound::Preceding(3),
-                end: FrameBound::Following(2),
+                start: Preceding(3),
+                end: Following(2),
             },
             &RowsFrameBounds {
-                start: FrameBound::Preceding(2),
-                end: FrameBound::Following(3),
+                start: Preceding(2),
+                end: Following(3),
             },
         ];
         assert_equivalent(
             merge_rows_frames(&frames),
             RowsFrameBounds {
-                start: FrameBound::Preceding(3),
-                end: FrameBound::Following(3),
+                start: Preceding(3),
+                end: Following(3),
             },
         );
 
         let frames = [
             &RowsFrameBounds {
-                start: FrameBound::UnboundedPreceding,
-                end: FrameBound::Following(2),
+                start: UnboundedPreceding,
+                end: Following(2),
             },
             &RowsFrameBounds {
-                start: FrameBound::Preceding(2),
-                end: FrameBound::UnboundedFollowing,
+                start: Preceding(2),
+                end: UnboundedFollowing,
             },
         ];
         assert_equivalent(
             merge_rows_frames(&frames),
             RowsFrameBounds {
-                start: FrameBound::UnboundedPreceding,
-                end: FrameBound::UnboundedFollowing,
+                start: UnboundedPreceding,
+                end: UnboundedFollowing,
             },
         );
 
         let frames = [
             &RowsFrameBounds {
-                start: FrameBound::UnboundedPreceding,
-                end: FrameBound::Following(2),
+                start: UnboundedPreceding,
+                end: Following(2),
             },
             &RowsFrameBounds {
-                start: FrameBound::Following(5),
-                end: FrameBound::Following(2),
+                start: Following(5),
+                end: Following(2),
             },
         ];
         assert_equivalent(
             merge_rows_frames(&frames),
             RowsFrameBounds {
-                start: FrameBound::UnboundedPreceding,
-                end: FrameBound::Following(5),
+                start: UnboundedPreceding,
+                end: Following(5),
             },
         );
     }
 
+    macro_rules! create_cache {
+        (..., $( $pk:literal ),* , ...) => {
+            {
+                let mut cache = create_cache!( $( $pk ),* );
+                cache.insert(CacheKey::Smallest, OwnedRow::empty().into());
+                cache.insert(CacheKey::Largest, OwnedRow::empty().into());
+                cache
+            }
+        };
+        (..., $( $pk:literal ),*) => {
+            {
+                let mut cache = create_cache!( $( $pk ),* );
+                cache.insert(CacheKey::Smallest, OwnedRow::empty().into());
+                cache
+            }
+        };
+        ($( $pk:literal ),* , ...) => {
+            {
+                let mut cache = create_cache!( $( $pk ),* );
+                cache.insert(CacheKey::Largest, OwnedRow::empty().into());
+                cache
+            }
+        };
+        ($( $pk:literal ),*) => {
+            {
+                #[allow(unused_mut)]
+                let mut cache = BTreeMap::new();
+                $(
+                    cache.insert(
+                        CacheKey::Normal(
+                            StateKey {
+                                // order key doesn't matter here
+                                order_key: vec![].into(),
+                                pk: OwnedRow::new(vec![Some(ScalarImpl::from($pk))]).into(),
+                            },
+                        ),
+                        // value row doesn't matter here
+                        OwnedRow::empty(),
+                    );
+                )*
+                cache
+            }
+        };
+        ($ord_type:expr, [..., $( ( $ord:literal, $pk:literal ) ),* , ...]) => {
+            {
+                let mut cache = create_cache!($ord_type, [$( ( $ord, $pk ) ),*]);
+                cache.insert(CacheKey::Smallest, OwnedRow::empty().into());
+                cache.insert(CacheKey::Largest, OwnedRow::empty().into());
+                cache
+            }
+        };
+        ($ord_type:expr, [..., $( ( $ord:literal, $pk:literal ) ),*]) => {
+            {
+                let mut cache = create_cache!($ord_type, [$( ( $ord, $pk ) ),*]);
+                cache.insert(CacheKey::Smallest, OwnedRow::empty().into());
+                cache
+            }
+        };
+        ($ord_type:expr, [$( ( $ord:literal, $pk:literal ) ),* , ...]) => {
+            {
+                let mut cache = create_cache!($ord_type, [$( ( $ord, $pk ) ),*]);
+                cache.insert(CacheKey::Largest, OwnedRow::empty().into());
+                cache
+            }
+        };
+        ($ord_type:expr, [$( ( $ord:literal, $pk:literal ) ),*]) => {
+            {
+                #[allow(unused_mut)]
+                let mut cache = BTreeMap::new();
+                $(
+                    cache.insert(
+                        CacheKey::Normal(
+                            StateKey {
+                                order_key: memcmp_encoding::encode_value(
+                                    Some(ScalarImpl::from($ord)),
+                                    $ord_type,
+                                ).unwrap(),
+                                pk: OwnedRow::new(vec![Some(ScalarImpl::from($pk))]).into(),
+                            },
+                        ),
+                        // value row doesn't matter here
+                        OwnedRow::empty(),
+                    );
+                )*
+                cache
+            }
+        }
+    }
+
+    macro_rules! create_change {
+        (Delete) => {
+            Change::Delete
+        };
+        (Insert) => {
+            Change::Insert(OwnedRow::empty())
+        };
+    }
+
+    macro_rules! create_delta {
+        ($( ( $pk:literal, $change:ident ) ),+ $(,)?) => {
+            {
+                let mut delta = BTreeMap::new();
+                $(
+                    delta.insert(
+                        CacheKey::Normal(
+                            StateKey {
+                                // order key doesn't matter here
+                                order_key: vec![].into(),
+                                pk: OwnedRow::new(vec![Some(ScalarImpl::from($pk))]).into(),
+                            },
+                        ),
+                        // value row doesn't matter here
+                        create_change!( $change ),
+                    );
+                )*
+                delta
+            }
+        };
+        ($ord_type:expr, [ $( ( $ord:literal, $pk:literal, $change:ident ) ),+ $(,)? ]) => {
+            {
+                let mut delta = BTreeMap::new();
+                $(
+                    delta.insert(
+                        CacheKey::Normal(
+                            StateKey {
+                                order_key: memcmp_encoding::encode_value(
+                                    Some(ScalarImpl::from($ord)),
+                                    $ord_type,
+                                ).unwrap(),
+                                pk: OwnedRow::new(vec![Some(ScalarImpl::from($pk))]).into(),
+                            },
+                        ),
+                        // value row doesn't matter here
+                        create_change!( $change ),
+                    );
+                )*
+                delta
+            }
+        };
+    }
+
     mod rows_frame_tests {
-        use std::collections::BTreeMap;
-
-        use delta_btree_map::Change;
-        use risingwave_common::types::{ScalarImpl, Sentinelled};
-        use risingwave_expr::window_function::FrameBound::*;
-        use risingwave_expr::window_function::StateKey;
-
         use super::*;
-
-        macro_rules! create_cache {
-            (..., $( $pk:literal ),* , ...) => {
-                {
-                    let mut cache = create_cache!( $( $pk ),* );
-                    cache.insert(CacheKey::Smallest, OwnedRow::empty().into());
-                    cache.insert(CacheKey::Largest, OwnedRow::empty().into());
-                    cache
-                }
-            };
-            (..., $( $pk:literal ),*) => {
-                {
-                    let mut cache = create_cache!( $( $pk ),* );
-                    cache.insert(CacheKey::Smallest, OwnedRow::empty().into());
-                    cache
-                }
-            };
-            ($( $pk:literal ),* , ...) => {
-                {
-                    let mut cache = create_cache!( $( $pk ),* );
-                    cache.insert(CacheKey::Largest, OwnedRow::empty().into());
-                    cache
-                }
-            };
-            ($( $pk:literal ),*) => {
-                {
-                    #[allow(unused_mut)]
-                    let mut cache = BTreeMap::new();
-                    $(
-                        cache.insert(
-                            CacheKey::Normal(
-                                StateKey {
-                                    // order key doesn't matter here
-                                    order_key: vec![].into(),
-                                    pk: OwnedRow::new(vec![Some($pk.into())]).into(),
-                                },
-                            ),
-                            // value row doesn't matter here
-                            OwnedRow::empty(),
-                        );
-                    )*
-                    cache
-                }
-            };
-        }
-
-        macro_rules! create_change {
-            (Delete) => {
-                Change::Delete
-            };
-            (Insert) => {
-                Change::Insert(OwnedRow::empty())
-            };
-        }
-
-        macro_rules! create_delta {
-            ($(( $pk:literal, $change:ident )),+ $(,)?) => {
-                {
-                    #[allow(unused_mut)]
-                    let mut delta = BTreeMap::new();
-                    $(
-                        delta.insert(
-                            CacheKey::Normal(
-                                StateKey {
-                                    // order key doesn't matter here
-                                    order_key: vec![].into(),
-                                    pk: OwnedRow::new(vec![Some($pk.into())]).into(),
-                                },
-                            ),
-                            // value row doesn't matter here
-                            create_change!( $change ),
-                        );
-                    )*
-                    delta
-                }
-            };
-        }
 
         fn assert_cache_key_eq(given: &CacheKey, expected: impl Into<ScalarImpl>) {
             assert_eq!(
@@ -1096,6 +1158,426 @@ mod tests {
                 assert_cache_key_eq(first_frame_start, 1);
                 assert!(last_frame_end.is_largest());
             }
+        }
+    }
+
+    mod range_frame_tests {
+        use risingwave_common::types::{data_types, DataType, Interval};
+        use risingwave_common::util::sort_util::OrderType;
+        use risingwave_expr::window_function::RangeFrameOffset;
+
+        use super::*;
+
+        fn create_range_frame<T>(
+            order_data_type: DataType,
+            order_type: OrderType,
+            start: FrameBound<T>,
+            end: FrameBound<T>,
+        ) -> RangeFrameBounds
+        where
+            T: Into<ScalarImpl>,
+        {
+            let offset_data_type = match &order_data_type {
+                t @ data_types::range_frame_numeric!() => t.clone(),
+                data_types::range_frame_datetime!() => DataType::Interval,
+                _ => unreachable!(),
+            };
+
+            let map_fn = |x: T| {
+                RangeFrameOffset::new_for_test(x.into(), &order_data_type, &offset_data_type)
+            };
+            let start = start.map(map_fn);
+            let end = end.map(map_fn);
+
+            RangeFrameBounds {
+                order_data_type,
+                order_type,
+                offset_data_type,
+                start,
+                end,
+            }
+        }
+
+        #[test]
+        fn test_calc_logical_for_int64_asc() {
+            let order_data_type = DataType::Int64;
+            let order_type = OrderType::ascending();
+
+            let range_frames = [
+                &create_range_frame(
+                    order_data_type.clone(),
+                    order_type,
+                    Preceding(3i64),
+                    Preceding(2i64),
+                ),
+                &create_range_frame(
+                    order_data_type.clone(),
+                    order_type,
+                    Preceding(1i64),
+                    Following(2i64),
+                ),
+            ];
+
+            let ord_key_1 = StateKey {
+                order_key: memcmp_encoding::encode_value(&Some(ScalarImpl::Int64(1)), order_type)
+                    .unwrap(),
+                pk: OwnedRow::empty().into(),
+            };
+            let ord_key_2 = StateKey {
+                order_key: memcmp_encoding::encode_value(&Some(ScalarImpl::Int64(3)), order_type)
+                    .unwrap(),
+                pk: OwnedRow::empty().into(),
+            };
+
+            let (logical_first_curr, logical_last_curr) =
+                calc_logical_curr_for_range_frames(&range_frames, &ord_key_1, &ord_key_2).unwrap();
+            assert_eq!(
+                logical_first_curr.as_normal_expect(),
+                &Some(ScalarImpl::Int64(-1))
+            );
+            assert_eq!(
+                logical_last_curr.as_normal_expect(),
+                &Some(ScalarImpl::Int64(6))
+            );
+
+            let (first_start, last_end) =
+                calc_logical_boundary_for_range_frames(&range_frames, &ord_key_1, &ord_key_2)
+                    .unwrap();
+            assert_eq!(first_start.as_normal_expect(), &Some(ScalarImpl::Int64(-2)));
+            assert_eq!(last_end.as_normal_expect(), &Some(ScalarImpl::Int64(5)));
+        }
+
+        #[test]
+        fn test_calc_logical_for_timestamp_desc_nulls_first() {
+            let order_data_type = DataType::Timestamp;
+            let order_type = OrderType::descending_nulls_first();
+
+            let range_frames = [&create_range_frame(
+                order_data_type.clone(),
+                order_type,
+                Preceding(Interval::from_month_day_usec(1, 2, 3 * 1000 * 1000)),
+                Following(Interval::from_month_day_usec(0, 1, 0)),
+            )];
+
+            let ord_key_1 = StateKey {
+                order_key: memcmp_encoding::encode_value(
+                    &Some(ScalarImpl::Timestamp(
+                        "2024-01-28 00:30:00".parse().unwrap(),
+                    )),
+                    order_type,
+                )
+                .unwrap(),
+                pk: OwnedRow::empty().into(),
+            };
+            let ord_key_2 = StateKey {
+                order_key: memcmp_encoding::encode_value(
+                    &Some(ScalarImpl::Timestamp(
+                        "2024-01-26 15:47:00".parse().unwrap(),
+                    )),
+                    order_type,
+                )
+                .unwrap(),
+                pk: OwnedRow::empty().into(),
+            };
+
+            let (logical_first_curr, logical_last_curr) =
+                calc_logical_curr_for_range_frames(&range_frames, &ord_key_1, &ord_key_2).unwrap();
+            assert_eq!(
+                logical_first_curr.as_normal_expect(),
+                &Some(ScalarImpl::Timestamp(
+                    "2024-01-29 00:30:00".parse().unwrap()
+                ))
+            );
+            assert_eq!(
+                logical_last_curr.as_normal_expect(),
+                &Some(ScalarImpl::Timestamp(
+                    "2023-12-24 15:46:57".parse().unwrap()
+                ))
+            );
+
+            let (first_start, last_end) =
+                calc_logical_boundary_for_range_frames(&range_frames, &ord_key_1, &ord_key_2)
+                    .unwrap();
+            assert_eq!(
+                first_start.as_normal_expect(),
+                &Some(ScalarImpl::Timestamp(
+                    "2024-03-01 00:30:03".parse().unwrap()
+                ))
+            );
+            assert_eq!(
+                last_end.as_normal_expect(),
+                &Some(ScalarImpl::Timestamp(
+                    "2024-01-25 15:47:00".parse().unwrap()
+                ))
+            );
+        }
+
+        fn assert_find_left_right_result_eq(
+            order_data_type: DataType,
+            order_type: OrderType,
+            part_with_delta: DeltaBTreeMap<'_, CacheKey, OwnedRow>,
+            logical_order_value: ScalarImpl,
+            expected_left: Sentinelled<ScalarImpl>,
+            expected_right: Sentinelled<ScalarImpl>,
+        ) {
+            let frames = if matches!(order_data_type, DataType::Int32) {
+                [create_range_frame(
+                    order_data_type.clone(),
+                    order_type,
+                    Preceding(0), // this doesn't matter here
+                    Following(0), // this doesn't matter here
+                )]
+            } else {
+                panic!()
+            };
+            let range_frames = frames.iter().collect::<Vec<_>>();
+            let logical_order_value = Some(logical_order_value);
+            let cache_key_pk_len = 1;
+
+            let find_left_res = find_left_for_range_frames(
+                &range_frames,
+                part_with_delta,
+                &logical_order_value,
+                cache_key_pk_len,
+            )
+            .clone();
+            assert_eq!(
+                find_left_res.map(|x| x.pk.0.into_iter().next().unwrap().unwrap()),
+                expected_left
+            );
+
+            let find_right_res = find_right_for_range_frames(
+                &range_frames,
+                part_with_delta,
+                &logical_order_value,
+                cache_key_pk_len,
+            )
+            .clone();
+            assert_eq!(
+                find_right_res.map(|x| x.pk.0.into_iter().next().unwrap().unwrap()),
+                expected_right
+            );
+        }
+
+        #[test]
+        fn test_insert_delta_only() {
+            let order_data_type = DataType::Int32;
+            let order_type = OrderType::ascending();
+
+            let cache = create_cache!();
+            let delta = create_delta!(
+                order_type,
+                [
+                    (1, 1, Insert),
+                    (1, 11, Insert),
+                    (3, 3, Insert),
+                    (5, 5, Insert)
+                ]
+            );
+            let part_with_delta = DeltaBTreeMap::new(&cache, &delta);
+
+            assert_find_left_right_result_eq(
+                order_data_type.clone(),
+                order_type,
+                part_with_delta,
+                ScalarImpl::from(2),
+                ScalarImpl::from(3).into(),
+                ScalarImpl::from(11).into(),
+            );
+
+            assert_find_left_right_result_eq(
+                order_data_type.clone(),
+                order_type,
+                part_with_delta,
+                ScalarImpl::from(5),
+                ScalarImpl::from(5).into(),
+                ScalarImpl::from(5).into(),
+            );
+
+            assert_find_left_right_result_eq(
+                order_data_type.clone(),
+                order_type,
+                part_with_delta,
+                ScalarImpl::from(6),
+                ScalarImpl::from(5).into(),
+                ScalarImpl::from(5).into(),
+            );
+        }
+
+        #[test]
+        fn test_simple() {
+            let order_data_type = DataType::Int32;
+            let order_type = OrderType::ascending();
+
+            let cache = create_cache!(order_type, [(2, 2), (3, 3), (4, 4), (5, 5), (6, 6)]);
+            let delta = create_delta!(
+                order_type,
+                [(2, 2, Insert), (2, 22, Insert), (3, 3, Delete)]
+            );
+            let part_with_delta = DeltaBTreeMap::new(&cache, &delta);
+
+            assert_find_left_right_result_eq(
+                order_data_type.clone(),
+                order_type,
+                part_with_delta,
+                ScalarImpl::from(0),
+                ScalarImpl::from(2).into(),
+                ScalarImpl::from(2).into(),
+            );
+
+            assert_find_left_right_result_eq(
+                order_data_type.clone(),
+                order_type,
+                part_with_delta,
+                ScalarImpl::from(2),
+                ScalarImpl::from(2).into(),
+                ScalarImpl::from(22).into(),
+            );
+
+            assert_find_left_right_result_eq(
+                order_data_type.clone(),
+                order_type,
+                part_with_delta,
+                ScalarImpl::from(3),
+                ScalarImpl::from(4).into(),
+                ScalarImpl::from(22).into(),
+            );
+        }
+
+        #[test]
+        fn test_empty_with_sentinels() {
+            let order_data_type = DataType::Int32;
+            let order_type = OrderType::ascending();
+
+            let cache = create_cache!(order_type, [..., , ...]);
+            let delta = create_delta!(order_type, [(1, 1, Insert), (2, 2, Insert)]);
+            let part_with_delta = DeltaBTreeMap::new(&cache, &delta);
+
+            assert_find_left_right_result_eq(
+                order_data_type.clone(),
+                order_type,
+                part_with_delta,
+                ScalarImpl::from(0),
+                Sentinelled::Smallest,
+                Sentinelled::Smallest,
+            );
+
+            assert_find_left_right_result_eq(
+                order_data_type.clone(),
+                order_type,
+                part_with_delta,
+                ScalarImpl::from(1),
+                Sentinelled::Smallest,
+                ScalarImpl::from(1).into(),
+            );
+
+            assert_find_left_right_result_eq(
+                order_data_type.clone(),
+                order_type,
+                part_with_delta,
+                ScalarImpl::from(2),
+                ScalarImpl::from(2).into(),
+                Sentinelled::Largest,
+            );
+
+            assert_find_left_right_result_eq(
+                order_data_type.clone(),
+                order_type,
+                part_with_delta,
+                ScalarImpl::from(3),
+                Sentinelled::Largest,
+                Sentinelled::Largest,
+            );
+        }
+
+        #[test]
+        fn test_with_left_sentinels() {
+            let order_data_type = DataType::Int32;
+            let order_type = OrderType::ascending();
+
+            let cache = create_cache!(order_type, [..., (2, 2), (4, 4), (5, 5)]);
+            let delta = create_delta!(
+                order_type,
+                [
+                    (1, 1, Insert),
+                    (2, 2, Insert),
+                    (4, 44, Insert),
+                    (5, 5, Delete)
+                ]
+            );
+            let part_with_delta = DeltaBTreeMap::new(&cache, &delta);
+
+            assert_find_left_right_result_eq(
+                order_data_type.clone(),
+                order_type,
+                part_with_delta,
+                ScalarImpl::from(1),
+                Sentinelled::Smallest,
+                ScalarImpl::from(1).into(),
+            );
+
+            assert_find_left_right_result_eq(
+                order_data_type.clone(),
+                order_type,
+                part_with_delta,
+                ScalarImpl::from(4),
+                ScalarImpl::from(4).into(),
+                ScalarImpl::from(44).into(),
+            );
+
+            assert_find_left_right_result_eq(
+                order_data_type.clone(),
+                order_type,
+                part_with_delta,
+                ScalarImpl::from(5),
+                ScalarImpl::from(44).into(),
+                ScalarImpl::from(44).into(),
+            );
+        }
+
+        #[test]
+        fn test_with_right_sentinel() {
+            let order_data_type = DataType::Int32;
+            let order_type = OrderType::ascending();
+
+            let cache = create_cache!(order_type, [(2, 2), (4, 4), (5, 5), ...]);
+            let delta = create_delta!(
+                order_type,
+                [
+                    (1, 1, Insert),
+                    (2, 2, Insert),
+                    (4, 44, Insert),
+                    (5, 5, Delete)
+                ]
+            );
+            let part_with_delta = DeltaBTreeMap::new(&cache, &delta);
+
+            assert_find_left_right_result_eq(
+                order_data_type.clone(),
+                order_type,
+                part_with_delta,
+                ScalarImpl::from(1),
+                ScalarImpl::from(1).into(),
+                ScalarImpl::from(1).into(),
+            );
+
+            assert_find_left_right_result_eq(
+                order_data_type.clone(),
+                order_type,
+                part_with_delta,
+                ScalarImpl::from(4),
+                ScalarImpl::from(4).into(),
+                Sentinelled::Largest,
+            );
+
+            assert_find_left_right_result_eq(
+                order_data_type.clone(),
+                order_type,
+                part_with_delta,
+                ScalarImpl::from(5),
+                Sentinelled::Largest,
+                Sentinelled::Largest,
+            );
         }
     }
 }

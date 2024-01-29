@@ -316,6 +316,41 @@ impl RangeFrameOffset {
             sub_expr: None,
         }
     }
+
+    fn build_exprs(
+        &mut self,
+        order_data_type: &DataType,
+        offset_data_type: &DataType,
+    ) -> Result<()> {
+        use risingwave_pb::expr::expr_node::PbType as PbExprType;
+
+        let input_expr = InputRefExpression::new(order_data_type.clone(), 0);
+        let offset_expr =
+            LiteralExpression::new(offset_data_type.clone(), Some(self.offset.clone()));
+        self.add_expr = Some(Arc::new(build_func(
+            PbExprType::Add,
+            order_data_type.clone(),
+            vec![input_expr.clone().boxed(), offset_expr.clone().boxed()],
+        )?));
+        self.sub_expr = Some(Arc::new(build_func(
+            PbExprType::Subtract,
+            order_data_type.clone(),
+            vec![input_expr.boxed(), offset_expr.boxed()],
+        )?));
+        Ok(())
+    }
+
+    pub fn new_for_test(
+        offset: ScalarImpl,
+        order_data_type: &DataType,
+        offset_data_type: &DataType,
+    ) -> Self {
+        let mut offset = Self::new(offset);
+        offset
+            .build_exprs(order_data_type, offset_data_type)
+            .unwrap();
+        offset
+    }
 }
 
 impl Deref for RangeFrameOffset {
@@ -605,8 +640,6 @@ impl RangeFrameBound {
         order_data_type: &DataType,
         offset_data_type: &DataType,
     ) -> Result<Self> {
-        use risingwave_pb::expr::expr_node::PbType as PbExprType;
-
         let bound = match bound.get_type()? {
             PbBoundType::Unspecified => bail!("unspecified type of `RangeFrameBound`"),
             PbBoundType::UnboundedPreceding => Self::UnboundedPreceding,
@@ -616,24 +649,8 @@ impl RangeFrameBound {
                 let offset_value = Datum::from_protobuf(bound.get_offset()?, offset_data_type)
                     .context("offset `Datum` is not decodable")?
                     .context("offset of `RangeFrameBound` must be non-NULL")?;
-                let input_expr = InputRefExpression::new(order_data_type.clone(), 0);
-                let offset_expr =
-                    LiteralExpression::new(offset_data_type.clone(), Some(offset_value.clone()));
-                let add_expr = build_func(
-                    PbExprType::Add,
-                    order_data_type.clone(),
-                    vec![input_expr.clone().boxed(), offset_expr.clone().boxed()],
-                )?;
-                let sub_expr = build_func(
-                    PbExprType::Subtract,
-                    order_data_type.clone(),
-                    vec![input_expr.boxed(), offset_expr.boxed()],
-                )?;
-                let offset = RangeFrameOffset {
-                    offset: offset_value,
-                    add_expr: Some(Arc::new(add_expr)),
-                    sub_expr: Some(Arc::new(sub_expr)),
-                };
+                let mut offset = RangeFrameOffset::new(offset_value);
+                offset.build_exprs(order_data_type, offset_data_type)?;
                 if bound_type == PbBoundType::Preceding {
                     Self::Preceding(offset)
                 } else {
