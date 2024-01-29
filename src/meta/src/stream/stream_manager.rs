@@ -878,6 +878,13 @@ mod tests {
         ) -> std::result::Result<Response<WaitEpochCommitResponse>, Status> {
             Ok(Response::new(WaitEpochCommitResponse::default()))
         }
+
+        async fn get_back_pressure(
+            &self,
+            _request: Request<GetBackPressureRequest>,
+        ) -> std::result::Result<Response<GetBackPressureResponse>, Status> {
+            Ok(Response::new(GetBackPressureResponse::default()))
+        }
     }
 
     struct MockServices {

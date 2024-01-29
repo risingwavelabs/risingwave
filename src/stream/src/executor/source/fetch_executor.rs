@@ -21,6 +21,7 @@ use either::Either;
 use futures::stream::{self, StreamExt};
 use futures::{pin_mut, TryStreamExt};
 use futures_async_stream::try_stream;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row};
@@ -31,8 +32,7 @@ use risingwave_connector::source::filesystem::opendal_source::{
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
-    BoxSourceWithStateStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
-    StreamChunkWithState,
+    BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
 use risingwave_connector::ConnectorParams;
 use risingwave_storage::store::PrefetchOptions;
@@ -40,11 +40,7 @@ use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, Mutation, PkIndicesRef, SourceStateTableHandler, StreamExecutorError,
-    StreamExecutorResult, StreamSourceCore,
-};
+use crate::executor::*;
 
 const SPLIT_BATCH_SIZE: usize = 1000;
 
@@ -96,7 +92,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         column_ids: Vec<ColumnId>,
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
     ) -> StreamExecutorResult<()> {
         let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
         'vnodes: for vnode in state_store_handler.state_store.vnodes().iter_vnodes() {
@@ -160,7 +156,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
         batch: SplitBatch,
-    ) -> StreamExecutorResult<BoxSourceWithStateStream> {
+    ) -> StreamExecutorResult<BoxChunkSourceStream> {
         source_desc
             .source
             .to_stream(batch, column_ids, Arc::new(source_ctx))
@@ -196,14 +192,17 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
+        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
+        else {
+            unreachable!("Partition and offset columns must be set.");
+        };
+
         // Initialize state table.
         state_store_handler.init_epoch(barrier.epoch);
 
         let mut splits_on_fetch: usize = 0;
-        let mut stream = StreamReaderWithPause::<true, StreamChunkWithState>::new(
-            upstream,
-            stream::pending().boxed(),
-        );
+        let mut stream =
+            StreamReaderWithPause::<true, StreamChunk>::new(upstream, stream::pending().boxed());
 
         if barrier.is_pause_on_startup() {
             stream.pause_stream();
@@ -279,7 +278,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     yield msg;
                                 }
                                 // Receiving file assignments from upstream list executor,
-                                // store into state table and try building a new reader.
+                                // store into state table.
                                 Message::Chunk(chunk) => {
                                     let file_assignment = chunk
                                         .data_chunk()
@@ -301,12 +300,10 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                             }
                         }
                         // StreamChunk from FsSourceReader, and the reader reads only one file.
-                        // If the file read out, replace with a new file reader.
-                        Either::Right(StreamChunkWithState {
-                            chunk,
-                            split_offset_mapping,
-                        }) => {
-                            let mapping = split_offset_mapping.unwrap();
+                        Either::Right(chunk) => {
+                            let mapping =
+                                get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx)
+                                    .unwrap();
                             debug_assert_eq!(mapping.len(), 1);
                             if let Some((split_id, offset)) = mapping.into_iter().next() {
                                 let row = state_store_handler
@@ -332,6 +329,12 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 }
                             }
 
+                            let chunk = prune_additional_cols(
+                                &chunk,
+                                split_idx,
+                                offset_idx,
+                                &source_desc.columns,
+                            );
                             yield Message::Chunk(chunk);
                         }
                     }

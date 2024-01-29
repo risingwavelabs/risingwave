@@ -33,19 +33,27 @@ use risingwave_common::types::DataType;
 
 use crate::catalog::system_catalog::{BuiltinView, SystemCatalogColumnsDef};
 
-pub static RW_STREAMING_PARALLELISM_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> =
+pub static RW_FRAGMENT_PARALLELISM_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> =
     LazyLock::new(|| {
         vec![
             (DataType::Int32, "id"),
             (DataType::Varchar, "name"),
             (DataType::Varchar, "relation_type"),
-            (DataType::Varchar, "parallelism"),
+            (DataType::Int32, "fragment_id"),
+            (DataType::Varchar, "distribution_type"),
+            (DataType::List(Box::new(DataType::Int32)), "state_table_ids"),
+            (
+                DataType::List(Box::new(DataType::Int32)),
+                "upstream_fragment_ids",
+            ),
+            (DataType::List(Box::new(DataType::Varchar)), "flags"),
+            (DataType::Int32, "parallelism"),
         ]
     });
-pub static RW_STREAMING_PARALLELISM: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
-    name: "rw_streaming_parallelism",
+pub static RW_FRAGMENT_PARALLELISM: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: "rw_fragment_parallelism",
     schema: RW_CATALOG_SCHEMA_NAME,
-    columns: &RW_STREAMING_PARALLELISM_COLUMNS,
+    columns: &RW_FRAGMENT_PARALLELISM_COLUMNS,
     sql: "WITH all_streaming_jobs AS ( \
             SELECT id, name, 'table' as relation_type FROM rw_tables \
             UNION ALL \
@@ -59,9 +67,14 @@ pub static RW_STREAMING_PARALLELISM: LazyLock<BuiltinView> = LazyLock::new(|| Bu
             job.id, \
             job.name, \
             job.relation_type, \
-            tf.parallelism \
+            f.fragment_id, \
+            f.distribution_type, \
+            f.state_table_ids, \
+            f.upstream_fragment_ids, \
+            f.flags, \
+            f.parallelism \
         FROM all_streaming_jobs job \
-        INNER JOIN rw_table_fragments tf ON job.id = tf.table_id \
+        INNER JOIN rw_fragments f ON job.id = f.table_id \
         ORDER BY job.id\
         "
     .to_string(),

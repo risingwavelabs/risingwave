@@ -581,6 +581,7 @@ mod tests {
             fields: vec![],
             column_type: SourceColumnType::Normal,
             is_pk: true,
+            is_hidden_addition_col: false,
             additional_column_type: AdditionalColumn {
                 column_type: Some(AdditionalColumnType::Key(AdditionalColumnKey {})),
             },

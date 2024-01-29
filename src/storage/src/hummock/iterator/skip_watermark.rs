@@ -292,7 +292,7 @@ mod tests {
     const TABLE_ID: TableId = TableId::new(233);
 
     async fn assert_iter_eq(
-        mut first: impl HummockIterator,
+        mut first: Option<impl HummockIterator>,
         mut second: impl HummockIterator,
         seek_key: Option<(usize, usize)>,
     ) {
@@ -305,29 +305,40 @@ mod tests {
                 },
                 epoch_with_gap: EpochWithGap::new_from_epoch(EPOCH),
             };
-            first.seek(full_key.to_ref()).await.unwrap();
+            if let Some(first) = &mut first {
+                first.seek(full_key.to_ref()).await.unwrap();
+            }
             second.seek(full_key.to_ref()).await.unwrap()
         } else {
-            first.rewind().await.unwrap();
+            if let Some(first) = &mut first {
+                first.rewind().await.unwrap();
+            }
             second.rewind().await.unwrap();
         }
 
-        while first.is_valid() {
-            assert!(second.is_valid());
-            let first_key = first.key();
-            let second_key = second.key();
-            assert_eq!(first_key, second_key);
-            assert_eq!(first.value(), second.value());
-            first.next().await.unwrap();
-            second.next().await.unwrap();
+        if let Some(first) = &mut first {
+            while first.is_valid() {
+                assert!(second.is_valid());
+                let first_key = first.key();
+                let second_key = second.key();
+                assert_eq!(first_key, second_key);
+                assert_eq!(first.value(), second.value());
+                first.next().await.unwrap();
+                second.next().await.unwrap();
+            }
         }
         assert!(!second.is_valid());
     }
 
     fn build_batch(
         pairs: impl Iterator<Item = (TableKey<Bytes>, HummockValue<Bytes>)>,
-    ) -> SharedBufferBatch {
-        SharedBufferBatch::for_test(pairs.collect(), EPOCH, TABLE_ID)
+    ) -> Option<SharedBufferBatch> {
+        let pairs: Vec<_> = pairs.collect();
+        if pairs.is_empty() {
+            None
+        } else {
+            Some(SharedBufferBatch::for_test(pairs, EPOCH, TABLE_ID))
+        }
     }
 
     fn filter_with_watermarks(
@@ -377,10 +388,12 @@ mod tests {
                 read_watermark.clone(),
             ));
             let iter = SkipWatermarkIterator::new(
-                build_batch(items.clone().into_iter()).into_forward_iter(),
+                build_batch(items.clone().into_iter())
+                    .unwrap()
+                    .into_forward_iter(),
                 BTreeMap::from_iter(once((TABLE_ID, read_watermark.clone()))),
             );
-            (batch.into_forward_iter(), iter)
+            (batch.map(|batch| batch.into_forward_iter()), iter)
         };
         let (first, second) = gen_iters();
         assert_iter_eq(first, second, None).await;

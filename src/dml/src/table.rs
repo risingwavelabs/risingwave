@@ -20,7 +20,6 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
-use risingwave_connector::source::StreamChunkWithState;
 use tokio::sync::oneshot;
 
 use crate::error::{DmlError, Result};
@@ -248,7 +247,7 @@ pub struct TableStreamReader {
 }
 
 impl TableStreamReader {
-    #[try_stream(boxed, ok = StreamChunkWithState, error = DmlError)]
+    #[try_stream(boxed, ok = StreamChunk, error = DmlError)]
     pub async fn into_data_stream_for_test(mut self) {
         while let Some((txn_msg, notifier)) = self.rx.recv().await {
             // Notify about that we've taken the chunk.
@@ -258,7 +257,7 @@ impl TableStreamReader {
                 }
                 TxnMsg::Data(_, chunk) => {
                     _ = notifier.send(chunk.cardinality());
-                    yield chunk.into();
+                    yield chunk;
                 }
             }
         }

@@ -31,12 +31,15 @@ pub struct SourceColumnDesc {
     pub fields: Vec<ColumnDesc>,
     pub column_type: SourceColumnType,
 
-    // `is_pk` is used to indicate whether the column is part of the primary key columns.
+    /// `is_pk` is used to indicate whether the column is part of the primary key columns.
     pub is_pk: bool,
 
-    // `additional_column_type` and `column_type` are orthogonal
-    // `additional_column_type` is used to indicate the column is from which part of the message
-    // `column_type` is used to indicate the type of the column, only used in cdc scenario
+    /// `is_hidden_addition_col` is used to indicate whether the column is a hidden addition column.
+    pub is_hidden_addition_col: bool,
+
+    /// `additional_column_type` and `column_type` are orthogonal
+    /// `additional_column_type` is used to indicate the column is from which part of the message
+    /// `column_type` is used to indicate the type of the column, only used in cdc scenario
     pub additional_column_type: AdditionalColumn,
 }
 
@@ -87,7 +90,15 @@ impl SourceColumnDesc {
             fields: vec![],
             column_type: SourceColumnType::Normal,
             is_pk: false,
+            is_hidden_addition_col: false,
             additional_column_type: AdditionalColumn { column_type: None },
+        }
+    }
+
+    pub fn hidden_addition_col_from_column_desc(c: &ColumnDesc) -> Self {
+        Self {
+            is_hidden_addition_col: true,
+            ..c.into()
         }
     }
 
@@ -105,7 +116,7 @@ impl SourceColumnDesc {
 
     #[inline]
     pub fn is_visible(&self) -> bool {
-        self.column_type == SourceColumnType::Normal
+        !self.is_hidden_addition_col && self.column_type == SourceColumnType::Normal
     }
 }
 
@@ -119,6 +130,7 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             fields: c.field_descs.clone(),
             column_type,
             is_pk: false,
+            is_hidden_addition_col: false,
             additional_column_type: c.additional_columns.clone(),
         }
     }
