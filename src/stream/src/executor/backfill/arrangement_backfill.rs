@@ -20,7 +20,7 @@ use futures::stream::{select_all, select_with_strategy};
 use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
@@ -42,9 +42,11 @@ use crate::executor::backfill::utils::{
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, Barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo,
-    HashMap, Message, PkIndicesRef, StreamExecutorError,
+    HashMap, Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::{ActorId, CreateMviewProgress};
+
+type Builders = HashMap<VirtualNode, DataChunkBuilder>;
 
 /// Similar to [`super::no_shuffle_backfill::BackfillExecutor`].
 /// Main differences:
@@ -132,7 +134,7 @@ where
             .iter()
             .map(|field| field.data_type.clone())
             .collect_vec();
-        let mut builders: HashMap<_, DataChunkBuilder> = upstream_table
+        let mut builders: Builders = upstream_table
             .vnodes()
             .iter_vnodes()
             .map(|vnode| {
@@ -277,29 +279,15 @@ where
                                         // Consume remaining rows in the builder.
                                         for (vnode, builder) in builders.iter_mut() {
                                             if let Some(data_chunk) = builder.consume_all() {
-                                                let chunk = StreamChunk::from_parts(
-                                                    vec![Op::Insert; data_chunk.capacity()],
+                                                yield Self::handle_snapshot_chunk(
                                                     data_chunk,
-                                                );
-                                                // Raise the current position.
-                                                // As snapshot read streams are ordered by pk, so we can
-                                                // just use the last row to update `current_pos`.
-                                                update_pos_by_vnode(
                                                     *vnode,
-                                                    &chunk,
                                                     &pk_in_output_indices,
                                                     &mut backfill_state,
-                                                )?;
-
-                                                let chunk_cardinality = chunk.cardinality() as u64;
-                                                cur_barrier_snapshot_processed_rows +=
-                                                    chunk_cardinality;
-                                                total_snapshot_processed_rows += chunk_cardinality;
-                                                let chunk = Message::Chunk(mapping_chunk(
-                                                    chunk,
+                                                    &mut cur_barrier_snapshot_processed_rows,
+                                                    &mut total_snapshot_processed_rows,
                                                     &self.output_indices,
-                                                ));
-                                                yield chunk;
+                                                )?;
                                             }
                                         }
 
@@ -325,29 +313,15 @@ where
                                     Some((vnode, row)) => {
                                         let builder = builders.get_mut(&vnode).unwrap();
                                         if let Some(chunk) = builder.append_one_row(row) {
-                                            let chunk = StreamChunk::from_parts(
-                                                vec![Op::Insert; chunk.capacity()],
+                                            yield Self::handle_snapshot_chunk(
                                                 chunk,
-                                            );
-                                            // Raise the current position.
-                                            // As snapshot read streams are ordered by pk, so we can
-                                            // just use the last row to update `current_pos`.
-                                            update_pos_by_vnode(
                                                 vnode,
-                                                &chunk,
                                                 &pk_in_output_indices,
                                                 &mut backfill_state,
-                                            )?;
-
-                                            let chunk_cardinality = chunk.cardinality() as u64;
-                                            cur_barrier_snapshot_processed_rows +=
-                                                chunk_cardinality;
-                                            total_snapshot_processed_rows += chunk_cardinality;
-                                            let chunk = Message::Chunk(mapping_chunk(
-                                                chunk,
+                                                &mut cur_barrier_snapshot_processed_rows,
+                                                &mut total_snapshot_processed_rows,
                                                 &self.output_indices,
-                                            ));
-                                            yield chunk;
+                                            )?;
                                         }
                                     }
                                 }
@@ -379,28 +353,15 @@ where
                                 Some((vnode, row)) => {
                                     let builder = builders.get_mut(&vnode).unwrap();
                                     if let Some(chunk) = builder.append_one_row(row) {
-                                        let chunk = StreamChunk::from_parts(
-                                            vec![Op::Insert; chunk.capacity()],
+                                        yield Self::handle_snapshot_chunk(
                                             chunk,
-                                        );
-                                        // Raise the current position.
-                                        // As snapshot read streams are ordered by pk, so we can
-                                        // just use the last row to update `current_pos`.
-                                        update_pos_by_vnode(
                                             vnode,
-                                            &chunk,
                                             &pk_in_output_indices,
                                             &mut backfill_state,
-                                        )?;
-
-                                        let chunk_cardinality = chunk.cardinality() as u64;
-                                        cur_barrier_snapshot_processed_rows += chunk_cardinality;
-                                        total_snapshot_processed_rows += chunk_cardinality;
-                                        let chunk = Message::Chunk(mapping_chunk(
-                                            chunk,
+                                            &mut cur_barrier_snapshot_processed_rows,
+                                            &mut total_snapshot_processed_rows,
                                             &self.output_indices,
-                                        ));
-                                        yield chunk;
+                                        )?;
                                     }
 
                                     break;
@@ -639,6 +600,28 @@ where
                 yield r?;
             }
         }
+    }
+
+    fn handle_snapshot_chunk(
+        chunk: DataChunk,
+        vnode: VirtualNode,
+        pk_in_output_indices: &[usize],
+        backfill_state: &mut BackfillState,
+        cur_barrier_snapshot_processed_rows: &mut u64,
+        total_snapshot_processed_rows: &mut u64,
+        output_indices: &[usize],
+    ) -> StreamExecutorResult<Message> {
+        let chunk = StreamChunk::from_parts(vec![Op::Insert; chunk.capacity()], chunk);
+        // Raise the current position.
+        // As snapshot read streams are ordered by pk, so we can
+        // just use the last row to update `current_pos`.
+        update_pos_by_vnode(vnode, &chunk, pk_in_output_indices, backfill_state)?;
+
+        let chunk_cardinality = chunk.cardinality() as u64;
+        *cur_barrier_snapshot_processed_rows += chunk_cardinality;
+        *total_snapshot_processed_rows += chunk_cardinality;
+        let chunk = Message::Chunk(mapping_chunk(chunk, output_indices));
+        Ok(chunk)
     }
 
     /// Read snapshot per vnode.
