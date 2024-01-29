@@ -339,7 +339,7 @@ pub mod tests {
         generate_l0_overlapping_sublevels, generate_level, generate_table,
     };
     use crate::hummock::compaction::selector::{CompactionSelector, ManualCompactionSelector};
-    use crate::hummock::compaction::LocalSelectorStatistic;
+    use crate::hummock::compaction::{CompactionDeveloperConfig, LocalSelectorStatistic};
     use crate::hummock::model::CompactionGroup;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
@@ -1201,6 +1201,7 @@ pub mod tests {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -1237,6 +1238,7 @@ pub mod tests {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -1309,6 +1311,7 @@ pub mod tests {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -1347,6 +1350,7 @@ pub mod tests {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);

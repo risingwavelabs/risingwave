@@ -62,7 +62,7 @@ impl BlockHolder {
     }
 
     pub fn from_cached_block(entry: CachedBlockEntry) -> Self {
-        let ptr = entry.value().as_ref() as *const _;
+        let ptr = entry.as_ref() as *const _;
         Self {
             _handle: BlockEntry::Cache(entry),
             block: ptr,

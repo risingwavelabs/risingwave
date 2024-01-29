@@ -434,6 +434,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_SYSTEM_TABLES), read_system_table_info },
     { BuiltinCatalog::View(&RW_RELATIONS) },
     { BuiltinCatalog::View(&RW_STREAMING_PARALLELISM) },
+    { BuiltinCatalog::View(&RW_FRAGMENT_PARALLELISM) },
     { BuiltinCatalog::Table(&RW_COLUMNS), read_rw_columns_info },
     { BuiltinCatalog::Table(&RW_TYPES), read_rw_types },
     { BuiltinCatalog::Table(&RW_HUMMOCK_PINNED_VERSIONS), read_hummock_pinned_versions await },

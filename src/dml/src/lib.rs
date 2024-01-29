@@ -20,9 +20,11 @@
 #![feature(type_alias_impl_trait)]
 #![feature(box_patterns)]
 #![feature(stmt_expr_attributes)]
+#![feature(error_generic_member_access)]
 
 pub use table::*;
 
 pub mod dml_manager;
+pub mod error;
 mod table;
 mod txn_channel;

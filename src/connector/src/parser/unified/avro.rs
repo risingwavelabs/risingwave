@@ -157,7 +157,7 @@ impl<'a> AvroParseOptions<'a> {
                 }?;
 
                 let negative = value.sign() == Sign::Minus;
-                let (lo, mid, hi) = extract_decimal(value.to_bytes_be().1);
+                let (lo, mid, hi) = extract_decimal(value.to_bytes_be().1)?;
                 let decimal =
                     rust_decimal::Decimal::from_parts(lo, mid, hi, negative, scale as u32);
                 ScalarImpl::Decimal(risingwave_common::types::Decimal::Normalized(decimal))
@@ -331,7 +331,7 @@ pub(crate) fn avro_decimal_to_rust_decimal(
     let negative = !avro_decimal.is_positive();
     let bytes = avro_decimal.to_vec_unsigned();
 
-    let (lo, mid, hi) = extract_decimal(bytes);
+    let (lo, mid, hi) = extract_decimal(bytes)?;
     Ok(rust_decimal::Decimal::from_parts(
         lo,
         mid,
@@ -341,30 +341,40 @@ pub(crate) fn avro_decimal_to_rust_decimal(
     ))
 }
 
-pub(crate) fn extract_decimal(bytes: Vec<u8>) -> (u32, u32, u32) {
+pub(crate) fn extract_decimal(bytes: Vec<u8>) -> anyhow::Result<(u32, u32, u32)> {
     match bytes.len() {
         len @ 0..=4 => {
             let mut pad = vec![0; 4 - len];
             pad.extend_from_slice(&bytes);
             let lo = u32::from_be_bytes(pad.try_into().unwrap());
-            (lo, 0, 0)
+            Ok((lo, 0, 0))
         }
         len @ 5..=8 => {
-            let mid = u32::from_be_bytes(bytes[..4].to_owned().try_into().unwrap());
-            let mut pad = vec![0; 8 - len];
-            pad.extend_from_slice(&bytes[4..]);
-            let lo = u32::from_be_bytes(pad.try_into().unwrap());
-            (lo, mid, 0)
+            let zero_len = 8 - len;
+            let mid_end = 4 - zero_len;
+
+            let mut pad = vec![0; zero_len];
+            pad.extend_from_slice(&bytes[..mid_end]);
+            let mid = u32::from_be_bytes(pad.try_into().unwrap());
+
+            let lo = u32::from_be_bytes(bytes[mid_end..].to_owned().try_into().unwrap());
+            Ok((lo, mid, 0))
         }
         len @ 9..=12 => {
-            let hi = u32::from_be_bytes(bytes[..4].to_owned().try_into().unwrap());
-            let mid = u32::from_be_bytes(bytes[4..8].to_owned().try_into().unwrap());
-            let mut pad = vec![0; 12 - len];
-            pad.extend_from_slice(&bytes[8..]);
-            let lo = u32::from_be_bytes(pad.try_into().unwrap());
-            (lo, mid, hi)
+            let zero_len = 12 - len;
+            let hi_end = 4 - zero_len;
+            let mid_end = hi_end + 4;
+
+            let mut pad = vec![0; zero_len];
+            pad.extend_from_slice(&bytes[..hi_end]);
+            let hi = u32::from_be_bytes(pad.try_into().unwrap());
+
+            let mid = u32::from_be_bytes(bytes[hi_end..mid_end].to_owned().try_into().unwrap());
+
+            let lo = u32::from_be_bytes(bytes[mid_end..].to_owned().try_into().unwrap());
+            Ok((lo, mid, hi))
         }
-        _ => unreachable!(),
+        _ => Err(anyhow!("decimal bytes len: {:?} > 12", bytes.len())),
     }
 }
 
@@ -431,6 +441,25 @@ mod tests {
         let avro_decimal = AvroDecimal::from(v);
         let rust_decimal = avro_decimal_to_rust_decimal(avro_decimal, 28, 1).unwrap();
         assert_eq!(rust_decimal, rust_decimal::Decimal::try_from(28.1).unwrap());
+
+        // 1.1234567891
+        let value = BigInt::from(11234567891_i64);
+        let negative = value.sign() == Sign::Minus;
+        let (lo, mid, hi) = extract_decimal(value.to_bytes_be().1).unwrap();
+        let decimal = rust_decimal::Decimal::from_parts(lo, mid, hi, negative, 10);
+        assert_eq!(
+            decimal,
+            rust_decimal::Decimal::try_from(1.1234567891).unwrap()
+        );
+
+        // 1.123456789123456789123456789
+        let v = vec![3, 161, 77, 58, 146, 180, 49, 220, 100, 4, 95, 21];
+        let avro_decimal = AvroDecimal::from(v);
+        let rust_decimal = avro_decimal_to_rust_decimal(avro_decimal, 28, 27).unwrap();
+        assert_eq!(
+            rust_decimal,
+            rust_decimal::Decimal::from_str("1.123456789123456789123456789").unwrap()
+        );
     }
 
     /// Convert Avro value to datum.For now, support the following [Avro type](https://avro.apache.org/docs/current/spec.html).
@@ -498,7 +527,7 @@ mod tests {
         assert_eq!(
             resp,
             Some(ScalarImpl::Decimal(Decimal::Normalized(
-                rust_decimal::Decimal::from_str("4.557430887741865791").unwrap()
+                rust_decimal::Decimal::from_str("0.017802464409370431").unwrap()
             )))
         );
     }

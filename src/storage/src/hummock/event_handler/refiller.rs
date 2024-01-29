@@ -44,6 +44,7 @@ use crate::hummock::{
     SstableStoreRef, TableHolder,
 };
 use crate::monitor::StoreLocalStatistic;
+use crate::opts::StorageOpts;
 
 pub static GLOBAL_CACHE_REFILL_METRICS: LazyLock<CacheRefillMetrics> =
     LazyLock::new(|| CacheRefillMetrics::new(&GLOBAL_METRICS_REGISTRY));
@@ -199,6 +200,22 @@ pub struct CacheRefillConfig {
     ///
     /// Only units whose admit rate > threshold will be refilled.
     pub threshold: f64,
+}
+
+impl CacheRefillConfig {
+    pub fn from_storage_opts(options: &StorageOpts) -> Self {
+        Self {
+            timeout: Duration::from_millis(options.cache_refill_timeout_ms),
+            data_refill_levels: options
+                .cache_refill_data_refill_levels
+                .iter()
+                .copied()
+                .collect(),
+            concurrency: options.cache_refill_concurrency,
+            unit: options.cache_refill_unit,
+            threshold: options.cache_refill_threshold,
+        }
+    }
 }
 
 struct Item {

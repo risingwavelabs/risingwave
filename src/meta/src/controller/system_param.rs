@@ -113,7 +113,7 @@ macro_rules! impl_merge_params {
                     (Some(persisted), Some(init)) => {
                         if persisted != &init {
                             tracing::warn!(
-                                "The initializing value of \"{:?}\" ({}) differ from persisted ({}), using persisted value",
+                                "The initializing value of {} ({}) differ from persisted ({}), using persisted value",
                                 key_of!($field),
                                 init,
                                 persisted
