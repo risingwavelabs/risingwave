@@ -13,19 +13,20 @@
 // limitations under the License.
 use std::collections::HashMap;
 
+use anyhow::Context;
 use bytes::Bytes;
 use reqwest::Url;
-use risingwave_common::error::ErrorCode::{InvalidParameterValue, ProtocolError};
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::bail;
 use risingwave_common::types::Datum;
 use risingwave_pb::data::DataType as PbDataType;
 
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::common::AwsAuthProps;
+use crate::error::NewResult;
 use crate::source::SourceMeta;
 
 /// get kafka topic name
-pub(super) fn get_kafka_topic(props: &HashMap<String, String>) -> Result<&String> {
+pub(super) fn get_kafka_topic(props: &HashMap<String, String>) -> NewResult<&String> {
     const KAFKA_TOPIC_KEY1: &str = "kafka.topic";
     const KAFKA_TOPIC_KEY2: &str = "topic";
 
@@ -36,30 +37,28 @@ pub(super) fn get_kafka_topic(props: &HashMap<String, String>) -> Result<&String
         return Ok(topic);
     }
 
-    Err(RwError::from(ProtocolError(format!(
+    // config
+    bail!(
         "Must specify '{}' or '{}'",
-        KAFKA_TOPIC_KEY1, KAFKA_TOPIC_KEY2,
-    ))))
+        KAFKA_TOPIC_KEY1,
+        KAFKA_TOPIC_KEY2
+    )
 }
 
 /// download bytes from http(s) url
-pub(super) async fn download_from_http(location: &Url) -> Result<Bytes> {
-    let res = reqwest::get(location.clone()).await.map_err(|e| {
-        InvalidParameterValue(format!(
-            "failed to make request to URL: {}, err: {}",
-            location, e
-        ))
-    })?;
-    if !res.status().is_success() {
-        return Err(RwError::from(InvalidParameterValue(format!(
-            "Http request err, URL: {}, status code: {}",
-            location,
-            res.status()
-        ))));
-    }
-    res.bytes()
+pub(super) async fn download_from_http(location: &Url) -> NewResult<Bytes> {
+    let res = reqwest::get(location.clone())
         .await
-        .map_err(|e| InvalidParameterValue(format!("failed to read HTTP body: {}", e)).into())
+        .with_context(|| format!("failed to make request to {location}"))?
+        .error_for_status()
+        .with_context(|| format!("http request failed for {location}"))?;
+
+    let bytes = res
+        .bytes()
+        .await
+        .with_context(|| format!("failed to read HTTP body of {location}"))?;
+
+    Ok(bytes)
 }
 
 // For parser that doesn't support key currently
@@ -69,9 +68,7 @@ macro_rules! only_parse_payload {
         if let Some(payload) = $payload {
             $self.parse_inner(payload, $writer).await
         } else {
-            Err(RwError::from(ErrorCode::InternalError(
-                "Empty payload with nonempty key".into(),
-            )))
+            risingwave_common::bail!("empty payload with non-empty key")
         }
     };
 }
@@ -96,20 +93,20 @@ macro_rules! extract_key_config {
 /// * local file, for on-premise or testing.
 /// * http/https, for common usage.
 /// * s3 file location format: <s3://bucket_name/file_name>
-pub(super) async fn bytes_from_url(url: &Url, config: Option<&AwsAuthProps>) -> Result<Vec<u8>> {
+pub(super) async fn bytes_from_url(url: &Url, config: Option<&AwsAuthProps>) -> NewResult<Vec<u8>> {
     match (url.scheme(), config) {
         // TODO(Tao): support local file only when it's compiled in debug mode.
         ("file", _) => {
             let path = url
                 .to_file_path()
-                .map_err(|()| InvalidParameterValue(format!("illegal path: {url}")))?;
-            Ok(std::fs::read(path)?)
+                .ok()
+                .with_context(|| format!("illegal path: {url}"))?;
+            Ok(std::fs::read(&path)
+                .with_context(|| format!("failed to read file from `{}`", path.display()))?)
         }
         ("https" | "http", _) => Ok(download_from_http(url).await?.into()),
         ("s3", Some(config)) => load_file_descriptor_from_s3(url, config).await,
-        (scheme, _) => Err(RwError::from(InvalidParameterValue(format!(
-            "path scheme {scheme} is not supported",
-        )))),
+        (scheme, _) => bail!("path scheme `{scheme}` is not supported"),
     }
 }
 

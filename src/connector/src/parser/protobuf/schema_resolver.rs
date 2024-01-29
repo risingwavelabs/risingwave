@@ -15,14 +15,14 @@
 use std::iter;
 use std::path::Path;
 
+use anyhow::Context;
 use itertools::Itertools;
 use protobuf_native::compiler::{
     SimpleErrorCollector, SourceTreeDescriptorDatabase, VirtualSourceTree,
 };
 use protobuf_native::MessageLite;
-use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
-use risingwave_common::error::{Result, RwError};
 
+use crate::error::NewResult;
 use crate::schema::schema_registry::Client;
 
 macro_rules! embed_wkts {
@@ -55,9 +55,11 @@ const WELL_KNOWN_TYPES: &[(&str, &[u8])] = embed_wkts![
 pub(super) async fn compile_file_descriptor_from_schema_registry(
     subject_name: &str,
     client: &Client,
-) -> Result<Vec<u8>> {
-    let (primary_subject, dependency_subjects) =
-        client.get_subject_and_references(subject_name).await?;
+) -> NewResult<Vec<u8>> {
+    let (primary_subject, dependency_subjects) = client
+        .get_subject_and_references(subject_name)
+        .await
+        .with_context(|| format!("failed to resolve subject `{subject_name}`"))?;
 
     // Compile .proto files into a file descriptor set.
     let mut source_tree = VirtualSourceTree::new();
@@ -81,12 +83,13 @@ pub(super) async fn compile_file_descriptor_from_schema_registry(
         db.as_mut()
             .build_file_descriptor_set(&[Path::new(&primary_subject.name)])
     }
-    .map_err(|_| {
-        RwError::from(ProtocolError(format!(
+    .with_context(|| {
+        format!(
             "build_file_descriptor_set failed. Errors:\n{}",
             error_collector.as_mut().join("\n")
-        )))
+        )
     })?;
-    fds.serialize()
-        .map_err(|_| RwError::from(InternalError("serialize descriptor set failed".to_owned())))
+
+    let serialized = fds.serialize().context("serialize descriptor set failed")?;
+    Ok(serialized)
 }

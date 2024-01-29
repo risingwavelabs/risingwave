@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use anyhow::Context;
 use itertools::Itertools;
 use prost_reflect::{
     Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor,
@@ -22,13 +23,14 @@ use prost_reflect::{
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Datum, Decimal, JsonbVal, ScalarImpl, F32, F64};
+use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 use thiserror::Error;
 use thiserror_ext::{AsReport, Macro};
 
 use super::schema_resolver::*;
+use crate::error::NewResult;
 use crate::parser::unified::protobuf::ProtobufAccess;
 use crate::parser::unified::{
     bail_uncategorized, uncategorized, AccessError, AccessImpl, AccessResult,
@@ -90,17 +92,15 @@ pub struct ProtobufParserConfig {
 }
 
 impl ProtobufParserConfig {
-    pub async fn new(encoding_properties: EncodingProperties) -> Result<Self> {
+    pub async fn new(encoding_properties: EncodingProperties) -> NewResult<Self> {
         let protobuf_config = try_match_expand!(encoding_properties, EncodingProperties::Protobuf)?;
         let location = &protobuf_config.row_schema_location;
         let message_name = &protobuf_config.message_name;
         let url = handle_sr_list(location.as_str())?;
 
-        if let Some(name) = protobuf_config.key_message_name {
+        if protobuf_config.key_message_name.is_some() {
             // https://docs.confluent.io/platform/7.5/control-center/topics/schema.html#c3-schemas-best-practices-key-value-pairs
-            return Err(RwError::from(ProtocolError(format!(
-                "key.message = {name} not used. Protobuf key unsupported."
-            ))));
+            bail!("protobuf key is not supported");
         }
         let schema_bytes = if protobuf_config.use_schema_registry {
             let schema_value = get_subject_by_strategy(
@@ -118,18 +118,14 @@ impl ProtobufParserConfig {
             bytes_from_url(url, protobuf_config.aws_auth_props.as_ref()).await?
         };
 
-        let pool = DescriptorPool::decode(schema_bytes.as_slice()).map_err(|e| {
-            ProtocolError(format!(
-                "cannot build descriptor pool from schema: {}, error: {}",
-                location, e
-            ))
-        })?;
+        let pool = DescriptorPool::decode(schema_bytes.as_slice())
+            .with_context(|| format!("cannot build descriptor pool from schema `{}`", location))?;
 
-        let message_descriptor = pool.get_message_by_name(message_name).ok_or_else(|| {
-            ProtocolError(format!(
-                "Cannot find message {} in schema: {}.\nDescriptor pool is {:?}",
-                message_name, location, pool
-            ))
+        let message_descriptor = pool.get_message_by_name(message_name).with_context(|| {
+            format!(
+                "cannot find message `{}` in schema `{}`",
+                message_name, location,
+            )
         })?;
 
         Ok(Self {
@@ -349,6 +345,7 @@ fn recursive_parse_json(
     serde_json::Value::Object(ret)
 }
 
+// TODO(eh): should use `AccessError`
 pub fn from_protobuf_value(
     field_desc: &FieldDescriptor,
     value: &Value,

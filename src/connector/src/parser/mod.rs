@@ -729,6 +729,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 }
 
 pub trait AccessBuilder {
+    // TODO(eh)
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>>;
 }
 

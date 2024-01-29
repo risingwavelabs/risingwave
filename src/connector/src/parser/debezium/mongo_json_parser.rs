@@ -14,7 +14,7 @@
 
 use std::fmt::Debug;
 
-use risingwave_common::error::ErrorCode::{self, ProtocolError};
+use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use simd_json::prelude::MutableObject;
