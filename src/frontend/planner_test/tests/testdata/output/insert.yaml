@@ -330,5 +330,16 @@
     └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32] } }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchInsert { table: t, mapping: [0:0], default: [1<-(2:Int32 + 3:Int32)] }
+    └─BatchInsert { table: t, mapping: [0:0], default: [1<-5:Int32] }
       └─BatchValues { rows: [[1:Int32]] }
+- name: distributed insert
+  sql: |
+    set batch_enable_distributed_dml = true;
+    create table t (a int, b int);
+    insert into t select * from t;
+  batch_distributed_plan: |-
+    BatchSimpleAgg { aggs: [sum()] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchInsert { table: t, mapping: [0:0, 1:1] }
+        └─BatchExchange { order: [], dist: HashShard(t.a, t.b) }
+          └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }

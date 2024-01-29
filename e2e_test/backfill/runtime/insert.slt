@@ -1,5 +1,0 @@
-statement ok
-INSERT INTO t select 1, 'jakbj2khbe2', 22222222222 from generate_series(1, 500000);
-
-statement ok
-flush;

@@ -21,6 +21,7 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::ObjectMetadataIter;
 use risingwave_pb::hummock::{FullScanTask, VacuumTask};
 use risingwave_rpc_client::HummockMetaClient;
+use thiserror_ext::AsReport;
 
 use super::{HummockError, HummockResult};
 use crate::hummock::{SstableStore, SstableStoreRef};
@@ -48,7 +49,7 @@ impl Vacuum {
                 tracing::info!("Finished vacuuming SSTs");
             }
             Err(e) => {
-                tracing::warn!("Failed to report vacuum task: {:#?}", e);
+                tracing::warn!(error = %e.as_report(), "Failed to report vacuum task");
                 return false;
             }
         }
@@ -128,7 +129,7 @@ impl Vacuum {
                 tracing::info!("Finished full scan SSTs");
             }
             Err(e) => {
-                tracing::warn!("Failed to report full scan task: {:#?}", e);
+                tracing::warn!(error = %e.as_report(), "Failed to report full scan task");
                 return false;
             }
         }

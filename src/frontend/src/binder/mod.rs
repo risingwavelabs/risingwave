@@ -21,7 +21,9 @@ use risingwave_common::error::Result;
 use risingwave_common::session_config::{ConfigMap, SearchPath};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{
+    Expr as AstExpr, FunctionArg, FunctionArgExpr, SelectItem, SetExpr, Statement,
+};
 
 mod bind_context;
 mod bind_param;
@@ -57,6 +59,7 @@ pub use update::BoundUpdate;
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, TableId, ViewId};
 use crate::expr::ExprImpl;
@@ -119,6 +122,10 @@ pub struct Binder {
 
     /// The sql udf context that will be used during binding phase
     udf_context: UdfContext,
+
+    /// Udf binding flag, used to distinguish between
+    /// columns and named parameters during sql udf binding
+    udf_binding_flag: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -167,6 +174,73 @@ impl UdfContext {
 
     pub fn get_context(&self) -> HashMap<String, ExprImpl> {
         self.udf_param_context.clone()
+    }
+
+    /// A common utility function to extract sql udf
+    /// expression out from the input `ast`
+    pub fn extract_udf_expression(ast: Vec<Statement>) -> Result<AstExpr> {
+        if ast.len() != 1 {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "the query for sql udf should contain only one statement".to_string(),
+            )
+            .into());
+        }
+
+        // Extract the expression out
+        let Statement::Query(query) = ast[0].clone() else {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "invalid function definition, please recheck the syntax".to_string(),
+            )
+            .into());
+        };
+
+        let SetExpr::Select(select) = query.body else {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "missing `select` body for sql udf expression, please recheck the syntax"
+                    .to_string(),
+            )
+            .into());
+        };
+
+        if select.projection.len() != 1 {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "`projection` should contain only one `SelectItem`".to_string(),
+            )
+            .into());
+        }
+
+        let SelectItem::UnnamedExpr(expr) = select.projection[0].clone() else {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "expect `UnnamedExpr` for `projection`".to_string(),
+            )
+            .into());
+        };
+
+        Ok(expr)
+    }
+
+    /// TODO: add name related logic
+    /// NOTE: need to think of a way to prevent naming conflict
+    /// e.g., when existing column names conflict with parameter names in sql udf
+    pub fn create_udf_context(
+        args: &[FunctionArg],
+        _catalog: &Arc<FunctionCatalog>,
+    ) -> Result<HashMap<String, AstExpr>> {
+        let mut ret: HashMap<String, AstExpr> = HashMap::new();
+        for (i, current_arg) in args.iter().enumerate() {
+            if let FunctionArg::Unnamed(arg) = current_arg {
+                let FunctionArgExpr::Expr(e) = arg else {
+                    return Err(ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into());
+                };
+                // if catalog.arg_names.is_some() {
+                //      todo!()
+                // }
+                ret.insert(format!("${}", i + 1), e.clone());
+                continue;
+            }
+            return Err(ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into());
+        }
+        Ok(ret)
     }
 }
 
@@ -270,6 +344,7 @@ impl Binder {
             included_relations: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
             udf_context: UdfContext::new(),
+            udf_binding_flag: false,
         }
     }
 
@@ -414,6 +489,18 @@ impl Binder {
 
     pub fn set_clause(&mut self, clause: Option<Clause>) {
         self.context.clause = clause;
+    }
+
+    pub fn udf_context_mut(&mut self) -> &mut UdfContext {
+        &mut self.udf_context
+    }
+
+    pub fn set_udf_binding_flag(&mut self) {
+        self.udf_binding_flag = true;
+    }
+
+    pub fn unset_udf_binding_flag(&mut self) {
+        self.udf_binding_flag = false;
     }
 }
 

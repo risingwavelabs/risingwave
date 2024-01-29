@@ -35,7 +35,7 @@ pub use plan_visitor::{
 
 mod logical_optimization;
 mod optimizer_context;
-mod plan_expr_rewriter;
+pub mod plan_expr_rewriter;
 mod plan_expr_visitor;
 mod rule;
 
@@ -70,7 +70,7 @@ use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
 use crate::expr::TimestamptzExprFinder;
-use crate::optimizer::plan_node::generic::Union;
+use crate::optimizer::plan_node::generic::{SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
     ToStream, VisitExprsRecursive,
@@ -221,6 +221,14 @@ impl PlanRoot {
         // Inline session timezone mainly for rewriting now()
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
+        // Const eval of exprs at the last minute, but before `to_batch` to make functional index selection happy.
+        plan = const_eval_exprs(plan)?;
+
+        if ctx.is_explain_trace() {
+            ctx.trace("Const eval exprs:");
+            ctx.trace(plan.explain_to_string());
+        }
+
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
         if ctx.is_explain_trace() {
@@ -239,14 +247,6 @@ impl PlanRoot {
 
         if ctx.is_explain_trace() {
             ctx.trace("Inline Session Timezone:");
-            ctx.trace(plan.explain_to_string());
-        }
-
-        // Const eval of exprs at the last minute
-        plan = const_eval_exprs(plan)?;
-
-        if ctx.is_explain_trace() {
-            ctx.trace("Const eval exprs:");
             ctx.trace(plan.explain_to_string());
         }
 
@@ -622,8 +622,7 @@ impl PlanRoot {
                 None,
                 columns.clone(),
                 row_id_index,
-                false,
-                true,
+                SourceNodeKind::CreateTable,
                 context.clone(),
             )
             .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;

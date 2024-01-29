@@ -708,9 +708,15 @@ impl StageRunner {
             if candidates.is_empty() {
                 return Err(SchedulerError::EmptyWorkerNodes);
             }
-            return Ok(Some(
-                candidates[self.stage.session_id.0 as usize % candidates.len()].clone(),
-            ));
+            let candidate = if self.stage.batch_enable_distributed_dml {
+                // If distributed dml is enabled, we need to try our best to distribute dml tasks evenly to each worker.
+                // Using a `task_id` could be helpful in this case.
+                candidates[task_id as usize % candidates.len()].clone()
+            } else {
+                // If distributed dml is disabled, we need to guarantee that dml from the same session would be sent to a fixed worker/channel to provide a order guarantee.
+                candidates[self.stage.session_id.0 as usize % candidates.len()].clone()
+            };
+            return Ok(Some(candidate));
         };
 
         if let Some(distributed_lookup_join_node) =
@@ -934,6 +940,7 @@ impl StageRunner {
                         identity,
                         node_body: Some(NodeBody::Exchange(ExchangeNode {
                             sources: exchange_sources,
+                            sequential: true,
                             input_schema: execution_plan_node.schema.clone(),
                         })),
                     },
@@ -943,6 +950,7 @@ impl StageRunner {
                         node_body: Some(NodeBody::MergeSortExchange(MergeSortExchangeNode {
                             exchange: Some(ExchangeNode {
                                 sources: exchange_sources,
+                                sequential: true,
                                 input_schema: execution_plan_node.schema.clone(),
                             }),
                             column_orders: sort_merge_exchange_node.column_orders.clone(),

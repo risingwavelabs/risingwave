@@ -21,8 +21,10 @@ clap = { version = "4", features = ["derive"] }
 comfy-table = "7"
 etcd-client = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+hex = "0.4"
 inquire = "0.6.2"
 itertools = "0.12"
+prost = { workspace = true }
 regex = "1.10.0"
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }

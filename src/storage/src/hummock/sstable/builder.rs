@@ -852,14 +852,14 @@ pub(super) mod tests {
             .await
             .unwrap();
 
-        assert_eq!(table.value().has_bloom_filter(), with_blooms);
+        assert_eq!(table.has_bloom_filter(), with_blooms);
         for i in 0..key_count {
             let full_key = test_key_of(i);
-            if table.value().has_bloom_filter() {
+            if table.has_bloom_filter() {
                 let hash = Sstable::hash_for_bloom_filter(full_key.user_key.encode().as_slice(), 0);
                 let key_ref = full_key.user_key.as_ref();
                 assert!(
-                    table.value().may_match_hash(
+                    table.may_match_hash(
                         &(Bound::Included(key_ref), Bound::Included(key_ref)),
                         hash
                     ),
@@ -938,9 +938,9 @@ pub(super) mod tests {
             let k = UserKey::for_test(TableId::new(2), table_key.as_slice());
             let hash = Sstable::hash_for_bloom_filter(&k.encode(), 2);
             let key_ref = k.as_ref();
-            assert!(table
-                .value()
-                .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash));
+            assert!(
+                table.may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
+            );
         }
     }
 }

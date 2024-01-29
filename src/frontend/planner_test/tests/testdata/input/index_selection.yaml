@@ -433,3 +433,23 @@
     select * from people where (first_name || ' ' || last_name) = 'John Smith';
   expected_outputs:
   - batch_plan
+- name: funtional index const eval
+  sql: |
+    create table a(v int);
+    explain create index b on a((1+1)*v);
+  expected_outputs:
+  - explain_output
+- name: funtional index const eval
+  sql: |
+    create table a(v int);
+    create index b on a((1+1)*v);
+    select * from a where 2*v >2;
+  expected_outputs:
+  - batch_plan
+- name: funtional index with timezone
+  sql: |
+    create table t(ts timestamp);
+    create index i on t(ts::timestamp with time zone);
+    select ts::timestamptz from t where ts > now();
+  expected_outputs:
+  - batch_plan

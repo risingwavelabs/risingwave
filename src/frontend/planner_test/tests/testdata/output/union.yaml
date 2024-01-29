@@ -252,11 +252,11 @@
       └─BatchExchange { order: [], dist: HashShard(t1.a, t1.b, t1.c) }
         └─BatchUnion { all: true }
           ├─BatchLimit { limit: 1, offset: 0 }
-          │ └─BatchExchange { order: [], dist: Single }
+          │ └─BatchExchange { order: [], dist: Single, sequential: true }
           │   └─BatchLimit { limit: 1, offset: 0 }
           │     └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], limit: 1, distribution: SomeShard }
           └─BatchLimit { limit: 1, offset: 0 }
-            └─BatchExchange { order: [], dist: Single }
+            └─BatchExchange { order: [], dist: Single, sequential: true }
               └─BatchLimit { limit: 1, offset: 0 }
                 └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], limit: 1, distribution: SomeShard }
 - sql: |
@@ -278,11 +278,11 @@
         └─BatchExchange { order: [], dist: HashShard(t1.a, t1.b, t1.c) }
           └─BatchUnion { all: true }
             ├─BatchLimit { limit: 1, offset: 0 }
-            │ └─BatchExchange { order: [], dist: Single }
+            │ └─BatchExchange { order: [], dist: Single, sequential: true }
             │   └─BatchLimit { limit: 1, offset: 0 }
             │     └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], limit: 1, distribution: SomeShard }
             └─BatchLimit { limit: 1, offset: 0 }
-              └─BatchExchange { order: [], dist: Single }
+              └─BatchExchange { order: [], dist: Single, sequential: true }
                 └─BatchLimit { limit: 1, offset: 0 }
                   └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], limit: 1, distribution: SomeShard }
 - sql: |
