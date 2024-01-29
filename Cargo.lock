@@ -7997,6 +7997,7 @@ dependencies = [
  "futures-io",
  "futures-timer",
  "log",
+ "lz4",
  "native-tls",
  "nom",
  "oauth2",
@@ -8015,6 +8016,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "zstd 0.12.4",
 ]
 
 [[package]]
@@ -9060,10 +9062,12 @@ dependencies = [
  "clap",
  "comfy-table",
  "futures",
+ "hex",
  "inquire",
  "itertools 0.12.0",
  "madsim-etcd-client",
  "madsim-tokio",
+ "prost 0.12.1",
  "regex",
  "risingwave_common",
  "risingwave_connector",
