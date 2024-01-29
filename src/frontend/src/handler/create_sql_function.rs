@@ -191,7 +191,7 @@ pub async fn handle_create_sql_function(
                 // Check if the return type mismatches
                 if e.return_type() != return_type {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "return type mismatch detected\nexpected: {}\nactual: {}\nplease adjust your function definition accordingly",
+                        "return type mismatch detected, expected: [{}] actual: [{}], please adjust your function definition accordingly",
                         return_type,
                         e.return_type()
                     ))
