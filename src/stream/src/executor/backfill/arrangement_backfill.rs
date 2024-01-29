@@ -42,7 +42,7 @@ use crate::executor::backfill::utils::{
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, Barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo,
-    Message, PkIndicesRef, StreamExecutorError,
+    HashMap, Message, PkIndicesRef, StreamExecutorError,
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
@@ -132,17 +132,18 @@ where
             .iter()
             .map(|field| field.data_type.clone())
             .collect_vec();
-        let mut builders = upstream_table
+        let mut builders: HashMap<_, DataChunkBuilder> = upstream_table
             .vnodes()
             .iter_vnodes()
-            .map(|_| {
-                create_builder(
+            .map(|vnode| {
+                let builder = create_builder(
                     self.rate_limit,
                     self.chunk_size,
                     snapshot_data_types.clone(),
-                )
+                );
+                (vnode, builder)
             })
-            .collect_vec();
+            .collect();
 
         let mut upstream = self.upstream.execute();
 
@@ -274,9 +275,8 @@ where
                                 match msg? {
                                     None => {
                                         // Consume remaining rows in the builder.
-                                        for (vnode, builder) in builders.iter_mut().enumerate() {
+                                        for (vnode, builder) in builders.iter_mut() {
                                             if let Some(data_chunk) = builder.consume_all() {
-                                                let vnode = VirtualNode::from_index(vnode);
                                                 let chunk = StreamChunk::from_parts(
                                                     vec![Op::Insert; data_chunk.capacity()],
                                                     data_chunk,
@@ -285,7 +285,7 @@ where
                                                 // As snapshot read streams are ordered by pk, so we can
                                                 // just use the last row to update `current_pos`.
                                                 update_pos_by_vnode(
-                                                    vnode,
+                                                    *vnode,
                                                     &chunk,
                                                     &pk_in_output_indices,
                                                     &mut backfill_state,
@@ -323,10 +323,7 @@ where
                                         break 'backfill_loop;
                                     }
                                     Some((vnode, row)) => {
-                                        println!("vnode: {}", vnode);
-                                        println!("vnode as index {}", vnode.to_index());
-                                        println!("builder len {}", builders.len());
-                                        let builder = builders.get_mut(vnode.to_index()).unwrap();
+                                        let builder = builders.get_mut(&vnode).unwrap();
                                         if let Some(chunk) = builder.append_one_row(row) {
                                             let chunk = StreamChunk::from_parts(
                                                 vec![Op::Insert; chunk.capacity()],
@@ -364,7 +361,7 @@ where
                     // If paused, we also can't read any snapshot records.
                     if !has_snapshot_read && !paused {
                         // If we have not snapshot read, builders must all be empty.
-                        assert!(builders.iter().all(|b| b.is_empty()));
+                        debug_assert!(builders.values().all(|b| b.is_empty()));
                         let (_, snapshot) = backfill_stream.into_inner();
                         #[for_await]
                         for msg in snapshot {
@@ -380,7 +377,7 @@ where
                                     break;
                                 }
                                 Some((vnode, row)) => {
-                                    let builder = builders.get_mut(vnode.to_index()).unwrap();
+                                    let builder = builders.get_mut(&vnode).unwrap();
                                     if let Some(chunk) = builder.append_one_row(row) {
                                         let chunk = StreamChunk::from_parts(
                                             vec![Op::Insert; chunk.capacity()],
@@ -445,18 +442,19 @@ where
                 // consume snapshot rows left in builder.
                 // NOTE(kwannoel): `zip_eq_debug` does not work here,
                 // we encounter "higher-ranked lifetime error".
-                for (vnode, chunk) in vnodes.iter_vnodes().zip_eq(builders.iter_mut().map(|b| {
-                    b.consume_all().map(|chunk| {
+                for (vnode, chunk) in builders.iter_mut().map(|(vnode, b)| {
+                    let chunk = b.consume_all().map(|chunk| {
                         let ops = vec![Op::Insert; chunk.capacity()];
                         StreamChunk::from_parts(ops, chunk)
-                    })
-                })) {
+                    });
+                    (vnode, chunk)
+                }) {
                     if let Some(chunk) = chunk {
                         // Raise the current position.
                         // As snapshot read streams are ordered by pk, so we can
                         // just use the last row to update `current_pos`.
                         update_pos_by_vnode(
-                            vnode,
+                            *vnode,
                             &chunk,
                             &pk_in_output_indices,
                             &mut backfill_state,
