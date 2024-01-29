@@ -23,10 +23,11 @@ use chrono::Datelike;
 use itertools::Itertools;
 use num_bigint::{BigInt, Sign};
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz};
 use risingwave_common::error::Result as RwResult;
 use risingwave_common::log::LogSuppresser;
-use risingwave_common::types::{DataType, Date, Datum, Interval, JsonbVal, ScalarImpl, Time};
+use risingwave_common::types::{
+    DataType, Date, Datum, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{Access, AccessError, AccessResult};
@@ -181,19 +182,29 @@ impl<'a> AvroParseOptions<'a> {
             }
             (Some(DataType::Varchar) | None, Value::String(s)) => s.clone().into_boxed_str().into(),
             // ---- Timestamp -----
-            (Some(DataType::Timestamp) | None, Value::TimestampMillis(ms)) => {
-                i64_to_timestamp(*ms).map_err(|_| create_error())?.into()
+            (Some(DataType::Timestamp) | None, Value::LocalTimestampMillis(ms)) => {
+                Timestamp::with_millis(*ms)
+                    .map_err(|_| create_error())?
+                    .into()
             }
-            (Some(DataType::Timestamp) | None, Value::TimestampMicros(us)) => {
-                i64_to_timestamp(*us).map_err(|_| create_error())?.into()
+            (Some(DataType::Timestamp) | None, Value::LocalTimestampMicros(us)) => {
+                Timestamp::with_micros(*us)
+                    .map_err(|_| create_error())?
+                    .into()
             }
 
             // ---- TimestampTz -----
             (Some(DataType::Timestamptz), Value::TimestampMillis(ms)) => {
-                i64_to_timestamptz(*ms).map_err(|_| create_error())?.into()
+                tracing::debug!("timestamp milliseconds {:?}", ms);
+                Timestamptz::from_millis(*ms)
+                    .ok_or(AccessError::Other(anyhow!(
+                        "timestamp with milliseconds {:?} * 1000 is out of range",
+                        ms
+                    )))?
+                    .into()
             }
             (Some(DataType::Timestamptz), Value::TimestampMicros(us)) => {
-                i64_to_timestamptz(*us).map_err(|_| create_error())?.into()
+                Timestamptz::from_micros(*us).into()
             }
 
             // ---- Interval -----
