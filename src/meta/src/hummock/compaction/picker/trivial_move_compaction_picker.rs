@@ -75,10 +75,6 @@ impl TrivialMovePicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        if !self.enable {
-            return None;
-        }
-
         if let Some(trivial_move_sst) =
             self.pick_trivial_move_sst(select_tables, target_tables, level_handlers, stats)
         {
