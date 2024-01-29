@@ -1,0 +1,26 @@
+query T
+SELECT encrypt('\x00112233445566778899aabbccddeeff','\x000102030405060708090a0b0c0d0e0f','aes-ecb/pad:none')
+----
+\x69c4e0d86a7b0430d8cdb78070b4c55a
+
+query T
+SELECT encrypt('\x00112233445566778899aabbccddeeff','\x000102030405060708090a0b0c0d0e0f1011121314151617','aes-ecb/pad:none');
+----
+\xdda97ca4864cdfe06eaf70a0ec0d7191
+
+query T
+SELECT encrypt('\x00112233445566778899aabbccddeeff','\x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f','aes-ecb/pad:none')
+----
+\x8ea2b7ca516745bfeafc49904b496089
+
+query T
+SELECT encrypt('\x00112233445566778899aabbccddeeff','\x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f','aes-cbc/pad:none')
+----
+\x8ea2b7ca516745bfeafc49904b496089
+
+# input not multiple of block size when not allowing padding
+statement error
+SELECT encrypt('\x00112233445566778899aabbccddeeff00','\x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f','aes-cbc/pad:none')
+
+
+

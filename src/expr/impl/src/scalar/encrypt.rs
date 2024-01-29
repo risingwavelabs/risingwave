@@ -230,20 +230,16 @@ mod test {
             let config = CipherConfig::parse_cipher_config(key, mode)?;
             decrypt(data, &config)
         };
+        let key = b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f";
 
         let encrypted = encrypt_wrapper(
             b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff",
-            b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f",
+            key,
             "aes-ecb/pad:none",
         )
         .unwrap();
 
-        let decrypted = decrypt_wrapper(
-            &encrypted,
-            b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0e",
-            "aes-ecb/pad:none",
-        )
-        .unwrap();
+        let decrypted = decrypt_wrapper(&encrypted, key, "aes-ecb/pad:none").unwrap();
         assert_eq!(
             decrypted,
             (*b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff").into()
