@@ -187,7 +187,7 @@ pub enum Operation {
 
     TryFlush,
 
-    Flush(Vec<(Bound<TracedBytes>, Bound<TracedBytes>)>),
+    Flush,
     /// Finish operation of Hummock.
     Finish,
 }

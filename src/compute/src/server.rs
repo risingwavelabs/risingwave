@@ -39,6 +39,7 @@ use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
 use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
+use risingwave_dml::dml_manager::DmlManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
 use risingwave_pb::connector_service::SinkPayloadFormat;
@@ -49,7 +50,6 @@ use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, ConnectorClient, ExtraInfoSourceRef, MetaClient};
-use risingwave_source::dml_manager::DmlManager;
 use risingwave_storage::hummock::compactor::{
     start_compactor, CompactionExecutor, CompactorContext,
 };
@@ -272,13 +272,6 @@ pub async fn compute_node_serve(
         config.batch.clone(),
         batch_manager_metrics,
     ));
-    let stream_mgr = Arc::new(LocalStreamManager::new(
-        advertise_addr.clone(),
-        state_store.clone(),
-        streaming_metrics.clone(),
-        config.streaming.clone(),
-        await_tree_config.clone(),
-    ));
 
     // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
     // `total_compute_memory_bytes` for memory control. This is just a workaround for some
@@ -305,10 +298,14 @@ pub async fn compute_node_serve(
     // Run a background heap profiler
     heap_profiler.start();
 
-    let watermark_epoch = memory_mgr.get_watermark_epoch();
-    // Set back watermark epoch to stream mgr. Executor will read epoch from stream manager instead
-    // of lru manager.
-    stream_mgr.set_watermark_epoch(watermark_epoch).await;
+    let stream_mgr = Arc::new(LocalStreamManager::new(
+        advertise_addr.clone(),
+        state_store.clone(),
+        streaming_metrics.clone(),
+        config.streaming.clone(),
+        await_tree_config.clone(),
+        memory_mgr.get_watermark_epoch(),
+    ));
 
     let grpc_await_tree_reg = await_tree_config
         .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));

@@ -48,7 +48,7 @@ fn create_executor() -> (MessageSender, BoxedMessageStream) {
     };
 
     let project_set = Box::new(ProjectSetExecutor::new(
-        ActorContext::create(123),
+        ActorContext::for_test(123),
         info,
         Box::new(source),
         vec![

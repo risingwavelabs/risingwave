@@ -25,39 +25,29 @@ use risingwave_common::bail;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::ConnectorError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_connector::dispatch_source_prop;
-use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
-use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
-use risingwave_connector::source::filesystem::opendal_source::{
+use rw_futures_util::select_all;
+
+use crate::dispatch_source_prop;
+use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
+use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
+use crate::source::filesystem::opendal_source::{
     OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
-use risingwave_connector::source::filesystem::FsPageItem;
-use risingwave_connector::source::{
-    create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties,
-    ConnectorState, FsFilterCtrlCtx, SourceColumnDesc, SourceContext, SplitReader,
+use crate::source::filesystem::FsPageItem;
+use crate::source::{
+    create_split_reader, BoxChunkSourceStream, BoxTryStream, Column, ConnectorProperties,
+    ConnectorState, SourceColumnDesc, SourceContext, SplitReader,
 };
-use rw_futures_util::select_all;
-use tokio::time;
-use tokio::time::Duration;
 
 #[derive(Clone, Debug)]
-pub struct ConnectorSource {
+pub struct SourceReader {
     pub config: ConnectorProperties,
     pub columns: Vec<SourceColumnDesc>,
     pub parser_config: SpecificParserConfig,
     pub connector_message_buffer_size: usize,
 }
 
-#[derive(Clone, Debug)]
-pub struct FsListCtrlContext {
-    pub interval: Duration,
-    pub last_tick: Option<time::Instant>,
-
-    pub filter_ctx: FsFilterCtrlCtx,
-}
-pub type FsListCtrlContextRef = Arc<FsListCtrlContext>;
-
-impl ConnectorSource {
+impl SourceReader {
     pub fn new(
         properties: HashMap<String, String>,
         columns: Vec<SourceColumnDesc>,
@@ -85,7 +75,7 @@ impl ConnectorSource {
                     .ok_or_else(|| {
                         anyhow!("Failed to find column id: {} in source: {:?}", id, self).into()
                     })
-                    .map(|col| col.clone())
+                    .cloned()
             })
             .collect::<Result<Vec<SourceColumnDesc>>>()
     }
@@ -112,12 +102,12 @@ impl ConnectorSource {
         }
     }
 
-    pub async fn stream_reader(
+    pub async fn to_stream(
         &self,
         state: ConnectorState,
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
-    ) -> Result<BoxSourceWithStateStream> {
+    ) -> Result<BoxChunkSourceStream> {
         let Some(splits) = state else {
             return Ok(pending().boxed());
         };

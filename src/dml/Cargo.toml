@@ -1,5 +1,5 @@
 [package]
-name = "risingwave_source"
+name = "risingwave_dml"
 version = { workspace = true }
 edition = { workspace = true }
 homepage = { workspace = true }
@@ -14,7 +14,6 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-anyhow = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 itertools = "0.12"
@@ -24,6 +23,8 @@ risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_pb = { workspace = true }
 rw_futures_util = { workspace = true }
+thiserror = "1"
+thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tracing = { version = "0.1" }
 
@@ -35,10 +36,6 @@ assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio"] }
 paste = "1"
 tempfile = "3"
-
-[[bench]]
-name = "json_parser"
-harness = false
 
 [lints]
 workspace = true

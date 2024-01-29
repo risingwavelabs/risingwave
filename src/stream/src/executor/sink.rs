@@ -510,7 +510,7 @@ mod test {
         };
 
         let sink_executor = SinkExecutor::new(
-            ActorContext::create(0),
+            ActorContext::for_test(0),
             info,
             Box::new(mock),
             SinkWriterParam::for_test(),
@@ -637,7 +637,7 @@ mod test {
         };
 
         let sink_executor = SinkExecutor::new(
-            ActorContext::create(0),
+            ActorContext::for_test(0),
             info,
             Box::new(mock),
             SinkWriterParam::for_test(),
@@ -761,7 +761,7 @@ mod test {
         };
 
         let sink_executor = SinkExecutor::new(
-            ActorContext::create(0),
+            ActorContext::for_test(0),
             info,
             Box::new(mock),
             SinkWriterParam::for_test(),

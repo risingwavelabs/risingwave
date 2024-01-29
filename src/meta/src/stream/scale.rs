@@ -42,6 +42,7 @@ use risingwave_pb::stream_plan::{DispatcherType, FragmentTypeFlag, StreamActor, 
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, UpdateActorsRequest,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
 use tokio::task::JoinHandle;
@@ -1780,13 +1781,8 @@ impl ScaleController {
                             .flatten()
                             .cloned()
                             .exactly_one()
-                            .map_err(|e| {
-                                anyhow!(
-                                    "Cannot find a single target ParallelUnit for fragment {}: {}",
-                                    fragment_id,
-                                    e
-                                )
-                            })?;
+                            .ok()
+                            .with_context(|| format!("Cannot find a single target ParallelUnit for fragment {fragment_id}"))?;
 
                         target_plan.insert(
                             fragment_id,
@@ -2558,7 +2554,7 @@ impl GlobalStreamManager {
                             changed = false;
                         }
                         Err(e) => {
-                            tracing::warn!(error = e.to_string(), "Failed to trigger scale out, waiting for next tick to retry after {}s", ticker.period().as_secs());
+                            tracing::warn!(error = %e.as_report(), "Failed to trigger scale out, waiting for next tick to retry after {}s", ticker.period().as_secs());
                             ticker.reset();
                         }
                     }

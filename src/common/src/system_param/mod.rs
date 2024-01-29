@@ -21,6 +21,7 @@
 //! - Add a new method to [`reader::SystemParamsReader`].
 
 pub mod common;
+pub mod diff;
 pub mod local_manager;
 pub mod reader;
 
@@ -30,6 +31,8 @@ use std::str::FromStr;
 
 use paste::paste;
 use risingwave_pb::meta::PbSystemParams;
+
+use self::diff::SystemParamsDiff;
 
 pub type SystemParamsError = String;
 
@@ -79,8 +82,8 @@ macro_rules! for_all_params {
             { bloom_false_positive,                     f64,    Some(0.001_f64),                            false,  "False positive probability of bloom filter.", },
             { state_store,                              String, None,                                       false,  "", },
             { data_directory,                           String, None,                                       false,  "Remote directory for storing data and metadata objects.", },
-            { backup_storage_url,                       String, Some("memory".to_string()),                 true,   "Remote storage url for storing snapshots.", },
-            { backup_storage_directory,                 String, Some("backup".to_string()),                 true,   "Remote directory for storing snapshots.", },
+            { backup_storage_url,                       String, None,                                       true,   "Remote storage url for storing snapshots.", },
+            { backup_storage_directory,                 String, None,                                       true,   "Remote directory for storing snapshots.", },
             { max_concurrent_creating_streaming_jobs,   u32,    Some(1_u32),                                true,   "Max number of concurrent creating streaming jobs.", },
             { pause_on_next_bootstrap,                  bool,   Some(false),                                true,   "Whether to pause all data sources on next bootstrap.", },
             { wasm_storage_url,                         String, Some("fs://.risingwave/data".to_string()),  false,  "", },
@@ -300,28 +303,48 @@ macro_rules! impl_default_from_other_params {
 
 macro_rules! impl_set_system_param {
     ($({ $field:ident, $type:ty, $default:expr, $($rest:tt)* },)*) => {
-        /// Set a system parameter with the given value or default one, returns the new value.
-        pub fn set_system_param(params: &mut PbSystemParams, key: &str, value: Option<String>) -> Result<String> {
-             match key {
+        /// Set a system parameter with the given value or default one.
+        ///
+        /// Returns the new value if changed, or an error if the parameter is unrecognized
+        /// or the value is invalid.
+        pub fn set_system_param(
+            params: &mut PbSystemParams,
+            key: &str,
+            value: Option<impl AsRef<str>>,
+        ) -> Result<Option<(String, SystemParamsDiff)>> {
+            use crate::system_param::reader::{SystemParamsReader, SystemParamsRead};
+
+            match key {
                 $(
                     key_of!($field) => {
                         let v = if let Some(v) = value {
-                            v.parse().map_err(|_| format!("cannot parse parameter value"))?
+                            v.as_ref().parse().map_err(|_| format!("cannot parse parameter value"))?
                         } else {
                             $default.ok_or_else(|| format!("{} does not have a default value", key))?
                         };
                         OverrideValidateOnSet::$field(&v)?;
-                        params.$field = Some(v.clone());
-                        return Ok(v.to_string())
+
+                        let changed = SystemParamsReader::new(&*params).$field() != v;
+                        if changed {
+                            let new_value = v.to_string();
+                            let diff = SystemParamsDiff {
+                                $field: Some(v.to_owned()),
+                                ..Default::default()
+                            };
+                            params.$field = Some(v);
+                            Ok(Some((new_value, diff)))
+                        } else {
+                            Ok(None)
+                        }
                     },
                 )*
                 _ => {
-                    return Err(format!(
+                    Err(format!(
                         "unrecognized system param {:?}",
                         key
-                    ));
+                    ))
                 }
-            };
+            }
         }
     };
 }
@@ -351,6 +374,8 @@ macro_rules! impl_system_params_for_test {
             };
             ret.data_directory = Some("hummock_001".to_string());
             ret.state_store = Some("hummock+memory".to_string());
+            ret.backup_storage_url = Some("memory".into());
+            ret.backup_storage_directory = Some("backup".into());
             ret
         }
     };
@@ -375,13 +400,17 @@ impl ValidateOnSet for OverrideValidateOnSet {
         Self::expect_range(*v, 1..)
     }
 
-    fn backup_storage_directory(_v: &String) -> Result<()> {
-        // TODO
+    fn backup_storage_directory(v: &String) -> Result<()> {
+        if v.trim().is_empty() {
+            return Err("backup_storage_directory cannot be empty".into());
+        }
         Ok(())
     }
 
-    fn backup_storage_url(_v: &String) -> Result<()> {
-        // TODO
+    fn backup_storage_url(v: &String) -> Result<()> {
+        if v.trim().is_empty() {
+            return Err("backup_storage_url cannot be empty".into());
+        }
         Ok(())
     }
 }
@@ -433,7 +462,7 @@ mod tests {
 
     #[test]
     fn test_set() {
-        let mut p = PbSystemParams::default();
+        let mut p = system_params_for_test();
         // Unrecognized param.
         assert!(set_system_param(&mut p, "?", Some("?".to_string())).is_err());
         // Value out of range.
