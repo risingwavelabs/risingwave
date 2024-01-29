@@ -773,7 +773,7 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-        api-requests-max: 30
+        api-requests-max: 20
         api-requests-deadline: 2s
       - use: etcd
         unsafe-no-fsync: true
