@@ -96,6 +96,24 @@ impl JsonEncoder {
         }
     }
 
+    pub fn new_with_starrocks(
+        schema: Schema,
+        col_indices: Option<Vec<usize>>,
+        timestamp_handling_mode: TimestampHandlingMode,
+        map: HashMap<String, (u8, u8)>,
+    ) -> Self {
+        Self {
+            schema,
+            col_indices,
+            time_handling_mode: TimeHandlingMode::Milli,
+            date_handling_mode: DateHandlingMode::String,
+            timestamp_handling_mode,
+            timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
+            custom_json_type: CustomJsonType::StarRocks(map),
+            kafka_connect: None,
+        }
+    }
+
     pub fn with_kafka_connect(self, kafka_connect: KafkaConnectParams) -> Self {
         Self {
             kafka_connect: Some(Arc::new(kafka_connect)),
@@ -203,7 +221,7 @@ fn datum_to_json_object(
             json!(v)
         }
         (DataType::Decimal, ScalarRefImpl::Decimal(mut v)) => match custom_json_type {
-            CustomJsonType::Doris(map) => {
+            CustomJsonType::Doris(map) | CustomJsonType::StarRocks(map) => {
                 if !matches!(v, Decimal::Normalized(_)) {
                     return Err(ArrayError::internal(
                         "doris/starrocks can't support decimal Inf, -Inf, Nan".to_string(),
@@ -270,8 +288,10 @@ fn datum_to_json_object(
             json!(v.as_iso_8601())
         }
         (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => match custom_json_type {
-            CustomJsonType::Es => JsonbVal::from(jsonb_ref).take(),
-            CustomJsonType::Doris(_) | CustomJsonType::None => json!(jsonb_ref.to_string()),
+            CustomJsonType::Es | CustomJsonType::StarRocks(_) => JsonbVal::from(jsonb_ref).take(),
+            CustomJsonType::Doris(_) | CustomJsonType::None => {
+                json!(jsonb_ref.to_string())
+            }
         },
         (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
             let elems = list_ref.iter();
@@ -314,6 +334,11 @@ fn datum_to_json_object(
                     Value::String(serde_json::to_string(&map).map_err(|err| {
                         ArrayError::internal(format!("Json to string err{:?}", err))
                     })?)
+                }
+                CustomJsonType::StarRocks(_) => {
+                    return Err(ArrayError::internal(
+                        "starrocks can't support struct".to_string(),
+                    ));
                 }
                 CustomJsonType::Es | CustomJsonType::None => {
                     let mut map = Map::with_capacity(st.len());

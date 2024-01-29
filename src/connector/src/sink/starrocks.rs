@@ -180,7 +180,7 @@ impl StarrocksSink {
                 Ok(starrocks_data_type.contains("datetime"))
             }
             risingwave_common::types::DataType::Timestamptz => Err(SinkError::Starrocks(
-                "starrocks can not support Timestamptz".to_string(),
+                "TIMESTAMP WITH TIMEZONE is not supported for Starrocks sink as Starrocks doesn't store time values with timezone information. Please convert to TIMESTAMP first.".to_string(),
             )),
             risingwave_common::types::DataType::Interval => Err(SinkError::Starrocks(
                 "starrocks can not support Interval".to_string(),
@@ -195,9 +195,7 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Bytea => Err(SinkError::Starrocks(
                 "starrocks can not support Bytea".to_string(),
             )),
-            risingwave_common::types::DataType::Jsonb => Err(SinkError::Starrocks(
-                "starrocks can not support import json".to_string(),
-            )),
+            risingwave_common::types::DataType::Jsonb => Ok(starrocks_data_type.contains("json")),
             risingwave_common::types::DataType::Serial => {
                 Ok(starrocks_data_type.contains("bigint"))
             }
@@ -360,7 +358,7 @@ impl StarrocksSinkWriter {
             inserter_innet_builder: starrocks_insert_builder,
             is_append_only,
             client: None,
-            row_encoder: JsonEncoder::new_with_doris(
+            row_encoder: JsonEncoder::new_with_starrocks(
                 schema,
                 None,
                 TimestampHandlingMode::String,

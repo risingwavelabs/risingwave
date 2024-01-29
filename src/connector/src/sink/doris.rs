@@ -170,7 +170,7 @@ impl DorisSink {
                 Ok(doris_data_type.contains("DATETIME"))
             }
             risingwave_common::types::DataType::Timestamptz => Err(SinkError::Doris(
-                "doris can not support Timestamptz".to_string(),
+                "TIMESTAMP WITH TIMEZONE is not supported for Doris sink as Doris doesn't store time values with timezone information. Please convert to TIMESTAMP first.".to_string(),
             )),
             risingwave_common::types::DataType::Interval => Err(SinkError::Doris(
                 "doris can not support Interval".to_string(),
