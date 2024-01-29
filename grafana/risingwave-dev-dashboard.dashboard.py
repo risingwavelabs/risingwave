@@ -24,22 +24,21 @@ logging.basicConfig(level=logging.WARN)
 
 def section_actor_info(outer_panels):
     panels = outer_panels.sub_panel()
-    excluded_cols = ["Time", "Value", "__name__", f"{COMPONENT_LABEL}", f"{NODE_LABEL}"]
     return [
         outer_panels.row_collapsed(
             "Actor/Table Id Info",
             [
                 panels.table_info(
-                    "Actor Id Info",
-                    "Mapping from actor id to fragment id",
-                    [panels.table_target(f"{metric('actor_info')}")],
-                    excluded_cols,
+                    "Actor Info",
+                    "Information about actors",
+                    [panels.table_target(f"group({metric('actor_info')}) by (actor_id, fragment_id, compute_node)")],
+                    ["actor_id", "fragment_id", "compute_node"],
                 ),
                 panels.table_info(
-                    "Materialized View Info",
-                    "Mapping from materialized view table id to it's internal table ids",
-                    [panels.table_target(f"{metric('table_info')}")],
-                    excluded_cols,
+                    "State Table Info",
+                    "Information about state tables. Column `materialized_view_id` is the id of the materialized view that this state table belongs to.",
+                    [panels.table_target(f"group({metric('table_info')}) by (table_id, table_name, table_type, materialized_view_id, fragment_id, compaction_group_id)")],
+                    ["table_id", "table_name", "table_type", "materialized_view_id", "fragment_id", "compaction_group_id"],
                 ),
             ],
         )
