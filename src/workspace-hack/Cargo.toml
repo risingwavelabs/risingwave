@@ -129,7 +129,7 @@ sqlx-postgres = { version = "0.7", default-features = false, features = ["bigdec
 sqlx-sqlite = { version = "0.7", default-features = false, features = ["chrono", "json", "time", "uuid"] }
 strum = { version = "0.25", features = ["derive"] }
 subtle = { version = "2" }
-syn-dff4ba8e3ae991db = { package = "syn", version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3", features = ["local-offset", "macros", "serde-well-known"] }
 tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }
 tokio = { version = "1", features = ["full", "stats", "tracing"] }

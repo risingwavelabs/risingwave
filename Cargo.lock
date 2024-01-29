@@ -9031,7 +9031,7 @@ dependencies = [
  "simd-json",
  "strum",
  "strum_macros",
- "syn 1.0.109",
+ "syn 2.0.48",
  "tempfile",
  "thiserror",
  "thiserror-ext",
