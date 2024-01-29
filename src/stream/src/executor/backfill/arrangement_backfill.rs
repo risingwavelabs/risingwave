@@ -585,8 +585,10 @@ where
             let backfill_progress = backfill_state.get_progress(&vnode)?;
             let current_pos = match backfill_progress {
                 BackfillProgressPerVnode::NotStarted => None,
-                BackfillProgressPerVnode::Completed(current_pos)
-                | BackfillProgressPerVnode::InProgress(current_pos) => Some(current_pos.clone()),
+                BackfillProgressPerVnode::Completed { current_pos, .. }
+                | BackfillProgressPerVnode::InProgress { current_pos, .. } => {
+                    Some(current_pos.clone())
+                }
             };
 
             let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos.clone());
