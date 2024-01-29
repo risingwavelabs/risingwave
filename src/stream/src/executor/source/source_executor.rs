@@ -107,6 +107,11 @@ impl<S: StateStore> SourceExecutor<S> {
             self.connector_params.connector_client.clone(),
             self.actor_ctx.error_suppressor.clone(),
             source_desc.source.config.clone(),
+            self.stream_source_core
+                .as_ref()
+                .unwrap()
+                .source_name
+                .clone(),
         );
         source_desc
             .source

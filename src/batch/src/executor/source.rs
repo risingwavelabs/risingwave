@@ -147,6 +147,7 @@ impl SourceExecutor {
             self.source_ctrl_opts.clone(),
             None,
             ConnectorProperties::default(),
+            "NA".to_owned(), // FIXME: source name was not passed in batch plan
         ));
         let stream = self
             .source

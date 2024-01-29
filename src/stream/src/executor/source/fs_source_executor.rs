@@ -107,6 +107,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             None,
             self.actor_ctx.error_suppressor.clone(),
             source_desc.source.config.clone(),
+            self.stream_source_core.source_name.clone(),
         );
         source_desc
             .source
