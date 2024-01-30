@@ -20,6 +20,7 @@ use std::marker::PhantomData;
 use std::ops::{Bound, RangeInclusive};
 
 use delta_btree_map::{Change, DeltaBTreeMap};
+use educe::Educe;
 use futures_async_stream::for_await;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::estimate_size::collections::EstimatedBTreeMap;
@@ -222,6 +223,31 @@ pub(super) struct OverPartitionStats {
     pub right_miss_count: u64,
 }
 
+#[derive(Debug, Educe)]
+#[educe(Clone, Copy)]
+pub(super) struct AffectedRange<'cache> {
+    pub first_frame_start: &'cache CacheKey,
+    pub first_curr_key: &'cache CacheKey,
+    pub last_curr_key: &'cache CacheKey,
+    pub last_frame_end: &'cache CacheKey,
+}
+
+impl<'cache> AffectedRange<'cache> {
+    fn new(
+        first_frame_start: &'cache CacheKey,
+        first_curr_key: &'cache CacheKey,
+        last_curr_key: &'cache CacheKey,
+        last_frame_end: &'cache CacheKey,
+    ) -> Self {
+        Self {
+            first_frame_start,
+            first_curr_key,
+            last_curr_key,
+            last_frame_end,
+        }
+    }
+}
+
 /// A wrapper of [`PartitionCache`] that provides helper methods to manipulate the cache.
 /// By putting this type inside `private` module, we can avoid misuse of the internal fields and
 /// methods.
@@ -380,12 +406,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         delta: &'cache PartitionDelta,
     ) -> StreamExecutorResult<(
         DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
-        Vec<(
-            &'cache CacheKey,
-            &'cache CacheKey,
-            &'cache CacheKey,
-            &'cache CacheKey,
-        )>,
+        Vec<AffectedRange<'cache>>,
     )>
     where
         's: 'cache,
@@ -450,15 +471,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     fn find_affected_ranges_readonly<'cache>(
         &'_ self,
         part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
-    ) -> std::result::Result<
-        Vec<(
-            &'cache CacheKey,
-            &'cache CacheKey,
-            &'cache CacheKey,
-            &'cache CacheKey,
-        )>,
-        (bool, bool),
-    > {
+    ) -> std::result::Result<Vec<AffectedRange<'cache>>, (bool, bool)> {
         if part_with_delta.first_key().is_none() {
             // nothing is left after applying the delta, meaning all entries are deleted
             return Ok(vec![]);
@@ -469,7 +482,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
         if part_with_delta.snapshot().is_empty() {
             // all existing keys are inserted in the delta
-            return Ok(vec![(
+            return Ok(vec![AffectedRange::new(
                 delta_first_key,
                 delta_first_key,
                 delta_last_key,
@@ -575,7 +588,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         if need_extend_leftward || need_extend_rightward {
             Err((need_extend_leftward, need_extend_rightward))
         } else {
-            Ok(vec![(
+            Ok(vec![AffectedRange::new(
                 first_frame_start,
                 first_curr_key,
                 last_curr_key,
