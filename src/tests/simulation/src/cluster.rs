@@ -32,6 +32,8 @@ use itertools::Itertools;
 use madsim::runtime::{Handle, NodeHandle};
 use rand::seq::IteratorRandom;
 use rand::Rng;
+#[cfg(madsim)]
+use risingwave_object_store::object::sim::SimServer as ObjectStoreSimServer;
 use risingwave_pb::common::WorkerNode;
 use sqllogictest::AsyncDB;
 #[cfg(not(madsim))]
@@ -297,18 +299,18 @@ metrics_level = "Disabled"
 ///
 /// # Nodes
 ///
-/// | Name           | IP            |
-/// | -------------- | ------------- |
-/// | meta-x         | 192.168.1.x   |
-/// | frontend-x     | 192.168.2.x   |
-/// | compute-x      | 192.168.3.x   |
-/// | compactor-x    | 192.168.4.x   |
-/// | etcd           | 192.168.10.1  |
-/// | kafka-broker   | 192.168.11.1  |
-/// | kafka-producer | 192.168.11.2  |
-/// | s3             | 192.168.12.1  |
-/// | client         | 192.168.100.1 |
-/// | ctl            | 192.168.101.1 |
+/// | Name             | IP            |
+/// | ---------------- | ------------- |
+/// | meta-x           | 192.168.1.x   |
+/// | frontend-x       | 192.168.2.x   |
+/// | compute-x        | 192.168.3.x   |
+/// | compactor-x      | 192.168.4.x   |
+/// | etcd             | 192.168.10.1  |
+/// | kafka-broker     | 192.168.11.1  |
+/// | kafka-producer   | 192.168.11.2  |
+/// | object_store_sim | 192.168.12.1  |
+/// | client           | 192.168.100.1 |
+/// | ctl              | 192.168.101.1 |
 pub struct Cluster {
     config: Configuration,
     handle: Handle,
@@ -385,14 +387,13 @@ impl Cluster {
             })
             .build();
 
-        // s3
+        // object_store_sim
         handle
             .create_node()
-            .name("s3")
+            .name("object_store_sim")
             .ip("192.168.12.1".parse().unwrap())
             .init(move || async move {
-                aws_sdk_s3::server::SimServer::default()
-                    .with_bucket("hummock001")
+                ObjectStoreSimServer::builder()
                     .serve("0.0.0.0:9301".parse().unwrap())
                     .await
             })
@@ -422,7 +423,7 @@ impl Cluster {
                 "--etcd-endpoints",
                 "etcd:2388",
                 "--state-store",
-                "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
+                "hummock+sim://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
                 "--data-directory",
                 "hummock_001",
             ]);
