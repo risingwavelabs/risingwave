@@ -82,6 +82,9 @@ message ExprNode {
     LTRIM = 210;
     RTRIM = 211;
     CASE = 212;
+    // Optimize case-when expression to constant lookup
+    // when arms are in a large scale with simple form
+    CONSTANT_LOOKUP = 624;
     // ROUND(numeric, integer) -> numeric
     ROUND_DIGIT = 213;
     // ROUND(numeric) -> numeric

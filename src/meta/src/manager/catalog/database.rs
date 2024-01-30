@@ -444,7 +444,7 @@ impl DatabaseManager {
     }
 
     pub fn unmark_creating(&mut self, relation: &RelationKey) {
-        self.in_progress_creation_tracker.remove(&relation.clone());
+        self.in_progress_creation_tracker.remove(relation);
     }
 
     pub fn unmark_creating_streaming_job(&mut self, table_id: TableId) {

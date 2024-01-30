@@ -1316,7 +1316,9 @@ impl FragmentManager {
 
         for (table_id, parallelism) in table_parallelism_assignment {
             if let Some(mut table) = table_fragments.get_mut(table_id) {
-                table.assigned_parallelism = parallelism;
+                if table.assigned_parallelism != parallelism {
+                    table.assigned_parallelism = parallelism;
+                }
             }
         }
 

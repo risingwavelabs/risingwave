@@ -598,6 +598,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         _table_id: u32,
         _parallelism: PbTableParallelism,
+        _deferred: bool,
     ) -> Result<()> {
         todo!()
     }

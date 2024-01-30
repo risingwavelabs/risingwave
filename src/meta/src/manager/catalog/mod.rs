@@ -1749,7 +1749,9 @@ impl CatalogManager {
         }
 
         for sink in database_mgr.sinks.values() {
-            if sink.dependent_relations.contains(&relation_id) {
+            if sink.dependent_relations.contains(&relation_id)
+                || sink.target_table == Some(relation_id)
+            {
                 let mut sink = sink.clone();
                 sink.definition = alter_relation_rename_refs(&sink.definition, from, to);
                 to_update_sinks.push(sink);

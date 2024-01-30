@@ -110,6 +110,19 @@ create function print_add_two(INT) returns int language sql as 'select print($1 
 statement error failed to conduct semantic check, please see if you are calling non-existence functions
 create function non_exist(INT) returns int language sql as 'select yo(114514)';
 
+# Try to create an anonymous sql udf whose return type mismatches with the sql body definition
+statement error return type mismatch detected
+create function type_mismatch(INT) returns varchar language sql as 'select $1 + 114514 + $1';
+
+# A valid example
+statement ok
+create function type_match(INT) returns varchar language sql as $$select '$1 + 114514 + $1'$$;
+
+query T
+select type_match(114514);
+----
+$1 + 114514 + $1
+
 # Call the defined anonymous sql udfs
 query I
 select add(1, -1);
@@ -260,7 +273,7 @@ create function add_sub(INT, FLOAT, INT) returns float language sql as $$select 
 
 # Complex types interleaving
 statement ok
-create function add_sub_types(INT, BIGINT, FLOAT, DECIMAL, REAL) returns real language sql as 'select $1 + $2 - $3 + $4 + $5';
+create function add_sub_types(INT, BIGINT, FLOAT, DECIMAL, REAL) returns double language sql as 'select $1 + $2 - $3 + $4 + $5';
 
 statement ok
 create function add_sub_return(INT, FLOAT, INT) returns float language sql return -$1 + $2 - $3;
@@ -375,6 +388,9 @@ drop function add_sub_mix;
 
 statement ok
 drop function add_named_wrapper;
+
+statement ok
+drop function type_match;
 
 # Drop the mock table
 statement ok
