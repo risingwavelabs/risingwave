@@ -336,7 +336,8 @@ impl StreamRpcManager {
                         .await?;
                     if let Some(actors) = actors {
                         let request_id = Self::new_request_id();
-                        tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
+                        let actor_ids = actors.iter().map(|actor| actor.actor_id).collect_vec();
+                        tracing::debug!(request_id = request_id.as_str(), actors = ?actor_ids, "update actors");
                         client
                             .update_actors(UpdateActorsRequest { request_id, actors })
                             .await?;
