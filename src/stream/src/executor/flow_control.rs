@@ -17,7 +17,6 @@ use std::num::NonZeroU32;
 
 use governor::clock::MonotonicClock;
 use governor::{Quota, RateLimiter};
-use risingwave_common::catalog::Schema;
 
 use super::*;
 
@@ -31,9 +30,9 @@ use super::*;
 ///
 /// It is used to throttle problematic MVs that are consuming too much resources.
 pub struct FlowControlExecutor {
+    info: ExecutorInfo,
     input: BoxedExecutor,
     actor_ctx: ActorContextRef,
-    identity: String,
     rate_limit: Option<u32>,
 }
 
@@ -49,9 +48,12 @@ impl FlowControlExecutor {
             input.identity().to_owned()
         };
         Self {
+            info: ExecutorInfo {
+                identity,
+                ..input.info().clone()
+            },
             input,
             actor_ctx,
-            identity,
             rate_limit,
         }
     }
@@ -130,7 +132,7 @@ impl Debug for FlowControlExecutor {
 
 impl Executor for FlowControlExecutor {
     fn info(&self) -> &ExecutorInfo {
-        &self.input.info()
+        &self.info
     }
 
     fn execute(self: Box<Self>) -> BoxedMessageStream {
