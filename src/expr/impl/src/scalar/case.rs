@@ -134,9 +134,24 @@ impl ConstantLookupExpression {
         }
     }
 
+    /// Evaluate the fallback arm with the given input
+    async fn eval_fallback(&self, input: &OwnedRow) -> Result<Datum> {
+        let Some(ref fallback) = self.fallback else {
+            return Ok(None);
+        };
+        let Ok(res) = fallback.eval_row(&input).await else {
+            bail!("failed to evaluate the input for fallback arm");
+        };
+        Ok(res)
+    }
+
     /// The actual lookup & evaluation logic
     /// used in both `eval_row` & `eval`
     async fn lookup(&self, datum: Datum, input: &OwnedRow) -> Result<Datum> {
+        if datum.is_none() {
+            return self.eval_fallback(input).await;
+        }
+
         if let Some(expr) = self.arms.get(datum.as_ref().unwrap()) {
             let Ok(res) = expr.eval_row(&input).await else {
                 bail!("failed to evaluate the input for normal arm");
@@ -144,13 +159,7 @@ impl ConstantLookupExpression {
             Ok(res)
         } else {
             // Fallback arm goes here
-            let Some(ref fallback) = self.fallback else {
-                return Ok(None);
-            };
-            let Ok(res) = fallback.eval_row(&input).await else {
-                bail!("failed to evaluate the input for fallback arm");
-            };
-            Ok(res)
+            self.eval_fallback(input).await
         }
     }
 }
