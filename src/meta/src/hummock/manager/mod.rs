@@ -2762,15 +2762,11 @@ impl HummockManager {
 
                             (Some(Err(err)), _stream) => {
                                 tracing::warn!(error = %err.as_report(), "compactor {} leaving the cluster with err", context_id);
-                                hummock_manager.compactor_manager
-                                    .remove_compactor(context_id);
                                 continue
                             }
 
                             _ => {
                                 tracing::warn!("compactor {} leaving the cluster", context_id);
-                                hummock_manager.compactor_manager
-                                    .remove_compactor(context_id);
                                 continue
                             },
                         };
@@ -2846,8 +2842,6 @@ impl HummockManager {
                             push_stream(context_id, stream, &mut compactor_request_streams);
                         } else {
                             tracing::warn!("compactor {} leaving the cluster since it's not alive", context_id);
-                            hummock_manager.compactor_manager
-                                .remove_compactor(context_id);
                         }
                     },
                 }
