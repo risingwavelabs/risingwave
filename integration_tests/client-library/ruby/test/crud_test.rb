@@ -17,10 +17,10 @@ class SQLTest < Test::Unit::TestCase
     salary = 50000
     tripIDs = ['12345', '67890']
     fareData = {
-		  "initial_charge"    => 3.0,
-		  "subsequent_charge" => 1.5,
-		  "surcharge"         => 0.5,
-		  "tolls"             => 2.0,
+      "initial_charge"    => 3.0,
+      "subsequent_charge" => 1.5,
+      "surcharge"         => 0.5,
+      "tolls"             => 2.0,
     }
     deci = 2.14159
     birthdate = Date.parse('1993-01-02')
@@ -29,8 +29,8 @@ class SQLTest < Test::Unit::TestCase
     timestz = DateTime.now()
     timegap = '02:00:00'
 
-	  insert_data(@conn, name, age, salary, tripIDs, birthdate, deci, fareData, starttime, timest, timestz, timegap)
-	  check_data(name, age, salary, tripIDs, birthdate, deci, fareData, starttime, timest, timestz, timegap)
+    insert_data(@conn, name, age, salary, tripIDs, birthdate, deci, fareData, starttime, timest, timestz, timegap)
+    check_data(name, age, salary, tripIDs, birthdate, deci, fareData, starttime, timest, timestz, timegap)
 
     # Insert data with null values
     nullName = "Null Person";
@@ -44,8 +44,9 @@ class SQLTest < Test::Unit::TestCase
     nullTimestz = DateTime.parse('1970-01-01T00:00:00Z')
     nullTimegap = '00:00:00';
     nullDeci = 0.0;
-	  insert_data(@conn, nullName, nullAge, nullSalary, nullTripIDs, nullBirthdate, nullDeci, nullFareData, nullStarttime, nullTimest, nullTimestz, nullTimegap)
-	  check_data(nullName, nullAge, nullSalary, nullTripIDs, nullBirthdate, nullDeci, nullFareData, nullStarttime, nullTimest, nullTimestz, nullTimegap)
+
+    insert_data(@conn, nullName, nullAge, nullSalary, nullTripIDs, nullBirthdate, nullDeci, nullFareData, nullStarttime, nullTimest, nullTimestz, nullTimegap)
+    check_data(nullName, nullAge, nullSalary, nullTripIDs, nullBirthdate, nullDeci, nullFareData, nullStarttime, nullTimest, nullTimestz, nullTimegap)
 
     update_data(@conn, name, 60000)
     delete_data(@conn, name)
