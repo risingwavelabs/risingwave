@@ -101,6 +101,7 @@ pub enum AccessError {
     #[error("Unsupported data type `{ty}`")]
     UnsupportedType { ty: String },
 
+    /// Errors that are not categorized into variants above.
     #[error("{message}")]
     Uncategorized { message: String },
 }

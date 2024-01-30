@@ -501,7 +501,7 @@ fn protobuf_type_mapping(
             let fields = m
                 .fields()
                 .map(|f| protobuf_type_mapping(&f, parse_trace))
-                .collect::<Result<Vec<_>>>()?;
+                .try_collect()?;
             let field_names = m.fields().map(|f| f.name().to_string()).collect_vec();
 
             // Note that this part is useful for actual parsing
