@@ -2761,12 +2761,12 @@ impl HummockManager {
                             }
 
                             (Some(Err(err)), _stream) => {
-                                tracing::warn!(error = %err.as_report(), "compactor {} leaving the cluster with err", context_id);
+                                tracing::warn!(error = %err.as_report(), "compactor stream {} poll with err, recv stream may be destroyed", context_id);
                                 continue
                             }
 
                             _ => {
-                                tracing::warn!("compactor {} leaving the cluster", context_id);
+                                tracing::warn!("compactor stream {} poll err, recv stream may be destroyed", context_id);
                                 continue
                             },
                         };
@@ -2841,7 +2841,7 @@ impl HummockManager {
                         if compactor_alive {
                             push_stream(context_id, stream, &mut compactor_request_streams);
                         } else {
-                            tracing::warn!("compactor {} leaving the cluster since it's not alive", context_id);
+                            tracing::warn!("compactor stream {} error, send stream may be destroyed", context_id);
                         }
                     },
                 }
