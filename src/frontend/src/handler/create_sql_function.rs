@@ -29,7 +29,7 @@ use thiserror_ext::AsReport;
 use super::*;
 use crate::binder::UdfContext;
 use crate::catalog::CatalogError;
-use crate::expr::{ExprImpl, Literal};
+use crate::expr::{Expr, ExprImpl, Literal};
 use crate::{bind_data_type, Binder};
 
 /// Create a mock `udf_context`, which is used for semantic check
@@ -176,12 +176,23 @@ pub async fn handle_create_sql_function(
             .update_context(create_mock_udf_context(arg_types.clone()));
 
         if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
-            if let Err(e) = binder.bind_expr(expr) {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
+            match binder.bind_expr(expr) {
+                Ok(expr) => {
+                    // Check if the return type mismatches
+                    if expr.return_type() != return_type {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "\nreturn type mismatch detected\nexpected: [{}]\nactual: [{}]\nplease adjust your function definition accordingly",
+                            return_type,
+                            expr.return_type()
+                        ))
+                        .into());
+                    }
+                }
+                Err(e) => return Err(ErrorCode::InvalidInputSyntax(format!(
                     "failed to conduct semantic check, please see if you are calling non-existence functions: {}",
                     e.as_report()
                 ))
-                .into());
+                .into()),
             }
         } else {
             return Err(ErrorCode::InvalidInputSyntax(
