@@ -345,6 +345,11 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .meta
                     .developer
                     .cached_traces_memory_limit_bytes,
+                enable_trivial_move: config.meta.developer.enable_trivial_move,
+                enable_check_task_level_overlap: config
+                    .meta
+                    .developer
+                    .enable_check_task_level_overlap,
             },
             config.system.into_init_system_params(),
         )

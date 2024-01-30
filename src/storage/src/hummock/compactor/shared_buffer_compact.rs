@@ -385,6 +385,7 @@ pub async fn merge_imms_in_memory(
     }
 }
 
+///  Based on the incoming payload and opts, calculate the sharding method and sstable size of shared buffer compaction.
 fn generate_splits(
     payload: &UploadTaskPayload,
     existing_table_ids: &HashSet<u32>,
@@ -418,10 +419,8 @@ fn generate_splits(
     } else {
         compact_data_size
     };
-    // mul 1.2 for other extra memory usage.
-    let mut sub_compaction_sstable_size =
-        std::cmp::min(sstable_size, sub_compaction_data_size * 6 / 5);
-    let mut split_weight_by_vnode = 0;
+
+    let mut vnode_partition_count = 0;
     if existing_table_ids.len() > 1 {
         if parallelism > 1 && compact_data_size > sstable_size {
             let mut last_buffer_size = 0;
@@ -447,27 +446,33 @@ fn generate_splits(
             }
         }
     } else {
+        // Collect vnodes in imm
         let mut vnodes = vec![];
         for imm in payload {
             vnodes.extend(imm.collect_vnodes());
         }
         vnodes.sort();
         vnodes.dedup();
+
+        // Based on the estimated `vnode_avg_size`, calculate the required `vnode_partition_count` to avoid small files and further align
         const MIN_SSTABLE_SIZE: u64 = 16 * 1024 * 1024;
         if compact_data_size >= MIN_SSTABLE_SIZE && !vnodes.is_empty() {
             let mut avg_vnode_size = compact_data_size / (vnodes.len() as u64);
-            split_weight_by_vnode = VirtualNode::COUNT;
-            while avg_vnode_size < MIN_SSTABLE_SIZE && split_weight_by_vnode > 0 {
-                split_weight_by_vnode /= 2;
+            vnode_partition_count = VirtualNode::COUNT;
+            while avg_vnode_size < MIN_SSTABLE_SIZE && vnode_partition_count > 0 {
+                vnode_partition_count /= 2;
                 avg_vnode_size *= 2;
             }
-            sub_compaction_sstable_size = compact_data_size;
         }
     }
+
+    // mul 1.2 for other extra memory usage.
+    // Ensure that the size of each sstable is still less than `sstable_size` after optimization to avoid generating a huge size sstable which will affect the object store
+    let sub_compaction_sstable_size = std::cmp::min(sstable_size, sub_compaction_data_size * 6 / 5);
     (
         splits,
         sub_compaction_sstable_size,
-        split_weight_by_vnode as u32,
+        vnode_partition_count as u32,
     )
 }
 
