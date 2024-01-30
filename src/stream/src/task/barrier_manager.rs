@@ -148,7 +148,11 @@ impl StreamActorManagerState {
             sender,
             join_result
                 .map_err(|join_error| {
-                    anyhow!("failed to join creating actors futures: {:?}", join_error).into()
+                    anyhow!(
+                        "failed to join creating actors futures: {:?}",
+                        join_error.as_report()
+                    )
+                    .into()
                 })
                 .and_then(|result| result),
         )
