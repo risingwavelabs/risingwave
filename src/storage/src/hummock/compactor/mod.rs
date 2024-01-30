@@ -504,6 +504,7 @@ pub fn start_compactor(
                                             tracing::warn!(error = %e.as_report(), "Failed to report task {task_id:?}");
                                         }
                                         if enable_check_compaction_result && need_check_task {
+                                            context.compactor_metrics.compaction_result_check_count.with_label_values(&["compaction"]).inc();
                                             match check_compaction_result(&compact_task, context.clone()).await {
                                                 Err(e) => {
                                                     tracing::warn!(error = %e.as_report(), "Failed to check compaction task {}",compact_task.task_id);

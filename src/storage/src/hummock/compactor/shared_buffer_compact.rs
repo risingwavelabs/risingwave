@@ -233,6 +233,11 @@ async fn compact_shared_buffer(
             level0.extend(ssts);
         }
         if context.storage_opts.check_compaction_result {
+            context
+                .compactor_metrics
+                .compaction_result_check_count
+                .with_label_values(&["flush"])
+                .inc();
             let compaction_executor = context.compaction_executor.clone();
             let mut forward_iters = Vec::with_capacity(payload.len());
             let del_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
