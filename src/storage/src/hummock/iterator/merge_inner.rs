@@ -200,11 +200,19 @@ impl<'a, T: Ord> Drop for PeekMutGuard<'a, T> {
 
 impl MergeIterator<SharedBufferBatchIterator<Forward>> {
     pub(crate) fn advance_peek_to_next_key(&mut self) {
-        self.heap
-            .peek_mut()
-            .expect("should exist")
-            .iter
-            .advance_to_next_key();
+        let mut node =
+            PeekMutGuard::peek_mut(&mut self.heap, &mut self.unused_iters).expect("no inner iter");
+
+        node.iter.advance_to_next_key();
+
+        if !node.iter.is_valid() {
+            // Put back to `unused_iters`
+            let node = node.pop();
+            self.unused_iters.push_back(node);
+        } else {
+            // This will update the heap top.
+            node.used();
+        }
     }
 
     pub(crate) fn rewind_no_await(&mut self) {

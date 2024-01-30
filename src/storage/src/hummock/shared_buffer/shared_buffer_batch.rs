@@ -477,7 +477,6 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
     }
 
     pub(crate) fn current_item(&self) -> (&TableKey<Bytes>, &(EpochWithGap, HummockValue<Bytes>)) {
-        assert!(self.is_valid(), "iterator is not valid");
         let (idx, version_idx) = match D::direction() {
             DirectionEnum::Forward => (self.current_idx, self.current_version_idx),
             DirectionEnum::Backward => (
@@ -485,7 +484,7 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
                 self.current_version_idx,
             ),
         };
-        let cur_entry = self.inner.get(idx).unwrap();
+        let cur_entry = &self.inner[idx];
         (&cur_entry.key, &cur_entry.new_values[version_idx as usize])
     }
 }
