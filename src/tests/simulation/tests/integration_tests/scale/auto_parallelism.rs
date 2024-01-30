@@ -662,7 +662,7 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
     session
         .run("select parallelism from table_parallelism")
         .await?
-        .assert_result_eq("AUTO");
+        .assert_result_eq("ADAPTIVE");
 
     // Find the table materialize fragment
     let table_mat_fragment = cluster
@@ -695,7 +695,7 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
     session
         .run("select parallelism from mview_parallelism where name = 'm_simple'")
         .await?
-        .assert_result_eq("AUTO");
+        .assert_result_eq("ADAPTIVE");
 
     // Find the table fragment for materialized view
     let simple_mv_fragment = cluster

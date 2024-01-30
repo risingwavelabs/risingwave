@@ -469,7 +469,7 @@ message TableParallelism {
     uint32 parallelism = 1;
   }
 
-  // deprecated, treat as AdaptiveParallelism
+  // deprecated, treated as AdaptiveParallelism
   message AutoParallelism {}
 
   message AdaptiveParallelism {}
@@ -480,7 +480,7 @@ message TableParallelism {
     FixedParallelism fixed = 1;
     AutoParallelism auto = 2;
     CustomParallelism custom = 3;
-    AdaptiveParallelism adaptive= 4;
+    AdaptiveParallelism adaptive = 4;
   }
 }
 
