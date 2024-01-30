@@ -178,6 +178,7 @@ pub async fn handle_create_sql_function(
         if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
             match binder.bind_expr(expr) {
                 Ok(expr) => {
+                    // Check if the return type mismatches
                     if expr.return_type() != return_type {
                         return Err(ErrorCode::InvalidInputSyntax(format!(
                             "\nreturn type mismatch detected\nexpected: [{}]\nactual: [{}]\nplease adjust your function definition accordingly",
