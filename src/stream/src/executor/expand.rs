@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Array, I64Array};
-use risingwave_common::catalog::Schema;
+
 
 use super::error::StreamExecutorError;
 use super::*;

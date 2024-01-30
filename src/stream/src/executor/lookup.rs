@@ -14,11 +14,11 @@
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use risingwave_common::catalog::Schema;
+
 use risingwave_common::types::DataType;
 use risingwave_storage::StateStore;
 
-use crate::executor::{Barrier, BoxedMessageStream, Executor, PkIndicesRef};
+use crate::executor::{Barrier, BoxedMessageStream, Executor};
 
 mod cache;
 mod sides;

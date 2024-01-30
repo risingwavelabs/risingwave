@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use futures::StreamExt;
-use risingwave_common::catalog::Schema;
+
 
 use super::*;
 
@@ -90,7 +90,7 @@ impl WrapperExecutor {
 
 impl Executor for WrapperExecutor {
     fn info(&self) -> &ExecutorInfo {
-        &self.input.info()
+        self.input.info()
     }
 
     fn execute(self: Box<Self>) -> BoxedMessageStream {

@@ -18,7 +18,7 @@ use futures::future::{join_all, select, Either};
 use futures::{FutureExt, SinkExt, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
+
 
 use super::error::StreamExecutorError;
 use super::*;

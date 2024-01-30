@@ -46,7 +46,7 @@ use crate::executor::backfill::utils::{
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
+    ExecutorInfo, Message, StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::CreateMviewProgress;
 

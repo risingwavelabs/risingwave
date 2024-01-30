@@ -18,14 +18,14 @@ use await_tree::InstrumentAwait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
-use risingwave_common::catalog::Schema;
+
 use risingwave_common::ensure;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::{
-    ActorContextRef, Barrier, BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndicesRef,
+    ActorContextRef, Barrier, BoxedMessageStream, Executor, ExecutorInfo, Message,
     StreamExecutorError,
 };
 use crate::task::CreateMviewProgress;

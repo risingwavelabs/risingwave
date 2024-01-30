@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::Schema;
+
 
 use super::{
-    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, PkIndicesRef,
+    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo,
 };
 
 /// No-op executor directly forwards the input stream. Currently used to break the multiple edges in

@@ -39,7 +39,7 @@ use super::aggregation::{
 };
 use super::sort_buffer::SortBuffer;
 use super::{
-    expect_first_barrier, ActorContextRef, ExecutorInfo, PkIndicesRef, StreamExecutorResult,
+    expect_first_barrier, ActorContextRef, ExecutorInfo, StreamExecutorResult,
     Watermark,
 };
 use crate::cache::{cache_may_stale, new_with_hasher, ManagedLruCache};

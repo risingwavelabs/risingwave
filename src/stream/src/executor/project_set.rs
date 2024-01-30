@@ -20,7 +20,7 @@ use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
-use risingwave_common::catalog::Schema;
+
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -29,7 +29,7 @@ use risingwave_expr::table_function::ProjectSetSelectItem;
 
 use super::error::StreamExecutorError;
 use super::{
-    ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef,
+    ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message,
     StreamExecutorResult, Watermark,
 };
 use crate::common::StreamChunkBuilder;

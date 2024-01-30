@@ -20,7 +20,7 @@ use anyhow::Context as _;
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::Schema;
+
 use tokio::time::Instant;
 
 use super::error::StreamExecutorError;

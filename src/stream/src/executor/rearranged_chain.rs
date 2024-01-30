@@ -19,7 +19,7 @@ use futures::stream::select_with_strategy;
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::Schema;
+
 
 use super::error::StreamExecutorError;
 use super::{

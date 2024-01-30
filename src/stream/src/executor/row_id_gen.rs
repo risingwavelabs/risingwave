@@ -19,14 +19,14 @@ use risingwave_common::array::{
     Array, ArrayBuilder, ArrayRef, Op, SerialArrayBuilder, StreamChunk,
 };
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
+
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::Serial;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_id::RowIdGenerator;
 
 use super::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, PkIndicesRef,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo,
 };
 use crate::executor::{Message, StreamExecutorError};
 

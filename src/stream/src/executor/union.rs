@@ -20,7 +20,7 @@ use futures::stream::{FusedStream, FuturesUnordered};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use pin_project::pin_project;
-use risingwave_common::catalog::Schema;
+
 
 use super::watermark::BufferedWatermarks;
 use super::*;

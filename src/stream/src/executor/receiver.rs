@@ -17,7 +17,6 @@ use anyhow::Context;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
 use tokio::time::Instant;
 
 use super::exchange::input::BoxedInput;
@@ -25,9 +24,7 @@ use super::ActorContextRef;
 use crate::executor::exchange::input::new_input;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::utils::ActorInputMetrics;
-use crate::executor::{
-    expect_first_barrier, BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndicesRef,
-};
+use crate::executor::{expect_first_barrier, BoxedMessageStream, Executor, ExecutorInfo, Message};
 use crate::task::{FragmentId, SharedContext};
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
 /// there should be a `ReceiverExecutor` running in the background, so as to push
@@ -89,6 +86,8 @@ impl ReceiverExecutor {
 
     #[cfg(test)]
     pub fn for_test(input: super::exchange::permit::Receiver) -> Self {
+        use risingwave_common::catalog::Schema;
+
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::Input;
         use crate::executor::ActorContext;
@@ -220,6 +219,7 @@ mod tests {
 
     use futures::{pin_mut, FutureExt};
     use risingwave_common::array::StreamChunk;
+    use risingwave_common::catalog::Schema;
     use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 
     use super::*;

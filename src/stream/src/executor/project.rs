@@ -16,7 +16,7 @@ use std::fmt::{Debug, Formatter};
 
 use multimap::MultiMap;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::Schema;
+
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;

@@ -19,7 +19,7 @@ use either::Either;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{ColumnDesc, Schema, TableId, TableVersionId};
+use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
 use risingwave_dml::dml_manager::DmlManagerRef;
@@ -27,7 +27,7 @@ use risingwave_dml::dml_manager::DmlManagerRef;
 use super::error::StreamExecutorError;
 use super::{
     expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
-    Mutation, PkIndicesRef,
+    Mutation,
 };
 use crate::common::StreamChunkBuilder;
 use crate::executor::stream_reader::StreamReaderWithPause;
@@ -292,7 +292,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnId, Field, INITIAL_TABLE_VERSION_ID};
+    use risingwave_common::catalog::{ColumnId, Field, Schema, INITIAL_TABLE_VERSION_ID};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::transaction::transaction_id::TxnId;
     use risingwave_common::types::DataType;

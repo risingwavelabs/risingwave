@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use futures::StreamExt;
-use risingwave_common::catalog::Schema;
+
 use risingwave_common::metrics::LabelGuardedIntCounter;
 
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{BoxedMessageStream, Executor, ExecutorInfo, PkIndicesRef};
+use crate::executor::{BoxedMessageStream, Executor, ExecutorInfo};
 use crate::task::{ActorId, FragmentId};
 
 #[derive(Default)]

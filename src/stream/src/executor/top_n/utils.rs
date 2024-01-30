@@ -31,7 +31,7 @@ use super::CacheKey;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndicesRef, Watermark,
+    ExecutorInfo, Message, Watermark,
 };
 
 pub trait TopNExecutorBase: Send + 'static {
@@ -82,7 +82,7 @@ where
     E: TopNExecutorBase,
 {
     fn info(&self) -> &ExecutorInfo {
-        &self.inner.info()
+        self.inner.info()
     }
 
     fn execute(self: Box<Self>) -> BoxedMessageStream {

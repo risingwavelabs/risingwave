@@ -15,13 +15,13 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
-use risingwave_common::catalog::Schema;
+
 use risingwave_storage::StateStore;
 
 use super::sort_buffer::SortBuffer;
 use super::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndicesRef, StreamExecutorError, Watermark,
+    ExecutorInfo, Message, StreamExecutorError, Watermark,
 };
 use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;

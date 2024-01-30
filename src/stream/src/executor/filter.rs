@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::catalog::Schema;
+
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 

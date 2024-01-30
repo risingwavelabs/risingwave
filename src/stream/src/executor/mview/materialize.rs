@@ -24,7 +24,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, TableId};
 use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -43,7 +43,7 @@ use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, AddMutation, BoxedExecutor,
-    BoxedMessageStream, Executor, ExecutorInfo, Message, Mutation, PkIndicesRef,
+    BoxedMessageStream, Executor, ExecutorInfo, Message, Mutation,
     StreamExecutorResult, UpdateMutation,
 };
 use crate::task::{ActorId, AtomicU64Ref};

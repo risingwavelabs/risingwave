@@ -16,7 +16,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::Schema;
+
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{
     build_retractable, AggCall, AggregateState, BoxedAggregateFunction,

@@ -19,7 +19,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{
     ActorContext, ActorContextRef, Barrier, BoxedMessageStream, Executor, ExecutorInfo, Message,
-    PkIndices, PkIndicesRef, StreamExecutorError,
+    PkIndices, StreamExecutorError,
 };
 
 /// The executor only for receiving barrier from the meta service. It always resides in the leaves

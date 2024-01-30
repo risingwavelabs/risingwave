@@ -20,7 +20,7 @@ use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayRef, Op, StreamChunk};
-use risingwave_common::catalog::Schema;
+
 use risingwave_common::estimate_size::collections::EstimatedVecDeque;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -40,7 +40,7 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
+    ExecutorInfo, Message, StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::AtomicU64Ref;
 
