@@ -230,6 +230,8 @@ pub(super) struct OverPartition<'a, S: StateStore> {
     range_cache: &'a mut PartitionCache,
     cache_policy: CachePolicy,
 
+    /// The `ROWS` frame that is the union of all `ROWS` frames of all window functions in this
+    /// over window executor.
     super_rows_frame_bounds: RowsFrameBounds,
     start_is_unbounded: bool,
     end_is_unbounded: bool,

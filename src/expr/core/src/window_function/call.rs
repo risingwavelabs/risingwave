@@ -159,7 +159,7 @@ impl RowsFrameBounds {
     ///
     /// A canonical `ROWS` frame is defined as:
     ///
-    /// - Its bounds are valid (see `validate`).
+    /// - Its bounds are valid (see [`Self::validate`]).
     /// - It contains the current row.
     pub fn is_canonical(&self) -> bool {
         self.validate().is_ok() && {

@@ -30,7 +30,23 @@ use super::over_partition::CacheKey;
 /// included in the returned frame.
 pub(super) fn merge_rows_frames(rows_frames: &[&RowsFrameBounds]) -> RowsFrameBounds {
     if rows_frames.is_empty() {
-        // this can simplify our implementation
+        // When there's no `ROWS` frame, for simplicity, we don't return `None`. Instead,
+        // we return `ROWS BETWEEN CURRENT ROW AND CURRENT ROW`, which is the implicit
+        // frame for all selected upstream columns.
+        //
+        // For example, the following two queries are equivalent:
+        //
+        // ```sql
+        // SELECT a, b, sum(c) OVER (...) FROM t;
+        // SELECT
+        //   first_value(a) OVER (... ROWS BETWEEN CURRENT ROW AND CURRENT ROW),
+        //   first_value(b) OVER (... ROWS BETWEEN CURRENT ROW AND CURRENT ROW),
+        //   sum(c) OVER (...)
+        // FROM t;
+        // ```
+        //
+        // See https://risingwave.com/blog/risingwave-window-functions-the-art-of-sliding-and-the-aesthetics-of-symmetry/
+        // for more details.
         return RowsFrameBounds {
             start: FrameBound::CurrentRow,
             end: FrameBound::CurrentRow,
@@ -38,7 +54,7 @@ pub(super) fn merge_rows_frames(rows_frames: &[&RowsFrameBounds]) -> RowsFrameBo
     }
 
     let none_as_max_cmp = |x: &Option<usize>, y: &Option<usize>| match (x, y) {
-        // None should be maximum (unbounded)
+        // None means unbounded, which should be the largest.
         (None, None) => std::cmp::Ordering::Equal,
         (None, Some(_)) => std::cmp::Ordering::Greater,
         (Some(_), None) => std::cmp::Ordering::Less,
@@ -87,7 +103,7 @@ pub(super) fn find_first_curr_for_rows_frame<'cache>(
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
     delta_key: &'cache CacheKey,
 ) -> &'cache CacheKey {
-    find_curr_for_rows_frame::<true>(frame_bounds, part_with_delta, delta_key)
+    find_curr_for_rows_frame::<true /* LEFT */>(frame_bounds, part_with_delta, delta_key)
 }
 
 /// For a canonical `ROWS` frame, given a key in delta, find the cache key
@@ -100,7 +116,7 @@ pub(super) fn find_last_curr_for_rows_frame<'cache>(
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
     delta_key: &'cache CacheKey,
 ) -> &'cache CacheKey {
-    find_curr_for_rows_frame::<false>(frame_bounds, part_with_delta, delta_key)
+    find_curr_for_rows_frame::<false /* RIGHT */>(frame_bounds, part_with_delta, delta_key)
 }
 
 /// For a canonical `ROWS` frame, given a key in `part_with_delta` corresponding
@@ -111,7 +127,7 @@ pub(super) fn find_frame_start_for_rows_frame<'cache>(
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
     curr_key: &'cache CacheKey,
 ) -> &'cache CacheKey {
-    find_boundary_for_rows_frame::<true>(frame_bounds, part_with_delta, curr_key)
+    find_boundary_for_rows_frame::<true /* LEFT */>(frame_bounds, part_with_delta, curr_key)
 }
 
 /// For a canonical `ROWS` frame, given a key in `part_with_delta` corresponding
@@ -124,7 +140,7 @@ pub(super) fn find_frame_end_for_rows_frame<'cache>(
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
     curr_key: &'cache CacheKey,
 ) -> &'cache CacheKey {
-    find_boundary_for_rows_frame::<false>(frame_bounds, part_with_delta, curr_key)
+    find_boundary_for_rows_frame::<false /* RIGHT */>(frame_bounds, part_with_delta, curr_key)
 }
 
 // -------------------------- ↑ PUBLIC INTERFACE ↑ --------------------------
