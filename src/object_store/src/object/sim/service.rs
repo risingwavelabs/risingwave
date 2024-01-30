@@ -88,7 +88,7 @@ impl SimService {
         self.storage.lock().remove(&path);
         Ok(Response::Delete)
     }
-    
+
     pub async fn delete_objects(&self, paths: Vec<String>) -> Result<Response> {
         for path in paths {
             self.storage.lock().remove(&path);

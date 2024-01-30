@@ -207,7 +207,9 @@ impl ObjectStore for SimObjectStore {
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
         let resp = self
             .client
-            .send_request(service::Request::DeleteObjects { paths: paths.to_vec() })
+            .send_request(service::Request::DeleteObjects {
+                paths: paths.to_vec(),
+            })
             .await?;
         if let Response::DeleteObjects = resp {
             Ok(())
