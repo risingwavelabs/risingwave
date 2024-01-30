@@ -143,11 +143,6 @@ impl NotificationManager {
         operation: Operation,
         info: Info,
     ) -> NotificationVersion {
-        println!(
-            "heiheihei: target: {:?}, operation: {:?}, info: {:?}",
-            target.subscribe_type, operation, info
-        );
-
         let mut version_guard = self.version_generator.lock().await;
         version_guard.increase_version().await;
         let version = version_guard.current_version();
