@@ -76,7 +76,7 @@ mod tests {
             U+  810",
         ));
 
-        let checked = update_check(source.info_old().into(), source.boxed().execute());
+        let checked = update_check(source.info().clone().into(), source.boxed().execute());
         pin_mut!(checked);
 
         checked.next().await.unwrap().unwrap(); // should panic
@@ -91,7 +91,7 @@ mod tests {
             U+  114",
         ));
 
-        let checked = update_check(source.info_old().into(), source.boxed().execute());
+        let checked = update_check(source.info().clone().into(), source.boxed().execute());
         pin_mut!(checked);
 
         checked.next().await.unwrap().unwrap(); // should panic
@@ -108,7 +108,7 @@ mod tests {
             U- 1919810",
         ));
 
-        let checked = update_check(source.info_old().into(), source.boxed().execute());
+        let checked = update_check(source.info().clone().into(), source.boxed().execute());
         pin_mut!(checked);
 
         checked.next().await.unwrap().unwrap(); // should panic
@@ -119,7 +119,7 @@ mod tests {
         let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
         tx.push_chunk(StreamChunk::default());
 
-        let checked = update_check(source.info_old().into(), source.boxed().execute());
+        let checked = update_check(source.info().clone().into(), source.boxed().execute());
         pin_mut!(checked);
 
         checked.next().await.unwrap().unwrap();

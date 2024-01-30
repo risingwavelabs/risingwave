@@ -142,7 +142,7 @@ pub struct EowcOverWindowExecutorArgs<S: StateStore> {
 
 impl<S: StateStore> EowcOverWindowExecutor<S> {
     pub fn new(args: EowcOverWindowExecutorArgs<S>) -> Self {
-        let input_info = args.input.info_old();
+        let input_info = args.input.info().clone();
 
         Self {
             input: args.input,

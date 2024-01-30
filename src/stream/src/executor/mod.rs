@@ -181,24 +181,6 @@ pub struct ExecutorInfo {
 pub trait Executor: Send + 'static {
     fn info(&self) -> &ExecutorInfo;
 
-    fn execute(self: Box<Self>) -> BoxedMessageStream;
-
-    fn execute_with_epoch(self: Box<Self>, _epoch: u64) -> BoxedMessageStream {
-        self.execute()
-    }
-
-    #[inline(always)]
-    fn info_old(&self) -> ExecutorInfo {
-        let schema = self.schema().to_owned();
-        let pk_indices = self.pk_indices().to_owned();
-        let identity = self.identity().to_owned();
-        ExecutorInfo {
-            schema,
-            pk_indices,
-            identity,
-        }
-    }
-
     fn schema(&self) -> &Schema {
         &self.info().schema
     }
@@ -209,6 +191,12 @@ pub trait Executor: Send + 'static {
 
     fn identity(&self) -> &str {
         &self.info().identity
+    }
+
+    fn execute(self: Box<Self>) -> BoxedMessageStream;
+
+    fn execute_with_epoch(self: Box<Self>, _epoch: u64) -> BoxedMessageStream {
+        self.execute()
     }
 
     fn boxed(self) -> BoxedExecutor

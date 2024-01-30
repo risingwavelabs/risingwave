@@ -82,7 +82,7 @@ mod tests {
         ));
         tx.push_barrier(1, false);
 
-        let checked = schema_check(source.info_old().into(), source.boxed().execute());
+        let checked = schema_check(source.info().clone().into(), source.boxed().execute());
         pin_mut!(checked);
 
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Chunk(_));
@@ -108,7 +108,7 @@ mod tests {
         ));
         tx.push_barrier(1, false);
 
-        let checked = schema_check(source.info_old().into(), source.boxed().execute());
+        let checked = schema_check(source.info().clone().into(), source.boxed().execute());
         pin_mut!(checked);
         checked.next().await.unwrap().unwrap();
     }

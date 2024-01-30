@@ -55,7 +55,7 @@ pub fn wrap(input: BoxedExecutor, actor_id: ActorId) -> (SubtaskHandle, SubtaskR
     let rx_executor = SubtaskRxExecutor {
         info: ExecutorInfo {
             identity: "SubtaskRxExecutor".to_owned(),
-            ..input.info_old()
+            ..input.info().clone()
         },
         rx,
     };

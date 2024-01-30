@@ -123,7 +123,7 @@ impl<S: StateStore> Executor for SimpleAggExecutor<S> {
 
 impl<S: StateStore> SimpleAggExecutor<S> {
     pub fn new(args: AggExecutorArgs<S, SimpleAggExecutorExtraArgs>) -> StreamResult<Self> {
-        let input_info = args.input.info_old();
+        let input_info = args.input.info().clone();
         Ok(Self {
             input: args.input,
             inner: ExecutorInner {

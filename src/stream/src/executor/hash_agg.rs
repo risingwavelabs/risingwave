@@ -205,7 +205,7 @@ impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
 
 impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     pub fn new(args: AggExecutorArgs<S, HashAggExecutorExtraArgs>) -> StreamResult<Self> {
-        let input_info = args.input.info_old();
+        let input_info = args.input.info().clone();
 
         let group_key_len = args.extra.group_key_indices.len();
         // NOTE: we assume the prefix of table pk is exactly the group key
@@ -612,7 +612,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // TODO(rc): use something like a `ColumnMapping` type
         let group_key_invert_idx = {
-            let mut group_key_invert_idx = vec![None; input.info_old().schema.len()];
+            let mut group_key_invert_idx = vec![None; input.info().schema.len()];
             for (group_key_seq, group_key_idx) in this.group_key_indices.iter().enumerate() {
                 group_key_invert_idx[*group_key_idx] = Some(group_key_seq);
             }
