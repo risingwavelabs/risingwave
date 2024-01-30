@@ -82,28 +82,12 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
 }
 
 impl<S: StateStore> Executor for WatermarkFilterExecutor<S> {
-    fn execute(self: Box<Self>) -> super::BoxedMessageStream {
-        self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &risingwave_common::catalog::Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
-    fn info_old(&self) -> ExecutorInfo {
-        self.info.clone()
-    }
-
     fn info(&self) -> &ExecutorInfo {
         &self.info
+    }
+
+    fn execute(self: Box<Self>) -> super::BoxedMessageStream {
+        self.execute_inner().boxed()
     }
 }
 

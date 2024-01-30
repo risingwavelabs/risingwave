@@ -77,24 +77,12 @@ impl<S> Executor for BatchQueryExecutor<S>
 where
     S: StateStore,
 {
-    fn execute(self: Box<Self>) -> super::BoxedMessageStream {
-        unreachable!("should call `execute_with_epoch`")
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
     fn info(&self) -> &ExecutorInfo {
         &self.info
+    }
+
+    fn execute(self: Box<Self>) -> super::BoxedMessageStream {
+        unreachable!("should call `execute_with_epoch`")
     }
 
     fn execute_with_epoch(self: Box<Self>, epoch: u64) -> BoxedMessageStream {

@@ -165,30 +165,23 @@ pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 /// Static information of an executor.
 #[derive(Debug, Default, Clone)]
 pub struct ExecutorInfo {
-    /// See [`Executor::schema`].
+    /// The schema of the OUTPUT of the executor.
     pub schema: Schema,
 
-    /// See [`Executor::pk_indices`].
+    /// The primary key indices of the OUTPUT of the executor.
+    /// Schema is used by both OLAP and streaming, therefore
+    /// pk indices are maintained independently.
     pub pk_indices: PkIndices,
 
-    /// See [`Executor::identity`].
+    /// Identity of the executor.
     pub identity: String,
 }
 
 /// `Executor` supports handling of control messages.
 pub trait Executor: Send + 'static {
+    fn info(&self) -> &ExecutorInfo;
+
     fn execute(self: Box<Self>) -> BoxedMessageStream;
-
-    /// Return the schema of the OUTPUT of the executor.
-    fn schema(&self) -> &Schema;
-
-    /// Return the primary key indices of the OUTPUT of the executor.
-    /// Schema is used by both OLAP and streaming, therefore
-    /// pk indices are maintained independently.
-    fn pk_indices(&self) -> PkIndicesRef<'_>;
-
-    /// Identity of the executor.
-    fn identity(&self) -> &str;
 
     fn execute_with_epoch(self: Box<Self>, _epoch: u64) -> BoxedMessageStream {
         self.execute()
@@ -206,7 +199,17 @@ pub trait Executor: Send + 'static {
         }
     }
 
-    fn info(&self) -> &ExecutorInfo;
+    fn schema(&self) -> &Schema {
+        &self.info().schema
+    }
+
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
+        &self.info().pk_indices
+    }
+
+    fn identity(&self) -> &str {
+        &self.info().identity
+    }
 
     fn boxed(self) -> BoxedExecutor
     where

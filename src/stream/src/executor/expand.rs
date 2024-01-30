@@ -74,18 +74,6 @@ impl Debug for ExpandExecutor {
 }
 
 impl Executor for ExpandExecutor {
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }

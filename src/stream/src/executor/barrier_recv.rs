@@ -59,6 +59,10 @@ impl BarrierRecvExecutor {
 }
 
 impl Executor for BarrierRecvExecutor {
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
+
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         UnboundedReceiverStream::new(self.barrier_receiver)
             .map(|barrier| Ok(Message::Barrier(barrier)))
@@ -68,22 +72,6 @@ impl Executor for BarrierRecvExecutor {
                 Err(StreamExecutorError::channel_closed("barrier receiver"))
             }))
             .boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
     }
 }
 

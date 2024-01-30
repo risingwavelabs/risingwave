@@ -112,24 +112,12 @@ struct ExecutionVars<S: StateStore> {
 }
 
 impl<S: StateStore> Executor for SimpleAggExecutor<S> {
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.inner.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info.identity
-    }
-
     fn info(&self) -> &ExecutorInfo {
         &self.inner.info
+    }
+
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.execute_inner().boxed()
     }
 }
 

@@ -32,24 +32,12 @@ impl DummyExecutor {
 }
 
 impl Executor for DummyExecutor {
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        futures::stream::pending().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
     fn info(&self) -> &ExecutorInfo {
         &self.info
+    }
+
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        futures::stream::pending().boxed()
     }
 }
 

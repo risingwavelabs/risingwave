@@ -129,23 +129,11 @@ impl Debug for FlowControlExecutor {
 }
 
 impl Executor for FlowControlExecutor {
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        self.input.schema()
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        self.input.pk_indices()
-    }
-
     fn info(&self) -> &ExecutorInfo {
         &self.input.info()
     }
 
-    fn identity(&self) -> &str {
-        &self.identity
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.execute_inner().boxed()
     }
 }

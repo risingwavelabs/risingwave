@@ -81,28 +81,12 @@ impl<E> Executor for TopNExecutorWrapper<E>
 where
     E: TopNExecutorBase,
 {
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.top_n_executor_execute().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.inner.info().schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info().pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info().identity
-    }
-
-    fn info_old(&self) -> ExecutorInfo {
-        self.inner.info().clone()
-    }
-
     fn info(&self) -> &ExecutorInfo {
         &self.inner.info()
+    }
+
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.top_n_executor_execute().boxed()
     }
 }
 

@@ -345,24 +345,12 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
 }
 
 impl<S: StateStore, Src: OpendalSource> Executor for FsFetchExecutor<S, Src> {
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.into_stream().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
     fn info(&self) -> &ExecutorInfo {
         &self.info
+    }
+
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.into_stream().boxed()
     }
 }
 

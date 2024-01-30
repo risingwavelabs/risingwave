@@ -69,24 +69,12 @@ impl HopWindowExecutor {
 }
 
 impl Executor for HopWindowExecutor {
-    fn execute(self: Box<Self>) -> super::BoxedMessageStream {
-        self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &risingwave_common::catalog::Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
     fn info(&self) -> &ExecutorInfo {
         &self.info
+    }
+
+    fn execute(self: Box<Self>) -> super::BoxedMessageStream {
+        self.execute_inner().boxed()
     }
 }
 

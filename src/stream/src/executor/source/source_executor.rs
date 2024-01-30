@@ -658,28 +658,16 @@ impl<S: StateStore> SourceExecutor<S> {
 }
 
 impl<S: StateStore> Executor for SourceExecutor<S> {
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
+
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         if self.stream_source_core.is_some() {
             self.execute_with_stream_source().boxed()
         } else {
             self.execute_without_stream_source().boxed()
         }
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
     }
 }
 

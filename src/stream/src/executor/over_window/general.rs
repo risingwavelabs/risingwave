@@ -98,24 +98,12 @@ struct ExecutionStats {
 }
 
 impl<S: StateStore> Executor for OverWindowExecutor<S> {
-    fn execute(self: Box<Self>) -> crate::executor::BoxedMessageStream {
-        self.executor_inner().boxed()
-    }
-
-    fn schema(&self) -> &risingwave_common::catalog::Schema {
-        &self.inner.info.schema
-    }
-
-    fn pk_indices(&self) -> crate::executor::PkIndicesRef<'_> {
-        &self.inner.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info.identity
-    }
-
     fn info(&self) -> &ExecutorInfo {
         &self.inner.info
+    }
+
+    fn execute(self: Box<Self>) -> crate::executor::BoxedMessageStream {
+        self.executor_inner().boxed()
     }
 }
 

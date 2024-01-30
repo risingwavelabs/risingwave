@@ -48,29 +48,13 @@ impl UnionExecutor {
 }
 
 impl Executor for UnionExecutor {
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
+
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         let streams = self.inputs.into_iter().map(|e| e.execute()).collect();
         merge(streams).boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
-    fn info_old(&self) -> ExecutorInfo {
-        self.info.clone()
-    }
-
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
     }
 }
 

@@ -91,24 +91,12 @@ impl Debug for ProjectSetExecutor {
 }
 
 impl Executor for ProjectSetExecutor {
-    fn execute(self: Box<Self>) -> super::BoxedMessageStream {
-        self.inner.execute(self.input).boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.inner.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info.identity
-    }
-
     fn info(&self) -> &ExecutorInfo {
         &self.inner.info
+    }
+
+    fn execute(self: Box<Self>) -> super::BoxedMessageStream {
+        self.inner.execute(self.input).boxed()
     }
 }
 

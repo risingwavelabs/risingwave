@@ -89,6 +89,10 @@ impl WrapperExecutor {
 }
 
 impl Executor for WrapperExecutor {
+    fn info(&self) -> &ExecutorInfo {
+        &self.input.info()
+    }
+
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         let info = Arc::new(self.input.info_old());
         Self::wrap(
@@ -109,21 +113,5 @@ impl Executor for WrapperExecutor {
             self.input.execute_with_epoch(epoch),
         )
         .boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        self.input.schema()
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        self.input.pk_indices()
-    }
-
-    fn identity(&self) -> &str {
-        self.input.identity()
-    }
-
-    fn info(&self) -> &ExecutorInfo {
-        &self.input.info()
     }
 }

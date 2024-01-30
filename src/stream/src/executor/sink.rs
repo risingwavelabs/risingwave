@@ -403,24 +403,12 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 }
 
 impl<F: LogStoreFactory> Executor for SinkExecutor<F> {
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.execute_inner()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
     fn info(&self) -> &ExecutorInfo {
         &self.info
+    }
+
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.execute_inner()
     }
 }
 
