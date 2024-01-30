@@ -29,7 +29,7 @@ curl -S -X PUT -H "Content-Type: application/json" http://localhost:8083/connect
     "table.include.list": "public.orders,public.pg_all_data_types"
 }'
 
-echo "Deploying Debezium Postgres connector"
+echo "\nDeploying Debezium Postgres connector"
 # time: adaptive_time_microseconds
 # interval: string
 # decimal: double
@@ -54,7 +54,7 @@ curl -S -X PUT -H "Content-Type: application/json" http://localhost:8083/connect
     "table.include.list": "public.pg_types2"
 }'
 
-echo "Deploying Debezium Postgres connector"
+echo "\nDeploying Debezium Postgres connector"
 # time: connnect
 # decimal: string
 curl -S -X PUT -H "Content-Type: application/json" http://localhost:8083/connectors/pg-connect-string/config \
@@ -77,7 +77,7 @@ curl -S -X PUT -H "Content-Type: application/json" http://localhost:8083/connect
     "table.include.list": "public.pg_types3"
 }'
 
-echo 'sleep one minute wait for debezium create all topics.'
-sleep 60
+echo '\nsleep two minutes wait for debezium create all topics.'
+sleep 120
 
 echo 'Done'
