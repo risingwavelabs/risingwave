@@ -469,14 +469,18 @@ message TableParallelism {
     uint32 parallelism = 1;
   }
 
+  // deprecated, treat as AdaptiveParallelism
+  message AutoParallelism {}
+
   message AdaptiveParallelism {}
 
   message CustomParallelism {}
 
   oneof parallelism {
     FixedParallelism fixed = 1;
-    AdaptiveParallelism adaptive = 2;
+    AutoParallelism auto = 2;
     CustomParallelism custom = 3;
+    AdaptiveParallelism adaptive= 4;
   }
 }
 

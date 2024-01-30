@@ -63,7 +63,7 @@ impl From<PbTableParallelism> for TableParallelism {
         use Parallelism::*;
         match &value.parallelism {
             Some(Fixed(FixedParallelism { parallelism: n })) => Self::Fixed(*n as usize),
-            Some(Adaptive(_)) => Self::Adaptive,
+            Some(Adaptive(_)) | Some(Auto(_)) => Self::Adaptive,
             Some(Custom(_)) => Self::Custom,
             _ => unreachable!(),
         }

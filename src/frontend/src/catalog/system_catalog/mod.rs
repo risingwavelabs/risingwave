@@ -217,11 +217,11 @@ fn extract_parallelism_from_table_state(state: &TableFragmentState) -> String {
         .as_ref()
         .and_then(|parallelism| parallelism.parallelism.as_ref())
     {
-        Some(PbParallelism::Adaptive(_)) => "adaptive".to_string(),
+        Some(PbParallelism::Auto(_)) | Some(PbParallelism::Adaptive(_)) => "adaptive".to_string(),
         Some(PbParallelism::Fixed(PbFixedParallelism { parallelism })) => {
             format!("fixed({parallelism})")
         }
-        None | Some(PbParallelism::Custom(_)) => "custom".to_string(),
+        None | Some(PbParallelism::Custom(_)) => "unknown".to_string(),
     }
 }
 
