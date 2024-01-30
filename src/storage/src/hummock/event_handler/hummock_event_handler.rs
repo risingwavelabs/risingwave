@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use await_tree::InstrumentAwait;
+use itertools::Itertools;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
@@ -401,6 +402,7 @@ impl HummockEventHandler {
             self.uploader.max_synced_epoch(),
             self.uploader.max_sealed_epoch(),
         );
+
         self.uploader.clear();
 
         for (epoch, result_sender) in self.pending_sync_requests.extract_if(|_, _| true) {
@@ -414,9 +416,12 @@ impl HummockEventHandler {
         }
 
         {
-            Self::for_each_read_version(&self.read_version_mapping, |read_version| {
-                read_version.clear_uncommitted()
-            });
+            let mapping = self.read_version_mapping.read();
+            assert!(
+                mapping.is_empty(),
+                "read version mapping not empty when clear. remaining tables: {:?}",
+                mapping.keys().collect_vec()
+            );
         }
 
         if let Some(sstable_object_id_manager) = &self.sstable_object_id_manager {

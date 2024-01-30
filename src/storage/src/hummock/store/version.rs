@@ -405,16 +405,6 @@ impl HummockReadVersion {
         }
     }
 
-    pub fn clear_uncommitted(&mut self) {
-        self.staging.imm.clear();
-        self.staging.sst.clear();
-        self.table_watermarks = self
-            .committed
-            .table_watermark_index()
-            .get(&self.table_id)
-            .cloned()
-    }
-
     pub fn add_merged_imm(&mut self, merged_imm: ImmutableMemtable) {
         assert!(merged_imm.get_imm_ids().iter().rev().is_sorted());
         let min_imm_id = *merged_imm.get_imm_ids().last().expect("non-empty");
