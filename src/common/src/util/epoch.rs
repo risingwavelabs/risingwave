@@ -220,10 +220,6 @@ impl TestEpoch {
         self.epoch_with_gap.inc_by(e);
     }
 
-    pub fn sub_by(&mut self, e: u64) {
-        self.epoch_with_gap.sub_by(e);
-    }
-
     pub fn pure_epoch(&self) -> u64 {
         self.epoch_with_gap.pure_epoch()
     }
@@ -231,20 +227,11 @@ impl TestEpoch {
     pub fn as_u64(&self) -> u64 {
         self.epoch_with_gap._as_u64()
     }
-
-    pub fn _new_min_epoch() -> Self {
-        Self {
-            epoch_with_gap: TestEpochWithGap::new_min_epoch(),
-        }
-    }
-
-    pub fn _new_max_epoch() -> Self {
-        Self {
-            epoch_with_gap: TestEpochWithGap::new_max_epoch(),
-        }
-    }
 }
 
+/// This structure is the same as `EpochWithGap` in the storage crate,
+/// but it is mocked in the common crate to prevent circular dependencies between the common and storage crates,
+/// as it is needed for all unit tests to use.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug, PartialOrd, Ord)]
 pub struct TestEpochWithGap(u64);
 
@@ -300,12 +287,6 @@ impl TestEpochWithGap {
 
     pub fn inc_by(&mut self, e: u64) {
         self.0 += e << EPOCH_PHYSICAL_SHIFT_BITS;
-    }
-
-    pub fn sub_by(&mut self, e: u64) {
-        if self.0 > (e << EPOCH_PHYSICAL_SHIFT_BITS) {
-            self.0 -= e << EPOCH_PHYSICAL_SHIFT_BITS;
-        }
     }
 }
 
