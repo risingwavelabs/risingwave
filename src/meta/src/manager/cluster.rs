@@ -134,11 +134,9 @@ impl ClusterManager {
             let mut new_worker = worker.clone();
             match old_worker_parallelism.cmp(&new_worker_parallelism) {
                 Ordering::Less => {
-                    tracing::info!(
+                    println!(
                         "worker {} parallelism updated from {} to {}",
-                        new_worker.worker_node.id,
-                        old_worker_parallelism,
-                        new_worker_parallelism
+                        new_worker.worker_node.id, old_worker_parallelism, new_worker_parallelism
                     );
                     let parallel_units = self
                         .generate_cn_parallel_units(
@@ -790,8 +788,11 @@ mod tests {
     async fn test_cluster_manager() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
 
-        let cluster_manager =
-            Arc::new(ClusterManager::new(env, Duration::new(0, 0)).await.unwrap());
+        let cluster_manager = Arc::new(
+            ClusterManager::new(env.clone(), Duration::new(0, 0))
+                .await
+                .unwrap(),
+        );
 
         let mut worker_nodes = Vec::new();
         let worker_count = 5usize;
@@ -878,8 +879,15 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(worker_node.parallel_units.len(), fake_parallelism + 4);
-        assert_cluster_manager(&cluster_manager, parallel_count + 4).await;
+
+        if !env.opts.disable_automatic_parallelism_control {
+            assert_eq!(worker_node.parallel_units.len(), fake_parallelism - 2);
+            assert_cluster_manager(&cluster_manager, parallel_count - 2).await;
+        } else {
+            // compatibility mode
+            assert_eq!(worker_node.parallel_units.len(), fake_parallelism + 4);
+            assert_cluster_manager(&cluster_manager, parallel_count + 4).await;
+        }
 
         let worker_to_delete_count = 4usize;
         for i in 0..worker_to_delete_count {
