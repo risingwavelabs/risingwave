@@ -9,7 +9,7 @@
 
 <div align="center">
 
-### 🌊Reimagine Stream Processing.
+### 🌊 Reimagine Stream Processing.
 
 </div>
 
@@ -41,12 +41,6 @@
     <img alt="Slack" src="https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack" />
   </a>
   <a
-    href="https://hub.docker.com/r/risingwavelabs/risingwave"
-    target="_blank"
-  >
-    <img alt="Docker" src="https://img.shields.io/docker/pulls/risingwavelabs/risingwave" />
-  </a>
-  <a
     href="https://twitter.com/risingwavelabs"
     target="_blank"
   >
@@ -60,7 +54,7 @@
   </a>
 </div>
 
-RisingWave is a distributed SQL streaming database engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data.
+RisingWave is a Postgres-compatible streaming database engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data.
 
 
 ![RisingWave](https://github.com/risingwavelabs/risingwave-docs/blob/main/docs/images/new_archi_grey.png)
@@ -129,8 +123,9 @@ Within your data stack, RisingWave can assist with:
 * Processing and transforming event streaming data in real time
 * Offloading event-driven queries (e.g., materialized views, triggers) from operational databases
 * Performing real-time ETL (Extract, Transform, Load)
+* Supporting real-time feature stores
 
-RisingWave is extensively utilized in real-time applications such as monitoring, alerting, dashboard reporting, ML feature engineering, among others. It has already been adopted in fields such as financial trading, manufacturing, new media, logistics, gaming, and more. Check out [customer stories](https://www.risingwave.com/use-cases/).
+RisingWave is extensively utilized in real-time applications such as monitoring, alerting, dashboard reporting, machine learning, among others. It has already been adopted in fields such as financial trading, manufacturing, new media, logistics, gaming, and more. Check out [customer stories](https://www.risingwave.com/use-cases/).
 
 ## Community
 
