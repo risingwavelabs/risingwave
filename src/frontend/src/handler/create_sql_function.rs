@@ -176,27 +176,22 @@ pub async fn handle_create_sql_function(
             .update_context(create_mock_udf_context(arg_types.clone()));
 
         if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
-            let bind_result = binder.bind_expr(expr);
-
-            if let Err(e) = &bind_result {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
+            match binder.bind_expr(expr) {
+                Ok(expr) => {
+                    if expr.return_type() != return_type {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "\nreturn type mismatch detected\nexpected: [{}]\nactual: [{}]\nplease adjust your function definition accordingly",
+                            return_type,
+                            expr.return_type()
+                        ))
+                        .into());
+                    }
+                }
+                Err(e) => return Err(ErrorCode::InvalidInputSyntax(format!(
                     "failed to conduct semantic check, please see if you are calling non-existence functions: {}",
                     e.as_report()
                 ))
-                .into());
-            } else {
-                // We can safely unwrap here
-                let e = bind_result.unwrap();
-
-                // Check if the return type mismatches
-                if e.return_type() != return_type {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "\nreturn type mismatch detected\nexpected: [{}]\nactual: [{}]\nplease adjust your function definition accordingly",
-                        return_type,
-                        e.return_type()
-                    ))
-                    .into());
-                }
+                .into()),
             }
         } else {
             return Err(ErrorCode::InvalidInputSyntax(
