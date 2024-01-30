@@ -39,6 +39,10 @@ impl MockExternalTableReader {
         }
     }
 
+    pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
+        Box::new(move |_| Ok(CdcOffset::MySql(MySqlOffset::default())))
+    }
+
     #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
     async fn snapshot_read_inner(&self) {
         let snap_idx = self
@@ -101,10 +105,6 @@ impl ExternalTableReader for MockExternalTableReader {
                 position: u64::MAX,
             }))
         }
-    }
-
-    fn get_cdc_offset_parser(&self) -> CdcOffsetParseFunc {
-        Box::new(move |_| Ok(CdcOffset::MySql(MySqlOffset::default())))
     }
 
     fn snapshot_read(

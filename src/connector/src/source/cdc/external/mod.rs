@@ -215,8 +215,6 @@ pub trait ExternalTableReader {
 
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset>;
 
-    fn get_cdc_offset_parser(&self) -> CdcOffsetParseFunc;
-
     fn snapshot_read(
         &self,
         table_name: SchemaTableName,
@@ -278,14 +276,6 @@ impl ExternalTableReader for MySqlExternalTableReader {
         }))
     }
 
-    fn get_cdc_offset_parser(&self) -> CdcOffsetParseFunc {
-        Box::new(move |offset| {
-            Ok(CdcOffset::MySql(MySqlOffset::parse_debezium_offset(
-                offset,
-            )?))
-        })
-    }
-
     fn snapshot_read(
         &self,
         table_name: SchemaTableName,
@@ -329,6 +319,14 @@ impl MySqlExternalTableReader {
             rw_schema,
             field_names,
             conn: tokio::sync::Mutex::new(conn),
+        })
+    }
+
+    pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
+        Box::new(move |offset| {
+            Ok(CdcOffset::MySql(MySqlOffset::parse_debezium_offset(
+                offset,
+            )?))
         })
     }
 
@@ -506,14 +504,6 @@ impl ExternalTableReader for ExternalTableReaderImpl {
         }
     }
 
-    fn get_cdc_offset_parser(&self) -> CdcOffsetParseFunc {
-        match self {
-            ExternalTableReaderImpl::MySql(mysql) => mysql.get_cdc_offset_parser(),
-            ExternalTableReaderImpl::Postgres(postgres) => postgres.get_cdc_offset_parser(),
-            ExternalTableReaderImpl::Mock(mock) => mock.get_cdc_offset_parser(),
-        }
-    }
-
     fn snapshot_read(
         &self,
         table_name: SchemaTableName,
@@ -525,6 +515,16 @@ impl ExternalTableReader for ExternalTableReaderImpl {
 }
 
 impl ExternalTableReaderImpl {
+    pub fn get_cdc_offset_parser(&self) -> CdcOffsetParseFunc {
+        match self {
+            ExternalTableReaderImpl::MySql(_) => MySqlExternalTableReader::get_cdc_offset_parser(),
+            ExternalTableReaderImpl::Postgres(_) => {
+                PostgresExternalTableReader::get_cdc_offset_parser()
+            }
+            ExternalTableReaderImpl::Mock(_) => MockExternalTableReader::get_cdc_offset_parser(),
+        }
+    }
+
     #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
     async fn snapshot_read_inner(
         &self,

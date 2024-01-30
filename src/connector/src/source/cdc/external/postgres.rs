@@ -105,14 +105,6 @@ impl ExternalTableReader for PostgresExternalTableReader {
         Ok(CdcOffset::Postgres(pg_offset))
     }
 
-    fn get_cdc_offset_parser(&self) -> CdcOffsetParseFunc {
-        Box::new(move |offset| {
-            Ok(CdcOffset::Postgres(PostgresOffset::parse_debezium_offset(
-                offset,
-            )?))
-        })
-    }
-
     fn snapshot_read(
         &self,
         table_name: SchemaTableName,
@@ -164,6 +156,14 @@ impl PostgresExternalTableReader {
             rw_schema,
             field_names,
             client: tokio::sync::Mutex::new(client),
+        })
+    }
+
+    pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
+        Box::new(move |offset| {
+            Ok(CdcOffset::Postgres(PostgresOffset::parse_debezium_offset(
+                offset,
+            )?))
         })
     }
 

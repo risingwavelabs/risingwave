@@ -32,9 +32,7 @@ use risingwave_connector::parser::{
     DebeziumParser, EncodingProperties, JsonProperties, ProtocolProperties,
     SourceStreamChunkBuilder, SpecificParserConfig,
 };
-use risingwave_connector::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, ExternalTableReader,
-};
+use risingwave_connector::source::cdc::external::{CdcOffset, CdcOffsetParseFunc};
 use risingwave_connector::source::{SourceColumnDesc, SourceContext};
 use risingwave_storage::StateStore;
 use rw_futures_util::pausable;
@@ -443,11 +441,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     }
                 }
             }
-        } else {
+        } else if self.disable_backfill {
+            // If backfill is disabled, we just mark the backfill as finished
             tracing::info!(
                 upstream_table_id,
                 upstream_table_name,
-                "CdcBackfill has been skipped"
+                "CdcBackfill has been disabled"
             );
             state_impl
                 .mutate_state(
