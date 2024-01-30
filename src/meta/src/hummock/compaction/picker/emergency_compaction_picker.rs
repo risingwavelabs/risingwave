@@ -73,6 +73,9 @@ impl EmergencyCompactionPicker {
                     && level.vnode_partition_count > 0
             })
             .count();
+        // We trigger `EmergencyCompactionPicker` only when some unexpected condition cause the number of l0 levels increase and the origin strategy
+        // can not compact those data to lower level. But if most of these levels are overlapping level, it is dangerous to compact small data of non-overlapping sub level
+        // to base level, it will cost a lot of compactor resource because of large write-amplification.
         if (self.config.split_weight_by_vnode == 0 && no_overlap_count > overlapping_count)
             || (self.config.split_weight_by_vnode > 0
                 && partitioned_count > no_overlap_count
