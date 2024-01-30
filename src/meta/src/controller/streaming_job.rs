@@ -23,10 +23,10 @@ use risingwave_meta_model_v2::prelude::{
     Actor, ActorDispatcher, Fragment, Index, Object, ObjectDependency, Source, Table,
 };
 use risingwave_meta_model_v2::{
-    actor, actor_dispatcher, fragment, index, object_dependency, sink, source, streaming_job,
-    table, ActorId, ActorUpstreamActors, CreateType, DatabaseId, ExprNodeArray, FragmentId,
-    I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId, StreamNode, TableId, TableVersion,
-    UserId,
+    actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
+    streaming_job, table, ActorId, ActorUpstreamActors, CreateType, DatabaseId, ExprNodeArray,
+    FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId, StreamNode, TableId,
+    TableVersion, UserId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableVersion};
@@ -44,7 +44,7 @@ use sea_orm::sea_query::SimpleExpr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
-    ModelTrait, NotSet, QueryFilter, QuerySelect, TransactionTrait,
+    ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect, TransactionTrait,
 };
 
 use crate::controller::catalog::CatalogController;
@@ -321,32 +321,55 @@ impl CatalogController {
 
     /// `try_abort_creating_streaming_job` is used to abort the job that is under initial status or in `FOREGROUND` mode.
     /// It returns true if the job is not found or aborted.
-    pub async fn try_abort_creating_streaming_job(&self, job_id: ObjectId) -> MetaResult<bool> {
+    pub async fn try_abort_creating_streaming_job(
+        &self,
+        job_id: ObjectId,
+        is_cancelled: bool,
+    ) -> MetaResult<bool> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let streaming_job = streaming_job::Entity::find_by_id(job_id).one(&txn).await?;
-        let Some(streaming_job) = streaming_job else {
+        let cnt = Object::find_by_id(job_id).count(&txn).await?;
+        if cnt == 0 {
             tracing::warn!(
                 id = job_id,
                 "streaming job not found when aborting creating, might be cleaned by recovery"
             );
             return Ok(true);
-        };
-
-        assert_ne!(streaming_job.job_status, JobStatus::Created);
-        if streaming_job.create_type == CreateType::Background
-            && streaming_job.job_status == JobStatus::Creating
-        {
-            // If the job is created in background and still in creating status, we should not abort it and let recovery to handle it.
-            tracing::warn!(
-                id = job_id,
-                "streaming job is created in background and still in creating status"
-            );
-            return Ok(false);
         }
 
+        if !is_cancelled {
+            let streaming_job = streaming_job::Entity::find_by_id(job_id).one(&txn).await?;
+            if let Some(streaming_job) = streaming_job {
+                assert_ne!(streaming_job.job_status, JobStatus::Created);
+                if streaming_job.create_type == CreateType::Background
+                    && streaming_job.job_status == JobStatus::Creating
+                {
+                    // If the job is created in background and still in creating status, we should not abort it and let recovery to handle it.
+                    tracing::warn!(
+                        id = job_id,
+                        "streaming job is created in background and still in creating status"
+                    );
+                    return Ok(false);
+                }
+            }
+        }
+
+        let internal_table_ids: Vec<TableId> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .filter(table::Column::BelongsToJobId.eq(job_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
         Object::delete_by_id(job_id).exec(&txn).await?;
+        if !internal_table_ids.is_empty() {
+            Object::delete_many()
+                .filter(object::Column::Oid.is_in(internal_table_ids))
+                .exec(&txn)
+                .await?;
+        }
         txn.commit().await?;
 
         Ok(true)
