@@ -135,4 +135,8 @@ impl<LS: LocalStateStore> Executor for SubscriptionExecutor<LS> {
     fn info_old(&self) -> ExecutorInfo {
         self.info.clone()
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
 }

@@ -151,6 +151,10 @@ impl Executor for ValuesExecutor {
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
 }
 
 #[cfg(test)]

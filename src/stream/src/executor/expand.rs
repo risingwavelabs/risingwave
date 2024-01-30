@@ -86,6 +86,10 @@ impl Executor for ExpandExecutor {
         &self.info.identity
     }
 
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
+
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

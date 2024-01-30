@@ -51,6 +51,10 @@ impl Executor for StatelessSimpleAggExecutor {
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
 }
 
 impl StatelessSimpleAggExecutor {

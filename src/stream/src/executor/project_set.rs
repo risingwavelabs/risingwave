@@ -106,6 +106,10 @@ impl Executor for ProjectSetExecutor {
     fn identity(&self) -> &str {
         &self.inner.info.identity
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.inner.info
+    }
 }
 
 impl Inner {

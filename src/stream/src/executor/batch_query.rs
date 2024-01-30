@@ -93,6 +93,10 @@ where
         &self.info.identity
     }
 
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
+
     fn execute_with_epoch(self: Box<Self>, epoch: u64) -> BoxedMessageStream {
         self.execute_inner(epoch).boxed()
     }

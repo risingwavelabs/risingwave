@@ -100,6 +100,10 @@ where
     fn info_old(&self) -> ExecutorInfo {
         self.inner.info().clone()
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.inner.info()
+    }
 }
 
 impl<E> TopNExecutorWrapper<E>

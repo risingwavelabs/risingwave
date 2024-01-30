@@ -53,11 +53,7 @@ use risingwave_stream::executor::{
 pub struct MockOffsetGenExecutor {
     upstream: Option<StreamBoxedExecutor>,
 
-    schema: Schema,
-
-    pk_indices: PkIndices,
-
-    identity: String,
+    info: ExecutorInfo,
 
     start_offset: u32,
 }
@@ -66,9 +62,11 @@ impl MockOffsetGenExecutor {
     pub fn new(upstream: StreamBoxedExecutor, schema: Schema, pk_indices: PkIndices) -> Self {
         Self {
             upstream: Some(upstream),
-            schema,
-            pk_indices,
-            identity: "MockOffsetGenExecutor".to_string(),
+            info: ExecutorInfo {
+                schema,
+                pk_indices,
+                identity: "MockOffsetGenExecutor".to_string(),
+            },
             start_offset: 0,
         }
     }
@@ -137,15 +135,19 @@ impl Executor for MockOffsetGenExecutor {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        &self.identity
+        &self.info.identity
+    }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
     }
 }
 

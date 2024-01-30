@@ -127,6 +127,10 @@ impl<S: StateStore> Executor for SimpleAggExecutor<S> {
     fn identity(&self) -> &str {
         &self.inner.info.identity
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.inner.info
+    }
 }
 
 impl<S: StateStore> SimpleAggExecutor<S> {

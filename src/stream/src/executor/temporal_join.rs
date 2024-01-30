@@ -506,4 +506,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Executor
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
 }

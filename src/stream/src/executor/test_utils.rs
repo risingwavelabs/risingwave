@@ -21,8 +21,8 @@ use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
 use super::{
-    Barrier, BoxedMessageStream, Executor, Message, MessageStream, PkIndices, StreamChunk,
-    StreamExecutorResult, Watermark,
+    Barrier, BoxedMessageStream, Executor, ExecutorInfo, Message, MessageStream, PkIndices,
+    StreamChunk, StreamExecutorResult, Watermark,
 };
 
 pub mod prelude {
@@ -44,8 +44,7 @@ pub mod prelude {
 }
 
 pub struct MockSource {
-    schema: Schema,
-    pk_indices: PkIndices,
+    info: ExecutorInfo,
     rx: mpsc::UnboundedReceiver<Message>,
 
     /// Whether to send a `Stop` barrier on stream finish.
@@ -108,22 +107,34 @@ impl MessageSender {
 impl std::fmt::Debug for MockSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MockSource")
-            .field("schema", &self.schema)
-            .field("pk_indices", &self.pk_indices)
+            .field("schema", &self.info.schema)
+            .field("pk_indices", &self.info.pk_indices)
             .finish()
     }
 }
 
 impl MockSource {
+    fn new(
+        schema: Schema,
+        pk_indices: PkIndices,
+        rx: mpsc::UnboundedReceiver<Message>,
+        stop_on_finish: bool,
+    ) -> Self {
+        Self {
+            info: ExecutorInfo {
+                schema,
+                pk_indices,
+                identity: "MockSource".to_string(),
+            },
+            rx,
+            stop_on_finish,
+        }
+    }
+
     #[allow(dead_code)]
     pub fn channel(schema: Schema, pk_indices: PkIndices) -> (MessageSender, Self) {
         let (tx, rx) = mpsc::unbounded_channel();
-        let source = Self {
-            schema,
-            pk_indices,
-            rx,
-            stop_on_finish: true,
-        };
+        let source = Self::new(schema, pk_indices, rx, true);
         (MessageSender(tx), source)
     }
 
@@ -174,15 +185,19 @@ impl Executor for MockSource {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        "MockSource"
+        &self.info.identity
+    }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
     }
 }
 

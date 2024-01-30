@@ -54,6 +54,10 @@ impl Executor for SubtaskRxExecutor {
     fn info_old(&self) -> ExecutorInfo {
         self.info.clone()
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
 }
 
 /// Wrap an executor into a subtask and a thin receiver executor, connected by a channel with a

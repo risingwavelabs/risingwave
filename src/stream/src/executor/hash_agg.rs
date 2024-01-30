@@ -209,6 +209,10 @@ impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
     fn identity(&self) -> &str {
         &self.inner.info.identity
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.inner.info
+    }
 }
 
 impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {

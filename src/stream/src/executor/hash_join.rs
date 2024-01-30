@@ -293,6 +293,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Executor for HashJoi
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
 }
 
 struct HashJoinChunkBuilder<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> {

@@ -70,6 +70,10 @@ impl Executor for LookupUnionExecutor {
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
 }
 
 impl LookupUnionExecutor {

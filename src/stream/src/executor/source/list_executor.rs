@@ -209,6 +209,10 @@ impl<S: StateStore> Executor for FsListExecutor<S> {
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
 }
 
 impl<S: StateStore> Debug for FsListExecutor<S> {

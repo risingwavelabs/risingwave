@@ -449,6 +449,10 @@ impl<S: StateStore, SD: ValueRowSerde> Executor for MaterializeExecutor<S, SD> {
     fn info_old(&self) -> ExecutorInfo {
         self.info.clone()
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
 }
 
 impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S, SD> {

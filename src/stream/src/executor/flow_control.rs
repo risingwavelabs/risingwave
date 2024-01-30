@@ -141,6 +141,10 @@ impl Executor for FlowControlExecutor {
         self.input.pk_indices()
     }
 
+    fn info(&self) -> &ExecutorInfo {
+        &self.input.info()
+    }
+
     fn identity(&self) -> &str {
         &self.identity
     }

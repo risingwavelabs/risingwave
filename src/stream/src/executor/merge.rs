@@ -261,6 +261,10 @@ impl Executor for MergeExecutor {
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
 }
 
 /// A stream for merging messages from multiple upstreams.

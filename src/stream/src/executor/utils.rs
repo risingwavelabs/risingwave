@@ -47,6 +47,10 @@ impl Executor for DummyExecutor {
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
 }
 
 pub(crate) struct ActorInputMetrics {

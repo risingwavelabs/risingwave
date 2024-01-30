@@ -133,6 +133,10 @@ impl<S: StateStore> Executor for EowcOverWindowExecutor<S> {
     fn identity(&self) -> &str {
         &self.inner.info.identity
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.inner.info
+    }
 }
 
 pub struct EowcOverWindowExecutorArgs<S: StateStore> {

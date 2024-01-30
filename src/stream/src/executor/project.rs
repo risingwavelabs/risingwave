@@ -99,6 +99,10 @@ impl Executor for ProjectExecutor {
         &self.inner.info.identity
     }
 
+    fn info(&self) -> &ExecutorInfo {
+        &self.inner.info
+    }
+
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.inner.execute(self.input).boxed()
     }

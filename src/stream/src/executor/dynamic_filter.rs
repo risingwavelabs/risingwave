@@ -509,6 +509,10 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> Executor
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
 }
 
 #[cfg(test)]

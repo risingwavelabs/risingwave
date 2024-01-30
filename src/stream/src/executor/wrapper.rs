@@ -122,4 +122,8 @@ impl Executor for WrapperExecutor {
     fn identity(&self) -> &str {
         self.input.identity()
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.input.info()
+    }
 }

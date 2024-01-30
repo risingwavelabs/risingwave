@@ -68,6 +68,10 @@ impl Executor for UnionExecutor {
     fn info_old(&self) -> ExecutorInfo {
         self.info.clone()
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
 }
 
 #[pin_project]

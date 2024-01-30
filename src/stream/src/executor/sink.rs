@@ -418,6 +418,10 @@ impl<F: LogStoreFactory> Executor for SinkExecutor<F> {
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
 }
 
 #[cfg(test)]

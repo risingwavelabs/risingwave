@@ -206,6 +206,8 @@ pub trait Executor: Send + 'static {
         }
     }
 
+    fn info(&self) -> &ExecutorInfo;
+
     fn boxed(self) -> BoxedExecutor
     where
         Self: Sized + Send + 'static,

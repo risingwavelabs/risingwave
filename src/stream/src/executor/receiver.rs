@@ -223,6 +223,10 @@ impl Executor for ReceiverExecutor {
     fn info_old(&self) -> ExecutorInfo {
         self.info.clone()
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
 }
 
 #[cfg(test)]

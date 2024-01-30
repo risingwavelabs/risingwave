@@ -360,6 +360,10 @@ impl<S: StateStore, Src: OpendalSource> Executor for FsFetchExecutor<S, Src> {
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
 }
 
 impl<S: StateStore, Src: OpendalSource> Debug for FsFetchExecutor<S, Src> {

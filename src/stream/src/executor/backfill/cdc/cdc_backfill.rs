@@ -605,6 +605,10 @@ impl<S: StateStore> Executor for CdcBackfillExecutor<S> {
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
 }
 
 #[cfg(test)]
