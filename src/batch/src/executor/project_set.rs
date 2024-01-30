@@ -230,7 +230,7 @@ mod tests {
         let fields = &proj_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
 
-        let expected = vec![DataChunk::from_pretty(
+        let expected = [DataChunk::from_pretty(
             "I i     i i
              0 1     1 2
              1 1     1 2

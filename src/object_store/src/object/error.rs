@@ -22,6 +22,7 @@ use aws_sdk_s3::primitives::ByteStreamError;
 use aws_smithy_types::body::SdkBody;
 use risingwave_common::error::BoxedError;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::error::RecvError;
 
 #[derive(Error, Debug, thiserror_ext::Box, thiserror_ext::Construct)]
@@ -104,13 +105,13 @@ where
 
 impl From<RecvError> for ObjectError {
     fn from(e: RecvError) -> Self {
-        ObjectErrorInner::Internal(e.to_string()).into()
+        ObjectErrorInner::Internal(e.to_report_string()).into()
     }
 }
 
 impl From<ByteStreamError> for ObjectError {
     fn from(e: ByteStreamError) -> Self {
-        ObjectErrorInner::Internal(e.to_string()).into()
+        ObjectErrorInner::Internal(e.to_report_string()).into()
     }
 }
 

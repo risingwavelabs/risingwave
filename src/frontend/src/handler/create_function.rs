@@ -54,7 +54,7 @@ pub async fn handle_create_function(
         Some(lang) => {
             let lang = lang.real_value().to_lowercase();
             match &*lang {
-                "python" | "java" | "wasm" => lang,
+                "python" | "java" | "wasm" | "javascript" => lang,
                 _ => {
                     return Err(ErrorCode::InvalidParameterValue(format!(
                         "language {} is not supported",
@@ -96,12 +96,10 @@ pub async fn handle_create_function(
         }
     };
 
-    let Some(using) = params.using else {
-        return Err(ErrorCode::InvalidParameterValue("USING must be specified".to_string()).into());
-    };
-
+    let mut arg_names = vec![];
     let mut arg_types = vec![];
     for arg in args.unwrap_or_default() {
+        arg_names.push(arg.name.map_or("".to_string(), |n| n.real_value()));
         arg_types.push(bind_data_type(&arg.data_type)?);
     }
 
@@ -124,12 +122,13 @@ pub async fn handle_create_function(
         return Err(CatalogError::Duplicated("function", name).into());
     }
 
-    let link;
     let identifier;
+    let mut link = None;
+    let mut body = None;
 
     match language.as_str() {
         "python" | "java" | "" => {
-            let CreateFunctionUsing::Link(l) = using else {
+            let Some(CreateFunctionUsing::Link(l)) = params.using else {
                 return Err(ErrorCode::InvalidParameterValue(
                     "USING LINK must be specified".to_string(),
                 )
@@ -141,11 +140,10 @@ pub async fn handle_create_function(
                 );
             };
             identifier = id;
-            link = l;
 
             // check UDF server
             {
-                let client = ArrowFlightUdfClient::connect(&link)
+                let client = ArrowFlightUdfClient::connect(&l)
                     .await
                     .map_err(|e| anyhow!(e))?;
                 /// A helper function to create a unnamed field from data type.
@@ -171,6 +169,20 @@ pub async fn handle_create_function(
                     .await
                     .context("failed to check UDF signature")?;
             }
+            link = Some(l);
+        }
+        "javascript" => {
+            identifier = function_name.to_string();
+            body = Some(match params.as_ {
+                Some(FunctionDefinition::SingleQuotedDef(s)) => s,
+                Some(FunctionDefinition::DoubleDollarDef(s)) => s,
+                _ => {
+                    return Err(ErrorCode::InvalidParameterValue(
+                        "AS must be specified".to_string(),
+                    )
+                    .into())
+                }
+            });
         }
         "wasm" => {
             identifier = wasm_identifier(
@@ -179,12 +191,17 @@ pub async fn handle_create_function(
                 &return_type,
                 matches!(kind, Kind::Table(_)),
             );
-
+            let Some(using) = params.using else {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "USING must be specified".to_string(),
+                )
+                .into());
+            };
             link = match using {
                 CreateFunctionUsing::Link(link) => {
                     let runtime = get_or_create_wasm_runtime(&link).await?;
                     check_wasm_function(&runtime, &identifier)?;
-                    link
+                    Some(link)
                 }
                 CreateFunctionUsing::Base64(encoded) => {
                     // decode wasm binary from base64
@@ -205,7 +222,11 @@ pub async fn handle_create_function(
                     )
                     .await?;
 
-                    format!("{}/{}", system_params.wasm_storage_url(), object_name)
+                    Some(format!(
+                        "{}/{}",
+                        system_params.wasm_storage_url(),
+                        object_name
+                    ))
                 }
             };
         }
@@ -218,12 +239,13 @@ pub async fn handle_create_function(
         database_id,
         name: function_name,
         kind: Some(kind),
+        arg_names,
         arg_types: arg_types.into_iter().map(|t| t.into()).collect(),
         return_type: Some(return_type.into()),
         language,
-        identifier,
-        body: None,
+        identifier: Some(identifier),
         link,
+        body,
         owner: session.user_id(),
     };
 

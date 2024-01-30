@@ -1,0 +1,4 @@
+query I
+select (select count(*) from no_shuffle_backfill) = (select count(*) from t);
+----
+t

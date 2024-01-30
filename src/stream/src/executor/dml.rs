@@ -16,13 +16,13 @@ use std::collections::BTreeMap;
 use std::mem;
 
 use either::Either;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
-use risingwave_source::dml_manager::DmlManagerRef;
+use risingwave_dml::dml_manager::DmlManagerRef;
 
 use super::error::StreamExecutorError;
 use super::{
@@ -106,16 +106,21 @@ impl DmlExecutor {
         // Note(bugen): Only register after the first barrier message is received, which means the
         // current executor is activated. This avoids the new reader overwriting the old one during
         // the preparation of schema change.
-        let batch_reader = self
-            .dml_manager
-            .register_reader(self.table_id, self.table_version_id, &self.column_descs)
-            .map_err(StreamExecutorError::connector_error)?;
-        let batch_reader = batch_reader.stream_reader().into_stream();
+        let handle = self.dml_manager.register_reader(
+            self.table_id,
+            self.table_version_id,
+            &self.column_descs,
+        )?;
+        let reader = handle
+            .stream_reader()
+            .into_stream()
+            .map_err(StreamExecutorError::from)
+            .boxed();
 
         // Merge the two streams using `StreamReaderWithPause` because when we receive a pause
         // barrier, we should stop receiving the data from DML. We poll data from the two streams in
         // a round robin way.
-        let mut stream = StreamReaderWithPause::<false, TxnMsg>::new(upstream, batch_reader);
+        let mut stream = StreamReaderWithPause::<false, TxnMsg>::new(upstream, reader);
 
         // If the first barrier requires us to pause on startup, pause the stream.
         if barrier.is_pause_on_startup() {
@@ -299,7 +304,7 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::transaction::transaction_id::TxnId;
     use risingwave_common::types::DataType;
-    use risingwave_source::dml_manager::DmlManager;
+    use risingwave_dml::dml_manager::DmlManager;
 
     use super::*;
     use crate::executor::test_utils::MockSource;

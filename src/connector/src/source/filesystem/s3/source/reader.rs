@@ -25,6 +25,7 @@ use aws_smithy_types::body::SdkBody;
 use aws_smithy_types::byte_stream::ByteStream;
 use futures_async_stream::try_stream;
 use io::StreamReader;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::error::RwError;
 use tokio::io::BufReader;
 use tokio_util::io;
@@ -38,10 +39,7 @@ use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::nd_streaming;
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::s3::S3Properties;
-use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta,
-    StreamChunkWithState,
-};
+use crate::source::{BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta};
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
@@ -199,13 +197,13 @@ impl SplitReader for S3FileReader {
         Ok(s3_file_reader)
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         self.into_chunk_stream()
     }
 }
 
 impl S3FileReader {
-    #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
+    #[try_stream(boxed, ok = StreamChunk, error = RwError)]
     async fn into_chunk_stream(self) {
         for split in self.splits {
             let actor_id = self.source_ctx.source_info.actor_id.to_string();
@@ -235,7 +233,7 @@ impl S3FileReader {
                     .metrics
                     .partition_input_count
                     .with_label_values(&[&actor_id, &source_id, &split_id])
-                    .inc_by(msg.chunk.cardinality() as u64);
+                    .inc_by(msg.cardinality() as u64);
                 yield msg;
             }
         }

@@ -42,6 +42,7 @@ use risingwave_pb::stream_plan::{DispatcherType, FragmentTypeFlag, StreamActor, 
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, UpdateActorsRequest,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
 use tokio::task::JoinHandle;
@@ -1551,35 +1552,7 @@ impl ScaleController {
         &self,
         reschedules: &HashMap<FragmentId, Reschedule>,
         table_parallelism: &HashMap<TableId, TableParallelism>,
-    ) -> MetaResult<HashMap<WorkerId, Vec<ActorId>>> {
-        let mut node_dropped_actors = HashMap::new();
-        for table_fragments in self
-            .fragment_manager
-            .get_fragment_read_guard()
-            .await
-            .table_fragments()
-            .values()
-        {
-            for fragment_id in table_fragments.fragments.keys() {
-                if let Some(reschedule) = reschedules.get(fragment_id) {
-                    for actor_id in &reschedule.removed_actors {
-                        let node_id = table_fragments
-                            .actor_status
-                            .get(actor_id)
-                            .unwrap()
-                            .parallel_unit
-                            .as_ref()
-                            .unwrap()
-                            .worker_node_id;
-                        node_dropped_actors
-                            .entry(node_id as WorkerId)
-                            .or_insert(vec![])
-                            .push(*actor_id as ActorId);
-                    }
-                }
-            }
-        }
-
+    ) -> MetaResult<()> {
         // Update fragment info after rescheduling in meta store.
         self.fragment_manager
             .post_apply_reschedules(reschedules.clone(), table_parallelism.clone())
@@ -1648,7 +1621,7 @@ impl ScaleController {
                 .await;
         }
 
-        Ok(node_dropped_actors)
+        Ok(())
     }
 
     pub async fn generate_table_resize_plan(
@@ -1780,13 +1753,8 @@ impl ScaleController {
                             .flatten()
                             .cloned()
                             .exactly_one()
-                            .map_err(|e| {
-                                anyhow!(
-                                    "Cannot find a single target ParallelUnit for fragment {}: {}",
-                                    fragment_id,
-                                    e
-                                )
-                            })?;
+                            .ok()
+                            .with_context(|| format!("Cannot find a single target ParallelUnit for fragment {fragment_id}"))?;
 
                         target_plan.insert(
                             fragment_id,
@@ -2424,7 +2392,7 @@ impl GlobalStreamManager {
             .prepare_reschedule_command(reschedules, options, table_parallelism.as_mut())
             .await?;
 
-        tracing::debug!("reschedule plan: {:#?}", reschedule_fragment);
+        tracing::debug!("reschedule plan: {:?}", reschedule_fragment);
 
         let command = Command::RescheduleFragment {
             reschedules: reschedule_fragment,
@@ -2558,7 +2526,7 @@ impl GlobalStreamManager {
                             changed = false;
                         }
                         Err(e) => {
-                            tracing::warn!(error = e.to_string(), "Failed to trigger scale out, waiting for next tick to retry after {}s", ticker.period().as_secs());
+                            tracing::warn!(error = %e.as_report(), "Failed to trigger scale out, waiting for next tick to retry after {}s", ticker.period().as_secs());
                             ticker.reset();
                         }
                     }

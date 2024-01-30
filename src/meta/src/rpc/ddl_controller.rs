@@ -57,13 +57,13 @@ use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::log::warn;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
-use crate::controller::catalog::{CatalogControllerRef, ReleaseContext};
 use crate::manager::{
     CatalogManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId, IdCategory,
     IdCategoryType, IndexId, LocalNotification, MetaSrvEnv, MetadataManager, MetadataManagerV1,
@@ -381,45 +381,14 @@ impl DdlController {
         Ok(version)
     }
 
-    async fn drop_database_v2(
-        &self,
-        catalog_controller: &CatalogControllerRef,
-        database_id: DatabaseId,
-    ) -> MetaResult<NotificationVersion> {
-        let (
-            ReleaseContext {
-                streaming_jobs,
-                source_ids,
-                connections,
-                ..
-            },
-            version,
-        ) = catalog_controller.drop_database(database_id as _).await?;
-        self.source_manager
-            .unregister_sources(source_ids.into_iter().map(|id| id as _).collect())
-            .await;
-        self.stream_manager
-            .drop_streaming_jobs(
-                streaming_jobs
-                    .into_iter()
-                    .map(|id| (id as u32).into())
-                    .collect(),
-            )
-            .await;
-        for svc in connections {
-            self.delete_vpc_endpoint_v2(svc.into_inner()).await?;
-        }
-        Ok(version)
-    }
-
     async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 self.drop_database_v1(&mgr.catalog_manager, database_id)
                     .await
             }
-            MetadataManager::V2(mgr) => {
-                self.drop_database_v2(&mgr.catalog_controller, database_id)
+            MetadataManager::V2(_) => {
+                self.drop_object(ObjectType::Database, database_id as _, DropMode::Cascade)
                     .await
             }
         }
@@ -438,9 +407,8 @@ impl DdlController {
     async fn drop_schema(&self, schema_id: SchemaId) -> MetaResult<NotificationVersion> {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => mgr.catalog_manager.drop_schema(schema_id).await,
-            MetadataManager::V2(mgr) => {
-                mgr.catalog_controller
-                    .drop_schema(schema_id as _, DropMode::Restrict)
+            MetadataManager::V2(_) => {
+                self.drop_object(ObjectType::Schema, schema_id as _, DropMode::Restrict)
                     .await
             }
         }
@@ -483,7 +451,9 @@ impl DdlController {
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
         let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unimplemented!("support drop source in v2");
+            return self
+                .drop_object(ObjectType::Source, source_id as _, drop_mode)
+                .await;
         };
         // 1. Drop source in catalog.
         let (version, streaming_job_ids) = mgr
@@ -551,7 +521,9 @@ impl DdlController {
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
         let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unimplemented!("support drop view in v2");
+            return self
+                .drop_object(ObjectType::View, view_id as _, drop_mode)
+                .await;
         };
         let (version, streaming_job_ids) = mgr
             .catalog_manager
@@ -584,20 +556,25 @@ impl DdlController {
         &self,
         connection_id: ConnectionId,
     ) -> MetaResult<NotificationVersion> {
-        let (version, connection) = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.drop_connection(connection_id).await?,
-            MetadataManager::V2(mgr) => {
-                mgr.catalog_controller
-                    .drop_connection(connection_id as _)
-                    .await?
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                let (version, connection) =
+                    mgr.catalog_manager.drop_connection(connection_id).await?;
+                self.delete_vpc_endpoint(&connection).await?;
+                Ok(version)
             }
-        };
-
-        self.delete_vpc_endpoint(&connection).await?;
-        Ok(version)
+            MetadataManager::V2(_) => {
+                self.drop_object(
+                    ObjectType::Connection,
+                    connection_id as _,
+                    DropMode::Restrict,
+                )
+                .await
+            }
+        }
     }
 
-    async fn delete_vpc_endpoint(&self, connection: &Connection) -> MetaResult<()> {
+    pub(crate) async fn delete_vpc_endpoint(&self, connection: &Connection) -> MetaResult<()> {
         // delete AWS vpc endpoint
         if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info
             && svc.get_provider()? == PbPrivateLinkProvider::Aws
@@ -614,7 +591,7 @@ impl DdlController {
         Ok(())
     }
 
-    async fn delete_vpc_endpoint_v2(&self, svc: PrivateLinkService) -> MetaResult<()> {
+    pub(crate) async fn delete_vpc_endpoint_v2(&self, svc: PrivateLinkService) -> MetaResult<()> {
         // delete AWS vpc endpoint
         if svc.get_provider()? == PbPrivateLinkProvider::Aws {
             if let Some(aws_cli) = self.aws_client.as_ref() {
@@ -779,7 +756,7 @@ impl DdlController {
                         .await;
                     match result {
                         Err(e) => {
-                            tracing::error!(id=stream_job_id, error = ?e, "finish stream job failed")
+                            tracing::error!(id = stream_job_id, error = %e.as_report(), "finish stream job failed")
                         }
                         Ok(_) => {
                             tracing::info!(id = stream_job_id, "finish stream job succeeded")
@@ -1079,7 +1056,7 @@ impl DdlController {
         let job_id = stream_job.id();
         tracing::debug!(id = job_id, "creating stream job");
 
-        let result = try {
+        let result: MetaResult<()> = try {
             // Add table fragments to meta store with state: `State::Initial`.
             mgr.fragment_manager
                 .start_create_table_fragments(table_fragments.clone())
@@ -1093,7 +1070,7 @@ impl DdlController {
         if let Err(e) = result {
             match stream_job.create_type() {
                 CreateType::Background => {
-                    tracing::error!(id = job_id, error = ?e, "finish stream job failed");
+                    tracing::error!(id = job_id, error = %e.as_report(), "finish stream job failed");
                     let should_cancel = match mgr
                         .fragment_manager
                         .select_table_fragments_by_table_id(&job_id.into())
@@ -1135,9 +1112,33 @@ impl DdlController {
         drop_mode: DropMode,
         target_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<NotificationVersion> {
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unimplemented!("support drop streaming job in v2");
-        };
+        match &self.metadata_manager {
+            MetadataManager::V1(_) => {
+                self.drop_streaming_job_v1(job_id, drop_mode, target_replace_info)
+                    .await
+            }
+            MetadataManager::V2(_) => {
+                if target_replace_info.is_some() {
+                    unimplemented!("support replace table for drop in v2");
+                }
+                let (object_id, object_type) = match job_id {
+                    StreamingJobId::MaterializedView(id) => (id as _, ObjectType::Table),
+                    StreamingJobId::Sink(id) => (id as _, ObjectType::Sink),
+                    StreamingJobId::Table(_, id) => (id as _, ObjectType::Table),
+                    StreamingJobId::Index(idx) => (idx as _, ObjectType::Index),
+                };
+                self.drop_object(object_type, object_id, drop_mode).await
+            }
+        }
+    }
+
+    async fn drop_streaming_job_v1(
+        &self,
+        job_id: StreamingJobId,
+        drop_mode: DropMode,
+        target_replace_info: Option<ReplaceTableInfo>,
+    ) -> MetaResult<NotificationVersion> {
+        let mgr = self.metadata_manager.as_v1_ref();
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
         let (mut version, streaming_job_ids) = match job_id {
             StreamingJobId::MaterializedView(table_id) => {
@@ -1346,7 +1347,7 @@ impl DdlController {
                     bail!("additional replace table event only occurs when sinking into table");
                 };
                 let MetadataManager::V1(mgr) = &self.metadata_manager else {
-                    unimplemented!("support replace table in v2");
+                    unimplemented!("support create sink into table in v2");
                 };
 
                 Some(
@@ -1402,9 +1403,7 @@ impl DdlController {
         internal_tables: Vec<Table>,
         error: Option<&impl ToString>,
     ) -> MetaResult<()> {
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unimplemented!("support cancel streaming job in v2");
-        };
+        let mgr = self.metadata_manager.as_v1_ref();
         let error = error.map(ToString::to_string).unwrap_or_default();
         let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
             id: stream_job.id(),
@@ -1428,7 +1427,10 @@ impl DdlController {
                     .await;
                 creating_internal_table_ids.push(table.id);
                 if let Err(e) = result {
-                    tracing::warn!("Failed to cancel create table procedure, perhaps barrier manager has already cleaned it. Reason: {e:#?}");
+                    tracing::warn!(
+                        error = %e.as_report(),
+                        "Failed to cancel create table procedure, perhaps barrier manager has already cleaned it."
+                    );
                 }
             }
             StreamingJob::Sink(sink, target_table) => {
@@ -1450,7 +1452,10 @@ impl DdlController {
                         )
                         .await;
                     if let Err(e) = result {
-                        tracing::warn!("Failed to cancel create table procedure, perhaps barrier manager has already cleaned it. Reason: {e:#?}");
+                        tracing::warn!(
+                            error = %e.as_report(),
+                            "Failed to cancel create table procedure, perhaps barrier manager has already cleaned it."
+                        );
                     }
                 }
                 creating_internal_table_ids.push(table.id);

@@ -92,6 +92,8 @@ pulsar = { version = "6.1", default-features = false, features = [
     "tokio-runtime",
     "telemetry",
     "auth-oauth2",
+    "lz4",
+    "zstd",
 ] }
 rdkafka = { workspace = true, features = [
     "cmake-build",
@@ -117,9 +119,10 @@ serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
 simd-json = "0.13.3"
 strum = "0.25"
-strum_macros = "0.25"
+strum_macros = "0.26"
 tempfile = "3"
 thiserror = "1"
+thiserror-ext = { workspace = true }
 time = "0.3.30"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -145,9 +148,11 @@ yup-oauth2 = "8.3"
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
+assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 deltalake = { workspace = true, features = ["datafusion"] }
 expect-test = "1"
+paste = "1"
 pretty_assertions = "1"
 quote = "1"
 rand = "0.8"
@@ -169,6 +174,10 @@ harness = false
 
 [[bench]]
 name = "nexmark_integration"
+harness = false
+
+[[bench]]
+name = "json_parser"
 harness = false
 
 [lints]

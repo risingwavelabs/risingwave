@@ -341,10 +341,28 @@ impl FunctionAttr {
         };
         // if user function accepts non-option arguments, we assume the function
         // returns null on null input, so we need to unwrap the inputs before calling.
-        if !user_fn.arg_option {
+        if self.prebuild.is_some() {
             output = quote! {
                 match (#(#inputs,)*) {
                     (#(Some(#inputs),)*) => #output,
+                    _ => None,
+                }
+            };
+        } else {
+            #[allow(clippy::disallowed_methods)] // allow zip
+            let some_inputs = inputs
+                .iter()
+                .zip(user_fn.args_option.iter())
+                .map(|(input, opt)| {
+                    if *opt {
+                        quote! { #input }
+                    } else {
+                        quote! { Some(#input) }
+                    }
+                });
+            output = quote! {
+                match (#(#inputs,)*) {
+                    (#(#some_inputs,)*) => #output,
                     _ => None,
                 }
             };
@@ -728,7 +746,7 @@ impl FunctionAttr {
             ReturnTypeKind::Result => quote! { Some(#next_state?) },
             ReturnTypeKind::ResultOption => quote! { #next_state? },
         };
-        if !user_fn.accumulate().arg_option {
+        if user_fn.accumulate().args_option.iter().all(|b| !b) {
             match self.args.len() {
                 0 => {
                     next_state = quote! {
