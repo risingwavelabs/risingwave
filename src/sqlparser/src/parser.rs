@@ -3017,7 +3017,12 @@ impl Parser {
 
                 let value = self.parse_set_variable()?;
 
-                AlterTableOperation::SetParallelism { parallelism: value }
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterTableOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else {
                 return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
             }
@@ -3096,7 +3101,12 @@ impl Parser {
 
                 let value = self.parse_set_variable()?;
 
-                AlterIndexOperation::SetParallelism { parallelism: value }
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterIndexOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else {
                 return self.expected("PARALLELISM after SET", self.peek_token());
             }
@@ -3142,7 +3152,12 @@ impl Parser {
 
                 let value = self.parse_set_variable()?;
 
-                AlterViewOperation::SetParallelism { parallelism: value }
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterViewOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else {
                 return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
             }
@@ -3194,8 +3209,12 @@ impl Parser {
                 }
 
                 let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
 
-                AlterSinkOperation::SetParallelism { parallelism: value }
+                AlterSinkOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else {
                 return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
             }
