@@ -159,8 +159,8 @@ impl RowsFrameBounds {
     ///
     /// A canonical `ROWS` frame is defined as:
     ///
-    /// - It is valid.
-    /// - It is a crossing frame, i.e. it contains the current row.
+    /// - Its bounds are valid (see `validate`).
+    /// - It contains the current row.
     pub fn is_canonical(&self) -> bool {
         self.validate().is_ok() && {
             let start = self.start.to_offset();
