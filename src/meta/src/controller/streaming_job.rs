@@ -1201,7 +1201,9 @@ impl CatalogController {
             streaming_job.parallelism = Set(match parallelism {
                 TableParallelism::Auto => StreamingParallelism::Auto,
                 TableParallelism::Fixed(n) => StreamingParallelism::Fixed(n as _),
-                TableParallelism::Custom => unreachable!("sql backend does't support custom parallelism"),
+                TableParallelism::Custom => {
+                    unreachable!("sql backend does't support custom parallelism")
+                }
             });
 
             streaming_job.update(&txn).await?;
