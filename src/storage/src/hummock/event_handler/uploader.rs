@@ -169,7 +169,11 @@ impl MergingImmTask {
         Poll::Ready(match ready!(self.join_handle.poll_unpin(cx)) {
             Ok(task_result) => task_result,
             Err(err) => {
-                panic!("failed to join merging task: {:?} {:?}", err, self);
+                panic!(
+                    "failed to join merging task: {:?} {:?}",
+                    err.as_report(),
+                    self
+                );
             }
         })
     }
