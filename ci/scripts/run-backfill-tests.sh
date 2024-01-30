@@ -265,6 +265,21 @@ test_backfill_snapshot_with_limited_storage_throughput() {
   kill_cluster
 }
 
+# Throttle the storage throughput.
+# Arrangement Backfill should not fail because of this.
+test_backfill_snapshot_with_wider_rows() {
+  echo "--- e2e, test_backfill_snapshot_with_wider_rows, $RUNTIME_CLUSTER_PROFILE"
+  cargo make ci-start $RUNTIME_CLUSTER_PROFILE
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_wide_table.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_wide_snapshot.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_no_shuffle.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_arrangement.slt'
+
+  kill_cluster
+}
+
 main() {
   set -euo pipefail
   test_snapshot_and_upstream_read
@@ -282,6 +297,7 @@ main() {
 
     # Backfill will happen in sequence here.
     test_backfill_snapshot_runtime
+    test_backfill_snapshot_with_wider_rows
     test_backfill_snapshot_with_limited_storage_throughput
 
     # No upstream only tests, because if there's no snapshot,
