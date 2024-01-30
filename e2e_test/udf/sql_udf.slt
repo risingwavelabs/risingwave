@@ -23,7 +23,11 @@ create function sub_named(a INT, b INT) returns int language sql as 'select a - 
 
 # Mixed parameter with named / anonymous parameters
 statement ok
-create function add_sub_mix(INT, a INT, INT) returns int language sql as 'select $1 + a + $3';
+create function add_sub_mix(INT, a INT, INT) returns int language sql as 'select $1 - a + $3';
+
+# Mixed parameter with calling inner sql udfs
+# statement ok
+# create function add_sub_mix_wrapper(INT, a INT, INT) returns int language sql as 'select add($1, a) + a + sub(a, $3)';
 
 # Named sql udf with corner case
 statement ok
@@ -131,7 +135,7 @@ select sub_named(1, 1);
 query I
 select add_sub_mix(1, 2, 3);
 ----
-6
+2
 
 query T
 select corner_case(1, 2, 3);
