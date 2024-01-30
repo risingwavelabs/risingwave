@@ -247,8 +247,6 @@ impl LocalStreamManager {
             .await?
     }
 
-    /// This function could only be called once during the lifecycle of `LocalStreamManager` for
-    /// now.
     pub async fn build_actors(&self, actors: Vec<ActorId>) -> StreamResult<()> {
         self.local_barrier_manager
             .send_and_await(|result_sender| LocalBarrierEvent::BuildActors {
