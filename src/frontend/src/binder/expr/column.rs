@@ -52,6 +52,8 @@ impl Binder {
                 // The reason that we directly return error here,
                 // is because during a valid sql udf binding,
                 // there will not exist any column identifiers
+                // And invalid cases should already be caught
+                // during semantic check phase
                 return Err(ErrorCode::BindError(format!(
                     "failed to find named parameter {column_name}"
                 ))

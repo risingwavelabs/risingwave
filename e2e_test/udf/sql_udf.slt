@@ -13,6 +13,35 @@ create function sub(INT, INT) returns int language sql as 'select $1 - $2';
 statement ok
 create function add_sub_binding() returns int language sql as 'select add(1, 1) + sub(2, 2)';
 
+# Create a named sql udf
+statement ok
+create function add_named(a INT, b INT) returns int language sql as 'select a + b';
+
+# Create another named sql udf
+statement ok
+create function sub_named(a INT, b INT) returns int language sql as 'select a - b';
+
+# Mixed parameter with named / anonymous parameters
+statement ok
+create function add_sub_mix(INT, a INT, INT) returns int language sql as 'select $1 - a + $3';
+
+# Mixed parameter with calling inner sql udfs
+# statement ok
+# create function add_sub_mix_wrapper(INT, a INT, INT) returns int language sql as 'select add($1, a) + a + sub(a, $3)';
+
+# Named sql udf with corner case
+statement ok
+create function corner_case(INT, a INT, INT) returns varchar language sql as $$select '$1 + a + $3'$$;
+
+# Named sql udf with invalid parameter in body definition
+# Will be rejected at creation time
+statement error failed to find named parameter aa
+create function unknown_parameter(a INT) returns int language sql as 'select a + aa + a';
+
+# Call anonymous sql udf inside named sql udf
+statement ok
+create function add_named_wrapper(a INT, b INT) returns int language sql as 'select add(a, b)';
+
 # Create an anonymous function that calls built-in functions
 # Note that double dollar signs should be used otherwise the parsing will fail, as illutrates below
 statement ok
@@ -94,7 +123,7 @@ select type_match(114514);
 ----
 $1 + 114514 + $1
 
-# Call the defined sql udf
+# Call the defined anonymous sql udfs
 query I
 select add(1, -1);
 ----
@@ -102,6 +131,32 @@ select add(1, -1);
 
 query I
 select sub(1, 1);
+----
+0
+
+# Call the defined named sql udfs
+query I
+select add_named(1, -1);
+----
+0
+
+query I
+select sub_named(1, 1);
+----
+0
+
+query I
+select add_sub_mix(1, 2, 3);
+----
+2
+
+query T
+select corner_case(1, 2, 3);
+----
+$1 + a + $3
+
+query I
+select add_named_wrapper(1, -1);
 ----
 0
 
@@ -158,13 +213,29 @@ select print_add_one(1), print_add_one(114513), print_add_two(2);
 ----
 2 114514 4
 
-# Create a mock table
+# Create a mock table for anonymous sql udf
 statement ok
 create table t1 (c1 INT, c2 INT);
+
+# Create a mock table for named sql udf
+statement ok
+create table t3 (a INT, b INT);
 
 # Insert some data into the mock table
 statement ok
 insert into t1 values (1, 1), (2, 2), (3, 3), (4, 4), (5, 5);
+
+statement ok
+insert into t3 values (1, 1), (2, 2), (3, 3), (4, 4), (5, 5);
+
+query I
+select add_named(a, b) from t3 order by a asc;
+----
+2
+4
+6
+8
+10
 
 query III
 select sub(c1, c2), c1, c2, add(c1, c2) from t1 order by c1 asc;
@@ -304,6 +375,21 @@ statement ok
 drop function regexp_replace_wrapper;
 
 statement ok
+drop function corner_case;
+
+statement ok
+drop function add_named;
+
+statement ok
+drop function sub_named;
+
+statement ok
+drop function add_sub_mix;
+
+statement ok
+drop function add_named_wrapper;
+
+statement ok
 drop function type_match;
 
 # Drop the mock table
@@ -312,3 +398,6 @@ drop table t1;
 
 statement ok
 drop table t2;
+
+statement ok
+drop table t3;
