@@ -217,7 +217,7 @@ impl SystemParamsController {
             .await;
 
         // Sync params to worker nodes.
-        self.notify_workers(&params).await;
+        self.notify_workers(&params);
 
         Ok(params)
     }
@@ -241,8 +241,7 @@ impl SystemParamsController {
                     }
                 }
                 system_params_controller
-                    .notify_workers(&*system_params_controller.params.read().await)
-                    .await;
+                    .notify_workers(&*system_params_controller.params.read().await);
             }
         });
 
@@ -251,7 +250,7 @@ impl SystemParamsController {
 
     // Notify workers of parameter change.
     // TODO: add system params into snapshot to avoid periodically sync.
-    async fn notify_workers(&self, params: &PbSystemParams) {
+    fn notify_workers(&self, params: &PbSystemParams) {
         self.notification_manager
             .notify_frontend_without_version(Operation::Update, Info::SystemParams(params.clone()));
         self.notification_manager

@@ -116,7 +116,7 @@ impl SystemParamsManager {
             .await;
 
         // Sync params to worker nodes.
-        self.notify_workers(params).await;
+        self.notify_workers(params);
 
         Ok(params.clone())
     }
@@ -142,9 +142,7 @@ impl SystemParamsManager {
                         return;
                     }
                 }
-                system_params_manager
-                    .notify_workers(&*system_params_manager.params.read().await)
-                    .await;
+                system_params_manager.notify_workers(&*system_params_manager.params.read().await);
             }
         });
 
@@ -153,7 +151,7 @@ impl SystemParamsManager {
 
     // Notify workers of parameter change.
     // TODO: add system params into snapshot to avoid periodically sync.
-    async fn notify_workers(&self, params: &SystemParams) {
+    fn notify_workers(&self, params: &SystemParams) {
         self.notification_manager
             .notify_frontend_without_version(Operation::Update, Info::SystemParams(params.clone()));
         self.notification_manager
