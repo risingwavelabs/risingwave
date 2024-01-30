@@ -1422,13 +1422,13 @@ async fn test_replicated_local_hummock_storage() {
             [
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000061616161 } }, epoch: 1, epoch_with_gap: 1},
+                        FullKey { UserKey { 233, TableKey { 000061616161 } }, epoch: 1, epoch_with_gap: 1, spill_offset: 0},
                         b"1111",
                     ),
                 ),
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000062626262 } }, epoch: 1, epoch_with_gap: 1},
+                        FullKey { UserKey { 233, TableKey { 000062626262 } }, epoch: 1, epoch_with_gap: 1, spill_offset: 0},
                         b"2222",
                     ),
                 ),
@@ -1482,13 +1482,13 @@ async fn test_replicated_local_hummock_storage() {
             [
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000063636363 } }, epoch: 2, epoch_with_gap: 2},
+                        FullKey { UserKey { 233, TableKey { 000063636363 } }, epoch: 2, epoch_with_gap: 2, spill_offset: 0},
                         b"3333",
                     ),
                 ),
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000064646464 } }, epoch: 2, epoch_with_gap: 2},
+                        FullKey { UserKey { 233, TableKey { 000064646464 } }, epoch: 2, epoch_with_gap: 2, spill_offset: 0},
                         b"4444",
                     ),
                 ),
