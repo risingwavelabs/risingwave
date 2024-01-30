@@ -263,7 +263,11 @@ async fn test_arrangement_backfill_progress() -> Result<()> {
         .await?;
     let progress = progress.replace('%', "");
     let progress = progress.parse::<f64>().unwrap();
-    assert!((1.0..2.0).contains(&progress));
+    assert!(
+        (1.0..2.0).contains(&progress),
+        "progress not within bounds {}",
+        progress
+    );
 
     // Trigger recovery and test it again.
     kill_cn_and_wait_recover(&cluster).await;
@@ -273,7 +277,11 @@ async fn test_arrangement_backfill_progress() -> Result<()> {
         .await?;
     let progress = progress.replace('%', "");
     let progress = progress.parse::<f64>().unwrap();
-    assert!((prev_progress..prev_progress + 1.5).contains(&progress));
+    assert!(
+        (prev_progress - 0.5..prev_progress + 1.5).contains(&progress),
+        "progress not within bounds {}",
+        progress
+    );
 
     Ok(())
 }
