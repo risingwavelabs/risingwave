@@ -369,7 +369,6 @@ impl GlobalStreamManager {
         res
     }
 
-    /// First broadcasts the actor info to `WorkerNodes`, and then let them build actors and channels.
     async fn build_actors(
         &self,
         table_fragments: &TableFragments,
