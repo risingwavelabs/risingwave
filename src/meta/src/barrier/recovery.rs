@@ -22,7 +22,7 @@ use futures::stream::FuturesUnordered;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::ParallelUnitId;
+
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::PausedReason;
@@ -35,7 +35,7 @@ use risingwave_pb::stream_service::{
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tracing::{debug, info, warn, Instrument};
+use tracing::{debug, warn, Instrument};
 use uuid::Uuid;
 
 use super::TracedEpoch;
