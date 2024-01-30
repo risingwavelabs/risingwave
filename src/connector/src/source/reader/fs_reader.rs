@@ -27,7 +27,7 @@ use risingwave_common::error::Result;
 use crate::dispatch_source_prop;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::{
-    create_split_reader, BoxSourceWithStateStream, ConnectorProperties, ConnectorState,
+    create_split_reader, BoxChunkSourceStream, ConnectorProperties, ConnectorState,
     SourceColumnDesc, SourceContext, SplitReader,
 };
 
@@ -82,7 +82,7 @@ impl FsSourceReader {
         state: ConnectorState,
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
-    ) -> Result<BoxSourceWithStateStream> {
+    ) -> Result<BoxChunkSourceStream> {
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
 

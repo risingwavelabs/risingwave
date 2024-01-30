@@ -16,6 +16,7 @@ use std::cmp::Ordering;
 use std::collections::vec_deque::VecDeque;
 use std::collections::HashSet;
 use std::iter::once;
+use std::ops::Bound::Included;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -165,7 +166,7 @@ impl StagingVersion {
                 && range_overlap(
                     &(left, right),
                     &imm.start_table_key(),
-                    imm.end_table_key().as_ref(),
+                    Included(&imm.end_table_key()),
                 )
         });
 
@@ -871,9 +872,6 @@ impl HummockVersionReader {
         let mut delete_range_iter = ForwardMergeRangeIterator::new(epoch);
         local_stats.staging_imm_iter_count = imms.len() as u64;
         for imm in imms {
-            if imm.has_range_tombstone() && !read_options.ignore_range_tombstone {
-                delete_range_iter.add_batch_iter(imm.delete_range_iter());
-            }
             staging_iters.push(HummockIteratorUnion::First(imm.into_forward_iter()));
         }
 

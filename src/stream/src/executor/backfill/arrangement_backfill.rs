@@ -147,6 +147,7 @@ where
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
+        let mut paused = first_barrier.is_pause_on_startup();
         let first_epoch = first_barrier.epoch;
         self.state_table.init_epoch(first_barrier.epoch);
 
@@ -184,7 +185,7 @@ where
         let mut snapshot_read_epoch;
 
         // Keep track of rows from the snapshot.
-        let mut total_snapshot_processed_rows: u64 = 0;
+        let mut total_snapshot_processed_rows: u64 = backfill_state.get_snapshot_row_count();
 
         // Arrangement Backfill Algorithm:
         //
@@ -225,12 +226,13 @@ where
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
-                    let right_snapshot = pin!(Self::snapshot_read_per_vnode(
+                    let right_snapshot = pin!(Self::make_snapshot_stream(
                         &upstream_table,
                         backfill_state.clone(), // FIXME: Use mutable reference instead.
                         &mut builders,
+                        paused,
                     )
-                    .map(Either::Right),);
+                    .map(Either::Right));
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.
@@ -276,9 +278,8 @@ where
                                         // mark.
                                         for chunk in upstream_chunk_buffer.drain(..) {
                                             let chunk_cardinality = chunk.cardinality() as u64;
-                                            cur_barrier_snapshot_processed_rows +=
+                                            cur_barrier_upstream_processed_rows +=
                                                 chunk_cardinality;
-                                            total_snapshot_processed_rows += chunk_cardinality;
                                             yield Message::Chunk(mapping_chunk(
                                                 chunk,
                                                 &self.output_indices,
@@ -288,6 +289,8 @@ where
                                         break 'backfill_loop;
                                     }
                                     Some((vnode, chunk)) => {
+                                        let chunk_cardinality = chunk.cardinality() as u64;
+
                                         // Raise the current position.
                                         // As snapshot read streams are ordered by pk, so we can
                                         // just use the last row to update `current_pos`.
@@ -296,9 +299,9 @@ where
                                             &chunk,
                                             &pk_in_output_indices,
                                             &mut backfill_state,
+                                            chunk_cardinality,
                                         )?;
 
-                                        let chunk_cardinality = chunk.cardinality() as u64;
                                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
                                         total_snapshot_processed_rows += chunk_cardinality;
                                         let chunk = Message::Chunk(mapping_chunk(
@@ -323,9 +326,24 @@ where
                 };
 
                 // Process barrier:
+                // - handle mutations
                 // - consume snapshot rows left in builder.
                 // - consume upstream buffer chunk
                 // - switch snapshot
+
+                // handle mutations
+                if let Some(mutation) = barrier.mutation.as_deref() {
+                    use crate::executor::Mutation;
+                    match mutation {
+                        Mutation::Pause => {
+                            paused = true;
+                        }
+                        Mutation::Resume => {
+                            paused = false;
+                        }
+                        _ => (),
+                    }
+                }
 
                 // consume snapshot rows left in builder.
                 // NOTE(kwannoel): `zip_eq_debug` does not work here,
@@ -337,6 +355,7 @@ where
                     })
                 })) {
                     if let Some(chunk) = chunk {
+                        let chunk_cardinality = chunk.cardinality() as u64;
                         // Raise the current position.
                         // As snapshot read streams are ordered by pk, so we can
                         // just use the last row to update `current_pos`.
@@ -345,9 +364,9 @@ where
                             &chunk,
                             &pk_in_output_indices,
                             &mut backfill_state,
+                            chunk_cardinality,
                         )?;
 
-                        let chunk_cardinality = chunk.cardinality() as u64;
                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
                         total_snapshot_processed_rows += chunk_cardinality;
                         yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
@@ -509,6 +528,26 @@ where
         }
     }
 
+    #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
+    async fn make_snapshot_stream<'a>(
+        upstream_table: &'a ReplicatedStateTable<S, SD>,
+        backfill_state: BackfillState,
+        builders: &'a mut [DataChunkBuilder],
+        paused: bool,
+    ) {
+        if paused {
+            #[for_await]
+            for _ in tokio_stream::pending() {
+                yield None;
+            }
+        } else {
+            #[for_await]
+            for r in Self::snapshot_read_per_vnode(upstream_table, backfill_state, builders) {
+                yield r?;
+            }
+        }
+    }
+
     /// Read snapshot per vnode.
     /// These streams should be sorted in storage layer.
     /// 1. Get row iterator / vnode.
@@ -548,8 +587,10 @@ where
             let backfill_progress = backfill_state.get_progress(&vnode)?;
             let current_pos = match backfill_progress {
                 BackfillProgressPerVnode::NotStarted => None,
-                BackfillProgressPerVnode::Completed(current_pos)
-                | BackfillProgressPerVnode::InProgress(current_pos) => Some(current_pos.clone()),
+                BackfillProgressPerVnode::Completed { current_pos, .. }
+                | BackfillProgressPerVnode::InProgress { current_pos, .. } => {
+                    Some(current_pos.clone())
+                }
             };
 
             let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos.clone());

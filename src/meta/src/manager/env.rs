@@ -213,6 +213,12 @@ pub struct MetaOpts {
     /// The maximum memory usage in bytes for the tracing collector embedded
     /// in the meta node.
     pub cached_traces_memory_limit_bytes: usize,
+
+    /// l0 picker whether to select trivial move task
+    pub enable_trivial_move: bool,
+
+    /// l0 multi level picker whether to check the overlap accuracy between sub levels
+    pub enable_check_task_level_overlap: bool,
 }
 
 impl MetaOpts {
@@ -264,6 +270,8 @@ impl MetaOpts {
             advertise_addr: "".to_string(),
             cached_traces_num: 1,
             cached_traces_memory_limit_bytes: usize::MAX,
+            enable_trivial_move: true,
+            enable_check_task_level_overlap: true,
         }
     }
 }

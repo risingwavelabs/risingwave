@@ -25,8 +25,8 @@ use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit, FieldDesc};
 use crate::source::{
-    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, DataType,
-    SourceContextRef, SourceMessage, SplitId, SplitMetaData, SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, DataType, SourceContextRef,
+    SourceMessage, SplitId, SplitMetaData, SplitReader,
 };
 
 pub struct DatagenSplitReader {
@@ -138,7 +138,7 @@ impl SplitReader for DatagenSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;
         // spawn_data_generation_stream(self.generator.into_native_stream(), BUFFER_SIZE).boxed()
@@ -154,11 +154,11 @@ impl SplitReader for DatagenSplitReader {
                 spawn_data_generation_stream(
                     self.generator
                         .into_native_stream()
-                        .inspect_ok(move |chunk_with_states| {
+                        .inspect_ok(move |stream_chunk| {
                             metrics
                                 .partition_input_count
                                 .with_label_values(&[&actor_id, &source_id, &split_id])
-                                .inc_by(chunk_with_states.chunk.cardinality() as u64);
+                                .inc_by(stream_chunk.cardinality() as u64);
                         }),
                     BUFFER_SIZE,
                 )
@@ -397,7 +397,7 @@ mod tests {
         .into_stream();
 
         let stream_chunk = reader.next().await.unwrap().unwrap();
-        let (op, row) = stream_chunk.chunk.rows().next().unwrap();
+        let (op, row) = stream_chunk.rows().next().unwrap();
         assert_eq!(op, Op::Insert);
         assert_eq!(row.datum_at(0), Some(ScalarImpl::Int32(533)).to_datum_ref(),);
         assert_eq!(
