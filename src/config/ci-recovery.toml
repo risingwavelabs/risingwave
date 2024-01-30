@@ -1,8 +1,6 @@
 [meta]
 disable_recovery = false
 max_heartbeat_interval_secs = 600
-enable_scale_in_when_recovery = true
-enable_automatic_parallelism_control = true
 
 [streaming]
 in_flight_barrier_nums = 10
