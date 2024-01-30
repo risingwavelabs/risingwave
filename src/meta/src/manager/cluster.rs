@@ -134,9 +134,11 @@ impl ClusterManager {
             let mut new_worker = worker.clone();
             match old_worker_parallelism.cmp(&new_worker_parallelism) {
                 Ordering::Less => {
-                    println!(
+                    tracing::info!(
                         "worker {} parallelism updated from {} to {}",
-                        new_worker.worker_node.id, old_worker_parallelism, new_worker_parallelism
+                        new_worker.worker_node.id,
+                        old_worker_parallelism,
+                        new_worker_parallelism
                     );
                     let parallel_units = self
                         .generate_cn_parallel_units(
