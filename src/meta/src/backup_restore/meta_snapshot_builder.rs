@@ -90,7 +90,7 @@ impl<S: MetaStore> MetaSnapshotV1Builder<S> {
             .await?
             .into_iter()
             .next()
-            .ok_or_else(|| anyhow!("hummock version stats not found in meta store"))?;
+            .unwrap_or_else(HummockVersionStats::default);
         let compaction_groups =
             crate::hummock::model::CompactionGroup::list_at_snapshot::<S>(&meta_store_snapshot)
                 .await?
@@ -193,16 +193,6 @@ mod tests {
             let v_ = v.clone();
             async move { v_ }
         };
-        let err = builder
-            .build(1, get_ckpt_builder(&hummock_version))
-            .await
-            .unwrap_err();
-        let err = assert_matches!(err, BackupError::Other(e) => e);
-        assert_eq!(
-            "hummock version stats not found in meta store",
-            err.to_string()
-        );
-
         let hummock_version_stats = HummockVersionStats {
             hummock_version_id: hummock_version.id,
             ..Default::default()

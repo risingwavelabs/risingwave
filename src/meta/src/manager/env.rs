@@ -117,6 +117,7 @@ pub struct MetaOpts {
     pub vacuum_spin_interval_ms: u64,
     /// Interval of hummock version checkpoint.
     pub hummock_version_checkpoint_interval_sec: u64,
+    pub enable_hummock_data_archive: bool,
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected. Greater value reduces object store IO, meanwhile it results in
     /// more loss of in memory `HummockVersionCheckpoint::stale_objects` state when meta node is
@@ -187,6 +188,7 @@ pub struct MetaOpts {
     pub min_table_split_write_throughput: u64,
 
     pub compaction_task_max_heartbeat_interval_secs: u64,
+    pub compaction_task_max_progress_interval_secs: u64,
     pub compaction_config: Option<CompactionConfig>,
 
     /// The size limit to split a state-table to independent sstable.
@@ -211,6 +213,12 @@ pub struct MetaOpts {
     /// The maximum memory usage in bytes for the tracing collector embedded
     /// in the meta node.
     pub cached_traces_memory_limit_bytes: usize,
+
+    /// l0 picker whether to select trivial move task
+    pub enable_trivial_move: bool,
+
+    /// l0 multi level picker whether to check the overlap accuracy between sub levels
+    pub enable_check_task_level_overlap: bool,
 }
 
 impl MetaOpts {
@@ -227,6 +235,7 @@ impl MetaOpts {
             vacuum_interval_sec: 30,
             vacuum_spin_interval_ms: 0,
             hummock_version_checkpoint_interval_sec: 30,
+            enable_hummock_data_archive: false,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             full_gc_interval_sec: 3600 * 24 * 7,
@@ -252,6 +261,7 @@ impl MetaOpts {
             do_not_config_object_storage_lifecycle: true,
             partition_vnode_count: 32,
             compaction_task_max_heartbeat_interval_secs: 0,
+            compaction_task_max_progress_interval_secs: 1,
             compaction_config: None,
             cut_table_size_limit: 1024 * 1024 * 1024,
             hybird_partition_vnode_count: 4,
@@ -260,6 +270,8 @@ impl MetaOpts {
             advertise_addr: "".to_string(),
             cached_traces_num: 1,
             cached_traces_memory_limit_bytes: usize::MAX,
+            enable_trivial_move: true,
+            enable_check_task_level_overlap: true,
         }
     }
 }
@@ -320,7 +332,6 @@ impl MetaSrvEnv {
         let hummock_seq = meta_store_sql
             .clone()
             .map(|m| Arc::new(SequenceGenerator::new(m.conn)));
-
         let sql_id_gen_manager = if let Some(store) = &meta_store_sql {
             Some(Arc::new(SqlIdGeneratorManager::new(&store.conn).await?))
         } else {

@@ -31,6 +31,7 @@ use risingwave_connector::source::{
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_rpc_client::ConnectorClient;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
@@ -172,11 +173,11 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
                 _ = interval.tick() => {
                     if self.fail_cnt > MAX_FAIL_CNT {
                         if let Err(e) = self.refresh().await {
-                            tracing::error!("error happened when refresh from connector source worker: {}", e.to_string());
+                            tracing::error!(error = %e.as_report(), "error happened when refresh from connector source worker");
                         }
                     }
                     if let Err(e) = self.tick().await {
-                        tracing::error!("error happened when tick from connector source worker: {}", e.to_string());
+                        tracing::error!(error = %e.as_report(), "error happened when tick from connector source worker");
                     }
                 }
             }
@@ -289,7 +290,7 @@ impl SourceManagerCore {
                 {
                     Ok(actor_ids) => actor_ids,
                     Err(err) => {
-                        tracing::warn!("Failed to get the actor of the fragment {}, maybe the fragment doesn't exist anymore", err.to_string());
+                        tracing::warn!(error = %err.as_report(), "Failed to get the actor of the fragment, maybe the fragment doesn't exist anymore");
                         continue;
                     }
                 };
@@ -360,7 +361,7 @@ impl SourceManagerCore {
     fn drop_source_fragments(
         &mut self,
         source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-        actor_splits: &HashSet<ActorId>,
+        removed_actors: &HashSet<ActorId>,
     ) {
         for (source_id, fragment_ids) in source_fragments {
             if let Entry::Occupied(mut entry) = self.source_fragments.entry(source_id) {
@@ -379,7 +380,7 @@ impl SourceManagerCore {
             }
         }
 
-        for actor_id in actor_splits {
+        for actor_id in removed_actors {
             self.actor_splits.remove(actor_id);
         }
     }
@@ -612,6 +613,15 @@ impl SourceManager {
         })
     }
 
+    pub async fn drop_source_fragments_v2(
+        &self,
+        source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+        removed_actors: HashSet<ActorId>,
+    ) {
+        let mut core = self.core.lock().await;
+        core.drop_source_fragments(source_fragments, &removed_actors);
+    }
+
     /// For dropping MV.
     pub async fn drop_source_fragments(&self, table_fragments: &[TableFragments]) {
         let mut core = self.core.lock().await;
@@ -709,8 +719,11 @@ impl SourceManager {
                 handle
                     .sync_call_tx
                     .send(tx)
-                    .map_err(|e| anyhow!(e.to_string()))?;
-                rx.await.map_err(|e| anyhow!(e.to_string()))??;
+                    .ok()
+                    .context("failed to send sync call")?;
+                rx.await
+                    .ok()
+                    .context("failed to receive sync call response")??;
             }
 
             let splits = handle.discovered_splits().await.unwrap();
@@ -926,8 +939,8 @@ impl SourceManager {
             let _pause_guard = self.paused.lock().await;
             if let Err(e) = self.tick().await {
                 tracing::error!(
-                    "error happened while running source manager tick: {}",
-                    e.to_string()
+                    error = %e.as_report(),
+                    "error happened while running source manager tick",
                 );
             }
         }

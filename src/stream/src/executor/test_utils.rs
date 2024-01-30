@@ -487,7 +487,7 @@ pub mod agg_executor {
             version: PbAggNodeVersion::Max,
 
             input,
-            actor_ctx: ActorContext::create(123),
+            actor_ctx: ActorContext::for_test(123),
             info,
 
             extreme_cache_size,

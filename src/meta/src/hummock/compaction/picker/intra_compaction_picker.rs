@@ -22,13 +22,15 @@ use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
     ValidationRuleType,
 };
-use crate::hummock::compaction::create_overlap_strategy;
 use crate::hummock::compaction::picker::TrivialMovePicker;
+use crate::hummock::compaction::{create_overlap_strategy, CompactionDeveloperConfig};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct IntraCompactionPicker {
     config: Arc<CompactionConfig>,
     compaction_task_validator: Arc<CompactionTaskValidator>,
+
+    developer_config: Arc<CompactionDeveloperConfig>,
 }
 
 impl CompactionPicker for IntraCompactionPicker {
@@ -76,20 +78,26 @@ impl CompactionPicker for IntraCompactionPicker {
 
 impl IntraCompactionPicker {
     #[cfg(test)]
-    pub fn new(config: Arc<CompactionConfig>) -> IntraCompactionPicker {
+    pub fn new(
+        config: Arc<CompactionConfig>,
+        developer_config: Arc<CompactionDeveloperConfig>,
+    ) -> IntraCompactionPicker {
         IntraCompactionPicker {
             compaction_task_validator: Arc::new(CompactionTaskValidator::new(config.clone())),
             config,
+            developer_config,
         }
     }
 
     pub fn new_with_validator(
         config: Arc<CompactionConfig>,
         compaction_task_validator: Arc<CompactionTaskValidator>,
+        developer_config: Arc<CompactionDeveloperConfig>,
     ) -> IntraCompactionPicker {
         IntraCompactionPicker {
             config,
             compaction_task_validator,
+            developer_config,
         }
     }
 
@@ -149,6 +157,7 @@ impl IntraCompactionPicker {
                 self.config.level0_sub_level_compact_level_count as usize,
                 self.config.level0_max_compact_file_number,
                 overlap_strategy.clone(),
+                self.developer_config.enable_check_task_level_overlap,
             );
 
             let l0_select_tables_vec = non_overlap_sub_level_picker
@@ -219,6 +228,10 @@ impl IntraCompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
+        if !self.developer_config.enable_trivial_move {
+            return None;
+        }
+
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
 
         for (idx, level) in l0.sub_levels.iter().enumerate() {
@@ -416,7 +429,7 @@ pub mod tests {
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
-        IntraCompactionPicker::new(config)
+        IntraCompactionPicker::new(config, Arc::new(CompactionDeveloperConfig::default()))
     }
 
     #[test]
@@ -530,7 +543,8 @@ pub mod tests {
                     .level0_overlapping_sub_level_compact_level_count(4)
                     .build(),
             );
-            let mut picker = IntraCompactionPicker::new(config);
+            let mut picker =
+                IntraCompactionPicker::new(config, Arc::new(CompactionDeveloperConfig::default()));
             let mut local_stats = LocalPickerStatistic::default();
             let ret = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -575,7 +589,8 @@ pub mod tests {
                     .level0_sub_level_compact_level_count(1)
                     .build(),
             );
-            let mut picker = IntraCompactionPicker::new(config);
+            let mut picker =
+                IntraCompactionPicker::new(config, Arc::new(CompactionDeveloperConfig::default()));
             let mut local_stats = LocalPickerStatistic::default();
             let ret = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -644,7 +659,8 @@ pub mod tests {
                     .level0_sub_level_compact_level_count(1)
                     .build(),
             );
-            let mut picker = IntraCompactionPicker::new(config);
+            let mut picker =
+                IntraCompactionPicker::new(config, Arc::new(CompactionDeveloperConfig::default()));
             let mut local_stats = LocalPickerStatistic::default();
             let ret = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -696,7 +712,8 @@ pub mod tests {
                 .level0_sub_level_compact_level_count(20) // reject intra
                 .build(),
         );
-        let mut picker = IntraCompactionPicker::new(config);
+        let mut picker =
+            IntraCompactionPicker::new(config, Arc::new(CompactionDeveloperConfig::default()));
 
         // Cannot trivial move because there is only 1 sub-level.
         let l0 = generate_l0_overlapping_sublevels(vec![vec![

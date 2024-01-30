@@ -39,7 +39,6 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let is_append_only = node.is_append_only;
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash join"));
@@ -150,7 +149,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             degree_state_table_l,
             state_table_r,
             degree_state_table_r,
-            lru_manager: stream.get_watermark_epoch(),
+            lru_manager: params.watermark_epoch,
             is_append_only,
             metrics: params.executor_stats,
             join_type_proto: node.get_join_type()?,

@@ -510,9 +510,7 @@ pub fn partial_cmp_datum_iter(
 ) -> Option<Ordering> {
     let mut order_types_iter = order_types.into_iter();
     lhs.into_iter().partial_cmp_by(rhs, |x, y| {
-        let Some(order_type) = order_types_iter.next() else {
-            return None;
-        };
+        let order_type = order_types_iter.next()?;
         partial_cmp_datum(x, y, order_type)
     })
 }

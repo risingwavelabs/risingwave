@@ -118,7 +118,8 @@ error: should not format error directly
 LL |     info!("{}", err);
    |                 ^^^
    |
-   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+   = help: consider importing `thiserror_ext::AsReport` and recording the error as a field
+           with `error = %<error>.as_report()` instead
 
 error: should not format error directly
   --> $DIR/format_error.rs:32:20
@@ -126,7 +127,8 @@ error: should not format error directly
 LL |     my_info!("{}", err);
    |                    ^^^
    |
-   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+   = help: consider importing `thiserror_ext::AsReport` and recording the error as a field
+           with `error = %<error>.as_report()` instead
 
 error: should not format error directly
   --> $DIR/format_error.rs:34:29
@@ -166,7 +168,8 @@ error: should not format error directly
 LL |     info!(%err, "{}", err);
    |                       ^^^
    |
-   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+   = help: consider importing `thiserror_ext::AsReport` and recording the error as a field
+           with `error = %<error>.as_report()` instead
 
 error: should not format error directly
   --> $DIR/format_error.rs:39:5

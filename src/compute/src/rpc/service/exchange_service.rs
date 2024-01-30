@@ -106,8 +106,8 @@ impl ExchangeService for ExchangeServiceImpl {
 
         let receiver = self
             .stream_mgr
-            .take_receiver((up_actor_id, down_actor_id))
-            .await?;
+            .context()
+            .take_receiver((up_actor_id, down_actor_id))?;
 
         // Map the remaining stream to add-permits.
         let add_permits_stream = request_stream.map_ok(|req| match req.value.unwrap() {

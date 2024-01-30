@@ -40,6 +40,7 @@ mod alter_parallelism;
 mod alter_rename;
 mod alter_set_schema;
 mod alter_source_column;
+mod alter_source_with_sr;
 mod alter_system;
 mod alter_table_column;
 pub mod alter_user;
@@ -243,6 +244,7 @@ pub async fn handle(
         Statement::CreateTable {
             name,
             columns,
+            wildcard_idx,
             constraints,
             query,
             with_options: _, // It is put in OptimizerContext
@@ -278,6 +280,7 @@ pub async fn handle(
                 handler_args,
                 name,
                 columns,
+                wildcard_idx,
                 constraints,
                 if_not_exists,
                 source_schema,
@@ -716,6 +719,13 @@ pub async fn handle(
                 None,
             )
             .await
+        }
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::FormatEncode { connector_schema },
+        } => {
+            alter_source_with_sr::handle_alter_source_with_sr(handler_args, name, connector_schema)
+                .await
         }
         Statement::AlterFunction {
             name,

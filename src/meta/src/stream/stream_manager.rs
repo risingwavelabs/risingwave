@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::future::{join_all, try_join_all, BoxFuture};
@@ -27,6 +27,7 @@ use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, UpdateActorsRequest,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{oneshot, Mutex, RwLock};
 use tracing::Instrument;
@@ -35,7 +36,7 @@ use uuid::Uuid;
 use super::{Locations, RescheduleOptions, ScaleController, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan};
 use crate::hummock::HummockManagerRef;
-use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob, WorkerId};
+use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
 use crate::model::{ActorId, TableFragments, TableParallelism};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -130,18 +131,18 @@ impl CreatingStreamingJobInfo {
         let mut receivers = HashMap::new();
         let mut recovered_job_ids = vec![];
         for job_id in job_ids {
-            if let Some(job) = jobs.get_mut(&job_id)
-                && let Some(shutdown_tx) = job.shutdown_tx.take()
-            {
-                let (tx, rx) = oneshot::channel();
-                if shutdown_tx
-                    .send(CreatingState::Canceling { finish_tx: tx })
-                    .await
-                    .is_ok()
-                {
-                    receivers.insert(job_id, rx);
-                } else {
-                    tracing::warn!(id=?job_id, "failed to send canceling state");
+            if let Some(job) = jobs.get_mut(&job_id) {
+                if let Some(shutdown_tx) = job.shutdown_tx.take() {
+                    let (tx, rx) = oneshot::channel();
+                    if shutdown_tx
+                        .send(CreatingState::Canceling { finish_tx: tx })
+                        .await
+                        .is_ok()
+                    {
+                        receivers.insert(job_id, rx);
+                    } else {
+                        tracing::warn!(id=?job_id, "failed to send canceling state");
+                    }
                 }
             } else {
                 // If these job ids do not exist in streaming_jobs,
@@ -272,7 +273,7 @@ impl GlobalStreamManager {
                         })
                         .await
                         .inspect_err(|_| {
-                            tracing::warn!("failed to notify failed: {table_id}, err: {err}")
+                            tracing::warn!(error = %err.as_report(), "failed to notify failed: {table_id}")
                         });
                 }
             }
@@ -330,15 +331,18 @@ impl GlobalStreamManager {
                                 });
                                 try_join_all(futures).await?;
 
-                                self.metadata_manager
-                                    .drop_streaming_job_by_ids(&HashSet::from_iter(
-                                        std::iter::once(table_id),
-                                    ))
-                                    .await?;
+                                if let MetadataManager::V1(mgr) = &self.metadata_manager {
+                                    mgr.fragment_manager
+                                        .drop_table_fragments_vec(&HashSet::from_iter(
+                                            std::iter::once(table_id),
+                                        ))
+                                        .await?;
+                                }
                             } else if !table_fragments.is_created() {
                                 tracing::debug!(
                                     "cancelling streaming job {table_id} by issue cancel command."
                                 );
+
                                 self.barrier_scheduler
                                     .run_command(Command::CancelStreamingJob(table_fragments))
                                     .await?;
@@ -537,14 +541,16 @@ impl GlobalStreamManager {
         };
 
         if let Err(err) = self.barrier_scheduler.run_command(command).await {
-            if create_type == CreateType::Foreground {
+            if create_type == CreateType::Foreground || err.is_cancelled() {
                 let mut table_ids = HashSet::from_iter(std::iter::once(table_id));
                 if let Some(dummy_table_id) = replace_table_id {
                     table_ids.insert(dummy_table_id);
                 }
-                self.metadata_manager
-                    .drop_streaming_job_by_ids(&table_ids)
-                    .await?;
+                if let MetadataManager::V1(mgr) = &self.metadata_manager {
+                    mgr.fragment_manager
+                        .drop_table_fragments_vec(&table_ids)
+                        .await?;
+                }
             }
 
             return Err(err);
@@ -582,9 +588,10 @@ impl GlobalStreamManager {
                 init_split_assignment,
             }))
             .await
+            && let MetadataManager::V1(mgr) = &self.metadata_manager
         {
-            self.metadata_manager
-                .drop_streaming_job_by_ids(&HashSet::from_iter(std::iter::once(dummy_table_id)))
+            mgr.fragment_manager
+                .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(dummy_table_id)))
                 .await?;
             return Err(err);
         }
@@ -601,15 +608,33 @@ impl GlobalStreamManager {
                 .drop_streaming_jobs_impl(streaming_job_ids)
                 .await
                 .inspect_err(|err| {
-                    tracing::error!(error = ?err, "Failed to drop streaming jobs");
+                    tracing::error!(error = ?err.as_report(), "Failed to drop streaming jobs");
                 });
         }
     }
 
+    pub async fn drop_streaming_jobs_v2(
+        &self,
+        removed_actors: Vec<ActorId>,
+        state_table_ids: Vec<StateTableId>,
+    ) {
+        if !removed_actors.is_empty() {
+            let _ = self
+                .barrier_scheduler
+                .run_command(Command::DropStreamingJobs(removed_actors))
+                .await
+                .inspect_err(|err| {
+                    tracing::error!(error = ?err.as_report(), "failed to run drop command");
+                });
+
+            self.hummock_manager
+                .unregister_table_ids_fail_fast(&state_table_ids)
+                .await;
+        }
+    }
+
     pub async fn drop_streaming_jobs_impl(&self, table_ids: Vec<TableId>) -> MetaResult<()> {
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unimplemented!("call drop_streaming_jobs_impl_v2 instead.")
-        };
+        let mgr = self.metadata_manager.as_v1_ref();
         let table_fragments_vec = mgr
             .fragment_manager
             .select_table_fragments_by_ids(&table_ids)
@@ -619,9 +644,23 @@ impl GlobalStreamManager {
             .drop_source_fragments(&table_fragments_vec)
             .await;
 
-        self.barrier_scheduler
-            .run_command(Command::DropStreamingJobs(table_ids.into_iter().collect()))
+        // Drop table fragments directly.
+        mgr.fragment_manager
+            .drop_table_fragments_vec(&table_ids.into_iter().collect())
             .await?;
+
+        // Issues a drop barrier command.
+        let dropped_actors = table_fragments_vec
+            .iter()
+            .flat_map(|tf| tf.actor_ids().into_iter())
+            .collect_vec();
+        let _ = self
+            .barrier_scheduler
+            .run_command(Command::DropStreamingJobs(dropped_actors))
+            .await
+            .inspect_err(|err| {
+                tracing::error!(error = ?err.as_report(), "failed to run drop command");
+            });
 
         // Unregister from compaction group afterwards.
         self.hummock_manager
@@ -629,24 +668,6 @@ impl GlobalStreamManager {
             .await;
 
         Ok(())
-    }
-
-    pub fn drop_streaming_jobs_impl_v2(
-        &self,
-        _job_info: HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
-        _state_table_ids: Vec<StateTableId>,
-    ) -> MetaResult<()> {
-        // self.barrier_scheduler.run_command(Command::DropStreamingJobsV2(job_info)).await?;
-        //
-        // // TODO: need some refactoring on source manager.
-        //
-        // // Unregister from compaction group afterwards.
-        // self.hummock_manager
-        //     .unregister_table_ids_fail_fast(
-        //         &state_table_ids
-        //     )
-        //     .await;
-        unimplemented!("drop_streaming_jobs_impl_v2")
     }
 
     /// Cancel streaming jobs and return the canceled table ids.
@@ -688,10 +709,9 @@ impl GlobalStreamManager {
                         id
                     )))?;
                 }
-                let MetadataManager::V1(mgr) = &self.metadata_manager else {
-                    unimplemented!("support cancel streaming job in v2");
-                };
-                mgr.catalog_manager.cancel_create_table_procedure(id.into(), fragment.internal_table_ids()).await?;
+                if let MetadataManager::V1(mgr) = &self.metadata_manager {
+                    mgr.catalog_manager.cancel_create_table_procedure(id.into(), fragment.internal_table_ids()).await?;
+                }
 
                 self.barrier_scheduler
                     .run_command(Command::CancelStreamingJob(fragment))
@@ -702,8 +722,8 @@ impl GlobalStreamManager {
                     tracing::info!(?id, "cancelled recovered streaming job");
                     Some(id)
                 }
-                Err(_) => {
-                    tracing::error!(?id, "failed to cancel recovered streaming job, does it correspond to any jobs in `SHOW JOBS`?");
+                Err(err) => {
+                    tracing::error!(error=?err.as_report(), "failed to cancel recovered streaming job {id}, does it correspond to any jobs in `SHOW JOBS`?");
                     None
                 }
             }
@@ -767,6 +787,7 @@ mod tests {
 
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::ParallelUnitMapping;
+    use risingwave_common::system_param::reader::SystemParamsRead;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::add_worker_node_request::Property;
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;

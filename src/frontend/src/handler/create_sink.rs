@@ -323,7 +323,7 @@ pub async fn handle_create_sink(
             );
         }
 
-        let mut graph = build_graph(plan);
+        let mut graph = build_graph(plan)?;
 
         graph.parallelism =
             session
@@ -471,6 +471,7 @@ pub(crate) async fn reparse_table_for_sink(
     let col_id_gen = ColumnIdGenerator::new_alter(table_catalog);
     let Statement::CreateTable {
         columns,
+        wildcard_idx,
         constraints,
         source_watermarks,
         append_only,
@@ -488,6 +489,7 @@ pub(crate) async fn reparse_table_for_sink(
         handler_args,
         col_id_gen,
         columns,
+        wildcard_idx,
         constraints,
         source_watermarks,
         append_only,

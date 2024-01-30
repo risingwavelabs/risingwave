@@ -70,7 +70,7 @@ impl SysCatalogReaderImpl {
                         ))),
                         Some(ScalarImpl::Int32(function.return_type.to_oid())),
                         Some(ScalarImpl::Utf8(function.language.clone().into())),
-                        Some(ScalarImpl::Utf8(function.link.clone().into())),
+                        function.link.clone().map(|s| ScalarImpl::Utf8(s.into())),
                         Some(ScalarImpl::Utf8(
                             get_acl_items(
                                 &Object::FunctionId(function.id.function_id()),

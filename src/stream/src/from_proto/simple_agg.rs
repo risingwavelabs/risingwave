@@ -34,7 +34,6 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let agg_calls: Vec<AggCall> = node
@@ -63,14 +62,14 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             actor_ctx: params.actor_context,
             info: params.info,
 
-            extreme_cache_size: stream.config.developer.unsafe_extreme_cache_size,
+            extreme_cache_size: params.env.config().developer.unsafe_extreme_cache_size,
 
             agg_calls,
             row_count_index: node.get_row_count_index() as usize,
             storages,
             intermediate_state_table,
             distinct_dedup_tables,
-            watermark_epoch: stream.get_watermark_epoch(),
+            watermark_epoch: params.watermark_epoch,
             extra: SimpleAggExecutorExtraArgs {},
         })?
         .boxed())

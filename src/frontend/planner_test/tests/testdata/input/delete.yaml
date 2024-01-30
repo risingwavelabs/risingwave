@@ -18,3 +18,10 @@
     delete from t returning sum(a);
   expected_outputs:
   - binder_error
+- name: distributed delete
+  sql: |
+    set batch_enable_distributed_dml = true;
+    create table t (a int, b int);
+    delete from t;
+  expected_outputs:
+    - batch_distributed_plan
