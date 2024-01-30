@@ -152,16 +152,16 @@ impl SystemParamsManager {
     }
 
     // Notify workers of parameter change.
+    // TODO: add system params into snapshot to avoid periodically sync.
     async fn notify_workers(&self, params: &SystemParams) {
         self.notification_manager
-            .notify_frontend(Operation::Update, Info::SystemParams(params.clone()))
-            .await;
+            .notify_frontend_without_version(Operation::Update, Info::SystemParams(params.clone()));
         self.notification_manager
-            .notify_compute(Operation::Update, Info::SystemParams(params.clone()))
-            .await;
-        self.notification_manager
-            .notify_compactor(Operation::Update, Info::SystemParams(params.clone()))
-            .await;
+            .notify_compute_without_version(Operation::Update, Info::SystemParams(params.clone()));
+        self.notification_manager.notify_compactor_without_version(
+            Operation::Update,
+            Info::SystemParams(params.clone()),
+        );
     }
 }
 
