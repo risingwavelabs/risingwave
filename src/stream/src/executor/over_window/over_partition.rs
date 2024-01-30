@@ -467,7 +467,6 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     /// TODO(rc): Currently at most one range will be in the result vector. Ideally we should
     /// recognize uncontinuous changes in the delta and find multiple ranges, but that will be
     /// too complex for now.
-    #[allow(clippy::type_complexity)]
     fn find_affected_ranges_readonly<'cache>(
         &'_ self,
         part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
