@@ -15,5 +15,6 @@ CREATE TABLE t (
     v13 int,
     v14 varchar,
     v15 bigint,
-    primary key (v1, v4, v7, v10, v13)
+    primary key (v1, v2, v3, v4, v5,
+                 v8, v9, v10, v11, v12)
 );
