@@ -156,6 +156,18 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         self.inner.get(k)
     }
 
+    #[must_use]
+    pub fn get_many<'a, 'b, Q: 'b>(
+        &'a mut self,
+        _keys: impl Iterator<Item = &'b Q>,
+    ) -> Vec<Option<&'a V>>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        todo!()
+    }
+
     pub fn peek_mut(&mut self, k: &K) -> Option<MutGuard<'_, V>> {
         let v = self.inner.peek_mut(k);
         v.map(|inner| {
@@ -192,7 +204,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     }
 
     pub fn is_empty(&self) -> bool {
-        self.inner.len() == 0
+        self.inner.is_empty()
     }
 
     pub fn clear(&mut self) {

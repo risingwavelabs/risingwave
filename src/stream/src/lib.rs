@@ -40,6 +40,7 @@
 #![feature(is_sorted)]
 #![feature(btree_cursors)]
 #![feature(assert_matches)]
+#![feature(closure_lifetime_binder)]
 
 #[macro_use]
 extern crate tracing;

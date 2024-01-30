@@ -174,11 +174,17 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
 
     /// Lookup the temporal side table and return a `JoinEntry` which could be empty if there are no
     /// matched records. The lookup will bypass the cache, it's better to call [`Self::lookup_cache`] first.
-    async fn lookup_table(&self, key: &K, epoch: HummockEpoch) -> StreamExecutorResult<JoinEntry> {
-        let pk_prefix = key.deserialize(&self.join_key_data_types)?;
+    async fn lookup_table(
+        join_key_data_types: &[DataType],
+        source: &StorageTable<S>,
+        table_stream_key_indices: &[usize],
+        table_output_indices: &[usize],
+        key: &K,
+        epoch: HummockEpoch,
+    ) -> StreamExecutorResult<JoinEntry> {
+        let pk_prefix = key.deserialize(join_key_data_types)?;
 
-        let iter = self
-            .source
+        let iter = source
             .batch_iter_with_pk_bounds(
                 HummockReadEpoch::NoWait(epoch),
                 &pk_prefix,
@@ -194,9 +200,9 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
         while let Some(row) = iter.next_row().await? {
             entry.insert(
                 row.as_ref()
-                    .project(&self.table_stream_key_indices)
+                    .project(table_stream_key_indices)
                     .into_owned_row(),
-                row.project(&self.table_output_indices).into_owned_row(),
+                row.project(table_output_indices).into_owned_row(),
             );
         }
 
@@ -406,6 +412,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
         let table_id_str = self.right_table.source.table_id().to_string();
         let actor_id_str = self.ctx.id.to_string();
         let fragment_id_str = self.ctx.fragment_id.to_string();
+
         #[for_await]
         for msg in align_input(self.left, self.right) {
             self.right_table.cache.evict();
@@ -429,66 +436,89 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                     let epoch = prev_epoch.expect("Chunk data should come after some barrier.");
                     let keys = K::build(&self.left_join_keys, chunk.data_chunk())?;
 
-                    // Fetch the local cache.
-                    struct FetchingCacheItem<'a, K> {
-                        op: Op,
-                        left_row: RowRef<'a>,
-                        key: K,
-                        inner: FetchingCacheItemInner,
-                    }
-                    enum FetchingCacheItemInner {
-                        NotSubsetOfNullMatched,
-                        Cached(JoinEntry),
-                        NotFoundInCache,
-                    }
-                    let fetching_cache_items: Vec<FetchingCacheItem<'_, K>> = chunk
-                        .rows_with_holes()
-                        .zip_eq_debug(keys.into_iter())
-                        .filter_map(|(r, key)| {
-                            use FetchingCacheItemInner::*;
-                            let Some((op, left_row)) = r else {
-                                return None;
-                            };
-                            if !key.null_bitmap().is_subset(&null_matched) {
-                                return Some(FetchingCacheItem {
-                                    op,
-                                    left_row,
-                                    key,
-                                    inner: NotSubsetOfNullMatched,
-                                });
+                    let mut lookup_cache_keys = Vec::with_capacity(keys.len());
+
+                    // Build GetMany request.
+                    let keys_to_lookup_cache_result_mapping: Vec<Option<usize>> = keys
+                        .iter()
+                        .zip_eq_debug(chunk.visibility().iter())
+                        .filter_map(|(key, visible)| if !visible { None } else { Some(key) })
+                        .map(|key| {
+                            if key.null_bitmap().is_subset(&null_matched) {
+                                None
+                            } else {
+                                let idx = lookup_cache_keys.len();
+                                lookup_cache_keys.push(key);
+                                Some(idx)
                             }
-                            let inner = match self.right_table.lookup_cache(&key) {
-                                Some(entry) => Cached(entry),
-                                None => NotFoundInCache,
-                            };
-                            Some(FetchingCacheItem {
-                                op,
-                                left_row,
-                                key,
-                                inner,
-                            })
                         })
                         .collect();
 
-                    // Step 2: Fetch remote.
-                    struct FetchingTableItem<'a, K> {
+                    let entries = self
+                        .right_table
+                        .cache
+                        .get_many(lookup_cache_keys.into_iter());
+
+                    // Fetch the local cache.
+                    struct FetchingCacheItem<'chunk, 'cache, K> {
                         op: Op,
-                        left_row: RowRef<'a>,
+                        left_row: RowRef<'chunk>,
                         key: K,
-                        inner: FetchingTableItemInner,
+                        inner: FetchingCacheItemInner<'cache>,
                     }
-                    enum FetchingTableItemInner {
+                    enum FetchingCacheItemInner<'cache> {
                         NotSubsetOfNullMatched,
-                        Entry(JoinEntry),
+                        Cached(&'cache JoinEntryWrapper),
+                        NotFoundInCache,
                     }
-                    let fetching_table_futs = fetching_cache_items.into_iter().map(
+
+                    let fetching_cache_items = keys
+                        .into_iter()
+                        .zip(keys_to_lookup_cache_result_mapping.into_iter())
+                        .zip(chunk.rows())
+                        .map(
+                            |((key, maybe_idx), (op, left_row))| -> FetchingCacheItem<'_, '_, K> {
+                                FetchingCacheItem {
+                                    key,
+                                    op,
+                                    left_row,
+                                    inner: if let Some(idx) = maybe_idx {
+                                        if let Some(entry) = entries[idx] {
+                                            FetchingCacheItemInner::Cached(entry)
+                                        } else {
+                                            FetchingCacheItemInner::NotFoundInCache
+                                        }
+                                    } else {
+                                        FetchingCacheItemInner::NotSubsetOfNullMatched
+                                    },
+                                }
+                            },
+                        );
+
+                    // Step 2: Fetch remote.
+                    struct FetchingTableItem<'chunk, 'cache, K> {
+                        op: Op,
+                        left_row: RowRef<'chunk>,
+                        key: K,
+                        inner: FetchingTableItemInner<'cache>,
+                    }
+                    enum FetchingTableItemInner<'cache> {
+                        NotSubsetOfNullMatched,
+                        Cached(&'cache JoinEntryWrapper),
+                        Fetched(JoinEntry),
+                    }
+                    let fetching_table_futs = fetching_cache_items.map(
                         |FetchingCacheItem {
                              op,
                              left_row,
                              key,
                              inner,
                          }| {
-                            let right_table = &self.right_table;
+                            let join_key_data_types = &self.right_table.join_key_data_types;
+                            let source = &self.right_table.source;
+                            let table_stream_key_indices =
+                                &self.right_table.table_stream_key_indices;
+                            let table_output_indices = &self.right_table.table_output_indices;
                             async move {
                                 let inner = match inner {
                                     FetchingCacheItemInner::NotSubsetOfNullMatched => {
@@ -496,13 +526,21 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                                             as StreamExecutorResult<_>
                                     }
                                     FetchingCacheItemInner::Cached(entry) => {
-                                        Ok(FetchingTableItemInner::Entry(entry))
+                                        Ok(FetchingTableItemInner::Cached(entry))
                                             as StreamExecutorResult<_>
                                     }
-                                    FetchingCacheItemInner::NotFoundInCache => right_table
-                                        .lookup_table(&key, epoch)
+                                    FetchingCacheItemInner::NotFoundInCache => {
+                                        TemporalSide::lookup_table(
+                                            join_key_data_types,
+                                            source,
+                                            table_stream_key_indices,
+                                            table_output_indices,
+                                            &key,
+                                            epoch,
+                                        )
                                         .await
-                                        .map(FetchingTableItemInner::Entry),
+                                        .map(FetchingTableItemInner::Fetched)
+                                    }
                                 };
                                 Ok(FetchingTableItem {
                                     op,
@@ -514,8 +552,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                         },
                     );
                     // Fetching table can be concurrent.
-                    let fetching_table_items: Vec<FetchingTableItem<'_, K>> =
+                    let fetching_table_items: Vec<FetchingTableItem<'_, '_, K>> =
                         future::try_join_all(fetching_table_futs).await?;
+
+                    let mut need_insert_back_entries = vec![];
 
                     for FetchingTableItem {
                         op,
@@ -524,7 +564,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                         inner,
                     } in fetching_table_items
                     {
-                        if let FetchingTableItemInner::Entry(join_entry) = inner
+                        let join_entry: Option<&JoinEntry> = match inner {
+                            FetchingTableItemInner::Cached(entry) => Some(entry.deref()),
+                            FetchingTableItemInner::Fetched(ref entry) => Some(entry),
+                            FetchingTableItemInner::NotSubsetOfNullMatched => None,
+                        };
+                        if let Some(join_entry) = join_entry
                             && !join_entry.is_empty()
                         {
                             for right_row in join_entry.cached.values() {
@@ -546,7 +591,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                                 }
                             }
                             // Insert back the state taken from ht.
-                            self.right_table.insert_back(key.clone(), join_entry);
+                            if let FetchingTableItemInner::Fetched(join_entry) = inner {
+                                need_insert_back_entries.push((key.clone(), join_entry));
+                            }
                         } else if T == JoinType::LeftOuter {
                             if let Some(chunk) = builder.append_row_update(op, left_row) {
                                 yield Message::Chunk(chunk);
@@ -555,6 +602,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                     }
                     if let Some(chunk) = builder.take() {
                         yield Message::Chunk(chunk);
+                    }
+                    for (key, entry) in need_insert_back_entries {
+                        self.right_table.insert_back(key, entry)
                     }
                 }
                 InternalMessage::Barrier(updates, barrier) => {
