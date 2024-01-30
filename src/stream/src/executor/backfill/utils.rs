@@ -461,10 +461,7 @@ pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
 ) -> StreamExecutorResult<()> {
     let vnodes = table.vnodes().clone();
     if let Some(old_state) = old_state {
-        if old_state[1..] == current_partial_state[1..] {
-            table.commit_no_data_expected(epoch);
-            return Ok(());
-        } else {
+        if old_state[1..] != current_partial_state[1..] {
             vnodes.iter_vnodes_scalar().for_each(|vnode| {
                 let datum = Some(vnode.into());
                 current_partial_state[0] = datum.clone();
@@ -632,7 +629,6 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     #[cfg(debug_assertions)] state_len: usize,
     vnodes: impl Iterator<Item = VirtualNode>,
 ) -> StreamExecutorResult<()> {
-    let mut has_progress = false;
     for vnode in vnodes {
         if !backfill_state.need_commit(&vnode) {
             continue;
@@ -667,7 +663,6 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
                 old_row: &encoded_prev_state[..],
                 new_row: &encoded_current_state[..],
             });
-            has_progress = true;
         } else {
             // No existing state, create a new entry.
             #[cfg(debug_assertions)]
@@ -680,15 +675,11 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
             table.write_record(Record::Insert {
                 new_row: &encoded_current_state[..],
             });
-            has_progress = true;
         }
         backfill_state.mark_committed(vnode);
     }
-    if has_progress {
-        table.commit(epoch).await?;
-    } else {
-        table.commit_no_data_expected(epoch);
-    }
+
+    table.commit(epoch).await?;
     Ok(())
 }
 
@@ -712,7 +703,7 @@ pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
         flush_data(table, epoch, old_state, current_state).await?;
         *old_state = Some(current_state.into());
     } else {
-        table.commit_no_data_expected(epoch);
+        table.commit(epoch).await?;
     }
     Ok(())
 }
