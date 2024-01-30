@@ -31,6 +31,7 @@ pub(crate) enum Request {
     Upload { path: String, obj: Bytes },
     Read { path: String },
     Delete { path: String },
+    DeleteObjects { paths: Vec<String> },
     List { path: String },
     Metadata { path: String },
 }
@@ -40,6 +41,7 @@ pub(crate) enum Response {
     Upload,
     Read(Bytes),
     Delete,
+    DeleteObjects,
     List(SimObjectIter),
     Metadata(ObjectMetadata),
 }
@@ -86,19 +88,29 @@ impl SimService {
         self.storage.lock().remove(&path);
         Ok(Response::Delete)
     }
+    
+    pub async fn delete_objects(&self, paths: Vec<String>) -> Result<Response> {
+        for path in paths {
+            self.storage.lock().remove(&path);
+        }
+        Ok(Response::DeleteObjects)
+    }
 
     pub async fn list(&self, prefix: String) -> Result<Response> {
+        if prefix.is_empty() {
+            return Ok(Response::List(SimObjectIter::new(vec![])));
+        }
+
+        let mut scan_end = prefix.chars().collect_vec();
+        let next = *scan_end.last().unwrap() as u8 + 1;
+        *scan_end.last_mut().unwrap() = next as char;
+        let scan_end = scan_end.into_iter().collect::<String>();
+
         let list_result = self
             .storage
             .lock()
-            .iter()
-            .filter_map(|(path, (metadata, _))| {
-                if path.starts_with(&prefix) {
-                    return Some(metadata.clone());
-                }
-                None
-            })
-            .sorted_by(|a, b| Ord::cmp(&a.key, &b.key))
+            .range(prefix..scan_end)
+            .map(|(_, (o, _))| o.clone())
             .collect_vec();
         Ok(Response::List(SimObjectIter::new(list_result)))
     }
@@ -115,7 +127,6 @@ impl SimService {
 }
 
 #[derive(Debug)]
-
 pub(crate) struct SimObjectIter {
     list_result: VecDeque<ObjectMetadata>,
 }

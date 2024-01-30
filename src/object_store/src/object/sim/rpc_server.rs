@@ -45,6 +45,7 @@ impl SimServer {
                     Upload { path, obj } => Box::new(service.upload(path, obj).await),
                     Read { path } => Box::new(service.read(path).await),
                     Delete { path } => Box::new(service.delete(path).await),
+                    DeleteObjects { paths } => Box::new(service.delete_objects(paths).await),
                     List { path } => Box::new(service.list(path).await),
                     Metadata { path } => Box::new(service.metadata(path).await),
                 };

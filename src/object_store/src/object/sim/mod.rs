@@ -26,6 +26,8 @@ use std::ops::{Range, RangeBounds};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use madsim::rand::{thread_rng, RngCore};
+use madsim::time::{sleep, Duration};
 use risingwave_common::range::RangeBoundsExt;
 
 use self::client::Client;
@@ -70,7 +72,7 @@ impl StreamingUploader for SimStreamingUploader {
                 })
                 .await?;
             let Response::Upload = resp else {
-                return Err(SimError::other("expect Response::Upload").into());
+                panic!("expect Response::Upload");
             };
             Ok(())
         }
@@ -129,7 +131,7 @@ impl ObjectStore for SimObjectStore {
             if let Response::Upload = resp {
                 Ok(())
             } else {
-                Err(SimError::other("expect Response::Upload").into())
+                panic!("expect Response::Upload");
             }
         }
     }
@@ -155,7 +157,7 @@ impl ObjectStore for SimObjectStore {
             }
             Ok(obj.slice(range))
         } else {
-            Err(SimError::other("expect Response::Read").into())
+            panic!("expect Response::Read");
         }
     }
 
@@ -168,7 +170,7 @@ impl ObjectStore for SimObjectStore {
         {
             Ok(m)
         } else {
-            Err(SimError::other("expect Response::Metadata").into())
+            panic!("expect Response::Metadata");
         }
     }
 
@@ -183,7 +185,7 @@ impl ObjectStore for SimObjectStore {
             .send_request(service::Request::Read { path })
             .await?;
         let Response::Read(body) = resp else {
-            return Err(SimError::other("expect Response::Read").into());
+            panic!("expect Response::Read");
         };
 
         Ok(Box::pin(SimDataIterator::new(body.slice(range))))
@@ -198,19 +200,19 @@ impl ObjectStore for SimObjectStore {
         if let Response::Delete = resp {
             Ok(())
         } else {
-            Err(SimError::other("expect Response::Delete").into())
+            panic!("expect Response::Delete");
         }
     }
 
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
-        let mut error = None;
-        for path in paths {
-            error = error.or(self.delete(path).await.err());
-        }
-        if let Some(e) = error {
-            Err(e)
-        } else {
+        let resp = self
+            .client
+            .send_request(service::Request::DeleteObjects { paths: paths.to_vec() })
+            .await?;
+        if let Response::DeleteObjects = resp {
             Ok(())
+        } else {
+            panic!("expect Response::DeleteObjects");
         }
     }
 
@@ -223,7 +225,7 @@ impl ObjectStore for SimObjectStore {
         if let Response::List(o) = resp {
             Ok(Box::pin(o))
         } else {
-            Err(SimError::other("expect Response::List").into())
+            panic!("expect Response::List");
         }
     }
 
