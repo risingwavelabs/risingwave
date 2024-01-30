@@ -82,6 +82,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Ltrim
             | expr_node::Type::Rtrim
             | expr_node::Type::Case
+            | expr_node::Type::ConstantLookup
             | expr_node::Type::RoundDigit
             | expr_node::Type::Round
             | expr_node::Type::Ascii
