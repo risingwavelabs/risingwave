@@ -305,7 +305,7 @@ impl Executor for RearrangedChainExecutor {
         &self.info.identity
     }
 
-    fn info(&self) -> ExecutorInfo {
+    fn info_old(&self) -> ExecutorInfo {
         self.info.clone()
     }
 }

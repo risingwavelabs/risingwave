@@ -195,7 +195,7 @@ pub trait Executor: Send + 'static {
     }
 
     #[inline(always)]
-    fn info(&self) -> ExecutorInfo {
+    fn info_old(&self) -> ExecutorInfo {
         let schema = self.schema().to_owned();
         let pk_indices = self.pk_indices().to_owned();
         let identity = self.identity().to_owned();

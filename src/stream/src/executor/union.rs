@@ -65,7 +65,7 @@ impl Executor for UnionExecutor {
         &self.info.identity
     }
 
-    fn info(&self) -> ExecutorInfo {
+    fn info_old(&self) -> ExecutorInfo {
         self.info.clone()
     }
 }

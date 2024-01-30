@@ -91,7 +91,7 @@ mod tests {
         tx.push_barrier(3, false);
         tx.push_barrier(4, false);
 
-        let checked = epoch_check(source.info().into(), source.boxed().execute());
+        let checked = epoch_check(source.info_old().into(), source.boxed().execute());
         pin_mut!(checked);
 
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 1);
@@ -111,7 +111,7 @@ mod tests {
         tx.push_barrier(514, false);
         tx.push_barrier(114, false);
 
-        let checked = epoch_check(source.info().into(), source.boxed().execute());
+        let checked = epoch_check(source.info_old().into(), source.boxed().execute());
         pin_mut!(checked);
 
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 100);
@@ -129,7 +129,7 @@ mod tests {
         tx.push_chunk(StreamChunk::default());
         tx.push_barrier(114, false);
 
-        let checked = epoch_check(source.info().into(), source.boxed().execute());
+        let checked = epoch_check(source.info_old().into(), source.boxed().execute());
         pin_mut!(checked);
 
         checked.next().await.unwrap().unwrap(); // should panic
@@ -139,7 +139,7 @@ mod tests {
     async fn test_empty() {
         let (_, mut source) = MockSource::channel(Default::default(), vec![]);
         source = source.stop_on_finish(false);
-        let checked = epoch_check(source.info().into(), source.boxed().execute());
+        let checked = epoch_check(source.info_old().into(), source.boxed().execute());
         pin_mut!(checked);
 
         assert!(checked.next().await.transpose().unwrap().is_none());

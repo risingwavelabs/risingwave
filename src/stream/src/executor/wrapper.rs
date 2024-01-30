@@ -90,7 +90,7 @@ impl WrapperExecutor {
 
 impl Executor for WrapperExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        let info = Arc::new(self.input.info());
+        let info = Arc::new(self.input.info_old());
         Self::wrap(
             self.enable_executor_row_count,
             info,
@@ -101,7 +101,7 @@ impl Executor for WrapperExecutor {
     }
 
     fn execute_with_epoch(self: Box<Self>, epoch: u64) -> BoxedMessageStream {
-        let info = Arc::new(self.input.info());
+        let info = Arc::new(self.input.info_old());
         Self::wrap(
             self.enable_executor_row_count,
             info,

@@ -51,7 +51,7 @@ impl Executor for SubtaskRxExecutor {
         &self.info.identity
     }
 
-    fn info(&self) -> ExecutorInfo {
+    fn info_old(&self) -> ExecutorInfo {
         self.info.clone()
     }
 }
@@ -67,7 +67,7 @@ pub fn wrap(input: BoxedExecutor, actor_id: ActorId) -> (SubtaskHandle, SubtaskR
     let rx_executor = SubtaskRxExecutor {
         info: ExecutorInfo {
             identity: "SubtaskRxExecutor".to_owned(),
-            ..input.info()
+            ..input.info_old()
         },
         rx,
     };

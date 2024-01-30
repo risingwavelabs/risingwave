@@ -97,7 +97,7 @@ where
         &self.inner.info().identity
     }
 
-    fn info(&self) -> ExecutorInfo {
+    fn info_old(&self) -> ExecutorInfo {
         self.inner.info().clone()
     }
 }

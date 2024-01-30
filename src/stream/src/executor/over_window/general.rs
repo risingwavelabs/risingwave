@@ -163,7 +163,7 @@ pub struct OverWindowExecutorArgs<S: StateStore> {
 
 impl<S: StateStore> OverWindowExecutor<S> {
     pub fn new(args: OverWindowExecutorArgs<S>) -> Self {
-        let input_info = args.input.info();
+        let input_info = args.input.info_old();
         let input_schema = &input_info.schema;
 
         let has_unbounded_frame = args
