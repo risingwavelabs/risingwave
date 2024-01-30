@@ -610,56 +610,29 @@ impl GlobalBarrierManagerContext {
         }
     }
 
-    async fn scale_actors_v2(&self, info: &InflightActorInfo) -> MetaResult<bool> {
+    async fn scale_actors_v2(&self, _info: &InflightActorInfo) -> MetaResult<bool> {
         let mgr = self.metadata_manager.as_v2_ref();
-        let prev_used_parallel_units: HashSet<_> = mgr
-            .catalog_controller
-            .all_inuse_parallel_units()
-            .await?
-            .into_iter()
-            .collect();
-        let curr_worker_parallel_units: HashSet<_> = info
-            .node_map
-            .iter()
-            .flat_map(|(_, worker_node)| {
-                worker_node
-                    .parallel_units
-                    .iter()
-                    .map(|parallel_unit| parallel_unit.id as i32)
-            })
-            .collect();
+        debug!("start resetting actors distribution");
 
-        // todo: maybe we can only check the reduced workers
-        if curr_worker_parallel_units == prev_used_parallel_units {
-            debug!("no changed workers, skipping.");
-            return Ok(false);
-        }
+        let table_parallelisms: HashMap<_, _> = {
+            let streaming_parallelisms = mgr
+                .catalog_controller
+                .get_all_streaming_parallelisms()
+                .await?;
 
-        info!("parallel unit has changed, triggering a forced reschedule.");
-
-        debug!(
-            "previous worker parallel units {:?}, current worker parallel units {:?}",
-            prev_used_parallel_units, curr_worker_parallel_units
-        );
-
-        let streaming_parallelisms = mgr
-            .catalog_controller
-            .get_all_streaming_parallelisms()
-            .await?;
-
-        let table_parallelisms = streaming_parallelisms
-            .into_iter()
-            .map(|(id, parallelism)| {
-                (
-                    id as u32,
-                    match parallelism {
+            streaming_parallelisms
+                .into_iter()
+                .map(|(table_id, parallelism)| {
+                    // no custom for sql backend
+                    let table_parallelism = match parallelism {
                         StreamingParallelism::Auto => TableParallelism::Auto,
                         StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
-                        StreamingParallelism::Custom => TableParallelism::Custom,
-                    },
-                )
-            })
-            .collect();
+                    };
+
+                    (table_id as u32, table_parallelism)
+                })
+                .collect()
+        };
 
         let workers = mgr
             .cluster_controller
@@ -682,9 +655,19 @@ impl GlobalBarrierManagerContext {
             .scale_controller
             .generate_table_resize_plan(TableResizePolicy {
                 worker_ids: schedulable_worker_ids,
-                table_parallelisms,
+                table_parallelisms: table_parallelisms.clone(),
             })
             .await?;
+
+        let table_parallelisms: HashMap<_, _> = table_parallelisms
+            .into_iter()
+            .map(|(table_id, parallelism)| {
+                debug_assert_ne!(parallelism, TableParallelism::Custom);
+                (TableId::new(table_id), parallelism)
+            })
+            .collect();
+
+        let mut compared_table_parallelisms = table_parallelisms.clone();
 
         let (reschedule_fragment, _) = self
             .scale_controller
@@ -693,13 +676,16 @@ impl GlobalBarrierManagerContext {
                 RescheduleOptions {
                     resolve_no_shuffle_upstream: true,
                 },
-                None,
+                Some(&mut compared_table_parallelisms),
             )
             .await?;
 
+        // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
+        debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
+
         if let Err(e) = self
             .scale_controller
-            .post_apply_reschedule(&reschedule_fragment, &Default::default())
+            .post_apply_reschedule(&reschedule_fragment, &table_parallelisms)
             .await
         {
             tracing::error!(

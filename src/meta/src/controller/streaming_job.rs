@@ -28,10 +28,10 @@ use risingwave_meta_model_v2::prelude::{
     StreamingJob as StreamingJobModel, Table,
 };
 use risingwave_meta_model_v2::{
-    actor, actor_dispatcher, fragment, index, object_dependency, sink, source, streaming_job,
-    table, ActorId, ActorUpstreamActors, CreateType, DatabaseId, ExprNodeArray, FragmentId,
-    I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId, StreamNode, StreamingParallelism,
-    TableId, TableVersion, UserId,
+    actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
+    streaming_job, table, ActorId, ActorUpstreamActors, CreateType, DatabaseId, ExprNodeArray,
+    FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId, StreamNode,
+    StreamingParallelism, TableId, TableVersion, UserId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableVersion};
@@ -1201,7 +1201,7 @@ impl CatalogController {
             streaming_job.parallelism = Set(match parallelism {
                 TableParallelism::Auto => StreamingParallelism::Auto,
                 TableParallelism::Fixed(n) => StreamingParallelism::Fixed(n as _),
-                TableParallelism::Custom => StreamingParallelism::Custom,
+                TableParallelism::Custom => unreachable!("sql backend does't support custom parallelism"),
             });
 
             streaming_job.update(&txn).await?;
