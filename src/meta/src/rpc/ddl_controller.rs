@@ -673,9 +673,32 @@ impl DdlController {
         mgr.catalog_manager
             .start_create_stream_job_procedure(&stream_job, internal_tables.clone())
             .await?;
+        let affected_table_replace_info = match affected_table_replace_info {
+            Some(replace_table_info) => {
+                let MetadataManager::V1(mgr) = &self.metadata_manager else {
+                    unimplemented!("support replace table in v2");
+                };
+
+                let ReplaceTableInfo {
+                    mut streaming_job,
+                    fragment_graph,
+                    ..
+                } = replace_table_info;
+                let fragment_graph = self
+                    .prepare_replace_table(
+                        mgr.catalog_manager.clone(),
+                        &mut streaming_job,
+                        fragment_graph,
+                    )
+                    .await?;
+
+                Some((streaming_job, fragment_graph))
+            }
+            None => None,
+        };
 
         // 4. Build and persist stream job.
-        let result = try {
+        let result: MetaResult<_> = try {
             tracing::debug!(id = stream_job.id(), "building stream job");
             let (ctx, table_fragments) = self
                 .build_stream_job(
@@ -723,6 +746,7 @@ impl DdlController {
         let (ctx, table_fragments) = match result {
             Ok(r) => r,
             Err(e) => {
+                tracing::error!(error = %e.as_report(), id = stream_job.id(), "failed to create streaming job");
                 self.cancel_stream_job(&stream_job, internal_tables, Some(&e))
                     .await?;
                 return Err(e);
@@ -825,19 +849,9 @@ impl DdlController {
         sink: Option<&Sink>,
         creating_sink_table_fragments: Option<&TableFragments>,
         dropping_sink_id: Option<SinkId>,
-        ReplaceTableInfo {
-            mut streaming_job,
-            fragment_graph,
-            ..
-        }: ReplaceTableInfo,
-    ) -> MetaResult<(StreamingJob, ReplaceTableContext, TableFragments)> {
-        let fragment_graph = self
-            .prepare_replace_table(
-                mgr.catalog_manager.clone(),
-                &mut streaming_job,
-                fragment_graph,
-            )
-            .await?;
+        streaming_job: &StreamingJob,
+        fragment_graph: StreamFragmentGraph,
+    ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
         let dummy_id = self
             .env
             .id_gen_manager()
@@ -845,7 +859,7 @@ impl DdlController {
             .await? as u32;
 
         let (mut replace_table_ctx, mut table_fragments) = self
-            .build_replace_table(stream_ctx, &streaming_job, fragment_graph, None, dummy_id)
+            .build_replace_table(stream_ctx, streaming_job, fragment_graph, None, dummy_id)
             .await?;
 
         let mut union_fragment_id = None;
@@ -935,7 +949,7 @@ impl DdlController {
             }
         }
 
-        Ok((streaming_job, replace_table_ctx, table_fragments))
+        Ok((replace_table_ctx, table_fragments))
     }
 
     fn inject_replace_table_plan_for_sink(
@@ -1188,35 +1202,61 @@ impl DdlController {
                 panic!("additional replace table event only occurs when dropping sink into table")
             };
 
-            let (streaming_job, context, table_fragments) = self
-                .inject_replace_table_job_for_table_sink(
-                    mgr,
-                    stream_ctx,
-                    None,
-                    None,
-                    Some(sink_id),
-                    replace_table_info,
-                )
-                .await?;
-
-            // Add table fragments to meta store with state: `State::Initial`.
-            mgr.fragment_manager
-                .start_create_table_fragments(table_fragments.clone())
-                .await?;
-
-            self.stream_manager
-                .replace_table(table_fragments, context)
-                .await?;
-
-            version = self
-                .finish_replace_table(
+            let ReplaceTableInfo {
+                mut streaming_job,
+                fragment_graph,
+                ..
+            } = replace_table_info;
+            let fragment_graph = self
+                .prepare_replace_table(
                     mgr.catalog_manager.clone(),
-                    &streaming_job,
-                    None,
-                    None,
-                    Some(sink_id),
+                    &mut streaming_job,
+                    fragment_graph,
                 )
                 .await?;
+
+            let result: MetaResult<()> = try {
+                tracing::debug!(id = streaming_job.id(), "replacing table for dropped sink");
+                let (context, table_fragments) = self
+                    .inject_replace_table_job_for_table_sink(
+                        mgr,
+                        stream_ctx,
+                        None,
+                        None,
+                        Some(sink_id),
+                        &streaming_job,
+                        fragment_graph,
+                    )
+                    .await?;
+
+                // Add table fragments to meta store with state: `State::Initial`.
+                mgr.fragment_manager
+                    .start_create_table_fragments(table_fragments.clone())
+                    .await?;
+
+                self.stream_manager
+                    .replace_table(table_fragments, context)
+                    .await?;
+            };
+
+            match result {
+                Ok(_) => {
+                    version = self
+                        .finish_replace_table(
+                            mgr.catalog_manager.clone(),
+                            &streaming_job,
+                            None,
+                            None,
+                            Some(sink_id),
+                        )
+                        .await?;
+                }
+                Err(err) => {
+                    tracing::error!(error = %err.as_report(), "failed to replace table for dropped sink");
+                    self.cancel_replace_table(mgr.catalog_manager.clone(), &streaming_job)
+                        .await?;
+                }
+            }
         }
 
         self.stream_manager
@@ -1274,7 +1314,7 @@ impl DdlController {
         stream_ctx: StreamContext,
         stream_job: &StreamingJob,
         fragment_graph: StreamFragmentGraph,
-        affected_table_replace_info: Option<ReplaceTableInfo>,
+        affected_table_replace_info: Option<(StreamingJob, StreamFragmentGraph)>,
     ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
         let id = stream_job.id();
         let default_parallelism = fragment_graph.default_parallelism();
@@ -1342,7 +1382,7 @@ impl DdlController {
         );
 
         let replace_table_job_info = match affected_table_replace_info {
-            Some(replace_table_info) => {
+            Some((streaming_job, fragment_graph)) => {
                 let StreamingJob::Sink(s, _) = stream_job else {
                     bail!("additional replace table event only occurs when sinking into table");
                 };
@@ -1350,17 +1390,19 @@ impl DdlController {
                     unimplemented!("support create sink into table in v2");
                 };
 
-                Some(
-                    self.inject_replace_table_job_for_table_sink(
+                let (context, table_fragments) = self
+                    .inject_replace_table_job_for_table_sink(
                         mgr,
                         stream_ctx,
                         Some(s),
                         Some(&table_fragments),
                         None,
-                        replace_table_info,
+                        &streaming_job,
+                        fragment_graph,
                     )
-                    .await?,
-                )
+                    .await?;
+
+                Some((streaming_job, context, table_fragments))
             }
             None => None,
         };
@@ -1613,7 +1655,7 @@ impl DdlController {
             .generate::<{ IdCategory::Table }>()
             .await? as u32;
 
-        let result = try {
+        let result: MetaResult<()> = try {
             let (ctx, table_fragments) = self
                 .build_replace_table(
                     stream_ctx,
@@ -1646,6 +1688,7 @@ impl DdlController {
                 .await
             }
             Err(err) => {
+                tracing::error!(error = %err.as_report(), "failed to replace table");
                 self.cancel_replace_table(mgr.catalog_manager.clone(), &stream_job)
                     .await?;
                 Err(err)
