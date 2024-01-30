@@ -265,8 +265,7 @@ test_backfill_snapshot_with_limited_storage_throughput() {
   kill_cluster
 }
 
-# Throttle the storage throughput.
-# Arrangement Backfill should not fail because of this.
+# Test case where we do backfill with PK of 10 columns to measure performance impact.
 test_backfill_snapshot_with_wider_rows() {
   echo "--- e2e, test_backfill_snapshot_with_wider_rows, $RUNTIME_CLUSTER_PROFILE"
   cargo make ci-start $RUNTIME_CLUSTER_PROFILE
