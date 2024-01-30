@@ -241,14 +241,6 @@ pub static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     .collect()
 });
 
-#[derive(Debug)]
-pub enum CompactionResumeTrigger {
-    /// The addition (re-subscription) of compactors
-    CompactorAddition { context_id: HummockContextId },
-    /// A compaction task is reported when all compactors are not idle.
-    TaskReport { original_task_num: usize },
-}
-
 pub struct CommitEpochInfo {
     pub sstables: Vec<ExtendedSstableInfo>,
     pub new_table_watermarks: HashMap<risingwave_common::catalog::TableId, TableWatermarks>,
