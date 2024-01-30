@@ -1803,6 +1803,22 @@ impl CatalogController {
             }};
         }
         let objs = get_referring_objects(object_id, &txn).await?;
+        // TODO: For sink into table. when sink into table is ready.
+        // if object_type == ObjectType::Table {
+        //     let incoming_sinks: Vec<_> = Table::find_by_id(object_id)
+        //         .select_only()
+        //         .column(table::Column::IncomingSinks)
+        //         .into_tuple()
+        //         .one(&txn)
+        //         .await?
+        //         .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
+        //     objs.extend(incoming_sinks.into_iter().map(|id| PartialObject {
+        //         oid: id as _,
+        //         obj_type: ObjectType::Sink,
+        //         ..Default::default()
+        //     }));
+        // }
+
         for obj in objs {
             match obj.obj_type {
                 ObjectType::Table => rename_relation_ref!(Table, table, table_id, obj.oid),
