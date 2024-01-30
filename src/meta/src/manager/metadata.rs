@@ -419,6 +419,17 @@ impl MetadataManager {
         }
     }
 
+    pub async fn count_streaming_job(&self) -> MetaResult<usize> {
+        match self {
+            MetadataManager::V1(mgr) => Ok(mgr.fragment_manager.count_streaming_job().await),
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .list_streaming_job_states()
+                .await
+                .map(|x| x.len()),
+        }
+    }
+
     pub async fn drop_streaming_job_by_ids(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
         match self {
             MetadataManager::V1(mgr) => {
