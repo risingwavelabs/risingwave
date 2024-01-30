@@ -374,7 +374,7 @@ impl GlobalBarrierManagerContext {
 
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
-                    let mut info = if self.env.opts.enable_scale_in_when_recovery {
+                    let mut info = if !self.env.opts.disable_automatic_parallelism_control {
                         let info = self.resolve_actor_info().await;
                         let scaled = self.scale_actors(&info).await.inspect_err(|err| {
                             warn!(error = %err.as_report(), "scale actors failed");

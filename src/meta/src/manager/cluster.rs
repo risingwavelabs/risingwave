@@ -149,7 +149,7 @@ impl ClusterManager {
                     new_worker.worker_node.parallel_units.extend(parallel_units);
                 }
                 Ordering::Greater => {
-                    if self.env.opts.enable_scale_in_when_recovery {
+                    if !self.env.opts.disable_automatic_parallelism_control {
                         // Handing over to the subsequent recovery loop for a forced reschedule.
                         tracing::info!(
                             "worker {} parallelism reduced from {} to {}",
