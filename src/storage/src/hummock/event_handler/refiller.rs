@@ -268,6 +268,17 @@ impl CacheRefiller {
     pub fn last_new_pinned_version(&self) -> Option<&PinnedVersion> {
         self.queue.back().map(|item| &item.event.new_pinned_version)
     }
+
+    pub fn clear(&mut self) -> Option<CacheRefillerEvent> {
+        let Some(last_item) = self.queue.pop_back() else {
+            return None;
+        };
+        let mut event = last_item.event;
+        while let Some(item) = self.queue.pop_back() {
+            event.pinned_version = item.event.pinned_version;
+        }
+        Some(event)
+    }
 }
 
 impl CacheRefiller {

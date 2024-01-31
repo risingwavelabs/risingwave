@@ -408,6 +408,49 @@ impl HummockEventHandler {
         );
         self.uploader.clear();
 
+        if let Some(CacheRefillerEvent {
+            pinned_version,
+            new_pinned_version,
+        }) = self.refiller.clear()
+        {
+            self.apply_version_update(pinned_version, new_pinned_version);
+        }
+
+        let mce = self.uploader.max_committed_epoch();
+
+        if mce < prev_epoch {
+            while self
+                .refiller
+                .last_new_pinned_version()
+                .map(|version| version.max_committed_epoch())
+                .unwrap_or(mce)
+                < prev_epoch
+            {
+                let version_update = self
+                    .version_update_rx
+                    .recv()
+                    .await
+                    .expect("should not be empty");
+                self.handle_version_update(version_update);
+            }
+            let CacheRefillerEvent {
+                pinned_version,
+                new_pinned_version,
+            } = self
+                .refiller
+                .clear()
+                .expect("must have some version update to raise the mce");
+            self.apply_version_update(pinned_version, new_pinned_version);
+        }
+
+        assert!(self.uploader.max_committed_epoch() >= prev_epoch);
+        if self.uploader.max_committed_epoch() > prev_epoch {
+            warn!(
+                mce = self.uploader.max_committed_epoch(),
+                prev_epoch, "mce higher than clear prev_epoch"
+            );
+        }
+
         for (epoch, result_sender) in self.pending_sync_requests.extract_if(|_, _| true) {
             send_sync_result(
                 result_sender,
