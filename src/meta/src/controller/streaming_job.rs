@@ -492,17 +492,6 @@ impl CatalogController {
             return Err(MetaError::permission_denied("table version is stale"));
         }
 
-        // let parallelism = match default_parallelism {
-        //     None => StreamingParallelism(PbTableParallelism {
-        //         parallelism: Some(PbParallelism::Auto(AutoParallelism {})),
-        //     }),
-        //     Some(n) => StreamingParallelism(PbTableParallelism {
-        //         parallelism: Some(PbParallelism::Fixed(FixedParallelism {
-        //             parallelism: n.get() as u32,
-        //         })),
-        //     }),
-        // };
-
         let parallelism = match default_parallelism {
             None => StreamingParallelism::Auto,
             Some(n) => StreamingParallelism::Fixed(n.get() as _),
@@ -1004,9 +993,6 @@ impl CatalogController {
 
                 let status = ActorStatus::from(PbActorState::try_from(state).unwrap());
                 let parallel_unit_id = parallel_unit.unwrap().id;
-
-                //                let status = actor_status.get_state().unwrap().into();
-                // let parallel_unit_id = actor_status.get_parallel_unit().unwrap().id;
 
                 let splits = actor_splits
                     .get(&actor_id)
