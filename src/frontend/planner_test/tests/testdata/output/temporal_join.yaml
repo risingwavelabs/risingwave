@@ -107,12 +107,13 @@
     StreamMaterialize { columns: [k, x1, x2, a1, b1, stream._row_id(hidden), version2.k(hidden)], stream_key: [stream._row_id, k], pk_columns: [stream._row_id, k], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(stream.k, stream._row_id) }
       └─StreamTemporalJoin { type: Inner, predicate: stream.k = version2.k, output: [stream.k, version1.x1, version2.x2, stream.a1, stream.b1, stream._row_id, version2.k] }
-        ├─StreamTemporalJoin { type: Inner, predicate: stream.k = version1.k, output: [stream.k, stream.a1, stream.b1, version1.x1, stream._row_id, version1.k] }
-        │ ├─StreamExchange { dist: HashShard(stream.k) }
-        │ │ └─StreamFilter { predicate: (stream.a1 < 10:Int32) }
-        │ │   └─StreamTableScan { table: stream, columns: [stream.k, stream.a1, stream.b1, stream._row_id], pk: [stream._row_id], dist: UpstreamHashShard(stream._row_id) }
-        │ └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(version1.k) }
-        │   └─StreamTableScan { table: version1, columns: [version1.k, version1.x1], pk: [version1.k], dist: UpstreamHashShard(version1.k) }
+        ├─StreamExchange { dist: HashShard(stream.k) }
+        │ └─StreamTemporalJoin { type: Inner, predicate: stream.k = version1.k, output: [stream.k, stream.a1, stream.b1, version1.x1, stream._row_id, version1.k] }
+        │   ├─StreamExchange { dist: HashShard(stream.k) }
+        │   │ └─StreamFilter { predicate: (stream.a1 < 10:Int32) }
+        │   │   └─StreamTableScan { table: stream, columns: [stream.k, stream.a1, stream.b1, stream._row_id], pk: [stream._row_id], dist: UpstreamHashShard(stream._row_id) }
+        │   └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(version1.k) }
+        │     └─StreamTableScan { table: version1, columns: [version1.k, version1.x1], pk: [version1.k], dist: UpstreamHashShard(version1.k) }
         └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(version2.k) }
           └─StreamTableScan { table: version2, columns: [version2.k, version2.x2], pk: [version2.k], dist: UpstreamHashShard(version2.k) }
 - name: multi-way temporal join with different keys

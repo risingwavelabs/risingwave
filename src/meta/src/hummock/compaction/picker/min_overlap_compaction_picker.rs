@@ -377,9 +377,9 @@ impl NonOverlapSubLevelPicker {
                         let start_idx = actual_sst_ids
                             .iter()
                             .position(|sst_id| sst_id == expected_sst_ids.first().unwrap());
-                        if start_idx.is_none()
-                            || actual_sst_ids[start_idx.unwrap()..] != expected_sst_ids
-                        {
+                        if start_idx.map_or(true, |idx| {
+                            actual_sst_ids[idx..idx + expected_sst_ids.len()] != expected_sst_ids
+                        }) {
                             // Print SstableInfo for `actual_sst_ids`
                             let mut actual_sst_infos = String::new();
                             ssts.iter().for_each(|s| {

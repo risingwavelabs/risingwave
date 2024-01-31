@@ -185,7 +185,7 @@ where
         let mut snapshot_read_epoch;
 
         // Keep track of rows from the snapshot.
-        let mut total_snapshot_processed_rows: u64 = 0;
+        let mut total_snapshot_processed_rows: u64 = backfill_state.get_snapshot_row_count();
 
         // Arrangement Backfill Algorithm:
         //
@@ -278,9 +278,8 @@ where
                                         // mark.
                                         for chunk in upstream_chunk_buffer.drain(..) {
                                             let chunk_cardinality = chunk.cardinality() as u64;
-                                            cur_barrier_snapshot_processed_rows +=
+                                            cur_barrier_upstream_processed_rows +=
                                                 chunk_cardinality;
-                                            total_snapshot_processed_rows += chunk_cardinality;
                                             yield Message::Chunk(mapping_chunk(
                                                 chunk,
                                                 &self.output_indices,
@@ -290,6 +289,8 @@ where
                                         break 'backfill_loop;
                                     }
                                     Some((vnode, chunk)) => {
+                                        let chunk_cardinality = chunk.cardinality() as u64;
+
                                         // Raise the current position.
                                         // As snapshot read streams are ordered by pk, so we can
                                         // just use the last row to update `current_pos`.
@@ -298,9 +299,9 @@ where
                                             &chunk,
                                             &pk_in_output_indices,
                                             &mut backfill_state,
+                                            chunk_cardinality,
                                         )?;
 
-                                        let chunk_cardinality = chunk.cardinality() as u64;
                                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
                                         total_snapshot_processed_rows += chunk_cardinality;
                                         let chunk = Message::Chunk(mapping_chunk(
@@ -354,6 +355,7 @@ where
                     })
                 })) {
                     if let Some(chunk) = chunk {
+                        let chunk_cardinality = chunk.cardinality() as u64;
                         // Raise the current position.
                         // As snapshot read streams are ordered by pk, so we can
                         // just use the last row to update `current_pos`.
@@ -362,9 +364,9 @@ where
                             &chunk,
                             &pk_in_output_indices,
                             &mut backfill_state,
+                            chunk_cardinality,
                         )?;
 
-                        let chunk_cardinality = chunk.cardinality() as u64;
                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
                         total_snapshot_processed_rows += chunk_cardinality;
                         yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
@@ -372,7 +374,6 @@ where
                 }
 
                 // consume upstream buffer chunk
-                let upstream_chunk_buffer_is_empty = upstream_chunk_buffer.is_empty();
                 for chunk in upstream_chunk_buffer.drain(..) {
                     cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
                     // FIXME: Replace with `snapshot_is_processed`
@@ -395,11 +396,7 @@ where
                     upstream_table.write_chunk(chunk);
                 }
 
-                if upstream_chunk_buffer_is_empty {
-                    upstream_table.commit_no_data_expected(barrier.epoch)
-                } else {
-                    upstream_table.commit(barrier.epoch).await?;
-                }
+                upstream_table.commit(barrier.epoch).await?;
 
                 self.metrics
                     .arrangement_backfill_snapshot_read_row_count
@@ -585,8 +582,10 @@ where
             let backfill_progress = backfill_state.get_progress(&vnode)?;
             let current_pos = match backfill_progress {
                 BackfillProgressPerVnode::NotStarted => None,
-                BackfillProgressPerVnode::Completed(current_pos)
-                | BackfillProgressPerVnode::InProgress(current_pos) => Some(current_pos.clone()),
+                BackfillProgressPerVnode::Completed { current_pos, .. }
+                | BackfillProgressPerVnode::InProgress { current_pos, .. } => {
+                    Some(current_pos.clone())
+                }
             };
 
             let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos.clone());
