@@ -582,18 +582,15 @@ impl CatalogController {
     ) -> MetaResult<Vec<ObjectId>> {
         let inner = self.inner.read().await;
 
-        let fragment_jobs: Vec<(FragmentId, ObjectId)> = Fragment::find()
+        let object_ids: Vec<ObjectId> = Fragment::find()
             .select_only()
-            .columns([fragment::Column::FragmentId, fragment::Column::JobId])
+            .column(fragment::Column::JobId)
             .filter(fragment::Column::FragmentId.is_in(fragment_ids))
             .into_tuple()
             .all(&inner.db)
             .await?;
 
-        Ok(fragment_jobs
-            .into_iter()
-            .map(|(_, job_id)| job_id)
-            .collect())
+        Ok(object_ids)
     }
 
     pub async fn get_job_fragments_by_id(&self, job_id: ObjectId) -> MetaResult<PbTableFragments> {
