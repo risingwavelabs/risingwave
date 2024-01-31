@@ -223,6 +223,15 @@ pub(super) struct OverPartitionStats {
     pub right_miss_count: u64,
 }
 
+/// [`AffectedRange`] represents a range of keys that are affected by a delta.
+/// The [`CacheKey`] fields are keys in the partition range cache + delta, which is
+/// represented by [`DeltaBTreeMap`].
+///
+/// - `first_curr_key` and `last_curr_key` are the current keys of the first and the last
+///  windows affected. They are used to pinpoint the bounds where state needs to be updated.
+/// - `first_frame_start` and `last_frame_end` are the frame start and end of the first and
+///  the last windows affected. They are used to pinpoint the bounds where state needs to be
+///  included for computing the new state.
 #[derive(Debug, Educe)]
 #[educe(Clone, Copy)]
 pub(super) struct AffectedRange<'cache> {
