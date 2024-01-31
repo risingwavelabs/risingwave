@@ -37,8 +37,6 @@ impl Binder {
             }
         };
 
-        println!("[bind_column] current context: {:#?}", self.udf_context);
-
         // Special check for sql udf
         // Note: The check in `bind_column` is to inline the identifiers,
         // which, in the context of sql udf, will NOT be perceived as normal

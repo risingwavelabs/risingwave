@@ -244,7 +244,7 @@ impl Binder {
 
                     // Only the top-most sql udf binding should unset the flag
                     // Otherwise the subseqent binding may not be able to
-                    // find the corresponding context
+                    // find the corresponding context, consider the following example:
                     // e.g., `select add_wrapper(a INT, b INT) returns int language sql as 'select add(a, b) + a';`
                     // The inner `add` should not unset the flag, otherwise the `a` will be treated as
                     // a normal column, which is then invalid in this context.
