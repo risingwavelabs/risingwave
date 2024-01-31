@@ -34,7 +34,9 @@ use tracing::error;
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::CompactorContext;
-use crate::hummock::compactor::{check_flush_result, CompactOutput, Compactor};
+use crate::hummock::compactor::{
+    check_flush_result, enable_block_based_filter, CompactOutput, Compactor,
+};
 use crate::hummock::event_handler::uploader::UploadTaskPayload;
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::iterator::{
@@ -46,8 +48,8 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator, GetObjectId,
-    HummockError, HummockResult, SstableBuilderOptions, SstableObjectIdManagerRef,
+    CachePolicy, CompactionDeleteRangeIterator, GetObjectId, HummockError, HummockResult,
+    SstableBuilderOptions, SstableObjectIdManagerRef,
 };
 use crate::mem_table::ImmutableMemtable;
 use crate::opts::StorageOpts;
@@ -154,7 +156,8 @@ async fn compact_shared_buffer(
     let mut compact_success = true;
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
-    let use_block_based_filter = BlockedXor16FilterBuilder::is_kv_count_too_large(total_key_count);
+    let use_block_based_filter =
+        enable_block_based_filter(context.clone(), total_key_count as u64, 0);
 
     let table_vnode_partition = if existing_table_ids.len() == 1 {
         let table_id = existing_table_ids.iter().next().unwrap();

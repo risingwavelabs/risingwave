@@ -35,7 +35,7 @@ use tokio::sync::oneshot::Receiver;
 
 use super::iterator::MonitoredCompactorIterator;
 use super::task_progress::TaskProgress;
-use super::{CompactionStatistics, TaskConfig};
+use super::{enable_block_based_filter, CompactionStatistics, TaskConfig};
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
@@ -51,9 +51,8 @@ use crate::hummock::iterator::{
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator, CompressionAlgorithm,
-    GetObjectId, HummockResult, MonotonicDeleteEvent, SstableBuilderOptions,
-    SstableDeleteRangeIterator, SstableStoreRef,
+    CachePolicy, CompactionDeleteRangeIterator, CompressionAlgorithm, GetObjectId, HummockResult,
+    MonotonicDeleteEvent, SstableBuilderOptions, SstableDeleteRangeIterator, SstableStoreRef,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 pub struct CompactorRunner {
@@ -86,7 +85,7 @@ impl CompactorRunner {
             .map(|sst| sst.total_key_count)
             .sum::<u64>() as usize;
         let use_block_based_filter =
-            BlockedXor16FilterBuilder::is_kv_count_too_large(kv_count) || task.target_level > 0;
+            enable_block_based_filter(context.clone(), kv_count as u64, task.target_level);
 
         let key_range = KeyRange {
             left: Bytes::copy_from_slice(task.splits[split_index].get_left()),
