@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -310,15 +310,8 @@ impl TraceSpan {
         Self::new_global_op(Operation::DropLocalStorage, storage_type)
     }
 
-    pub fn new_flush_span(
-        delete_range: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        storage_type: StorageType,
-    ) -> MayTraceSpan {
-        let delete_range = delete_range
-            .into_iter()
-            .map(|(k, v)| (k.map(Bytes::into), v.map(Bytes::into)))
-            .collect();
-        Self::new_global_op(Operation::Flush(delete_range), storage_type)
+    pub fn new_flush_span(storage_type: StorageType) -> MayTraceSpan {
+        Self::new_global_op(Operation::Flush, storage_type)
     }
 
     pub fn new_try_flush_span(storage_type: StorageType) -> MayTraceSpan {

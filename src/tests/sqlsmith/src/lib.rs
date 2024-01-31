@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,8 +37,8 @@ use risingwave_sqlparser::parser::Parser;
 use crate::sql_gen::SqlGenerator;
 
 pub mod reducer;
-pub mod runner;
 mod sql_gen;
+pub mod test_runners;
 mod utils;
 pub mod validation;
 pub use validation::is_permissible_error;
@@ -274,6 +274,7 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                                     options: [],
                                 },
                             ],
+                            wildcard_idx: None,
                             constraints: [],
                             with_options: [],
                             source_schema: None,
@@ -319,6 +320,7 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                                     options: [],
                                 },
                             ],
+                            wildcard_idx: None,
                             constraints: [],
                             with_options: [],
                             source_schema: None,
@@ -375,6 +377,7 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                                     options: [],
                                 },
                             ],
+                            wildcard_idx: None,
                             constraints: [],
                             with_options: [],
                             source_schema: None,
@@ -507,6 +510,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                     ],
                                 },
                             ],
+                            wildcard_idx: None,
                             constraints: [],
                             with_options: [],
                             source_schema: None,
@@ -559,6 +563,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                     ],
                                 },
                             ],
+                            wildcard_idx: None,
                             constraints: [],
                             with_options: [],
                             source_schema: None,
@@ -618,6 +623,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                     ],
                                 },
                             ],
+                            wildcard_idx: None,
                             constraints: [],
                             with_options: [],
                             source_schema: None,
@@ -695,6 +701,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                     ],
                                 },
                             ],
+                            wildcard_idx: None,
                             constraints: [],
                             with_options: [],
                             source_schema: None,

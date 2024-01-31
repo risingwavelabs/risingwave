@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -70,9 +70,9 @@ mod flow_control;
 mod hash_agg;
 pub mod hash_join;
 mod hop_window;
+mod join;
 mod lookup;
 mod lookup_union;
-mod managed_state;
 mod merge;
 mod mview;
 mod no_op;
@@ -90,6 +90,7 @@ mod sort_buffer;
 pub mod source;
 mod stateless_simple_agg;
 mod stream_reader;
+mod subscription;
 pub mod subtask;
 mod temporal_join;
 mod top_n;
@@ -122,6 +123,7 @@ pub use flow_control::FlowControlExecutor;
 pub use hash_agg::HashAggExecutor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
+pub use join::JoinType;
 pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
 pub use merge::MergeExecutor;
@@ -139,6 +141,7 @@ pub use sink::SinkExecutor;
 pub use sort::*;
 pub use source::*;
 pub use stateless_simple_agg::StatelessSimpleAggExecutor;
+pub use subscription::SubscriptionExecutor;
 pub use temporal_join::*;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -303,7 +303,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (3, 1000),
@@ -404,7 +404,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (0, 4),
@@ -517,7 +517,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::<_, true>::new(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (0, 4),
@@ -629,7 +629,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (3, 4),
@@ -861,7 +861,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (1, 3),
@@ -945,7 +945,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (1, 3),
@@ -1005,7 +1005,7 @@ mod tests {
             let top_n_executor_after_recovery = Box::new(
                 TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (1, 3),
@@ -1139,7 +1139,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties_for_test(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (0, 3),
@@ -1295,7 +1295,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties_for_test(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (0, 3),
@@ -1358,7 +1358,7 @@ mod tests {
             let top_n_executor_after_recovery = Box::new(
                 TopNExecutor::new_with_ties_for_test(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (0, 3),

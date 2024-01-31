@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{
     MetaSnapshot, Relation, RelationGroup, SubscribeResponse, SubscribeType,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::Mutex;
 use tonic::Status;
@@ -265,7 +266,7 @@ impl NotificationManager {
         let mut core_guard = self.core.lock().await;
         core_guard.local_senders.retain(|sender| {
             if let Err(err) = sender.send(notification.clone()) {
-                tracing::warn!("Failed to notify local subscriber. {}", err);
+                tracing::warn!(error = %err.as_report(), "Failed to notify local subscriber");
                 return false;
             }
             true

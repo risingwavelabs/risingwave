@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,21 +20,18 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, Field, TableId};
-use risingwave_common::constants::log_store::{
-    EPOCH_COLUMN_INDEX, KV_LOG_STORE_PREDEFINED_COLUMNS, SEQ_ID_COLUMN_INDEX,
-};
+use risingwave_common::constants::log_store::v1::{KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
+use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
     SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
     SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use tracing::info;
 
 use super::derive::{derive_columns, derive_pk};
 use super::generic::GenericPlanRef;
@@ -106,17 +103,26 @@ impl StreamSink {
             format_desc,
         )?;
 
+        let unsupported_sink =
+            |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)));
+
         // check and ensure that the sink connector is specified and supported
         match sink.properties.get(CONNECTOR_TYPE_KEY) {
-            Some(connector) => match_sink_name_str!(
-                connector.to_lowercase().as_str(),
-                SinkType,
-                Ok(()),
-                |other| Err(SinkError::Config(anyhow!(
-                    "unsupported sink type {}",
-                    other
-                )))
-            )?,
+            Some(connector) => {
+                match_sink_name_str!(
+                    connector.to_lowercase().as_str(),
+                    SinkType,
+                    {
+                        // the table sink is created by with properties
+                        if connector == TABLE_SINK && sink.target_table.is_none() {
+                            unsupported_sink(TABLE_SINK)
+                        } else {
+                            Ok(())
+                        }
+                    },
+                    |other: &str| unsupported_sink(other)
+                )?;
+            }
             None => {
                 return Err(
                     SinkError::Config(anyhow!("connector not specified when create sink")).into(),
@@ -150,13 +156,6 @@ impl StreamSink {
             Distribution::Single => RequiredDist::single(),
             _ => {
                 match properties.get("connector") {
-                    Some(s) if s == "deltalake" => {
-                        // iceberg with multiple parallelism will fail easily with concurrent commit
-                        // on metadata
-                        // TODO: reset iceberg sink to have multiple parallelism
-                        info!("setting iceberg sink parallelism to singleton");
-                        RequiredDist::single()
-                    }
                     Some(s) if s == "jdbc" && sink_type == SinkType::Upsert => {
                         if sink_type == SinkType::Upsert && downstream_pk.is_empty() {
                             return Err(ErrorCode::SinkError(Box::new(Error::new(
@@ -352,10 +351,10 @@ impl StreamSink {
             value_indices.push(indice);
         }
 
-        // The table's pk is composed of `epoch` and `seq_id`.
-        table_catalog_builder.add_order_column(EPOCH_COLUMN_INDEX, OrderType::ascending());
-        table_catalog_builder
-            .add_order_column(SEQ_ID_COLUMN_INDEX, OrderType::ascending_nulls_last());
+        for (i, ordering) in PK_ORDERING.iter().enumerate() {
+            table_catalog_builder.add_order_column(i, *ordering);
+        }
+
         let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
 
         let payload_indices = table_catalog_builder.extend_columns(&self.sink_desc().columns);

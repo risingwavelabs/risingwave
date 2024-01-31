@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use risingwave_object_store::object::ObjectError;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::error::RecvError;
 
 // TODO(error-handling): should prefer use error types than strings.
@@ -152,7 +153,7 @@ impl HummockError {
 
 impl From<prost::DecodeError> for HummockError {
     fn from(error: prost::DecodeError) -> Self {
-        HummockErrorInner::DecodeError(error.to_string()).into()
+        HummockErrorInner::DecodeError(error.to_report_string()).into()
     }
 }
 

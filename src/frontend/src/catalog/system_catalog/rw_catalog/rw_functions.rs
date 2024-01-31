@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -70,7 +70,7 @@ impl SysCatalogReaderImpl {
                         ))),
                         Some(ScalarImpl::Int32(function.return_type.to_oid())),
                         Some(ScalarImpl::Utf8(function.language.clone().into())),
-                        Some(ScalarImpl::Utf8(function.link.clone().into())),
+                        function.link.clone().map(|s| ScalarImpl::Utf8(s.into())),
                         Some(ScalarImpl::Utf8(
                             get_acl_items(
                                 &Object::FunctionId(function.id.function_id()),

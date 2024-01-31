@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,11 +26,12 @@ use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
-    EqJoinPredicate, EqJoinPredicateDisplay, LogicalScan, PlanBase, PlanTreeNodeUnary, ToBatchPb,
-    ToDistributedBatch, ToLocalBatch,
+    EqJoinPredicate, EqJoinPredicateDisplay, LogicalScan, PlanBase, PlanTreeNodeUnary,
+    ToDistributedBatch, ToLocalBatch, TryToBatchPb,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::PlanRef;
+use crate::scheduler::SchedulerResult;
 use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -200,9 +201,9 @@ impl ToDistributedBatch for BatchLookupJoin {
     }
 }
 
-impl ToBatchPb for BatchLookupJoin {
-    fn to_batch_prost_body(&self) -> NodeBody {
-        if self.distributed_lookup {
+impl TryToBatchPb for BatchLookupJoin {
+    fn try_to_batch_prost_body(&self) -> SchedulerResult<NodeBody> {
+        Ok(if self.distributed_lookup {
             NodeBody::DistributedLookupJoin(DistributedLookupJoinNode {
                 join_type: self.core.join_type as i32,
                 condition: self
@@ -222,7 +223,7 @@ impl ToBatchPb for BatchLookupJoin {
                     .into_iter()
                     .map(|a| a as _)
                     .collect(),
-                inner_side_table_desc: Some(self.right_table_desc.to_protobuf()),
+                inner_side_table_desc: Some(self.right_table_desc.try_to_protobuf()?),
                 inner_side_column_ids: self
                     .right_output_column_ids
                     .iter()
@@ -252,7 +253,7 @@ impl ToBatchPb for BatchLookupJoin {
                     .into_iter()
                     .map(|a| a as _)
                     .collect(),
-                inner_side_table_desc: Some(self.right_table_desc.to_protobuf()),
+                inner_side_table_desc: Some(self.right_table_desc.try_to_protobuf()?),
                 inner_side_vnode_mapping: vec![], // To be filled in at local.rs
                 inner_side_column_ids: self
                     .right_output_column_ids
@@ -264,7 +265,7 @@ impl ToBatchPb for BatchLookupJoin {
                 null_safe: self.eq_join_predicate.null_safes(),
                 lookup_prefix_len: self.lookup_prefix_len as u32,
             })
-        }
+        })
     }
 }
 

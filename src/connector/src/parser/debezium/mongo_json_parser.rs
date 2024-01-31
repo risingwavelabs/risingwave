@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -63,7 +63,8 @@ impl DebeziumMongoJsonParser {
             })?
             .clone();
 
-        if rw_columns.len() != 2 {
+        // _rw_{connector}_file/partition & _rw_{connector}_offset are created automatically.
+        if rw_columns.iter().filter(|desc| desc.is_visible()).count() != 2 {
             return Err(RwError::from(ProtocolError(
                 "Debezuim Mongo needs no more columns except `_id` and `payload` in table".into(),
             )));

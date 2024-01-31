@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use assert_matches::assert_matches;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::HummockSnapshot;
@@ -28,6 +28,7 @@ use tokio::sync::{oneshot, watch, RwLock};
 use super::notifier::{BarrierInfo, Notifier};
 use super::{Command, Scheduled};
 use crate::hummock::HummockManagerRef;
+use crate::model::ActorId;
 use crate::rpc::metrics::MetaMetrics;
 use crate::{MetaError, MetaResult};
 
@@ -92,8 +93,12 @@ impl ScheduledQueue {
         // command and execute it when the cluster is ready to clean up it.
         // TODO: this is just a workaround to allow dropping streaming jobs when the cluster is under recovery,
         // we need to refine it when catalog and streaming metadata can be handled in a transactional way.
-        if let QueueStatus::Blocked(reason) = &self.status &&
-            !matches!(scheduled.command, Command::DropStreamingJobs(_) | Command::CancelStreamingJob(_)) {
+        if let QueueStatus::Blocked(reason) = &self.status
+            && !matches!(
+                scheduled.command,
+                Command::DropStreamingJobs(_) | Command::CancelStreamingJob(_)
+            )
+        {
             return Err(MetaError::unavailable(reason));
         }
         self.queue.push_back(scheduled);
@@ -275,20 +280,17 @@ impl BarrierScheduler {
 
         for (injected_rx, collect_rx, finish_rx) in contexts {
             // Wait for this command to be injected, and record the result.
-            let info = injected_rx
-                .await
-                .map_err(|e| anyhow!("failed to inject barrier: {}", e))?;
+            let info = injected_rx.await.ok().context("failed to inject barrier")?;
             infos.push(info);
 
             // Throw the error if it occurs when collecting this barrier.
             collect_rx
                 .await
-                .map_err(|e| anyhow!("failed to collect barrier: {}", e))??;
+                .ok()
+                .context("failed to collect barrier")??;
 
             // Wait for this command to be finished.
-            finish_rx
-                .await
-                .map_err(|e| anyhow!("failed to finish command: {}", e))?;
+            finish_rx.await.ok().context("failed to finish command")?;
         }
 
         Ok(infos)
@@ -391,27 +393,27 @@ impl ScheduledBarriers {
         queue.mark_ready();
     }
 
-    /// Try to pre apply drop scheduled command and return the table ids of dropped streaming jobs.
+    /// Try to pre apply drop and cancel scheduled command and return them if any.
     /// It should only be called in recovery.
-    pub(super) async fn pre_apply_drop_scheduled(&self) -> HashSet<TableId> {
-        let mut to_drop_tables = HashSet::new();
+    pub(super) async fn pre_apply_drop_cancel_scheduled(&self) -> (Vec<ActorId>, HashSet<TableId>) {
         let mut queue = self.inner.queue.write().await;
         assert_matches!(queue.status, QueueStatus::Blocked(_));
+        let (mut drop_table_ids, mut cancel_table_ids) = (vec![], HashSet::new());
 
         while let Some(Scheduled {
             notifiers, command, ..
         }) = queue.queue.pop_front()
         {
             match command {
-                Command::DropStreamingJobs(table_ids) => {
-                    to_drop_tables.extend(table_ids);
+                Command::DropStreamingJobs(actor_ids) => {
+                    drop_table_ids.extend(actor_ids);
                 }
                 Command::CancelStreamingJob(table_fragments) => {
                     let table_id = table_fragments.table_id();
-                    to_drop_tables.insert(table_id);
+                    cancel_table_ids.insert(table_id);
                 }
                 _ => {
-                    unreachable!("only drop streaming jobs should be buffered");
+                    unreachable!("only drop and cancel streaming jobs should be buffered");
                 }
             }
             notifiers.into_iter().for_each(|mut notify| {
@@ -419,7 +421,7 @@ impl ScheduledBarriers {
                 notify.notify_finished();
             });
         }
-        to_drop_tables
+        (drop_table_ids, cancel_table_ids)
     }
 
     /// Whether the barrier(checkpoint = true) should be injected.
@@ -427,6 +429,7 @@ impl ScheduledBarriers {
         self.inner
             .num_uncheckpointed_barrier
             .load(Ordering::Relaxed)
+            + 1
             >= self.inner.checkpoint_frequency.load(Ordering::Relaxed)
             || self.inner.force_checkpoint.load(Ordering::Relaxed)
     }

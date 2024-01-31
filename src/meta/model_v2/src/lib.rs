@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@ pub mod fragment;
 pub mod function;
 pub mod hummock_pinned_snapshot;
 pub mod hummock_pinned_version;
+pub mod hummock_sequence;
 pub mod hummock_version_delta;
 pub mod hummock_version_stats;
 pub mod index;
@@ -74,12 +75,13 @@ pub type CompactionTaskId = i64;
 pub type HummockSstableObjectId = i64;
 
 pub type FragmentId = i32;
-
 pub type ActorId = i32;
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum JobStatus {
+    #[sea_orm(string_value = "INITIAL")]
+    Initial,
     #[sea_orm(string_value = "CREATING")]
     Creating,
     #[sea_orm(string_value = "CREATED")]
@@ -89,6 +91,7 @@ pub enum JobStatus {
 impl From<JobStatus> for PbStreamJobStatus {
     fn from(job_status: JobStatus) -> Self {
         match job_status {
+            JobStatus::Initial => Self::Unspecified,
             JobStatus::Creating => Self::Creating,
             JobStatus::Created => Self::Created,
         }
@@ -99,6 +102,7 @@ impl From<JobStatus> for PbStreamJobStatus {
 impl From<JobStatus> for PbStreamJobState {
     fn from(status: JobStatus) -> Self {
         match status {
+            JobStatus::Initial => PbStreamJobState::Initial,
             JobStatus::Creating => PbStreamJobState::Creating,
             JobStatus::Created => PbStreamJobState::Created,
         }

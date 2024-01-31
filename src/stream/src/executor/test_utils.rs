@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -487,7 +487,7 @@ pub mod agg_executor {
             version: PbAggNodeVersion::Max,
 
             input,
-            actor_ctx: ActorContext::create(123),
+            actor_ctx: ActorContext::for_test(123),
             info,
 
             extreme_cache_size,

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::pin::{pin, Pin};
+use std::pin::Pin;
 use std::sync::Arc;
 
 use either::Either;
@@ -29,9 +29,10 @@ use risingwave_connector::parser::{
     DebeziumParser, EncodingProperties, JsonProperties, ProtocolProperties,
     SourceStreamChunkBuilder, SpecificParserConfig,
 };
-use risingwave_connector::source::external::CdcOffset;
+use risingwave_connector::source::cdc::external::CdcOffset;
 use risingwave_connector::source::{SourceColumnDesc, SourceContext};
 use risingwave_storage::StateStore;
+use rw_futures_util::pausable;
 
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::cdc::state::CdcBackfillState;
@@ -119,14 +120,10 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // `None` means it starts from the beginning.
         let mut current_pk_pos: Option<OwnedRow>;
 
-        tracing::info!(
-            upstream_table_id,
-            upstream_table_name,
-            ?pk_in_output_indices
-        );
-
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
+
+        let mut paused = first_barrier.is_pause_on_startup();
 
         // Check whether this parallelism has been assigned splits,
         // if not, we should bypass the backfill directly.
@@ -164,6 +161,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         tracing::info!(
             upstream_table_id,
             upstream_table_name,
+            initial_binlog_offset = ?last_binlog_offset,
             ?current_pk_pos,
             is_finished = state.is_finished,
             snapshot_row_count = total_snapshot_row_count,
@@ -224,8 +222,13 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 let left_upstream = upstream.by_ref().map(Either::Left);
 
                 let args = SnapshotReadArgs::new_for_cdc(current_pk_pos.clone(), self.chunk_size);
-                let right_snapshot =
-                    pin!(upstream_table_reader.snapshot_read(args).map(Either::Right));
+
+                let (right_snapshot, valve) =
+                    pausable(upstream_table_reader.snapshot_read(args).map(Either::Right));
+
+                if paused {
+                    valve.pause();
+                }
 
                 // Prefer to select upstream, so we can stop snapshot stream when barrier comes.
                 let backfill_stream =
@@ -243,6 +246,21 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         Either::Left(msg) => {
                             match msg? {
                                 Message::Barrier(barrier) => {
+                                    if let Some(mutation) = barrier.mutation.as_deref() {
+                                        use crate::executor::Mutation;
+                                        match mutation {
+                                            Mutation::Pause => {
+                                                paused = true;
+                                                valve.pause();
+                                            }
+                                            Mutation::Resume => {
+                                                paused = false;
+                                                valve.resume();
+                                            }
+                                            _ => (),
+                                        }
+                                    }
+
                                     // If it is a barrier, switch snapshot and consume buffered
                                     // upstream chunk.
                                     // If no current_pos, means we did not process any snapshot yet.

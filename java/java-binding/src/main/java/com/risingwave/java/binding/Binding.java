@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +28,8 @@ public class Binding {
 
     public static native void tracingSlf4jEvent(
             String threadName, String name, int level, String message);
+
+    public static native boolean tracingSlf4jEventEnabled(int level);
 
     public static native int vnodeCount();
 
@@ -67,13 +69,15 @@ public class Binding {
 
     static native String iteratorGetStringValue(long pointer, int index);
 
-    static native java.sql.Timestamp iteratorGetTimestampValue(long pointer, int index);
+    static native java.time.LocalDateTime iteratorGetTimestampValue(long pointer, int index);
+
+    static native java.time.OffsetDateTime iteratorGetTimestamptzValue(long pointer, int index);
 
     static native java.math.BigDecimal iteratorGetDecimalValue(long pointer, int index);
 
-    static native java.sql.Time iteratorGetTimeValue(long pointer, int index);
+    static native java.time.LocalTime iteratorGetTimeValue(long pointer, int index);
 
-    static native java.sql.Date iteratorGetDateValue(long pointer, int index);
+    static native java.time.LocalDate iteratorGetDateValue(long pointer, int index);
 
     static native String iteratorGetIntervalValue(long pointer, int index);
 
@@ -85,6 +89,8 @@ public class Binding {
     static native Object iteratorGetArrayValue(long pointer, int index, Class<?> clazz);
 
     public static native boolean sendCdcSourceMsgToChannel(long channelPtr, byte[] msg);
+
+    public static native boolean sendCdcSourceErrorToChannel(long channelPtr, String errorMsg);
 
     public static native com.risingwave.java.binding.JniSinkWriterStreamRequest
             recvSinkWriterRequestFromChannel(long channelPtr);

@@ -1,0 +1,65 @@
+---
+version: "3"
+services:
+  risingwave-standalone:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: risingwave-standalone
+  etcd-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: etcd-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+
+  go-lang:
+    image: golang:bullseye
+    command: tail -f /dev/null
+    volumes:
+      - ./go:/go-client
+  python:
+    image: python:3.9.18-slim-bullseye
+    command: tail -f /dev/null
+    volumes:
+      - ./python:/python-client
+  java:
+    image: eclipse-temurin:11.0.21_9-jdk-jammy
+    command: tail -f /dev/null
+    volumes:
+      - ./java:/java-client
+  nodejs:
+    image: node:21.6.0-bullseye-slim
+    command: tail -f /dev/null
+    volumes:
+      - ./nodejs:/nodejs-client
+  php:
+    image: php-library
+    build: ./php
+    command: tail -f /dev/null
+    volumes:
+      - ./php:/php-client
+
+volumes:
+  risingwave-standalone:
+    external: false
+  etcd-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+  message_queue:
+    external: false
+name: risingwave-compose

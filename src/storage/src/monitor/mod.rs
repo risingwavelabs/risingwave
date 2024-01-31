@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +28,9 @@ pub use compactor_metrics::*;
 
 mod local_metrics;
 pub use local_metrics::*;
+
+mod hitmap;
+pub use hitmap::*;
 pub use risingwave_object_store::object::object_metrics::{
     ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
 };

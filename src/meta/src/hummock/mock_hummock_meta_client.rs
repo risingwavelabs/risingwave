@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,6 +40,7 @@ use risingwave_pb::hummock::{
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient};
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -119,7 +120,7 @@ impl MockHummockMetaClient {
 }
 
 fn mock_err(error: super::error::Error) -> RpcError {
-    anyhow!("mock error: {}", error).into()
+    anyhow!(error).context("mock error").into()
 }
 
 #[async_trait]
@@ -235,9 +236,9 @@ impl HummockMetaClient for MockHummockMetaClient {
         UnboundedSender<SubscribeCompactionEventRequest>,
         BoxStream<'static, CompactionEventItem>,
     )> {
-        let worker_node = self
+        let context_id = self
             .hummock_manager
-            .cluster_manager()
+            .metadata_manager()
             .add_worker_node(
                 WorkerType::Compactor,
                 HostAddress {
@@ -249,7 +250,6 @@ impl HummockMetaClient for MockHummockMetaClient {
             )
             .await
             .unwrap();
-        let context_id = worker_node.id;
         let _compactor_rx = self
             .hummock_manager
             .compactor_manager_ref_for_test()
@@ -327,7 +327,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                             )
                             .await
                         {
-                            tracing::error!("report compact_tack fail {e:?}");
+                            tracing::error!(error = %e.as_report(), "report compact_tack fail");
                         }
                     }
                 }

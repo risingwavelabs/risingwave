@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod big_query;
-pub mod blackhole;
 pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
@@ -21,19 +20,21 @@ pub mod coordinate;
 pub mod deltalake;
 pub mod doris;
 pub mod doris_starrocks_connector;
+pub mod elasticsearch;
 pub mod encoder;
 pub mod formatter;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
 pub mod log_store;
+pub mod mock_coordination_client;
 pub mod nats;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
 pub mod starrocks;
-pub mod table;
 pub mod test_sink;
+pub mod trivial;
 pub mod utils;
 pub mod writer;
 
@@ -46,7 +47,7 @@ use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
@@ -59,13 +60,14 @@ use thiserror::Error;
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
+use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
-use crate::sink::table::TABLE_SINK;
 use crate::sink::writer::SinkWriter;
 use crate::ConnectorParams;
 
+const BOUNDED_CHANNEL_SIZE: usize = 16;
 #[macro_export]
 macro_rules! for_all_sinks {
     ($macro:path $(, $arg:tt)*) => {
@@ -74,23 +76,21 @@ macro_rules! for_all_sinks {
                 { Redis, $crate::sink::redis::RedisSink },
                 { Kafka, $crate::sink::kafka::KafkaSink },
                 { Pulsar, $crate::sink::pulsar::PulsarSink },
-                { BlackHole, $crate::sink::blackhole::BlackHoleSink },
+                { BlackHole, $crate::sink::trivial::BlackHoleSink },
                 { Kinesis, $crate::sink::kinesis::KinesisSink },
                 { ClickHouse, $crate::sink::clickhouse::ClickHouseSink },
                 { Iceberg, $crate::sink::iceberg::IcebergSink },
                 { Nats, $crate::sink::nats::NatsSink },
-                { RemoteIceberg, $crate::sink::iceberg::RemoteIcebergSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
-                { DeltaLake, $crate::sink::remote::DeltaLakeSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
-                { DeltaLakeRust, $crate::sink::deltalake::DeltaLakeSink },
+                { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { Test, $crate::sink::test_sink::TestSink },
-                { Table, $crate::sink::table::TableSink }
+                { Table, $crate::sink::trivial::TableSink }
             }
             $(,$arg)*
         }
@@ -136,6 +136,7 @@ macro_rules! match_sink_name_str {
 
 pub const CONNECTOR_TYPE_KEY: &str = "connector";
 pub const SINK_TYPE_OPTION: &str = "type";
+pub const SINK_WITHOUT_BACKFILL: &str = "snapshot";
 pub const SINK_TYPE_APPEND_ONLY: &str = "append-only";
 pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
@@ -151,7 +152,6 @@ pub struct SinkParam {
     pub format_desc: Option<SinkFormatDesc>,
     pub db_name: String,
     pub sink_from_name: String,
-    pub target_table: Option<TableId>,
 }
 
 impl SinkParam {
@@ -183,7 +183,6 @@ impl SinkParam {
             format_desc,
             db_name: pb_param.db_name,
             sink_from_name: pb_param.sink_from_name,
-            target_table: pb_param.target_table.map(TableId::new),
         }
     }
 
@@ -199,7 +198,6 @@ impl SinkParam {
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
-            target_table: self.target_table.map(|table_id| table_id.table_id()),
         }
     }
 
@@ -225,7 +223,6 @@ impl From<SinkCatalog> for SinkParam {
             format_desc: sink_catalog.format_desc,
             db_name: sink_catalog.db_name,
             sink_from_name: sink_catalog.sink_from_name,
-            target_table: sink_catalog.target_table,
         }
     }
 }
@@ -271,8 +268,31 @@ pub struct SinkWriterParam {
     pub connector_params: ConnectorParams,
     pub executor_id: u64,
     pub vnode_bitmap: Option<Bitmap>,
-    pub meta_client: Option<MetaClient>,
+    pub meta_client: Option<SinkMetaClient>,
     pub sink_metrics: SinkMetrics,
+}
+
+#[derive(Clone)]
+pub enum SinkMetaClient {
+    MetaClient(MetaClient),
+    MockMetaClient(MockMetaClient),
+}
+
+impl SinkMetaClient {
+    pub async fn sink_coordinate_client(&self) -> SinkCoordinationRpcClientEnum {
+        match self {
+            SinkMetaClient::MetaClient(meta_client) => {
+                SinkCoordinationRpcClientEnum::SinkCoordinationRpcClient(
+                    meta_client.sink_coordinate_client().await,
+                )
+            }
+            SinkMetaClient::MockMetaClient(mock_meta_client) => {
+                SinkCoordinationRpcClientEnum::MockSinkCoordinationRpcClient(
+                    mock_meta_client.sink_coordinate_client(),
+                )
+            }
+        }
+    }
 }
 
 impl SinkWriterParam {
@@ -373,13 +393,10 @@ impl SinkImpl {
         param.properties.remove(PRIVATE_LINK_TARGET_KEY);
         param.properties.remove(CONNECTION_NAME_KEY);
 
-        let sink_type = if param.target_table.is_some() {
-            TABLE_SINK
-        } else {
-            param.properties.get(CONNECTOR_TYPE_KEY).ok_or_else(|| {
-                SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY))
-            })?
-        };
+        let sink_type = param
+            .properties
+            .get(CONNECTOR_TYPE_KEY)
+            .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)))?;
 
         match_sink_name_str!(
             sink_type.to_lowercase().as_str(),
@@ -392,6 +409,10 @@ impl SinkImpl {
                 )))
             }
         )
+    }
+
+    pub fn is_sink_into_table(&self) -> bool {
+        matches!(self, SinkImpl::Table(_))
     }
 }
 

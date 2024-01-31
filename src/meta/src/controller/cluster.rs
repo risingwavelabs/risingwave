@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect,
     TransactionTrait,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
@@ -268,7 +269,7 @@ impl ClusterController {
                 {
                     Ok(keys) => keys,
                     Err(err) => {
-                        tracing::warn!("Failed to load expire worker info from db: {}", err);
+                        tracing::warn!(error = %err.as_report(), "Failed to load expire worker info from db");
                         continue;
                     }
                 };
@@ -278,7 +279,7 @@ impl ClusterController {
                     .exec(&inner.db)
                     .await
                 {
-                    tracing::warn!("Failed to delete expire workers from db: {}", err);
+                    tracing::warn!(error = %err.as_report(), "Failed to delete expire workers from db");
                     continue;
                 }
 
@@ -883,6 +884,9 @@ impl ClusterControllerInner {
             .find_also_related(WorkerProperty)
             .one(&self.db)
             .await?;
+        if worker.is_none() {
+            return Ok(None);
+        }
         let extra_info = self.get_extra_info_checked(worker_id)?;
         Ok(worker.map(|(w, p)| WorkerInfo(w, p, extra_info).into()))
     }

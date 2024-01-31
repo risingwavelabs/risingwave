@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::default::Default;
+use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::ops::Bound;
 use std::sync::{Arc, LazyLock};
@@ -155,7 +156,7 @@ pub trait StateStoreWrite: StaticSendSync {
         kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
-    ) -> impl Future<Output = StorageResult<usize>> + Send + '_;
+    ) -> StorageResult<usize>;
 }
 
 #[derive(Default, Debug)]
@@ -235,10 +236,7 @@ pub trait LocalStateStore: StaticSendSync {
     /// than the given `epoch` will be deleted.
     fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()>;
 
-    fn flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> impl Future<Output = StorageResult<usize>> + Send + '_;
+    fn flush(&mut self) -> impl Future<Output = StorageResult<usize>> + Send + '_;
 
     fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_;
     fn epoch(&self) -> u64;
@@ -409,6 +407,41 @@ pub enum OpConsistencyLevel {
     ConsistentOldValue(Arc<dyn CheckOldValueEquality>),
 }
 
+impl Debug for OpConsistencyLevel {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OpConsistencyLevel::Inconsistent => f.write_str("OpConsistencyLevel::Inconsistent"),
+            OpConsistencyLevel::ConsistentOldValue(_) => {
+                f.write_str("OpConsistencyLevel::ConsistentOldValue")
+            }
+        }
+    }
+}
+
+impl PartialEq<Self> for OpConsistencyLevel {
+    fn eq(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (
+                OpConsistencyLevel::Inconsistent,
+                OpConsistencyLevel::Inconsistent
+            ) | (
+                OpConsistencyLevel::ConsistentOldValue(_),
+                OpConsistencyLevel::ConsistentOldValue(_),
+            )
+        )
+    }
+}
+
+impl Eq for OpConsistencyLevel {}
+
+impl OpConsistencyLevel {
+    pub fn update(&mut self, new_level: &OpConsistencyLevel) {
+        assert_ne!(self, new_level);
+        *self = new_level.clone()
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct NewLocalOptions {
     pub table_id: TableId,
@@ -534,6 +567,7 @@ impl From<TracedInitOptions> for InitOptions {
 #[derive(Clone, Debug)]
 pub struct SealCurrentEpochOptions {
     pub table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>)>,
+    pub switch_op_consistency_level: Option<OpConsistencyLevel>,
 }
 
 impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
@@ -548,6 +582,9 @@ impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
                         .collect(),
                 )
             }),
+            switch_op_consistency_level: value
+                .switch_op_consistency_level
+                .map(|level| matches!(level, OpConsistencyLevel::ConsistentOldValue(_))),
         }
     }
 }
@@ -572,24 +609,22 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
                         .collect(),
                 )
             }),
+            switch_op_consistency_level: value.switch_op_consistency_level.map(|enable| {
+                if enable {
+                    OpConsistencyLevel::ConsistentOldValue(CHECK_BYTES_EQUAL.clone())
+                } else {
+                    OpConsistencyLevel::Inconsistent
+                }
+            }),
         }
     }
 }
 
 impl SealCurrentEpochOptions {
-    pub fn new(watermarks: Vec<VnodeWatermark>, direction: WatermarkDirection) -> Self {
-        Self {
-            table_watermarks: Some((direction, watermarks)),
-        }
-    }
-
-    pub fn no_watermark() -> Self {
+    pub fn for_test() -> Self {
         Self {
             table_watermarks: None,
+            switch_op_consistency_level: None,
         }
-    }
-
-    pub fn for_test() -> Self {
-        Self::no_watermark()
     }
 }

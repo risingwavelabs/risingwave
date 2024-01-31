@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,13 +40,13 @@ use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
 use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_connector::ConnectorParams;
+use risingwave_dml::dml_manager::DmlManager;
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::PbRowFormatType;
-use risingwave_source::connector_test_utils::create_source_desc_builder;
-use risingwave_source::dml_manager::DmlManager;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::panic_store::PanicStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -159,7 +159,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let barrier_tx = Arc::new(barrier_tx);
     let vnodes = Bitmap::from_bytes(&[0b11111111]);
 
-    let actor_ctx = ActorContext::create(0x3f3f3f);
+    let actor_ctx = ActorContext::for_test(0x3f3f3f);
     let system_params_manager = LocalSystemParamsManager::for_test();
 
     // Create a `SourceExecutor` to read the changes.
@@ -245,6 +245,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         vec![],
         Some(row_id_index),
         false,
+        0,
     ));
 
     let value_indices = (0..column_descs.len()).collect_vec();
@@ -366,6 +367,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         1024,
         "DeleteExecutor".to_string(),
         false,
+        0,
     ));
 
     curr_epoch += 1;

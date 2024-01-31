@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use risingwave_common::system_param::common::CommonHandler;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::{check_missing_params, set_system_param};
 use risingwave_common::{for_all_params, key_of};
@@ -43,6 +44,8 @@ pub struct SystemParamsManager {
     notification_manager: NotificationManagerRef,
     // Cached parameters.
     params: RwLock<SystemParams>,
+    /// Common handler for system params.
+    common_handler: CommonHandler,
 }
 
 impl SystemParamsManager {
@@ -69,7 +72,8 @@ impl SystemParamsManager {
         Ok(Self {
             meta_store,
             notification_manager,
-            params: RwLock::new(params),
+            params: RwLock::new(params.clone()),
+            common_handler: CommonHandler::new(params.into()),
         })
     }
 
@@ -86,13 +90,23 @@ impl SystemParamsManager {
         let params = params_guard.deref_mut();
         let mut mem_txn = VarTransaction::new(params);
 
-        set_system_param(mem_txn.deref_mut(), name, value).map_err(MetaError::system_params)?;
+        let Some((_new_value, diff)) =
+            set_system_param(mem_txn.deref_mut(), name, value).map_err(MetaError::system_params)?
+        else {
+            // No changes on the parameter.
+            return Ok(params.clone());
+        };
 
         let mut store_txn = Transaction::default();
         mem_txn.apply_to_txn(&mut store_txn).await?;
         self.meta_store.txn(store_txn).await?;
 
         mem_txn.commit();
+
+        // Run common handler.
+        self.common_handler.handle_change(&diff);
+
+        // TODO: notify the diff instead of the snapshot.
 
         // Sync params to other managers on the meta node only once, since it's infallible.
         self.notification_manager
@@ -159,7 +173,7 @@ impl SystemParamsManager {
 // 4. None, None: A new version of RW cluster is launched for the first time and newly introduced
 // params are not set. The new field is not initialized either, just leave it as `None`.
 macro_rules! impl_merge_params {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $($rest:tt)* },)*) => {
         fn merge_params(mut persisted: SystemParams, init: SystemParams) -> SystemParams {
             $(
                 match (persisted.$field.as_ref(), init.$field) {

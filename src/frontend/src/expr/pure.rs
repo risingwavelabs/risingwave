@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -82,6 +82,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Ltrim
             | expr_node::Type::Rtrim
             | expr_node::Type::Case
+            | expr_node::Type::ConstantLookup
             | expr_node::Type::RoundDigit
             | expr_node::Type::Round
             | expr_node::Type::Ascii
@@ -225,7 +226,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Greatest
             | expr_node::Type::Least
             | expr_node::Type::ConvertFrom
-            | expr_node::Type::ConvertTo =>
+            | expr_node::Type::ConvertTo
+            | expr_node::Type::IcebergTransform =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call
@@ -242,6 +244,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::CastRegclass
             | expr_node::Type::PgGetIndexdef
             | expr_node::Type::ColDescription
+            | expr_node::Type::PgGetViewdef
             | expr_node::Type::MakeTimestamptz => self.impure = true,
         }
     }

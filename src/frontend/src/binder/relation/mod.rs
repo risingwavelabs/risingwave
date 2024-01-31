@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -105,7 +105,7 @@ impl Relation {
         match self {
             Relation::Subquery(subquery) => subquery
                 .query
-                .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
+                .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
             Relation::Join(join) | Relation::Apply(join) => {
                 let mut correlated_indices = vec![];
                 correlated_indices.extend(

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_default::DefaultFromSerde;
 use serde_json::Value;
 
+use crate::for_all_params;
 use crate::hash::VirtualNode;
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
@@ -157,6 +158,10 @@ pub struct RwConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
+serde_with::with_prefix!(meta_prefix "meta_");
+serde_with::with_prefix!(streaming_prefix "stream_");
+serde_with::with_prefix!(batch_prefix "batch_");
+
 #[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
 pub enum MetaBackend {
     #[default]
@@ -197,6 +202,14 @@ pub struct MetaConfig {
     /// Interval of hummock version checkpoint.
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
     pub hummock_version_checkpoint_interval_sec: u64,
+
+    /// If enabled, SSTable object file and version delta will be retained.
+    ///
+    /// SSTable object file need to be deleted via full GC.
+    ///
+    /// version delta need to be manually deleted.
+    #[serde(default = "default::meta::enable_hummock_data_archive")]
+    pub enable_hummock_data_archive: bool,
 
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected.
@@ -290,10 +303,15 @@ pub struct MetaConfig {
     /// split it to an single group.
     pub min_table_split_write_throughput: u64,
 
+    // If the compaction task does not report heartbeat beyond the
+    // `compaction_task_max_heartbeat_interval_secs` interval, we will cancel the task
     #[serde(default = "default::meta::compaction_task_max_heartbeat_interval_secs")]
+    pub compaction_task_max_heartbeat_interval_secs: u64,
+
     // If the compaction task does not change in progress beyond the
     // `compaction_task_max_heartbeat_interval_secs` interval, we will cancel the task
-    pub compaction_task_max_heartbeat_interval_secs: u64,
+    #[serde(default = "default::meta::compaction_task_max_progress_interval_secs")]
+    pub compaction_task_max_progress_interval_secs: u64,
 
     #[serde(default)]
     pub compaction_config: CompactionConfig,
@@ -305,6 +323,9 @@ pub struct MetaConfig {
     /// Keeps the latest N events per channel.
     #[serde(default = "default::meta::event_log_channel_max_size")]
     pub event_log_channel_max_size: u32,
+
+    #[serde(default, with = "meta_prefix")]
+    pub developer: MetaDeveloperConfig,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -371,6 +392,28 @@ impl<'de> Deserialize<'de> for DefaultParallelism {
     }
 }
 
+/// The subsections `[meta.developer]`.
+///
+/// It is put at [`MetaConfig::developer`].
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct MetaDeveloperConfig {
+    /// The number of traces to be cached in-memory by the tracing collector
+    /// embedded in the meta node.
+    #[serde(default = "default::developer::meta_cached_traces_num")]
+    pub cached_traces_num: u32,
+
+    /// The maximum memory usage in bytes for the tracing collector embedded
+    /// in the meta node.
+    #[serde(default = "default::developer::meta_cached_traces_memory_limit_bytes")]
+    pub cached_traces_memory_limit_bytes: usize,
+
+    /// Compaction picker config
+    #[serde(default = "default::developer::enable_trivial_move")]
+    pub enable_trivial_move: bool,
+    #[serde(default = "default::developer::enable_check_task_level_overlap")]
+    pub enable_check_task_level_overlap: bool,
+}
+
 /// The section `[server]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct ServerConfig {
@@ -423,6 +466,10 @@ pub struct BatchConfig {
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
+
+    #[serde(default = "default::batch::frontend_compute_runtime_worker_threads")]
+    /// frontend compute runtime worker threads
+    pub frontend_compute_runtime_worker_threads: usize,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -533,6 +580,10 @@ pub struct StorageConfig {
     #[serde(default)]
     pub prefetch_buffer_capacity_mb: Option<usize>,
 
+    /// max prefetch block number
+    #[serde(default = "default::storage::max_prefetch_block_number")]
+    pub max_prefetch_block_number: usize,
+
     #[serde(default = "default::storage::disable_remote_compactor")]
     pub disable_remote_compactor: bool,
 
@@ -592,6 +643,8 @@ pub struct StorageConfig {
     pub compactor_max_sst_size: u64,
     #[serde(default = "default::storage::enable_fast_compaction")]
     pub enable_fast_compaction: bool,
+    #[serde(default = "default::storage::check_compaction_result")]
+    pub check_compaction_result: bool,
     #[serde(default = "default::storage::max_preload_io_retry_times")]
     pub max_preload_io_retry_times: usize,
 
@@ -747,9 +800,6 @@ pub struct HeapProfilingConfig {
     pub dir: String,
 }
 
-serde_with::with_prefix!(streaming_prefix "stream_");
-serde_with::with_prefix!(batch_prefix "batch_");
-
 /// The subsections `[streaming.developer]`.
 ///
 /// It is put at [`StreamingConfig::developer`].
@@ -823,57 +873,26 @@ pub struct BatchDeveloperConfig {
     #[serde(default = "default::developer::batch_chunk_size")]
     pub chunk_size: usize,
 }
-/// The section `[system]` in `risingwave.toml`. All these fields are used to initialize the system
-/// parameters persisted in Meta store. Most fields are for testing purpose only and should not be
-/// documented.
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
-pub struct SystemConfig {
-    /// The interval of periodic barrier.
-    #[serde(default = "default::system::barrier_interval_ms")]
-    pub barrier_interval_ms: Option<u32>,
 
-    /// There will be a checkpoint for every n barriers
-    #[serde(default = "default::system::checkpoint_frequency")]
-    pub checkpoint_frequency: Option<u64>,
-
-    /// Target size of the Sstable.
-    #[serde(default = "default::system::sstable_size_mb")]
-    pub sstable_size_mb: Option<u32>,
-
-    #[serde(default = "default::system::parallel_compact_size_mb")]
-    pub parallel_compact_size_mb: Option<u32>,
-
-    /// Size of each block in bytes in SST.
-    #[serde(default = "default::system::block_size_kb")]
-    pub block_size_kb: Option<u32>,
-
-    /// False positive probability of bloom filter.
-    #[serde(default = "default::system::bloom_false_positive")]
-    pub bloom_false_positive: Option<f64>,
-
-    #[serde(default = "default::system::state_store")]
-    pub state_store: Option<String>,
-
-    /// Remote directory for storing data and metadata objects.
-    #[serde(default = "default::system::data_directory")]
-    pub data_directory: Option<String>,
-
-    /// Remote storage url for storing snapshots.
-    #[serde(default = "default::system::backup_storage_url")]
-    pub backup_storage_url: Option<String>,
-
-    /// Remote directory for storing snapshots.
-    #[serde(default = "default::system::backup_storage_directory")]
-    pub backup_storage_directory: Option<String>,
-
-    /// Max number of concurrent creating streaming jobs.
-    #[serde(default = "default::system::max_concurrent_creating_streaming_jobs")]
-    pub max_concurrent_creating_streaming_jobs: Option<u32>,
-
-    /// Whether to pause all data sources on next bootstrap.
-    #[serde(default = "default::system::pause_on_next_bootstrap")]
-    pub pause_on_next_bootstrap: Option<bool>,
+macro_rules! define_system_config {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $doc:literal, $($rest:tt)* },)*) => {
+        paste::paste!(
+            /// The section `[system]` in `risingwave.toml`. All these fields are used to initialize the system
+            /// parameters persisted in Meta store. Most fields are for testing purpose only and should not be
+            /// documented.
+            #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+            pub struct SystemConfig {
+                $(
+                    #[doc = $doc]
+                    #[serde(default = "default::system::" $field "_opt")]
+                    pub $field: Option<$type>,
+                )*
+            }
+        );
+    };
 }
+
+for_all_params!(define_system_config);
 
 /// The subsections `[storage.object_store]`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
@@ -908,26 +927,60 @@ pub struct S3ObjectStoreConfig {
     pub object_store_req_retry_max_delay_ms: u64,
     #[serde(default = "default::object_store_config::s3::object_store_req_retry_max_attempts")]
     pub object_store_req_retry_max_attempts: usize,
+    /// For backwards compatibility, users should use `S3ObjectStoreDeveloperConfig` instead.
+    #[serde(
+        default = "default::object_store_config::s3::developer::object_store_retry_unknown_service_error"
+    )]
+    pub retry_unknown_service_error: bool,
+    #[serde(default)]
+    pub developer: S3ObjectStoreDeveloperConfig,
+}
+
+/// The subsections `[storage.object_store.s3.developer]`.
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct S3ObjectStoreDeveloperConfig {
+    /// Whether to retry s3 sdk error from which no error metadata is provided.
+    #[serde(
+        default = "default::object_store_config::s3::developer::object_store_retry_unknown_service_error"
+    )]
+    pub object_store_retry_unknown_service_error: bool,
+    /// An array of error codes that should be retried.
+    /// e.g. `["SlowDown", "TooManyRequests"]`
+    #[serde(
+        default = "default::object_store_config::s3::developer::object_store_retryable_service_error_codes"
+    )]
+    pub object_store_retryable_service_error_codes: Vec<String>,
 }
 
 impl SystemConfig {
     #![allow(deprecated)]
     pub fn into_init_system_params(self) -> SystemParams {
-        SystemParams {
-            barrier_interval_ms: self.barrier_interval_ms,
-            checkpoint_frequency: self.checkpoint_frequency,
-            sstable_size_mb: self.sstable_size_mb,
-            parallel_compact_size_mb: self.parallel_compact_size_mb,
-            block_size_kb: self.block_size_kb,
-            bloom_false_positive: self.bloom_false_positive,
-            state_store: self.state_store,
-            data_directory: self.data_directory,
-            backup_storage_url: self.backup_storage_url,
-            backup_storage_directory: self.backup_storage_directory,
-            max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
-            pause_on_next_bootstrap: self.pause_on_next_bootstrap,
-            telemetry_enabled: None, // deprecated
+        macro_rules! fields {
+            ($({ $field:ident, $($rest:tt)* },)*) => {
+                SystemParams {
+                    $($field: self.$field,)*
+                    ..Default::default() // deprecated fields
+                }
+            };
         }
+
+        let mut system_params = for_all_params!(fields);
+
+        // Initialize backup_storage_url and backup_storage_directory if not set.
+        if let Some(state_store) = &system_params.state_store
+            && let Some(data_directory) = &system_params.data_directory
+            && let Some(hummock_state_store) = state_store.strip_prefix("hummock+")
+        {
+            if system_params.backup_storage_url.is_none() {
+                system_params.backup_storage_url = Some(hummock_state_store.to_owned());
+                tracing::info!("initialize backup_storage_url based on state_store");
+            }
+            if system_params.backup_storage_directory.is_none() {
+                system_params.backup_storage_directory = Some(format!("{data_directory}/backup"));
+                tracing::info!("initialize backup_storage_directory based on data_directory");
+            }
+        }
+        system_params
     }
 }
 
@@ -961,6 +1014,10 @@ pub mod default {
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
             30
+        }
+
+        pub fn enable_hummock_data_archive() -> bool {
+            false
         }
 
         pub fn min_delta_log_num_for_hummock_version_checkpoint() -> u64 {
@@ -1012,7 +1069,7 @@ pub mod default {
         }
 
         pub fn partition_vnode_count() -> u32 {
-            64
+            16
         }
 
         pub fn table_write_throughput_threshold() -> u64 {
@@ -1024,7 +1081,11 @@ pub mod default {
         }
 
         pub fn compaction_task_max_heartbeat_interval_secs() -> u64 {
-            60 // 1min
+            30 // 30s
+        }
+
+        pub fn compaction_task_max_progress_interval_secs() -> u64 {
+            60 * 10 // 10min
         }
 
         pub fn cut_table_size_limit() -> u64 {
@@ -1086,7 +1147,7 @@ pub mod default {
         }
 
         pub fn imm_merge_threshold() -> usize {
-            4
+            0 // disable
         }
 
         pub fn write_conflict_detection_enabled() -> bool {
@@ -1118,7 +1179,7 @@ pub mod default {
         }
 
         pub fn compactor_max_task_multiplier() -> f32 {
-            1.5000
+            2.5000
         }
 
         pub fn compactor_memory_available_proportion() -> f64 {
@@ -1163,14 +1224,18 @@ pub mod default {
         }
 
         pub fn enable_fast_compaction() -> bool {
-            true
+            false
+        }
+
+        pub fn check_compaction_result() -> bool {
+            false
         }
 
         pub fn max_preload_io_retry_times() -> usize {
             3
         }
         pub fn mem_table_spill_threshold() -> usize {
-            4 << 20
+            0 // disable
         }
 
         pub fn compactor_fast_max_compact_delete_ratio() -> u32 {
@@ -1179,6 +1244,10 @@ pub mod default {
 
         pub fn compactor_fast_max_compact_task_size() -> u64 {
             2 * 1024 * 1024 * 1024 // 2g
+        }
+
+        pub fn max_prefetch_block_number() -> usize {
+            16
         }
     }
 
@@ -1304,6 +1373,13 @@ pub mod default {
     }
 
     pub mod developer {
+        pub fn meta_cached_traces_num() -> u32 {
+            256
+        }
+
+        pub fn meta_cached_traces_memory_limit_bytes() -> usize {
+            1 << 27 // 128 MiB
+        }
 
         pub fn batch_output_channel_size() -> usize {
             64
@@ -1352,11 +1428,17 @@ pub mod default {
         pub fn stream_hash_agg_max_dirty_groups_heap_size() -> usize {
             64 << 20 // 64MB
         }
+
+        pub fn enable_trivial_move() -> bool {
+            true
+        }
+
+        pub fn enable_check_task_level_overlap() -> bool {
+            false
+        }
     }
 
-    pub mod system {
-        pub use crate::system_param::default::*;
-    }
+    pub use crate::system_param::default as system;
 
     pub mod batch {
         pub fn enable_barrier_read() -> bool {
@@ -1367,6 +1449,10 @@ pub mod default {
             // 1 hour
             60 * 60
         }
+
+        pub fn frontend_compute_runtime_worker_threads() -> usize {
+            4
+        }
     }
 
     pub mod compaction_config {
@@ -1375,15 +1461,15 @@ pub mod default {
         const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * 1024 * 1024; // 512MB
 
         // decrease this configure when the generation of checkpoint barrier is not frequent.
-        const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 6;
+        const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 12;
         const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024; // 32MB
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
         const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
         const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 300;
-        const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 96;
+        const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 100;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
-        const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
+        const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 12;
         const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
         const DEFAULT_EMERGENCY_PICKER: bool = true;
 
@@ -1439,19 +1525,19 @@ pub mod default {
 
     pub mod object_store_config {
         pub fn object_store_streaming_read_timeout_ms() -> u64 {
-            10 * 60 * 1000
+            8 * 60 * 1000
         }
 
         pub fn object_store_streaming_upload_timeout_ms() -> u64 {
-            10 * 60 * 1000
+            8 * 60 * 1000
         }
 
         pub fn object_store_upload_timeout_ms() -> u64 {
-            60 * 60 * 1000
+            8 * 60 * 1000
         }
 
         pub fn object_store_read_timeout_ms() -> u64 {
-            60 * 60 * 1000
+            8 * 60 * 1000
         }
 
         pub mod s3 {
@@ -1488,6 +1574,16 @@ pub mod default {
 
             pub fn object_store_req_retry_max_attempts() -> usize {
                 DEFAULT_RETRY_MAX_ATTEMPTS
+            }
+
+            pub mod developer {
+                pub fn object_store_retry_unknown_service_error() -> bool {
+                    false
+                }
+
+                pub fn object_store_retryable_service_error_codes() -> Vec<String> {
+                    vec!["SlowDown".into(), "TooManyRequests".into()]
+                }
             }
         }
     }

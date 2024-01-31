@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -157,6 +157,10 @@ pub struct TableCatalog {
 
     /// Incoming sinks, used for sink into table
     pub incoming_sinks: Vec<SinkId>,
+
+    pub created_at_cluster_version: Option<String>,
+
+    pub initialized_at_cluster_version: Option<String>,
 }
 
 // How the stream job was created will determine
@@ -369,6 +373,7 @@ impl TableCatalog {
             read_prefix_len_hint: self.read_prefix_len_hint,
             watermark_columns: self.watermark_columns.clone(),
             versioned: self.version.is_some(),
+            vnode_col_index: self.vnode_col_index,
         }
     }
 
@@ -445,6 +450,8 @@ impl TableCatalog {
             create_type: self.create_type.to_prost().into(),
             description: self.description.clone(),
             incoming_sinks: self.incoming_sinks.clone(),
+            created_at_cluster_version: self.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
         }
     }
 
@@ -556,10 +563,12 @@ impl From<PbTable> for TableCatalog {
                 .unwrap_or_else(Cardinality::unknown),
             created_at_epoch: tb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
-            cleaned_by_watermark: matches!(tb.cleaned_by_watermark, true),
+            cleaned_by_watermark: tb.cleaned_by_watermark,
             create_type: CreateType::from_prost(create_type),
             description: tb.description,
             incoming_sinks: tb.incoming_sinks.clone(),
+            created_at_cluster_version: tb.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: tb.initialized_at_cluster_version.clone(),
         }
     }
 }
@@ -589,7 +598,7 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::{PbStreamJobStatus, PbTable};
     use risingwave_pb::plan_common::{
-        AdditionalColumnType, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
+        AdditionalColumn, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
     };
 
     use super::*;
@@ -656,6 +665,8 @@ mod tests {
             create_type: PbCreateType::Foreground.into(),
             description: Some("description".to_string()),
             incoming_sinks: vec![],
+            created_at_cluster_version: None,
+            initialized_at_cluster_version: None,
         }
         .into();
 
@@ -683,7 +694,7 @@ mod tests {
                             type_name: ".test.Country".to_string(),
                             description: None,
                             generated_or_default_column: None,
-                            additional_column_type: AdditionalColumnType::Normal,
+                            additional_columns: AdditionalColumn { column_type: None },
                             version: ColumnDescVersion::Pr13707,
                         },
                         is_hidden: false
@@ -716,6 +727,8 @@ mod tests {
                 create_type: CreateType::Foreground,
                 description: Some("description".to_string()),
                 incoming_sinks: vec![],
+                created_at_cluster_version: None,
+                initialized_at_cluster_version: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,6 +33,9 @@ public class DbzConnectorConfig {
     /* Debezium private configs */
     public static final String WAIT_FOR_CONNECTOR_EXIT_BEFORE_INTERRUPT_MS =
             "debezium.embedded.shutdown.pause.before.interrupt.ms";
+
+    public static final String WAIT_FOR_STREAMING_START_BEFORE_EXIT_SECS =
+            "cdc.source.wait.streaming.before.exit.seconds";
 
     /* Common configs */
     public static final String HOST = "hostname";
@@ -153,13 +156,50 @@ public class DbzConnectorConfig {
 
             dbzProps.putAll(mysqlProps);
 
-        } else if (source == SourceTypeE.POSTGRES || source == SourceTypeE.CITUS) {
+        } else if (source == SourceTypeE.POSTGRES) {
+            var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
+
+            // disable publication auto creation if needed
+            var pubAutoCreate =
+                    Boolean.parseBoolean(
+                            userProps.getOrDefault(DbzConnectorConfig.PG_PUB_CREATE, "true"));
+            if (!pubAutoCreate) {
+                postgresProps.setProperty("publication.autocreate.mode", "disabled");
+            }
+            if (isCdcBackfill) {
+                // skip the initial snapshot for cdc backfill
+                postgresProps.setProperty("snapshot.mode", "never");
+
+                // if startOffset is specified, we should continue
+                // reading changes from the given offset
+                if (null != startOffset && !startOffset.isBlank()) {
+                    postgresProps.setProperty(
+                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+                }
+
+            } else {
+                // if snapshot phase is finished and offset is specified, we will continue reading
+                // changes from the given offset
+                if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
+                    postgresProps.setProperty("snapshot.mode", "never");
+                    postgresProps.setProperty(
+                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+                }
+            }
+
+            dbzProps.putAll(postgresProps);
+
+            if (isMultiTableShared) {
+                // remove table filtering for the shared Postgres source, since we
+                // allow user to ingest tables in different schemas
+                LOG.info("Disable table filtering for the shared Postgres source");
+                dbzProps.remove("table.include.list");
+            }
+        } else if (source == SourceTypeE.CITUS) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
 
             // citus needs all_tables publication to capture all shards
-            if (source == SourceTypeE.CITUS) {
-                postgresProps.setProperty("publication.autocreate.mode", "all_tables");
-            }
+            postgresProps.setProperty("publication.autocreate.mode", "all_tables");
 
             // disable publication auto creation if needed
             var pubAutoCreate =
@@ -186,20 +226,10 @@ public class DbzConnectorConfig {
             dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
         }
 
-        if (isMultiTableShared) {
-            adjustConfigForSharedCdcStream(dbzProps);
-        }
-
         this.sourceId = sourceId;
         this.sourceType = source;
         this.resolvedDbzProps = dbzProps;
         this.isBackfillSource = isCdcBackfill;
-    }
-
-    private void adjustConfigForSharedCdcStream(Properties dbzProps) {
-        // disable table filtering for the shared cdc stream
-        LOG.info("Disable table filtering for the shared cdc stream");
-        dbzProps.remove("table.include.list");
     }
 
     private Properties initiateDbConfig(String fileName, StringSubstitutor substitutor) {

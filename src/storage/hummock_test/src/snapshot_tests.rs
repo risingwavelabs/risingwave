@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -124,7 +124,6 @@ async fn test_snapshot_inner(
                     StorageValue::new_put("test"),
                 ),
             ],
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -169,7 +168,6 @@ async fn test_snapshot_inner(
                     StorageValue::new_put("test"),
                 ),
             ],
-            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -215,7 +213,6 @@ async fn test_snapshot_inner(
                     StorageValue::new_delete(),
                 ),
             ],
-            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -278,7 +275,6 @@ async fn test_snapshot_range_scan_inner(
                     StorageValue::new_put("test"),
                 ),
             ],
-            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),

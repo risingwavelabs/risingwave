@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -92,10 +92,9 @@ impl BlockStreamIterator {
             None => return Ok(None),
             Some(ret) => ret,
         };
-        let meta = self.sstable.value().meta.block_metas[self.next_block_index].clone();
+        let meta = self.sstable.meta.block_metas[self.next_block_index].clone();
         let filter_block = self
             .sstable
-            .value()
             .filter_reader
             .get_block_raw_filter(self.next_block_index);
         self.next_block_index += 1;
@@ -111,25 +110,25 @@ impl BlockStreamIterator {
     }
 
     fn next_block_smallest(&self) -> &[u8] {
-        self.sstable.value().meta.block_metas[self.next_block_index]
+        self.sstable.meta.block_metas[self.next_block_index]
             .smallest_key
             .as_ref()
     }
 
     fn next_block_largest(&self) -> &[u8] {
-        if self.next_block_index + 1 < self.sstable.value().meta.block_metas.len() {
-            self.sstable.value().meta.block_metas[self.next_block_index + 1]
+        if self.next_block_index + 1 < self.sstable.meta.block_metas.len() {
+            self.sstable.meta.block_metas[self.next_block_index + 1]
                 .smallest_key
                 .as_ref()
         } else {
-            self.sstable.value().meta.largest_key.as_ref()
+            self.sstable.meta.largest_key.as_ref()
         }
     }
 
     fn current_block_largest(&self) -> Vec<u8> {
-        if self.next_block_index < self.sstable.value().meta.block_metas.len() {
+        if self.next_block_index < self.sstable.meta.block_metas.len() {
             let mut largest_key = FullKey::decode(
-                self.sstable.value().meta.block_metas[self.next_block_index]
+                self.sstable.meta.block_metas[self.next_block_index]
                     .smallest_key
                     .as_ref(),
             );
@@ -137,7 +136,7 @@ impl BlockStreamIterator {
             largest_key.epoch_with_gap = EpochWithGap::new_max_epoch();
             largest_key.encode()
         } else {
-            self.sstable.value().meta.largest_key.clone()
+            self.sstable.meta.largest_key.clone()
         }
     }
 
@@ -145,7 +144,7 @@ impl BlockStreamIterator {
         match self.iter.as_ref() {
             Some(iter) => iter.key(),
             None => FullKey::decode(
-                self.sstable.value().meta.block_metas[self.next_block_index]
+                self.sstable.meta.block_metas[self.next_block_index]
                     .smallest_key
                     .as_ref(),
             ),
@@ -153,15 +152,13 @@ impl BlockStreamIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.iter.is_some() || self.next_block_index < self.sstable.value().meta.block_metas.len()
+        self.iter.is_some() || self.next_block_index < self.sstable.meta.block_metas.len()
     }
 }
 
 impl Drop for BlockStreamIterator {
     fn drop(&mut self) {
-        self.task_progress
-            .num_pending_read_io
-            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        self.task_progress.dec_num_pending_read_io();
     }
 }
 
@@ -242,12 +239,10 @@ impl ConcatSstableIterator {
                 .await?;
             let stats_ptr = self.stats.remote_io_time.clone();
             let now = Instant::now();
-            self.task_progress
-                .num_pending_read_io
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.task_progress.inc_num_pending_read_io();
             let block_stream = self
                 .sstable_store
-                .get_stream_for_blocks(sstable.value().id, &sstable.value().meta.block_metas)
+                .get_stream_for_blocks(sstable.id, &sstable.meta.block_metas)
                 .verbose_instrument_await("stream_iter_get_stream")
                 .await?;
 
@@ -317,7 +312,6 @@ impl CompactorRunner {
             builder_factory,
             context.compactor_metrics.clone(),
             Some(task_progress.clone()),
-            task_config.is_target_l0_or_lbase,
             task_config.table_vnode_partition.clone(),
         );
         assert_eq!(
@@ -448,7 +442,7 @@ impl CompactorRunner {
         if rest_data.is_valid() {
             // compact rest keys of the current block.
             let sstable_iter = rest_data.sstable_iter.as_mut().unwrap();
-            let target_key = FullKey::decode(&sstable_iter.sstable.value().meta.largest_key);
+            let target_key = FullKey::decode(&sstable_iter.sstable.meta.largest_key);
             if let Some(iter) = sstable_iter.iter.as_mut() {
                 self.executor.run(iter, target_key).await?;
                 assert!(
@@ -466,8 +460,11 @@ impl CompactorRunner {
                 let smallest_key = FullKey::decode(sstable_iter.next_block_smallest()).to_vec();
                 let (block, filter_data, block_meta) =
                     sstable_iter.download_next_block().await?.unwrap();
-                if self.executor.builder.need_flush() {
-                    let largest_key = sstable_iter.sstable.value().meta.largest_key.clone();
+                // If the last key is tombstone and it was deleted, the first key of this block must be deleted. So we can not move this block directly.
+                let need_deleted = self.executor.last_key.user_key.eq(&smallest_key.user_key)
+                    && self.executor.last_key_is_delete;
+                if self.executor.builder.need_flush() || need_deleted {
+                    let largest_key = sstable_iter.sstable.meta.largest_key.clone();
                     let target_key = FullKey::decode(&largest_key);
                     sstable_iter.init_block_iter(block, block_meta.uncompressed_size as usize)?;
                     let mut iter = sstable_iter.iter.take().unwrap();

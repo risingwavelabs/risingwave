@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use risingwave_pb::catalog::PbIndex;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
 
-use crate::{ExprNodeArray, I32Array, IndexId, TableId};
+use crate::{ExprNodeArray, IndexId, TableId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "index")]
@@ -27,7 +27,7 @@ pub struct Model {
     pub index_table_id: TableId,
     pub primary_table_id: TableId,
     pub index_items: ExprNodeArray,
-    pub original_columns: I32Array,
+    pub index_columns_len: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -74,7 +74,7 @@ impl From<PbIndex> for ActiveModel {
             index_table_id: Set(pb_index.index_table_id as _),
             primary_table_id: Set(pb_index.primary_table_id as _),
             index_items: Set(pb_index.index_item.into()),
-            original_columns: Set(pb_index.original_columns.into()),
+            index_columns_len: Set(pb_index.index_columns_len as _),
         }
     }
 }

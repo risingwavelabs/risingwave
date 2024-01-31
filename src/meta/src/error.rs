@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -117,6 +117,10 @@ impl MetaError {
 
     pub fn is_fragment_not_found(&self) -> bool {
         matches!(self.inner(), MetaErrorInner::FragmentNotFound(..))
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self.inner(), MetaErrorInner::Cancelled(..))
     }
 
     pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {

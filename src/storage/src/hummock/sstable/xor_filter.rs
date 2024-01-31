@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -503,11 +503,11 @@ mod tests {
             .await
             .unwrap();
         let mut stat = StoreLocalStatistic::default();
-        if let XorFilter::BlockXor16(reader) = &sstable.value().filter_reader.filter {
-            for idx in 0..sstable.value().meta.block_metas.len() {
+        if let XorFilter::BlockXor16(reader) = &sstable.filter_reader.filter {
+            for idx in 0..sstable.meta.block_metas.len() {
                 let resp = sstable_store
                     .get_block_response(
-                        sstable.value(),
+                        &sstable,
                         idx,
                         CachePolicy::Fill(CachePriority::High),
                         &mut stat,

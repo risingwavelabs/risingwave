@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -193,6 +193,11 @@ impl SessionImpl {
             State::Implicit(ctx) => ctx,
             State::Explicit(ctx) => ctx,
         })
+    }
+
+    /// Unpin snapshot by replacing the snapshot with None.
+    pub fn unpin_snapshot(&self) {
+        self.txn_ctx().snapshot = None;
     }
 
     /// Acquires and pins a snapshot for the current transaction.

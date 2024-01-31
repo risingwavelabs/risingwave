@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use risingwave_simulation::utils::AssertResult;
 
 #[tokio::test]
 async fn test_delta_join() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale_no_shuffle()).await?;
     let mut session = cluster.start_session();
 
     session.run("set rw_implicit_flush = true;").await?;
@@ -125,7 +125,7 @@ async fn test_delta_join() -> Result<()> {
 
 #[tokio::test]
 async fn test_share_multiple_no_shuffle_upstream() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale_no_shuffle()).await?;
     let mut session = cluster.start_session();
 
     session.run("create table t (a int, b int);").await?;
@@ -145,7 +145,7 @@ async fn test_share_multiple_no_shuffle_upstream() -> Result<()> {
 
 #[tokio::test]
 async fn test_resolve_no_shuffle_upstream() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale_no_shuffle()).await?;
     let mut session = cluster.start_session();
 
     session.run("create table t (v int);").await?;

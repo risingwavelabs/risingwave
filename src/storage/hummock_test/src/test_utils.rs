@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -90,7 +89,6 @@ pub trait TestIngestBatch: LocalStateStore {
     async fn ingest_batch(
         &mut self,
         kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize>;
 }
@@ -100,7 +98,6 @@ impl<S: LocalStateStore> TestIngestBatch for S {
     async fn ingest_batch(
         &mut self,
         kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize> {
         assert_eq!(self.epoch(), write_options.epoch);
@@ -110,7 +107,7 @@ impl<S: LocalStateStore> TestIngestBatch for S {
                 Some(value) => self.insert(key, value, None)?,
             }
         }
-        self.flush(delete_ranges).await
+        self.flush().await
     }
 }
 

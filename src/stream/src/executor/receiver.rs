@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -94,7 +94,7 @@ impl ReceiverExecutor {
         use crate::executor::ActorContext;
 
         Self::new(
-            ActorContext::create(114),
+            ActorContext::for_test(114),
             ExecutorInfo {
                 schema: Schema::default(),
                 pk_indices: vec![],
@@ -278,7 +278,7 @@ mod tests {
         };
 
         let receiver = ReceiverExecutor::new(
-            ActorContext::create(actor_id),
+            ActorContext::for_test(actor_id),
             info,
             fragment_id,
             upstream_fragment_id,

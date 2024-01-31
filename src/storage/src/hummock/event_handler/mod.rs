@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
+use thiserror_ext::AsReport;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -192,10 +193,10 @@ impl Drop for LocalInstanceGuard {
             })
             .unwrap_or_else(|err| {
                 tracing::error!(
-                    "LocalInstanceGuard table_id {:?} instance_id {} Drop SendError {:?}",
-                    self.table_id,
-                    self.instance_id,
-                    err
+                    error = %err.as_report(),
+                    table_id = %self.table_id,
+                    instance_id = self.instance_id,
+                    "LocalInstanceGuard Drop SendError",
                 )
             })
     }

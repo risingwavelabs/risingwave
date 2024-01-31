@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
 };
+use thiserror_ext::AsReport;
 use tracing::warn;
 
 /// [`HummockStateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
@@ -76,6 +77,9 @@ pub struct HummockStateStoreMetrics {
 
     // memory
     pub mem_table_spill_counts: RelabeledCounterVec,
+
+    // block statistics
+    pub block_efficiency_histogram: RelabeledHistogramVec,
 }
 
 pub static GLOBAL_HUMMOCK_STATE_STORE_METRICS: OnceLock<HummockStateStoreMetrics> = OnceLock::new();
@@ -371,6 +375,19 @@ impl HummockStateStoreMetrics {
             metric_level,
         );
 
+        let opts = histogram_opts!(
+            "block_efficiency_histogram",
+            "Access ratio of in-memory block.",
+            exponential_buckets(0.001, 2.0, 11).unwrap(),
+        );
+        let block_efficiency_histogram =
+            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let block_efficiency_histogram = RelabeledHistogramVec::with_metric_level(
+            MetricLevel::Info,
+            block_efficiency_histogram,
+            metric_level,
+        );
+
         Self {
             bloom_filter_true_negative_counts,
             bloom_filter_check_counts,
@@ -396,6 +413,8 @@ impl HummockStateStoreMetrics {
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
             mem_table_spill_counts,
+
+            block_efficiency_histogram,
         }
     }
 
@@ -516,8 +535,8 @@ pub fn monitor_cache(memory_collector: Arc<dyn MemoryCollector>) {
     let collector = Box::new(StateStoreCollector::new(memory_collector));
     if let Err(e) = GLOBAL_METRICS_REGISTRY.register(collector) {
         warn!(
-            "unable to monitor cache. May have been registered if in all-in-one deployment: {:?}",
-            e
+            "unable to monitor cache. May have been registered if in all-in-one deployment: {}",
+            e.as_report()
         );
     }
 }

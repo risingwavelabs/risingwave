@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::types::DataType;
-use risingwave_pb::plan_common::AdditionalColumnType;
+use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
 use super::{Access, ChangeEvent, ChangeEventOperation};
 use crate::parser::unified::AccessError;
@@ -105,8 +105,8 @@ where
     }
 
     fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult {
-        match desc.additional_column_type {
-            AdditionalColumnType::Key => {
+        match desc.additional_column_type.column_type {
+            Some(AdditionalColumnType::Key(_)) => {
                 if let Some(key_as_column_name) = &self.key_column_name
                     && &desc.name == key_as_column_name
                 {
@@ -115,9 +115,7 @@ where
                     self.access(&["key", &desc.name], Some(&desc.data_type))
                 }
             }
-            AdditionalColumnType::Unspecified | AdditionalColumnType::Normal => {
-                self.access(&["value", &desc.name], Some(&desc.data_type))
-            }
+            None => self.access(&["value", &desc.name], Some(&desc.data_type)),
             _ => unreachable!(),
         }
     }

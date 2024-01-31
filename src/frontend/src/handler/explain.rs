@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,6 +64,7 @@ async fn do_handle_explain(
                 append_only,
                 cdc_table_info,
                 include_column_options,
+                wildcard_idx,
                 ..
             } => {
                 let col_id_gen = ColumnIdGenerator::new_initial();
@@ -77,6 +78,7 @@ async fn do_handle_explain(
                     cdc_table_info,
                     name.clone(),
                     columns,
+                    wildcard_idx,
                     constraints,
                     source_watermarks,
                     append_only,
@@ -111,7 +113,15 @@ async fn do_handle_explain(
                         emit_mode,
                     )
                     .map(|x| x.0),
-
+                    Statement::CreateView {
+                        materialized: false,
+                        ..
+                    } => {
+                        return Err(ErrorCode::NotSupported(
+                            "EXPLAIN CREATE VIEW".into(),
+                            "A created VIEW is just an alias. Instead, use EXPLAIN on the queries which reference the view.".into()
+                        ).into());
+                    }
                     Statement::CreateSink { stmt } => {
                         gen_sink_plan(&session, context.clone(), stmt).map(|plan| plan.sink_plan)
                     }
@@ -176,7 +186,7 @@ async fn do_handle_explain(
                             )?);
                         }
                         Convention::Stream => {
-                            let graph = build_graph(plan.clone());
+                            let graph = build_graph(plan.clone())?;
                             blocks.push(explain_stream_graph(&graph, explain_verbose));
                         }
                     }

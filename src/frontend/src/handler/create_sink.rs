@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
 use risingwave_connector::sink::{
-    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
 };
 use risingwave_pb::catalog::{PbSource, Table};
 use risingwave_pb::ddl_service::ReplaceTablePlan;
@@ -105,13 +105,18 @@ pub fn gen_sink_plan(
 
     // Used for debezium's table name
     let sink_from_table_name;
+    // `true` means that sink statement has the form: `CREATE SINK s1 FROM ...`
+    // `false` means that sink statement has the form: `CREATE SINK s1 AS <query>`
+    let direct_sink;
     let query = match stmt.sink_from {
         CreateSink::From(from_name) => {
             sink_from_table_name = from_name.0.last().unwrap().real_value();
+            direct_sink = true;
             Box::new(gen_sink_query_from_name(from_name)?)
         }
         CreateSink::AsQuery(query) => {
             sink_from_table_name = sink_table_name.clone();
+            direct_sink = false;
             query
         }
     };
@@ -173,23 +178,13 @@ pub fn gen_sink_plan(
         }
         None => match with_options.get(SINK_TYPE_OPTION) {
             // Case B: old syntax `type = '...'`
-            Some(t) => {
-                if !allow_old_sink_type_syntax(&connector) {
-                    return Err(ErrorCode::BindError(format!(
-                        "connector {} does not support `type = '...'`, please use syntax `FORMAT ... ENCODE ...` instead.",
-                        connector
-                    ))
-                    .into());
-                } else {
-                    SinkFormatDesc::from_legacy_type(&connector, t)?.map(|mut f| {
-                        session.notice_to_user("Consider using the newer syntax `FORMAT ... ENCODE ...` instead of `type = '...'`.");
-                        if let Some(v) = with_options.get(SINK_USER_FORCE_APPEND_ONLY_OPTION) {
-                              f.options.insert(SINK_USER_FORCE_APPEND_ONLY_OPTION.into(), v.into());
-                        }
-                        f
-                    })
+            Some(t) => SinkFormatDesc::from_legacy_type(&connector, t)?.map(|mut f| {
+                session.notice_to_user("Consider using the newer syntax `FORMAT ... ENCODE ...` instead of `type = '...'`.");
+                if let Some(v) = with_options.get(SINK_USER_FORCE_APPEND_ONLY_OPTION) {
+                    f.options.insert(SINK_USER_FORCE_APPEND_ONLY_OPTION.into(), v.into());
                 }
-            }
+                f
+            }),
             // Case C: no format + encode required
             None => None,
         },
@@ -198,6 +193,20 @@ pub fn gen_sink_plan(
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     if let Some(col_names) = col_names {
         plan_root.set_out_names(col_names)?;
+    };
+
+    let without_backfill = match with_options.remove(SINK_WITHOUT_BACKFILL) {
+        Some(flag) if flag.eq_ignore_ascii_case("false") => {
+            if direct_sink {
+                true
+            } else {
+                return Err(ErrorCode::BindError(
+                    "`snapshot = false` only support `CREATE SINK FROM MV or TABLE`".to_string(),
+                )
+                .into());
+            }
+        }
+        _ => false,
     };
 
     let target_table_catalog = stmt
@@ -216,6 +225,7 @@ pub fn gen_sink_plan(
         db_name.to_owned(),
         sink_from_table_name,
         format_desc,
+        without_backfill,
         target_table,
     )?;
     let sink_desc = sink_plan.sink_desc().clone();
@@ -255,7 +265,7 @@ pub fn gen_sink_plan(
             || sink_catalog.sink_type == SinkType::ForceAppendOnly)
         {
             return Err(RwError::from(ErrorCode::BindError(
-                "Only append-only sinks can sink to a table without primary keys. Please try to add \"FORMAT PLAIN ENCODE NATIVE\"".to_string(),
+                "Only append-only sinks can sink to a table without primary keys.".to_string(),
             )));
         }
 
@@ -313,7 +323,7 @@ pub async fn handle_create_sink(
             );
         }
 
-        let mut graph = build_graph(plan);
+        let mut graph = build_graph(plan)?;
 
         graph.parallelism =
             session
@@ -461,6 +471,7 @@ pub(crate) async fn reparse_table_for_sink(
     let col_id_gen = ColumnIdGenerator::new_alter(table_catalog);
     let Statement::CreateTable {
         columns,
+        wildcard_idx,
         constraints,
         source_watermarks,
         append_only,
@@ -478,6 +489,7 @@ pub(crate) async fn reparse_table_for_sink(
         handler_args,
         col_id_gen,
         columns,
+        wildcard_idx,
         constraints,
         source_watermarks,
         append_only,
@@ -591,8 +603,7 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         E::Protobuf => SinkEncode::Protobuf,
         E::Avro => SinkEncode::Avro,
         E::Template => SinkEncode::Template,
-        E::Native => SinkEncode::Native,
-        e @ (E::Csv | E::Bytes) => {
+        e @ (E::Native | E::Csv | E::Bytes) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into());
         }
     };
@@ -637,16 +648,8 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Json,Encode::Template],
                     Format::Upsert => vec![Encode::Json,Encode::Template],
                 ),
-                "table" => hashmap!(
-                    Format::Plain => vec![Encode::Native],
-                    Format::Upsert => vec![Encode::Native],
-                ),
         ))
     });
-
-pub fn allow_old_sink_type_syntax(connector: &str) -> bool {
-    !matches!(connector, "table")
-}
 
 pub fn validate_compatibility(connector: &str, format_desc: &ConnectorSchema) -> Result<()> {
     let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS

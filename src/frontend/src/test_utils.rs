@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -53,7 +53,7 @@ use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::{EventLog, SystemParams};
+use risingwave_pb::meta::{EventLog, PbTableParallelism, SystemParams};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -521,6 +521,11 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn alter_source_with_sr(&self, source: PbSource) -> Result<()> {
+        self.catalog.write().update_source(&source);
+        Ok(())
+    }
+
     async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()> {
         for database in self.catalog.read().iter_databases() {
             for schema in database.iter_schemas() {
@@ -587,6 +592,15 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_database_name(&self, _database_id: u32, _database_name: &str) -> Result<()> {
         unreachable!()
+    }
+
+    async fn alter_parallelism(
+        &self,
+        _table_id: u32,
+        _parallelism: PbTableParallelism,
+        _deferred: bool,
+    ) -> Result<()> {
+        todo!()
     }
 }
 
@@ -970,6 +984,19 @@ pub static PROTO_FILE_DATA: &str = r#"
       Country country = 3;
       int64 zipcode = 4;
       float rate = 5;
+    }
+    message TestRecordAlterType {
+        string id = 1;
+        Country country = 3;
+        int32 zipcode = 4;
+        float rate = 5;
+      }
+    message TestRecordExt {
+      int32 id = 1;
+      Country country = 3;
+      int64 zipcode = 4;
+      float rate = 5;
+      string name = 6;
     }
     message Country {
       string address = 1;

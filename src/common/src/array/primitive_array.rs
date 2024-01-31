@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -208,7 +208,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         *self.data.get_unchecked(idx)
     }
 
-    fn raw_iter(&self) -> impl DoubleEndedIterator<Item = Self::RefItem<'_>> {
+    fn raw_iter(&self) -> impl ExactSizeIterator<Item = Self::RefItem<'_>> {
         self.data.iter().cloned()
     }
 

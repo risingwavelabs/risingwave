@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,18 +15,19 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use risingwave_common::catalog::{ColumnCatalog, TableId};
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkType};
 use risingwave_connector::sink::{
-    SinkError, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
+    SinkError, SinkMetaClient, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
 };
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
-use risingwave_storage::dispatch_state_store;
 
 use super::*;
 use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
-use crate::common::log_store_impl::kv_log_store::{KvLogStoreFactory, KvLogStoreMetrics};
+use crate::common::log_store_impl::kv_log_store::{
+    KvLogStoreFactory, KvLogStoreMetrics, KV_LOG_STORE_V1_INFO,
+};
 use crate::executor::SinkExecutor;
 
 pub struct SinkExecutorBuilder;
@@ -37,8 +38,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
     async fn new_boxed_executor(
         params: ExecutorParams,
         node: &Self::Node,
-        _store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
+        state_store: impl StateStore,
     ) -> StreamResult<BoxedExecutor> {
         let [input_executor]: [_; 1] = params.input.try_into().unwrap();
 
@@ -47,7 +47,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let sink_id = sink_desc.get_id().into();
         let db_name = sink_desc.get_db_name().into();
         let sink_from_name = sink_desc.get_sink_from_name().into();
-        let target_table = sink_desc.get_target_table().cloned().ok().map(TableId::new);
         let properties = sink_desc.get_properties().clone();
         let downstream_pk = sink_desc
             .downstream_pk
@@ -102,12 +101,11 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             format_desc,
             db_name,
             sink_from_name,
-            target_table,
         };
 
         let sink_id_str = format!("{}", sink_id.sink_id);
 
-        let sink_metrics = stream.streaming_metrics.new_sink_metrics(
+        let sink_metrics = params.executor_stats.new_sink_metrics(
             &params.info.identity,
             sink_id_str.as_str(),
             connector,
@@ -117,7 +115,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             connector_params: params.env.connector_params(),
             executor_id: params.executor_id,
             vnode_bitmap: params.vnode_bitmap.clone(),
-            meta_client: params.env.meta_client(),
+            meta_client: params.env.meta_client().map(SinkMetaClient::MetaClient),
             sink_metrics,
         };
 
@@ -152,29 +150,28 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     connector,
                 );
                 // TODO: support setting max row count in config
-                dispatch_state_store!(params.env.state_store(), state_store, {
-                    let factory = KvLogStoreFactory::new(
-                        state_store,
-                        node.table.as_ref().unwrap().clone(),
-                        params.vnode_bitmap.clone().map(Arc::new),
-                        65536,
-                        metrics,
-                        log_store_identity,
-                    );
+                let factory = KvLogStoreFactory::new(
+                    state_store,
+                    node.table.as_ref().unwrap().clone(),
+                    params.vnode_bitmap.clone().map(Arc::new),
+                    65536,
+                    metrics,
+                    log_store_identity,
+                    &KV_LOG_STORE_V1_INFO,
+                );
 
-                    Ok(Box::new(
-                        SinkExecutor::new(
-                            params.actor_context,
-                            params.info,
-                            input_executor,
-                            sink_write_param,
-                            sink_param,
-                            columns,
-                            factory,
-                        )
-                        .await?,
-                    ))
-                })
+                Ok(Box::new(
+                    SinkExecutor::new(
+                        params.actor_context,
+                        params.info,
+                        input_executor,
+                        sink_write_param,
+                        sink_param,
+                        columns,
+                        factory,
+                    )
+                    .await?,
+                ))
             }
         }
     }

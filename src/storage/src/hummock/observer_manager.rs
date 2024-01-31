@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -81,7 +81,7 @@ impl ObserverState for HummockObserverNode {
                         ),
                     ))
                     .inspect_err(|e| {
-                        tracing::error!("unable to send version delta: {:?}", e);
+                        tracing::error!(event = ?e.0, "unable to send version delta");
                     });
             }
 
@@ -131,7 +131,7 @@ impl ObserverState for HummockObserverNode {
                 )),
             ))
             .inspect_err(|e| {
-                tracing::error!("unable to send full version: {:?}", e);
+                tracing::error!(event = ?e.0, "unable to send full version");
             });
         let snapshot_version = snapshot.version.unwrap();
         self.version = snapshot_version.catalog_version;

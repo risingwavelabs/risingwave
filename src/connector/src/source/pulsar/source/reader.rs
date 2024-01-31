@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,8 +37,8 @@ use crate::parser::ParserConfig;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
-    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, SourceContextRef,
-    SourceMessage, SplitId, SplitMetaData, SplitReader, StreamChunkWithState,
+    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef,
+    SourceMessage, SplitId, SplitMetaData, SplitReader,
 };
 
 pub enum PulsarSplitReader {
@@ -83,7 +83,7 @@ impl SplitReader for PulsarSplitReader {
         }
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         match self {
             Self::Broker(reader) => {
                 let (parser_config, source_context) =
@@ -162,7 +162,10 @@ impl SplitReader for PulsarBrokerReader {
     ) -> Result<Self> {
         ensure!(splits.len() == 1, "only support single split");
         let split = splits.into_iter().next().unwrap();
-        let pulsar = props.common.build_client().await?;
+        let pulsar = props
+            .common
+            .build_client(&props.oauth, &props.aws_auth_props)
+            .await?;
         let topic = split.topic.to_string();
 
         tracing::debug!("creating consumer for pulsar split topic {}", topic,);
@@ -231,7 +234,7 @@ impl SplitReader for PulsarBrokerReader {
         })
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self, parser_config, source_context)
@@ -353,7 +356,7 @@ impl PulsarIcebergReader {
         Ok(table)
     }
 
-    #[try_stream(ok = StreamChunkWithState, error = anyhow::Error)]
+    #[try_stream(ok = (StreamChunk, HashMap<SplitId, String>), error = anyhow::Error)]
     async fn as_stream_chunk_stream(&self) {
         #[for_await]
         for file_scan in self.scan().await? {
@@ -368,7 +371,7 @@ impl PulsarIcebergReader {
         }
     }
 
-    #[try_stream(ok = StreamChunkWithState, error = RwError)]
+    #[try_stream(ok = StreamChunk, error = RwError)]
     async fn into_stream(self) {
         let (props, mut split, parser_config, source_ctx) = (
             self.props.clone(),
@@ -381,13 +384,9 @@ impl PulsarIcebergReader {
 
         #[for_await]
         for msg in self.as_stream_chunk_stream() {
-            let msg =
+            let (_chunk, mapping) =
                 msg.inspect_err(|e| tracing::error!("Failed to read message from iceberg: {}", e))?;
-            last_msg_id = msg
-                .split_offset_mapping
-                .as_ref()
-                .and_then(|m| m.get(self.split.topic.to_string().as_str()))
-                .cloned();
+            last_msg_id = mapping.get(self.split.topic.to_string().as_str()).cloned();
         }
 
         tracing::info!("Finished reading pulsar message from iceberg");
@@ -429,24 +428,20 @@ impl PulsarIcebergReader {
             ),
         );
 
-        if let Some(s3_configs) = self.props.common.oauth.as_ref().map(|s| &s.aws_auth_props) {
-            if let Some(region) = &s3_configs.region {
-                iceberg_configs.insert("iceberg.table.io.region".to_string(), region.to_string());
-            }
-
-            if let Some(access_key) = &s3_configs.access_key {
-                iceberg_configs.insert(
-                    "iceberg.table.io.access_key_id".to_string(),
-                    access_key.to_string(),
-                );
-            }
-
-            if let Some(secret_key) = &s3_configs.secret_key {
-                iceberg_configs.insert(
-                    "iceberg.table.io.secret_access_key".to_string(),
-                    secret_key.to_string(),
-                );
-            }
+        if let Some(region) = &self.props.aws_auth_props.region {
+            iceberg_configs.insert("iceberg.table.io.region".to_string(), region.to_string());
+        }
+        if let Some(access_key) = &self.props.aws_auth_props.access_key {
+            iceberg_configs.insert(
+                "iceberg.table.io.access_key_id".to_string(),
+                access_key.to_string(),
+            );
+        }
+        if let Some(secret_key) = &self.props.aws_auth_props.secret_key {
+            iceberg_configs.insert(
+                "iceberg.table.io.secret_access_key".to_string(),
+                secret_key.to_string(),
+            );
         }
 
         iceberg_configs.insert("iceberg.table.io.bucket".to_string(), bucket.to_string());
@@ -471,7 +466,7 @@ impl PulsarIcebergReader {
     fn convert_record_batch_to_source_with_state(
         &self,
         record_batch: &RecordBatch,
-    ) -> Result<StreamChunkWithState> {
+    ) -> Result<(StreamChunk, HashMap<SplitId, String>)> {
         let mut offsets = Vec::with_capacity(record_batch.num_rows());
 
         let ledger_id_array = record_batch
@@ -540,14 +535,11 @@ impl PulsarIcebergReader {
 
         let stream_chunk = StreamChunk::from(data_chunk);
 
-        let state = Some(HashMap::from([(
+        let state = HashMap::from([(
             self.split.topic.to_string().into(),
             offsets.last().unwrap().clone(),
-        )]));
+        )]);
 
-        Ok(StreamChunkWithState {
-            chunk: stream_chunk,
-            split_offset_mapping: state,
-        })
+        Ok((stream_chunk, state))
     }
 }

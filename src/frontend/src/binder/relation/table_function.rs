@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -119,14 +119,10 @@ impl Binder {
         let func = func?;
 
         if let ExprImpl::TableFunction(func) = &func {
-            if func
-                .args
-                .iter()
-                .any(|arg| matches!(arg, ExprImpl::Subquery(_)))
-            {
+            if func.args.iter().any(|arg| arg.has_subquery()) {
                 // Same error reports as DuckDB.
                 return Err(ErrorCode::InvalidInputSyntax(
-                    format!("Only table-in-out functions can have subquery parameters, {} only accepts constant parameters", func.name()),
+                    format!("Only table-in-out functions can have subquery parameters. The table function has subquery parameters is {}", func.name()),
                 )
                     .into());
             }

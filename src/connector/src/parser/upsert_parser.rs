@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_pb::plan_common::AdditionalColumnType;
+use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
 use super::bytes_parser::BytesAccessBuilder;
 use super::unified::upsert::UpsertChangeEvent;
@@ -53,7 +53,10 @@ async fn build_accessor_builder(
 
 pub fn get_key_column_name(columns: &[SourceColumnDesc]) -> Option<String> {
     columns.iter().find_map(|column| {
-        if column.additional_column_type == AdditionalColumnType::Key {
+        if matches!(
+            column.additional_column_type.column_type,
+            Some(AdditionalColumnType::Key(_))
+        ) {
             Some(column.name.clone())
         } else {
             None

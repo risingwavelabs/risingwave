@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -51,6 +51,7 @@ use risingwave_common::types::{DataType, Datum};
 pub use self::build::*;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
+pub use self::expr_udf::get_or_create_wasm_runtime;
 pub use self::value::{ValueImpl, ValueRef};
 pub use self::wrapper::*;
 pub use super::{ExprError, Result};

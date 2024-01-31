@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,10 +23,11 @@ use chrono::Datelike;
 use itertools::Itertools;
 use num_bigint::{BigInt, Sign};
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz};
 use risingwave_common::error::Result as RwResult;
 use risingwave_common::log::LogSuppresser;
-use risingwave_common::types::{DataType, Date, Datum, Interval, JsonbVal, ScalarImpl, Time};
+use risingwave_common::types::{
+    DataType, Date, Datum, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{Access, AccessError, AccessResult};
@@ -157,7 +158,7 @@ impl<'a> AvroParseOptions<'a> {
                 }?;
 
                 let negative = value.sign() == Sign::Minus;
-                let (lo, mid, hi) = extract_decimal(value.to_bytes_be().1);
+                let (lo, mid, hi) = extract_decimal(value.to_bytes_be().1)?;
                 let decimal =
                     rust_decimal::Decimal::from_parts(lo, mid, hi, negative, scale as u32);
                 ScalarImpl::Decimal(risingwave_common::types::Decimal::Normalized(decimal))
@@ -181,19 +182,27 @@ impl<'a> AvroParseOptions<'a> {
             }
             (Some(DataType::Varchar) | None, Value::String(s)) => s.clone().into_boxed_str().into(),
             // ---- Timestamp -----
-            (Some(DataType::Timestamp) | None, Value::TimestampMillis(ms)) => {
-                i64_to_timestamp(*ms).map_err(|_| create_error())?.into()
+            (Some(DataType::Timestamp) | None, Value::LocalTimestampMillis(ms)) => {
+                Timestamp::with_millis(*ms)
+                    .map_err(|_| create_error())?
+                    .into()
             }
-            (Some(DataType::Timestamp) | None, Value::TimestampMicros(us)) => {
-                i64_to_timestamp(*us).map_err(|_| create_error())?.into()
+            (Some(DataType::Timestamp) | None, Value::LocalTimestampMicros(us)) => {
+                Timestamp::with_micros(*us)
+                    .map_err(|_| create_error())?
+                    .into()
             }
 
             // ---- TimestampTz -----
-            (Some(DataType::Timestamptz), Value::TimestampMillis(ms)) => {
-                i64_to_timestamptz(*ms).map_err(|_| create_error())?.into()
+            (Some(DataType::Timestamptz) | None, Value::TimestampMillis(ms)) => {
+                Timestamptz::from_millis(*ms)
+                    .ok_or(AccessError::Other(anyhow!(
+                        "timestamptz with milliseconds {ms} * 1000 is out of range",
+                    )))?
+                    .into()
             }
-            (Some(DataType::Timestamptz), Value::TimestampMicros(us)) => {
-                i64_to_timestamptz(*us).map_err(|_| create_error())?.into()
+            (Some(DataType::Timestamptz) | None, Value::TimestampMicros(us)) => {
+                Timestamptz::from_micros(*us).into()
             }
 
             // ---- Interval -----
@@ -331,7 +340,7 @@ pub(crate) fn avro_decimal_to_rust_decimal(
     let negative = !avro_decimal.is_positive();
     let bytes = avro_decimal.to_vec_unsigned();
 
-    let (lo, mid, hi) = extract_decimal(bytes);
+    let (lo, mid, hi) = extract_decimal(bytes)?;
     Ok(rust_decimal::Decimal::from_parts(
         lo,
         mid,
@@ -341,30 +350,40 @@ pub(crate) fn avro_decimal_to_rust_decimal(
     ))
 }
 
-pub(crate) fn extract_decimal(bytes: Vec<u8>) -> (u32, u32, u32) {
+pub(crate) fn extract_decimal(bytes: Vec<u8>) -> anyhow::Result<(u32, u32, u32)> {
     match bytes.len() {
         len @ 0..=4 => {
             let mut pad = vec![0; 4 - len];
             pad.extend_from_slice(&bytes);
             let lo = u32::from_be_bytes(pad.try_into().unwrap());
-            (lo, 0, 0)
+            Ok((lo, 0, 0))
         }
         len @ 5..=8 => {
-            let mid = u32::from_be_bytes(bytes[..4].to_owned().try_into().unwrap());
-            let mut pad = vec![0; 8 - len];
-            pad.extend_from_slice(&bytes[4..]);
-            let lo = u32::from_be_bytes(pad.try_into().unwrap());
-            (lo, mid, 0)
+            let zero_len = 8 - len;
+            let mid_end = 4 - zero_len;
+
+            let mut pad = vec![0; zero_len];
+            pad.extend_from_slice(&bytes[..mid_end]);
+            let mid = u32::from_be_bytes(pad.try_into().unwrap());
+
+            let lo = u32::from_be_bytes(bytes[mid_end..].to_owned().try_into().unwrap());
+            Ok((lo, mid, 0))
         }
         len @ 9..=12 => {
-            let hi = u32::from_be_bytes(bytes[..4].to_owned().try_into().unwrap());
-            let mid = u32::from_be_bytes(bytes[4..8].to_owned().try_into().unwrap());
-            let mut pad = vec![0; 12 - len];
-            pad.extend_from_slice(&bytes[8..]);
-            let lo = u32::from_be_bytes(pad.try_into().unwrap());
-            (lo, mid, hi)
+            let zero_len = 12 - len;
+            let hi_end = 4 - zero_len;
+            let mid_end = hi_end + 4;
+
+            let mut pad = vec![0; zero_len];
+            pad.extend_from_slice(&bytes[..hi_end]);
+            let hi = u32::from_be_bytes(pad.try_into().unwrap());
+
+            let mid = u32::from_be_bytes(bytes[hi_end..mid_end].to_owned().try_into().unwrap());
+
+            let lo = u32::from_be_bytes(bytes[mid_end..].to_owned().try_into().unwrap());
+            Ok((lo, mid, hi))
         }
-        _ => unreachable!(),
+        _ => Err(anyhow!("decimal bytes len: {:?} > 12", bytes.len())),
     }
 }
 
@@ -414,7 +433,7 @@ pub(crate) fn unix_epoch_days() -> i32 {
 mod tests {
     use apache_avro::Decimal as AvroDecimal;
     use risingwave_common::error::{ErrorCode, RwError};
-    use risingwave_common::types::{Decimal, Timestamp};
+    use risingwave_common::types::{Decimal, Timestamptz};
 
     use super::*;
 
@@ -431,6 +450,25 @@ mod tests {
         let avro_decimal = AvroDecimal::from(v);
         let rust_decimal = avro_decimal_to_rust_decimal(avro_decimal, 28, 1).unwrap();
         assert_eq!(rust_decimal, rust_decimal::Decimal::try_from(28.1).unwrap());
+
+        // 1.1234567891
+        let value = BigInt::from(11234567891_i64);
+        let negative = value.sign() == Sign::Minus;
+        let (lo, mid, hi) = extract_decimal(value.to_bytes_be().1).unwrap();
+        let decimal = rust_decimal::Decimal::from_parts(lo, mid, hi, negative, 10);
+        assert_eq!(
+            decimal,
+            rust_decimal::Decimal::try_from(1.1234567891).unwrap()
+        );
+
+        // 1.123456789123456789123456789
+        let v = vec![3, 161, 77, 58, 146, 180, 49, 220, 100, 4, 95, 21];
+        let avro_decimal = AvroDecimal::from(v);
+        let rust_decimal = avro_decimal_to_rust_decimal(avro_decimal, 28, 27).unwrap();
+        assert_eq!(
+            rust_decimal,
+            rust_decimal::Decimal::from_str("1.123456789123456789123456789").unwrap()
+        );
     }
 
     /// Convert Avro value to datum.For now, support the following [Avro type](https://avro.apache.org/docs/current/spec.html).
@@ -457,24 +495,24 @@ mod tests {
     }
 
     #[test]
-    fn test_avro_timestamp_micros() {
-        let v1 = Value::TimestampMicros(1620000000000);
-        let v2 = Value::TimestampMillis(1620000000);
+    fn test_avro_timestamptz_micros() {
+        let v1 = Value::TimestampMicros(1620000000000000);
+        let v2 = Value::TimestampMillis(1620000000000);
         let value_schema1 = Schema::TimestampMicros;
         let value_schema2 = Schema::TimestampMillis;
-        let datum1 = from_avro_value(v1, &value_schema1, &DataType::Timestamp).unwrap();
-        let datum2 = from_avro_value(v2, &value_schema2, &DataType::Timestamp).unwrap();
+        let datum1 = from_avro_value(v1, &value_schema1, &DataType::Timestamptz).unwrap();
+        let datum2 = from_avro_value(v2, &value_schema2, &DataType::Timestamptz).unwrap();
         assert_eq!(
             datum1,
-            Some(ScalarImpl::Timestamp(Timestamp::new(
-                "2021-05-03T00:00:00".parse().unwrap()
-            )))
+            Some(ScalarImpl::Timestamptz(
+                Timestamptz::from_str("2021-05-03T00:00:00Z").unwrap()
+            ))
         );
         assert_eq!(
             datum2,
-            Some(ScalarImpl::Timestamp(Timestamp::new(
-                "2021-05-03T00:00:00".parse().unwrap()
-            )))
+            Some(ScalarImpl::Timestamptz(
+                Timestamptz::from_str("2021-05-03T00:00:00Z").unwrap()
+            ))
         );
     }
 
@@ -498,7 +536,7 @@ mod tests {
         assert_eq!(
             resp,
             Some(ScalarImpl::Decimal(Decimal::Normalized(
-                rust_decimal::Decimal::from_str("4.557430887741865791").unwrap()
+                rust_decimal::Decimal::from_str("0.017802464409370431").unwrap()
             )))
         );
     }

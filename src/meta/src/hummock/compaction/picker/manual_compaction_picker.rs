@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -339,7 +339,7 @@ pub mod tests {
         generate_l0_overlapping_sublevels, generate_level, generate_table,
     };
     use crate::hummock::compaction::selector::{CompactionSelector, ManualCompactionSelector};
-    use crate::hummock::compaction::LocalSelectorStatistic;
+    use crate::hummock::compaction::{CompactionDeveloperConfig, LocalSelectorStatistic};
     use crate::hummock::model::CompactionGroup;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
@@ -384,9 +384,7 @@ pub mod tests {
                     generate_table(1, 1, 101, 200, 1),
                     generate_table(2, 1, 222, 300, 1),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -398,9 +396,7 @@ pub mod tests {
                     generate_table(7, 1, 501, 800, 1),
                     generate_table(8, 2, 301, 400, 1),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
         let mut levels = Levels {
@@ -562,9 +558,7 @@ pub mod tests {
                     generate_table(3, 1, 0, 100, 1),
                     generate_table(4, 2, 2000, 3000, 1),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -573,9 +567,7 @@ pub mod tests {
                     generate_table(1, 1, 0, 100, 1),
                     generate_table(2, 2, 2000, 3000, 1),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
         // Set internal_table_ids.
@@ -617,9 +609,7 @@ pub mod tests {
                 generate_table(3, 2, 200, 300, 1),
                 generate_table(4, 2, 300, 400, 1),
             ],
-            total_file_size: 0,
-            sub_level_id: 0,
-            uncompressed_file_size: 0,
+            ..Default::default()
         }];
         let levels = Levels {
             levels,
@@ -641,6 +631,7 @@ pub mod tests {
             total_file_size: 0,
             sub_level_id: 0,
             uncompressed_file_size: 0,
+            ..Default::default()
         }];
         let levels = Levels {
             levels,
@@ -1177,9 +1168,7 @@ pub mod tests {
                     generate_table(3, 1, 101, 200, 1),
                     generate_table(4, 1, 222, 300, 1),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
         assert_eq!(levels.len(), 4);
@@ -1212,6 +1201,7 @@ pub mod tests {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -1248,6 +1238,7 @@ pub mod tests {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -1287,9 +1278,7 @@ pub mod tests {
                     generate_table(6, 1, 444, 500, 1),
                     generate_table(7, 1, 555, 600, 1),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
         assert_eq!(levels.len(), 4);
@@ -1322,6 +1311,7 @@ pub mod tests {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -1360,6 +1350,7 @@ pub mod tests {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);

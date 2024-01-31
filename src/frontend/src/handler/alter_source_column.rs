@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_connector::source::{extract_source_struct, SourceEncode, SourceStruct};
@@ -63,15 +62,23 @@ pub async fn handle_alter_source_column(
     let SourceStruct { encode, .. } = extract_source_struct(&catalog.info)?;
     match encode {
         SourceEncode::Avro | SourceEncode::Protobuf => {
-            bail_not_implemented!("Alter source with schema registry")
+            return Err(ErrorCode::NotSupported(
+                "alter source with schema registry".to_string(),
+                "try `ALTER SOURCE .. FORMAT .. ENCODE .. (...)` instead".to_string(),
+            )
+            .into());
         }
         SourceEncode::Json if catalog.info.use_schema_registry => {
-            bail_not_implemented!("Alter source with schema registry")
+            return Err(ErrorCode::NotSupported(
+                "alter source with schema registry".to_string(),
+                "try `ALTER SOURCE .. FORMAT .. ENCODE .. (...)` instead".to_string(),
+            )
+            .into());
         }
         SourceEncode::Invalid | SourceEncode::Native => {
             return Err(RwError::from(ErrorCode::NotSupported(
-                format!("Alter source with encode {:?}", encode),
-                "Alter source with encode JSON | BYTES | CSV".into(),
+                format!("alter source with encode {:?}", encode),
+                "alter source with encode JSON | BYTES | CSV".into(),
             )));
         }
         _ => {}

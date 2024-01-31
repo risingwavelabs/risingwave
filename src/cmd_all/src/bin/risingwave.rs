@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -192,7 +192,7 @@ fn main() -> Result<()> {
 }
 
 fn playground(opts: PlaygroundOpts) {
-    let settings = risingwave_rt::LoggerSettings::new("playground")
+    let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
         .with_target("risingwave_storage", Level::WARN)
         .with_thread_name(true);
     risingwave_rt::init_risingwave_logger(settings);
@@ -200,7 +200,8 @@ fn playground(opts: PlaygroundOpts) {
 }
 
 fn standalone(opts: StandaloneOpts) {
-    let settings = risingwave_rt::LoggerSettings::new("standalone")
+    let opts = risingwave_cmd_all::parse_standalone_opt_args(&opts);
+    let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
         .with_target("risingwave_storage", Level::WARN)
         .with_thread_name(true);
     risingwave_rt::init_risingwave_logger(settings);

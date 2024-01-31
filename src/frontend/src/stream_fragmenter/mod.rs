@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ use risingwave_pb::stream_plan::{
 use self::rewrite::build_delta_join_without_arrange;
 use crate::optimizer::plan_node::reorganize_elements_id;
 use crate::optimizer::PlanRef;
+use crate::scheduler::SchedulerResult;
 
 /// The mutable state when building fragment graph.
 #[derive(Educe)]
@@ -112,11 +113,11 @@ impl BuildFragmentGraphState {
     }
 }
 
-pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
+pub fn build_graph(plan_node: PlanRef) -> SchedulerResult<StreamFragmentGraphProto> {
     let plan_node = reorganize_elements_id(plan_node);
 
     let mut state = BuildFragmentGraphState::default();
-    let stream_node = plan_node.to_stream_prost(&mut state);
+    let stream_node = plan_node.to_stream_prost(&mut state)?;
     generate_fragment_graph(&mut state, stream_node).unwrap();
     let mut fragment_graph = state.fragment_graph.to_protobuf();
     fragment_graph.dependent_table_ids = state
@@ -125,7 +126,7 @@ pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
         .map(|id| id.table_id)
         .collect();
     fragment_graph.table_ids_cnt = state.next_table_id;
-    fragment_graph
+    Ok(fragment_graph)
 }
 
 #[cfg(any())]

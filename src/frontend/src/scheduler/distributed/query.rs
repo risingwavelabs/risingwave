@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 // Licensed under the Apache License, Version 2.0 (the "License");
 //
 // you may not use this file except in compliance with the License.
@@ -591,6 +591,8 @@ pub(crate) mod tests {
             create_type: CreateType::Foreground,
             description: None,
             incoming_sinks: vec![],
+            initialized_at_cluster_version: None,
+            created_at_cluster_version: None,
         };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),

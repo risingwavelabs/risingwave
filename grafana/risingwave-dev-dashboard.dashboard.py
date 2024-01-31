@@ -265,7 +265,13 @@ def section_compaction(outer_panels):
                     [
                         panels.target(
                             f"avg({metric('storage_compact_task_pending_num')}) by({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "compactor_task_split_count - {{%s}} @ {{%s}}"
+                            "compactor_task_count - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+
+                        panels.target(
+                            f"avg({metric('storage_compact_task_pending_parallelism')}) by({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "compactor_task_pending_parallelism - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
@@ -827,6 +833,28 @@ def section_streaming(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_rowsps(
+                    "Arrangement Backfill Snapshot Read Throughput(rows)",
+                    "Total number of rows that have been read from the backfill snapshot",
+                    [
+                        panels.target(
+                            f"rate({table_metric('stream_arrangement_backfill_snapshot_read_row_count')}[$__rate_interval])",
+                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
+                            % NODE_LABEL,
+                            ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Arrangement Backfill Upstream Throughput(rows)",
+                    "Total number of rows that have been output from the backfill upstream",
+                    [
+                        panels.target(
+                            f"rate({table_metric('stream_arrangement_backfill_upstream_output_row_count')}[$__rate_interval])",
+                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
+                            % NODE_LABEL,
+                            ),
+                    ],
+                ),
                 panels.timeseries_count(
                     "Barrier Number",
                     "The number of barriers that have been ingested but not completely processed. This metric reflects the "
@@ -982,6 +1010,16 @@ def section_streaming_cdc(outer_panels):
                                 f"lag p{legend}" + " - {{table_name}}",
                             ),
                             [50, 99, "max"],
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "CDC Source Errors",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('cdc_source_error')}) by (connector_name, source_id, error_msg)",
+                            "{{connector_name}}: {{error_msg}} ({{source_id}})",
                         ),
                     ],
                 ),

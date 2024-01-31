@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use risingwave_storage::StateStore;
 use super::ExecutorBuilder;
 use crate::error::StreamResult;
 use crate::executor::{BoxedExecutor, Executor, NoOpExecutor};
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::task::ExecutorParams;
 
 pub struct NoOpExecutorBuilder;
 
@@ -29,7 +29,6 @@ impl ExecutorBuilder for NoOpExecutorBuilder {
         params: ExecutorParams,
         _node: &NoOpNode,
         _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         Ok(NoOpExecutor::new(params.actor_context, params.info, input).boxed())

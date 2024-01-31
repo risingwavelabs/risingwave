@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@ use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, next_key, prefixed_range_with_vnode, TableKeyRange,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::plan_common::StorageTableDesc;
 use tracing::trace;
 
 use crate::error::{StorageError, StorageResult};
@@ -46,7 +47,7 @@ use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::{PrefetchOptions, ReadOptions};
 use crate::table::merge_sort::merge_sort;
-use crate::table::{compute_vnode, Distribution, KeyedRow, TableIter};
+use crate::table::{KeyedRow, TableDistribution, TableIter};
 use crate::StateStore;
 
 /// [`StorageTableInner`] is the interface accessing relational data in KV(`StateStore`) with
@@ -88,16 +89,7 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
     // FIXME: revisit constructions and usages.
     pk_indices: Vec<usize>,
 
-    /// Indices of distribution key for computing vnode.
-    /// Note that the index is based on the primary key columns by `pk_indices`.
-    dist_key_in_pk_indices: Vec<usize>,
-
-    /// Virtual nodes that the table is partitioned into.
-    ///
-    /// Only the rows whose vnode of the primary key is in this set will be visible to the
-    /// executor. For READ_WRITE instances, the table will also check whether the written rows
-    /// confirm to this partition.
-    vnodes: Arc<Bitmap>,
+    distribution: TableDistribution,
 
     /// Used for catalog table_properties
     table_option: TableOption,
@@ -127,32 +119,91 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
     /// from those supplied to associated executors.
     /// These `output_column_ids` may have `pk` appended, since they will be needed to scan from
     /// storage. The associated executors may not have these `pk` fields.
-    #[allow(clippy::too_many_arguments)]
     pub fn new_partial(
         store: S,
-        table_id: TableId,
-        table_columns: Vec<ColumnDesc>,
         output_column_ids: Vec<ColumnId>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-        distribution: Distribution,
-        table_options: TableOption,
-        value_indices: Vec<usize>,
-        read_prefix_len_hint: usize,
-        versioned: bool,
+        vnodes: Option<Arc<Bitmap>>,
+        table_desc: &StorageTableDesc,
     ) -> Self {
+        let table_id = TableId {
+            table_id: table_desc.table_id,
+        };
+        let column_descs = table_desc
+            .columns
+            .iter()
+            .map(ColumnDesc::from)
+            .collect_vec();
+        let order_types: Vec<OrderType> = table_desc
+            .pk
+            .iter()
+            .map(|order| OrderType::from_protobuf(order.get_order_type().unwrap()))
+            .collect();
+
+        let pk_indices = table_desc
+            .pk
+            .iter()
+            .map(|k| k.column_index as usize)
+            .collect_vec();
+
+        let table_option = TableOption {
+            retention_seconds: if table_desc.retention_seconds > 0 {
+                Some(table_desc.retention_seconds)
+            } else {
+                None
+            },
+        };
+        let value_indices = table_desc
+            .get_value_indices()
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
+        let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
+        let versioned = table_desc.versioned;
+        let dist_key_in_pk_indices = table_desc
+            .dist_key_in_pk_indices
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
+        let vnode_col_idx_in_pk = table_desc.vnode_col_idx_in_pk.map(|k| k as usize);
+        let distribution =
+            TableDistribution::new(vnodes, dist_key_in_pk_indices, vnode_col_idx_in_pk);
+
         Self::new_inner(
             store,
             table_id,
-            table_columns,
+            column_descs,
             output_column_ids,
             order_types,
             pk_indices,
             distribution,
-            table_options,
+            table_option,
             value_indices,
-            read_prefix_len_hint,
+            prefix_hint_len,
             versioned,
+        )
+    }
+
+    pub fn for_test_with_partial_columns(
+        store: S,
+        table_id: TableId,
+        columns: Vec<ColumnDesc>,
+        output_column_ids: Vec<ColumnId>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        value_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_inner(
+            store,
+            table_id,
+            columns,
+            output_column_ids,
+            order_types,
+            pk_indices,
+            TableDistribution::singleton(),
+            Default::default(),
+            value_indices,
+            0,
+            false,
         )
     }
 
@@ -165,18 +216,14 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
         value_indices: Vec<usize>,
     ) -> Self {
         let output_column_ids = columns.iter().map(|c| c.column_id).collect();
-        Self::new_inner(
+        Self::for_test_with_partial_columns(
             store,
             table_id,
             columns,
             output_column_ids,
             order_types,
             pk_indices,
-            Distribution::fallback(),
-            Default::default(),
             value_indices,
-            0,
-            false,
         )
     }
 
@@ -188,10 +235,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
         output_column_ids: Vec<ColumnId>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
-        Distribution {
-            dist_key_in_pk_indices,
-            vnodes,
-        }: Distribution,
+        distribution: TableDistribution,
         table_option: TableOption,
         value_indices: Vec<usize>,
         read_prefix_len_hint: usize,
@@ -254,8 +298,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             mapping: Arc::new(mapping),
             row_serde: Arc::new(row_serde),
             pk_indices,
-            dist_key_in_pk_indices,
-            vnodes,
+            distribution,
             table_option,
             read_prefix_len_hint,
         }
@@ -292,23 +335,13 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     pub fn table_id(&self) -> TableId {
         self.table_id
     }
+
+    pub fn vnodes(&self) -> &Arc<Bitmap> {
+        self.distribution.vnodes()
+    }
 }
 /// Point get
 impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
-    /// Get vnode value with given primary key.
-    fn compute_vnode_by_pk(&self, pk: impl Row) -> VirtualNode {
-        compute_vnode(pk, &self.dist_key_in_pk_indices, &self.vnodes)
-    }
-
-    /// Try getting vnode value with given primary key prefix, used for `vnode_hint` in iterators.
-    /// Return `None` if the provided columns are not enough.
-    fn try_compute_vnode_by_pk_prefix(&self, pk_prefix: impl Row) -> Option<VirtualNode> {
-        self.dist_key_in_pk_indices
-            .iter()
-            .all(|&d| d < pk_prefix.len())
-            .then(|| compute_vnode(pk_prefix, &self.dist_key_in_pk_indices, &self.vnodes))
-    }
-
     /// Get a single row by point get
     pub async fn get_row(
         &self,
@@ -318,8 +351,11 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         let epoch = wait_epoch.get_epoch();
         let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
         self.store.try_wait_epoch(wait_epoch).await?;
-        let serialized_pk =
-            serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
+        let serialized_pk = serialize_pk_with_vnode(
+            &pk,
+            &self.pk_serializer,
+            self.distribution.compute_vnode_by_pk(&pk),
+        );
         assert!(pk.len() <= self.pk_indices.len());
 
         let prefix_hint = if self.read_prefix_len_hint != 0 && self.read_prefix_len_hint == pk.len()
@@ -382,8 +418,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     /// Update the vnode bitmap of the storage table, returns the previous vnode bitmap.
     #[must_use = "the executor should decide whether to manipulate the cache based on the previous vnode bitmap"]
     pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-        assert_eq!(self.vnodes.len(), new_vnodes.len());
-        std::mem::replace(&mut self.vnodes, new_vnodes)
+        self.distribution.update_vnode_bitmap(new_vnodes)
     }
 }
 
@@ -432,7 +467,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                 // If `vnode_hint` is set, we can only access this single vnode.
                 Some(vnode) => Either::Left(std::iter::once(vnode)),
                 // Otherwise, we need to access all vnodes of this table.
-                None => Either::Right(self.vnodes.iter_vnodes()),
+                None => Either::Right(self.distribution.vnodes().iter_vnodes()),
             };
             vnodes.map(|vnode| prefixed_range_with_vnode(encoded_key_range.clone(), vnode))
         };
@@ -605,7 +640,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             prefix_hint,
             (start_key, end_key),
             epoch,
-            self.try_compute_vnode_by_pk_prefix(pk_prefix),
+            self.distribution.try_compute_vnode_by_pk_prefix(pk_prefix),
             ordered,
             prefetch_options,
         )

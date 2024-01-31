@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
-
 use bytes::Bytes;
 use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -23,6 +21,7 @@ use risingwave_hummock_trace::{
     init_collector, should_use_trace, ConcurrentId, MayTraceSpan, OperationResult, StorageType,
     TraceResult, TraceSpan, TracedBytes, TracedSealCurrentEpochOptions, LOCAL_ID,
 };
+use thiserror_ext::AsReport;
 
 use super::identity;
 use crate::error::{StorageError, StorageResult};
@@ -176,12 +175,9 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         res
     }
 
-    async fn flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> StorageResult<usize> {
-        let span = TraceSpan::new_flush_span(delete_ranges.clone(), self.storage_type);
-        let res = self.inner.flush(delete_ranges).await;
+    async fn flush(&mut self) -> StorageResult<usize> {
+        let span = TraceSpan::new_flush_span(self.storage_type);
+        let res = self.inner.flush().await;
         span.may_send_result(OperationResult::Flush(
             res.as_ref().map(|o: &usize| *o).into(),
         ));
@@ -357,7 +353,7 @@ impl<S: StateStoreIterItemStream> TracedStateStoreIter<S> {
         while let Some((key, value)) = inner
             .try_next()
             .await
-            .inspect_err(|e| tracing::error!("Failed in next: {:?}", e))?
+            .inspect_err(|e| tracing::error!(error = %e.as_report(), "Failed in next"))?
         {
             self.span.may_send_iter_next();
             self.span

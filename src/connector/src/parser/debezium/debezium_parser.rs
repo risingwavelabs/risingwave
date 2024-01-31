@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -109,7 +109,9 @@ impl DebeziumParser {
             Err(err) => {
                 // Only try to access transaction control message if the row operation access failed
                 // to make it a fast path.
-                if let Ok(transaction_control) = row_op.transaction_control() {
+                if let Ok(transaction_control) =
+                    row_op.transaction_control(&self.source_ctx.connector_props)
+                {
                     Ok(ParseResult::TransactionControl(transaction_control))
                 } else {
                     Err(err)?
@@ -149,5 +151,78 @@ impl ByteStreamSourceParser for DebeziumParser {
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<ParseResult> {
         self.parse_inner(key, payload, writer).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ops::Deref;
+    use std::sync::Arc;
+
+    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+
+    use super::*;
+    use crate::parser::{SourceStreamChunkBuilder, TransactionControl};
+    use crate::source::{ConnectorProperties, DataType};
+
+    #[tokio::test]
+    async fn test_parse_transaction_metadata() {
+        let schema = vec![
+            ColumnCatalog {
+                column_desc: ColumnDesc::named("payload", ColumnId::placeholder(), DataType::Jsonb),
+                is_hidden: false,
+            },
+            ColumnCatalog::offset_column(),
+            ColumnCatalog::cdc_table_name_column(),
+        ];
+
+        let columns = schema
+            .iter()
+            .map(|c| SourceColumnDesc::from(&c.column_desc))
+            .collect::<Vec<_>>();
+
+        let props = SpecificParserConfig {
+            key_encoding_config: None,
+            encoding_config: EncodingProperties::Json(JsonProperties {
+                use_schema_registry: false,
+            }),
+            protocol_config: ProtocolProperties::Debezium,
+        };
+        let mut source_ctx = SourceContext::default();
+        source_ctx.connector_props = ConnectorProperties::PostgresCdc(Box::default());
+        let mut parser = DebeziumParser::new(props, columns.clone(), Arc::new(source_ctx))
+            .await
+            .unwrap();
+        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
+
+        // "id":"35352:3962948040" Postgres transaction ID itself and LSN of given operation separated by colon, i.e. the format is txID:LSN
+        let begin_msg = r#"{"schema":null,"payload":{"status":"BEGIN","id":"35352:3962948040","event_count":null,"data_collections":null,"ts_ms":1704269323180}}"#;
+        let commit_msg = r#"{"schema":null,"payload":{"status":"END","id":"35352:3962950064","event_count":11,"data_collections":[{"data_collection":"public.orders_tx","event_count":5},{"data_collection":"public.person","event_count":6}],"ts_ms":1704269323180}}"#;
+        let res = parser
+            .parse_one_with_txn(
+                None,
+                Some(begin_msg.as_bytes().to_vec()),
+                builder.row_writer(),
+            )
+            .await;
+        match res {
+            Ok(ParseResult::TransactionControl(TransactionControl::Begin { id })) => {
+                assert_eq!(id.deref(), "35352");
+            }
+            _ => panic!("unexpected parse result: {:?}", res),
+        }
+        let res = parser
+            .parse_one_with_txn(
+                None,
+                Some(commit_msg.as_bytes().to_vec()),
+                builder.row_writer(),
+            )
+            .await;
+        match res {
+            Ok(ParseResult::TransactionControl(TransactionControl::Commit { id })) => {
+                assert_eq!(id.deref(), "35352");
+            }
+            _ => panic!("unexpected parse result: {:?}", res),
+        }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,12 +24,13 @@ use risingwave_pb::batch_plan::RowSeqScanNode;
 
 use super::batch::prelude::*;
 use super::utils::{childless_record, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
+use super::{generic, ExprRewritable, PlanBase, PlanRef, ToDistributedBatch};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::{ToLocalBatch, TryToBatchPb};
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
+use crate::scheduler::SchedulerResult;
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -232,10 +233,10 @@ impl ToDistributedBatch for BatchSeqScan {
     }
 }
 
-impl ToBatchPb for BatchSeqScan {
-    fn to_batch_prost_body(&self) -> NodeBody {
-        NodeBody::RowSeqScan(RowSeqScanNode {
-            table_desc: Some(self.core.table_desc.to_protobuf()),
+impl TryToBatchPb for BatchSeqScan {
+    fn try_to_batch_prost_body(&self) -> SchedulerResult<NodeBody> {
+        Ok(NodeBody::RowSeqScan(RowSeqScanNode {
+            table_desc: Some(self.core.table_desc.try_to_protobuf()?),
             column_ids: self
                 .core
                 .output_column_ids()
@@ -247,7 +248,7 @@ impl ToBatchPb for BatchSeqScan {
             vnode_bitmap: None,
             ordered: !self.order().is_any(),
             limit: *self.limit(),
-        })
+        }))
     }
 }
 

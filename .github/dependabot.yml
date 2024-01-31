@@ -32,3 +32,6 @@ updates:
       patterns:
         - "mysql_common"
         - "mysql_async"
+    google-cloud:
+      patterns:
+        - "google-cloud*"

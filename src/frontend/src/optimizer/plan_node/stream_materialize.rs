@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use std::assert_matches::assert_matches;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, TableId};
+use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, TableId, OBJECT_ID_PLACEHOLDER};
 use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
@@ -29,7 +29,6 @@ use super::stream::StreamPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::table_catalog::{CreateType, TableCatalog, TableType, TableVersion};
-use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -235,8 +234,7 @@ impl StreamMaterialize {
             append_only,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties,
-            // TODO(zehua): replace it with FragmentId::placeholder()
-            fragment_id: FragmentId::MAX - 1,
+            fragment_id: OBJECT_ID_PLACEHOLDER,
             dml_fragment_id: None,
             vnode_col_index: None,
             row_id_index,
@@ -254,6 +252,8 @@ impl StreamMaterialize {
             create_type: CreateType::Foreground, // Will be updated in the handler itself.
             description: None,
             incoming_sinks: vec![],
+            initialized_at_cluster_version: None,
+            created_at_cluster_version: None,
         })
     }
 

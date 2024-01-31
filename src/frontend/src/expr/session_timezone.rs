@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -76,7 +76,7 @@ impl SessionTimezone {
     fn with_timezone(
         &self,
         func_type: ExprType,
-        inputs: &Vec<ExprImpl>,
+        inputs: &[ExprImpl],
         return_type: DataType,
     ) -> Option<ExprImpl> {
         match func_type {
@@ -135,7 +135,7 @@ impl SessionTimezone {
             | ExprType::IsDistinctFrom
             | ExprType::IsNotDistinctFrom => {
                 assert_eq!(inputs.len(), 2);
-                let mut inputs = inputs.clone();
+                let mut inputs = inputs.to_vec();
                 for idx in 0..2 {
                     if matches!(inputs[(idx + 1) % 2].return_type(), DataType::Timestamptz)
                         && matches!(
@@ -212,7 +212,7 @@ impl SessionTimezone {
                     // This is optional but avoids false warning in common case.
                     return None;
                 }
-                let mut new_inputs = inputs.clone();
+                let mut new_inputs = inputs.to_vec();
                 new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
                 Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
             }
@@ -225,7 +225,7 @@ impl SessionTimezone {
                 {
                     return None;
                 }
-                let mut new_inputs = inputs.clone();
+                let mut new_inputs = inputs.to_vec();
                 new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
                 Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
             }
@@ -238,7 +238,7 @@ impl SessionTimezone {
                 {
                     return None;
                 }
-                let mut new_inputs = inputs.clone();
+                let mut new_inputs = inputs.to_vec();
                 new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
                 Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
             }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::error::Result;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_sqlparser::ast::{Ident, SetVariableValue};
 
 use super::variable::set_var_to_param_str;

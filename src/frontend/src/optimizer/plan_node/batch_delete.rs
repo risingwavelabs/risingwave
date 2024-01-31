@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::PhysicalPlanRef;
-use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::generic::{GenericPlanNode, PhysicalPlanRef};
+use crate::optimizer::plan_node::{utils, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchDelete` implements [`super::LogicalDelete`]
@@ -35,7 +35,6 @@ pub struct BatchDelete {
 
 impl BatchDelete {
     pub fn new(core: generic::Delete<PlanRef>) -> Self {
-        assert_eq!(core.input.distribution(), &Distribution::Single);
         let base =
             PlanBase::new_batch_with_core(&core, core.input.distribution().clone(), Order::any());
         Self { base, core }
@@ -59,9 +58,29 @@ impl_distill_by_unit!(BatchDelete, core, "BatchDelete");
 
 impl ToDistributedBatch for BatchDelete {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let new_input = RequiredDist::single()
+        if self
+            .core
+            .ctx()
+            .session_ctx()
+            .config()
+            .batch_enable_distributed_dml()
+        {
+            // Add an hash shuffle between the delete and its input.
+            let new_input = RequiredDist::PhysicalDist(Distribution::HashShard(
+                (0..self.input().schema().len()).collect(),
+            ))
             .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
-        Ok(self.clone_with_input(new_input).into())
+            let new_delete: PlanRef = self.clone_with_input(new_input).into();
+            if self.core.returning {
+                Ok(new_delete)
+            } else {
+                utils::sum_affected_row(new_delete)
+            }
+        } else {
+            let new_input = RequiredDist::single()
+                .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
+            Ok(self.clone_with_input(new_input).into())
+        }
     }
 }
 
@@ -71,6 +90,7 @@ impl ToBatchPb for BatchDelete {
             table_id: self.core.table_id.table_id(),
             table_version_id: self.core.table_version_id,
             returning: self.core.returning,
+            session_id: self.base.ctx().session_ctx().session_id().0 as u32,
         })
     }
 }

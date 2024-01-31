@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,8 +35,8 @@ pub const RW_WORKER_NODES: BuiltinTable = BuiltinTable {
         (DataType::Boolean, "is_serving"),
         (DataType::Boolean, "is_unschedulable"),
         (DataType::Varchar, "rw_version"),
-        (DataType::Int64, "total_memory_bytes"),
-        (DataType::Int64, "total_cpu_cores"),
+        (DataType::Int64, "system_total_memory_bytes"),
+        (DataType::Int64, "system_total_cpu_cores"),
         (DataType::Timestamptz, "started_at"),
     ],
     pk: &[0],

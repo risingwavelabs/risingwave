@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ use risingwave_hummock_sdk::key::{get_table_id, TABLE_PREFIX_LEN};
 use risingwave_pb::catalog::Table;
 use risingwave_rpc_client::error::{Result as RpcResult, RpcError};
 use risingwave_rpc_client::MetaClient;
+use thiserror_ext::AsReport;
 
 use crate::hummock::{HummockError, HummockResult};
 
@@ -315,8 +316,8 @@ impl FilterKeyExtractorManagerInner {
                     .await
                     .map_err(|e| {
                         HummockError::other(format!(
-                            "request rpc list_tables for meta failed because {:?}",
-                            e
+                            "request rpc list_tables for meta failed: {}",
+                            e.as_report()
                         ))
                     })?;
             let mut guard = self.table_id_to_filter_key_extractor.write();
@@ -553,6 +554,8 @@ mod tests {
             create_type: PbCreateType::Foreground.into(),
             description: None,
             incoming_sinks: vec![],
+            initialized_at_cluster_version: None,
+            created_at_cluster_version: None,
         }
     }
 

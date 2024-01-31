@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -135,7 +135,7 @@ impl FunctionCall {
             let datum = literal
                 .get_data()
                 .as_ref()
-                .map(|scalar| ScalarImpl::from_literal(scalar.as_utf8(), &target))
+                .map(|scalar| ScalarImpl::from_text(scalar.as_utf8(), &target))
                 .transpose();
             if let Ok(datum) = datum {
                 *child = Literal::new(datum, target).into();

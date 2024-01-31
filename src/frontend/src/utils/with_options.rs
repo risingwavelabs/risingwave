@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use std::num::NonZeroU32;
 
 use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
 use risingwave_connector::source::kafka::{
-    insert_privatelink_broker_rewrite_map, PRIVATELINK_ENDPOINT_KEY,
+    insert_privatelink_broker_rewrite_map, CONNECTION_NAME_KEY, PRIVATELINK_ENDPOINT_KEY,
 };
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_sqlparser::ast::{
@@ -29,7 +29,6 @@ use risingwave_sqlparser::ast::{
 use crate::catalog::connection_catalog::resolve_private_link_connection;
 use crate::catalog::ConnectionId;
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
-use crate::handler::util::get_connection_name;
 use crate::session::SessionImpl;
 
 mod options {
@@ -49,6 +48,12 @@ impl std::ops::Deref for WithOptions {
 
     fn deref(&self) -> &Self::Target {
         &self.inner
+    }
+}
+
+impl std::ops::DerefMut for WithOptions {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
     }
 }
 
@@ -134,7 +139,7 @@ pub(crate) fn resolve_privatelink_in_with_option(
     session: &SessionImpl,
 ) -> RwResult<Option<ConnectionId>> {
     let is_kafka = is_kafka_connector(with_options);
-    let privatelink_endpoint = with_options.get(PRIVATELINK_ENDPOINT_KEY).cloned();
+    let privatelink_endpoint = with_options.remove(PRIVATELINK_ENDPOINT_KEY);
 
     // if `privatelink.endpoint` is provided in WITH, use it to rewrite broker address directly
     if let Some(endpoint) = privatelink_endpoint {
@@ -148,7 +153,9 @@ pub(crate) fn resolve_privatelink_in_with_option(
         return Ok(None);
     }
 
-    let connection_name = get_connection_name(with_options);
+    let connection_name = with_options
+        .remove(CONNECTION_NAME_KEY)
+        .map(|s| s.to_lowercase());
     let connection_id = match connection_name {
         Some(connection_name) => {
             let connection = session

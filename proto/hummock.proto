@@ -49,6 +49,7 @@ message Level {
   uint64 total_file_size = 4;
   uint64 sub_level_id = 5;
   uint64 uncompressed_file_size = 6;
+  uint32 vnode_partition_count = 7;
 }
 
 message InputLevel {
@@ -62,6 +63,7 @@ message IntraLevelDelta {
   uint64 l0_sub_level_id = 2;
   repeated uint64 removed_table_ids = 3;
   repeated SstableInfo inserted_table_infos = 4;
+  uint32 vnode_partition_count = 5;
 }
 
 enum CompatibilityVersion {
@@ -184,6 +186,12 @@ message HummockVersionCheckpoint {
   map<uint64, StaleObjects> stale_objects = 2;
 }
 
+message HummockVersionArchive {
+  HummockVersion version = 1;
+  // some version_deltas since version
+  repeated HummockVersionDelta version_deltas = 2;
+}
+
 // We will have two epoch after decouple
 message HummockSnapshot {
   // Epoch with checkpoint, we will read durable data with it.
@@ -285,7 +293,7 @@ message CompactTask {
     PENDING = 1;
     SUCCESS = 2;
     HEARTBEAT_CANCELED = 3;
-    NO_AVAIL_RESOURCE_CANCELED = 4;
+    NO_AVAIL_MEMORY_RESOURCE_CANCELED = 4;
     ASSIGN_FAIL_CANCELED = 5;
     SEND_FAIL_CANCELED = 6;
     MANUAL_CANCELED = 7;
@@ -294,6 +302,7 @@ message CompactTask {
     EXECUTE_FAILED = 10;
     JOIN_HANDLE_FAILED = 11;
     TRACK_SST_OBJECT_ID_FAILED = 12;
+    NO_AVAIL_CPU_RESOURCE_CANCELED = 13;
   }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;
@@ -341,7 +350,7 @@ message CompactTask {
   bool split_by_state_table = 21 [deprecated = true];
   // Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
   // Deprecated. use table_vnode_partition instead;
-  uint32 split_weight_by_vnode = 22 [deprecated = true];
+  uint32 split_weight_by_vnode = 22;
   map<uint32, uint32> table_vnode_partition = 23;
   // The table watermark of any table id. In compaction we only use the table watermarks on safe epoch,
   // so we only need to include the table watermarks on safe epoch to reduce the size of metadata.
@@ -749,6 +758,15 @@ message ListCompactTaskProgressResponse {
   repeated CompactTaskProgress task_progress = 1;
 }
 
+message CancelCompactTaskRequest {
+  uint64 task_id = 1;
+  CompactTask.TaskStatus task_status = 2;
+}
+
+message CancelCompactTaskResponse {
+  bool ret = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -787,6 +805,7 @@ service HummockManagerService {
   rpc GetCompactionScore(GetCompactionScoreRequest) returns (GetCompactionScoreResponse);
   rpc ListCompactTaskAssignment(ListCompactTaskAssignmentRequest) returns (ListCompactTaskAssignmentResponse);
   rpc ListCompactTaskProgress(ListCompactTaskProgressRequest) returns (ListCompactTaskProgressResponse);
+  rpc CancelCompactTask(CancelCompactTaskRequest) returns (CancelCompactTaskResponse);
 }
 
 message CompactionConfig {

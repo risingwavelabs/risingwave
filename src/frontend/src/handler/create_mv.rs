@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -200,7 +200,7 @@ It only indicates the physical clustering of the data, which may improve the per
         }
         let can_run_in_background = plan_has_backfill_leaf_nodes(&plan);
         let context = plan.plan_base().ctx().clone();
-        let mut graph = build_graph(plan);
+        let mut graph = build_graph(plan)?;
         graph.parallelism =
             session
                 .config()

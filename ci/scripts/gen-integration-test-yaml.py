@@ -35,6 +35,10 @@ CASES_MAP = {
     'nats': ['json'],
     'doris-sink': ['json'],
     'starrocks-sink': ['json'],
+    'deltalake-sink': ['json'],
+    'pinot-sink': ['json'],
+    'presto-trino': ['json'],
+    'client-library': ['none'],
 }
 
 def gen_pipeline_steps():
@@ -47,6 +51,8 @@ def gen_pipeline_steps():
    command: ci/scripts/integration-tests.sh -c {test_case} -f {test_format}
    timeout_in_minutes: 30
    retry: *auto-retry
+   concurrency: 10
+   concurrency_group: 'integration-test/run'
    plugins:
      - seek-oss/aws-sm#v2.3.1:
          env:

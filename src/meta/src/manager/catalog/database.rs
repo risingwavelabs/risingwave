@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -329,6 +329,14 @@ impl DatabaseManager {
         self.sources.values().cloned().collect_vec()
     }
 
+    pub fn list_sinks(&self) -> Vec<Sink> {
+        self.sinks.values().cloned().collect_vec()
+    }
+
+    pub fn list_views(&self) -> Vec<View> {
+        self.views.values().cloned().collect_vec()
+    }
+
     pub fn list_source_ids(&self, schema_id: SchemaId) -> Vec<SourceId> {
         self.sources
             .values()
@@ -436,7 +444,7 @@ impl DatabaseManager {
     }
 
     pub fn unmark_creating(&mut self, relation: &RelationKey) {
-        self.in_progress_creation_tracker.remove(&relation.clone());
+        self.in_progress_creation_tracker.remove(relation);
     }
 
     pub fn unmark_creating_streaming_job(&mut self, table_id: TableId) {

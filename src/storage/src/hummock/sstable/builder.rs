@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -200,12 +200,13 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         }
         if is_max_epoch(event.new_epoch)
             && self.monotonic_deletes.last().map_or(true, |last| {
-                is_max_epoch(last.new_epoch)
-                    && last.event_key.left_user_key.table_id
-                        == event.event_key.left_user_key.table_id
+                last.event_key.left_user_key.table_id != event.event_key.left_user_key.table_id
+                    || is_max_epoch(last.new_epoch)
             })
         {
-            // This range would never delete any key so we can merge it with last range.
+            // There are two case we shall skip the right end of delete-range.
+            //   1, it belongs the same table-id with the last event, and the last event is also right-end of some delete-range so we can merge them into one point.
+            //   2, this point does not belong the same table-id with the last event. It means that the left end of this delete-range may be dropped, so we can not add it.
             return;
         }
         if !is_max_epoch(event.new_epoch) {
@@ -237,6 +238,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         value: HummockValue<&[u8]>,
     ) -> HummockResult<()> {
         self.add(full_key, value).await
+    }
+
+    /// only for test
+    pub fn current_block_size(&self) -> usize {
+        self.block_builder.approximate_len()
     }
 
     /// Add raw data of block to sstable. return false means fallback
@@ -666,7 +672,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             + self.range_tombstone_size
     }
 
-    async fn build_block(&mut self) -> HummockResult<()> {
+    pub async fn build_block(&mut self) -> HummockResult<()> {
         // Skip empty block.
         if self.block_builder.is_empty() {
             return Ok(());
@@ -710,10 +716,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     /// Returns true if we roughly reached capacity
     pub fn reach_capacity(&self) -> bool {
         self.approximate_len() >= self.options.capacity
-    }
-
-    pub fn reach_max_sst_size(&self) -> bool {
-        self.approximate_len() as u64 >= self.options.max_sst_size
     }
 
     fn finalize_last_table_stats(&mut self) {
@@ -850,14 +852,14 @@ pub(super) mod tests {
             .await
             .unwrap();
 
-        assert_eq!(table.value().has_bloom_filter(), with_blooms);
+        assert_eq!(table.has_bloom_filter(), with_blooms);
         for i in 0..key_count {
             let full_key = test_key_of(i);
-            if table.value().has_bloom_filter() {
+            if table.has_bloom_filter() {
                 let hash = Sstable::hash_for_bloom_filter(full_key.user_key.encode().as_slice(), 0);
                 let key_ref = full_key.user_key.as_ref();
                 assert!(
-                    table.value().may_match_hash(
+                    table.may_match_hash(
                         &(Bound::Included(key_ref), Bound::Included(key_ref)),
                         hash
                     ),
@@ -936,9 +938,9 @@ pub(super) mod tests {
             let k = UserKey::for_test(TableId::new(2), table_key.as_slice());
             let hash = Sstable::hash_for_bloom_filter(&k.encode(), 2);
             let key_ref = k.as_ref();
-            assert!(table
-                .value()
-                .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash));
+            assert!(
+                table.may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
+            );
         }
     }
 }

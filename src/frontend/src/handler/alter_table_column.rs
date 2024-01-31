@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -153,6 +153,7 @@ pub async fn handle_alter_table_column(
         constraints,
         source_watermarks,
         append_only,
+        wildcard_idx,
         ..
     } = definition
     else {
@@ -167,6 +168,7 @@ pub async fn handle_alter_table_column(
         handler_args,
         col_id_gen,
         columns,
+        wildcard_idx,
         constraints,
         source_watermarks,
         append_only,
@@ -196,7 +198,7 @@ pub async fn handle_alter_table_column(
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
 }
 
-fn schema_has_schema_registry(schema: &ConnectorSchema) -> bool {
+pub fn schema_has_schema_registry(schema: &ConnectorSchema) -> bool {
     match schema.row_encode {
         Encode::Avro | Encode::Protobuf => true,
         Encode::Json => {

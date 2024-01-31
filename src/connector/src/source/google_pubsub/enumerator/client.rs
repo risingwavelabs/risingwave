@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
-use google_cloud_pubsub::client::Client;
+use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::subscription::{SeekTo, SubscriptionConfig};
 
 use crate::source::base::SplitEnumerator;
@@ -37,12 +37,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
     ) -> anyhow::Result<PubsubSplitEnumerator> {
-        let split_count = properties.split_count;
         let subscription = properties.subscription.to_owned();
-
-        if split_count < 1 {
-            bail!("split_count must be >= 1")
-        }
 
         if properties.credentials.is_none() && properties.emulator_host.is_none() {
             bail!("credentials must be set if not using the pubsub emulator")
@@ -51,7 +46,8 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         properties.initialize_env();
 
         // Validate config
-        let client = Client::new(Default::default())
+        let config = ClientConfig::default().with_auth().await?;
+        let client = Client::new(config)
             .await
             .map_err(|e| anyhow!("error initializing pubsub client: {:?}", e))?;
 
@@ -86,7 +82,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
             }
             (None, Some(snapshot)) => Some(SeekTo::Snapshot(snapshot)),
             (Some(_), Some(_)) => {
-                bail!("specify atmost one of start_offset or start_snapshot")
+                bail!("specify at most one of start_offset or start_snapshot")
             }
         };
 
@@ -98,7 +94,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
 
         Ok(Self {
             subscription,
-            split_count,
+            split_count: 1,
         })
     }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,12 +18,18 @@ use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::{
+    extract_parallelism_from_table_state, BuiltinTable, SysCatalogReaderImpl,
+};
 
 pub const RW_TABLE_FRAGMENTS: BuiltinTable = BuiltinTable {
     name: "rw_table_fragments",
     schema: RW_CATALOG_SCHEMA_NAME,
-    columns: &[(DataType::Int32, "table_id"), (DataType::Varchar, "status")],
+    columns: &[
+        (DataType::Int32, "table_id"),
+        (DataType::Varchar, "status"),
+        (DataType::Varchar, "parallelism"),
+    ],
     pk: &[0],
 };
 
@@ -34,9 +40,12 @@ impl SysCatalogReaderImpl {
         Ok(states
             .into_iter()
             .map(|state| {
+                let parallelism = extract_parallelism_from_table_state(&state);
+
                 OwnedRow::new(vec![
                     Some(ScalarImpl::Int32(state.table_id as i32)),
                     Some(ScalarImpl::Utf8(state.state().as_str_name().into())),
+                    Some(ScalarImpl::Utf8(parallelism.to_uppercase().into())),
                 ])
             })
             .collect_vec())

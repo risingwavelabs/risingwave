@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,16 +16,16 @@ use anyhow::{anyhow, ensure, Context, Result};
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, TimeZone, Utc};
 use futures_async_stream::try_stream;
-use google_cloud_pubsub::client::Client;
+use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::subscription::{SeekTo, Subscription};
 use risingwave_common::bail;
-use tonic_0_9::Code;
+use tonic::Code;
 
 use super::TaggedReceivedMessage;
 use crate::parser::ParserConfig;
 use crate::source::google_pubsub::{PubsubProperties, PubsubSplit};
 use crate::source::{
-    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, SourceContextRef,
+    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef,
     SourceMessage, SplitId, SplitMetaData, SplitReader,
 };
 
@@ -126,9 +126,8 @@ impl SplitReader for PubsubSplitReader {
         // Set environment variables consumed by `google_cloud_pubsub`
         properties.initialize_env();
 
-        let client = Client::new(Default::default())
-            .await
-            .map_err(|e| anyhow!(e))?;
+        let config = ClientConfig::default().with_auth().await?;
+        let client = Client::new(config).await.map_err(|e| anyhow!(e))?;
         let subscription = client.subscription(&properties.subscription);
 
         if let Some(ref offset) = split.start_offset {
@@ -165,7 +164,7 @@ impl SplitReader for PubsubSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self, parser_config, source_context)

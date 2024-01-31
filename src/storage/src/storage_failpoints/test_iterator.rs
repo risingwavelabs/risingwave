@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,8 +24,8 @@ use crate::hummock::iterator::test_utils::{
     TEST_KEYS_COUNT,
 };
 use crate::hummock::iterator::{
-    BackwardConcatIterator, BackwardUserIterator, ConcatIterator, HummockIterator,
-    UnorderedMergeIteratorInner, UserIterator,
+    BackwardConcatIterator, BackwardUserIterator, ConcatIterator, HummockIterator, MergeIterator,
+    UserIterator,
 };
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::test_utils::{
@@ -175,7 +175,7 @@ async fn test_failpoints_merge_invalid_key() {
     )
     .await;
     let tables = vec![table0, table1];
-    let mut mi = UnorderedMergeIteratorInner::new({
+    let mut mi = MergeIterator::new({
         let mut iters = vec![];
         for table in tables {
             iters.push(SstableIterator::new(
@@ -223,7 +223,7 @@ async fn test_failpoints_backward_merge_invalid_key() {
     )
     .await;
     let tables = vec![table0, table1];
-    let mut mi = UnorderedMergeIteratorInner::new({
+    let mut mi = MergeIterator::new({
         let mut iters = vec![];
         for table in tables {
             iters.push(BackwardSstableIterator::new(table, sstable_store.clone()));
@@ -279,7 +279,7 @@ async fn test_failpoints_user_read_err() {
         ),
     ];
 
-    let mi = UnorderedMergeIteratorInner::new(iters);
+    let mi = MergeIterator::new(iters);
     let mut ui = UserIterator::for_test(mi, (Unbounded, Unbounded));
     ui.rewind().await.unwrap();
 
@@ -331,7 +331,7 @@ async fn test_failpoints_backward_user_read_err() {
         BackwardSstableIterator::new(table1, sstable_store.clone()),
     ];
 
-    let mi = UnorderedMergeIteratorInner::new(iters);
+    let mi = MergeIterator::new(iters);
     let mut ui = BackwardUserIterator::for_test(mi, (Unbounded, Unbounded));
     ui.rewind().await.unwrap();
 
@@ -400,7 +400,7 @@ async fn test_failpoints_compactor_iterator_recreate() {
 
     let table = sstable_store.sstable(&info, &mut stats).await.unwrap();
     let mut sstable_iter = SstableStreamIterator::new(
-        table.value().meta.block_metas.clone(),
+        table.meta.block_metas.clone(),
         info,
         HashSet::from_iter(std::iter::once(0)),
         0,

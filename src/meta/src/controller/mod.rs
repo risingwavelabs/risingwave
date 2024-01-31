@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,8 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-#![expect(dead_code, reason = "WIP")]
 
 use anyhow::anyhow;
 use risingwave_common::util::epoch::Epoch;
@@ -33,7 +31,9 @@ use crate::MetaError;
 pub mod catalog;
 pub mod cluster;
 pub mod fragment;
+pub mod id;
 pub mod rename;
+pub mod streaming_job;
 pub mod system_param;
 pub mod user;
 pub mod utils;
@@ -137,6 +137,8 @@ impl From<ObjectModel<table::Model>> for PbTable {
             description: value.0.description,
             // TODO: fix it for model v2.
             incoming_sinks: vec![],
+            initialized_at_cluster_version: value.1.initialized_at_cluster_version,
+            created_at_cluster_version: value.1.created_at_cluster_version,
         }
     }
 }
@@ -169,6 +171,8 @@ impl From<ObjectModel<source::Model>> for PbSource {
                 .0
                 .optional_associated_table_id
                 .map(|id| PbOptionalAssociatedTableId::AssociatedTableId(id as _)),
+            initialized_at_cluster_version: value.1.initialized_at_cluster_version,
+            created_at_cluster_version: value.1.created_at_cluster_version,
         }
     }
 }
@@ -202,6 +206,8 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             format_desc: value.0.sink_format_desc.map(|desc| desc.0),
             // todo: fix this for model v2
             target_table: None,
+            initialized_at_cluster_version: value.1.initialized_at_cluster_version,
+            created_at_cluster_version: value.1.created_at_cluster_version,
         }
     }
 }
@@ -217,7 +223,7 @@ impl From<ObjectModel<index::Model>> for PbIndex {
             index_table_id: value.0.index_table_id as _,
             primary_table_id: value.0.primary_table_id as _,
             index_item: value.0.index_items.0,
-            original_columns: value.0.original_columns.0,
+            index_columns_len: value.0.index_columns_len as _,
             initialized_at_epoch: Some(
                 Epoch::from_unix_millis(value.1.initialized_at.timestamp_millis() as _).0,
             ),
@@ -225,6 +231,8 @@ impl From<ObjectModel<index::Model>> for PbIndex {
                 Epoch::from_unix_millis(value.1.created_at.timestamp_millis() as _).0,
             ),
             stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
+            initialized_at_cluster_version: value.1.initialized_at_cluster_version,
+            created_at_cluster_version: value.1.created_at_cluster_version,
         }
     }
 }
@@ -266,11 +274,18 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             database_id: value.1.database_id.unwrap() as _,
             name: value.0.name,
             owner: value.1.owner_id as _,
+            arg_names: value
+                .0
+                .arg_names
+                .split(',')
+                .map(|s| s.to_string())
+                .collect(),
             arg_types: value.0.arg_types.into_inner(),
             return_type: Some(value.0.return_type.into_inner()),
             language: value.0.language,
             link: value.0.link,
             identifier: value.0.identifier,
+            body: value.0.body,
             kind: Some(value.0.kind.into()),
         }
     }

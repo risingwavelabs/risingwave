@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use async_trait::async_trait;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use opendal::Operator;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::error::RwError;
 use tokio::io::BufReader;
 use tokio_util::io::{ReaderStream, StreamReader};
@@ -24,10 +25,11 @@ use tokio_util::io::{ReaderStream, StreamReader};
 use super::opendal_enumerator::OpendalEnumerator;
 use super::OpendalSource;
 use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
+use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
-    SplitReader, StreamChunkWithState,
+    BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
+    SplitReader,
 };
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
@@ -61,13 +63,13 @@ impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
         Ok(opendal_reader)
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         self.into_chunk_stream()
     }
 }
 
 impl<Src: OpendalSource> OpendalReader<Src> {
-    #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
+    #[try_stream(boxed, ok = StreamChunk, error = RwError)]
     async fn into_chunk_stream(self) {
         for split in self.splits {
             let actor_id = self.source_ctx.source_info.actor_id.to_string();
@@ -81,10 +83,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
 
             let parser =
                 ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx).await?;
-            let msg_stream = if matches!(
-                parser,
-                ByteStreamSourceParserImpl::Json(_) | ByteStreamSourceParserImpl::Csv(_)
-            ) {
+            let msg_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
                 parser.into_stream(nd_streaming::split_stream(data_stream))
             } else {
                 parser.into_stream(data_stream)
@@ -96,7 +95,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                     .metrics
                     .partition_input_count
                     .with_label_values(&[&actor_id, &source_id, &split_id])
-                    .inc_by(msg.chunk.cardinality() as u64);
+                    .inc_by(msg.cardinality() as u64);
                 yield msg;
             }
         }

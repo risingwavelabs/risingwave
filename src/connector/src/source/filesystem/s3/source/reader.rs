@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ use aws_smithy_types::body::SdkBody;
 use aws_smithy_types::byte_stream::ByteStream;
 use futures_async_stream::try_stream;
 use io::StreamReader;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::error::RwError;
 use tokio::io::BufReader;
 use tokio_util::io;
@@ -36,11 +37,10 @@ use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::base::{SplitMetaData, SplitReader};
 use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::nd_streaming;
+use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::s3::S3Properties;
-use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta,
-    StreamChunkWithState,
-};
+use crate::source::{BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta};
+
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
 
@@ -182,7 +182,7 @@ impl SplitReader for S3FileReader {
 
         let sdk_config = config.build_config().await?;
 
-        let bucket_name = props.bucket_name;
+        let bucket_name = props.common.bucket_name;
         let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
 
         let s3_file_reader = S3FileReader {
@@ -197,13 +197,13 @@ impl SplitReader for S3FileReader {
         Ok(s3_file_reader)
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         self.into_chunk_stream()
     }
 }
 
 impl S3FileReader {
-    #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
+    #[try_stream(boxed, ok = StreamChunk, error = RwError)]
     async fn into_chunk_stream(self) {
         for split in self.splits {
             let actor_id = self.source_ctx.source_info.actor_id.to_string();
@@ -221,10 +221,7 @@ impl S3FileReader {
 
             let parser =
                 ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx).await?;
-            let msg_stream = if matches!(
-                parser,
-                ByteStreamSourceParserImpl::Json(_) | ByteStreamSourceParserImpl::Csv(_)
-            ) {
+            let msg_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
                 parser.into_stream(nd_streaming::split_stream(data_stream))
             } else {
                 parser.into_stream(data_stream)
@@ -236,7 +233,7 @@ impl S3FileReader {
                     .metrics
                     .partition_input_count
                     .with_label_values(&[&actor_id, &source_id, &split_id])
-                    .inc_by(msg.chunk.cardinality() as u64);
+                    .inc_by(msg.cardinality() as u64);
                 yield msg;
             }
         }
@@ -253,20 +250,22 @@ mod tests {
         CommonParserConfig, CsvProperties, EncodingProperties, ProtocolProperties,
         SpecificParserConfig,
     };
-    use crate::source::filesystem::{S3Properties, S3SplitEnumerator};
+    use crate::source::filesystem::s3::S3PropertiesCommon;
+    use crate::source::filesystem::S3SplitEnumerator;
     use crate::source::{SourceColumnDesc, SourceEnumeratorContext, SplitEnumerator};
 
     #[tokio::test]
     #[ignore]
     async fn test_s3_split_reader() {
-        let props = S3Properties {
+        let props: S3Properties = S3PropertiesCommon {
             region_name: "ap-southeast-1".to_owned(),
             bucket_name: "mingchao-s3-source".to_owned(),
             match_pattern: None,
             access: None,
             secret: None,
             endpoint_url: None,
-        };
+        }
+        .into();
         let mut enumerator =
             S3SplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
                 .await
