@@ -65,8 +65,6 @@ pub enum HummockEvent {
 
     Shutdown,
 
-    VersionUpdate(HummockVersionUpdate),
-
     ImmToUploader(ImmutableMemtable),
 
     SealEpoch {
@@ -112,10 +110,6 @@ impl HummockEvent {
             HummockEvent::Clear(_, prev_epoch) => format!("Clear {:?}", prev_epoch),
 
             HummockEvent::Shutdown => "Shutdown".to_string(),
-
-            HummockEvent::VersionUpdate(version_update_payload) => {
-                format!("VersionUpdate {:?}", version_update_payload)
-            }
 
             HummockEvent::ImmToUploader(imm) => {
                 format!("ImmToUploader {:?}", imm)

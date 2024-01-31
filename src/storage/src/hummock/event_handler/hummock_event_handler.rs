@@ -24,7 +24,8 @@ use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use thiserror_ext::AsReport;
 use tokio::spawn;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot;
 use tracing::{debug, error, info, trace, warn};
 
 use super::refiller::{CacheRefillConfig, CacheRefiller};
@@ -113,8 +114,9 @@ impl BufferTracker {
 }
 
 pub struct HummockEventHandler {
-    hummock_event_tx: mpsc::UnboundedSender<HummockEvent>,
-    hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
+    hummock_event_tx: UnboundedSender<HummockEvent>,
+    hummock_event_rx: UnboundedReceiver<HummockEvent>,
+    version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
     pending_sync_requests: BTreeMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
     read_version_mapping: Arc<ReadVersionMappingType>,
 
@@ -158,8 +160,7 @@ async fn flush_imms(
 
 impl HummockEventHandler {
     pub fn new(
-        hummock_event_tx: mpsc::UnboundedSender<HummockEvent>,
-        hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
+        version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
         pinned_version: PinnedVersion,
         compactor_context: CompactorContext,
         filter_key_extractor_manager: FilterKeyExtractorManager,
@@ -169,8 +170,7 @@ impl HummockEventHandler {
         let upload_compactor_context = compactor_context.clone();
         let cloned_sstable_object_id_manager = sstable_object_id_manager.clone();
         Self::new_inner(
-            hummock_event_tx,
-            hummock_event_rx,
+            version_update_rx,
             pinned_version,
             Some(sstable_object_id_manager),
             compactor_context.sstable_store.clone(),
@@ -190,8 +190,7 @@ impl HummockEventHandler {
     }
 
     fn new_inner(
-        hummock_event_tx: mpsc::UnboundedSender<HummockEvent>,
-        hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
+        version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
         pinned_version: PinnedVersion,
         sstable_object_id_manager: Option<Arc<SstableObjectIdManager>>,
         sstable_store: SstableStoreRef,
@@ -200,6 +199,7 @@ impl HummockEventHandler {
         spawn_upload_task: SpawnUploadTask,
         spawn_merging_task: SpawnMergingTask,
     ) -> Self {
+        let (hummock_event_tx, hummock_event_rx) = unbounded_channel();
         let (version_update_notifier_tx, _) =
             tokio::sync::watch::channel(pinned_version.max_committed_epoch());
         let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
@@ -226,6 +226,7 @@ impl HummockEventHandler {
         Self {
             hummock_event_tx,
             hummock_event_rx,
+            version_update_rx,
             pending_sync_requests: Default::default(),
             version_update_notifier_tx,
             pinned_version: Arc::new(ArcSwap::from_pointee(pinned_version)),
@@ -248,6 +249,10 @@ impl HummockEventHandler {
 
     pub fn read_version_mapping(&self) -> Arc<ReadVersionMappingType> {
         self.read_version_mapping.clone()
+    }
+
+    pub fn event_sender(&self) -> UnboundedSender<HummockEvent> {
+        self.hummock_event_tx.clone()
     }
 
     pub fn buffer_tracker(&self) -> &BufferTracker {
@@ -529,13 +534,20 @@ impl HummockEventHandler {
                             self.handle_clear(notifier, prev_epoch).await
                         },
                         HummockEvent::Shutdown => {
-                            info!("buffer tracker shutdown");
+                            info!("event handler shutdown");
                             return;
                         },
                         event => {
                             self.handle_hummock_event(event);
                         }
                     }
+                }
+                version_update = pin!(self.version_update_rx.recv()) => {
+                    let Some(version_update) = version_update else {
+                        warn!("version update stream ends. event handle shutdown");
+                        return;
+                    };
+                    self.handle_version_update(version_update);
                 }
             }
         }
@@ -591,10 +603,6 @@ impl HummockEventHandler {
             HummockEvent::Shutdown => {
                 unreachable!("shutdown is handled specially")
             }
-            HummockEvent::VersionUpdate(version_payload) => {
-                self.handle_version_update(version_payload);
-            }
-
             HummockEvent::ImmToUploader(imm) => {
                 self.uploader.add_imm(imm);
                 self.uploader.may_flush();
@@ -785,7 +793,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_event_handler() {
-        let (tx, rx) = unbounded_channel();
         let table_id = TableId::new(123);
         let epoch0 = 233;
         let pinned_version = PinnedVersion::new(
@@ -800,11 +807,12 @@ mod tests {
         let mut storage_opts = default_opts_for_test();
         storage_opts.imm_merge_threshold = 5;
 
+        let (_version_update_tx, version_update_rx) = unbounded_channel();
+
         let (spawn_upload_task_tx, mut spawn_upload_task_rx) = unbounded_channel();
         let (spawn_merging_task_tx, mut spawn_merging_task_rx) = unbounded_channel();
         let event_handler = HummockEventHandler::new_inner(
-            tx.clone(),
-            rx,
+            version_update_rx,
             pinned_version,
             None,
             mock_sstable_store(),
@@ -842,6 +850,8 @@ mod tests {
                 })
             }),
         );
+
+        let tx = event_handler.event_sender();
 
         let _join_handle = spawn(event_handler.start_hummock_event_handler_worker());
 
