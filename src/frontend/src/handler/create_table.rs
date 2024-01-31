@@ -809,10 +809,13 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
 
+    // disable backfill if 'snapshot=false'
     let disable_backfill = match context.with_options().get(CDC_BACKFILL_ENABLE_KEY) {
         None => false,
-        Some(v) => bool::from_str(v)
-            .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_ENABLE_KEY))?,
+        Some(v) => {
+            !(bool::from_str(v)
+                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_ENABLE_KEY))?)
+        }
     };
 
     let logical_scan = LogicalCdcScan::create(

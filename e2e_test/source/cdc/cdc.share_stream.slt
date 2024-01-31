@@ -126,7 +126,7 @@ mysql --protocol=tcp -u root mytest -e "FLUSH LOGS"
 
 # table without backfill should not contain historical records
 query I
-select count(*) from orders_no_backfill order by order_id;
+select count(*) from orders_no_backfill
 ----
 0
 

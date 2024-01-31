@@ -172,6 +172,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             initial_binlog_offset = ?last_binlog_offset,
             ?current_pk_pos,
             is_finished = state.is_finished,
+            disable_backfill = self.disable_backfill,
             snapshot_row_count = total_snapshot_row_count,
             chunk_size = self.chunk_size,
             "start cdc backfill"
