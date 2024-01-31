@@ -374,7 +374,6 @@ where
                 }
 
                 // consume upstream buffer chunk
-                let upstream_chunk_buffer_is_empty = upstream_chunk_buffer.is_empty();
                 for chunk in upstream_chunk_buffer.drain(..) {
                     cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
                     // FIXME: Replace with `snapshot_is_processed`
@@ -397,11 +396,7 @@ where
                     upstream_table.write_chunk(chunk);
                 }
 
-                if upstream_chunk_buffer_is_empty {
-                    upstream_table.commit_no_data_expected(barrier.epoch)
-                } else {
-                    upstream_table.commit(barrier.epoch).await?;
-                }
+                upstream_table.commit(barrier.epoch).await?;
 
                 self.metrics
                     .arrangement_backfill_snapshot_read_row_count

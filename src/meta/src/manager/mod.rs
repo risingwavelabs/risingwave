@@ -21,6 +21,7 @@ mod id;
 mod idle;
 mod metadata;
 mod notification;
+mod notification_version;
 pub mod sink_coordination;
 mod streaming_job;
 mod system_param;

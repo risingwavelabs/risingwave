@@ -23,6 +23,7 @@ pub mod prelude;
 
 pub mod actor;
 pub mod actor_dispatcher;
+pub mod catalog_version;
 pub mod cluster;
 pub mod compaction_config;
 pub mod compaction_status;
