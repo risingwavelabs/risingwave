@@ -765,6 +765,10 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
                     }
                 }
             }
+            if vnode == VirtualNode::from_scalar(0) {
+                tracing::trace!("update vnode: vnode=0");
+            }
+
             table.write_record(Record::Update {
                 old_row: &encoded_prev_state[..],
                 new_row: &encoded_current_state[..],
@@ -779,6 +783,10 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
                 assert!(row.is_none(), "row {:#?}", row);
                 assert_eq!(encoded_current_state.len(), state_len);
             }
+            if vnode == VirtualNode::from_scalar(0) {
+                tracing::trace!("insert vnode: vnode=0");
+            }
+
             table.write_record(Record::Insert {
                 new_row: &encoded_current_state[..],
             });
@@ -787,6 +795,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
         backfill_state.mark_committed(vnode);
     }
     if has_progress {
+        tracing::trace!("committing on epoch, {:#?}", epoch);
         table.commit(epoch).await?;
     } else {
         table.commit_no_data_expected(epoch);
