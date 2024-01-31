@@ -246,6 +246,8 @@ impl Binder {
                     // Since the subsequent `unset flag` operation relies on global counting
                     self.udf_context.decr_global_count();
 
+                    println!("[bind_function] function: {} global_count: {}", function_name, self.udf_context.global_count());
+
                     // Only the top-most sql udf binding should unset the flag
                     // Otherwise the subsequent binding may not be able to
                     // find the corresponding context, consider the following example:

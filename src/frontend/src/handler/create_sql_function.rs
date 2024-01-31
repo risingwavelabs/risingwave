@@ -190,6 +190,10 @@ pub async fn handle_create_sql_function(
 
         binder.set_udf_binding_flag();
 
+        // Need to set the initial global count to 1
+        // otherwise the flag will be unset during the semantic check
+        binder.udf_context_mut().incr_global_count();
+
         if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
             match binder.bind_expr(expr) {
                 Ok(expr) => {
