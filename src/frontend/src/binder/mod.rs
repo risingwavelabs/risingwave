@@ -219,6 +219,8 @@ impl UdfContext {
         Ok(expr)
     }
 
+    /// Create the sql udf context
+    /// used per `bind_function` for sql udf & semantic check at definition time
     pub fn create_udf_context(
         args: &[FunctionArg],
         catalog: &Arc<FunctionCatalog>,
@@ -229,7 +231,9 @@ impl UdfContext {
                 FunctionArg::Unnamed(arg) => {
                     let FunctionArgExpr::Expr(e) = arg else {
                         return Err(
-                            ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into()
+                            ErrorCode::InvalidInputSyntax(
+                                "expect `FunctionArgExpr` for unnamed argument".to_string()
+                            ).into()
                         );
                     };
                     if catalog.arg_names[i].is_empty() {
@@ -240,7 +244,10 @@ impl UdfContext {
                         ret.insert(catalog.arg_names[i].clone(), e.clone());
                     }
                 }
-                _ => return Err(ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into()),
+                _ => return Err(ErrorCode::InvalidInputSyntax(
+                    "expect unamed argument when creating sql udf context".to_string()
+                )
+                .into()),
             }
         }
         Ok(ret)
