@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use chrono::format::Parsed;
-use risingwave_common::types::{Date, Timestamp, Timestamptz};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_common::types::{Date, IntoOrdered, Timestamp, Timestamptz, F64};
+use risingwave_expr::expr_context::TIME_ZONE;
+use risingwave_expr::{capture_context, function, ExprError, Result};
 
-use super::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
+use super::timestamptz::{timestamp_at_time_zone_impl, timestamptz_at_time_zone_impl};
 use super::to_char::ChronoPattern;
 
 /// Parse the input string with the given chrono pattern.
@@ -65,36 +66,45 @@ fn parse(s: &str, tmpl: &ChronoPattern) -> Result<Parsed> {
     Ok(parsed)
 }
 
-#[function(
-    "to_timestamp1(varchar, varchar) -> timestamp",
-    prebuild = "ChronoPattern::compile($1)",
-    deprecated
-)]
-pub fn to_timestamp_legacy(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
-    let parsed = parse(s, tmpl)?;
-    match parsed.offset {
-        None => Ok(parsed.to_naive_datetime_with_offset(0)?.into()),
-        // If the parsed result is a physical instant, return its reading in UTC.
-        // This decision was arbitrary and we are just being backward compatible here.
-        Some(_) => timestamptz_at_time_zone(parsed.to_datetime()?.into(), "UTC"),
-    }
+#[function("to_timestamp(float8) -> timestamptz")]
+fn f64_sec_to_timestamptz(elem: F64) -> Result<Timestamptz> {
+    // TODO(#4515): handle +/- infinity
+    let micros = (elem.0 * 1e6)
+        .into_ordered()
+        .try_into()
+        .map_err(|_| ExprError::NumericOutOfRange)?;
+    Ok(Timestamptz::from_micros(micros))
 }
 
+// capture context based implementation
+#[function(
+    "to_timestamp1(varchar, varchar) -> timestamptz",
+    prebuild = "ChronoPattern::compile($1)"
+)]
+fn to_timestamptz(s: &str, tmpl: &ChronoPattern) -> Result<Timestamptz> {
+    to_timestamptz_impl_captured(s, tmpl)
+}
+
+// rewrite based implementation
 #[function(
     "to_timestamp1(varchar, varchar, varchar) -> timestamptz",
     prebuild = "ChronoPattern::compile($1)"
 )]
-pub fn to_timestamp(s: &str, timezone: &str, tmpl: &ChronoPattern) -> Result<Timestamptz> {
+pub fn to_timestamptz1(s: &str, time_zone: &str, tmpl: &ChronoPattern) -> Result<Timestamptz> {
+    to_timestamptz_impl(time_zone, s, tmpl)
+}
+
+#[capture_context(TIME_ZONE)]
+pub fn to_timestamptz_impl(time_zone: &str, s: &str, tmpl: &ChronoPattern) -> Result<Timestamptz> {
     let parsed = parse(s, tmpl)?;
     Ok(match parsed.offset {
         Some(_) => parsed.to_datetime()?.into(),
         // If the parsed result lacks offset info, interpret it in the implicit session time zone.
-        None => timestamp_at_time_zone(parsed.to_naive_datetime_with_offset(0)?.into(), timezone)?,
+        None => {
+            timestamp_at_time_zone_impl(time_zone, parsed.to_naive_datetime_with_offset(0)?.into())?
+        }
     })
 }
-
-#[function("to_timestamp1(varchar, varchar) -> timestamptz", rewritten)]
-fn _to_timestamp1() {}
 
 #[function(
     "char_to_date(varchar, varchar) -> date",
@@ -108,6 +118,22 @@ pub fn to_date(s: &str, tmpl: &ChronoPattern) -> Result<Date> {
         *year += 1;
     }
     Ok(parsed.to_naive_date()?.into())
+}
+
+// kept for backward compatibility
+#[function(
+    "to_timestamp1(varchar, varchar) -> timestamp",
+    prebuild = "ChronoPattern::compile($1)",
+    deprecated
+)]
+pub fn to_timestamp_legacy(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
+    let parsed = parse(s, tmpl)?;
+    match parsed.offset {
+        None => Ok(parsed.to_naive_datetime_with_offset(0)?.into()),
+        // If the parsed result is a physical instant, return its reading in UTC.
+        // This decision was arbitrary and we are just being backward compatible here.
+        Some(_) => timestamptz_at_time_zone_impl("UTC", parsed.to_datetime()?.into()),
+    }
 }
 
 #[cfg(test)]

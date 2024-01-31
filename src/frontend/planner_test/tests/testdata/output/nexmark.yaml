@@ -1073,7 +1073,7 @@
     └─BatchProject { exprs: [bid.bidder, count, $expr1, $expr2] }
       └─BatchHashAgg { group_key: [bid.bidder, $expr1, $expr2], aggs: [count] }
         └─BatchExchange { order: [], dist: HashShard(bid.bidder, $expr1, $expr2) }
-          └─BatchProject { exprs: [bid.bidder, $expr1, AddWithTimeZone($expr1, '00:00:10':Interval, 'UTC':Varchar) as $expr2] }
+          └─BatchProject { exprs: [bid.bidder, $expr1, AddWithTimeZone($expr1, '00:00:10':Interval) as $expr2] }
             └─BatchProject { exprs: [bid.bidder, bid.p_time, TumbleStart(bid.p_time, '00:00:10':Interval) as $expr1] }
               └─BatchScan { table: bid, columns: [bid.bidder, bid.p_time], distribution: SomeShard }
   stream_plan: |-
@@ -1081,7 +1081,7 @@
     └─StreamProject { exprs: [bid.bidder, count, $expr1, $expr2], output_watermarks: [$expr1, $expr2] }
       └─StreamHashAgg [append_only] { group_key: [bid.bidder, $expr1, $expr2], aggs: [count], output_watermarks: [$expr1, $expr2] }
         └─StreamExchange { dist: HashShard(bid.bidder, $expr1, $expr2) }
-          └─StreamProject { exprs: [bid.bidder, $expr1, AddWithTimeZone($expr1, '00:00:10':Interval, 'UTC':Varchar) as $expr2, bid._row_id], output_watermarks: [$expr1, $expr2] }
+          └─StreamProject { exprs: [bid.bidder, $expr1, AddWithTimeZone($expr1, '00:00:10':Interval) as $expr2, bid._row_id], output_watermarks: [$expr1, $expr2] }
             └─StreamProject { exprs: [bid.bidder, bid.p_time, TumbleStart(bid.p_time, '00:00:10':Interval) as $expr1, bid._row_id], output_watermarks: [bid.p_time, $expr1] }
               └─StreamTableScan { table: bid, columns: [bid.bidder, bid.p_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_dist_plan: |+
@@ -1093,7 +1093,7 @@
             └── StreamExchange Hash([0, 1, 2]) from 1
 
     Fragment 1
-    StreamProject { exprs: [bid.bidder, $expr1, AddWithTimeZone($expr1, '00:00:10':Interval, 'UTC':Varchar) as $expr2, bid._row_id], output_watermarks: [$expr1, $expr2] }
+    StreamProject { exprs: [bid.bidder, $expr1, AddWithTimeZone($expr1, '00:00:10':Interval) as $expr2, bid._row_id], output_watermarks: [$expr1, $expr2] }
     └── StreamProject { exprs: [bid.bidder, bid.p_time, TumbleStart(bid.p_time, '00:00:10':Interval) as $expr1, bid._row_id], output_watermarks: [bid.p_time, $expr1] }
         └── StreamTableScan { table: bid, columns: [bid.bidder, bid.p_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { tables: [ StreamScan: 1 ] }
             ├── Upstream

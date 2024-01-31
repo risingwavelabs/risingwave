@@ -249,6 +249,10 @@ pub struct ConfigMap {
 
     #[parameter(default = "hex", check_hook = check_bytea_output)]
     bytea_output: String,
+
+    /// Enable timezone rewrite. Defaults to false.
+    #[parameter(default = false, rename = "rw_enable_timezone_rewriting")]
+    enable_timezone_rewriting: bool,
 }
 
 fn check_timezone(val: &str) -> Result<(), String> {

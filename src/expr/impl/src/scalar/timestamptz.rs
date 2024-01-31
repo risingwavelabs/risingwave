@@ -15,9 +15,9 @@
 use std::fmt::Write;
 
 use num_traits::CheckedNeg;
-use risingwave_common::types::{CheckedAdd, Interval, IntoOrdered, Timestamp, Timestamptz, F64};
-use risingwave_expr::{function, ExprError, Result};
-use thiserror_ext::AsReport;
+use risingwave_common::types::{CheckedAdd, Interval, Timestamp, Timestamptz};
+use risingwave_expr::expr_context::TIME_ZONE;
+use risingwave_expr::{capture_context, function, ExprError, Result};
 
 /// Just a wrapper to reuse the `map_err` logic.
 #[inline(always)]
@@ -28,18 +28,20 @@ pub fn time_zone_err(inner_err: String) -> ExprError {
     }
 }
 
-#[function("to_timestamp(float8) -> timestamptz")]
-pub fn f64_sec_to_timestamptz(elem: F64) -> Result<Timestamptz> {
-    // TODO(#4515): handle +/- infinity
-    let micros = (elem.0 * 1e6)
-        .into_ordered()
-        .try_into()
-        .map_err(|_| ExprError::NumericOutOfRange)?;
-    Ok(Timestamptz::from_micros(micros))
+// capture context based implementation
+#[function("at_time_zone(timestamp) -> timestamptz")]
+fn timestamp_at_time_zone(input: Timestamp) -> Result<Timestamptz> {
+    timestamp_at_time_zone_impl_captured(input)
 }
 
+// rewrite based implementation
 #[function("at_time_zone(timestamp, varchar) -> timestamptz")]
-pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<Timestamptz> {
+fn timestamp_at_time_zone1(input: Timestamp, time_zone: &str) -> Result<Timestamptz> {
+    timestamp_at_time_zone_impl(time_zone, input)
+}
+
+#[capture_context(TIME_ZONE)]
+pub fn timestamp_at_time_zone_impl(time_zone: &str, input: Timestamp) -> Result<Timestamptz> {
     let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
     // https://www.postgresql.org/docs/current/datetime-invalid-input.html
     // Special cases:
@@ -64,10 +66,46 @@ pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<Times
     Ok(Timestamptz::from_micros(usec))
 }
 
+// capture context based implementation
+#[function("at_time_zone(timestamptz) -> timestamp")]
+fn timestamptz_at_time_zone(input: Timestamptz) -> Result<Timestamp> {
+    timestamptz_at_time_zone_impl_captured(input)
+}
+
+// rewrite based implementation
+#[function("at_time_zone(timestamptz, varchar) -> timestamp")]
+fn timestamptz_at_time_zone1(input: Timestamptz, time_zone: &str) -> Result<Timestamp> {
+    timestamptz_at_time_zone_impl(time_zone, input)
+}
+
+#[capture_context(TIME_ZONE)]
+pub fn timestamptz_at_time_zone_impl(time_zone: &str, input: Timestamptz) -> Result<Timestamp> {
+    let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
+    let instant_local = input.to_datetime_in_zone(time_zone);
+    let naive = instant_local.naive_local();
+    Ok(Timestamp(naive))
+}
+
+// capture context based implementation
+#[function("cast_with_time_zone(timestamptz) -> varchar")]
+fn timestamptz_to_string(elem: Timestamptz, writer: &mut impl Write) -> Result<()> {
+    timestamptz_to_string_impl_captured(elem, writer)
+}
+
+// rewrite based implementation
 #[function("cast_with_time_zone(timestamptz, varchar) -> varchar")]
-pub fn timestamptz_to_string(
+fn timestamptz_to_string1(
     elem: Timestamptz,
     time_zone: &str,
+    writer: &mut impl Write,
+) -> Result<()> {
+    timestamptz_to_string_impl(time_zone, elem, writer)
+}
+
+#[capture_context(TIME_ZONE)]
+fn timestamptz_to_string_impl(
+    time_zone: &str,
+    elem: Timestamptz,
     writer: &mut impl Write,
 ) -> Result<()> {
     let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
@@ -81,25 +119,29 @@ pub fn timestamptz_to_string(
     Ok(())
 }
 
-// Tries to interpret the string with a timezone, and if failing, tries to interpret the string as a
-// timestamp and then adjusts it with the session timezone.
-#[function("cast_with_time_zone(varchar, varchar) -> timestamptz")]
-pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<Timestamptz> {
-    elem.parse().or_else(|_| {
-        timestamp_at_time_zone(
-            elem.parse::<Timestamp>()
-                .map_err(|err| ExprError::Parse(err.to_report_string().into()))?,
-            time_zone,
-        )
-    })
+// capture context based implementation
+#[function("cast_with_time_zone(varchar) -> timestamptz")]
+fn str_to_timestamptz(elem: &str) -> Result<Timestamptz> {
+    str_to_timestamptz_impl_captured(elem)
 }
 
-#[function("at_time_zone(timestamptz, varchar) -> timestamp")]
-pub fn timestamptz_at_time_zone(input: Timestamptz, time_zone: &str) -> Result<Timestamp> {
-    let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
-    let instant_local = input.to_datetime_in_zone(time_zone);
-    let naive = instant_local.naive_local();
-    Ok(Timestamp(naive))
+// rewrite based implementation
+#[function("cast_with_time_zone(varchar, varchar) -> timestamptz")]
+fn str_to_timestamptz1(elem: &str, time_zone: &str) -> Result<Timestamptz> {
+    str_to_timestamptz_impl(time_zone, elem)
+}
+
+// Tries to interpret the string with a timezone, and if failing, tries to interpret the string as a
+// timestamp and then adjusts it with the session timezone.
+#[capture_context(TIME_ZONE)]
+fn str_to_timestamptz_impl(time_zone: &str, elem: &str) -> Result<Timestamptz> {
+    elem.parse().or_else(|_| {
+        timestamp_at_time_zone_impl(
+            time_zone,
+            elem.parse::<Timestamp>()
+                .map_err(|err| ExprError::Parse(err.to_string().into()))?,
+        )
+    })
 }
 
 /// This operation is zone agnostic.
@@ -115,24 +157,56 @@ pub fn timestamptz_timestamptz_sub(l: Timestamptz, r: Timestamptz) -> Result<Int
     Ok(interval)
 }
 
+// capture context based implementation
+#[function("subtract_with_time_zone(timestamptz, interval) -> timestamptz")]
+pub fn timestamptz_interval_sub(input: Timestamptz, interval: Interval) -> Result<Timestamptz> {
+    timestamptz_interval_sub_impl_captured(input, interval)
+}
+
+// rewrite based implementation
 #[function("subtract_with_time_zone(timestamptz, interval, varchar) -> timestamptz")]
-pub fn timestamptz_interval_sub(
+pub fn timestamptz_interval_sub1(
     input: Timestamptz,
     interval: Interval,
     time_zone: &str,
 ) -> Result<Timestamptz> {
-    timestamptz_interval_add(
+    timestamptz_interval_sub_impl(time_zone, input, interval)
+}
+
+#[capture_context(TIME_ZONE)]
+pub fn timestamptz_interval_sub_impl(
+    time_zone: &str,
+    input: Timestamptz,
+    interval: Interval,
+) -> Result<Timestamptz> {
+    timestamptz_interval_add_impl(
+        time_zone,
         input,
         interval.checked_neg().ok_or(ExprError::NumericOverflow)?,
-        time_zone,
     )
 }
 
+// capture context based implementation
+#[function("add_with_time_zone(timestamptz, interval) -> timestamptz")]
+pub fn timestamptz_interval_add(input: Timestamptz, interval: Interval) -> Result<Timestamptz> {
+    timestamptz_interval_add_impl_captured(input, interval)
+}
+
+// rewrite based implementation
 #[function("add_with_time_zone(timestamptz, interval, varchar) -> timestamptz")]
-pub fn timestamptz_interval_add(
+pub fn timestamptz_interval_add1(
     input: Timestamptz,
     interval: Interval,
     time_zone: &str,
+) -> Result<Timestamptz> {
+    timestamptz_interval_add_impl(time_zone, input, interval)
+}
+
+#[capture_context(TIME_ZONE)]
+pub fn timestamptz_interval_add_impl(
+    time_zone: &str,
+    input: Timestamptz,
+    interval: Interval,
 ) -> Result<Timestamptz> {
     use num_traits::Zero as _;
 
@@ -146,11 +220,11 @@ pub fn timestamptz_interval_add(
     if !qualitative.is_zero() {
         // Only convert into and from naive local when necessary because it is lossy.
         // See `e2e_test/batch/functions/issue_12072.slt.part` for the difference.
-        let naive = timestamptz_at_time_zone(t, time_zone)?;
+        let naive = timestamptz_at_time_zone_impl(time_zone, t)?;
         let naive = naive
             .checked_add(qualitative)
             .ok_or(ExprError::NumericOverflow)?;
-        t = timestamp_at_time_zone(naive, time_zone)?;
+        t = timestamp_at_time_zone_impl(time_zone, naive)?;
     }
     let t = timestamptz_interval_quantitative(t, quantitative, i64::checked_add)?;
     Ok(t)
@@ -219,17 +293,17 @@ mod tests {
             ["2022-11-06 10:00:00Z", "2022-11-06 02:00:00", "2022-11-06 18:00:00", "2022-11-06 11:00:00"],
         ];
         for case in test_cases {
-            let usecs = str_to_timestamptz(case[0], "UTC").unwrap();
+            let usecs = str_to_timestamptz_impl("UTC", case[0]).unwrap();
             case.iter()
                 .skip(1)
                 .zip_eq_fast(zones)
                 .for_each(|(local, zone)| {
                     let local = local.parse().unwrap();
 
-                    let actual = timestamptz_at_time_zone(usecs, zone).unwrap();
+                    let actual = timestamptz_at_time_zone_impl(zone, usecs).unwrap();
                     assert_eq!(local, actual);
 
-                    let actual = timestamp_at_time_zone(local, zone).unwrap();
+                    let actual = timestamp_at_time_zone_impl(zone, local).unwrap();
                     assert_eq!(usecs, actual);
                 });
         }
@@ -243,7 +317,7 @@ mod tests {
             ("2022-03-27 02:00:00", "europe/zurich"),
             ("2022-03-27 02:59:00", "europe/zurich"),
         ] {
-            let actual = timestamp_at_time_zone(local.parse().unwrap(), zone);
+            let actual = timestamp_at_time_zone_impl(zone, local.parse().unwrap());
             assert!(actual.is_err());
         }
     }
@@ -262,14 +336,14 @@ mod tests {
             ("2022-11-06 09:59:00Z", "2022-11-06 01:59:00", "US/Pacific", true),
         ];
         for (instant, local, zone, preferred) in test_cases {
-            let usecs = str_to_timestamptz(instant, "UTC").unwrap();
+            let usecs = str_to_timestamptz_impl("UTC", instant).unwrap();
             let local = local.parse().unwrap();
 
-            let actual = timestamptz_at_time_zone(usecs, zone).unwrap();
+            let actual = timestamptz_at_time_zone_impl(zone, usecs).unwrap();
             assert_eq!(local, actual);
 
             if preferred {
-                let actual = timestamp_at_time_zone(local, zone).unwrap();
+                let actual = timestamp_at_time_zone_impl(zone, local).unwrap();
                 assert_eq!(usecs, actual)
             }
         }
@@ -278,27 +352,27 @@ mod tests {
     #[test]
     fn test_timestamptz_to_and_from_string() {
         let str1 = "1600-11-15 15:35:40.999999+08:00";
-        let timestamptz1 = str_to_timestamptz(str1, "UTC").unwrap();
+        let timestamptz1 = str_to_timestamptz_impl("UTC", str1).unwrap();
         assert_eq!(timestamptz1.timestamp_micros(), -11648507059000001);
 
         let mut writer = String::new();
-        timestamptz_to_string(timestamptz1, "UTC", &mut writer).unwrap();
+        timestamptz_to_string_impl("UTC", timestamptz1, &mut writer).unwrap();
         assert_eq!(writer, "1600-11-15 07:35:40.999999+00:00");
 
         let str2 = "1969-12-31 23:59:59.999999+00:00";
-        let timestamptz2 = str_to_timestamptz(str2, "UTC").unwrap();
+        let timestamptz2 = str_to_timestamptz_impl("UTC", str2).unwrap();
         assert_eq!(timestamptz2.timestamp_micros(), -1);
 
         let mut writer = String::new();
-        timestamptz_to_string(timestamptz2, "UTC", &mut writer).unwrap();
+        timestamptz_to_string_impl("UTC", timestamptz2, &mut writer).unwrap();
         assert_eq!(writer, str2);
 
         // Parse a timestamptz from a str without timezone
         let str3 = "2022-01-01 00:00:00+08:00";
-        let timestamptz3 = str_to_timestamptz(str3, "UTC").unwrap();
+        let timestamptz3 = str_to_timestamptz_impl("UTC", str3).unwrap();
 
         let timestamp_from_no_tz =
-            str_to_timestamptz("2022-01-01 00:00:00", "Asia/Singapore").unwrap();
+            str_to_timestamptz_impl("Asia/Singapore", "2022-01-01 00:00:00").unwrap();
         assert_eq!(timestamptz3, timestamp_from_no_tz);
     }
 }

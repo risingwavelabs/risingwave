@@ -27,4 +27,4 @@
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     select current_timestamp > now() - interval '10 minutes';
-  batch_plan: 'BatchValues { rows: [[true:Boolean]] }'
+  batch_plan: 'BatchValues { rows: [[(''2021-04-01 00:00:00+00:00'':Timestamptz > SubtractWithTimeZone(''2021-04-01 00:00:00+00:00'':Timestamptz, ''00:10:00'':Interval))]] }'

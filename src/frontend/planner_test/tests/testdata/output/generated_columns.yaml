@@ -30,11 +30,11 @@
   sql: |
     explain create table t1 (proc_time TIMESTAMP AS proctime());
   explain_output: |
-    StreamMaterialize { columns: [proc_time, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite, watermark_columns: [proc_time] }
+    StreamMaterialize { columns: [proc_time, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
     └─StreamRowIdGen { row_id_index: 1 }
-      └─StreamUnion { all: true, output_watermarks: [$expr1] }
+      └─StreamUnion { all: true }
         └─StreamExchange { dist: HashShard(_row_id) }
-          └─StreamProject { exprs: [AtTimeZone(Proctime, 'UTC':Varchar) as $expr1, _row_id], output_watermarks: [$expr1] }
+          └─StreamProject { exprs: [AtTimeZone(Proctime) as $expr1, _row_id] }
             └─StreamDml { columns: [_row_id] }
               └─StreamSource
 - name: watermark on generated column
