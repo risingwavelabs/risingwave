@@ -221,7 +221,8 @@ fn extract_parallelism_from_table_state(state: &TableFragmentState) -> String {
         Some(PbParallelism::Fixed(PbFixedParallelism { parallelism })) => {
             format!("fixed({parallelism})")
         }
-        None | Some(PbParallelism::Custom(_)) => "unknown".to_string(),
+        Some(PbParallelism::Custom(_)) => "custom".to_string(),
+        None => "unknown".to_string(),
     }
 }
 
