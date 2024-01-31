@@ -155,6 +155,10 @@ impl UdfContext {
         self.udf_global_counter += 1;
     }
 
+    pub fn decr_global_count(&mut self) {
+        self.udf_global_counter -= 1;
+    }
+
     pub fn _is_empty(&self) -> bool {
         self.udf_param_context.is_empty()
     }

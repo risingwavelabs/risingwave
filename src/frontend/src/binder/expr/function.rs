@@ -242,6 +242,10 @@ impl Binder {
                     self.set_udf_binding_flag();
                     let bind_result = self.bind_expr(expr);
 
+                    // We should properly decrement global count after a successful binding
+                    // Since the subsequent `unset flag` operation relies on global counting
+                    self.udf_context.decr_global_count();
+
                     // Only the top-most sql udf binding should unset the flag
                     // Otherwise the subsequent binding may not be able to
                     // find the corresponding context, consider the following example:
@@ -254,6 +258,7 @@ impl Binder {
 
                     // Restore context information for subsequent binding
                     self.udf_context.update_context(stashed_udf_context);
+
                     return bind_result;
                 } else {
                     return Err(ErrorCode::InvalidInputSyntax(
