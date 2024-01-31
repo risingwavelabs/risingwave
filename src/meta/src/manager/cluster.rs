@@ -112,6 +112,7 @@ impl ClusterManager {
         let mut core = self.core.write().await;
 
         if let Some(worker) = core.get_worker_by_host_mut(host_address.clone()) {
+            tracing::info!("worker {} re-joined the cluster", worker.worker_id());
             worker.update_resource(Some(resource));
             worker.update_started_at(timestamp_now_sec());
             if let Some(property) = &mut property {
@@ -233,12 +234,25 @@ impl ClusterManager {
         worker.insert(self.env.meta_store_checked()).await?;
         // Update core.
         core.add_worker_node(worker);
+
+        tracing::info!(
+            "new worker {} from {}:{} joined cluster",
+            worker_id,
+            host_address.get_host(),
+            host_address.get_port()
+        );
+
         Ok(worker_node)
     }
 
     pub async fn activate_worker_node(&self, host_address: HostAddress) -> MetaResult<()> {
         let mut core = self.core.write().await;
         let mut worker = core.get_worker_by_host_checked(host_address.clone())?;
+
+        let worker_id = worker.worker_id();
+
+        tracing::info!("worker {} activating", worker_id);
+
         if worker.worker_node.state != State::Running as i32 {
             worker.worker_node.state = State::Running as i32;
             worker.insert(self.env.meta_store_checked()).await?;
@@ -257,6 +271,8 @@ impl ClusterManager {
             .notification_manager()
             .notify_local_subscribers(LocalNotification::WorkerNodeActivated(worker.worker_node))
             .await;
+
+        tracing::info!("worker {} activated", worker_id);
 
         Ok(())
     }

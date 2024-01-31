@@ -704,11 +704,20 @@ impl GlobalBarrierManagerContext {
         let mgr = self.metadata_manager.as_v1_ref();
         debug!("start resetting actors distribution");
 
+        if info.actor_location_map.is_empty() {
+            debug!("empty cluster, skipping");
+            return Ok(true);
+        }
+
         let current_parallelism = info
             .node_map
             .values()
             .flat_map(|worker_node| worker_node.parallel_units.iter())
             .count();
+
+        if current_parallelism == 0 {
+            return Err(anyhow!("no available parallel units for auto scaling").into());
+        }
 
         /// We infer the new parallelism strategy based on the prior level of parallelism of the table.
         /// If the parallelism strategy is Fixed or Auto, we won't make any modifications.
