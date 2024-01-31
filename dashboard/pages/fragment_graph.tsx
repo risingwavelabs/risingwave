@@ -41,8 +41,9 @@ import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 import useFetch from "./api/fetch"
-import { getActorBackPressures, p50, p90, p95, p99 } from "./api/metric"
+import { BackPressureInfo, getBackPressureWithoutPrometheus, BackPressuresMetrics, getActorBackPressures, BackPressureRateInfo, p50, p90, p95, p99, calculateBPRate, INTERVAL } from "./api/metric"
 import { getFragments, getStreamingJobs } from "./api/streaming"
+import { sortBy } from "lodash"
 
 interface DispatcherNode {
   [actorId: number]: Dispatcher[]
@@ -168,8 +169,8 @@ function buildFragmentDependencyAsEdges(
 
 const SIDEBAR_WIDTH = 200
 
-type BackPressureAlgo = "p50" | "p90" | "p95" | "p99"
-const backPressureAlgos: BackPressureAlgo[] = ["p50", "p90", "p95", "p99"]
+type BackPressureAlgo = "p50" | "p90" | "p95" | "p99" | "current"
+const backPressureAlgos: BackPressureAlgo[] = ["p50", "p90", "p95", "p99", "current"]
 
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
@@ -181,7 +182,7 @@ export default function Streaming() {
 
   const { response: actorBackPressures } = useFetch(
     getActorBackPressures,
-    5000,
+    INTERVAL,
     backPressureAlgo !== null
   )
 
@@ -210,8 +211,46 @@ export default function Streaming() {
         }
       }
     }
-    return () => {}
+    return () => { }
   }, [relationId, relationList, setRelationId])
+
+
+  // get back pressure rate without prometheus
+  const [backPressuresMetricsWithoutPromtheus, setBackPressuresMetrics] =
+    useState<BackPressuresMetrics>()
+  const [previousBP, setPreviousBP] = useState<BackPressureInfo[]>([])
+  const [backPressureRate, setBackPressureRate] = useState<
+    BackPressureRateInfo[]
+  >([])
+  const toast = useErrorToast()
+
+  useEffect(() => {
+    let localPreviousBP = previousBP
+
+    async function doFetch() {
+      while (true) {
+        try {
+          const currentBP = await getBackPressureWithoutPrometheus()
+          const metrics = calculateBPRate(currentBP, localPreviousBP)
+          setBackPressureRate(backPressureRate)
+          localPreviousBP = currentBP
+          setPreviousBP(currentBP)
+          metrics.outputBufferBlockingDuration = sortBy(
+            metrics.outputBufferBlockingDuration,
+            (m) => (m.metric.fragment_id, m.metric.downstream_fragment_id)
+          )
+
+          setBackPressuresMetrics(metrics)
+          await new Promise((resolve) => setTimeout(resolve, INTERVAL))
+        } catch (e: any) {
+          toast(e, "warning")
+          break
+        }
+      }
+    }
+    doFetch()
+    return () => { }
+  }, [toast])
 
   const fragmentDependency = fragmentDependencyCallback()?.fragmentDep
   const fragmentDependencyDag = fragmentDependencyCallback()?.fragmentDepDag
@@ -238,8 +277,6 @@ export default function Streaming() {
 
   const [searchActorId, setSearchActorId] = useState<string>("")
   const [searchFragId, setSearchFragId] = useState<string>("")
-
-  const toast = useErrorToast()
 
   const handleSearchFragment = () => {
     const searchFragIdInt = parseInt(searchFragId)
@@ -279,38 +316,47 @@ export default function Streaming() {
   }
 
   const backPressures = useMemo(() => {
-    if (actorBackPressures && backPressureAlgo) {
+    if ((actorBackPressures || backPressuresMetricsWithoutPromtheus) && backPressureAlgo) {
       let map = new Map()
 
-      for (const m of actorBackPressures.outputBufferBlockingDuration) {
-        console.log(backPressureAlgo)
-        let algoFunc
-        switch (backPressureAlgo) {
-          case "p50":
-            algoFunc = p50
-            break
-          case "p90":
-            algoFunc = p90
-            break
-          case "p95":
-            algoFunc = p95
-            break
-          case "p99":
-            algoFunc = p99
-            break
-          default:
-            return
+      if (backPressureAlgo === "current" && backPressuresMetricsWithoutPromtheus) {
+        for (const m of backPressuresMetricsWithoutPromtheus.outputBufferBlockingDuration) {
+          map.set(
+            `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
+            m.sample[0].value
+          )
         }
+      } else if (backPressureAlgo !== "current" && actorBackPressures) {
+        for (const m of actorBackPressures.outputBufferBlockingDuration) {
+          console.log(backPressureAlgo)
+          let algoFunc
+          switch (backPressureAlgo) {
+            case "p50":
+              algoFunc = p50
+              break
+            case "p90":
+              algoFunc = p90
+              break
+            case "p95":
+              algoFunc = p95
+              break
+            case "p99":
+              algoFunc = p99
+              break
+            default:
+              return
+          }
 
-        const value = algoFunc(m.sample) * 100
-        map.set(
-          `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
-          value
-        )
+          const value = algoFunc(m.sample) * 100
+          map.set(
+            `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
+            value
+          )
+        }
       }
       return map
     }
-  }, [actorBackPressures, backPressureAlgo])
+  }, [actorBackPressures, backPressureAlgo, backPressuresMetricsWithoutPromtheus])
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
