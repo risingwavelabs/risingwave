@@ -31,7 +31,7 @@ pub enum NotificationVersionGenerator {
 // TODO: add pre-allocation if necessary
 impl NotificationVersionGenerator {
     pub async fn new(
-        meta_store: MetaStoreRef,
+        meta_store: Option<MetaStoreRef>,
         meta_store_sql: Option<SqlMetaStore>,
     ) -> MetaResult<Self> {
         if let Some(sql) = meta_store_sql {
@@ -52,6 +52,7 @@ impl NotificationVersionGenerator {
 
             Ok(Self::SqlGenerator(current_version, sql.conn))
         } else {
+            let meta_store = meta_store.unwrap();
             let current_version = NotificationModelV1::new(&meta_store).await;
             Ok(Self::KvGenerator(current_version, meta_store))
         }
