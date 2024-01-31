@@ -394,7 +394,7 @@ impl HummockEventHandler {
         }
     }
 
-    fn handle_clear(&mut self, notifier: oneshot::Sender<()>) {
+    async fn handle_clear(&mut self, notifier: oneshot::Sender<()>, prev_epoch: u64) {
         info!(
             "handle clear event. max_committed_epoch: {}, max_synced_epoch: {}, max_sealed_epoch: {}",
             self.uploader.max_committed_epoch(),
@@ -524,8 +524,17 @@ impl HummockEventHandler {
                 }
                 event = pin!(self.hummock_event_rx.recv()) => {
                     let Some(event) = event else { break };
-                    if self.handle_hummock_event(event) {
-                        break;
+                    match event {
+                        HummockEvent::Clear(notifier, prev_epoch) => {
+                            self.handle_clear(notifier, prev_epoch).await
+                        },
+                        HummockEvent::Shutdown => {
+                            info!("buffer tracker shutdown");
+                            return;
+                        },
+                        event => {
+                            self.handle_hummock_event(event);
+                        }
                     }
                 }
             }
@@ -565,7 +574,7 @@ impl HummockEventHandler {
     }
 
     /// Gracefully shutdown if returns `true`.
-    fn handle_hummock_event(&mut self, event: HummockEvent) -> bool {
+    fn handle_hummock_event(&mut self, event: HummockEvent) {
         match event {
             HummockEvent::BufferMayFlush => {
                 self.uploader.may_flush();
@@ -576,14 +585,12 @@ impl HummockEventHandler {
             } => {
                 self.handle_await_sync_epoch(new_sync_epoch, sync_result_sender);
             }
-            HummockEvent::Clear(notifier) => {
-                self.handle_clear(notifier);
+            HummockEvent::Clear(_, _) => {
+                unreachable!("clear is handled in separated async context")
             }
             HummockEvent::Shutdown => {
-                info!("buffer tracker shutdown");
-                return true;
+                unreachable!("shutdown is handled specially")
             }
-
             HummockEvent::VersionUpdate(version_payload) => {
                 self.handle_version_update(version_payload);
             }
@@ -702,7 +709,6 @@ impl HummockEventHandler {
                 }
             }
         }
-        false
     }
 
     fn generate_instance_id(&mut self) -> LocalInstanceId {

@@ -15,9 +15,8 @@
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
-use std::future::Future;
+use std::future::{poll_fn, Future};
 use std::mem::swap;
-use std::ops::DerefMut;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{ready, Context, Poll};
@@ -1021,10 +1020,6 @@ impl HummockUploader {
 
         // TODO: call `abort` on the uploading task join handle
     }
-
-    pub(crate) fn next_event(&mut self) -> NextUploaderEvent<'_> {
-        NextUploaderEvent { uploader: self }
-    }
 }
 
 impl HummockUploader {
@@ -1116,10 +1111,6 @@ impl HummockUploader {
     }
 }
 
-pub(crate) struct NextUploaderEvent<'a> {
-    uploader: &'a mut HummockUploader,
-}
-
 pub(crate) enum UploaderEvent {
     // staging sstable info of newer data comes first
     SyncFinish(HummockEpoch, Vec<StagingSstableInfo>),
@@ -1127,30 +1118,28 @@ pub(crate) enum UploaderEvent {
     ImmMerged(MergeImmTaskOutput),
 }
 
-impl<'a> Future for NextUploaderEvent<'a> {
-    type Output = UploaderEvent;
+impl HummockUploader {
+    pub(crate) fn next_event(&mut self) -> impl Future<Output = UploaderEvent> + '_ {
+        poll_fn(|cx| {
+            if let Some((epoch, newly_uploaded_sstables)) = ready!(self.poll_syncing_task(cx)) {
+                return Poll::Ready(UploaderEvent::SyncFinish(epoch, newly_uploaded_sstables));
+            }
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let uploader = &mut self.deref_mut().uploader;
+            if let Some(sstable_info) = ready!(self.poll_sealed_spill_task(cx)) {
+                return Poll::Ready(UploaderEvent::DataSpilled(sstable_info));
+            }
 
-        if let Some((epoch, newly_uploaded_sstables)) = ready!(uploader.poll_syncing_task(cx)) {
-            return Poll::Ready(UploaderEvent::SyncFinish(epoch, newly_uploaded_sstables));
-        }
+            if let Some(sstable_info) = ready!(self.poll_unsealed_spill_task(cx)) {
+                return Poll::Ready(UploaderEvent::DataSpilled(sstable_info));
+            }
 
-        if let Some(sstable_info) = ready!(uploader.poll_sealed_spill_task(cx)) {
-            return Poll::Ready(UploaderEvent::DataSpilled(sstable_info));
-        }
-
-        if let Some(sstable_info) = ready!(uploader.poll_unsealed_spill_task(cx)) {
-            return Poll::Ready(UploaderEvent::DataSpilled(sstable_info));
-        }
-
-        if let Some(merge_output) = ready!(uploader.poll_sealed_merge_imm_task(cx)) {
-            // add the merged imm into sealed data
-            uploader.update_sealed_data(&merge_output.merged_imm);
-            return Poll::Ready(UploaderEvent::ImmMerged(merge_output));
-        }
-        Poll::Pending
+            if let Some(merge_output) = ready!(self.poll_sealed_merge_imm_task(cx)) {
+                // add the merged imm into sealed data
+                self.update_sealed_data(&merge_output.merged_imm);
+                return Poll::Ready(UploaderEvent::ImmMerged(merge_output));
+            }
+            Poll::Pending
+        })
     }
 }
 

@@ -581,7 +581,7 @@ mod tests {
             .unwrap();
 
         // Recovery
-        test_env.storage.clear_shared_buffer().await.unwrap();
+        test_env.storage.clear_shared_buffer(epoch2).await;
 
         // Rebuild log reader and writer in recovery
         let factory = KvLogStoreFactory::new(
@@ -778,7 +778,7 @@ mod tests {
             .unwrap();
 
         // Recovery
-        test_env.storage.clear_shared_buffer().await.unwrap();
+        test_env.storage.clear_shared_buffer(epoch2).await;
 
         // Rebuild log reader and writer in recovery
         let factory = KvLogStoreFactory::new(
@@ -1002,7 +1002,7 @@ mod tests {
             .unwrap();
 
         // Recovery
-        test_env.storage.clear_shared_buffer().await.unwrap();
+        test_env.storage.clear_shared_buffer(epoch2).await;
 
         let vnodes = build_bitmap(0..VirtualNode::COUNT);
         let factory = KvLogStoreFactory::new(

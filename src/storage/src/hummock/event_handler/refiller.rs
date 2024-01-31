@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::ops::{Deref, DerefMut, Range};
-use std::pin::Pin;
+use std::future::poll_fn;
+use std::ops::{Deref, Range};
 use std::sync::{Arc, LazyLock};
-use std::task::{ready, Context, Poll};
+use std::task::{ready, Poll};
 use std::time::{Duration, Instant};
 
 use foyer::common::code::Key;
@@ -268,29 +268,19 @@ impl CacheRefiller {
     pub fn last_new_pinned_version(&self) -> Option<&PinnedVersion> {
         self.queue.back().map(|item| &item.event.new_pinned_version)
     }
-
-    pub fn next_event(&mut self) -> NextCacheRefillerEvent<'_> {
-        NextCacheRefillerEvent { refiller: self }
-    }
 }
 
-pub struct NextCacheRefillerEvent<'a> {
-    refiller: &'a mut CacheRefiller,
-}
-
-impl<'a> Future for NextCacheRefillerEvent<'a> {
-    type Output = CacheRefillerEvent;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let refiller = &mut self.deref_mut().refiller;
-
-        if let Some(item) = refiller.queue.front_mut() {
-            ready!(item.handle.poll_unpin(cx)).unwrap();
-            let item = refiller.queue.pop_front().unwrap();
-            GLOBAL_CACHE_REFILL_METRICS.refill_queue_total.sub(1);
-            return Poll::Ready(item.event);
-        }
-        Poll::Pending
+impl CacheRefiller {
+    pub fn next_event(&mut self) -> impl Future<Output = CacheRefillerEvent> + '_ {
+        poll_fn(|cx| {
+            if let Some(item) = self.queue.front_mut() {
+                ready!(item.handle.poll_unpin(cx)).unwrap();
+                let item = self.queue.pop_front().unwrap();
+                GLOBAL_CACHE_REFILL_METRICS.refill_queue_total.sub(1);
+                return Poll::Ready(item.event);
+            }
+            Poll::Pending
+        })
     }
 }
 

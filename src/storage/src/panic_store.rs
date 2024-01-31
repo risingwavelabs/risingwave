@@ -154,7 +154,7 @@ impl StateStore for PanicStateStore {
     }
 
     #[allow(clippy::unused_async)]
-    async fn clear_shared_buffer(&self) -> StorageResult<()> {
+    async fn clear_shared_buffer(&self, _prev_epoch: u64) {
         panic!("should not clear shared buffer from the panic state store!");
     }
 

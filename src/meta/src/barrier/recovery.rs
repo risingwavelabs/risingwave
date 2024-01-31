@@ -391,9 +391,11 @@ impl GlobalBarrierManagerContext {
                     };
 
                     // Reset all compute nodes, stop and drop existing actors.
-                    self.reset_compute_nodes(&info).await.inspect_err(|err| {
-                        warn!(error = %err.as_report(), "reset compute nodes failed");
-                    })?;
+                    self.reset_compute_nodes(&info, prev_epoch.value().0)
+                        .await
+                        .inspect_err(|err| {
+                            warn!(error = %err.as_report(), "reset compute nodes failed");
+                        })?;
 
                     if self.pre_apply_drop_cancel(scheduled_barriers).await? {
                         info = self.resolve_actor_info().await;
@@ -432,16 +434,6 @@ impl GlobalBarrierManagerContext {
                         tracing::Span::current(), // recovery span
                     ));
 
-                    #[cfg(not(all(test, feature = "failpoints")))]
-                    {
-                        use risingwave_common::util::epoch::INVALID_EPOCH;
-
-                        let mce = self.hummock_manager.get_current_max_committed_epoch().await;
-
-                        if mce != INVALID_EPOCH {
-                            command_ctx.wait_epoch_commit(mce).await?;
-                        }
-                    };
                     let await_barrier_complete = self.inject_barrier(command_ctx.clone()).await;
                     let res = match await_barrier_complete.await.result {
                         Ok(response) => {
@@ -952,13 +944,18 @@ impl GlobalBarrierManagerContext {
     }
 
     /// Reset all compute nodes by calling `force_stop_actors`.
-    async fn reset_compute_nodes(&self, info: &InflightActorInfo) -> MetaResult<()> {
+    async fn reset_compute_nodes(
+        &self,
+        info: &InflightActorInfo,
+        prev_epoch: u64,
+    ) -> MetaResult<()> {
         let futures = info.node_map.values().map(|worker_node| async move {
             let client = self.env.stream_client_pool().get(worker_node).await?;
             debug!(worker = ?worker_node.id, "force stop actors");
             client
                 .force_stop_actors(ForceStopActorsRequest {
                     request_id: Uuid::new_v4().to_string(),
+                    prev_epoch,
                 })
                 .await
         });

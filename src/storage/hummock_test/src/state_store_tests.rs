@@ -1328,7 +1328,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         min_object_id_epoch2,
     );
 
-    hummock_storage.clear_shared_buffer().await.unwrap();
+    hummock_storage.clear_shared_buffer(epoch1).await;
 
     let read_version = local_hummock_storage.read_version();
 

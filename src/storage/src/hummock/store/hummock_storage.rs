@@ -467,10 +467,10 @@ impl StateStore for HummockStorage {
         StoreLocalStatistic::flush_all();
     }
 
-    async fn clear_shared_buffer(&self) -> StorageResult<()> {
+    async fn clear_shared_buffer(&self, prev_epoch: u64) {
         let (tx, rx) = oneshot::channel();
         self.hummock_event_sender
-            .send(HummockEvent::Clear(tx))
+            .send(HummockEvent::Clear(tx, prev_epoch))
             .expect("should send success");
         rx.await.expect("should wait success");
 
@@ -478,8 +478,6 @@ impl StateStore for HummockStorage {
         self.min_current_epoch
             .store(HummockEpoch::MAX, MemOrdering::SeqCst);
         self.seal_epoch.store(epoch, MemOrdering::SeqCst);
-
-        Ok(())
     }
 
     fn new_local(&self, option: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_ {
