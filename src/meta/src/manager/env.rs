@@ -286,7 +286,8 @@ impl MetaSrvEnv {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
-        let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
+        let notification_manager =
+            Arc::new(NotificationManager::new(meta_store.clone(), meta_store_sql.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
         let (mut cluster_id, cluster_first_launch) =
             if let Some(id) = ClusterId::from_meta_store(&meta_store).await? {
@@ -463,7 +464,8 @@ impl MetaSrvEnv {
         let meta_store_sql = Some(SqlMetaStore::for_test().await);
 
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
-        let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
+        let notification_manager =
+            Arc::new(NotificationManager::new(meta_store.clone(), meta_store_sql.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let idle_manager = Arc::new(IdleManager::disabled());
         let (cluster_id, cluster_first_launch) = (ClusterId::new(), true);
