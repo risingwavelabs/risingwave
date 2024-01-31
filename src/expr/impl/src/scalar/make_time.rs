@@ -19,24 +19,19 @@ use risingwave_expr::{capture_context, function, ExprError, Result};
 
 use crate::scalar::timestamptz::timestamp_at_time_zone;
 
-pub fn make_naive_date(year: i32, month: i32, day: i32, for_timestamp: bool) -> Result<NaiveDate> {
+pub fn make_naive_date(mut year: i32, month: i32, day: i32) -> Result<NaiveDate> {
     if year == 0 {
         return Err(ExprError::InvalidParam {
             name: "year, month, day",
             reason: format!("invalid date: {}-{}-{}", year, month, day).into(),
         });
     }
-    let adjusted_year = if year < 0 && !for_timestamp {
-        // For a year `-X`, The `Date` type is printed as `X+1 BC`, while `Timestamp` is printed as `-X`.
-        year + 1
-    } else {
-        year
-    };
-    NaiveDate::from_ymd_opt(adjusted_year, month as u32, day as u32).ok_or_else(|| {
-        ExprError::InvalidParam {
-            name: "year, month, day",
-            reason: format!("invalid date: {}-{}-{}", year, month, day).into(),
-        }
+    if year < 0 {
+        year += 1
+    }
+    NaiveDate::from_ymd_opt(year, month as u32, day as u32).ok_or_else(|| ExprError::InvalidParam {
+        name: "year, month, day",
+        reason: format!("invalid date: {}-{}-{}", year, month, day).into(),
     })
 }
 
@@ -60,7 +55,7 @@ fn make_naive_time(hour: i32, min: i32, sec: F64) -> Result<NaiveTime> {
 // year int, month int, day int
 #[function("make_date(int4, int4, int4) -> date")]
 pub fn make_date(year: i32, month: i32, day: i32) -> Result<Date> {
-    Ok(Date(make_naive_date(year, month, day, false)?))
+    Ok(Date(make_naive_date(year, month, day)?))
 }
 
 // hour int, min int, sec double precision
@@ -80,7 +75,7 @@ pub fn make_timestamp(
     sec: F64,
 ) -> Result<Timestamp> {
     Ok(Timestamp(NaiveDateTime::new(
-        make_naive_date(year, month, day, true)?,
+        make_naive_date(year, month, day)?,
         make_naive_time(hour, min, sec)?,
     )))
 }
@@ -123,7 +118,7 @@ fn make_timestamptz_impl(
     sec: F64,
 ) -> Result<Timestamptz> {
     let naive_date_time = NaiveDateTime::new(
-        make_naive_date(year, month, day, true)?,
+        make_naive_date(year, month, day)?,
         make_naive_time(hour, min, sec)?,
     );
     timestamp_at_time_zone(Timestamp(naive_date_time), time_zone)
@@ -135,7 +130,7 @@ mod tests {
     use risingwave_common::types::{Date, Timestamp};
 
     /// This test is to testify that our `Date` expressess a year `-X` as `X+1 BC`, while `Timestamp` expresses it as `-X`.
-    /// Can be removed if we change the implementation of `Date`.
+    /// Can be removed if we change the `ToText` implementation of `Date` or `Timestamp`.
     #[test]
     fn test_naive_date_and_time() {
         let year = -1973;
