@@ -26,8 +26,8 @@ statement ok
 create function add_sub_mix(INT, a INT, INT) returns int language sql as 'select $1 - a + $3';
 
 # Mixed parameter with calling inner sql udfs
-# statement ok
-# create function add_sub_mix_wrapper(INT, a INT, INT) returns int language sql as 'select add($1, a) + a + sub(a, $3)';
+statement ok
+create function add_sub_mix_wrapper(INT, a INT, INT) returns int language sql as 'select add($1, a) + a + sub(a, $3)';
 
 # Named sql udf with corner case
 statement ok
@@ -149,6 +149,11 @@ query I
 select add_sub_mix(1, 2, 3);
 ----
 2
+
+query I
+select add_sub_mix_wrapper(1, 2, 3);
+----
+4
 
 query T
 select corner_case(1, 2, 3);
@@ -391,6 +396,9 @@ drop function add_named_wrapper;
 
 statement ok
 drop function type_match;
+
+statement ok
+drop function add_sub_mix_wrapper;
 
 # Drop the mock table
 statement ok
