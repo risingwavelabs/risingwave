@@ -139,7 +139,7 @@ impl ConstantLookupExpression {
         let Some(ref fallback) = self.fallback else {
             return Ok(None);
         };
-        let Ok(res) = fallback.eval_row(&input).await else {
+        let Ok(res) = fallback.eval_row(input).await else {
             bail!("failed to evaluate the input for fallback arm");
         };
         Ok(res)
@@ -153,7 +153,7 @@ impl ConstantLookupExpression {
         }
 
         if let Some(expr) = self.arms.get(datum.as_ref().unwrap()) {
-            let Ok(res) = expr.eval_row(&input).await else {
+            let Ok(res) = expr.eval_row(input).await else {
                 bail!("failed to evaluate the input for normal arm");
             };
             Ok(res)
