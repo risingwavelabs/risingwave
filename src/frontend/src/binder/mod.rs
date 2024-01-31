@@ -230,11 +230,10 @@ impl UdfContext {
             match current_arg {
                 FunctionArg::Unnamed(arg) => {
                     let FunctionArgExpr::Expr(e) = arg else {
-                        return Err(
-                            ErrorCode::InvalidInputSyntax(
-                                "expect `FunctionArgExpr` for unnamed argument".to_string()
-                            ).into()
-                        );
+                        return Err(ErrorCode::InvalidInputSyntax(
+                            "expect `FunctionArgExpr` for unnamed argument".to_string(),
+                        )
+                        .into());
                     };
                     if catalog.arg_names[i].is_empty() {
                         ret.insert(format!("${}", i + 1), e.clone());
@@ -244,10 +243,12 @@ impl UdfContext {
                         ret.insert(catalog.arg_names[i].clone(), e.clone());
                     }
                 }
-                _ => return Err(ErrorCode::InvalidInputSyntax(
-                    "expect unamed argument when creating sql udf context".to_string()
-                )
-                .into()),
+                _ => {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "expect unnamed argument when creating sql udf context".to_string(),
+                    )
+                    .into())
+                }
             }
         }
         Ok(ret)
