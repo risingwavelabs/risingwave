@@ -221,8 +221,8 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
@@ -270,7 +270,7 @@ mod tests {
         ))
         .execute();
 
-        tx.push_barrier(TestEpoch::new_without_offset(1).as_u64(), false);
+        tx.push_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test(), false);
         dedup_executor.next().await.unwrap().unwrap();
 
         let chunk = StreamChunk::from_pretty(
@@ -291,7 +291,7 @@ mod tests {
             )
         );
 
-        tx.push_barrier(TestEpoch::new_without_offset(2).as_u64(), false);
+        tx.push_barrier(EpochWithGap::new_without_offset(2).as_u64_for_test(), false);
         dedup_executor.next().await.unwrap().unwrap();
 
         let chunk = StreamChunk::from_pretty(

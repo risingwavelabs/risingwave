@@ -24,7 +24,6 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::range::RangeBoundsExt;
-use risingwave_common::util::epoch::TestEpoch;
 use risingwave_hummock_sdk::key::{
     gen_key_from_bytes, prefix_slice_with_vnode, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN,
 };
@@ -100,9 +99,9 @@ async fn test_storage_basic() {
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
     // epoch 0 is reserved by storage service
-    let epoch1 = TestEpoch::new_without_offset(1);
+    let epoch1 = EpochWithGap::new_without_offset(1);
     hummock_storage
-        .init_for_test(epoch1.as_u64())
+        .init_for_test(epoch1.as_u64_for_test())
         .await
         .unwrap();
 
@@ -112,7 +111,7 @@ async fn test_storage_basic() {
             batch1,
             vec![],
             WriteOptions {
-                epoch: epoch1.as_u64(),
+                epoch: epoch1.as_u64_for_test(),
                 table_id: TEST_TABLE_ID,
             },
         )
@@ -124,7 +123,7 @@ async fn test_storage_basic() {
         .storage
         .get(
             gen_key_from_str(VirtualNode::ZERO, "aa"),
-            epoch1.as_u64(),
+            epoch1.as_u64_for_test(),
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
@@ -140,7 +139,7 @@ async fn test_storage_basic() {
         .storage
         .get(
             gen_key_from_str(VirtualNode::ZERO, "bb"),
-            epoch1.as_u64(),
+            epoch1.as_u64_for_test(),
             ReadOptions {
                 table_id: TEST_TABLE_ID,
                 cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -157,7 +156,7 @@ async fn test_storage_basic() {
         .storage
         .get(
             gen_key_from_str(VirtualNode::ZERO, "ab"),
-            epoch1.as_u64(),
+            epoch1.as_u64_for_test(),
             ReadOptions {
                 table_id: TEST_TABLE_ID,
                 cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -169,13 +168,16 @@ async fn test_storage_basic() {
     assert_eq!(value, None);
 
     let epoch2 = epoch1.next_epoch();
-    hummock_storage.seal_current_epoch(epoch2.as_u64(), SealCurrentEpochOptions::for_test());
+    hummock_storage.seal_current_epoch(
+        epoch2.as_u64_for_test(),
+        SealCurrentEpochOptions::for_test(),
+    );
     hummock_storage
         .ingest_batch(
             batch2,
             vec![],
             WriteOptions {
-                epoch: epoch2.as_u64(),
+                epoch: epoch2.as_u64_for_test(),
                 table_id: TEST_TABLE_ID,
             },
         )
@@ -187,7 +189,7 @@ async fn test_storage_basic() {
         .storage
         .get(
             gen_key_from_str(VirtualNode::ZERO, "aa"),
-            epoch2.as_u64(),
+            epoch2.as_u64_for_test(),
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
@@ -202,13 +204,16 @@ async fn test_storage_basic() {
 
     // Write the third batch.
     let epoch3 = epoch2.next_epoch();
-    hummock_storage.seal_current_epoch(epoch3.as_u64(), SealCurrentEpochOptions::for_test());
+    hummock_storage.seal_current_epoch(
+        epoch3.as_u64_for_test(),
+        SealCurrentEpochOptions::for_test(),
+    );
     hummock_storage
         .ingest_batch(
             batch3,
             vec![],
             WriteOptions {
-                epoch: epoch3.as_u64(),
+                epoch: epoch3.as_u64_for_test(),
                 table_id: TEST_TABLE_ID,
             },
         )
@@ -220,7 +225,7 @@ async fn test_storage_basic() {
         .storage
         .get(
             gen_key_from_str(VirtualNode::ZERO, "aa"),
-            epoch3.as_u64(),
+            epoch3.as_u64_for_test(),
             ReadOptions {
                 table_id: TEST_TABLE_ID,
                 cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -236,7 +241,7 @@ async fn test_storage_basic() {
         .storage
         .get(
             gen_key_from_str(VirtualNode::ZERO, "ff"),
-            epoch3.as_u64(),
+            epoch3.as_u64_for_test(),
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
@@ -256,7 +261,7 @@ async fn test_storage_basic() {
                 Unbounded,
                 Included(gen_key_from_str(VirtualNode::ZERO, "ee")),
             ),
-            epoch1.as_u64(),
+            epoch1.as_u64_for_test(),
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
@@ -272,7 +277,7 @@ async fn test_storage_basic() {
             FullKey::new(
                 TEST_TABLE_ID,
                 gen_key_from_str(VirtualNode::ZERO, "aa"),
-                epoch1.as_u64()
+                epoch1.as_u64_for_test()
             ),
             Bytes::copy_from_slice(&b"111"[..])
         )),
@@ -283,7 +288,7 @@ async fn test_storage_basic() {
             FullKey::new(
                 TEST_TABLE_ID,
                 gen_key_from_str(VirtualNode::ZERO, "bb"),
-                epoch1.as_u64()
+                epoch1.as_u64_for_test()
             ),
             Bytes::copy_from_slice(&b"222"[..])
         )),
@@ -296,7 +301,7 @@ async fn test_storage_basic() {
         .storage
         .get(
             gen_key_from_str(VirtualNode::ZERO, "aa"),
-            epoch1.as_u64(),
+            epoch1.as_u64_for_test(),
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
@@ -314,7 +319,7 @@ async fn test_storage_basic() {
         .storage
         .get(
             gen_key_from_str(VirtualNode::ZERO, "aa"),
-            epoch2.as_u64(),
+            epoch2.as_u64_for_test(),
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
@@ -334,7 +339,7 @@ async fn test_storage_basic() {
                 Unbounded,
                 Included(gen_key_from_str(VirtualNode::ZERO, "ee")),
             ),
-            epoch2.as_u64(),
+            epoch2.as_u64_for_test(),
             ReadOptions {
                 table_id: TEST_TABLE_ID,
                 cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -349,7 +354,7 @@ async fn test_storage_basic() {
             FullKey::new(
                 TEST_TABLE_ID,
                 gen_key_from_str(VirtualNode::ZERO, "aa"),
-                epoch2.as_u64()
+                epoch2.as_u64_for_test()
             ),
             Bytes::copy_from_slice(&b"111111"[..])
         )),
@@ -360,7 +365,7 @@ async fn test_storage_basic() {
             FullKey::new(
                 TEST_TABLE_ID,
                 gen_key_from_str(VirtualNode::ZERO, "bb"),
-                epoch1.as_u64()
+                epoch1.as_u64_for_test()
             ),
             Bytes::copy_from_slice(&b"222"[..])
         )),
@@ -371,7 +376,7 @@ async fn test_storage_basic() {
             FullKey::new(
                 TEST_TABLE_ID,
                 gen_key_from_str(VirtualNode::ZERO, "cc"),
-                epoch2.as_u64()
+                epoch2.as_u64_for_test()
             ),
             Bytes::copy_from_slice(&b"333"[..])
         )),
@@ -387,7 +392,7 @@ async fn test_storage_basic() {
                 Unbounded,
                 Included(gen_key_from_str(VirtualNode::ZERO, "ee")),
             ),
-            epoch3.as_u64(),
+            epoch3.as_u64_for_test(),
             ReadOptions {
                 table_id: TEST_TABLE_ID,
                 cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -402,7 +407,7 @@ async fn test_storage_basic() {
             FullKey::new(
                 TEST_TABLE_ID,
                 gen_key_from_str(VirtualNode::ZERO, "bb"),
-                epoch1.as_u64()
+                epoch1.as_u64_for_test()
             ),
             Bytes::copy_from_slice(&b"222"[..])
         )),
@@ -413,7 +418,7 @@ async fn test_storage_basic() {
             FullKey::new(
                 TEST_TABLE_ID,
                 gen_key_from_str(VirtualNode::ZERO, "cc"),
-                epoch2.as_u64()
+                epoch2.as_u64_for_test()
             ),
             Bytes::copy_from_slice(&b"333"[..])
         )),
@@ -424,7 +429,7 @@ async fn test_storage_basic() {
             FullKey::new(
                 TEST_TABLE_ID,
                 gen_key_from_str(VirtualNode::ZERO, "dd"),
-                epoch3.as_u64()
+                epoch3.as_u64_for_test()
             ),
             Bytes::copy_from_slice(&b"444"[..])
         )),
@@ -435,7 +440,7 @@ async fn test_storage_basic() {
             FullKey::new(
                 TEST_TABLE_ID,
                 gen_key_from_str(VirtualNode::ZERO, "ee"),
-                epoch3.as_u64()
+                epoch3.as_u64_for_test()
             ),
             Bytes::copy_from_slice(&b"555"[..])
         )),
@@ -459,9 +464,9 @@ async fn test_state_store_sync() {
     let read_version = hummock_storage.read_version();
 
     let base_epoch = read_version.read().committed().max_committed_epoch();
-    let epoch1 = TestEpoch::new_without_offset(base_epoch + 1);
+    let epoch1 = EpochWithGap::new_without_offset(base_epoch + 1);
     hummock_storage
-        .init_for_test(epoch1.as_u64())
+        .init_for_test(epoch1.as_u64_for_test())
         .await
         .unwrap();
 
@@ -483,7 +488,7 @@ async fn test_state_store_sync() {
             batch1,
             vec![],
             WriteOptions {
-                epoch: epoch1.as_u64(),
+                epoch: epoch1.as_u64_for_test(),
                 table_id: TEST_TABLE_ID,
             },
         )
@@ -511,7 +516,7 @@ async fn test_state_store_sync() {
             batch2,
             vec![],
             WriteOptions {
-                epoch: epoch1.as_u64(),
+                epoch: epoch1.as_u64_for_test(),
                 table_id: TEST_TABLE_ID,
             },
         )
@@ -519,7 +524,10 @@ async fn test_state_store_sync() {
         .unwrap();
 
     let epoch2 = epoch1.next_epoch();
-    hummock_storage.seal_current_epoch(epoch2.as_u64(), SealCurrentEpochOptions::for_test());
+    hummock_storage.seal_current_epoch(
+        epoch2.as_u64_for_test(),
+        SealCurrentEpochOptions::for_test(),
+    );
 
     // ingest more 8B then will trigger a sync behind the scene
     let mut batch3 = vec![(
@@ -532,7 +540,7 @@ async fn test_state_store_sync() {
             batch3,
             vec![],
             WriteOptions {
-                epoch: epoch2.as_u64(),
+                epoch: epoch2.as_u64_for_test(),
                 table_id: TEST_TABLE_ID,
             },
         )
@@ -541,17 +549,17 @@ async fn test_state_store_sync() {
 
     let res = test_env
         .storage
-        .seal_and_sync_epoch(epoch1.as_u64())
+        .seal_and_sync_epoch(epoch1.as_u64_for_test())
         .await
         .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch1.as_u64(), res.uncommitted_ssts)
+        .commit_epoch(epoch1.as_u64_for_test(), res.uncommitted_ssts)
         .await
         .unwrap();
     test_env
         .storage
-        .try_wait_epoch_for_test(epoch1.as_u64())
+        .try_wait_epoch_for_test(epoch1.as_u64_for_test())
         .await;
     {
         // after sync 1 epoch
@@ -574,7 +582,7 @@ async fn test_state_store_sync() {
                 .storage
                 .get(
                     k,
-                    epoch1.as_u64(),
+                    epoch1.as_u64_for_test(),
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -590,17 +598,17 @@ async fn test_state_store_sync() {
 
     let res = test_env
         .storage
-        .seal_and_sync_epoch(epoch2.as_u64())
+        .seal_and_sync_epoch(epoch2.as_u64_for_test())
         .await
         .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch2.as_u64(), res.uncommitted_ssts)
+        .commit_epoch(epoch2.as_u64_for_test(), res.uncommitted_ssts)
         .await
         .unwrap();
     test_env
         .storage
-        .try_wait_epoch_for_test(epoch2.as_u64())
+        .try_wait_epoch_for_test(epoch2.as_u64_for_test())
         .await;
     {
         // after sync all epoch
@@ -623,7 +631,7 @@ async fn test_state_store_sync() {
                 .storage
                 .get(
                     k,
-                    epoch2.as_u64(),
+                    epoch2.as_u64_for_test(),
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -646,7 +654,7 @@ async fn test_state_store_sync() {
                     Unbounded,
                     Included(gen_key_from_str(VirtualNode::ZERO, "eeee")),
                 ),
-                epoch1.as_u64(),
+                epoch1.as_u64_for_test(),
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
                     cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -661,12 +669,12 @@ async fn test_state_store_sync() {
             (
                 gen_key_from_str(VirtualNode::ZERO, "aaaa"),
                 "1111",
-                epoch1.as_u64(),
+                epoch1.as_u64_for_test(),
             ),
             (
                 gen_key_from_str(VirtualNode::ZERO, "bbbb"),
                 "2222",
-                epoch1.as_u64(),
+                epoch1.as_u64_for_test(),
             ),
         ];
         for (k, v, e) in kv_map_batch_1 {
@@ -684,17 +692,17 @@ async fn test_state_store_sync() {
             (
                 gen_key_from_str(VirtualNode::ZERO, "cccc"),
                 "3333",
-                epoch1.as_u64(),
+                epoch1.as_u64_for_test(),
             ),
             (
                 gen_key_from_str(VirtualNode::ZERO, "dddd"),
                 "4444",
-                epoch1.as_u64(),
+                epoch1.as_u64_for_test(),
             ),
             (
                 gen_key_from_str(VirtualNode::ZERO, "eeee"),
                 "5555",
-                epoch1.as_u64(),
+                epoch1.as_u64_for_test(),
             ),
         ];
 
@@ -720,7 +728,7 @@ async fn test_state_store_sync() {
                     Unbounded,
                     Included(gen_key_from_str(VirtualNode::ZERO, "eeee")),
                 ),
-                epoch2.as_u64(),
+                epoch2.as_u64_for_test(),
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
                     cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -744,7 +752,7 @@ async fn test_state_store_sync() {
                     FullKey::new(
                         TEST_TABLE_ID,
                         gen_key_from_str(VirtualNode::ZERO, k),
-                        e.as_u64()
+                        e.as_u64_for_test()
                     ),
                     Bytes::from(v)
                 ))
@@ -759,7 +767,7 @@ async fn test_state_store_sync() {
                     FullKey::new_with_gap_epoch(
                         TEST_TABLE_ID,
                         gen_key_from_str(VirtualNode::ZERO, k),
-                        EpochWithGap::new(e.as_u64(), 1)
+                        EpochWithGap::new(e.as_u64_for_test(), 1)
                     ),
                     Bytes::from(v)
                 ))
@@ -773,7 +781,7 @@ async fn test_state_store_sync() {
                     FullKey::new_with_gap_epoch(
                         TEST_TABLE_ID,
                         gen_key_from_str(VirtualNode::ZERO, k),
-                        EpochWithGap::new(e.as_u64(), 0)
+                        EpochWithGap::new(e.as_u64_for_test(), 0)
                     ),
                     Bytes::from(v)
                 ))
@@ -798,10 +806,10 @@ async fn test_delete_get() {
         .committed()
         .max_committed_epoch();
 
-    let epoch1 = TestEpoch::new_without_offset(initial_epoch + 1);
+    let epoch1 = EpochWithGap::new_without_offset(initial_epoch + 1);
 
     hummock_storage
-        .init_for_test(epoch1.as_u64())
+        .init_for_test(epoch1.as_u64_for_test())
         .await
         .unwrap();
     let batch1 = vec![
@@ -819,7 +827,7 @@ async fn test_delete_get() {
             batch1,
             vec![],
             WriteOptions {
-                epoch: epoch1.as_u64(),
+                epoch: epoch1.as_u64_for_test(),
                 table_id: TEST_TABLE_ID,
             },
         )
@@ -828,16 +836,19 @@ async fn test_delete_get() {
 
     let res = test_env
         .storage
-        .seal_and_sync_epoch(epoch1.as_u64())
+        .seal_and_sync_epoch(epoch1.as_u64_for_test())
         .await
         .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch1.as_u64(), res.uncommitted_ssts)
+        .commit_epoch(epoch1.as_u64_for_test(), res.uncommitted_ssts)
         .await
         .unwrap();
     let epoch2 = epoch1.next_epoch();
-    hummock_storage.seal_current_epoch(epoch2.as_u64(), SealCurrentEpochOptions::for_test());
+    hummock_storage.seal_current_epoch(
+        epoch2.as_u64_for_test(),
+        SealCurrentEpochOptions::for_test(),
+    );
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
@@ -847,7 +858,7 @@ async fn test_delete_get() {
             batch2,
             vec![],
             WriteOptions {
-                epoch: epoch2.as_u64(),
+                epoch: epoch2.as_u64_for_test(),
                 table_id: TEST_TABLE_ID,
             },
         )
@@ -855,23 +866,23 @@ async fn test_delete_get() {
         .unwrap();
     let res = test_env
         .storage
-        .seal_and_sync_epoch(epoch2.as_u64())
+        .seal_and_sync_epoch(epoch2.as_u64_for_test())
         .await
         .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch2.as_u64(), res.uncommitted_ssts)
+        .commit_epoch(epoch2.as_u64_for_test(), res.uncommitted_ssts)
         .await
         .unwrap();
     test_env
         .storage
-        .try_wait_epoch_for_test(epoch2.as_u64())
+        .try_wait_epoch_for_test(epoch2.as_u64_for_test())
         .await;
     assert!(test_env
         .storage
         .get(
             gen_key_from_str(VirtualNode::ZERO, "bb"),
-            epoch2.as_u64(),
+            epoch2.as_u64_for_test(),
             ReadOptions {
                 prefix_hint: None,
                 cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -899,9 +910,9 @@ async fn test_multiple_epoch_sync() {
         .committed()
         .max_committed_epoch();
 
-    let epoch1 = TestEpoch::new_without_offset(initial_epoch + 1);
+    let epoch1 = EpochWithGap::new_without_offset(initial_epoch + 1);
     hummock_storage
-        .init_for_test(epoch1.as_u64())
+        .init_for_test(epoch1.as_u64_for_test())
         .await
         .unwrap();
     let batch1 = vec![
@@ -919,7 +930,7 @@ async fn test_multiple_epoch_sync() {
             batch1,
             vec![],
             WriteOptions {
-                epoch: epoch1.as_u64(),
+                epoch: epoch1.as_u64_for_test(),
                 table_id: TEST_TABLE_ID,
             },
         )
@@ -927,7 +938,10 @@ async fn test_multiple_epoch_sync() {
         .unwrap();
 
     let epoch2 = epoch1.next_epoch();
-    hummock_storage.seal_current_epoch(epoch2.as_u64(), SealCurrentEpochOptions::for_test());
+    hummock_storage.seal_current_epoch(
+        epoch2.as_u64_for_test(),
+        SealCurrentEpochOptions::for_test(),
+    );
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
@@ -937,7 +951,7 @@ async fn test_multiple_epoch_sync() {
             batch2,
             vec![],
             WriteOptions {
-                epoch: epoch2.as_u64(),
+                epoch: epoch2.as_u64_for_test(),
                 table_id: TEST_TABLE_ID,
             },
         )
@@ -945,7 +959,10 @@ async fn test_multiple_epoch_sync() {
         .unwrap();
 
     let epoch3 = epoch2.next_epoch();
-    hummock_storage.seal_current_epoch(epoch3.as_u64(), SealCurrentEpochOptions::for_test());
+    hummock_storage.seal_current_epoch(
+        epoch3.as_u64_for_test(),
+        SealCurrentEpochOptions::for_test(),
+    );
     let batch3 = vec![
         (
             gen_key_from_str(VirtualNode::ZERO, "bb"),
@@ -961,7 +978,7 @@ async fn test_multiple_epoch_sync() {
             batch3,
             vec![],
             WriteOptions {
-                epoch: epoch3.as_u64(),
+                epoch: epoch3.as_u64_for_test(),
                 table_id: TEST_TABLE_ID,
             },
         )
@@ -974,7 +991,7 @@ async fn test_multiple_epoch_sync() {
                 hummock_storage_clone
                     .get(
                         gen_key_from_str(VirtualNode::ZERO, "bb"),
-                        epoch1.as_u64(),
+                        epoch1.as_u64_for_test(),
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -989,7 +1006,7 @@ async fn test_multiple_epoch_sync() {
             assert!(hummock_storage_clone
                 .get(
                     gen_key_from_str(VirtualNode::ZERO, "bb"),
-                    epoch2.as_u64(),
+                    epoch2.as_u64_for_test(),
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
 
@@ -1004,7 +1021,7 @@ async fn test_multiple_epoch_sync() {
                 hummock_storage_clone
                     .get(
                         gen_key_from_str(VirtualNode::ZERO, "bb"),
-                        epoch3.as_u64(),
+                        epoch3.as_u64_for_test(),
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -1020,33 +1037,33 @@ async fn test_multiple_epoch_sync() {
     };
     test_get().await;
 
-    test_env.storage.seal_epoch(epoch1.as_u64(), false);
+    test_env.storage.seal_epoch(epoch1.as_u64_for_test(), false);
     let sync_result2 = test_env
         .storage
-        .seal_and_sync_epoch(epoch2.as_u64())
+        .seal_and_sync_epoch(epoch2.as_u64_for_test())
         .await
         .unwrap();
     let sync_result3 = test_env
         .storage
-        .seal_and_sync_epoch(epoch3.as_u64())
+        .seal_and_sync_epoch(epoch3.as_u64_for_test())
         .await
         .unwrap();
     test_get().await;
 
     test_env
         .meta_client
-        .commit_epoch(epoch2.as_u64(), sync_result2.uncommitted_ssts)
+        .commit_epoch(epoch2.as_u64_for_test(), sync_result2.uncommitted_ssts)
         .await
         .unwrap();
 
     test_env
         .meta_client
-        .commit_epoch(epoch3.as_u64(), sync_result3.uncommitted_ssts)
+        .commit_epoch(epoch3.as_u64_for_test(), sync_result3.uncommitted_ssts)
         .await
         .unwrap();
     test_env
         .storage
-        .try_wait_epoch_for_test(epoch3.as_u64())
+        .try_wait_epoch_for_test(epoch3.as_u64_for_test())
         .await;
     test_get().await;
 }

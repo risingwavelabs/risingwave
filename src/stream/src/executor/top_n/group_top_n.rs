@@ -283,8 +283,8 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::SerializedKey;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
@@ -364,23 +364,23 @@ mod tests {
             pk_indices(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(1).as_u64(),
+                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
                 )),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(2).as_u64(),
+                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
                 )),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(3).as_u64(),
+                    EpochWithGap::new_without_offset(3).as_u64_for_test(),
                 )),
                 Message::Chunk(std::mem::take(&mut chunks[2])),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(4).as_u64(),
+                    EpochWithGap::new_without_offset(4).as_u64_for_test(),
                 )),
                 Message::Chunk(std::mem::take(&mut chunks[3])),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(5).as_u64(),
+                    EpochWithGap::new_without_offset(5).as_u64_for_test(),
                 )),
             ],
         ))

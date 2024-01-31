@@ -59,7 +59,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_common::util::epoch::TestEpoch;
+    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
@@ -81,7 +81,7 @@ mod tests {
             +  10  14.0
             +   4 300.0",
         ));
-        tx.push_barrier(TestEpoch::new_without_offset(1).as_u64(), false);
+        tx.push_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test(), false);
 
         let checked = schema_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
@@ -107,7 +107,7 @@ mod tests {
             +  10  14
             +   4 300",
         ));
-        tx.push_barrier(TestEpoch::new_without_offset(1).as_u64(), false);
+        tx.push_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test(), false);
 
         let checked = schema_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);

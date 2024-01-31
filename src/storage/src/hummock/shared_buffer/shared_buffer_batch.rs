@@ -896,7 +896,6 @@ mod tests {
     use std::ops::Bound::{Excluded, Included};
 
     use risingwave_common::must_match;
-    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_hummock_sdk::key::map_table_key_range;
 
     use super::*;
@@ -907,7 +906,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shared_buffer_batch_basic() {
-        let epoch = TestEpoch::new_without_offset(1).as_u64();
+        let epoch = EpochWithGap::new_without_offset(1).as_u64_for_test();
         let shared_buffer_items: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
             (
                 iterator_test_table_key_of(0),
@@ -1020,7 +1019,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shared_buffer_batch_seek() {
-        let epoch = TestEpoch::new_without_offset(1).as_u64();
+        let epoch = EpochWithGap::new_without_offset(1).as_u64_for_test();
         let shared_buffer_items = vec![
             (
                 iterator_test_table_key_of(1),
@@ -1077,7 +1076,8 @@ mod tests {
         // FORWARD: Seek to 2nd key with future epoch, expect last two items to return
         let mut iter = shared_buffer_batch.clone().into_forward_iter();
         iter.seek(
-            iterator_test_key_of_epoch(2, TestEpoch::new_without_offset(2).as_u64()).to_ref(),
+            iterator_test_key_of_epoch(2, EpochWithGap::new_without_offset(2).as_u64_for_test())
+                .to_ref(),
         )
         .await
         .unwrap();
@@ -1092,7 +1092,8 @@ mod tests {
         // FORWARD: Seek to 2nd key with old epoch, expect last item to return
         let mut iter = shared_buffer_batch.clone().into_forward_iter();
         iter.seek(
-            iterator_test_key_of_epoch(2, TestEpoch::new_without_offset(0).as_u64()).to_ref(),
+            iterator_test_key_of_epoch(2, EpochWithGap::new_without_offset(0).as_u64_for_test())
+                .to_ref(),
         )
         .await
         .unwrap();
@@ -1139,7 +1140,8 @@ mod tests {
         // BACKWARD: Seek to 2nd key with future epoch, expect first item to return
         let mut iter = shared_buffer_batch.clone().into_backward_iter();
         iter.seek(
-            iterator_test_key_of_epoch(2, TestEpoch::new_without_offset(2).as_u64()).to_ref(),
+            iterator_test_key_of_epoch(2, EpochWithGap::new_without_offset(2).as_u64_for_test())
+                .to_ref(),
         )
         .await
         .unwrap();
@@ -1166,7 +1168,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shared_buffer_batch_delete_range() {
-        let epoch = TestEpoch::new_without_offset(1).as_u64();
+        let epoch = EpochWithGap::new_without_offset(1).as_u64_for_test();
         let delete_ranges = vec![
             (
                 Bound::Included(Bytes::from(b"aaa".to_vec())),
@@ -1216,7 +1218,7 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn test_invalid_table_id() {
-        let epoch = TestEpoch::new_without_offset(1).as_u64();
+        let epoch = EpochWithGap::new_without_offset(1).as_u64_for_test();
         let shared_buffer_batch = SharedBufferBatch::for_test(vec![], epoch, Default::default());
         // Seeking to non-current epoch should panic
         let mut iter = shared_buffer_batch.into_forward_iter();
@@ -1286,7 +1288,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value3")),
             ),
         ];
-        let epoch = TestEpoch::new_without_offset(1).as_u64();
+        let epoch = EpochWithGap::new_without_offset(1).as_u64_for_test();
         let imm1 = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items1.clone()),
             epoch,
@@ -1306,7 +1308,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value32")),
             ),
         ];
-        let epoch = TestEpoch::new_without_offset(2).as_u64();
+        let epoch = EpochWithGap::new_without_offset(2).as_u64_for_test();
         let imm2 = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items2.clone()),
             epoch,
@@ -1327,7 +1329,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value33")),
             ),
         ];
-        let epoch = TestEpoch::new_without_offset(3).as_u64();
+        let epoch = EpochWithGap::new_without_offset(3).as_u64_for_test();
         let imm3 = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items3.clone()),
             epoch,
@@ -1352,14 +1354,14 @@ mod tests {
                     merged_imm
                         .get(
                             TableKey(key.as_slice()),
-                            TestEpoch::new_without_offset(i as u64 + 1).as_u64(),
+                            EpochWithGap::new_without_offset(i as u64 + 1).as_u64_for_test(),
                             &ReadOptions::default()
                         )
                         .unwrap()
                         .0,
                     value.clone(),
                     "epoch: {}, key: {:?}",
-                    TestEpoch::new_without_offset(i as u64 + 1).as_u64(),
+                    EpochWithGap::new_without_offset(i as u64 + 1).as_u64_for_test(),
                     String::from_utf8(key.clone())
                 );
             }
@@ -1367,7 +1369,7 @@ mod tests {
         assert_eq!(
             merged_imm.get(
                 TableKey(iterator_test_table_key_of(4).as_slice()),
-                TestEpoch::new_without_offset(1).as_u64(),
+                EpochWithGap::new_without_offset(1).as_u64_for_test(),
                 &ReadOptions::default()
             ),
             None
@@ -1375,7 +1377,7 @@ mod tests {
         assert_eq!(
             merged_imm.get(
                 TableKey(iterator_test_table_key_of(5).as_slice()),
-                TestEpoch::new_without_offset(1).as_u64(),
+                EpochWithGap::new_without_offset(1).as_u64_for_test(),
                 &ReadOptions::default()
             ),
             None
@@ -1383,7 +1385,7 @@ mod tests {
 
         // Forward iterator
         for snapshot_epoch in 1..=3 {
-            let snapshot_epoch = TestEpoch::new_without_offset(snapshot_epoch).as_u64();
+            let snapshot_epoch = EpochWithGap::new_without_offset(snapshot_epoch).as_u64_for_test();
             let mut iter = merged_imm.clone().into_forward_iter();
             iter.rewind().await.unwrap();
             let mut output = vec![];
@@ -1444,7 +1446,7 @@ mod tests {
     #[tokio::test]
     async fn test_merge_imms_delete_range() {
         let table_id = TableId { table_id: 1004 };
-        let epoch = TestEpoch::new_without_offset(1).as_u64();
+        let epoch = EpochWithGap::new_without_offset(1).as_u64_for_test();
         let delete_ranges = vec![
             (
                 Bound::Included(Bytes::from(b"111".to_vec())),
@@ -1486,7 +1488,7 @@ mod tests {
             None,
         );
 
-        let epoch = TestEpoch::new_without_offset(2).as_u64();
+        let epoch = EpochWithGap::new_without_offset(2).as_u64_for_test();
         let delete_ranges = vec![
             (
                 Bound::Included(Bytes::from(b"444".to_vec())),
@@ -1536,15 +1538,15 @@ mod tests {
         let merged_imm = merge_imms_in_memory(table_id, 0, imms, None).await.unwrap();
 
         assert_eq!(
-            TestEpoch::new_without_offset(1).as_u64(),
+            EpochWithGap::new_without_offset(1).as_u64_for_test(),
             merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey(b"111")))
         );
         assert_eq!(
-            TestEpoch::new_without_offset(1).as_u64(),
+            EpochWithGap::new_without_offset(1).as_u64_for_test(),
             merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey(b"555")))
         );
         assert_eq!(
-            TestEpoch::new_without_offset(2).as_u64(),
+            EpochWithGap::new_without_offset(2).as_u64_for_test(),
             merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey(b"888")))
         );
 
@@ -1553,7 +1555,7 @@ mod tests {
             merged_imm
                 .get(
                     TableKey(b"111"),
-                    TestEpoch::new_without_offset(2).as_u64(),
+                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
                     &ReadOptions::default()
                 )
                 .unwrap()
@@ -1566,7 +1568,7 @@ mod tests {
             merged_imm
                 .get(
                     TableKey(b"555"),
-                    TestEpoch::new_without_offset(1).as_u64(),
+                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
                     &ReadOptions::default()
                 )
                 .unwrap()
@@ -1579,7 +1581,7 @@ mod tests {
             merged_imm
                 .get(
                     TableKey(b"555"),
-                    TestEpoch::new_without_offset(2).as_u64(),
+                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
                     &ReadOptions::default()
                 )
                 .unwrap()
@@ -1592,7 +1594,7 @@ mod tests {
             merged_imm
                 .get(
                     TableKey(b"666"),
-                    TestEpoch::new_without_offset(2).as_u64(),
+                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
                     &ReadOptions::default()
                 )
                 .unwrap()
@@ -1604,7 +1606,7 @@ mod tests {
             merged_imm
                 .get(
                     TableKey(b"888"),
-                    TestEpoch::new_without_offset(2).as_u64(),
+                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
                     &ReadOptions::default()
                 )
                 .unwrap()
@@ -1617,7 +1619,7 @@ mod tests {
             merged_imm
                 .get(
                     TableKey(b"888"),
-                    TestEpoch::new_without_offset(1).as_u64(),
+                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
                     &ReadOptions::default()
                 )
                 .unwrap()

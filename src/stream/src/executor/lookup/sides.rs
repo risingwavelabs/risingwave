@@ -414,7 +414,7 @@ mod tests {
     use risingwave_common::array::{StreamChunk, StreamChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_common::util::epoch::TestEpoch;
+    use risingwave_hummock_sdk::EpochWithGap;
 
     use crate::executor::lookup::sides::stream_lookup_arrange_this_epoch;
     use crate::executor::test_utils::MockSource;
@@ -445,7 +445,7 @@ mod tests {
         // Simulate recovery test
         drop(tx_r);
 
-        tx_l.push_barrier(TestEpoch::new_without_offset(1).as_u64(), false);
+        tx_l.push_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test(), false);
 
         tx_l.push_chunk(chunk_l1);
 

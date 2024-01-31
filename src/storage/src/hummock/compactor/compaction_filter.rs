@@ -126,8 +126,8 @@ mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::TableId;
-    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
+    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::{CompactionFilter, TtlCompactionFilter};
 
@@ -138,7 +138,7 @@ mod tests {
             FullKey::new(
                 TableId::new(1),
                 TableKey(vec![]),
-                TestEpoch::new_without_offset(1).as_u64(),
+                EpochWithGap::new_without_offset(1).as_u64_for_test(),
             )
             .to_ref(),
         );

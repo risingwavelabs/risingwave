@@ -319,8 +319,8 @@ impl<S: StateStore> ManagedTopNState<S> {
 mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
@@ -350,7 +350,7 @@ mod tests {
             )
             .await;
             tb.init_epoch(EpochPair::new_test_epoch(
-                TestEpoch::new_without_offset(1).as_u64(),
+                EpochWithGap::new_without_offset(1).as_u64_for_test(),
             ));
             tb
         };
@@ -432,7 +432,7 @@ mod tests {
             )
             .await;
             tb.init_epoch(EpochPair::new_test_epoch(
-                TestEpoch::new_without_offset(1).as_u64(),
+                EpochWithGap::new_without_offset(1).as_u64_for_test(),
             ));
             tb
         };
@@ -481,7 +481,7 @@ mod tests {
             )
             .await;
             tb.init_epoch(EpochPair::new_test_epoch(
-                TestEpoch::new_without_offset(1).as_u64(),
+                EpochWithGap::new_without_offset(1).as_u64_for_test(),
             ));
             tb
         };

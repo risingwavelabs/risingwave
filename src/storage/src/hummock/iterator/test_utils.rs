@@ -18,7 +18,6 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::TestEpoch;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_object_store::object::{
@@ -93,7 +92,9 @@ pub fn iterator_test_bytes_user_key_of(idx: usize) -> UserKey<Bytes> {
 pub fn iterator_test_key_of(idx: usize) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: iterator_test_user_key_of(idx),
-        epoch_with_gap: EpochWithGap::new_from_epoch(TestEpoch::new_without_offset(233).as_u64()),
+        epoch_with_gap: EpochWithGap::new_from_epoch(
+            EpochWithGap::new_without_offset(233).as_u64_for_test(),
+        ),
     }
 }
 
@@ -112,7 +113,11 @@ pub fn iterator_test_key_of_epoch(idx: usize, epoch: HummockEpoch) -> FullKey<Ve
 
 /// Generates keys like `{table_id=0}key_test_00002` with epoch `epoch` .
 pub fn iterator_test_bytes_key_of_epoch(idx: usize, epoch: HummockEpoch) -> FullKey<Bytes> {
-    iterator_test_key_of_epoch(idx, TestEpoch::new_without_offset(epoch).as_u64()).into_bytes()
+    iterator_test_key_of_epoch(
+        idx,
+        EpochWithGap::new_without_offset(epoch).as_u64_for_test(),
+    )
+    .into_bytes()
 }
 
 /// The value of an index, like `value_test_00002` without value meta
@@ -188,7 +193,10 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
         object_id,
         kv_pairs.into_iter().map(|kv| {
             (
-                iterator_test_key_of_epoch(kv.0, TestEpoch::new_without_offset(kv.1).as_u64()),
+                iterator_test_key_of_epoch(
+                    kv.0,
+                    EpochWithGap::new_without_offset(kv.1).as_u64_for_test(),
+                ),
                 kv.2,
             )
         }),
@@ -213,7 +221,7 @@ pub async fn gen_iterator_test_sstable_with_range_tombstones_for_test(
                 false,
                 iterator_test_table_key_of(end),
                 false,
-                TestEpoch::new_without_offset(epoch).as_u64(),
+                EpochWithGap::new_without_offset(epoch).as_u64_for_test(),
             )
         })
         .collect_vec();
@@ -222,7 +230,10 @@ pub async fn gen_iterator_test_sstable_with_range_tombstones_for_test(
         object_id,
         kv_pairs.into_iter().map(|kv| {
             (
-                iterator_test_key_of_epoch(kv.0, TestEpoch::new_without_offset(kv.1).as_u64()),
+                iterator_test_key_of_epoch(
+                    kv.0,
+                    EpochWithGap::new_without_offset(kv.1).as_u64_for_test(),
+                ),
                 kv.2,
             )
         }),
@@ -271,7 +282,7 @@ pub async fn gen_iterator_test_sstable_with_incr_epoch(
             (
                 iterator_test_key_of_epoch(
                     idx_mapping(i),
-                    TestEpoch::new_without_offset(epoch_base + i as u64).as_u64(),
+                    EpochWithGap::new_without_offset(epoch_base + i as u64).as_u64_for_test(),
                 ),
                 HummockValue::put(iterator_test_value_of(idx_mapping(i))),
             )

@@ -20,8 +20,9 @@ use risingwave_common::field_generator::VarcharProperty;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::{EpochPair, TestEpoch};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_stream::common::table::state_table::WatermarkCacheParameterizedStateTable;
 use tokio::runtime::Runtime;
@@ -113,7 +114,8 @@ async fn run_bench_state_table_inserts<const USE_WATERMARK_CACHE: bool>(
     mut state_table: TestStateTable<USE_WATERMARK_CACHE>,
     rows: Vec<OwnedRow>,
 ) {
-    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
+    let mut epoch =
+        EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
     state_table.init_epoch(epoch);
     for row in rows {
         state_table.insert(row);
@@ -173,7 +175,8 @@ async fn run_bench_state_table_chunks<const USE_WATERMARK_CACHE: bool>(
     mut state_table: TestStateTable<USE_WATERMARK_CACHE>,
     chunks: Vec<StreamChunk>,
 ) {
-    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
+    let mut epoch =
+        EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
     state_table.init_epoch(epoch);
     for chunk in chunks {
         state_table.write_chunk(chunk);

@@ -761,8 +761,8 @@ mod tests {
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_hummock_sdk::key::FullKey;
+    use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_storage::store::StateStoreReadIterStream;
     use risingwave_storage::table::DEFAULT_VNODE;
     use tokio::sync::oneshot;
@@ -796,7 +796,7 @@ mod tests {
         let data_chunk = builder.consume_all().unwrap();
         let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
 
-        let mut epoch = TestEpoch::new_without_offset(233);
+        let mut epoch = EpochWithGap::new_without_offset(233);
 
         let mut serialized_keys = vec![];
         let mut seq_id = 1;
@@ -805,15 +805,16 @@ mod tests {
             key.slice(VirtualNode::SIZE..)
         }
         let delete_range_right1 =
-            serde.serialize_truncation_offset_watermark((epoch.as_u64(), None));
+            serde.serialize_truncation_offset_watermark((epoch.as_u64_for_test(), None));
 
         for (op, row) in stream_chunk.rows() {
-            let (_, key, value) = serde.serialize_data_row(epoch.as_u64(), seq_id, op, row);
+            let (_, key, value) =
+                serde.serialize_data_row(epoch.as_u64_for_test(), seq_id, op, row);
             let key = remove_vnode_prefix(&key.0);
             assert!(key < delete_range_right1);
             serialized_keys.push(key);
             let (decoded_epoch, row_op) = serde.deserialize(value).unwrap();
-            assert_eq!(decoded_epoch, epoch.as_u64());
+            assert_eq!(decoded_epoch, epoch.as_u64_for_test());
             match row_op {
                 LogStoreRowOp::Row {
                     op: deserialized_op,
@@ -827,12 +828,13 @@ mod tests {
             seq_id += 1;
         }
 
-        let (key, encoded_barrier) = serde.serialize_barrier(epoch.as_u64(), DEFAULT_VNODE, false);
+        let (key, encoded_barrier) =
+            serde.serialize_barrier(epoch.as_u64_for_test(), DEFAULT_VNODE, false);
         let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(encoded_barrier).unwrap() {
             (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
                 assert!(!is_checkpoint);
-                assert_eq!(decoded_epoch, epoch.as_u64());
+                assert_eq!(decoded_epoch, epoch.as_u64_for_test());
             }
             _ => unreachable!(),
         }
@@ -843,16 +845,17 @@ mod tests {
         epoch.inc();
 
         let delete_range_right2 =
-            serde.serialize_truncation_offset_watermark((epoch.as_u64(), None));
+            serde.serialize_truncation_offset_watermark((epoch.as_u64_for_test(), None));
 
         for (op, row) in stream_chunk.rows() {
-            let (_, key, value) = serde.serialize_data_row(epoch.as_u64(), seq_id, op, row);
+            let (_, key, value) =
+                serde.serialize_data_row(epoch.as_u64_for_test(), seq_id, op, row);
             let key = remove_vnode_prefix(&key.0);
             assert!(key >= delete_range_right1);
             assert!(key < delete_range_right2);
             serialized_keys.push(key);
             let (decoded_epoch, row_op) = serde.deserialize(value).unwrap();
-            assert_eq!(decoded_epoch, epoch.as_u64());
+            assert_eq!(decoded_epoch, epoch.as_u64_for_test());
             match row_op {
                 LogStoreRowOp::Row {
                     op: deserialized_op,
@@ -867,11 +870,11 @@ mod tests {
         }
 
         let (key, encoded_checkpoint_barrier) =
-            serde.serialize_barrier(epoch.as_u64(), DEFAULT_VNODE, true);
+            serde.serialize_barrier(epoch.as_u64_for_test(), DEFAULT_VNODE, true);
         let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(encoded_checkpoint_barrier).unwrap() {
             (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
-                assert_eq!(decoded_epoch, epoch.as_u64());
+                assert_eq!(decoded_epoch, epoch.as_u64_for_test());
                 assert!(is_checkpoint);
             }
             _ => unreachable!(),

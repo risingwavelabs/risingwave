@@ -18,9 +18,8 @@ use bytes::Bytes;
 use futures::TryStreamExt;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::TestEpoch;
 use risingwave_hummock_sdk::key::TableKey;
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{EpochWithGap, HummockReadEpoch};
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::CachePolicy;
@@ -111,8 +110,8 @@ async fn test_snapshot_inner(
         .new_local(NewLocalOptions::for_test(Default::default()))
         .await;
 
-    let epoch1 = TestEpoch::new_without_offset(1);
-    local.init_for_test(epoch1.as_u64()).await.unwrap();
+    let epoch1 = EpochWithGap::new_without_offset(1);
+    local.init_for_test(epoch1.as_u64_for_test()).await.unwrap();
     local
         .ingest_batch(
             vec![
@@ -127,32 +126,35 @@ async fn test_snapshot_inner(
             ],
             vec![],
             WriteOptions {
-                epoch: epoch1.as_u64(),
+                epoch: epoch1.as_u64_for_test(),
                 table_id: Default::default(),
             },
         )
         .await
         .unwrap();
     let epoch2 = epoch1.next_epoch();
-    local.seal_current_epoch(epoch2.as_u64(), SealCurrentEpochOptions::for_test());
+    local.seal_current_epoch(
+        epoch2.as_u64_for_test(),
+        SealCurrentEpochOptions::for_test(),
+    );
     if enable_sync {
         let ssts = hummock_storage
-            .seal_and_sync_epoch(epoch1.as_u64())
+            .seal_and_sync_epoch(epoch1.as_u64_for_test())
             .await
             .unwrap()
             .uncommitted_ssts;
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch1.as_u64(), ssts)
+                .commit_epoch(epoch1.as_u64_for_test(), ssts)
                 .await
                 .unwrap();
             hummock_storage
-                .try_wait_epoch(HummockReadEpoch::Committed(epoch1.as_u64()))
+                .try_wait_epoch(HummockReadEpoch::Committed(epoch1.as_u64_for_test()))
                 .await
                 .unwrap();
         }
     }
-    assert_count_range_scan!(hummock_storage, .., 2, epoch1.as_u64());
+    assert_count_range_scan!(hummock_storage, .., 2, epoch1.as_u64_for_test());
 
     local
         .ingest_batch(
@@ -172,33 +174,36 @@ async fn test_snapshot_inner(
             ],
             vec![],
             WriteOptions {
-                epoch: epoch2.as_u64(),
+                epoch: epoch2.as_u64_for_test(),
                 table_id: Default::default(),
             },
         )
         .await
         .unwrap();
     let epoch3 = epoch2.next_epoch();
-    local.seal_current_epoch(epoch3.as_u64(), SealCurrentEpochOptions::for_test());
+    local.seal_current_epoch(
+        epoch3.as_u64_for_test(),
+        SealCurrentEpochOptions::for_test(),
+    );
     if enable_sync {
         let ssts = hummock_storage
-            .seal_and_sync_epoch(epoch2.as_u64())
+            .seal_and_sync_epoch(epoch2.as_u64_for_test())
             .await
             .unwrap()
             .uncommitted_ssts;
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch2.as_u64(), ssts)
+                .commit_epoch(epoch2.as_u64_for_test(), ssts)
                 .await
                 .unwrap();
             hummock_storage
-                .try_wait_epoch(HummockReadEpoch::Committed(epoch2.as_u64()))
+                .try_wait_epoch(HummockReadEpoch::Committed(epoch2.as_u64_for_test()))
                 .await
                 .unwrap();
         }
     }
-    assert_count_range_scan!(hummock_storage, .., 3, epoch2.as_u64());
-    assert_count_range_scan!(hummock_storage, .., 2, epoch1.as_u64());
+    assert_count_range_scan!(hummock_storage, .., 3, epoch2.as_u64_for_test());
+    assert_count_range_scan!(hummock_storage, .., 2, epoch1.as_u64_for_test());
 
     local
         .ingest_batch(
@@ -218,7 +223,7 @@ async fn test_snapshot_inner(
             ],
             vec![],
             WriteOptions {
-                epoch: epoch3.as_u64(),
+                epoch: epoch3.as_u64_for_test(),
                 table_id: Default::default(),
             },
         )
@@ -227,24 +232,24 @@ async fn test_snapshot_inner(
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     if enable_sync {
         let ssts = hummock_storage
-            .seal_and_sync_epoch(epoch3.as_u64())
+            .seal_and_sync_epoch(epoch3.as_u64_for_test())
             .await
             .unwrap()
             .uncommitted_ssts;
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch3.as_u64(), ssts)
+                .commit_epoch(epoch3.as_u64_for_test(), ssts)
                 .await
                 .unwrap();
             hummock_storage
-                .try_wait_epoch(HummockReadEpoch::Committed(epoch3.as_u64()))
+                .try_wait_epoch(HummockReadEpoch::Committed(epoch3.as_u64_for_test()))
                 .await
                 .unwrap();
         }
     }
-    assert_count_range_scan!(hummock_storage, .., 0, epoch3.as_u64());
-    assert_count_range_scan!(hummock_storage, .., 3, epoch2.as_u64());
-    assert_count_range_scan!(hummock_storage, .., 2, epoch1.as_u64());
+    assert_count_range_scan!(hummock_storage, .., 0, epoch3.as_u64_for_test());
+    assert_count_range_scan!(hummock_storage, .., 3, epoch2.as_u64_for_test());
+    assert_count_range_scan!(hummock_storage, .., 2, epoch1.as_u64_for_test());
 }
 
 async fn test_snapshot_range_scan_inner(
@@ -253,11 +258,11 @@ async fn test_snapshot_range_scan_inner(
     enable_sync: bool,
     enable_commit: bool,
 ) {
-    let epoch = TestEpoch::new_without_offset(1);
+    let epoch = EpochWithGap::new_without_offset(1);
     let mut local = hummock_storage
         .new_local(NewLocalOptions::for_test(Default::default()))
         .await;
-    local.init_for_test(epoch.as_u64()).await.unwrap();
+    local.init_for_test(epoch.as_u64_for_test()).await.unwrap();
 
     local
         .ingest_batch(
@@ -281,7 +286,7 @@ async fn test_snapshot_range_scan_inner(
             ],
             vec![],
             WriteOptions {
-                epoch: epoch.as_u64(),
+                epoch: epoch.as_u64_for_test(),
                 table_id: Default::default(),
             },
         )
@@ -290,17 +295,17 @@ async fn test_snapshot_range_scan_inner(
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     if enable_sync {
         let ssts = hummock_storage
-            .seal_and_sync_epoch(epoch.as_u64())
+            .seal_and_sync_epoch(epoch.as_u64_for_test())
             .await
             .unwrap()
             .uncommitted_ssts;
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch.as_u64(), ssts)
+                .commit_epoch(epoch.as_u64_for_test(), ssts)
                 .await
                 .unwrap();
             hummock_storage
-                .try_wait_epoch(HummockReadEpoch::Committed(epoch.as_u64()))
+                .try_wait_epoch(HummockReadEpoch::Committed(epoch.as_u64_for_test()))
                 .await
                 .unwrap();
         }
@@ -311,12 +316,22 @@ async fn test_snapshot_range_scan_inner(
         };
     }
 
-    assert_count_range_scan!(hummock_storage, key!(2)..=key!(3), 2, epoch.as_u64());
-    assert_count_range_scan!(hummock_storage, key!(2)..key!(3), 1, epoch.as_u64());
-    assert_count_range_scan!(hummock_storage, key!(2).., 3, epoch.as_u64());
-    assert_count_range_scan!(hummock_storage, ..=key!(3), 3, epoch.as_u64());
-    assert_count_range_scan!(hummock_storage, ..key!(3), 2, epoch.as_u64());
-    assert_count_range_scan!(hummock_storage, .., 4, epoch.as_u64());
+    assert_count_range_scan!(
+        hummock_storage,
+        key!(2)..=key!(3),
+        2,
+        epoch.as_u64_for_test()
+    );
+    assert_count_range_scan!(
+        hummock_storage,
+        key!(2)..key!(3),
+        1,
+        epoch.as_u64_for_test()
+    );
+    assert_count_range_scan!(hummock_storage, key!(2).., 3, epoch.as_u64_for_test());
+    assert_count_range_scan!(hummock_storage, ..=key!(3), 3, epoch.as_u64_for_test());
+    assert_count_range_scan!(hummock_storage, ..key!(3), 2, epoch.as_u64_for_test());
+    assert_count_range_scan!(hummock_storage, .., 4, epoch.as_u64_for_test());
 }
 
 #[tokio::test]

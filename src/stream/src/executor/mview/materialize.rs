@@ -590,9 +590,8 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-    use risingwave_hummock_sdk::HummockReadEpoch;
+    use risingwave_hummock_sdk::{EpochWithGap, HummockReadEpoch};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
@@ -631,15 +630,15 @@ mod tests {
             PkIndices::new(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(1).as_u64(),
+                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk1),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(2).as_u64(),
+                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk2),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(3).as_u64(),
+                    EpochWithGap::new_without_offset(3).as_u64_for_test(),
                 )),
             ],
         );
@@ -745,15 +744,15 @@ mod tests {
             PkIndices::new(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(1).as_u64(),
+                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk1),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(2).as_u64(),
+                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk2),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(3).as_u64(),
+                    EpochWithGap::new_without_offset(3).as_u64_for_test(),
                 )),
             ],
         );
@@ -847,16 +846,16 @@ mod tests {
             PkIndices::new(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(1).as_u64(),
+                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk1),
                 Message::Chunk(chunk2),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(2).as_u64(),
+                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk3),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(3).as_u64(),
+                    EpochWithGap::new_without_offset(3).as_u64_for_test(),
                 )),
             ],
         );
@@ -985,19 +984,19 @@ mod tests {
             PkIndices::new(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(1).as_u64(),
+                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk1),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(2).as_u64(),
+                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk2),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(3).as_u64(),
+                    EpochWithGap::new_without_offset(3).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk3),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(4).as_u64(),
+                    EpochWithGap::new_without_offset(4).as_u64_for_test(),
                 )),
             ],
         );
@@ -1177,16 +1176,16 @@ mod tests {
             PkIndices::new(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(1).as_u64(),
+                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk1),
                 Message::Chunk(chunk2),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(2).as_u64(),
+                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk3),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(3).as_u64(),
+                    EpochWithGap::new_without_offset(3).as_u64_for_test(),
                 )),
             ],
         );
@@ -1294,11 +1293,11 @@ mod tests {
             PkIndices::new(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(1).as_u64(),
+                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk1),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(2).as_u64(),
+                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
                 )),
             ],
         );
@@ -1417,19 +1416,19 @@ mod tests {
             PkIndices::new(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(1).as_u64(),
+                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk1),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(2).as_u64(),
+                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk2),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(3).as_u64(),
+                    EpochWithGap::new_without_offset(3).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk3),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(4).as_u64(),
+                    EpochWithGap::new_without_offset(4).as_u64_for_test(),
                 )),
             ],
         );
@@ -1625,11 +1624,11 @@ mod tests {
 
         let chunks = gen_fuzz_data(N, 128);
         let messages = iter::once(Message::Barrier(Barrier::new_test_barrier(
-            TestEpoch::new_without_offset(1).as_u64(),
+            EpochWithGap::new_without_offset(1).as_u64_for_test(),
         )))
         .chain(chunks.into_iter().map(Message::Chunk))
         .chain(iter::once(Message::Barrier(Barrier::new_test_barrier(
-            TestEpoch::new_without_offset(2).as_u64(),
+            EpochWithGap::new_without_offset(2).as_u64_for_test(),
         ))))
         .collect();
         // Prepare stream executors.

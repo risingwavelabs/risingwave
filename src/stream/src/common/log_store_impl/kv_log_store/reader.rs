@@ -27,12 +27,11 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
-use risingwave_common::util::epoch::TestEpoch;
 use risingwave_connector::sink::log_store::{
     ChunkId, LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
 use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{PrefetchOptions, ReadOptions};
 use risingwave_storage::StateStore;
@@ -186,15 +185,14 @@ impl<S: StateStore> KvLogStoreReader<S> {
         last_persisted_epoch: Option<u64>,
     ) -> impl Future<Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<S::IterStream>>>>> + Send
     {
-        let range_start =
-            if let Some(last_persisted_epoch) = last_persisted_epoch {
-                // start from the next epoch of last_persisted_epoch
-                Included(self.serde.serialize_epoch(
-                    last_persisted_epoch + TestEpoch::new_without_offset(1).as_u64(),
-                ))
-            } else {
-                Unbounded
-            };
+        let range_start = if let Some(last_persisted_epoch) = last_persisted_epoch {
+            // start from the next epoch of last_persisted_epoch
+            Included(self.serde.serialize_epoch(
+                last_persisted_epoch + EpochWithGap::new_without_offset(1).as_u64_for_test(),
+            ))
+        } else {
+            Unbounded
+        };
         let range_end = self.serde.serialize_epoch(
             self.first_write_epoch
                 .expect("should have set first write epoch"),
@@ -479,7 +477,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                 self.truncate_offset
                     .map(|truncate_offset| match truncate_offset {
                         TruncateOffset::Chunk { epoch, .. } => {
-                            epoch - TestEpoch::new_without_offset(1).as_u64()
+                            epoch - EpochWithGap::new_without_offset(1).as_u64_for_test()
                         }
                         TruncateOffset::Barrier { epoch } => epoch,
                     });

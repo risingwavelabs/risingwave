@@ -436,9 +436,8 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::TestEpoch;
-    use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::key::PointRange;
+    use risingwave_hummock_sdk::{can_concat, EpochWithGap};
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -482,7 +481,8 @@ mod tests {
                 .add_full_key_for_test(
                     FullKey::from_user_key(
                         test_user_key_of(i).as_ref(),
-                        TestEpoch::new_without_offset((table_capacity - i) as u64).as_u64(),
+                        EpochWithGap::new_without_offset((table_capacity - i) as u64)
+                            .as_u64_for_test(),
                     ),
                     HummockValue::put(b"value"),
                     true,
@@ -503,14 +503,17 @@ mod tests {
             mock_sstable_store(),
             opts,
         ));
-        let mut epoch = TestEpoch::new_without_offset(100);
+        let mut epoch = EpochWithGap::new_without_offset(100);
 
         macro_rules! add {
             () => {
                 epoch.sub();
                 builder
                     .add_full_key_for_test(
-                        FullKey::from_user_key(test_user_key_of(1).as_ref(), epoch.as_u64()),
+                        FullKey::from_user_key(
+                            test_user_key_of(1).as_ref(),
+                            epoch.as_u64_for_test(),
+                        ),
                         HummockValue::put(b"v"),
                         true,
                     )
@@ -593,7 +596,7 @@ mod tests {
         let full_key = FullKey::for_test(
             table_id,
             [VirtualNode::ZERO.to_be_bytes().as_slice(), b"k"].concat(),
-            TestEpoch::new_without_offset(1).as_u64(),
+            EpochWithGap::new_without_offset(1).as_u64_for_test(),
         );
         let target_extended_user_key = PointRange::from_user_key(full_key.user_key.as_ref(), false);
         while del_iter.is_valid() && del_iter.key().as_ref().le(&target_extended_user_key) {
@@ -733,7 +736,7 @@ mod tests {
             .await
             .unwrap();
         let v = vec![5u8; 220];
-        let epoch = TestEpoch::new_without_offset(12).as_u64();
+        let epoch = EpochWithGap::new_without_offset(12).as_u64_for_test();
         builder
             .add_full_key(
                 FullKey::from_user_key(UserKey::for_test(table_id, b"bbbb"), epoch),
@@ -756,7 +759,7 @@ mod tests {
                     UserKey::for_test(table_id, b"eeee".to_vec()),
                     false,
                 ),
-                new_epoch: TestEpoch::new_without_offset(11).as_u64(),
+                new_epoch: EpochWithGap::new_without_offset(11).as_u64_for_test(),
             })
             .await
             .unwrap();
@@ -766,7 +769,7 @@ mod tests {
                     UserKey::for_test(table_id, b"ffff".to_vec()),
                     false,
                 ),
-                new_epoch: TestEpoch::new_without_offset(10).as_u64(),
+                new_epoch: EpochWithGap::new_without_offset(10).as_u64_for_test(),
             })
             .await
             .unwrap();

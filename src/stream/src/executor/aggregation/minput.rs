@@ -296,9 +296,10 @@ mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ListValue};
-    use risingwave_common::util::epoch::{EpochPair, TestEpoch};
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_expr::aggregate::{build_append_only, AggCall};
+    use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_pb::stream_plan::PbAggNodeVersion;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
@@ -385,7 +386,8 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
+        let mut epoch =
+            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
         table.init_epoch(epoch);
 
         {
@@ -485,7 +487,8 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
+        let mut epoch =
+            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
         table.init_epoch(epoch);
 
         {
@@ -582,7 +585,8 @@ mod tests {
         )
         .await;
 
-        let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
+        let mut epoch =
+            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
         table_1.init_epoch(epoch);
         table_2.init_epoch(epoch);
 
@@ -704,7 +708,8 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
+        let mut epoch =
+            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
         table.init_epoch(epoch);
 
         {
@@ -787,7 +792,8 @@ mod tests {
         )
         .await;
 
-        let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
+        let mut epoch =
+            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
         table.init_epoch(epoch);
 
         let order_columns = vec![
@@ -909,7 +915,8 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
+        let mut epoch =
+            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
         table.init_epoch(epoch);
 
         {
@@ -1022,7 +1029,8 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
+        let mut epoch =
+            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
         table.init_epoch(epoch);
 
         {
@@ -1107,7 +1115,8 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
+        let mut epoch =
+            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
         table.init_epoch(epoch);
         {
             let chunk = create_chunk(

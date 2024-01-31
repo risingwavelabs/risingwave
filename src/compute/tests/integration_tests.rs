@@ -37,12 +37,12 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
-use risingwave_common::util::epoch::{EpochPair, TestEpoch};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_connector::ConnectorParams;
-use risingwave_hummock_sdk::to_committed_batch_query_epoch;
+use risingwave_hummock_sdk::{to_committed_batch_query_epoch, EpochWithGap};
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::PbRowFormatType;
 use risingwave_source::connector_test_utils::create_source_desc_builder;
@@ -274,9 +274,9 @@ async fn test_table_materialize() -> StreamResult<()> {
     assert!(result.is_none());
 
     // Send a barrier to start materialized view.
-    let mut curr_epoch = TestEpoch::new_without_offset(1919);
+    let mut curr_epoch = EpochWithGap::new_without_offset(1919);
     barrier_tx
-        .send(Barrier::new_test_barrier(curr_epoch.as_u64()))
+        .send(Barrier::new_test_barrier(curr_epoch.as_u64_for_test()))
         .unwrap();
 
     assert!(matches!(
@@ -285,7 +285,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             epoch,
             mutation: None,
             ..
-        }) if epoch.curr == curr_epoch.as_u64()
+        }) if epoch.curr == curr_epoch.as_u64_for_test()
     ));
 
     curr_epoch.inc();
@@ -295,7 +295,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         let _ = stream.next().await.unwrap()?;
         // Send a barrier and poll again, should write changes to storage.
         barrier_tx_clone
-            .send(Barrier::new_test_barrier(curr_epoch.as_u64()))
+            .send(Barrier::new_test_barrier(curr_epoch.as_u64_for_test()))
             .unwrap();
         Ok::<_, RwError>(())
     });
@@ -325,7 +325,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             epoch,
             mutation: None,
             ..
-        }) if epoch.curr == curr_epoch.as_u64()
+        }) if epoch.curr == curr_epoch.as_u64_for_test()
     ));
 
     // Scan the table again, we are able to get the data now!
@@ -377,7 +377,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         let _ = stream.next().await.unwrap()?;
         // Send a barrier and poll again, should write changes to storage.
         barrier_tx_clone
-            .send(Barrier::new_test_barrier(curr_epoch.as_u64()))
+            .send(Barrier::new_test_barrier(curr_epoch.as_u64_for_test()))
             .unwrap();
         Ok::<_, RwError>(())
     });
@@ -404,7 +404,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             epoch,
             mutation: None,
             ..
-        }) if epoch.curr == curr_epoch.as_u64()
+        }) if epoch.curr == curr_epoch.as_u64_for_test()
     ));
 
     // Scan the table again, we are able to see the deletion now!
@@ -463,7 +463,8 @@ async fn test_row_seq_scan() -> Result<()> {
         vec![0, 1, 2],
     );
 
-    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
+    let mut epoch =
+        EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
     state.init_epoch(epoch);
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),

@@ -22,8 +22,8 @@ use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::TestEpoch;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
@@ -107,15 +107,15 @@ async fn create_arrangement(
         vec![0],
         vec![
             Message::Barrier(Barrier::new_test_barrier(
-                TestEpoch::new_without_offset(2).as_u64(),
+                EpochWithGap::new_without_offset(2).as_u64_for_test(),
             )),
             Message::Chunk(chunk1),
             Message::Barrier(Barrier::new_test_barrier(
-                TestEpoch::new_without_offset(3).as_u64(),
+                EpochWithGap::new_without_offset(3).as_u64_for_test(),
             )),
             Message::Chunk(chunk2),
             Message::Barrier(Barrier::new_test_barrier(
-                TestEpoch::new_without_offset(4).as_u64(),
+                EpochWithGap::new_without_offset(4).as_u64_for_test(),
             )),
         ],
     );
@@ -175,15 +175,15 @@ fn create_source() -> Box<dyn Executor + Send> {
         PkIndices::new(),
         vec![
             Message::Barrier(Barrier::new_test_barrier(
-                TestEpoch::new_without_offset(2).as_u64(),
+                EpochWithGap::new_without_offset(2).as_u64_for_test(),
             )),
             Message::Chunk(chunk1),
             Message::Barrier(Barrier::new_test_barrier(
-                TestEpoch::new_without_offset(3).as_u64(),
+                EpochWithGap::new_without_offset(3).as_u64_for_test(),
             )),
             Message::Chunk(chunk2),
             Message::Barrier(Barrier::new_test_barrier(
-                TestEpoch::new_without_offset(4).as_u64(),
+                EpochWithGap::new_without_offset(4).as_u64_for_test(),
             )),
         ],
     );

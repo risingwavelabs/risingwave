@@ -145,7 +145,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::epoch::TestEpoch;
+    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
@@ -161,15 +161,15 @@ mod tests {
             vec![
                 Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(1).as_u64(),
+                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
                 )),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(2).as_u64(),
+                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
                 )),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(3).as_u64(),
+                    EpochWithGap::new_without_offset(3).as_u64_for_test(),
                 )),
             ],
         )
@@ -180,11 +180,11 @@ mod tests {
             vec![
                 Message::Chunk(StreamChunk::from_pretty("I\n + 11")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(1).as_u64(),
+                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
                 )),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 12")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(2).as_u64(),
+                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
                 )),
             ],
         )
@@ -195,11 +195,11 @@ mod tests {
             vec![
                 Message::Chunk(StreamChunk::from_pretty("I\n + 21")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(1).as_u64(),
+                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
                 )),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 22")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(2).as_u64(),
+                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
                 )),
             ],
         )
@@ -224,17 +224,17 @@ mod tests {
                 Message::Chunk(StreamChunk::from_pretty("I\n + 11")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(1).as_u64()
+                    EpochWithGap::new_without_offset(1).as_u64_for_test()
                 )),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 22")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 12")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(2).as_u64()
+                    EpochWithGap::new_without_offset(2).as_u64_for_test()
                 )),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    TestEpoch::new_without_offset(3).as_u64()
+                    EpochWithGap::new_without_offset(3).as_u64_for_test()
                 )),
             ]
         );

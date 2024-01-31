@@ -29,7 +29,6 @@ use risingwave_batch::executor::{Executor as BatchExecutor, RowSeqScanExecutor, 
 use risingwave_common::array::{Array, ArrayBuilder, DataChunk, Op, StreamChunk, Utf8ArrayBuilder};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::types::{Datum, JsonbVal};
-use risingwave_common::util::epoch::TestEpoch;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::cdc::external::mock_external_table::MockExternalTableReader;
 use risingwave_connector::source::cdc::external::{
@@ -37,7 +36,7 @@ use risingwave_connector::source::cdc::external::{
 };
 use risingwave_connector::source::cdc::{CdcSplitBase, DebeziumCdcSplit, MySqlCdcSplit};
 use risingwave_connector::source::SplitImpl;
-use risingwave_hummock_sdk::to_committed_batch_query_epoch;
+use risingwave_hummock_sdk::{to_committed_batch_query_epoch, EpochWithGap};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_stream::common::table::state_table::StateTable;
@@ -291,7 +290,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let stream_chunk2 = create_stream_chunk(chunk2_datums, &chunk_schema);
 
     // The first barrier
-    let mut curr_epoch = TestEpoch::new_without_offset(11);
+    let mut curr_epoch = EpochWithGap::new_without_offset(11);
     let mut splits = HashMap::new();
     splits.insert(
         actor_id,
@@ -307,13 +306,14 @@ async fn test_cdc_backfill() -> StreamResult<()> {
             _phantom: PhantomData,
         })],
     );
-    let init_barrier =
-        Barrier::new_test_barrier(curr_epoch.as_u64()).with_mutation(Mutation::Add(AddMutation {
+    let init_barrier = Barrier::new_test_barrier(curr_epoch.as_u64_for_test()).with_mutation(
+        Mutation::Add(AddMutation {
             adds: HashMap::new(),
             added_actors: HashSet::new(),
             splits,
             pause: false,
-        }));
+        }),
+    );
 
     tx.send_barrier(init_barrier);
 
@@ -324,7 +324,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
             epoch,
             mutation: Some(_),
             ..
-        }) if epoch.curr == curr_epoch.as_u64()
+        }) if epoch.curr == curr_epoch.as_u64_for_test()
     ));
 
     // start the stream pipeline src -> backfill -> mview
@@ -335,17 +335,17 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     tx.push_chunk(stream_chunk1);
     tokio::time::sleep(interval).await;
     curr_epoch.inc();
-    tx.push_barrier(curr_epoch.as_u64(), false);
+    tx.push_barrier(curr_epoch.as_u64_for_test(), false);
 
     tx.push_chunk(stream_chunk2);
 
     tokio::time::sleep(interval).await;
     curr_epoch.inc();
-    tx.push_barrier(curr_epoch.as_u64(), false);
+    tx.push_barrier(curr_epoch.as_u64_for_test(), false);
 
     tokio::time::sleep(interval).await;
     curr_epoch.inc();
-    tx.push_barrier(curr_epoch.as_u64(), true);
+    tx.push_barrier(curr_epoch.as_u64_for_test(), true);
 
     // scan the final result of the mv table
     let column_descs = vec![

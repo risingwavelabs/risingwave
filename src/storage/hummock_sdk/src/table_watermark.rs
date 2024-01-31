@@ -596,7 +596,6 @@ mod tests {
     use risingwave_common::buffer::{Bitmap, BitmapBuilder};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::TestEpoch;
 
     use crate::key::{
         is_empty_key_range, map_table_key_range, prefix_slice_with_vnode,
@@ -607,6 +606,7 @@ mod tests {
         WatermarkDirection,
     };
     use crate::version::HummockVersion;
+    use crate::EpochWithGap;
 
     fn build_bitmap(vnodes: impl IntoIterator<Item = usize>) -> Arc<Bitmap> {
         let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
@@ -618,14 +618,14 @@ mod tests {
 
     #[test]
     fn test_apply_new_table_watermark() {
-        let epoch1 = TestEpoch::new_without_offset(1);
+        let epoch1 = EpochWithGap::new_without_offset(1);
         let direction = WatermarkDirection::Ascending;
         let watermark1 = Bytes::from("watermark1");
         let watermark2 = Bytes::from("watermark2");
         let watermark3 = Bytes::from("watermark3");
         let watermark4 = Bytes::from("watermark4");
         let mut table_watermarks = TableWatermarks::single_epoch(
-            epoch1.as_u64(),
+            epoch1.as_u64_for_test(),
             vec![VnodeWatermark::new(
                 build_bitmap(vec![0, 1, 2]),
                 watermark1.clone(),
@@ -634,7 +634,7 @@ mod tests {
         );
         let epoch2 = epoch1.next_epoch();
         table_watermarks.add_new_epoch_watermarks(
-            epoch2.as_u64(),
+            epoch2.as_u64_for_test(),
             vec![VnodeWatermark::new(
                 build_bitmap(vec![0, 1, 2, 3]),
                 watermark2.clone(),
@@ -646,7 +646,7 @@ mod tests {
 
         let epoch3 = epoch2.next_epoch();
         let mut second_table_watermark = TableWatermarks::single_epoch(
-            epoch3.as_u64(),
+            epoch3.as_u64_for_test(),
             vec![VnodeWatermark::new(
                 build_bitmap(0..VirtualNode::COUNT),
                 watermark3.clone(),
@@ -654,7 +654,7 @@ mod tests {
             direction,
         );
         table_watermarks.add_new_epoch_watermarks(
-            epoch3.as_u64(),
+            epoch3.as_u64_for_test(),
             vec![VnodeWatermark::new(
                 build_bitmap(0..VirtualNode::COUNT),
                 watermark3.clone(),
@@ -664,7 +664,7 @@ mod tests {
         let epoch4 = epoch3.next_epoch();
         let epoch5 = epoch4.next_epoch();
         table_watermarks.add_new_epoch_watermarks(
-            epoch5.as_u64(),
+            epoch5.as_u64_for_test(),
             vec![VnodeWatermark::new(
                 build_bitmap(vec![0, 3, 4]),
                 watermark4.clone(),
@@ -672,7 +672,7 @@ mod tests {
             direction,
         );
         second_table_watermark.add_new_epoch_watermarks(
-            epoch5.as_u64(),
+            epoch5.as_u64_for_test(),
             vec![VnodeWatermark::new(
                 build_bitmap(vec![0, 3, 4]),
                 watermark4.clone(),
@@ -686,14 +686,14 @@ mod tests {
 
     #[test]
     fn test_clear_stale_epoch_watmermark() {
-        let epoch1 = TestEpoch::new_without_offset(1);
+        let epoch1 = EpochWithGap::new_without_offset(1);
         let direction = WatermarkDirection::Ascending;
         let watermark1 = Bytes::from("watermark1");
         let watermark2 = Bytes::from("watermark2");
         let watermark3 = Bytes::from("watermark3");
         let watermark4 = Bytes::from("watermark4");
         let mut table_watermarks = TableWatermarks::single_epoch(
-            epoch1.as_u64(),
+            epoch1.as_u64_for_test(),
             vec![VnodeWatermark::new(
                 build_bitmap(vec![0, 1, 2]),
                 watermark1.clone(),
@@ -702,7 +702,7 @@ mod tests {
         );
         let epoch2 = epoch1.next_epoch();
         table_watermarks.add_new_epoch_watermarks(
-            epoch2.as_u64(),
+            epoch2.as_u64_for_test(),
             vec![VnodeWatermark::new(
                 build_bitmap(vec![0, 1, 2, 3]),
                 watermark2.clone(),
@@ -711,7 +711,7 @@ mod tests {
         );
         let epoch3 = epoch2.next_epoch();
         table_watermarks.add_new_epoch_watermarks(
-            epoch3.as_u64(),
+            epoch3.as_u64_for_test(),
             vec![VnodeWatermark::new(
                 build_bitmap(0..VirtualNode::COUNT),
                 watermark3.clone(),
@@ -721,7 +721,7 @@ mod tests {
         let epoch4 = epoch3.next_epoch();
         let epoch5 = epoch4.next_epoch();
         table_watermarks.add_new_epoch_watermarks(
-            epoch5.as_u64(),
+            epoch5.as_u64_for_test(),
             vec![VnodeWatermark::new(
                 build_bitmap(vec![0, 3, 4]),
                 watermark4.clone(),
@@ -730,30 +730,30 @@ mod tests {
         );
 
         let mut table_watermarks_checkpoint = table_watermarks.clone();
-        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch1.as_u64());
+        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch1.as_u64_for_test());
         assert_eq!(table_watermarks_checkpoint, table_watermarks);
 
-        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch2.as_u64());
+        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch2.as_u64_for_test());
         assert_eq!(
             table_watermarks_checkpoint,
             TableWatermarks {
                 watermarks: vec![
                     (
-                        epoch2.as_u64(),
+                        epoch2.as_u64_for_test(),
                         vec![VnodeWatermark::new(
                             build_bitmap(vec![0, 1, 2, 3]),
                             watermark2.clone(),
                         )]
                     ),
                     (
-                        epoch3.as_u64(),
+                        epoch3.as_u64_for_test(),
                         vec![VnodeWatermark::new(
                             build_bitmap(0..VirtualNode::COUNT),
                             watermark3.clone(),
                         )]
                     ),
                     (
-                        epoch5.as_u64(),
+                        epoch5.as_u64_for_test(),
                         vec![VnodeWatermark::new(
                             build_bitmap(vec![0, 3, 4]),
                             watermark4.clone(),
@@ -764,20 +764,20 @@ mod tests {
             }
         );
 
-        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch3.as_u64());
+        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch3.as_u64_for_test());
         assert_eq!(
             table_watermarks_checkpoint,
             TableWatermarks {
                 watermarks: vec![
                     (
-                        epoch3.as_u64(),
+                        epoch3.as_u64_for_test(),
                         vec![VnodeWatermark::new(
                             build_bitmap(0..VirtualNode::COUNT),
                             watermark3.clone(),
                         )]
                     ),
                     (
-                        epoch5.as_u64(),
+                        epoch5.as_u64_for_test(),
                         vec![VnodeWatermark::new(
                             build_bitmap(vec![0, 3, 4]),
                             watermark4.clone(),
@@ -788,20 +788,20 @@ mod tests {
             }
         );
 
-        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch4.as_u64());
+        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch4.as_u64_for_test());
         assert_eq!(
             table_watermarks_checkpoint,
             TableWatermarks {
                 watermarks: vec![
                     (
-                        epoch4.as_u64(),
+                        epoch4.as_u64_for_test(),
                         vec![VnodeWatermark::new(
                             build_bitmap((1..3).chain(5..VirtualNode::COUNT)),
                             watermark3.clone()
                         )]
                     ),
                     (
-                        epoch5.as_u64(),
+                        epoch5.as_u64_for_test(),
                         vec![VnodeWatermark::new(
                             build_bitmap(vec![0, 3, 4]),
                             watermark4.clone(),
@@ -812,12 +812,12 @@ mod tests {
             }
         );
 
-        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch5.as_u64());
+        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch5.as_u64_for_test());
         assert_eq!(
             table_watermarks_checkpoint,
             TableWatermarks {
                 watermarks: vec![(
-                    epoch5.as_u64(),
+                    epoch5.as_u64_for_test(),
                     vec![
                         VnodeWatermark::new(build_bitmap(vec![0, 3, 4]), watermark4.clone()),
                         VnodeWatermark::new(

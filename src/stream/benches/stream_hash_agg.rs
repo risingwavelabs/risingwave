@@ -20,9 +20,9 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::field_generator::VarcharProperty;
 use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::TestEpoch;
 use risingwave_expr::aggregate::AggCall;
 use risingwave_expr::expr::*;
+use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::StateStore;
 use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
@@ -121,13 +121,13 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
 
     // ---- Create MockSourceExecutor ----
     let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
-    tx.push_barrier(TestEpoch::new_without_offset(1).as_u64(), false);
+    tx.push_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test(), false);
     for chunk in chunks {
         tx.push_chunk(chunk);
     }
     tx.push_barrier_with_prev_epoch_for_test(
-        TestEpoch::new_without_offset(2).as_u64(),
-        TestEpoch::new_without_offset(1).as_u64(),
+        EpochWithGap::new_without_offset(2).as_u64_for_test(),
+        EpochWithGap::new_without_offset(1).as_u64_for_test(),
         false,
     );
 

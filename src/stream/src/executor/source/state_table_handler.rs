@@ -274,8 +274,9 @@ pub(crate) mod tests {
 
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{Datum, ScalarImpl};
-    use risingwave_common::util::epoch::{EpochPair, TestEpoch};
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_connector::source::kafka::KafkaSplit;
+    use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_storage::memory::MemoryStateStore;
     use serde_json::Value;
 
@@ -294,10 +295,11 @@ pub(crate) mod tests {
             .into();
         let b: Datum = Some(ScalarImpl::Jsonb(b));
 
-        let init_epoch_num = TestEpoch::new_without_offset(1).as_u64();
+        let init_epoch_num = EpochWithGap::new_without_offset(1).as_u64_for_test();
         let init_epoch = EpochPair::new_test_epoch(init_epoch_num);
-        let next_epoch =
-            EpochPair::new_test_epoch(init_epoch_num + TestEpoch::new_without_offset(1).as_u64());
+        let next_epoch = EpochPair::new_test_epoch(
+            init_epoch_num + EpochWithGap::new_without_offset(1).as_u64_for_test(),
+        );
 
         state_table.init_epoch(init_epoch);
         state_table.insert(OwnedRow::new(vec![a.clone(), b.clone()]));
@@ -320,9 +322,12 @@ pub(crate) mod tests {
         let serialized = split_impl.encode_to_bytes();
         let serialized_json = split_impl.encode_to_json();
 
-        let epoch_1 = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
-        let epoch_2 = EpochPair::new_test_epoch(TestEpoch::new_without_offset(2).as_u64());
-        let epoch_3 = EpochPair::new_test_epoch(TestEpoch::new_without_offset(3).as_u64());
+        let epoch_1 =
+            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
+        let epoch_2 =
+            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(2).as_u64_for_test());
+        let epoch_3 =
+            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(3).as_u64_for_test());
 
         state_table_handler.init_epoch(epoch_1);
         state_table_handler

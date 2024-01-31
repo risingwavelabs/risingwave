@@ -30,9 +30,9 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, RwConfig,
 };
-use risingwave_common::util::epoch::TestEpoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
+use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_hummock_test::local_state_store_test_utils::LocalStateStoreTestExt;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -305,8 +305,8 @@ async fn run_compare_result(
     test_delete_ratio: u32,
 ) -> Result<(), String> {
     let init_epoch =
-        TestEpoch::new_without_offset(hummock.get_pinned_version().max_committed_epoch() + 1)
-            .as_u64();
+        EpochWithGap::new_without_offset(hummock.get_pinned_version().max_committed_epoch() + 1)
+            .as_u64_for_test();
 
     let mut normal = NormalState::new(hummock, 1, init_epoch).await;
     let mut delete_range = DeleteRangeState::new(hummock, 2, init_epoch).await;
@@ -321,7 +321,7 @@ async fn run_compare_result(
     let mut rng = StdRng::seed_from_u64(seed);
     let mut overlap_ranges = vec![];
     for epoch_idx in 0..test_count {
-        let epoch = TestEpoch::new_without_offset(init_epoch / 65536 + epoch_idx);
+        let epoch = EpochWithGap::new_without_offset(init_epoch / 65536 + epoch_idx);
         for idx in 0..1000 {
             let op = rng.next_u32() % 50;
             let key_number = rng.next_u64() % test_range;
@@ -346,7 +346,7 @@ async fn run_compare_result(
                     key_number,
                     a.map(|raw| String::from_utf8(raw.to_vec()).unwrap()),
                     b.map(|raw| String::from_utf8(raw.to_vec()).unwrap()),
-                    epoch.as_u64(),
+                    epoch.as_u64_for_test(),
                 );
             } else if op < test_delete_ratio + 10 {
                 let end_key = key_number + (rng.next_u64() % range_mod) + 1;
@@ -365,21 +365,29 @@ async fn run_compare_result(
                     continue;
                 }
                 let key = format!("\0\0{:010}", key_number);
-                let val = format!("val-{:010}-{:016}-{:016}", idx, key_number, epoch.as_u64());
+                let val = format!(
+                    "val-{:010}-{:016}-{:016}",
+                    idx,
+                    key_number,
+                    epoch.as_u64_for_test()
+                );
                 normal.insert(key.as_bytes(), val.as_bytes());
                 delete_range.insert(key.as_bytes(), val.as_bytes());
             }
         }
         let next_epoch = epoch.next_epoch();
-        normal.commit(next_epoch.as_u64()).await?;
-        delete_range.commit(next_epoch.as_u64()).await?;
+        normal.commit(next_epoch.as_u64_for_test()).await?;
+        delete_range.commit(next_epoch.as_u64_for_test()).await?;
         // let checkpoint = epoch % 10 == 0;
-        let ret = hummock.seal_and_sync_epoch(epoch.as_u64()).await.unwrap();
+        let ret = hummock
+            .seal_and_sync_epoch(epoch.as_u64_for_test())
+            .await
+            .unwrap();
         meta_client
-            .commit_epoch(epoch.as_u64(), ret.uncommitted_ssts)
+            .commit_epoch(epoch.as_u64_for_test(), ret.uncommitted_ssts)
             .await
             .map_err(|e| format!("{:?}", e))?;
-        if (epoch.as_u64() / 65536) % 200 == 0 {
+        if (epoch.as_u64_for_test() / 65536) % 200 == 0 {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }

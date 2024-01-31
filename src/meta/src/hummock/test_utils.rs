@@ -16,12 +16,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
-use risingwave_common::util::epoch::TestEpoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
+    CompactionGroupId, EpochWithGap, HummockContextId, HummockEpoch, HummockSstableObjectId,
+    LocalSstableInfo,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 #[cfg(test)]
@@ -55,7 +55,8 @@ pub async fn add_test_tables(
     context_id: HummockContextId,
 ) -> Vec<Vec<SstableInfo>> {
     // Increase version by 2.
-    let mut epoch = TestEpoch::new_without_offset(1);
+
+    let mut epoch = EpochWithGap::new_without_offset(1);
     let sstable_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables = generate_test_sstables_with_table_id(epoch, 1, sstable_ids);
     register_sstable_infos_to_compaction_group(
@@ -71,7 +72,7 @@ pub async fn add_test_tables(
         .collect();
     hummock_manager
         .commit_epoch(
-            epoch.as_u64(),
+            epoch.as_u64_for_test(),
             CommitEpochInfo::for_test(ssts, sst_to_worker),
         )
         .await
@@ -150,7 +151,7 @@ pub async fn add_test_tables(
         .collect();
     hummock_manager
         .commit_epoch(
-            epoch.as_u64(),
+            epoch.as_u64_for_test(),
             CommitEpochInfo::for_test(ssts, sst_to_worker),
         )
         .await
@@ -159,7 +160,7 @@ pub async fn add_test_tables(
 }
 
 pub fn generate_test_sstables_with_table_id(
-    epoch: TestEpoch,
+    epoch: EpochWithGap,
     table_id: u32,
     sst_ids: Vec<HummockSstableObjectId>,
 ) -> Vec<SstableInfo> {
@@ -173,20 +174,20 @@ pub fn generate_test_sstables_with_table_id(
                     format!("{:03}\0\0_key_test_{:05}", table_id, i + 1)
                         .as_bytes()
                         .to_vec(),
-                    epoch.as_u64(),
+                    epoch.as_u64_for_test(),
                 ),
                 right: key_with_epoch(
                     format!("{:03}\0\0_key_test_{:05}", table_id, (i + 1) * 10)
                         .as_bytes()
                         .to_vec(),
-                    epoch.as_u64(),
+                    epoch.as_u64_for_test(),
                 ),
                 right_exclusive: false,
             }),
             file_size: 2,
             table_ids: vec![table_id],
             uncompressed_file_size: 2,
-            max_epoch: epoch.as_u64(),
+            max_epoch: epoch.as_u64_for_test(),
             ..Default::default()
         });
     }
@@ -194,7 +195,7 @@ pub fn generate_test_sstables_with_table_id(
 }
 
 pub fn generate_test_tables(
-    epoch: TestEpoch,
+    epoch: EpochWithGap,
     sst_ids: Vec<HummockSstableObjectId>,
 ) -> Vec<SstableInfo> {
     let mut sst_info = vec![];
@@ -203,14 +204,14 @@ pub fn generate_test_tables(
             object_id: sst_id,
             sst_id,
             key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(sst_id, i + 1, epoch.as_u64()),
-                right: iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch.as_u64()),
+                left: iterator_test_key_of_epoch(sst_id, i + 1, epoch.as_u64_for_test()),
+                right: iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch.as_u64_for_test()),
                 right_exclusive: false,
             }),
             file_size: 2,
             table_ids: vec![sst_id as u32, sst_id as u32 * 10000],
             uncompressed_file_size: 2,
-            max_epoch: epoch.as_u64(),
+            max_epoch: epoch.as_u64_for_test(),
             ..Default::default()
         });
     }
@@ -402,7 +403,7 @@ pub async fn add_ssts(
 ) -> Vec<SstableInfo> {
     let table_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables =
-        generate_test_sstables_with_table_id(TestEpoch::new_without_offset(epoch), 1, table_ids);
+        generate_test_sstables_with_table_id(EpochWithGap::new_without_offset(epoch), 1, table_ids);
     let ssts = to_local_sstable_info(&test_tables);
     let sst_to_worker = ssts
         .iter()

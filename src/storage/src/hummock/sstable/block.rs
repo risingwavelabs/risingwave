@@ -742,8 +742,8 @@ impl BlockBuilder {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::TableId;
-    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN};
+    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::hummock::{BlockHolder, BlockIterator};
@@ -840,7 +840,7 @@ mod tests {
         FullKey::for_test(
             TableId::new(table_id),
             table_key,
-            TestEpoch::new_without_offset(epoch).as_u64(),
+            EpochWithGap::new_without_offset(epoch).as_u64_for_test(),
         )
     }
 

@@ -313,7 +313,7 @@ impl EpochWithGap {
     }
 
     // return the epoch_with_gap(epoch + spill_offset)
-    pub(crate) fn from_u64(epoch_with_gap: u64) -> Self {
+    pub(crate) fn from_u64_real(epoch_with_gap: u64) -> Self {
         EpochWithGap(epoch_with_gap)
     }
 
@@ -324,5 +324,36 @@ impl EpochWithGap {
 
     pub fn offset(&self) -> u64 {
         self.0 & EPOCH_SPILL_TIME_MASK
+    }
+}
+
+impl EpochWithGap {
+    const EPOCH_PHYSICAL_SHIFT_BITS: u8 = 16;
+
+    pub fn new_without_offset(epoch: u64) -> Self {
+        EpochWithGap::new(epoch * (1 << 16), 0)
+    }
+
+    pub fn inc(&mut self) {
+        self.0 += 1 << Self::EPOCH_PHYSICAL_SHIFT_BITS;
+    }
+
+    pub fn sub(&mut self) {
+        if self.0 > (1 << Self::EPOCH_PHYSICAL_SHIFT_BITS) {
+            self.0 -= 1 << Self::EPOCH_PHYSICAL_SHIFT_BITS;
+        }
+    }
+
+    // return the epoch_with_gap(epoch + spill_offset)
+    pub fn as_u64_for_test(&self) -> HummockEpoch {
+        self.0
+    }
+
+    pub fn next_epoch(&self) -> EpochWithGap {
+        EpochWithGap::new(self.0 + (1 << Self::EPOCH_PHYSICAL_SHIFT_BITS), 0)
+    }
+
+    pub fn prev_epoch(&self) -> EpochWithGap {
+        EpochWithGap::new(self.0 - (1 << Self::EPOCH_PHYSICAL_SHIFT_BITS), 0)
     }
 }

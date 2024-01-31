@@ -77,21 +77,20 @@ mod tests {
     use std::cmp::Ordering;
 
     use risingwave_common::catalog::TableId;
-    use risingwave_common::util::epoch::TestEpoch;
 
     use crate::key::{FullKey, UserKey};
-    use crate::KeyComparator;
+    use crate::{EpochWithGap, KeyComparator};
 
     #[test]
     fn test_cmp_encoded_full_key() {
         // 1 compared with 256 under little-endian encoding would return wrong result.
 
-        let epoch = TestEpoch::new_without_offset(1);
-        let epoch2 = TestEpoch::new_without_offset(2);
-        let key1 = FullKey::for_test(TableId::new(0), b"0".to_vec(), epoch.as_u64());
-        let key2 = FullKey::for_test(TableId::new(1), b"0".to_vec(), epoch.as_u64());
-        let key3 = FullKey::for_test(TableId::new(1), b"1".to_vec(), epoch2.as_u64());
-        let key4 = FullKey::for_test(TableId::new(1), b"1".to_vec(), epoch.as_u64());
+        let epoch = EpochWithGap::new_without_offset(1);
+        let epoch2 = EpochWithGap::new_without_offset(2);
+        let key1 = FullKey::for_test(TableId::new(0), b"0".to_vec(), epoch.as_u64_for_test());
+        let key2 = FullKey::for_test(TableId::new(1), b"0".to_vec(), epoch.as_u64_for_test());
+        let key3 = FullKey::for_test(TableId::new(1), b"1".to_vec(), epoch2.as_u64_for_test());
+        let key4 = FullKey::for_test(TableId::new(1), b"1".to_vec(), epoch.as_u64_for_test());
 
         assert_eq!(
             KeyComparator::compare_encoded_full_key(&key1.encode(), &key1.encode()),

@@ -1003,9 +1003,9 @@ mod tests {
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_common::util::hash_util::Crc32FastBuilder;
     use risingwave_common::util::iter_util::ZipEqFast;
+    use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_pb::stream_plan::DispatcherType;
 
     use super::*;
@@ -1202,7 +1202,7 @@ mod tests {
                 hash_mapping: Default::default(),
             }]
         };
-        let b1 = Barrier::new_test_barrier(TestEpoch::new_without_offset(1).as_u64())
+        let b1 = Barrier::new_test_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test())
             .with_mutation(Mutation::Update(UpdateMutation {
                 dispatchers: dispatcher_updates,
                 merges: Default::default(),
@@ -1228,7 +1228,7 @@ mod tests {
 
         // 6. Send another barrier.
         tx.send(Message::Barrier(Barrier::new_test_barrier(
-            TestEpoch::new_without_offset(2).as_u64(),
+            EpochWithGap::new_without_offset(2).as_u64_for_test(),
         )))
         .await
         .unwrap();
@@ -1257,7 +1257,7 @@ mod tests {
                 hash_mapping: Default::default(),
             }]
         };
-        let b3 = Barrier::new_test_barrier(TestEpoch::new_without_offset(3).as_u64())
+        let b3 = Barrier::new_test_barrier(EpochWithGap::new_without_offset(3).as_u64_for_test())
             .with_mutation(Mutation::Update(UpdateMutation {
                 dispatchers: dispatcher_updates,
                 merges: Default::default(),
@@ -1277,7 +1277,7 @@ mod tests {
 
         // 11. Send another barrier.
         tx.send(Message::Barrier(Barrier::new_test_barrier(
-            TestEpoch::new_without_offset(4).as_u64(),
+            EpochWithGap::new_without_offset(4).as_u64_for_test(),
         )))
         .await
         .unwrap();

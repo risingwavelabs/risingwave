@@ -326,8 +326,6 @@ mod tests {
     use std::ops::Bound::*;
     use std::sync::Arc;
 
-    use risingwave_common::util::epoch::TestEpoch;
-
     use super::*;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
@@ -835,7 +833,8 @@ mod tests {
             read_options.clone(),
         )];
 
-        let min_epoch = TestEpoch::new_without_offset((TEST_KEYS_COUNT / 5) as u64).as_u64();
+        let min_epoch =
+            EpochWithGap::new_without_offset((TEST_KEYS_COUNT / 5) as u64).as_u64_for_test();
         let mi = UnorderedMergeIteratorInner::new(iters);
         let mut ui =
             UserIterator::for_test_with_epoch(mi, (Unbounded, Unbounded), u64::MAX, min_epoch);
@@ -877,7 +876,7 @@ mod tests {
         let mut ui: UserIterator<_> = UserIterator::new(
             mi,
             (Unbounded, Unbounded),
-            TestEpoch::new_without_offset(150).as_u64(),
+            EpochWithGap::new_without_offset(150).as_u64_for_test(),
             0,
             None,
             del_iter,
@@ -912,7 +911,7 @@ mod tests {
         let mut ui: UserIterator<_> = UserIterator::new(
             mi,
             (Unbounded, Unbounded),
-            TestEpoch::new_without_offset(300).as_u64(),
+            EpochWithGap::new_without_offset(300).as_u64_for_test(),
             0,
             None,
             del_iter,

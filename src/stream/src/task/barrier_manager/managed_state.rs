@@ -328,7 +328,7 @@ impl ManagedBarrierState {
 mod tests {
     use std::collections::HashSet;
 
-    use risingwave_common::util::epoch::TestEpoch;
+    use risingwave_hummock_sdk::EpochWithGap;
     use tokio::sync::oneshot;
 
     use crate::executor::Barrier;
@@ -337,9 +337,12 @@ mod tests {
     #[tokio::test]
     async fn test_managed_state_add_actor() {
         let mut managed_barrier_state = ManagedBarrierState::for_test();
-        let barrier1 = Barrier::new_test_barrier(TestEpoch::new_without_offset(1).as_u64());
-        let barrier2 = Barrier::new_test_barrier(TestEpoch::new_without_offset(2).as_u64());
-        let barrier3 = Barrier::new_test_barrier(TestEpoch::new_without_offset(3).as_u64());
+        let barrier1 =
+            Barrier::new_test_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test());
+        let barrier2 =
+            Barrier::new_test_barrier(EpochWithGap::new_without_offset(2).as_u64_for_test());
+        let barrier3 =
+            Barrier::new_test_barrier(EpochWithGap::new_without_offset(3).as_u64_for_test());
         let (tx1, _rx1) = oneshot::channel();
         let (tx2, _rx2) = oneshot::channel();
         let (tx3, _rx3) = oneshot::channel();
@@ -357,7 +360,7 @@ mod tests {
                 .first_key_value()
                 .unwrap()
                 .0,
-            &TestEpoch::new_without_offset(1).as_u64()
+            &EpochWithGap::new_without_offset(1).as_u64_for_test()
         );
         managed_barrier_state.collect(1, &barrier2);
         managed_barrier_state.collect(1, &barrier3);
@@ -368,7 +371,7 @@ mod tests {
                 .first_key_value()
                 .unwrap()
                 .0,
-            { &TestEpoch::new_without_offset(2).as_u64() }
+            { &EpochWithGap::new_without_offset(2).as_u64_for_test() }
         );
         managed_barrier_state.collect(2, &barrier3);
         managed_barrier_state.collect(3, &barrier3);
@@ -378,9 +381,12 @@ mod tests {
     #[tokio::test]
     async fn test_managed_state_stop_actor() {
         let mut managed_barrier_state = ManagedBarrierState::for_test();
-        let barrier1 = Barrier::new_test_barrier(TestEpoch::new_without_offset(1).as_u64());
-        let barrier2 = Barrier::new_test_barrier(TestEpoch::new_without_offset(2).as_u64());
-        let barrier3 = Barrier::new_test_barrier(TestEpoch::new_without_offset(3).as_u64());
+        let barrier1 =
+            Barrier::new_test_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test());
+        let barrier2 =
+            Barrier::new_test_barrier(EpochWithGap::new_without_offset(2).as_u64_for_test());
+        let barrier3 =
+            Barrier::new_test_barrier(EpochWithGap::new_without_offset(3).as_u64_for_test());
         let (tx1, _rx1) = oneshot::channel();
         let (tx2, _rx2) = oneshot::channel();
         let (tx3, _rx3) = oneshot::channel();
@@ -422,9 +428,12 @@ mod tests {
     #[tokio::test]
     async fn test_managed_state_issued_after_collect() {
         let mut managed_barrier_state = ManagedBarrierState::for_test();
-        let barrier1 = Barrier::new_test_barrier(TestEpoch::new_without_offset(1).as_u64());
-        let barrier2 = Barrier::new_test_barrier(TestEpoch::new_without_offset(2).as_u64());
-        let barrier3 = Barrier::new_test_barrier(TestEpoch::new_without_offset(3).as_u64());
+        let barrier1 =
+            Barrier::new_test_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test());
+        let barrier2 =
+            Barrier::new_test_barrier(EpochWithGap::new_without_offset(2).as_u64_for_test());
+        let barrier3 =
+            Barrier::new_test_barrier(EpochWithGap::new_without_offset(3).as_u64_for_test());
         let (tx1, _rx1) = oneshot::channel();
         let (tx2, _rx2) = oneshot::channel();
         let (tx3, _rx3) = oneshot::channel();
@@ -439,7 +448,7 @@ mod tests {
                 .first_key_value()
                 .unwrap()
                 .0,
-            { &TestEpoch::new_without_offset(2).as_u64() }
+            { &EpochWithGap::new_without_offset(2).as_u64_for_test() }
         );
         managed_barrier_state.collect(1, &barrier2);
         assert_eq!(
@@ -448,7 +457,7 @@ mod tests {
                 .first_key_value()
                 .unwrap()
                 .0,
-            { &TestEpoch::new_without_offset(1).as_u64() }
+            { &EpochWithGap::new_without_offset(1).as_u64_for_test() }
         );
         managed_barrier_state.collect(1, &barrier1);
         assert_eq!(
@@ -469,7 +478,7 @@ mod tests {
                 .first_key_value()
                 .unwrap()
                 .0,
-            { &TestEpoch::new_without_offset(1).as_u64() }
+            { &EpochWithGap::new_without_offset(1).as_u64_for_test() }
         );
         managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2, tx2);
         managed_barrier_state.collect(3, &barrier2);
@@ -479,7 +488,7 @@ mod tests {
                 .first_key_value()
                 .unwrap()
                 .0,
-            { &TestEpoch::new_without_offset(2).as_u64() }
+            { &EpochWithGap::new_without_offset(2).as_u64_for_test() }
         );
         managed_barrier_state.collect(3, &barrier3);
         assert_eq!(
@@ -488,7 +497,7 @@ mod tests {
                 .first_key_value()
                 .unwrap()
                 .0,
-            { &TestEpoch::new_without_offset(2).as_u64() }
+            { &EpochWithGap::new_without_offset(2).as_u64_for_test() }
         );
         managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3, tx3);
         assert!(managed_barrier_state.epoch_barrier_state_map.is_empty());

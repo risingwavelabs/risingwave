@@ -162,8 +162,8 @@ mod tests {
     };
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, ScalarImpl, StructType};
-    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_expr::expr::{BoxedExpression, LiteralExpression, NonStrictExpression};
+    use risingwave_hummock_sdk::EpochWithGap;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::ValuesExecutor;
@@ -226,13 +226,14 @@ mod tests {
         let mut values_executor = Box::new(values_executor_struct).execute();
 
         // Init barrier
-        let first_message = Barrier::new_test_barrier(TestEpoch::new_without_offset(1).as_u64())
-            .with_mutation(Mutation::Add(AddMutation {
-                adds: Default::default(),
-                added_actors: maplit::hashset! {actor_id},
-                splits: Default::default(),
-                pause: false,
-            }));
+        let first_message =
+            Barrier::new_test_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test())
+                .with_mutation(Mutation::Add(AddMutation {
+                    adds: Default::default(),
+                    added_actors: maplit::hashset! {actor_id},
+                    splits: Default::default(),
+                    pause: false,
+                }));
         tx.send(first_message).unwrap();
 
         assert!(matches!(
@@ -269,7 +270,7 @@ mod tests {
 
         // ValueExecutor should simply forward following barriers
         tx.send(Barrier::new_test_barrier(
-            TestEpoch::new_without_offset(2).as_u64(),
+            EpochWithGap::new_without_offset(2).as_u64_for_test(),
         ))
         .unwrap();
 
@@ -279,7 +280,7 @@ mod tests {
         ));
 
         tx.send(Barrier::new_test_barrier(
-            TestEpoch::new_without_offset(3).as_u64(),
+            EpochWithGap::new_without_offset(3).as_u64_for_test(),
         ))
         .unwrap();
 

@@ -1145,10 +1145,9 @@ mod tests {
     use futures::FutureExt;
     use prometheus::core::GenericGauge;
     use risingwave_common::catalog::TableId;
-    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
     use risingwave_hummock_sdk::version::HummockVersion;
-    use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+    use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
     use risingwave_pb::hummock::{KeyRange, SstableInfo};
     use spin::Mutex;
     use tokio::spawn;
@@ -1237,12 +1236,12 @@ mod tests {
         let start_full_key = FullKey::new(
             TEST_TABLE_ID,
             TableKey(dummy_table_key()),
-            TestEpoch::new_without_offset(start_epoch).as_u64(),
+            EpochWithGap::new_without_offset(start_epoch).as_u64_for_test(),
         );
         let end_full_key = FullKey::new(
             TEST_TABLE_ID,
             TableKey(dummy_table_key()),
-            TestEpoch::new_without_offset(end_epoch).as_u64(),
+            EpochWithGap::new_without_offset(end_epoch).as_u64_for_test(),
         );
         let gen_sst_object_id = (start_epoch << 8) + end_epoch;
         vec![LocalSstableInfo::for_test(SstableInfo {
@@ -1319,14 +1318,14 @@ mod tests {
     pub async fn test_uploading_task_future() {
         let uploader_context = test_uploader_context(dummy_success_upload_future);
 
-        let imm = gen_imm(TestEpoch::new_without_offset(INITIAL_EPOCH).as_u64()).await;
+        let imm = gen_imm(EpochWithGap::new_without_offset(INITIAL_EPOCH).as_u64_for_test()).await;
         let imm_size = imm.size();
         let imm_id = imm.batch_id();
         let task = UploadingTask::new(vec![imm], &uploader_context);
         assert_eq!(imm_size, task.task_info.task_size);
         assert_eq!(vec![imm_id], task.task_info.imm_ids);
         assert_eq!(
-            vec![TestEpoch::new_without_offset(INITIAL_EPOCH).as_u64()],
+            vec![EpochWithGap::new_without_offset(INITIAL_EPOCH).as_u64_for_test()],
             task.task_info.epochs
         );
         let output = task.await.unwrap();
@@ -1334,13 +1333,13 @@ mod tests {
         assert_eq!(imm_size, output.imm_size());
         assert_eq!(&vec![imm_id], output.imm_ids());
         assert_eq!(
-            &vec![TestEpoch::new_without_offset(INITIAL_EPOCH).as_u64()],
+            &vec![EpochWithGap::new_without_offset(INITIAL_EPOCH).as_u64_for_test()],
             output.epochs()
         );
 
         let uploader_context = test_uploader_context(dummy_fail_upload_future);
         let task = UploadingTask::new(
-            vec![gen_imm(TestEpoch::new_without_offset(INITIAL_EPOCH).as_u64()).await],
+            vec![gen_imm(EpochWithGap::new_without_offset(INITIAL_EPOCH).as_u64_for_test()).await],
             &uploader_context,
         );
         let _ = task.await.unwrap_err();
@@ -1350,7 +1349,7 @@ mod tests {
     pub async fn test_uploading_task_poll_result() {
         let uploader_context = test_uploader_context(dummy_success_upload_future);
         let mut task = UploadingTask::new(
-            vec![gen_imm(TestEpoch::new_without_offset(INITIAL_EPOCH).as_u64()).await],
+            vec![gen_imm(EpochWithGap::new_without_offset(INITIAL_EPOCH).as_u64_for_test()).await],
             &uploader_context,
         );
         let output = poll_fn(|cx| task.poll_result(cx)).await.unwrap();
@@ -1358,7 +1357,7 @@ mod tests {
 
         let uploader_context = test_uploader_context(dummy_fail_upload_future);
         let mut task = UploadingTask::new(
-            vec![gen_imm(TestEpoch::new_without_offset(INITIAL_EPOCH).as_u64()).await],
+            vec![gen_imm(EpochWithGap::new_without_offset(INITIAL_EPOCH).as_u64_for_test()).await],
             &uploader_context,
         );
         let _ = poll_fn(|cx| task.poll_result(cx)).await.unwrap_err();
@@ -1383,7 +1382,7 @@ mod tests {
             }
         });
         let mut task = UploadingTask::new(
-            vec![gen_imm(TestEpoch::new_without_offset(INITIAL_EPOCH).as_u64()).await],
+            vec![gen_imm(EpochWithGap::new_without_offset(INITIAL_EPOCH).as_u64_for_test()).await],
             &uploader_context,
         );
         let output = poll_fn(|cx| task.poll_ok_with_retry(cx)).await;
@@ -1394,12 +1393,12 @@ mod tests {
     #[tokio::test]
     async fn test_uploader_basic() {
         let mut uploader = test_uploader(dummy_success_upload_future);
-        let epoch1 = TestEpoch::new_without_offset(INITIAL_EPOCH);
-        let imm = gen_imm(epoch1.as_u64()).await;
+        let epoch1 = EpochWithGap::new_without_offset(INITIAL_EPOCH);
+        let imm = gen_imm(epoch1.as_u64_for_test()).await;
         uploader.add_imm(imm.clone());
         assert_eq!(1, uploader.unsealed_data.len());
         assert_eq!(
-            epoch1.as_u64() as HummockEpoch,
+            epoch1.as_u64_for_test() as HummockEpoch,
             *uploader.unsealed_data.first_key_value().unwrap().0
         );
         assert_eq!(
@@ -1412,48 +1411,54 @@ mod tests {
                 .imms
                 .len()
         );
-        uploader.seal_epoch(epoch1.as_u64());
-        assert_eq!(epoch1.as_u64(), uploader.max_sealed_epoch);
+        uploader.seal_epoch(epoch1.as_u64_for_test());
+        assert_eq!(epoch1.as_u64_for_test(), uploader.max_sealed_epoch);
         assert!(uploader.unsealed_data.is_empty());
         assert_eq!(1, uploader.sealed_data.imm_count());
 
-        uploader.start_sync_epoch(epoch1.as_u64());
-        assert_eq!(epoch1.as_u64() as HummockEpoch, uploader.max_syncing_epoch);
+        uploader.start_sync_epoch(epoch1.as_u64_for_test());
+        assert_eq!(
+            epoch1.as_u64_for_test() as HummockEpoch,
+            uploader.max_syncing_epoch
+        );
         assert_eq!(0, uploader.sealed_data.imm_count());
         assert!(uploader.sealed_data.spilled_data.is_empty());
         assert_eq!(1, uploader.syncing_data.len());
         let syncing_data = uploader.syncing_data.front().unwrap();
-        assert_eq!(epoch1.as_u64() as HummockEpoch, syncing_data.sync_epoch);
+        assert_eq!(
+            epoch1.as_u64_for_test() as HummockEpoch,
+            syncing_data.sync_epoch
+        );
         assert!(syncing_data.uploaded.is_empty());
         assert!(syncing_data.uploading_tasks.is_some());
 
         match uploader.next_event().await {
             UploaderEvent::SyncFinish(finished_epoch, ssts) => {
-                assert_eq!(epoch1.as_u64(), finished_epoch);
+                assert_eq!(epoch1.as_u64_for_test(), finished_epoch);
                 assert_eq!(1, ssts.len());
                 let staging_sst = ssts.first().unwrap();
-                assert_eq!(&vec![epoch1.as_u64()], staging_sst.epochs());
+                assert_eq!(&vec![epoch1.as_u64_for_test()], staging_sst.epochs());
                 assert_eq!(&vec![imm.batch_id()], staging_sst.imm_ids());
                 assert_eq!(&dummy_success_upload_output(), staging_sst.sstable_infos());
             }
             _ => unreachable!(),
         };
-        assert_eq!(epoch1.as_u64(), uploader.max_synced_epoch());
-        let synced_data = uploader.get_synced_data(epoch1.as_u64()).unwrap();
+        assert_eq!(epoch1.as_u64_for_test(), uploader.max_synced_epoch());
+        let synced_data = uploader.get_synced_data(epoch1.as_u64_for_test()).unwrap();
         let ssts = &synced_data.as_ref().unwrap().staging_ssts;
         assert_eq!(1, ssts.len());
         let staging_sst = ssts.first().unwrap();
-        assert_eq!(&vec![epoch1.as_u64()], staging_sst.epochs());
+        assert_eq!(&vec![epoch1.as_u64_for_test()], staging_sst.epochs());
         assert_eq!(&vec![imm.batch_id()], staging_sst.imm_ids());
         assert_eq!(&dummy_success_upload_output(), staging_sst.sstable_infos());
 
         let new_pinned_version = uploader
             .context
             .pinned_version
-            .new_pin_version(test_hummock_version(epoch1.as_u64()));
+            .new_pin_version(test_hummock_version(epoch1.as_u64_for_test()));
         uploader.update_pinned_version(new_pinned_version);
         assert!(uploader.synced_data.is_empty());
-        assert_eq!(epoch1.as_u64(), uploader.max_committed_epoch());
+        assert_eq!(epoch1.as_u64_for_test(), uploader.max_committed_epoch());
     }
 
     #[tokio::test]
@@ -1470,7 +1475,7 @@ mod tests {
         // data. Then we await the merging task and check the uploader's state again.
         let mut merged_imms = VecDeque::new();
         for i in 1..=ckpt_intervals {
-            let epoch = TestEpoch::new_without_offset(INITIAL_EPOCH + i).as_u64();
+            let epoch = EpochWithGap::new_without_offset(INITIAL_EPOCH + i).as_u64_for_test();
             let mut imm1 = gen_imm(epoch).await;
             let mut imm2 = gen_imm(epoch).await;
 
@@ -1557,8 +1562,8 @@ mod tests {
     #[tokio::test]
     async fn test_uploader_empty_epoch() {
         let mut uploader = test_uploader(dummy_success_upload_future);
-        let epoch1 = TestEpoch::new_without_offset(INITIAL_EPOCH + 1).as_u64();
-        let epoch2 = TestEpoch::new_without_offset(INITIAL_EPOCH + 2).as_u64();
+        let epoch1 = EpochWithGap::new_without_offset(INITIAL_EPOCH + 1).as_u64_for_test();
+        let epoch2 = EpochWithGap::new_without_offset(INITIAL_EPOCH + 2).as_u64_for_test();
         let imm = gen_imm(epoch2).await;
         // epoch1 is empty while epoch2 is not. Going to seal empty epoch1.
         uploader.add_imm(imm);
@@ -1602,7 +1607,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value3")),
             ),
         ];
-        let epoch = TestEpoch::new_without_offset(1).as_u64();
+        let epoch = EpochWithGap::new_without_offset(1).as_u64_for_test();
         let imm1 = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items1.clone()),
             epoch,
@@ -1622,7 +1627,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value32")),
             ),
         ];
-        let epoch = TestEpoch::new_without_offset(2).as_u64();
+        let epoch = EpochWithGap::new_without_offset(2).as_u64_for_test();
         let imm2 = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items2.clone()),
             epoch,
@@ -1643,7 +1648,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value33")),
             ),
         ];
-        let epoch = TestEpoch::new_without_offset(3).as_u64();
+        let epoch = EpochWithGap::new_without_offset(3).as_u64_for_test();
         let imm3 = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items3.clone()),
             epoch,
@@ -1692,12 +1697,12 @@ mod tests {
     async fn test_uploader_empty_advance_mce() {
         let mut uploader = test_uploader(dummy_success_upload_future);
         let initial_pinned_version = uploader.context.pinned_version.clone();
-        let epoch1 = TestEpoch::new_without_offset(INITIAL_EPOCH + 1).as_u64();
-        let epoch2 = TestEpoch::new_without_offset(INITIAL_EPOCH + 2).as_u64();
-        let epoch3 = TestEpoch::new_without_offset(INITIAL_EPOCH + 3).as_u64();
-        let epoch4 = TestEpoch::new_without_offset(INITIAL_EPOCH + 4).as_u64();
-        let epoch5 = TestEpoch::new_without_offset(INITIAL_EPOCH + 5).as_u64();
-        let epoch6 = TestEpoch::new_without_offset(INITIAL_EPOCH + 6).as_u64();
+        let epoch1 = EpochWithGap::new_without_offset(INITIAL_EPOCH + 1).as_u64_for_test();
+        let epoch2 = EpochWithGap::new_without_offset(INITIAL_EPOCH + 2).as_u64_for_test();
+        let epoch3 = EpochWithGap::new_without_offset(INITIAL_EPOCH + 3).as_u64_for_test();
+        let epoch4 = EpochWithGap::new_without_offset(INITIAL_EPOCH + 4).as_u64_for_test();
+        let epoch5 = EpochWithGap::new_without_offset(INITIAL_EPOCH + 5).as_u64_for_test();
+        let epoch6 = EpochWithGap::new_without_offset(INITIAL_EPOCH + 6).as_u64_for_test();
         let version1 = initial_pinned_version.new_pin_version(test_hummock_version(epoch1));
         let version2 = initial_pinned_version.new_pin_version(test_hummock_version(epoch2));
         let version3 = initial_pinned_version.new_pin_version(test_hummock_version(epoch3));
@@ -1814,17 +1819,17 @@ mod tests {
     async fn test_uploader_finish_in_order() {
         let (buffer_tracker, mut uploader, new_task_notifier) = prepare_uploader_order_test();
 
-        let epoch1 = TestEpoch::new_without_offset(INITIAL_EPOCH + 1);
-        let epoch2 = TestEpoch::new_without_offset(INITIAL_EPOCH + 2);
+        let epoch1 = EpochWithGap::new_without_offset(INITIAL_EPOCH + 1);
+        let epoch2 = EpochWithGap::new_without_offset(INITIAL_EPOCH + 2);
         let memory_limiter = buffer_tracker.get_memory_limiter().clone();
         let memory_limiter = Some(memory_limiter.deref());
 
         // imm2 contains data in newer epoch, but added first
-        let imm2 = gen_imm_with_limiter(epoch2.as_u64(), memory_limiter).await;
+        let imm2 = gen_imm_with_limiter(epoch2.as_u64_for_test(), memory_limiter).await;
         uploader.add_imm(imm2.clone());
-        let imm1_1 = gen_imm_with_limiter(epoch1.as_u64(), memory_limiter).await;
+        let imm1_1 = gen_imm_with_limiter(epoch1.as_u64_for_test(), memory_limiter).await;
         uploader.add_imm(imm1_1.clone());
-        let imm1_2 = gen_imm_with_limiter(epoch1.as_u64(), memory_limiter).await;
+        let imm1_2 = gen_imm_with_limiter(epoch1.as_u64_for_test(), memory_limiter).await;
         uploader.add_imm(imm1_2.clone());
 
         // imm1 will be spilled first
@@ -1843,49 +1848,49 @@ mod tests {
         finish_tx1.send(()).unwrap();
         if let UploaderEvent::DataSpilled(sst) = uploader.next_event().await {
             assert_eq!(&vec![imm1_2.batch_id(), imm1_1.batch_id()], sst.imm_ids());
-            assert_eq!(&vec![epoch1.as_u64()], sst.epochs());
+            assert_eq!(&vec![epoch1.as_u64_for_test()], sst.epochs());
         } else {
             unreachable!("")
         }
 
         if let UploaderEvent::DataSpilled(sst) = uploader.next_event().await {
             assert_eq!(&vec![imm2.batch_id()], sst.imm_ids());
-            assert_eq!(&vec![epoch2.as_u64()], sst.epochs());
+            assert_eq!(&vec![epoch2.as_u64_for_test()], sst.epochs());
         } else {
             unreachable!("")
         }
 
-        let imm1_3 = gen_imm_with_limiter(epoch1.as_u64(), memory_limiter).await;
+        let imm1_3 = gen_imm_with_limiter(epoch1.as_u64_for_test(), memory_limiter).await;
         uploader.add_imm(imm1_3.clone());
         let (await_start1_3, finish_tx1_3) = new_task_notifier(vec![imm1_3.batch_id()]);
         uploader.may_flush();
         await_start1_3.await;
-        let imm1_4 = gen_imm_with_limiter(epoch1.as_u64(), memory_limiter).await;
+        let imm1_4 = gen_imm_with_limiter(epoch1.as_u64_for_test(), memory_limiter).await;
         uploader.add_imm(imm1_4.clone());
         let (await_start1_4, finish_tx1_4) = new_task_notifier(vec![imm1_4.batch_id()]);
-        uploader.seal_epoch(epoch1.as_u64());
-        uploader.start_sync_epoch(epoch1.as_u64());
+        uploader.seal_epoch(epoch1.as_u64_for_test());
+        uploader.start_sync_epoch(epoch1.as_u64_for_test());
         await_start1_4.await;
 
-        uploader.seal_epoch(epoch2.as_u64());
+        uploader.seal_epoch(epoch2.as_u64_for_test());
 
         // current uploader state:
         // unsealed: empty
         // sealed: epoch2: uploaded sst([imm2])
         // syncing: epoch1: uploading: [imm1_4], [imm1_3], uploaded: sst([imm1_2, imm1_1])
 
-        let epoch3 = TestEpoch::new_without_offset(INITIAL_EPOCH + 3);
-        let imm3_1 = gen_imm_with_limiter(epoch3.as_u64(), memory_limiter).await;
+        let epoch3 = EpochWithGap::new_without_offset(INITIAL_EPOCH + 3);
+        let imm3_1 = gen_imm_with_limiter(epoch3.as_u64_for_test(), memory_limiter).await;
         uploader.add_imm(imm3_1.clone());
         let (await_start3_1, finish_tx3_1) = new_task_notifier(vec![imm3_1.batch_id()]);
         uploader.may_flush();
         await_start3_1.await;
-        let imm3_2 = gen_imm_with_limiter(epoch3.as_u64(), memory_limiter).await;
+        let imm3_2 = gen_imm_with_limiter(epoch3.as_u64_for_test(), memory_limiter).await;
         uploader.add_imm(imm3_2.clone());
         let (await_start3_2, finish_tx3_2) = new_task_notifier(vec![imm3_2.batch_id()]);
         uploader.may_flush();
         await_start3_2.await;
-        let imm3_3 = gen_imm_with_limiter(epoch3.as_u64(), memory_limiter).await;
+        let imm3_3 = gen_imm_with_limiter(epoch3.as_u64_for_test(), memory_limiter).await;
         uploader.add_imm(imm3_3.clone());
 
         // current uploader state:
@@ -1893,8 +1898,8 @@ mod tests {
         // sealed: uploaded sst([imm2])
         // syncing: epoch1: uploading: [imm1_4], [imm1_3], uploaded: sst([imm1_2, imm1_1])
 
-        let epoch4 = TestEpoch::new_without_offset(INITIAL_EPOCH + 4);
-        let imm4 = gen_imm_with_limiter(epoch4.as_u64(), memory_limiter).await;
+        let epoch4 = EpochWithGap::new_without_offset(INITIAL_EPOCH + 4);
+        let imm4 = gen_imm_with_limiter(epoch4.as_u64_for_test(), memory_limiter).await;
         uploader.add_imm(imm4.clone());
         assert_uploader_pending(&mut uploader).await;
 
@@ -1911,16 +1916,16 @@ mod tests {
         finish_tx1_3.send(()).unwrap();
 
         if let UploaderEvent::SyncFinish(epoch, newly_upload_sst) = uploader.next_event().await {
-            assert_eq!(epoch1.as_u64(), epoch);
+            assert_eq!(epoch1.as_u64_for_test(), epoch);
             assert_eq!(2, newly_upload_sst.len());
             assert_eq!(&vec![imm1_4.batch_id()], newly_upload_sst[0].imm_ids());
             assert_eq!(&vec![imm1_3.batch_id()], newly_upload_sst[1].imm_ids());
         } else {
             unreachable!("should be sync finish");
         }
-        assert_eq!(epoch1.as_u64(), uploader.max_synced_epoch);
+        assert_eq!(epoch1.as_u64_for_test(), uploader.max_synced_epoch);
         let synced_data1 = &uploader
-            .get_synced_data(epoch1.as_u64())
+            .get_synced_data(epoch1.as_u64_for_test())
             .unwrap()
             .as_ref()
             .unwrap()
@@ -1940,16 +1945,16 @@ mod tests {
         // syncing: empty
         // synced: epoch1: sst([imm1_4]), sst([imm1_3]), sst([imm1_2, imm1_1])
 
-        uploader.start_sync_epoch(epoch2.as_u64());
+        uploader.start_sync_epoch(epoch2.as_u64_for_test());
         if let UploaderEvent::SyncFinish(epoch, newly_upload_sst) = uploader.next_event().await {
-            assert_eq!(epoch2.as_u64(), epoch);
+            assert_eq!(epoch2.as_u64_for_test(), epoch);
             assert!(newly_upload_sst.is_empty());
         } else {
             unreachable!("should be sync finish");
         }
-        assert_eq!(epoch2.as_u64(), uploader.max_synced_epoch);
+        assert_eq!(epoch2.as_u64_for_test(), uploader.max_synced_epoch);
         let synced_data2 = &uploader
-            .get_synced_data(epoch2.as_u64())
+            .get_synced_data(epoch2.as_u64_for_test())
             .unwrap()
             .as_ref()
             .unwrap()
@@ -1965,7 +1970,7 @@ mod tests {
         // synced: epoch1: sst([imm1_4]), sst([imm1_3]), sst([imm1_2, imm1_1])
         //         epoch2: sst([imm2])
 
-        uploader.seal_epoch(epoch3.as_u64());
+        uploader.seal_epoch(epoch3.as_u64_for_test());
         if let UploaderEvent::DataSpilled(sst) = uploader.next_event().await {
             assert_eq!(&vec![imm3_1.batch_id()], sst.imm_ids());
         } else {
@@ -1979,10 +1984,10 @@ mod tests {
         // synced: epoch1: sst([imm1_4]), sst([imm1_3]), sst([imm1_2, imm1_1])
         //         epoch2: sst([imm2])
 
-        uploader.seal_epoch(epoch4.as_u64());
+        uploader.seal_epoch(epoch4.as_u64_for_test());
         let (await_start4_with_3_3, finish_tx4_with_3_3) =
             new_task_notifier(vec![imm4.batch_id(), imm3_3.batch_id()]);
-        uploader.start_sync_epoch(epoch4.as_u64());
+        uploader.start_sync_epoch(epoch4.as_u64_for_test());
         await_start4_with_3_3.await;
 
         // current uploader state:
@@ -1998,7 +2003,7 @@ mod tests {
         finish_tx4_with_3_3.send(()).unwrap();
 
         if let UploaderEvent::SyncFinish(epoch, newly_upload_sst) = uploader.next_event().await {
-            assert_eq!(epoch4.as_u64(), epoch);
+            assert_eq!(epoch4.as_u64_for_test(), epoch);
             assert_eq!(2, newly_upload_sst.len());
             assert_eq!(
                 &vec![imm4.batch_id(), imm3_3.batch_id()],
@@ -2008,16 +2013,16 @@ mod tests {
         } else {
             unreachable!("should be sync finish");
         }
-        assert_eq!(epoch4.as_u64(), uploader.max_synced_epoch);
+        assert_eq!(epoch4.as_u64_for_test(), uploader.max_synced_epoch);
         let synced_data4 = &uploader
-            .get_synced_data(epoch4.as_u64())
+            .get_synced_data(epoch4.as_u64_for_test())
             .unwrap()
             .as_ref()
             .unwrap()
             .staging_ssts;
         assert_eq!(3, synced_data4.len());
         assert_eq!(
-            &vec![epoch4.as_u64(), epoch3.as_u64()],
+            &vec![epoch4.as_u64_for_test(), epoch3.as_u64_for_test()],
             synced_data4[0].epochs()
         );
         assert_eq!(

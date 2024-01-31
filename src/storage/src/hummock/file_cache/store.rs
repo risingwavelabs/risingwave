@@ -676,8 +676,8 @@ impl Cursor for CachedSstableCursor {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::TableId;
-    use risingwave_common::util::epoch::TestEpoch;
     use risingwave_hummock_sdk::key::FullKey;
+    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::hummock::{BlockBuilder, BlockBuilderOptions, BlockMeta, CompressionAlgorithm};
@@ -698,19 +698,35 @@ mod tests {
 
         let mut builder = BlockBuilder::new(options);
         builder.add_for_test(
-            construct_full_key_struct_for_test(0, b"k1", TestEpoch::new_without_offset(1).as_u64()),
+            construct_full_key_struct_for_test(
+                0,
+                b"k1",
+                EpochWithGap::new_without_offset(1).as_u64_for_test(),
+            ),
             b"v01",
         );
         builder.add_for_test(
-            construct_full_key_struct_for_test(0, b"k2", TestEpoch::new_without_offset(2).as_u64()),
+            construct_full_key_struct_for_test(
+                0,
+                b"k2",
+                EpochWithGap::new_without_offset(2).as_u64_for_test(),
+            ),
             b"v02",
         );
         builder.add_for_test(
-            construct_full_key_struct_for_test(0, b"k3", TestEpoch::new_without_offset(3).as_u64()),
+            construct_full_key_struct_for_test(
+                0,
+                b"k3",
+                EpochWithGap::new_without_offset(3).as_u64_for_test(),
+            ),
             b"v03",
         );
         builder.add_for_test(
-            construct_full_key_struct_for_test(0, b"k4", TestEpoch::new_without_offset(4).as_u64()),
+            construct_full_key_struct_for_test(
+                0,
+                b"k4",
+                EpochWithGap::new_without_offset(4).as_u64_for_test(),
+            ),
             b"v04",
         );
 

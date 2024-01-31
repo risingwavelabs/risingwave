@@ -17,7 +17,7 @@ use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::util::epoch::TestEpoch;
+use risingwave_hummock_sdk::EpochWithGap;
 use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
@@ -156,7 +156,7 @@ impl MockSource {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self: Box<Self>) {
-        let mut epoch = TestEpoch::new_without_offset(1);
+        let mut epoch = EpochWithGap::new_without_offset(1);
 
         while let Some(msg) = self.rx.recv().await {
             epoch.inc();
@@ -164,7 +164,7 @@ impl MockSource {
         }
 
         if self.stop_on_finish {
-            yield Message::Barrier(Barrier::new_test_barrier(epoch.as_u64()).with_stop());
+            yield Message::Barrier(Barrier::new_test_barrier(epoch.as_u64_for_test()).with_stop());
         }
     }
 }

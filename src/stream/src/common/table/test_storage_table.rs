@@ -17,9 +17,9 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::{EpochPair, TestEpoch};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{EpochWithGap, HummockReadEpoch};
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
@@ -75,7 +75,8 @@ async fn test_storage_table_value_indices() {
         pk_indices,
         value_indices.into_iter().map(|v| v as usize).collect_vec(),
     );
-    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
+    let mut epoch =
+        EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
     state.init_epoch(epoch);
 
     state.insert(OwnedRow::new(vec![
@@ -195,7 +196,8 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
+    let mut epoch =
+        EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
     state.init_epoch(epoch);
 
     let table = StorageTable::for_test(
@@ -308,7 +310,8 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         pk_indices,
         value_indices,
     );
-    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
+    let mut epoch =
+        EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
     state.init_epoch(epoch);
 
     state.insert(OwnedRow::new(vec![Some(1_i32.into()), None, None]));
@@ -413,7 +416,8 @@ async fn test_batch_scan_with_value_indices() {
         pk_indices,
         value_indices,
     );
-    let mut epoch = EpochPair::new_test_epoch(TestEpoch::new_without_offset(1).as_u64());
+    let mut epoch =
+        EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
     state.init_epoch(epoch);
 
     state.insert(OwnedRow::new(vec![

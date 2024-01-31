@@ -205,7 +205,8 @@ mod tests {
     use crate::executor::{Barrier, Message};
 
     mod test1 {
-        use risingwave_common::util::epoch::TestEpoch;
+
+        use risingwave_hummock_sdk::EpochWithGap;
 
         use super::*;
         use crate::executor::ActorContext;
@@ -275,23 +276,23 @@ mod tests {
                 pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(
-                        TestEpoch::new_without_offset(1).as_u64(),
+                        EpochWithGap::new_without_offset(1).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        TestEpoch::new_without_offset(2).as_u64(),
+                        EpochWithGap::new_without_offset(2).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        TestEpoch::new_without_offset(3).as_u64(),
+                        EpochWithGap::new_without_offset(3).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[2])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        TestEpoch::new_without_offset(4).as_u64(),
+                        EpochWithGap::new_without_offset(4).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[3])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        TestEpoch::new_without_offset(5).as_u64(),
+                        EpochWithGap::new_without_offset(5).as_u64_for_test(),
                     )),
                 ],
             ))
@@ -723,7 +724,8 @@ mod tests {
     }
 
     mod test2 {
-        use risingwave_common::util::epoch::TestEpoch;
+
+        use risingwave_hummock_sdk::EpochWithGap;
         use risingwave_storage::memory::MemoryStateStore;
 
         use super::*;
@@ -764,14 +766,14 @@ mod tests {
                 pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(
-                        TestEpoch::new_without_offset(1).as_u64(),
+                        EpochWithGap::new_without_offset(1).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
                     Message::Chunk(std::mem::take(&mut chunks[2])),
                     Message::Chunk(std::mem::take(&mut chunks[3])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        TestEpoch::new_without_offset(2).as_u64(),
+                        EpochWithGap::new_without_offset(2).as_u64_for_test(),
                     )),
                 ],
             ))
@@ -801,12 +803,12 @@ mod tests {
                 pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(
-                        TestEpoch::new_without_offset(1).as_u64(),
+                        EpochWithGap::new_without_offset(1).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        TestEpoch::new_without_offset(2).as_u64(),
+                        EpochWithGap::new_without_offset(2).as_u64_for_test(),
                     )),
                 ],
             ))
@@ -838,12 +840,12 @@ mod tests {
                 pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(
-                        TestEpoch::new_without_offset(3).as_u64(),
+                        EpochWithGap::new_without_offset(3).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        TestEpoch::new_without_offset(4).as_u64(),
+                        EpochWithGap::new_without_offset(4).as_u64_for_test(),
                     )),
                 ],
             ))
@@ -1078,7 +1080,8 @@ mod tests {
     }
 
     mod test_with_ties {
-        use risingwave_common::util::epoch::TestEpoch;
+
+        use risingwave_hummock_sdk::EpochWithGap;
         use risingwave_storage::memory::MemoryStateStore;
 
         use super::*;
@@ -1125,14 +1128,14 @@ mod tests {
                 pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(
-                        TestEpoch::new_without_offset(1).as_u64(),
+                        EpochWithGap::new_without_offset(1).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
                     Message::Chunk(std::mem::take(&mut chunks[2])),
                     Message::Chunk(std::mem::take(&mut chunks[3])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        TestEpoch::new_without_offset(2).as_u64(),
+                        EpochWithGap::new_without_offset(2).as_u64_for_test(),
                     )),
                 ],
             ))
@@ -1270,12 +1273,12 @@ mod tests {
                 pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(
-                        TestEpoch::new_without_offset(1).as_u64(),
+                        EpochWithGap::new_without_offset(1).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        TestEpoch::new_without_offset(2).as_u64(),
+                        EpochWithGap::new_without_offset(2).as_u64_for_test(),
                     )),
                 ],
             ))
@@ -1303,12 +1306,12 @@ mod tests {
                 pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(
-                        TestEpoch::new_without_offset(3).as_u64(),
+                        EpochWithGap::new_without_offset(3).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        TestEpoch::new_without_offset(4).as_u64(),
+                        EpochWithGap::new_without_offset(4).as_u64_for_test(),
                     )),
                 ],
             ))
