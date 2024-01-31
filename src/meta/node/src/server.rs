@@ -124,7 +124,6 @@ pub async fn rpc_serve(
         Some(backend) => {
             let mut options = sea_orm::ConnectOptions::new(backend.endpoint);
             options
-                .sqlx_logging(false)
                 .max_connections(20)
                 .connect_timeout(Duration::from_secs(10))
                 .idle_timeout(Duration::from_secs(30));
