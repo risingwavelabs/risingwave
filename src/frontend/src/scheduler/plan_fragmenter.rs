@@ -28,6 +28,8 @@ use risingwave_common::catalog::TableDesc;
 use risingwave_common::error::RwError;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::scan_range::ScanRange;
+use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
+use risingwave_connector::source::filesystem::opendal_source::{OpendalGcs, OpendalS3};
 use risingwave_connector::source::kafka::KafkaSplitEnumerator;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SplitEnumerator, SplitImpl,
@@ -47,6 +49,7 @@ use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
+use crate::scheduler::plan_fragmenter::ConnectorProperties::Gcs;
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::SchedulerResult;
 
@@ -270,25 +273,51 @@ impl SourceScanInfo {
                 unreachable!("Never call complete when SourceScanInfo is already complete")
             }
         };
-        let kafka_prop = match fetch_info.connector {
-            ConnectorProperties::Kafka(prop) => *prop,
+        match fetch_info.connector {
+            ConnectorProperties::Kafka(prop) => {
+                let kafka_prop = *prop;
+                let mut kafka_enumerator = KafkaSplitEnumerator::new(
+                    kafka_prop,
+                    SourceEnumeratorContext::default().into(),
+                )
+                .await?;
+                let split_info = kafka_enumerator
+                    .list_splits_batch(fetch_info.timebound.0, fetch_info.timebound.1)
+                    .await?
+                    .into_iter()
+                    .map(SplitImpl::Kafka)
+                    .collect_vec();
+
+                Ok(SourceScanInfo::Complete(split_info))
+            }
+            ConnectorProperties::OpendalS3(prop) => {
+                let mut opendal_s3_enumerator: OpendalEnumerator<OpendalS3> =
+                    OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
+                let split_info = opendal_s3_enumerator
+                    .list_splits_batch(fetch_info.timebound.0, fetch_info.timebound.1)
+                    .await?
+                    .into_iter()
+                    .map(SplitImpl::OpendalS3)
+                    .collect_vec();
+                Ok(SourceScanInfo::Complete(split_info.into()))
+            }
+            ConnectorProperties::Gcs(prop) => {
+                let mut opendal_gcs_enumerator: OpendalEnumerator<OpendalGcs> =
+                    OpendalEnumerator::new_gcs_source(*prop)?;
+                let split_info = opendal_gcs_enumerator
+                    .list_splits_batch(fetch_info.timebound.0, fetch_info.timebound.1)
+                    .await?
+                    .into_iter()
+                    .map(SplitImpl::Gcs)
+                    .collect_vec();
+                Ok(SourceScanInfo::Complete(split_info.into()))
+            }
             _ => {
                 return Err(SchedulerError::Internal(anyhow!(
                     "Unsupported to query directly from this source"
                 )))
             }
-        };
-        let mut kafka_enumerator =
-            KafkaSplitEnumerator::new(kafka_prop, SourceEnumeratorContext::default().into())
-                .await?;
-        let split_info = kafka_enumerator
-            .list_splits_batch(fetch_info.timebound.0, fetch_info.timebound.1)
-            .await?
-            .into_iter()
-            .map(SplitImpl::Kafka)
-            .collect_vec();
-
-        Ok(SourceScanInfo::Complete(split_info))
+        }
     }
 
     pub fn split_info(&self) -> SchedulerResult<&Vec<SplitImpl>> {
