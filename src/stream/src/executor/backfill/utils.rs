@@ -476,6 +476,7 @@ pub(crate) fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Optio
 /// See how it decodes the state with the inline comments.
 pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
     state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
+    actor_id: u32,
 ) -> StreamExecutorResult<Vec<(VirtualNode, BackfillStatePerVnode)>> {
     debug_assert!(!state_table.vnodes().is_empty());
     let vnodes = state_table.vnodes().iter_vnodes();
@@ -526,7 +527,7 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
                     )
                 } else {
                     if vnode == VirtualNode::from_scalar(0) {
-                        tracing::info!("recovered progress for vnode=0");
+                        tracing::info!("recovered progress for vnode=0, actor_id={}", actor_id);
                     }
 
                     BackfillStatePerVnode::new(
@@ -733,12 +734,14 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     backfill_state: &mut BackfillState,
     #[cfg(debug_assertions)] state_len: usize,
     vnodes: impl Iterator<Item = VirtualNode>,
+    actor_id: u32,
 ) -> StreamExecutorResult<()> {
     let mut has_progress = false;
     for vnode in vnodes {
         if !backfill_state.need_commit(&vnode) {
             continue;
         }
+
         let (encoded_prev_state, encoded_current_state) =
             match backfill_state.get_commit_state(&vnode) {
                 Some((old_state, new_state)) => (old_state, new_state),
@@ -766,7 +769,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
                 }
             }
             if vnode == VirtualNode::from_scalar(0) {
-                tracing::trace!("update vnode: vnode=0");
+                tracing::trace!("update vnode: vnode=0, actor_id={}", actor_id);
             }
 
             table.write_record(Record::Update {
@@ -784,7 +787,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
                 assert_eq!(encoded_current_state.len(), state_len);
             }
             if vnode == VirtualNode::from_scalar(0) {
-                tracing::trace!("insert vnode: vnode=0");
+                tracing::trace!("insert vnode: vnode=0, actor_id={}", actor_id);
             }
 
             table.write_record(Record::Insert {
@@ -795,7 +798,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
         backfill_state.mark_committed(vnode);
     }
     if has_progress {
-        tracing::trace!("committing on epoch, {:#?}", epoch);
+        tracing::trace!("committing on epoch, {:#?}, actor_id={}", epoch, actor_id);
         table.commit(epoch).await?;
     } else {
         table.commit_no_data_expected(epoch);

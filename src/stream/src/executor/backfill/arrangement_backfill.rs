@@ -110,7 +110,10 @@ where
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        tracing::debug!("Arrangement Backfill Executor started");
+        tracing::debug!(
+            "Arrangement Backfill Executor started, actor_id={}",
+            self.actor_id
+        );
         // The primary key columns, in the output columns of the upstream_table scan.
         // Table scan scans a subset of the columns of the upstream table.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
@@ -151,7 +154,7 @@ where
         let first_epoch = first_barrier.epoch;
         self.state_table.init_epoch(first_barrier.epoch);
 
-        let progress_per_vnode = get_progress_per_vnode(&self.state_table).await?;
+        let progress_per_vnode = get_progress_per_vnode(&self.state_table, self.actor_id).await?;
 
         let is_completely_finished = progress_per_vnode.iter().all(|(_, p)| {
             matches!(
@@ -444,6 +447,7 @@ where
                     #[cfg(debug_assertions)]
                     state_len,
                     vnodes.iter_vnodes(),
+                    self.actor_id,
                 )
                 .await?;
 
@@ -503,6 +507,7 @@ where
                             #[cfg(debug_assertions)]
                             state_len,
                             vnodes.iter_vnodes(),
+                            self.actor_id,
                         )
                         .await?;
                     }
