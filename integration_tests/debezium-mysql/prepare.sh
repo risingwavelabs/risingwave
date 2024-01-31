@@ -70,5 +70,3 @@ echo 'sleep 3 minutes wait for debezium create all topics.'
 sleep 180
 
 echo 'Done'
-
-psql -h localhost -p 4566 -d dev -U root -f create_source.sql
