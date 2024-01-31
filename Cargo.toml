@@ -133,8 +133,8 @@ arrow-flight = "50"
 arrow-select = "50"
 arrow-ord = "50"
 arrow-row = "50"
-arrow-udf-js = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "7ba1c22" }
-arrow-udf-wasm = "0.1"
+arrow-udf-js = "0.1"
+arrow-udf-wasm = { version = "0.1.1", features = ["build"] }
 arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
 arrow-buffer-deltalake = { package = "arrow-buffer", version = "48.0.1" }
 arrow-cast-deltalake = { package = "arrow-cast", version = "48.0.1" }
