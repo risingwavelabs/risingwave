@@ -187,6 +187,11 @@ pub fn rebalance_actor_vnode(
     actors_to_remove: &BTreeSet<ActorId>,
     actors_to_create: &BTreeSet<ActorId>,
 ) -> HashMap<ActorId, Bitmap> {
+    let actor_ids: BTreeSet<_> = actors.iter().map(|actor| actor.actor_id).collect();
+
+    assert_eq!(actors_to_remove.difference(&actor_ids).count(), 0);
+    assert_eq!(actors_to_create.intersection(&actor_ids).count(), 0);
+
     assert!(actors.len() >= actors_to_remove.len());
 
     let target_actor_count = actors.len() - actors_to_remove.len() + actors_to_create.len();
