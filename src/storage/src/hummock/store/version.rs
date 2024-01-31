@@ -40,6 +40,7 @@ use tracing::Instrument;
 
 use super::StagingDataIterator;
 use crate::error::StorageResult;
+use crate::hummock::event_handler::HummockReadVersionRef;
 use crate::hummock::iterator::{
     ConcatIterator, ForwardMergeRangeIterator, HummockIteratorUnion, MergeIterator,
     SkipWatermarkIterator, UserIterator,
@@ -242,6 +243,10 @@ impl HummockReadVersion {
 
     pub fn new(table_id: TableId, committed_version: CommittedVersion) -> Self {
         Self::new_with_replication_option(table_id, committed_version, false)
+    }
+
+    pub fn table_id(&self) -> TableId {
+        self.table_id
     }
 
     /// Updates the read version with `VersionUpdate`.
@@ -500,7 +505,7 @@ pub fn read_filter_for_batch(
     epoch: HummockEpoch, // for check
     table_id: TableId,
     mut key_range: TableKeyRange,
-    read_version_vec: Vec<Arc<RwLock<HummockReadVersion>>>,
+    read_version_vec: Vec<HummockReadVersionRef>,
 ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
     assert!(!read_version_vec.is_empty());
     let mut staging_vec = Vec::with_capacity(read_version_vec.len());
