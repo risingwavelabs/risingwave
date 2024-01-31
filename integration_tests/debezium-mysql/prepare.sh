@@ -66,7 +66,9 @@ curl -S -X PUT -H  "Content-Type:application/json" http://localhost:8083/connect
     "table.include.list": "mydb.mysql_types3"
  }'
 
-echo 'sleep two minutes wait for debezium create all topics.'
-sleep 120
+echo 'sleep 3 minutes wait for debezium create all topics.'
+sleep 180
 
 echo 'Done'
+
+psql -h localhost -p 4566 -d dev -U root -f create_source.sql
