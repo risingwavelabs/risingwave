@@ -121,6 +121,15 @@ mysql --protocol=tcp -u root mytest -e "INSERT INTO products VALUES(default, 'Ju
 
 sleep 5s
 
+system ok
+mysql --protocol=tcp -u root mytest -e "FLUSH LOGS"
+
+# table without backfill should not contain historical records
+query I
+select count(*) from orders_no_backfill order by order_id;
+----
+0
+
 # check ingestion results
 query I
 SELECT * from products_test_cnt
