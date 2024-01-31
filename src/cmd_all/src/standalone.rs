@@ -161,6 +161,14 @@ pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts 
     }
 }
 
+/// For `standalone` mode, we can configure and start multiple services in one process.
+/// Note that this is different from `single` mode, where we start
+/// pre-defined services all-in-one process,
+/// the pre-defined services are not configurable.
+/// `single` mode is meant to be user-facing, where users can just use `./risingwave`
+/// to start the service.
+/// `standalone` mode is meant to be used by our cloud service, where we can configure
+/// and start multiple services in one process.
 pub async fn standalone(
     ParsedStandaloneOpts {
         meta_opts,

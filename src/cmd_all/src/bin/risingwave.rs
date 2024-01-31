@@ -18,6 +18,7 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use clap::{command, ArgMatches, Args, Command, FromArgMatches};
+use clap::error::ErrorKind;
 use risingwave_cmd::{compactor, compute, ctl, frontend, meta};
 use risingwave_cmd_all::{PlaygroundOpts, StandaloneOpts};
 use risingwave_common::git_sha;
@@ -179,7 +180,16 @@ fn main() -> Result<()> {
                 .subcommands(Component::commands()),
         );
 
-    let matches = command.get_matches();
+    let matches = match command.try_get_matches() {
+        Ok(m) => m,
+        Err(e) if e.kind() == ErrorKind::MissingSubcommand => {
+            println!("jackpot!");
+            return Ok(());
+        }
+        Err(e) => {
+            e.exit();
+        }
+    };
 
     let multicall = matches.subcommand().unwrap();
     let argv_1 = multicall.1.subcommand();
