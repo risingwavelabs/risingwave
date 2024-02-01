@@ -28,7 +28,9 @@ use risingwave_common::catalog::TableDesc;
 use risingwave_common::error::RwError;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::scan_range::ScanRange;
-use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
+use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::{
+    FileSourceScanInfo, OpendalEnumerator,
+};
 use risingwave_connector::source::filesystem::opendal_source::{OpendalGcs, OpendalS3};
 use risingwave_connector::source::kafka::KafkaSplitEnumerator;
 use risingwave_connector::source::{
@@ -251,6 +253,16 @@ impl Query {
 #[derive(Debug, Clone)]
 pub struct SourceFetchInfo {
     pub connector: ConnectorProperties,
+    pub scan_info: ConnectorScanInfo,
+}
+
+#[derive(Clone, Debug)]
+pub enum ConnectorScanInfo {
+    Kafka(KafkaScanInfo),
+    FileSource(FileSourceScanInfo),
+}
+#[derive(Clone, Debug)]
+pub struct KafkaScanInfo {
     pub timebound: (Option<i64>, Option<i64>),
 }
 
@@ -276,13 +288,18 @@ impl SourceScanInfo {
         match fetch_info.connector {
             ConnectorProperties::Kafka(prop) => {
                 let kafka_prop = *prop;
+                let scan_info = if let ConnectorScanInfo::Kafka(scan_info) = fetch_info.scan_info {
+                    scan_info
+                } else {
+                    unreachable!()
+                };
                 let mut kafka_enumerator = KafkaSplitEnumerator::new(
                     kafka_prop,
                     SourceEnumeratorContext::default().into(),
                 )
                 .await?;
                 let split_info = kafka_enumerator
-                    .list_splits_batch(fetch_info.timebound.0, fetch_info.timebound.1)
+                    .list_splits_batch(scan_info.timebound.0, scan_info.timebound.1)
                     .await?
                     .into_iter()
                     .map(SplitImpl::Kafka)
@@ -293,8 +310,14 @@ impl SourceScanInfo {
             ConnectorProperties::OpendalS3(prop) => {
                 let mut opendal_s3_enumerator: OpendalEnumerator<OpendalS3> =
                     OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
+                let scan_info =
+                    if let ConnectorScanInfo::FileSource(scan_info) = fetch_info.scan_info {
+                        scan_info
+                    } else {
+                        unreachable!()
+                    };
                 let split_info = opendal_s3_enumerator
-                    .list_splits_batch(fetch_info.timebound.0, fetch_info.timebound.1)
+                    .list_splits_batch(scan_info)
                     .await?
                     .into_iter()
                     .map(SplitImpl::OpendalS3)
@@ -304,8 +327,14 @@ impl SourceScanInfo {
             ConnectorProperties::Gcs(prop) => {
                 let mut opendal_gcs_enumerator: OpendalEnumerator<OpendalGcs> =
                     OpendalEnumerator::new_gcs_source(*prop)?;
+                let scan_info =
+                    if let ConnectorScanInfo::FileSource(scan_info) = fetch_info.scan_info {
+                        scan_info
+                    } else {
+                        unreachable!()
+                    };
                 let split_info = opendal_gcs_enumerator
-                    .list_splits_batch(fetch_info.timebound.0, fetch_info.timebound.1)
+                    .list_splits_batch(scan_info)
                     .await?
                     .into_iter()
                     .map(SplitImpl::Gcs)
@@ -948,7 +977,9 @@ impl BatchPlanFragmenter {
                 let timestamp_bound = source_node.kafka_timestamp_range_value();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
                     connector: property,
-                    timebound: timestamp_bound,
+                    scan_info: ConnectorScanInfo::Kafka(KafkaScanInfo {
+                        timebound: timestamp_bound,
+                    }),
                 })));
             }
         }
