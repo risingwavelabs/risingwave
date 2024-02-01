@@ -31,7 +31,6 @@ use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
-use risingwave_pb::stream_service::{BackPressureInfo, GetBackPressureResponse};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -108,7 +107,7 @@ impl ClusterManager {
         property: AddNodeProperty,
         resource: risingwave_pb::common::worker_node::Resource,
     ) -> MetaResult<WorkerNode> {
-        let worker_node_parallelism = property.worker_node_parallelism as usize;
+        let new_worker_parallelism = property.worker_node_parallelism as usize;
         let mut property = self.parse_property(r#type, property);
         let mut core = self.core.write().await;
 
@@ -124,8 +123,8 @@ impl ClusterManager {
                     .unwrap_or_default();
             }
 
-            let current_parallelism = worker.worker_node.parallel_units.len();
-            if current_parallelism == worker_node_parallelism
+            let old_worker_parallelism = worker.worker_node.parallel_units.len();
+            if old_worker_parallelism == new_worker_parallelism
                 && worker.worker_node.property == property
             {
                 worker.update_expire_at(self.max_heartbeat_interval);
@@ -133,31 +132,45 @@ impl ClusterManager {
             }
 
             let mut new_worker = worker.clone();
-            match current_parallelism.cmp(&worker_node_parallelism) {
+            match old_worker_parallelism.cmp(&new_worker_parallelism) {
                 Ordering::Less => {
                     tracing::info!(
                         "worker {} parallelism updated from {} to {}",
                         new_worker.worker_node.id,
-                        current_parallelism,
-                        worker_node_parallelism
+                        old_worker_parallelism,
+                        new_worker_parallelism
                     );
                     let parallel_units = self
                         .generate_cn_parallel_units(
-                            worker_node_parallelism - current_parallelism,
+                            new_worker_parallelism - old_worker_parallelism,
                             new_worker.worker_id(),
                         )
                         .await?;
                     new_worker.worker_node.parallel_units.extend(parallel_units);
                 }
                 Ordering::Greater => {
-                    // Warn and keep the original parallelism if the worker registered with a
-                    // smaller parallelism.
-                    tracing::warn!(
-                        "worker {} parallelism is less than current, current is {}, but received {}",
-                        new_worker.worker_id(),
-                        current_parallelism,
-                        worker_node_parallelism
-                    );
+                    if self.env.opts.enable_scale_in_when_recovery {
+                        // Handing over to the subsequent recovery loop for a forced reschedule.
+                        tracing::info!(
+                            "worker {} parallelism reduced from {} to {}",
+                            new_worker.worker_node.id,
+                            old_worker_parallelism,
+                            new_worker_parallelism
+                        );
+                        new_worker
+                            .worker_node
+                            .parallel_units
+                            .truncate(new_worker_parallelism)
+                    } else {
+                        // Warn and keep the original parallelism if the worker registered with a
+                        // smaller parallelism, entering compatibility mode.
+                        tracing::warn!(
+                            "worker {} parallelism is less than current, current is {}, but received {}",
+                            new_worker.worker_id(),
+                            new_worker_parallelism,
+                            old_worker_parallelism,
+                        );
+                    }
                 }
                 Ordering::Equal => {}
             }
@@ -173,7 +186,7 @@ impl ClusterManager {
             }
 
             new_worker.update_expire_at(self.max_heartbeat_interval);
-            new_worker.insert(self.env.meta_store()).await?;
+            new_worker.insert(self.env.meta_store_checked()).await?;
             *worker = new_worker;
             return Ok(worker.to_protobuf());
         }
@@ -194,7 +207,7 @@ impl ClusterManager {
 
         // Generate parallel units.
         let parallel_units = if r#type == WorkerType::ComputeNode {
-            self.generate_cn_parallel_units(worker_node_parallelism, worker_id)
+            self.generate_cn_parallel_units(new_worker_parallelism, worker_id)
                 .await?
         } else {
             vec![]
@@ -217,7 +230,7 @@ impl ClusterManager {
         worker.update_started_at(timestamp_now_sec());
         worker.update_resource(Some(resource));
         // Persist worker node.
-        worker.insert(self.env.meta_store()).await?;
+        worker.insert(self.env.meta_store_checked()).await?;
         // Update core.
         core.add_worker_node(worker);
         Ok(worker_node)
@@ -228,7 +241,7 @@ impl ClusterManager {
         let mut worker = core.get_worker_by_host_checked(host_address.clone())?;
         if worker.worker_node.state != State::Running as i32 {
             worker.worker_node.state = State::Running as i32;
-            worker.insert(self.env.meta_store()).await?;
+            worker.insert(self.env.meta_store_checked()).await?;
             core.update_worker_node(worker.clone());
         }
 
@@ -279,7 +292,7 @@ impl ClusterManager {
             }
         }
 
-        self.env.meta_store().txn(txn).await?;
+        self.env.meta_store_checked().txn(txn).await?;
 
         for var_txn in var_txns {
             var_txn.commit();
@@ -295,7 +308,7 @@ impl ClusterManager {
         let worker_node = worker.to_protobuf();
 
         // Persist deletion.
-        Worker::delete(self.env.meta_store(), &host_address).await?;
+        Worker::delete(self.env.meta_store_checked(), &host_address).await?;
 
         // Update core.
         core.delete_worker_node(worker);
@@ -493,33 +506,6 @@ impl ClusterManager {
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> Option<Worker> {
         self.core.read().await.get_worker_by_id(worker_id)
     }
-
-    pub async fn get_back_pressure(&self) -> MetaResult<GetBackPressureResponse> {
-        let mut core = self.core.write().await;
-        let mut back_pressure_infos: Vec<BackPressureInfo> = Vec::new();
-        for worker in core.workers.values_mut() {
-            if worker.worker_type() != WorkerType::ComputeNode {
-                continue;
-            }
-            let client = self
-                .env
-                .stream_client_pool()
-                .get(&worker.worker_node)
-                .await
-                .unwrap();
-            let request = risingwave_pb::stream_service::GetBackPressureRequest {};
-            back_pressure_infos.extend(
-                client
-                    .get_back_pressure(request)
-                    .await
-                    .unwrap()
-                    .back_pressure_infos,
-            );
-        }
-        Ok(GetBackPressureResponse {
-            back_pressure_infos,
-        })
-    }
 }
 
 /// The cluster info used for scheduling a streaming job.
@@ -550,7 +536,7 @@ impl ClusterManagerCore {
     pub const MAX_WORKER_REUSABLE_ID_COUNT: usize = 1 << Self::MAX_WORKER_REUSABLE_ID_BITS;
 
     async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let meta_store = env.meta_store();
+        let meta_store = env.meta_store_checked();
         let mut workers = Worker::list(meta_store).await?;
 
         let used_transactional_ids: HashSet<_> = workers
@@ -578,7 +564,7 @@ impl ClusterManagerCore {
                     None => {
                         return Err(MetaError::unavailable(
                             "no available transactional id for worker",
-                        ))
+                        ));
                     }
                     Some(id) => id,
                 };

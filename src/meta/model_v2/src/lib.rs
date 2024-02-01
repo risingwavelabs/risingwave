@@ -23,6 +23,7 @@ pub mod prelude;
 
 pub mod actor;
 pub mod actor_dispatcher;
+pub mod catalog_version;
 pub mod cluster;
 pub mod compaction_config;
 pub mod compaction_status;
@@ -226,3 +227,11 @@ derive_from_json_struct!(
     FragmentVnodeMapping,
     risingwave_pb::common::ParallelUnitMapping
 );
+
+#[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize)]
+pub enum StreamingParallelism {
+    Auto,
+    Fixed(usize),
+}
+
+impl Eq for StreamingParallelism {}

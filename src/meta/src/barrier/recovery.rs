@@ -23,6 +23,7 @@ use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
+use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
@@ -47,7 +48,7 @@ use crate::barrier::state::BarrierManagerState;
 use crate::barrier::{Command, GlobalBarrierManagerContext};
 use crate::controller::catalog::ReleaseContext;
 use crate::manager::{MetadataManager, WorkerId};
-use crate::model::{MetadataModel, MigrationPlan, TableFragments};
+use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
 use crate::MetaResult;
 
@@ -137,9 +138,7 @@ impl GlobalBarrierManagerContext {
     }
 
     async fn recover_background_mv_progress_v1(&self) -> MetaResult<()> {
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unreachable!()
-        };
+        let mgr = self.metadata_manager.as_v1_ref();
         let mviews = mgr.catalog_manager.list_creating_background_mvs().await;
 
         let mut mview_definitions = HashMap::new();
@@ -227,9 +226,7 @@ impl GlobalBarrierManagerContext {
     }
 
     async fn recover_background_mv_progress_v2(&self) -> MetaResult<()> {
-        let MetadataManager::V2(mgr) = &self.metadata_manager else {
-            unreachable!()
-        };
+        let mgr = self.metadata_manager.as_v2_ref();
         let mviews = mgr
             .catalog_controller
             .list_background_creating_mviews()
@@ -305,6 +302,33 @@ impl GlobalBarrierManagerContext {
         Ok(())
     }
 
+    /// Pre buffered drop and cancel command, return true if any.
+    async fn pre_apply_drop_cancel(
+        &self,
+        scheduled_barriers: &ScheduledBarriers,
+    ) -> MetaResult<bool> {
+        let (dropped_actors, cancelled) =
+            scheduled_barriers.pre_apply_drop_cancel_scheduled().await;
+        let applied = !dropped_actors.is_empty() || !cancelled.is_empty();
+        if !cancelled.is_empty() {
+            match &self.metadata_manager {
+                MetadataManager::V1(mgr) => {
+                    mgr.fragment_manager
+                        .drop_table_fragments_vec(&cancelled)
+                        .await?;
+                }
+                MetadataManager::V2(mgr) => {
+                    for job_id in cancelled {
+                        mgr.catalog_controller
+                            .try_abort_creating_streaming_job(job_id.table_id as _, true)
+                            .await?;
+                    }
+                }
+            }
+        }
+        Ok(applied)
+    }
+
     /// Recovery the whole cluster from the latest epoch.
     ///
     /// If `paused_reason` is `Some`, all data sources (including connectors and DMLs) will be
@@ -346,7 +370,7 @@ impl GlobalBarrierManagerContext {
             async {
                 let recovery_result: MetaResult<_> = try {
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
-                    let _ = scheduled_barriers.pre_apply_drop_scheduled().await;
+                    let _ = self.pre_apply_drop_cancel(scheduled_barriers).await?;
 
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
@@ -372,7 +396,7 @@ impl GlobalBarrierManagerContext {
                         warn!(error = %err.as_report(), "reset compute nodes failed");
                     })?;
 
-                    if scheduled_barriers.pre_apply_drop_scheduled().await {
+                    if self.pre_apply_drop_cancel(scheduled_barriers).await? {
                         info = self.resolve_actor_info().await;
                     }
 
@@ -469,9 +493,7 @@ impl GlobalBarrierManagerContext {
     }
 
     async fn migrate_actors_v2(&self) -> MetaResult<InflightActorInfo> {
-        let MetadataManager::V2(mgr) = &self.metadata_manager else {
-            unreachable!()
-        };
+        let mgr = self.metadata_manager.as_v2_ref();
 
         let all_inuse_parallel_units: HashSet<_> = mgr
             .catalog_controller
@@ -551,9 +573,7 @@ impl GlobalBarrierManagerContext {
 
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
     async fn migrate_actors_v1(&self) -> MetaResult<InflightActorInfo> {
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unreachable!()
-        };
+        let mgr = self.metadata_manager.as_v1_ref();
 
         let info = self.resolve_actor_info().await;
 
@@ -576,7 +596,7 @@ impl GlobalBarrierManagerContext {
             .migrate_fragment_actors(&migration_plan)
             .await?;
         // 3. remove the migration plan.
-        migration_plan.delete(self.env.meta_store()).await?;
+        migration_plan.delete(self.env.meta_store_checked()).await?;
         debug!("migrate actors succeed.");
 
         let info = self.resolve_actor_info().await;
@@ -586,42 +606,149 @@ impl GlobalBarrierManagerContext {
     async fn scale_actors(&self, info: &InflightActorInfo) -> MetaResult<bool> {
         match &self.metadata_manager {
             MetadataManager::V1(_) => self.scale_actors_v1(info).await,
-            MetadataManager::V2(_) => self.scale_actors_v2(info),
+            MetadataManager::V2(_) => self.scale_actors_v2(info).await,
         }
     }
 
-    fn scale_actors_v2(&self, _info: &InflightActorInfo) -> MetaResult<bool> {
-        let MetadataManager::V2(_mgr) = &self.metadata_manager else {
-            unreachable!()
+    async fn scale_actors_v2(&self, _info: &InflightActorInfo) -> MetaResult<bool> {
+        let mgr = self.metadata_manager.as_v2_ref();
+        debug!("start resetting actors distribution");
+
+        let table_parallelisms: HashMap<_, _> = {
+            let streaming_parallelisms = mgr
+                .catalog_controller
+                .get_all_streaming_parallelisms()
+                .await?;
+
+            streaming_parallelisms
+                .into_iter()
+                .map(|(table_id, parallelism)| {
+                    // no custom for sql backend
+                    let table_parallelism = match parallelism {
+                        StreamingParallelism::Auto => TableParallelism::Auto,
+                        StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
+                    };
+
+                    (table_id as u32, table_parallelism)
+                })
+                .collect()
         };
-        unimplemented!("implement auto-scale funcs in sql backend")
+
+        let workers = mgr
+            .cluster_controller
+            .list_active_streaming_workers()
+            .await?;
+
+        let schedulable_worker_ids = workers
+            .iter()
+            .filter(|worker| {
+                !worker
+                    .property
+                    .as_ref()
+                    .map(|p| p.is_unschedulable)
+                    .unwrap_or(false)
+            })
+            .map(|worker| worker.id)
+            .collect();
+
+        let plan = self
+            .scale_controller
+            .generate_table_resize_plan(TableResizePolicy {
+                worker_ids: schedulable_worker_ids,
+                table_parallelisms: table_parallelisms.clone(),
+            })
+            .await?;
+
+        let table_parallelisms: HashMap<_, _> = table_parallelisms
+            .into_iter()
+            .map(|(table_id, parallelism)| {
+                debug_assert_ne!(parallelism, TableParallelism::Custom);
+                (TableId::new(table_id), parallelism)
+            })
+            .collect();
+
+        let mut compared_table_parallelisms = table_parallelisms.clone();
+
+        let (reschedule_fragment, _) = self
+            .scale_controller
+            .prepare_reschedule_command(
+                plan,
+                RescheduleOptions {
+                    resolve_no_shuffle_upstream: true,
+                },
+                Some(&mut compared_table_parallelisms),
+            )
+            .await?;
+
+        // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
+        debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
+
+        if let Err(e) = self
+            .scale_controller
+            .post_apply_reschedule(&reschedule_fragment, &table_parallelisms)
+            .await
+        {
+            tracing::error!(
+                error = %e.as_report(),
+                "failed to apply reschedule for offline scaling in recovery",
+            );
+
+            return Err(e);
+        }
+
+        debug!("scaling-in actors succeed.");
+        Ok(true)
     }
 
     async fn scale_actors_v1(&self, info: &InflightActorInfo) -> MetaResult<bool> {
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unreachable!()
-        };
-        debug!("start scaling-in offline actors.");
+        let mgr = self.metadata_manager.as_v1_ref();
+        debug!("start resetting actors distribution");
 
-        let expired_workers: HashSet<WorkerId> = info
-            .actor_map
-            .iter()
-            .filter(|(&worker, actors)| !actors.is_empty() && !info.node_map.contains_key(&worker))
-            .map(|(&worker, _)| worker)
-            .collect();
+        let current_parallelism = info
+            .node_map
+            .values()
+            .flat_map(|worker_node| worker_node.parallel_units.iter())
+            .count();
 
-        if expired_workers.is_empty() {
-            debug!("no expired workers, skipping.");
-            return Ok(false);
+        /// We infer the new parallelism strategy based on the prior level of parallelism of the table.
+        /// If the parallelism strategy is Fixed or Auto, we won't make any modifications.
+        /// For Custom, we'll assess the parallelism of the core fragment;
+        /// if the parallelism is higher than the currently available parallelism, we'll set it to Auto.
+        /// If it's lower, we'll set it to Fixed.
+        fn derive_target_parallelism_for_custom(
+            current_parallelism: usize,
+            table: &TableFragments,
+        ) -> TableParallelism {
+            let derive_from_fragment = table.mview_fragment().or_else(|| table.sink_fragment());
+
+            if let TableParallelism::Custom = &table.assigned_parallelism {
+                if let Some(fragment) = derive_from_fragment {
+                    let fragment_parallelism = fragment.get_actors().len();
+                    if fragment_parallelism >= current_parallelism {
+                        TableParallelism::Auto
+                    } else {
+                        TableParallelism::Fixed(fragment_parallelism)
+                    }
+                } else {
+                    TableParallelism::Auto
+                }
+            } else {
+                table.assigned_parallelism
+            }
         }
 
-        let table_parallelisms = {
+        let table_parallelisms: HashMap<_, _> = {
             let guard = mgr.fragment_manager.get_fragment_read_guard().await;
 
             guard
                 .table_fragments()
                 .iter()
-                .map(|(table_id, table)| (table_id.table_id, table.assigned_parallelism))
+                .map(|(table_id, table)| {
+                    let target_parallelism =
+                        derive_target_parallelism_for_custom(current_parallelism, table);
+
+                    (table_id.table_id, target_parallelism)
+                })
                 .collect()
         };
 
@@ -644,32 +771,39 @@ impl GlobalBarrierManagerContext {
 
         let plan = self
             .scale_controller
-            .as_ref()
-            .unwrap()
             .generate_table_resize_plan(TableResizePolicy {
                 worker_ids: schedulable_worker_ids,
-                table_parallelisms,
+                table_parallelisms: table_parallelisms.clone(),
             })
             .await?;
 
+        let table_parallelisms: HashMap<_, _> = table_parallelisms
+            .into_iter()
+            .map(|(table_id, parallelism)| {
+                debug_assert_ne!(parallelism, TableParallelism::Custom);
+                (TableId::new(table_id), parallelism)
+            })
+            .collect();
+
+        let mut compared_table_parallelisms = table_parallelisms.clone();
+
         let (reschedule_fragment, applied_reschedules) = self
             .scale_controller
-            .as_ref()
-            .unwrap()
             .prepare_reschedule_command(
                 plan,
                 RescheduleOptions {
                     resolve_no_shuffle_upstream: true,
                 },
-                None,
+                Some(&mut compared_table_parallelisms),
             )
             .await?;
 
+        // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
+        debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
+
         if let Err(e) = self
             .scale_controller
-            .as_ref()
-            .unwrap()
-            .post_apply_reschedule(&reschedule_fragment, &Default::default())
+            .post_apply_reschedule(&reschedule_fragment, &table_parallelisms)
             .await
         {
             tracing::error!(
@@ -694,11 +828,9 @@ impl GlobalBarrierManagerContext {
         &self,
         expired_workers: HashSet<WorkerId>,
     ) -> MetaResult<MigrationPlan> {
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unreachable!()
-        };
+        let mgr = self.metadata_manager.as_v1_ref();
 
-        let mut cached_plan = MigrationPlan::get(self.env.meta_store()).await?;
+        let mut cached_plan = MigrationPlan::get(self.env.meta_store_checked()).await?;
 
         let all_worker_parallel_units = mgr.fragment_manager.all_worker_parallel_units().await;
 
@@ -795,7 +927,7 @@ impl GlobalBarrierManagerContext {
             new_plan.parallel_unit_plan
         );
 
-        new_plan.insert(self.env.meta_store()).await?;
+        new_plan.insert(self.env.meta_store_checked()).await?;
         Ok(new_plan)
     }
 

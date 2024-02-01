@@ -79,7 +79,7 @@ use crate::hummock::compaction::selector::{
     DynamicLevelSelector, LocalSelectorStatistic, ManualCompactionOption, ManualCompactionSelector,
     SpaceReclaimCompactionSelector, TombstoneCompactionSelector, TtlCompactionSelector,
 };
-use crate::hummock::compaction::CompactStatus;
+use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
     build_compact_task_level_type_metrics_label, trigger_delta_log_stats, trigger_lsm_stat,
@@ -364,7 +364,7 @@ impl HummockManager {
         // Make sure data dir is not used by another cluster.
         // Skip this check in e2e compaction test, which needs to start a secondary cluster with
         // same bucket
-        if env.cluster_first_launch() && !deterministic_mode {
+        if !deterministic_mode {
             write_exclusive_cluster_id(
                 state_store_dir,
                 env.cluster_id().clone(),
@@ -453,7 +453,7 @@ impl HummockManager {
         let sql_meta_store = self.sql_meta_store();
         let compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus> = match &sql_meta_store
         {
-            None => CompactStatus::list(self.env.meta_store())
+            None => CompactStatus::list(self.env.meta_store_checked())
                 .await?
                 .into_iter()
                 .map(|cg| (cg.compaction_group_id(), cg))
@@ -471,7 +471,7 @@ impl HummockManager {
         }
 
         compaction_guard.compact_task_assignment = match &sql_meta_store {
-            None => CompactTaskAssignment::list(self.env.meta_store())
+            None => CompactTaskAssignment::list(self.env.meta_store_checked())
                 .await?
                 .into_iter()
                 .map(|assigned| (assigned.key().unwrap(), assigned))
@@ -487,7 +487,7 @@ impl HummockManager {
 
         let hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta> =
             match &sql_meta_store {
-                None => HummockVersionDelta::list(self.env.meta_store())
+                None => HummockVersionDelta::list(self.env.meta_store_checked())
                     .await?
                     .into_iter()
                     .map(|version_delta| (version_delta.id, version_delta))
@@ -536,7 +536,7 @@ impl HummockManager {
             }
         }
         versioning_guard.version_stats = match &sql_meta_store {
-            None => HummockVersionStats::list(self.env.meta_store())
+            None => HummockVersionStats::list(self.env.meta_store_checked())
                 .await?
                 .into_iter()
                 .next(),
@@ -564,7 +564,7 @@ impl HummockManager {
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
         versioning_guard.pinned_versions = match &sql_meta_store {
-            None => HummockPinnedVersion::list(self.env.meta_store())
+            None => HummockPinnedVersion::list(self.env.meta_store_checked())
                 .await?
                 .into_iter()
                 .map(|p| (p.context_id, p))
@@ -579,7 +579,7 @@ impl HummockManager {
         };
 
         versioning_guard.pinned_snapshots = match &sql_meta_store {
-            None => HummockPinnedSnapshot::list(self.env.meta_store())
+            None => HummockPinnedSnapshot::list(self.env.meta_store_checked())
                 .await?
                 .into_iter()
                 .map(|p| (p.context_id, p))
@@ -955,6 +955,9 @@ impl HummockManager {
             &mut stats,
             selector,
             table_id_to_option.clone(),
+            Arc::new(CompactionDeveloperConfig::new_from_meta_opts(
+                &self.env.opts,
+            )),
         );
         stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
         let compact_task = match compact_task {
@@ -1924,7 +1927,7 @@ impl HummockManager {
         compaction_groups: Vec<PbCompactionGroupInfo>,
     ) -> Result<()> {
         for table in &table_catalogs {
-            table.insert(self.env.meta_store()).await?;
+            table.insert(self.env.meta_store_checked()).await?;
         }
         for group in &compaction_groups {
             assert!(

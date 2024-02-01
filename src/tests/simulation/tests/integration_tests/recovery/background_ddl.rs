@@ -16,8 +16,12 @@ use std::time::Duration;
 
 use anyhow::Result;
 use risingwave_common::error::anyhow_error;
-use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts, Session};
+use risingwave_simulation::cluster::{Cluster, Configuration, Session};
 use tokio::time::sleep;
+
+use crate::utils::{
+    kill_cn_and_meta_and_wait_recover, kill_cn_and_wait_recover, kill_random_and_wait_recover,
+};
 
 const CREATE_TABLE: &str = "CREATE TABLE t(v1 int);";
 const DROP_TABLE: &str = "DROP TABLE t;";
@@ -30,39 +34,6 @@ const RESET_RATE_LIMIT: &str = "SET STREAMING_RATE_LIMIT=0;";
 const CREATE_MV1: &str = "CREATE MATERIALIZED VIEW mv1 as SELECT * FROM t;";
 const DROP_MV1: &str = "DROP MATERIALIZED VIEW mv1;";
 const WAIT: &str = "WAIT;";
-
-async fn kill_cn_and_wait_recover(cluster: &Cluster) {
-    cluster
-        .kill_nodes(["compute-1", "compute-2", "compute-3"], 0)
-        .await;
-    sleep(Duration::from_secs(10)).await;
-}
-
-async fn kill_cn_and_meta_and_wait_recover(cluster: &Cluster) {
-    cluster
-        .kill_nodes(
-            [
-                "compute-1",
-                "compute-2",
-                "compute-3",
-                "meta-1",
-                "meta-2",
-                "meta-3",
-            ],
-            0,
-        )
-        .await;
-    sleep(Duration::from_secs(10)).await;
-}
-
-async fn kill_random_and_wait_recover(cluster: &Cluster) {
-    // Kill it again
-    for _ in 0..3 {
-        sleep(Duration::from_secs(2)).await;
-        cluster.kill_node(&KillOpts::ALL_FAST).await;
-    }
-    sleep(Duration::from_secs(10)).await;
-}
 
 async fn cancel_stream_jobs(session: &mut Session) -> Result<Vec<u32>> {
     tracing::info!("finding streaming jobs to cancel");

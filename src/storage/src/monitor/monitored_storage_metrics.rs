@@ -127,7 +127,7 @@ impl MonitoredStorageMetrics {
         let opts = histogram_opts!(
             "state_store_iter_item",
             "Total bytes gotten from state store scan(), for calculating read throughput",
-            size_buckets
+            size_buckets.clone(),
         );
         let iter_item =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
@@ -189,14 +189,14 @@ impl MonitoredStorageMetrics {
         let opts = histogram_opts!(
             "state_store_sync_duration",
             "Histogram of time spent on compacting shared buffer to remote storage",
-            time_buckets.clone()
+            time_buckets,
         );
         let sync_duration = register_histogram_with_registry!(opts, registry).unwrap();
 
         let opts = histogram_opts!(
             "state_store_sync_size",
             "Total size of upload to l0 every epoch",
-            time_buckets
+            size_buckets,
         );
         let sync_size = register_histogram_with_registry!(opts, registry).unwrap();
 

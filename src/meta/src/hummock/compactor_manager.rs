@@ -132,7 +132,7 @@ impl CompactorManagerInner {
         use sea_orm::EntityTrait;
         // Retrieve the existing task assignments from metastore.
         let task_assignment: Vec<CompactTaskAssignment> = match env.sql_meta_store() {
-            None => CompactTaskAssignment::list(env.meta_store()).await?,
+            None => CompactTaskAssignment::list(env.meta_store_checked()).await?,
             Some(sql_meta_store) => compaction_task::Entity::find()
                 .all(&sql_meta_store.conn)
                 .await

@@ -1127,24 +1127,6 @@ where
         Ok(())
     }
 
-    // TODO(st1page): maybe we should extract a pub struct to do it
-    /// just specially used by those state table read-only and after the call the data
-    /// in the epoch will be visible
-    pub fn commit_no_data_expected(&mut self, new_epoch: EpochPair) {
-        assert_eq!(self.epoch(), new_epoch.prev);
-        assert!(!self.is_dirty());
-        // Tick the watermark buffer here because state table is expected to be committed once
-        // per epoch.
-        self.watermark_buffer_strategy.tick();
-        self.local_store.seal_current_epoch(
-            new_epoch.curr,
-            SealCurrentEpochOptions {
-                table_watermarks: None,
-                switch_op_consistency_level: None,
-            },
-        );
-    }
-
     /// Write to state store.
     async fn seal_current_epoch(
         &mut self,
