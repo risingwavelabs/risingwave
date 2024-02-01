@@ -61,8 +61,8 @@ pub struct MetaNodeOpts {
 
     /// We will start a http server at this address via `MetricsManager`.
     /// Then the prometheus instance will poll the metrics from this address.
-    #[clap(long, env = "RW_PROMETHEUS_HOST")]
-    pub prometheus_host: Option<String>,
+    #[clap(long, env = "RW_PROMETHEUS_HOST", alias = "prometheus_host")]
+    pub prometheus_listener_addr: Option<String>,
 
     #[clap(long, env = "RW_ETCD_ENDPOINTS", default_value_t = String::from(""))]
     etcd_endpoints: String,
@@ -200,7 +200,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         info!("> version: {} ({})", RW_VERSION, GIT_SHA);
         let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
-        let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
+        let prometheus_addr = opts.prometheus_listener_addr.map(|x| x.parse().unwrap());
         let backend = match config.meta.backend {
             MetaBackend::Etcd => MetaStoreBackend::Etcd {
                 endpoints: opts
