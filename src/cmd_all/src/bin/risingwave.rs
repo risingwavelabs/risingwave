@@ -231,10 +231,10 @@ fn standalone(opts: StandaloneOpts) {
 }
 
 fn single_node(opts: SingleNodeOpts) {
-    let opts = risingwave_cmd_all::parse_single_node_opt_args(&opts);
+    let opts = risingwave_cmd_all::map_single_node_opts_to_standalone_opts(&opts);
     let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
         .with_target("risingwave_storage", Level::WARN)
         .with_thread_name(true);
     risingwave_rt::init_risingwave_logger(settings);
-    risingwave_rt::main_okk(risingwave_cmd_all::single_node(opts)).unwrap();
+    risingwave_rt::main_okk(risingwave_cmd_all::standalone(opts)).unwrap();
 }
