@@ -101,11 +101,8 @@ pub async fn handle_alter_source_with_sr(
     };
 
     if source.associated_table_id.is_some() {
-        Err(ErrorCode::NotSupported(
-            "alter table with connector with ALTER SOURCE statement".to_string(),
-            "try to use ALTER TABLE instead".to_string(),
-        ))?
-    };
+        bail_not_implemented!("altering source associated with table is not supported yet");
+    }
 
     let StreamSourceInfo {
         format, row_encode, ..
