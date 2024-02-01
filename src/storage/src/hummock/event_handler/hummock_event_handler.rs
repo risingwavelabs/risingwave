@@ -15,14 +15,15 @@
 use std::collections::{BTreeMap, HashMap};
 use std::ops::DerefMut;
 use std::pin::pin;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use arc_swap::ArcSwap;
 use await_tree::InstrumentAwait;
 use itertools::Itertools;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_pb::stream_plan::StreamActor;
 use thiserror_ext::AsReport;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
@@ -53,6 +54,55 @@ use crate::hummock::{
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 use crate::store::SyncResult;
+
+struct ActorTracker {
+    running_actors: HashMap<usize, StreamActor>,
+    next_tracking_id: usize,
+}
+
+pub struct ActorTrackerGuard {
+    tracking_id: usize,
+}
+
+impl Drop for ActorTrackerGuard {
+    fn drop(&mut self) {
+        deregister_running_actor(self.tracking_id);
+    }
+}
+
+static ACTOR_HOOK: LazyLock<Mutex<ActorTracker>> = LazyLock::new(|| {
+    Mutex::new(ActorTracker {
+        next_tracking_id: 0,
+        running_actors: HashMap::new(),
+    })
+});
+
+fn deregister_running_actor(tracking_id: usize) {
+    let actor = ACTOR_HOOK
+        .lock()
+        .running_actors
+        .remove(&tracking_id)
+        .expect("should exist");
+    info!(tracking_id, actor_id = actor.actor_id, "deregister actor");
+}
+
+pub fn register_new_running_actor(actor: StreamActor) -> ActorTrackerGuard {
+    let mut lock = ACTOR_HOOK.lock();
+    lock.next_tracking_id += 1;
+    let tracking_id = lock.next_tracking_id;
+    info!(tracking_id, actor_id = actor.actor_id, "register new actor");
+    lock.running_actors.insert(tracking_id, actor);
+    ActorTrackerGuard { tracking_id }
+}
+
+fn running_actors() -> Vec<StreamActor> {
+    ACTOR_HOOK
+        .lock()
+        .running_actors
+        .values()
+        .cloned()
+        .collect_vec()
+}
 
 #[derive(Clone)]
 pub struct BufferTracker {
@@ -417,11 +467,12 @@ impl HummockEventHandler {
 
         assert!(
             self.local_read_version_mapping.is_empty(),
-            "read version mapping not empty when clear. remaining tables: {:?}",
+            "read version mapping not empty when clear. remaining tables: {:?}, remaining actors: {:?}",
             self.local_read_version_mapping
                 .values()
                 .map(|read_version| read_version.read().table_id())
-                .collect_vec()
+                .collect_vec(),
+            running_actors(),
         );
 
         if let Some(sstable_object_id_manager) = &self.sstable_object_id_manager {

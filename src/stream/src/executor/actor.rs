@@ -27,7 +27,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr_context::expr_context_scope;
 use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::ExprContext;
-use risingwave_pb::stream_plan::PbStreamActor;
+use risingwave_pb::stream_plan::{PbStreamActor, StreamActor};
 use thiserror_ext::AsReport;
 use tokio_stream::StreamExt;
 use tracing::Instrument;
@@ -53,6 +53,8 @@ pub struct ActorContext {
     pub error_suppressor: Arc<Mutex<ErrorSuppressor>>,
 
     pub dispatch_num: usize,
+
+    pub pb: StreamActor,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
@@ -70,6 +72,7 @@ impl ActorContext {
             error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(10))),
             // Set 1 for test to enable sanity check on table
             dispatch_num: 1,
+            pb: StreamActor::default(),
         })
     }
 
@@ -90,6 +93,7 @@ impl ActorContext {
             streaming_metrics,
             error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(unique_user_errors))),
             dispatch_num,
+            pb: stream_actor.clone(),
         })
     }
 

@@ -36,6 +36,7 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamActor, StreamNode};
+use risingwave_storage::hummock::event_handler::hummock_event_handler::register_new_running_actor;
 use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use thiserror_ext::AsReport;
@@ -316,6 +317,7 @@ impl LocalStreamManager {
                 })
                 .try_collect()?
         };
+
         let actors = self.create_actors(actors, env).await?;
         self.core.lock().spawn_actors(
             actors,
@@ -604,6 +606,7 @@ impl LocalStreamManagerCore {
             let handle = {
                 let trace_span = format!("Actor {actor_id}: `{}`", actor_context.mview_definition);
                 let barrier_manager = barrier_manager.clone();
+                let actor_guard = register_new_running_actor(actor.actor_context.pb.clone());
                 let actor = actor.run().map(move |result| {
                     if let Err(err) = result {
                         // TODO: check error type and panic if it's unexpected.
@@ -638,14 +641,24 @@ impl LocalStreamManagerCore {
                             actor_context.store_mem_usage(bytes);
                         },
                     );
-                    self.runtime.spawn(allocation_stated)
+                    self.runtime.spawn(allocation_stated.map(move |output| {
+                        let _actor_guard = actor_guard;
+                        output
+                    }))
                 }
                 #[cfg(not(enable_task_local_alloc))]
                 {
-                    self.runtime.spawn(instrumented)
+                    self.runtime.spawn(instrumented.map(move |output| {
+                        let _actor_guard = actor_guard;
+                        output
+                    }))
                 }
             };
-            self.handles.insert(actor_id, handle);
+            assert!(
+                self.handles.insert(actor_id, handle).is_none(),
+                "duplicate actor id: {}",
+                actor_id
+            );
 
             if streaming_metrics.level >= MetricLevel::Debug {
                 tracing::info!("Tokio metrics are enabled because metrics_level >= Debug");
