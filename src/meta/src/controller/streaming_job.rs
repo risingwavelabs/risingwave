@@ -993,8 +993,6 @@ impl CatalogController {
                 );
 
                 let actor_upstreams = ActorUpstreamActors(actor_upstreams);
-
-                let status = ActorStatus::from(PbActorState::try_from(state).unwrap());
                 let parallel_unit_id = parallel_unit.unwrap().id;
 
                 let splits = actor_splits
@@ -1004,7 +1002,7 @@ impl CatalogController {
                 new_actors.push(actor::ActiveModel {
                     actor_id: Set(actor_id as _),
                     fragment_id: Set(fragment_id as _),
-                    status: Set(status),
+                    status: Set(ActorStatus::Running),
                     splits: Set(splits.map(|splits| PbConnectorSplits { splits }.into())),
                     parallel_unit_id: Set(parallel_unit_id as _),
                     upstream_actor_ids: Set(actor_upstreams),
