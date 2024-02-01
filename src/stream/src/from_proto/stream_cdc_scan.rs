@@ -45,6 +45,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             .collect_vec();
 
         let table_desc: &ExternalTableDesc = node.get_cdc_table_desc()?;
+        let disable_backfill = node.disable_backfill;
 
         let table_schema: Schema = table_desc.columns.iter().map(Into::into).collect();
         assert_eq!(output_indices, (0..table_schema.len()).collect_vec());
@@ -105,6 +106,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             params.executor_stats,
             state_table,
             backfill_chunk_size,
+            disable_backfill,
         )
         .boxed();
 
