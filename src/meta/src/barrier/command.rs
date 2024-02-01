@@ -23,6 +23,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::BarrierKind;
@@ -31,12 +32,11 @@ use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers, FragmentTypeFlag,
-    PauseMutation, ResumeMutation, SourceChangeSplitMutation, StopMutation, ThrottleMutation,
-    UpdateMutation,
+    PauseMutation, ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamActor,
+    ThrottleMutation, UpdateMutation,
 };
-use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
+use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
-use uuid::Uuid;
 
 use super::info::{ActorDesc, CommandActorChanges, InflightActorInfo};
 use super::trace::TracedEpoch;
@@ -76,6 +76,8 @@ pub struct Reschedule {
     /// Whether this fragment is injectable. The injectable means whether the fragment contains
     /// any executors that are able to receive barrier.
     pub injectable: bool,
+
+    pub newly_created_actors: Vec<(StreamActor, PbActorStatus)>,
 }
 
 #[derive(Debug, Clone)]
@@ -478,18 +480,15 @@ impl CommandContext {
                 ),
 
                 Command::RescheduleFragment { reschedules, .. } => {
-                    let MetadataManager::V1(mgr) = &self.barrier_manager_context.metadata_manager
-                    else {
-                        unimplemented!("implement scale functions in v2");
-                    };
+                    let metadata_manager = &self.barrier_manager_context.metadata_manager;
+
                     let mut dispatcher_update = HashMap::new();
                     for reschedule in reschedules.values() {
                         for &(upstream_fragment_id, dispatcher_id) in
                             &reschedule.upstream_fragment_dispatcher_ids
                         {
                             // Find the actors of the upstream fragment.
-                            let upstream_actor_ids = mgr
-                                .fragment_manager
+                            let upstream_actor_ids = metadata_manager
                                 .get_running_actors_of_fragment(upstream_fragment_id)
                                 .await?;
 
@@ -527,8 +526,7 @@ impl CommandContext {
                     for (&fragment_id, reschedule) in reschedules {
                         for &downstream_fragment_id in &reschedule.downstream_fragment_ids {
                             // Find the actors of the downstream fragment.
-                            let downstream_actor_ids = mgr
-                                .fragment_manager
+                            let downstream_actor_ids = metadata_manager
                                 .get_running_actors_of_fragment(downstream_fragment_id)
                                 .await?;
 
@@ -740,27 +738,16 @@ impl CommandContext {
 
     /// Clean up actors in CNs if needed, used by drop, cancel and reschedule commands.
     async fn clean_up(&self, actors: Vec<ActorId>) -> MetaResult<()> {
-        let futures = self.info.node_map.values().map(|node| {
-            let request_id = Uuid::new_v4().to_string();
-            let actor_ids = actors.clone();
-
-            async move {
-                let client = self
-                    .barrier_manager_context
-                    .env
-                    .stream_client_pool()
-                    .get(node)
-                    .await?;
-                let request = DropActorsRequest {
-                    request_id,
-                    actor_ids,
-                };
-                client.drop_actors(request).await
-            }
-        });
-
-        try_join_all(futures).await?;
-        Ok(())
+        self.barrier_manager_context
+            .stream_rpc_manager
+            .drop_actors(
+                &self.info.node_map,
+                self.info
+                    .node_map
+                    .keys()
+                    .map(|worker_id| (*worker_id, actors.clone())),
+            )
+            .await
     }
 
     pub async fn wait_epoch_commit(&self, epoch: HummockEpoch) -> MetaResult<()> {
@@ -968,8 +955,6 @@ impl CommandContext {
                 self.clean_up(removed_actors).await?;
                 self.barrier_manager_context
                     .scale_controller
-                    .as_ref()
-                    .unwrap()
                     .post_apply_reschedule(reschedules, table_parallelism)
                     .await?;
             }

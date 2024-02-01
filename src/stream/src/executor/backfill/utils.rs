@@ -34,9 +34,7 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_connector::error::ConnectorError;
-use risingwave_connector::source::cdc::external::{
-    CdcOffset, ExternalTableReader, ExternalTableReaderImpl,
-};
+use risingwave_connector::source::cdc::external::{CdcOffset, CdcOffsetParseFunc};
 use risingwave_storage::table::{collect_data_chunk_with_builder, KeyedRow};
 use risingwave_storage::StateStore;
 
@@ -310,7 +308,7 @@ pub(crate) fn mark_chunk(
 }
 
 pub(crate) fn mark_cdc_chunk(
-    table_reader: &ExternalTableReaderImpl,
+    offset_parse_func: &CdcOffsetParseFunc,
     chunk: StreamChunk,
     current_pos: &OwnedRow,
     pk_in_output_indices: PkIndicesRef<'_>,
@@ -319,7 +317,7 @@ pub(crate) fn mark_cdc_chunk(
 ) -> StreamExecutorResult<StreamChunk> {
     let chunk = chunk.compact();
     mark_cdc_chunk_inner(
-        table_reader,
+        offset_parse_func,
         chunk,
         current_pos,
         last_cdc_offset,
@@ -343,8 +341,6 @@ pub(crate) fn mark_chunk_ref_by_vnode(
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
     // Use project to avoid allocation.
     for row in data.rows() {
-        // TODO(kwannoel): Is this logic correct for computing vnode?
-        // I will revisit it again when arrangement_backfill is implemented e2e.
         let vnode = VirtualNode::compute_row(row, pk_in_output_indices);
         let v = match backfill_state.get_progress(&vnode)? {
             // We want to just forward the row, if the vnode has finished backfill.
@@ -400,7 +396,7 @@ fn mark_chunk_inner(
 }
 
 fn mark_cdc_chunk_inner(
-    table_reader: &ExternalTableReaderImpl,
+    offset_parse_func: &CdcOffsetParseFunc,
     chunk: StreamChunk,
     current_pos: &OwnedRow,
     last_cdc_offset: Option<CdcOffset>,
@@ -414,7 +410,7 @@ fn mark_cdc_chunk_inner(
     let offset_col_idx = data.dimension() - 1;
     for v in data.rows().map(|row| {
         let offset_datum = row.datum_at(offset_col_idx).unwrap();
-        let event_offset = table_reader.parse_cdc_offset(offset_datum.into_utf8())?;
+        let event_offset = (*offset_parse_func)(offset_datum.into_utf8())?;
         let visible = {
             // filter changelog events with binlog range
             let in_binlog_range = if let Some(binlog_low) = &last_cdc_offset {
@@ -555,10 +551,7 @@ pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
 ) -> StreamExecutorResult<()> {
     let vnodes = table.vnodes().clone();
     if let Some(old_state) = old_state {
-        if old_state[1..] == current_partial_state[1..] {
-            table.commit_no_data_expected(epoch);
-            return Ok(());
-        } else {
+        if old_state[1..] != current_partial_state[1..] {
             vnodes.iter_vnodes_scalar().for_each(|vnode| {
                 let datum = Some(vnode.into());
                 current_partial_state[0] = datum.clone();
@@ -627,13 +620,13 @@ pub(crate) fn get_new_pos(chunk: &StreamChunk, pk_in_output_indices: &[usize]) -
 }
 
 pub(crate) fn get_cdc_chunk_last_offset(
-    table_reader: &ExternalTableReaderImpl,
+    offset_parse_func: &CdcOffsetParseFunc,
     chunk: &StreamChunk,
 ) -> StreamExecutorResult<Option<CdcOffset>> {
     let row = chunk.rows().last().unwrap().1;
     let offset_col = row.iter().last().unwrap();
-    let output = offset_col
-        .map(|scalar| Ok::<_, ConnectorError>(table_reader.parse_cdc_offset(scalar.into_utf8()))?);
+    let output =
+        offset_col.map(|scalar| Ok::<_, ConnectorError>((*offset_parse_func)(scalar.into_utf8()))?);
     output.transpose().map_err(|e| e.into())
 }
 
@@ -727,7 +720,6 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     #[cfg(debug_assertions)] state_len: usize,
     vnodes: impl Iterator<Item = VirtualNode>,
 ) -> StreamExecutorResult<()> {
-    let mut has_progress = false;
     for vnode in vnodes {
         if !backfill_state.need_commit(&vnode) {
             continue;
@@ -762,7 +754,6 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
                 old_row: &encoded_prev_state[..],
                 new_row: &encoded_current_state[..],
             });
-            has_progress = true;
         } else {
             // No existing state, create a new entry.
             #[cfg(debug_assertions)]
@@ -775,15 +766,11 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
             table.write_record(Record::Insert {
                 new_row: &encoded_current_state[..],
             });
-            has_progress = true;
         }
         backfill_state.mark_committed(vnode);
     }
-    if has_progress {
-        table.commit(epoch).await?;
-    } else {
-        table.commit_no_data_expected(epoch);
-    }
+
+    table.commit(epoch).await?;
     Ok(())
 }
 
@@ -807,7 +794,7 @@ pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
         flush_data(table, epoch, old_state, current_state).await?;
         *old_state = Some(current_state.into());
     } else {
-        table.commit_no_data_expected(epoch);
+        table.commit(epoch).await?;
     }
     Ok(())
 }

@@ -820,6 +820,9 @@ impl Binder {
                 ),
                 ("date_trunc", raw_call(ExprType::DateTrunc)),
                 ("date_part", raw_call(ExprType::DatePart)),
+                ("make_date", raw_call(ExprType::MakeDate)),
+                ("make_time", raw_call(ExprType::MakeTime)),
+                ("make_timestamp", raw_call(ExprType::MakeTimestamp)),
                 ("to_date", raw_call(ExprType::CharToDate)),
                 ("make_timestamptz", raw_call(ExprType::MakeTimestamptz)),
                 // string
@@ -873,6 +876,8 @@ impl Binder {
                 ("sha256", raw_call(ExprType::Sha256)),
                 ("sha384", raw_call(ExprType::Sha384)),
                 ("sha512", raw_call(ExprType::Sha512)),
+                ("encrypt", raw_call(ExprType::Encrypt)),
+                ("decrypt", raw_call(ExprType::Decrypt)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
                 ("int8send", raw_call(ExprType::PgwireSend)),

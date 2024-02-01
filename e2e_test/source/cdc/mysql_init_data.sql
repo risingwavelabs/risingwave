@@ -1,4 +1,3 @@
--- USE `my@db`;
 
 INSERT INTO products
 VALUES (default,"scooter","Small 2-wheel scooter"),
