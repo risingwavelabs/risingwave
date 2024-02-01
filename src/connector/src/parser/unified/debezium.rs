@@ -15,6 +15,7 @@
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
+use crate::parser::unified::uncategorized;
 use crate::parser::TransactionControl;
 use crate::source::{ConnectorProperties, SourceColumnDesc};
 
@@ -163,10 +164,9 @@ pub struct MongoProjection<A> {
 }
 
 pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> AccessResult {
-    let id_field = bson_doc.get("_id").ok_or_else(|| AccessError::Undefined {
-        name: "_id".to_owned(),
-        path: "Debezuim Mongo".to_owned(),
-    })?;
+    let id_field = bson_doc
+        .get("_id")
+        .ok_or_else(|| uncategorized!("Debezium Mongo requires document has a `_id` field"))?;
 
     let type_error = || AccessError::TypeError {
         expected: id_type.to_string(),

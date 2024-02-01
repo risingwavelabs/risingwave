@@ -458,11 +458,8 @@ pub fn from_protobuf_value(
             }
         }
         Value::List(values) => {
-            let data_type = protobuf_type_mapping(field_desc, &mut vec![]).map_err(|e| {
-                AccessError::Uncategorized {
-                    message: e.to_report_string(),
-                }
-            })?;
+            let data_type = protobuf_type_mapping(field_desc, &mut vec![])
+                .map_err(|e| uncategorized!("{}", e.to_report_string()))?;
             let mut builder = data_type.as_list().create_array_builder(values.len());
             for value in values {
                 builder.append(from_protobuf_value(field_desc, value, descriptor_pool)?);
