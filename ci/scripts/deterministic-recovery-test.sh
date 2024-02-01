@@ -9,12 +9,14 @@ echo "--- Download artifacts"
 download-and-decompress-artifact risingwave_simulation .
 chmod +x ./risingwave_simulation
 
-export RUST_LOG="risingwave_meta::barrier::recovery=debug,\
+export RUST_LOG="info,\
+risingwave_meta::barrier::recovery=debug,\
 risingwave_meta::manager::catalog=debug,\
 risingwave_meta::rpc::ddl_controller=debug,\
 risingwave_meta::barrier::mod=debug,\
 risingwave_simulation=debug,\
-risingwave_stream::executor::backfill=trace"
+risingwave_stream::executor::backfill=trace,\
+risingwave_stream::task::stream_manager=debug"
 
 # Extra logs you can enable if the existing trace does not give enough info.
 #risingwave_stream::executor::backfill=trace,
