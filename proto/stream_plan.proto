@@ -256,8 +256,6 @@ message FilterNode {
 message CdcFilterNode {
   expr.ExprNode search_condition = 1;
   uint32 upstream_source_id = 2;
-  reserved "upstream_column_ids";
-  reserved 3;
 }
 
 // A materialized view is regarded as a table.
