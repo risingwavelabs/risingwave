@@ -84,6 +84,7 @@
         <datastax.version>4.15.0</datastax.version>
         <flink.version>1.18.0</flink.version>
         <testcontainers.version>1.17.6</testcontainers.version>
+        <maven-spotless-plugin.version>2.41.1</maven-spotless-plugin.version>
     </properties>
 
     <dependencyManagement>
@@ -491,6 +492,19 @@
                     <serverId>ossrh</serverId>
                     <nexusUrl>https://s01.oss.sonatype.org/</nexusUrl>
                     <autoReleaseAfterClose>true</autoReleaseAfterClose>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>${maven-spotless-plugin.version}</version>
+                <configuration>
+                    <java>
+                        <googleJavaFormat>
+                            <version>1.19.1</version>
+                            <style>GOOGLE</style>
+                        </googleJavaFormat>
+                    </java>
                 </configuration>
             </plugin>
         </plugins>
