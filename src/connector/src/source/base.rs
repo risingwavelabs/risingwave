@@ -172,6 +172,7 @@ impl SourceContext {
         source_ctrl_opts: SourceCtrlOpts,
         connector_client: Option<ConnectorClient>,
         connector_props: ConnectorProperties,
+        source_name: String,
     ) -> Self {
         Self {
             connector_client,
@@ -179,6 +180,7 @@ impl SourceContext {
                 actor_id,
                 source_id: table_id,
                 fragment_id,
+                source_name,
             },
             metrics,
             source_ctrl_opts,
@@ -196,6 +198,7 @@ impl SourceContext {
         connector_client: Option<ConnectorClient>,
         error_suppressor: Arc<Mutex<ErrorSuppressor>>,
         connector_props: ConnectorProperties,
+        source_name: String,
     ) -> Self {
         let mut ctx = Self::new(
             actor_id,
@@ -205,6 +208,7 @@ impl SourceContext {
             source_ctrl_opts,
             connector_client,
             connector_props,
+            source_name,
         );
         ctx.error_suppressor = Some(error_suppressor);
         ctx
@@ -235,12 +239,13 @@ impl SourceContext {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SourceInfo {
     pub actor_id: u32,
     pub source_id: TableId,
     // There should be a 1-1 mapping between `source_id` & `fragment_id`
     pub fragment_id: u32,
+    pub source_name: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]

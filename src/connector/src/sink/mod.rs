@@ -270,6 +270,11 @@ pub struct SinkWriterParam {
     pub vnode_bitmap: Option<Bitmap>,
     pub meta_client: Option<SinkMetaClient>,
     pub sink_metrics: SinkMetrics,
+    // The val has two effect:
+    // 1. Indicates that the sink will accpect the data chunk with extra partition value column.
+    // 2. The index of the extra partition value column.
+    // More detail of partition value column, see `PartitionComputeInfo`
+    pub extra_partition_col_idx: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -303,6 +308,7 @@ impl SinkWriterParam {
             vnode_bitmap: Default::default(),
             meta_client: Default::default(),
             sink_metrics: SinkMetrics::for_test(),
+            extra_partition_col_idx: Default::default(),
         }
     }
 }

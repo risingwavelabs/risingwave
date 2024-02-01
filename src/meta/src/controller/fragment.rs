@@ -576,6 +576,23 @@ impl CatalogController {
         Ok(upstream_job_counts)
     }
 
+    pub async fn get_fragment_job_id(
+        &self,
+        fragment_ids: Vec<FragmentId>,
+    ) -> MetaResult<Vec<ObjectId>> {
+        let inner = self.inner.read().await;
+
+        let object_ids: Vec<ObjectId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::JobId)
+            .filter(fragment::Column::FragmentId.is_in(fragment_ids))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(object_ids)
+    }
+
     pub async fn get_job_fragments_by_id(&self, job_id: ObjectId) -> MetaResult<PbTableFragments> {
         let inner = self.inner.read().await;
         let fragment_actors = Fragment::find()
