@@ -824,9 +824,9 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
 ///
 /// For `current_pos` and `old_pos` are just pk of upstream.
 /// They should be strictly increasing.
-pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
+pub(crate) async fn persist_state<S: StateStore>(
     epoch: EpochPair,
-    table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
+    table: &mut StateTableInner<S>,
     is_finished: bool,
     current_pos: &Option<OwnedRow>,
     row_count: u64,
