@@ -32,20 +32,15 @@ use crate::executor::{DataChunk, Executor};
 ///
 /// ```
 /// use futures_async_stream::for_await;
+/// use risingwave_batch::executor::{Executor, FileSelector, IcebergScanExecutor};
 /// use risingwave_common::catalog::{Field, Schema};
 /// use risingwave_common::types::DataType;
 /// use risingwave_connector::sink::iceberg::IcebergConfig;
 ///
-/// use crate::executor::iceberg_scan::{FileSelector, IcebergScanExecutor};
-/// use crate::executor::Executor;
-///
 /// #[tokio::test]
 /// async fn test_iceberg_scan() {
-///     let iceberg_scan_executor = IcebergScanExecutor {
-///         database_name: "demo_db".into(),
-///         table_name: "demo_table".into(),
-///         file_selector: FileSelector::select_all(),
-///         iceberg_config: IcebergConfig {
+///     let iceberg_scan_executor = IcebergScanExecutor::new(
+///         IcebergConfig {
 ///             database_name: "demo_db".into(),
 ///             table_name: "demo_table".into(),
 ///             catalog_type: Some("storage".into()),
@@ -56,15 +51,16 @@ use crate::executor::{DataChunk, Executor};
 ///             region: Some("us-east-1".into()),
 ///             ..Default::default()
 ///         },
-///         snapshot_id: None,
-///         batch_size: 1024,
-///         schema: Schema::new(vec![
+///         None,
+///         FileSelector::select_all(),
+///         1024,
+///         Schema::new(vec![
 ///             Field::with_name(DataType::Int64, "seq_id"),
 ///             Field::with_name(DataType::Int64, "user_id"),
 ///             Field::with_name(DataType::Varchar, "user_name"),
 ///         ]),
-///         identity: "iceberg_scan".into(),
-///     };
+///         "iceberg_scan".into(),
+///     );
 ///
 ///     let stream = Box::new(iceberg_scan_executor).execute();
 ///     #[for_await]
@@ -76,8 +72,6 @@ use crate::executor::{DataChunk, Executor};
 /// ```
 
 pub struct IcebergScanExecutor {
-    database_name: String,
-    table_name: String,
     iceberg_config: IcebergConfig,
     snapshot_id: Option<i64>,
     file_selector: FileSelector,
@@ -102,6 +96,24 @@ impl Executor for IcebergScanExecutor {
 }
 
 impl IcebergScanExecutor {
+    pub fn new(
+        iceberg_config: IcebergConfig,
+        snapshot_id: Option<i64>,
+        file_selector: FileSelector,
+        batch_size: usize,
+        schema: Schema,
+        identity: String,
+    ) -> Self {
+        Self {
+            iceberg_config,
+            snapshot_id,
+            file_selector,
+            batch_size,
+            schema,
+            identity,
+        }
+    }
+
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let table = self
@@ -160,11 +172,11 @@ pub enum FileSelector {
 }
 
 impl FileSelector {
-    fn select_all() -> Self {
+    pub fn select_all() -> Self {
         FileSelector::Hash(0, 1)
     }
 
-    fn select(&self, path: &str) -> bool {
+    pub fn select(&self, path: &str) -> bool {
         match self {
             FileSelector::FileList(paths) => paths.contains(&path.to_string()),
             FileSelector::Hash(task_id, num_tasks) => {
@@ -174,7 +186,7 @@ impl FileSelector {
         }
     }
 
-    fn hash_str_to_usize(s: &str) -> usize {
+    pub fn hash_str_to_usize(s: &str) -> usize {
         let mut hasher = DefaultHasher::new();
         s.hash(&mut hasher);
         hasher.finish() as usize

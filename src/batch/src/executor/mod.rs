@@ -53,6 +53,7 @@ pub use generic_exchange::*;
 pub use group_top_n::*;
 pub use hash_agg::*;
 pub use hop_window::*;
+pub use iceberg_scan::*;
 pub use insert::*;
 pub use join::*;
 pub use limit::*;
