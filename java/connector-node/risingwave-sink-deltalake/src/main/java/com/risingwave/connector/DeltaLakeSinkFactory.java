@@ -32,59 +32,56 @@ import java.util.Map;
 import org.apache.hadoop.conf.Configuration;
 
 public class DeltaLakeSinkFactory implements SinkFactory {
-    @Override
-    public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
-        ObjectMapper mapper = new ObjectMapper();
-        DeltaLakeSinkConfig config =
-                mapper.convertValue(tableProperties, DeltaLakeSinkConfig.class);
+  @Override
+  public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
+    ObjectMapper mapper = new ObjectMapper();
+    DeltaLakeSinkConfig config = mapper.convertValue(tableProperties, DeltaLakeSinkConfig.class);
 
-        Configuration hadoopConf = getConfig(config.getLocation(), config);
+    Configuration hadoopConf = getConfig(config.getLocation(), config);
 
-        DeltaLog log = DeltaLog.forTable(hadoopConf, config.getLocation());
-        StructType schema = log.snapshot().getMetadata().getSchema();
-        DeltaLakeSinkUtil.checkSchema(tableSchema, schema);
-        return new SinkWriterV1.Adapter(new DeltaLakeSink(tableSchema, hadoopConf, log));
+    DeltaLog log = DeltaLog.forTable(hadoopConf, config.getLocation());
+    StructType schema = log.snapshot().getMetadata().getSchema();
+    DeltaLakeSinkUtil.checkSchema(tableSchema, schema);
+    return new SinkWriterV1.Adapter(new DeltaLakeSink(tableSchema, hadoopConf, log));
+  }
+
+  @Override
+  public void validate(
+      TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
+    if (sinkType != SinkType.SINK_TYPE_APPEND_ONLY
+        && sinkType != SinkType.SINK_TYPE_FORCE_APPEND_ONLY) {
+      throw Status.INVALID_ARGUMENT
+          .withDescription("only append-only delta lake sink is supported")
+          .asRuntimeException();
     }
 
-    @Override
-    public void validate(
-            TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
-        if (sinkType != SinkType.SINK_TYPE_APPEND_ONLY
-                && sinkType != SinkType.SINK_TYPE_FORCE_APPEND_ONLY) {
-            throw Status.INVALID_ARGUMENT
-                    .withDescription("only append-only delta lake sink is supported")
-                    .asRuntimeException();
-        }
+    ObjectMapper mapper = new ObjectMapper();
+    mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
+    DeltaLakeSinkConfig config = mapper.convertValue(tableProperties, DeltaLakeSinkConfig.class);
 
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
-        DeltaLakeSinkConfig config =
-                mapper.convertValue(tableProperties, DeltaLakeSinkConfig.class);
+    String location = config.getLocation();
 
-        String location = config.getLocation();
+    Configuration hadoopConf = getConfig(config.getLocation(), config);
 
-        Configuration hadoopConf = getConfig(config.getLocation(), config);
+    DeltaLog log = DeltaLog.forTable(hadoopConf, location);
+    StructType schema = log.snapshot().getMetadata().getSchema();
+    DeltaLakeSinkUtil.checkSchema(tableSchema, schema);
+    DeltaLakeSinkUtil.convertSchema(log, tableSchema);
+  }
 
-        DeltaLog log = DeltaLog.forTable(hadoopConf, location);
-        StructType schema = log.snapshot().getMetadata().getSchema();
-        DeltaLakeSinkUtil.checkSchema(tableSchema, schema);
-        DeltaLakeSinkUtil.convertSchema(log, tableSchema);
+  private Configuration getConfig(String location, DeltaLakeSinkConfig config) {
+    String scheme = UrlParser.parseLocationScheme(location);
+    switch (scheme) {
+      case "file":
+        return new Configuration();
+      case "s3":
+      case "s3a":
+        return S3Utils.getHadoopConf(config);
+      default:
+        throw UNIMPLEMENTED
+            .withDescription(
+                String.format("unsupported deltalake sink location scheme: %s", scheme))
+            .asRuntimeException();
     }
-
-    private Configuration getConfig(String location, DeltaLakeSinkConfig config) {
-        String scheme = UrlParser.parseLocationScheme(location);
-        switch (scheme) {
-            case "file":
-                return new Configuration();
-            case "s3":
-            case "s3a":
-                return S3Utils.getHadoopConf(config);
-            default:
-                throw UNIMPLEMENTED
-                        .withDescription(
-                                String.format(
-                                        "unsupported deltalake sink location scheme: %s", scheme))
-                        .asRuntimeException();
-        }
-    }
+  }
 }

@@ -23,32 +23,30 @@ import com.risingwave.proto.ConnectorServiceProto;
 import java.util.Optional;
 
 public class SinkUtils {
-    public static String getConnectorName(ConnectorServiceProto.SinkParam sinkParam) {
-        return Optional.ofNullable(sinkParam.getPropertiesMap().get("connector"))
-                .orElseThrow(
-                        () -> {
-                            return INVALID_ARGUMENT
-                                    .withDescription("connector not specified prop map")
-                                    .asRuntimeException();
-                        });
-    }
+  public static String getConnectorName(ConnectorServiceProto.SinkParam sinkParam) {
+    return Optional.ofNullable(sinkParam.getPropertiesMap().get("connector"))
+        .orElseThrow(
+            () -> {
+              return INVALID_ARGUMENT
+                  .withDescription("connector not specified prop map")
+                  .asRuntimeException();
+            });
+  }
 
-    public static SinkFactory getSinkFactory(String sinkName) {
-        switch (sinkName) {
-            case "file":
-                return new FileSinkFactory();
-            case "jdbc":
-                return new JDBCSinkFactory();
-            case "elasticsearch":
-                return new EsSinkFactory();
-            case "cassandra":
-                return new CassandraFactory();
-            case "http":
-                return new FlinkDynamicAdapterFactory(new HttpFlinkMockSinkFactory());
-            default:
-                throw UNIMPLEMENTED
-                        .withDescription("unknown sink type: " + sinkName)
-                        .asRuntimeException();
-        }
+  public static SinkFactory getSinkFactory(String sinkName) {
+    switch (sinkName) {
+      case "file":
+        return new FileSinkFactory();
+      case "jdbc":
+        return new JDBCSinkFactory();
+      case "elasticsearch":
+        return new EsSinkFactory();
+      case "cassandra":
+        return new CassandraFactory();
+      case "http":
+        return new FlinkDynamicAdapterFactory(new HttpFlinkMockSinkFactory());
+      default:
+        throw UNIMPLEMENTED.withDescription("unknown sink type: " + sinkName).asRuntimeException();
     }
+  }
 }

@@ -17,13 +17,13 @@ package com.risingwave.connector.api.sink;
 import com.risingwave.connector.api.TableSchema;
 
 public abstract class SinkWriterBase implements SinkWriterV1 {
-    TableSchema tableSchema;
+  TableSchema tableSchema;
 
-    public SinkWriterBase(TableSchema tableSchema) {
-        this.tableSchema = tableSchema;
-    }
+  public SinkWriterBase(TableSchema tableSchema) {
+    this.tableSchema = tableSchema;
+  }
 
-    public TableSchema getTableSchema() {
-        return tableSchema;
-    }
+  public TableSchema getTableSchema() {
+    return tableSchema;
+  }
 }

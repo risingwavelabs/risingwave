@@ -15,11 +15,11 @@
 package com.risingwave.java.binding;
 
 public class KeyedRow extends BaseRow {
-    public KeyedRow(long pointer) {
-        super(pointer);
-    }
+  public KeyedRow(long pointer) {
+    super(pointer);
+  }
 
-    public byte[] getKey() {
-        return Binding.iteratorGetKey(pointer);
-    }
+  public byte[] getKey() {
+    return Binding.iteratorGetKey(pointer);
+  }
 }

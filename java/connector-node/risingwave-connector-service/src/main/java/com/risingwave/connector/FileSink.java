@@ -30,83 +30,78 @@ import java.util.UUID;
 import java.util.stream.IntStream;
 
 public class FileSink extends SinkWriterBase {
-    private final FileWriter sinkWriter;
+  private final FileWriter sinkWriter;
 
-    private FileSinkConfig config;
+  private FileSinkConfig config;
 
-    private boolean closed = false;
+  private boolean closed = false;
 
-    public FileSink(FileSinkConfig config, TableSchema tableSchema) {
-        super(tableSchema);
+  public FileSink(FileSinkConfig config, TableSchema tableSchema) {
+    super(tableSchema);
 
-        String sinkPath = config.getSinkPath();
-        try {
-            new File(sinkPath).mkdirs();
-            Path path = Paths.get(sinkPath, UUID.randomUUID() + ".dat");
-            if (path.toFile().createNewFile()) {
-                sinkWriter = new FileWriter(path.toFile());
-            } else {
-                throw INTERNAL.withDescription("failed to create file: " + path)
-                        .asRuntimeException();
-            }
-            config.setSinkPath(path.toString());
-        } catch (IOException e) {
+    String sinkPath = config.getSinkPath();
+    try {
+      new File(sinkPath).mkdirs();
+      Path path = Paths.get(sinkPath, UUID.randomUUID() + ".dat");
+      if (path.toFile().createNewFile()) {
+        sinkWriter = new FileWriter(path.toFile());
+      } else {
+        throw INTERNAL.withDescription("failed to create file: " + path).asRuntimeException();
+      }
+      config.setSinkPath(path.toString());
+    } catch (IOException e) {
+      throw INTERNAL.withCause(e).asRuntimeException();
+    }
+
+    this.config = config;
+  }
+
+  @Override
+  public void write(Iterator<SinkRow> rows) {
+    while (rows.hasNext()) {
+      SinkRow row = rows.next();
+      switch (row.getOp()) {
+        case INSERT:
+          String buf =
+              new Gson().toJson(IntStream.range(0, row.size()).mapToObj(row::get).toArray());
+          try {
+            sinkWriter.write(buf + System.lineSeparator());
+          } catch (IOException e) {
             throw INTERNAL.withCause(e).asRuntimeException();
-        }
-
-        this.config = config;
+          }
+          break;
+        default:
+          throw UNIMPLEMENTED
+              .withDescription("unsupported operation: " + row.getOp())
+              .asRuntimeException();
+      }
     }
+  }
 
-    @Override
-    public void write(Iterator<SinkRow> rows) {
-        while (rows.hasNext()) {
-            SinkRow row = rows.next();
-            switch (row.getOp()) {
-                case INSERT:
-                    String buf =
-                            new Gson()
-                                    .toJson(
-                                            IntStream.range(0, row.size())
-                                                    .mapToObj(row::get)
-                                                    .toArray());
-                    try {
-                        sinkWriter.write(buf + System.lineSeparator());
-                    } catch (IOException e) {
-                        throw INTERNAL.withCause(e).asRuntimeException();
-                    }
-                    break;
-                default:
-                    throw UNIMPLEMENTED
-                            .withDescription("unsupported operation: " + row.getOp())
-                            .asRuntimeException();
-            }
-        }
+  @Override
+  public void sync() {
+    try {
+      sinkWriter.flush();
+    } catch (IOException e) {
+      throw INTERNAL.withCause(e).asRuntimeException();
     }
+  }
 
-    @Override
-    public void sync() {
-        try {
-            sinkWriter.flush();
-        } catch (IOException e) {
-            throw INTERNAL.withCause(e).asRuntimeException();
-        }
+  @Override
+  public void drop() {
+    try {
+      sinkWriter.close();
+      closed = true;
+    } catch (IOException e) {
+      throw INTERNAL.withCause(e).asRuntimeException();
     }
+  }
 
-    @Override
-    public void drop() {
-        try {
-            sinkWriter.close();
-            closed = true;
-        } catch (IOException e) {
-            throw INTERNAL.withCause(e).asRuntimeException();
-        }
-    }
+  public String getSinkPath() {
+    return config.getSinkPath();
+  }
 
-    public String getSinkPath() {
-        return config.getSinkPath();
-    }
-
-    public boolean isClosed() {
-        return closed;
-    }
+  public boolean isClosed() {
+    return closed;
+  }
 }

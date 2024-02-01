@@ -17,11 +17,11 @@ package com.risingwave.connector.api.source;
 import java.util.Properties;
 
 public interface SourceConfig {
-    long getId();
+  long getId();
 
-    String getSourceName();
+  String getSourceName();
 
-    SourceTypeE getSourceType();
+  SourceTypeE getSourceType();
 
-    Properties getProperties();
+  Properties getProperties();
 }

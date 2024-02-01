@@ -32,8 +32,8 @@ import org.apache.kafka.connect.json.JsonConverter;
  * </pre>
  */
 public class DbzJsonConverter extends JsonConverter {
-    @Override
-    public ObjectNode asJsonSchema(Schema schema) {
-        return null;
-    }
+  @Override
+  public ObjectNode asJsonSchema(Schema schema) {
+    return null;
+  }
 }

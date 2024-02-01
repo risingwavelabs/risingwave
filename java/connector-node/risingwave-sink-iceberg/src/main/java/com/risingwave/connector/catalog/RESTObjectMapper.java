@@ -25,26 +25,25 @@ import com.fasterxml.jackson.databind.PropertyNamingStrategy;
 import org.apache.iceberg.rest.RESTSerializers;
 
 class RESTObjectMapper {
-    private static final JsonFactory FACTORY = new JsonFactory();
-    private static final ObjectMapper MAPPER = new ObjectMapper(FACTORY);
-    private static volatile boolean isInitialized = false;
+  private static final JsonFactory FACTORY = new JsonFactory();
+  private static final ObjectMapper MAPPER = new ObjectMapper(FACTORY);
+  private static volatile boolean isInitialized = false;
 
-    private RESTObjectMapper() {}
+  private RESTObjectMapper() {}
 
-    static ObjectMapper mapper() {
+  static ObjectMapper mapper() {
+    if (!isInitialized) {
+      synchronized (RESTObjectMapper.class) {
         if (!isInitialized) {
-            synchronized (RESTObjectMapper.class) {
-                if (!isInitialized) {
-                    MAPPER.setVisibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY);
-                    MAPPER.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-                    MAPPER.setPropertyNamingStrategy(
-                            new PropertyNamingStrategy.KebabCaseStrategy());
-                    RESTSerializers.registerAll(MAPPER);
-                    isInitialized = true;
-                }
-            }
+          MAPPER.setVisibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY);
+          MAPPER.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+          MAPPER.setPropertyNamingStrategy(new PropertyNamingStrategy.KebabCaseStrategy());
+          RESTSerializers.registerAll(MAPPER);
+          isInitialized = true;
         }
-
-        return MAPPER;
+      }
     }
+
+    return MAPPER;
+  }
 }

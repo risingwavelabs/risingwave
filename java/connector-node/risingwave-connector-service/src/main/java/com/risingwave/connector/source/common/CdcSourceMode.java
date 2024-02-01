@@ -15,8 +15,8 @@
 package com.risingwave.connector.source.common;
 
 public enum CdcSourceMode {
-    // The source is dedicated to a single CDC table
-    SINGLE_MODE,
-    // The source is sharing by multiple CDC tables
-    SHARING_MODE,
+  // The source is dedicated to a single CDC table
+  SINGLE_MODE,
+  // The source is sharing by multiple CDC tables
+  SHARING_MODE,
 }

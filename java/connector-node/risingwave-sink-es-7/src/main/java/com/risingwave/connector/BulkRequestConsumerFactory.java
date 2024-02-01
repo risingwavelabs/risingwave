@@ -26,4 +26,4 @@ import org.elasticsearch.action.bulk.BulkResponse;
  * across different Elasticsearch versions.
  */
 interface BulkRequestConsumerFactory
-        extends BiConsumer<BulkRequest, ActionListener<BulkResponse>> {}
+    extends BiConsumer<BulkRequest, ActionListener<BulkResponse>> {}

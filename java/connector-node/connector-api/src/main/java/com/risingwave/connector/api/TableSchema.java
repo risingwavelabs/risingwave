@@ -26,87 +26,87 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 public class TableSchema {
-    private final List<String> columnNames;
-    private final Map<String, TypeName> columns;
-    private final Map<String, Integer> columnIndices;
-    private List<ColumnDesc> columnDescs;
+  private final List<String> columnNames;
+  private final Map<String, TypeName> columns;
+  private final Map<String, Integer> columnIndices;
+  private List<ColumnDesc> columnDescs;
 
-    private final List<String> primaryKeys;
+  private final List<String> primaryKeys;
 
-    public TableSchema(
-            List<String> columnNames, List<Data.DataType> dataTypes, List<String> primaryKeys) {
-        this.columnNames = columnNames;
-        this.primaryKeys = primaryKeys;
-        this.columns = new HashMap<>();
-        this.columnIndices = new HashMap<>();
-        this.columnDescs = new ArrayList<>();
-        for (int i = 0; i < columnNames.size(); i++) {
-            columns.put(columnNames.get(i), dataTypes.get(i).getTypeName());
-            columnIndices.put(columnNames.get(i), i);
-            columnDescs.add(new ColumnDesc(columnNames.get(i), dataTypes.get(i)));
-        }
+  public TableSchema(
+      List<String> columnNames, List<Data.DataType> dataTypes, List<String> primaryKeys) {
+    this.columnNames = columnNames;
+    this.primaryKeys = primaryKeys;
+    this.columns = new HashMap<>();
+    this.columnIndices = new HashMap<>();
+    this.columnDescs = new ArrayList<>();
+    for (int i = 0; i < columnNames.size(); i++) {
+      columns.put(columnNames.get(i), dataTypes.get(i).getTypeName());
+      columnIndices.put(columnNames.get(i), i);
+      columnDescs.add(new ColumnDesc(columnNames.get(i), dataTypes.get(i)));
     }
+  }
 
-    public int getNumColumns() {
-        return columns.size();
-    }
+  public int getNumColumns() {
+    return columns.size();
+  }
 
-    public int getColumnIndex(String columnName) {
-        return columnIndices.get(columnName);
-    }
+  public int getColumnIndex(String columnName) {
+    return columnIndices.get(columnName);
+  }
 
-    public TypeName getColumnType(String columnName) {
-        return columns.get(columnName);
-    }
+  public TypeName getColumnType(String columnName) {
+    return columns.get(columnName);
+  }
 
-    public ColumnDesc getColumnDesc(int index) {
-        return columnDescs.get(index);
-    }
+  public ColumnDesc getColumnDesc(int index) {
+    return columnDescs.get(index);
+  }
 
-    public Map<String, TypeName> getColumnTypes() {
-        return new HashMap<>(columns);
-    }
+  public Map<String, TypeName> getColumnTypes() {
+    return new HashMap<>(columns);
+  }
 
-    public String[] getColumnNames() {
-        return columnNames.toArray(new String[0]);
-    }
+  public String[] getColumnNames() {
+    return columnNames.toArray(new String[0]);
+  }
 
-    public List<ColumnDesc> getColumnDescs() {
-        return columnDescs;
-    }
+  public List<ColumnDesc> getColumnDescs() {
+    return columnDescs;
+  }
 
-    public Object getFromRow(String columnName, SinkRow row) {
-        return row.get(columnIndices.get(columnName));
-    }
+  public Object getFromRow(String columnName, SinkRow row) {
+    return row.get(columnIndices.get(columnName));
+  }
 
-    public static TableSchema fromProto(ConnectorServiceProto.TableSchema tableSchema) {
-        return new TableSchema(
-                tableSchema.getColumnsList().stream()
-                        .map(PlanCommon.ColumnDesc::getName)
-                        .collect(Collectors.toList()),
-                tableSchema.getColumnsList().stream()
-                        .map(PlanCommon.ColumnDesc::getColumnType)
-                        .collect(Collectors.toList()),
-                tableSchema.getPkIndicesList().stream()
-                        .map(i -> tableSchema.getColumns(i).getName())
-                        .collect(Collectors.toList()));
-    }
+  public static TableSchema fromProto(ConnectorServiceProto.TableSchema tableSchema) {
+    return new TableSchema(
+        tableSchema.getColumnsList().stream()
+            .map(PlanCommon.ColumnDesc::getName)
+            .collect(Collectors.toList()),
+        tableSchema.getColumnsList().stream()
+            .map(PlanCommon.ColumnDesc::getColumnType)
+            .collect(Collectors.toList()),
+        tableSchema.getPkIndicesList().stream()
+            .map(i -> tableSchema.getColumns(i).getName())
+            .collect(Collectors.toList()));
+  }
 
-    public List<String> getPrimaryKeys() {
-        return primaryKeys;
-    }
+  public List<String> getPrimaryKeys() {
+    return primaryKeys;
+  }
 
-    @Override
-    public String toString() {
-        return "TableSchema{"
-                + "columnNames="
-                + columnNames
-                + ", columns="
-                + columns
-                + ", columnIndices="
-                + columnIndices
-                + ", primaryKeys="
-                + primaryKeys
-                + '}';
-    }
+  @Override
+  public String toString() {
+    return "TableSchema{"
+        + "columnNames="
+        + columnNames
+        + ", columns="
+        + columns
+        + ", columnIndices="
+        + columnIndices
+        + ", primaryKeys="
+        + primaryKeys
+        + '}';
+  }
 }

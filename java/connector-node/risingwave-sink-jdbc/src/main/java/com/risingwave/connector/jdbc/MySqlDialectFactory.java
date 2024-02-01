@@ -16,8 +16,8 @@ package com.risingwave.connector.jdbc;
 
 public class MySqlDialectFactory implements JdbcDialectFactory {
 
-    @Override
-    public JdbcDialect create(int[] columnSqlTypes) {
-        return new MySqlDialect();
-    }
+  @Override
+  public JdbcDialect create(int[] columnSqlTypes) {
+    return new MySqlDialect();
+  }
 }

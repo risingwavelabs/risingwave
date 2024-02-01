@@ -29,87 +29,85 @@ import org.apache.flink.util.UserCodeClassLoader;
  * Method is implemented in `SinkWriterContextV2`.
  */
 public class SinkWriterContext implements org.apache.flink.api.connector.sink.Sink.InitContext {
-    static class ProcessingTimeCallbackAdapter
-            implements ProcessingTimeService.ProcessingTimeCallback {
+  static class ProcessingTimeCallbackAdapter
+      implements ProcessingTimeService.ProcessingTimeCallback {
 
-        Sink.ProcessingTimeService.ProcessingTimeCallback processingTimerCallback;
+    Sink.ProcessingTimeService.ProcessingTimeCallback processingTimerCallback;
 
-        public ProcessingTimeCallbackAdapter(
-                Sink.ProcessingTimeService.ProcessingTimeCallback processingTimerCallback) {
-            this.processingTimerCallback = processingTimerCallback;
-        }
-
-        @Override
-        public void onProcessingTime(long time) throws IOException, InterruptedException {
-            processingTimerCallback.onProcessingTime(time);
-        }
-    }
-
-    /**
-     * Timing task wrapper, responsible for converting `ProcessingTimeService` in sink v2 to
-     * `ProcessingTimeService` in sink v1
-     */
-    static class ProcessingTimeServiceAdapter implements Sink.ProcessingTimeService {
-
-        org.apache.flink.api.common.operators.ProcessingTimeService processingTimeService;
-
-        public ProcessingTimeServiceAdapter(
-                org.apache.flink.api.common.operators.ProcessingTimeService processingTimeService) {
-            this.processingTimeService = processingTimeService;
-        }
-
-        @Override
-        public long getCurrentProcessingTime() {
-            return processingTimeService.getCurrentProcessingTime();
-        }
-
-        @Override
-        public void registerProcessingTimer(
-                long time, ProcessingTimeCallback processingTimerCallback) {
-            processingTimeService.registerTimer(
-                    time, new ProcessingTimeCallbackAdapter(processingTimerCallback));
-        }
-    }
-
-    SinkWriterContextV2 sinkWriterContextV2;
-
-    public SinkWriterContext() {
-        sinkWriterContextV2 = new SinkWriterContextV2();
+    public ProcessingTimeCallbackAdapter(
+        Sink.ProcessingTimeService.ProcessingTimeCallback processingTimerCallback) {
+      this.processingTimerCallback = processingTimerCallback;
     }
 
     @Override
-    public UserCodeClassLoader getUserCodeClassLoader() {
-        return sinkWriterContextV2.getUserCodeClassLoader();
+    public void onProcessingTime(long time) throws IOException, InterruptedException {
+      processingTimerCallback.onProcessingTime(time);
+    }
+  }
+
+  /**
+   * Timing task wrapper, responsible for converting `ProcessingTimeService` in sink v2 to
+   * `ProcessingTimeService` in sink v1
+   */
+  static class ProcessingTimeServiceAdapter implements Sink.ProcessingTimeService {
+
+    org.apache.flink.api.common.operators.ProcessingTimeService processingTimeService;
+
+    public ProcessingTimeServiceAdapter(
+        org.apache.flink.api.common.operators.ProcessingTimeService processingTimeService) {
+      this.processingTimeService = processingTimeService;
     }
 
     @Override
-    public MailboxExecutor getMailboxExecutor() {
-        return sinkWriterContextV2.getMailboxExecutor();
+    public long getCurrentProcessingTime() {
+      return processingTimeService.getCurrentProcessingTime();
     }
 
     @Override
-    public org.apache.flink.api.connector.sink.Sink.ProcessingTimeService
-            getProcessingTimeService() {
-        return new ProcessingTimeServiceAdapter(sinkWriterContextV2.getProcessingTimeService());
+    public void registerProcessingTimer(long time, ProcessingTimeCallback processingTimerCallback) {
+      processingTimeService.registerTimer(
+          time, new ProcessingTimeCallbackAdapter(processingTimerCallback));
     }
+  }
 
-    @Override
-    public int getSubtaskId() {
-        return sinkWriterContextV2.getSubtaskId();
-    }
+  SinkWriterContextV2 sinkWriterContextV2;
 
-    @Override
-    public int getNumberOfParallelSubtasks() {
-        return sinkWriterContextV2.getNumberOfParallelSubtasks();
-    }
+  public SinkWriterContext() {
+    sinkWriterContextV2 = new SinkWriterContextV2();
+  }
 
-    @Override
-    public SinkWriterMetricGroup metricGroup() {
-        return sinkWriterContextV2.metricGroup();
-    }
+  @Override
+  public UserCodeClassLoader getUserCodeClassLoader() {
+    return sinkWriterContextV2.getUserCodeClassLoader();
+  }
 
-    @Override
-    public OptionalLong getRestoredCheckpointId() {
-        return sinkWriterContextV2.getRestoredCheckpointId();
-    }
+  @Override
+  public MailboxExecutor getMailboxExecutor() {
+    return sinkWriterContextV2.getMailboxExecutor();
+  }
+
+  @Override
+  public org.apache.flink.api.connector.sink.Sink.ProcessingTimeService getProcessingTimeService() {
+    return new ProcessingTimeServiceAdapter(sinkWriterContextV2.getProcessingTimeService());
+  }
+
+  @Override
+  public int getSubtaskId() {
+    return sinkWriterContextV2.getSubtaskId();
+  }
+
+  @Override
+  public int getNumberOfParallelSubtasks() {
+    return sinkWriterContextV2.getNumberOfParallelSubtasks();
+  }
+
+  @Override
+  public SinkWriterMetricGroup metricGroup() {
+    return sinkWriterContextV2.metricGroup();
+  }
+
+  @Override
+  public OptionalLong getRestoredCheckpointId() {
+    return sinkWriterContextV2.getRestoredCheckpointId();
+  }
 }

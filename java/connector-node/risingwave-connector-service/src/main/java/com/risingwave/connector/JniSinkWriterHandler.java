@@ -20,33 +20,33 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class JniSinkWriterHandler {
-    private static final Logger LOG = LoggerFactory.getLogger(JniSinkWriterHandler.class);
+  private static final Logger LOG = LoggerFactory.getLogger(JniSinkWriterHandler.class);
 
-    public static void runJniSinkWriterThread(long requestRxPtr, long responseTxPtr) {
-        // For jni.rs
-        java.lang.Thread.currentThread()
-                .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
-        JniSinkWriterResponseObserver responseObserver =
-                new JniSinkWriterResponseObserver(responseTxPtr);
-        SinkWriterStreamObserver sinkWriterStreamObserver =
-                new SinkWriterStreamObserver(responseObserver);
-        try {
-            while (true) {
-                try (JniSinkWriterStreamRequest request =
-                        Binding.recvSinkWriterRequestFromChannel(requestRxPtr)) {
-                    if (request == null) {
-                        break;
-                    }
-                    sinkWriterStreamObserver.onNext(request.asPbRequest());
-                }
-                if (!responseObserver.isSuccess()) {
-                    throw new RuntimeException("fail to sendSinkWriterResponseToChannel");
-                }
-            }
-            sinkWriterStreamObserver.onCompleted();
-        } catch (Throwable t) {
-            sinkWriterStreamObserver.onError(t);
+  public static void runJniSinkWriterThread(long requestRxPtr, long responseTxPtr) {
+    // For jni.rs
+    java.lang.Thread.currentThread()
+        .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
+    JniSinkWriterResponseObserver responseObserver =
+        new JniSinkWriterResponseObserver(responseTxPtr);
+    SinkWriterStreamObserver sinkWriterStreamObserver =
+        new SinkWriterStreamObserver(responseObserver);
+    try {
+      while (true) {
+        try (JniSinkWriterStreamRequest request =
+            Binding.recvSinkWriterRequestFromChannel(requestRxPtr)) {
+          if (request == null) {
+            break;
+          }
+          sinkWriterStreamObserver.onNext(request.asPbRequest());
         }
-        LOG.info("end of runJniSinkWriterThread");
+        if (!responseObserver.isSuccess()) {
+          throw new RuntimeException("fail to sendSinkWriterResponseToChannel");
+        }
+      }
+      sinkWriterStreamObserver.onCompleted();
+    } catch (Throwable t) {
+      sinkWriterStreamObserver.onError(t);
     }
+    LOG.info("end of runJniSinkWriterThread");
+  }
 }

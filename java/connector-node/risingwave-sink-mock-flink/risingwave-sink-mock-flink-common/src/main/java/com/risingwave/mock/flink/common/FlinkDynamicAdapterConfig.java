@@ -28,37 +28,37 @@ import org.apache.flink.table.catalog.ObjectPath;
  * The user-input configuration items will be passed downstream to create the corresponding factory.
  */
 public class FlinkDynamicAdapterConfig extends CommonSinkConfig {
-    Map<String, String> option;
+  Map<String, String> option;
 
-    @JsonCreator
-    public FlinkDynamicAdapterConfig(Map<String, String> tableProperties) {
-        super(
-                tableProperties.get("connector"),
-                Boolean.valueOf(tableProperties.get("force_append_only")),
-                tableProperties.get("primary_key"));
-        this.option = tableProperties;
-    }
+  @JsonCreator
+  public FlinkDynamicAdapterConfig(Map<String, String> tableProperties) {
+    super(
+        tableProperties.get("connector"),
+        Boolean.valueOf(tableProperties.get("force_append_only")),
+        tableProperties.get("primary_key"));
+    this.option = tableProperties;
+  }
 
-    public ObjectPath getTablePath() {
-        throw new RuntimeException("Cannot get table with connector type " + getConnector());
-    }
+  public ObjectPath getTablePath() {
+    throw new RuntimeException("Cannot get table with connector type " + getConnector());
+  }
 
-    /**
-     * Our option contains both kinds of parameters, and it is the responsibility of the correct
-     * parameter to be chosen here
-     *
-     * @param needOptionSet: Need option names
-     */
-    public void processOption(Set<ConfigOption<?>> needOptionSet) {
-        Set<String> needOptionStringSet =
-                needOptionSet.stream().map(c -> c.key()).collect(Collectors.toSet());
-        option =
-                option.entrySet().stream()
-                        .filter(entry -> needOptionStringSet.contains(entry.getKey()))
-                        .collect(Collectors.toMap(a -> a.getKey(), a -> a.getValue()));
-    }
+  /**
+   * Our option contains both kinds of parameters, and it is the responsibility of the correct
+   * parameter to be chosen here
+   *
+   * @param needOptionSet: Need option names
+   */
+  public void processOption(Set<ConfigOption<?>> needOptionSet) {
+    Set<String> needOptionStringSet =
+        needOptionSet.stream().map(c -> c.key()).collect(Collectors.toSet());
+    option =
+        option.entrySet().stream()
+            .filter(entry -> needOptionStringSet.contains(entry.getKey()))
+            .collect(Collectors.toMap(a -> a.getKey(), a -> a.getValue()));
+  }
 
-    public Map<String, String> getOption() {
-        return option;
-    }
+  public Map<String, String> getOption() {
+    return option;
+  }
 }

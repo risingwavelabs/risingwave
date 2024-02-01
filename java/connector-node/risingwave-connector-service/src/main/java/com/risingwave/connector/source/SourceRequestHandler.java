@@ -21,24 +21,23 @@ import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 
 public class SourceRequestHandler {
-    private final StreamObserver<ConnectorServiceProto.GetEventStreamResponse> responseObserver;
+  private final StreamObserver<ConnectorServiceProto.GetEventStreamResponse> responseObserver;
 
-    public SourceRequestHandler(
-            StreamObserver<ConnectorServiceProto.GetEventStreamResponse> responseObserver) {
-        this.responseObserver = responseObserver;
-    }
+  public SourceRequestHandler(
+      StreamObserver<ConnectorServiceProto.GetEventStreamResponse> responseObserver) {
+    this.responseObserver = responseObserver;
+  }
 
-    public void handle(ConnectorServiceProto.GetEventStreamRequest request) {
-        var handler =
-                SourceHandlerFactory.createSourceHandler(
-                        SourceTypeE.valueOf(request.getSourceType()),
-                        request.getSourceId(),
-                        request.getStartOffset(),
-                        request.getPropertiesMap(),
-                        request.getSnapshotDone(),
-                        request.getCommonParam().getIsMultiTableShared());
-        handler.startSource(
-                (ServerCallStreamObserver<ConnectorServiceProto.GetEventStreamResponse>)
-                        responseObserver);
-    }
+  public void handle(ConnectorServiceProto.GetEventStreamRequest request) {
+    var handler =
+        SourceHandlerFactory.createSourceHandler(
+            SourceTypeE.valueOf(request.getSourceType()),
+            request.getSourceId(),
+            request.getStartOffset(),
+            request.getPropertiesMap(),
+            request.getSnapshotDone(),
+            request.getCommonParam().getIsMultiTableShared());
+    handler.startSource(
+        (ServerCallStreamObserver<ConnectorServiceProto.GetEventStreamResponse>) responseObserver);
+  }
 }

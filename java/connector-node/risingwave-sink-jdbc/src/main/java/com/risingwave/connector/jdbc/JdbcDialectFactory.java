@@ -16,5 +16,5 @@ package com.risingwave.connector.jdbc;
 
 public interface JdbcDialectFactory {
 
-    JdbcDialect create(int[] columnSqlTypes);
+  JdbcDialect create(int[] columnSqlTypes);
 }

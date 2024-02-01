@@ -42,115 +42,108 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 public class MetaClient implements AutoCloseable {
-    private final int workerId;
+  private final int workerId;
 
-    private final ManagedChannel channel;
+  private final ManagedChannel channel;
 
-    // Scheduler for background tasks.
-    private final ScheduledExecutorService scheduler;
+  // Scheduler for background tasks.
+  private final ScheduledExecutorService scheduler;
 
-    // RPC stubs.
-    private final ClusterServiceBlockingStub clusterStub;
-    private final DdlServiceBlockingStub ddlStub;
-    private final HeartbeatServiceBlockingStub heartbeatStub;
-    private final HummockManagerServiceBlockingStub hummockStub;
+  // RPC stubs.
+  private final ClusterServiceBlockingStub clusterStub;
+  private final DdlServiceBlockingStub ddlStub;
+  private final HeartbeatServiceBlockingStub heartbeatStub;
+  private final HummockManagerServiceBlockingStub hummockStub;
 
-    private boolean isClosed;
+  private boolean isClosed;
 
-    // A heart beat task that sends a heartbeat to the meta service when run.
-    private class HeartbeatTask implements Runnable {
-        Duration timeout;
+  // A heart beat task that sends a heartbeat to the meta service when run.
+  private class HeartbeatTask implements Runnable {
+    Duration timeout;
 
-        HeartbeatTask(Duration timeout) {
-            this.timeout = timeout;
-        }
-
-        @Override
-        public void run() {
-            HeartbeatRequest req = HeartbeatRequest.newBuilder().setNodeId(workerId).build();
-
-            try {
-                heartbeatStub
-                        .withDeadlineAfter(timeout.toMillis(), TimeUnit.MILLISECONDS)
-                        .heartbeat(req);
-            } catch (Exception e) {
-                Logger.getGlobal().warning(String.format("Failed to send heartbeat: %s", e));
-            }
-        }
-    }
-
-    public MetaClient(String metaAddr, ScheduledExecutorService scheduler) {
-        this.channel =
-                Grpc.newChannelBuilder(metaAddr, InsecureChannelCredentials.create()).build();
-        this.scheduler = scheduler;
-
-        this.clusterStub = ClusterServiceGrpc.newBlockingStub(channel);
-        this.ddlStub = DdlServiceGrpc.newBlockingStub(channel);
-        this.hummockStub = HummockManagerServiceGrpc.newBlockingStub(channel);
-        this.heartbeatStub = HeartbeatServiceGrpc.newBlockingStub(channel);
-
-        this.isClosed = false;
-
-        AddWorkerNodeRequest req =
-                AddWorkerNodeRequest.newBuilder()
-                        .setWorkerType(WorkerType.WORKER_TYPE_RISE_CTL)
-                        .setHost(
-                                HostAddress.newBuilder().setHost("127.0.0.1").setPort(8880).build())
-                        .setProperty(
-                                Property.newBuilder()
-                                        .setIsStreaming(false)
-                                        .setIsServing(false)
-                                        .setWorkerNodeParallelism(0)
-                                        .build())
-                        .build();
-        AddWorkerNodeResponse resp = clusterStub.addWorkerNode(req);
-
-        this.workerId = resp.getNodeId();
-    }
-
-    public HummockVersion pinVersion() {
-        PinVersionRequest req = PinVersionRequest.newBuilder().setContextId(workerId).build();
-        PinVersionResponse resp = hummockStub.pinVersion(req);
-        return resp.getPinnedVersion();
-    }
-
-    public void unpinVersion(HummockVersion version) {
-        // TODO: we are calling UnpinBefore in this method. If there are multiple versions being
-        // used, unpin using UnpinBefore may accidentally unpin the version used by other thread. We
-        // may introduce reference counting in the meta client.
-        UnpinVersionBeforeRequest req =
-                UnpinVersionBeforeRequest.newBuilder()
-                        .setContextId(workerId)
-                        .setUnpinVersionBefore(version.getId())
-                        .build();
-        hummockStub.unpinVersionBefore(req);
-    }
-
-    public Table getTable(String databaseName, String tableName) {
-        GetTableRequest req =
-                GetTableRequest.newBuilder()
-                        .setDatabaseName(databaseName)
-                        .setTableName(tableName)
-                        .build();
-        GetTableResponse resp = ddlStub.getTable(req);
-        if (resp.hasTable()) {
-            return resp.getTable();
-        } else {
-            return null;
-        }
-    }
-
-    public ScheduledFuture<?> startHeartbeatLoop(Duration interval) {
-        Runnable heartbeatTask = new HeartbeatTask(interval.multipliedBy(3));
-        return scheduler.scheduleWithFixedDelay(
-                heartbeatTask, interval.toMillis(), interval.toMillis(), TimeUnit.MILLISECONDS);
+    HeartbeatTask(Duration timeout) {
+      this.timeout = timeout;
     }
 
     @Override
-    public void close() {
-        if (!isClosed) {
-            isClosed = true;
-            this.channel.shutdown();
-        }
+    public void run() {
+      HeartbeatRequest req = HeartbeatRequest.newBuilder().setNodeId(workerId).build();
+
+      try {
+        heartbeatStub.withDeadlineAfter(timeout.toMillis(), TimeUnit.MILLISECONDS).heartbeat(req);
+      } catch (Exception e) {
+        Logger.getGlobal().warning(String.format("Failed to send heartbeat: %s", e));
+      }
     }
+  }
+
+  public MetaClient(String metaAddr, ScheduledExecutorService scheduler) {
+    this.channel = Grpc.newChannelBuilder(metaAddr, InsecureChannelCredentials.create()).build();
+    this.scheduler = scheduler;
+
+    this.clusterStub = ClusterServiceGrpc.newBlockingStub(channel);
+    this.ddlStub = DdlServiceGrpc.newBlockingStub(channel);
+    this.hummockStub = HummockManagerServiceGrpc.newBlockingStub(channel);
+    this.heartbeatStub = HeartbeatServiceGrpc.newBlockingStub(channel);
+
+    this.isClosed = false;
+
+    AddWorkerNodeRequest req =
+        AddWorkerNodeRequest.newBuilder()
+            .setWorkerType(WorkerType.WORKER_TYPE_RISE_CTL)
+            .setHost(HostAddress.newBuilder().setHost("127.0.0.1").setPort(8880).build())
+            .setProperty(
+                Property.newBuilder()
+                    .setIsStreaming(false)
+                    .setIsServing(false)
+                    .setWorkerNodeParallelism(0)
+                    .build())
+            .build();
+    AddWorkerNodeResponse resp = clusterStub.addWorkerNode(req);
+
+    this.workerId = resp.getNodeId();
+  }
+
+  public HummockVersion pinVersion() {
+    PinVersionRequest req = PinVersionRequest.newBuilder().setContextId(workerId).build();
+    PinVersionResponse resp = hummockStub.pinVersion(req);
+    return resp.getPinnedVersion();
+  }
+
+  public void unpinVersion(HummockVersion version) {
+    // TODO: we are calling UnpinBefore in this method. If there are multiple versions being
+    // used, unpin using UnpinBefore may accidentally unpin the version used by other thread. We
+    // may introduce reference counting in the meta client.
+    UnpinVersionBeforeRequest req =
+        UnpinVersionBeforeRequest.newBuilder()
+            .setContextId(workerId)
+            .setUnpinVersionBefore(version.getId())
+            .build();
+    hummockStub.unpinVersionBefore(req);
+  }
+
+  public Table getTable(String databaseName, String tableName) {
+    GetTableRequest req =
+        GetTableRequest.newBuilder().setDatabaseName(databaseName).setTableName(tableName).build();
+    GetTableResponse resp = ddlStub.getTable(req);
+    if (resp.hasTable()) {
+      return resp.getTable();
+    } else {
+      return null;
+    }
+  }
+
+  public ScheduledFuture<?> startHeartbeatLoop(Duration interval) {
+    Runnable heartbeatTask = new HeartbeatTask(interval.multipliedBy(3));
+    return scheduler.scheduleWithFixedDelay(
+        heartbeatTask, interval.toMillis(), interval.toMillis(), TimeUnit.MILLISECONDS);
+  }
+
+  @Override
+  public void close() {
+    if (!isClosed) {
+      isClosed = true;
+      this.channel.shutdown();
+    }
+  }
 }

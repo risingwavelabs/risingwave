@@ -37,60 +37,58 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class EsSinkFactory implements SinkFactory {
-    private static final Logger LOG = LoggerFactory.getLogger(EsSinkFactory.class);
+  private static final Logger LOG = LoggerFactory.getLogger(EsSinkFactory.class);
 
-    public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
-        ObjectMapper mapper = new ObjectMapper();
-        EsSinkConfig config = mapper.convertValue(tableProperties, EsSinkConfig.class);
-        return new SinkWriterV1.Adapter(new EsSink(config, tableSchema));
+  public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
+    ObjectMapper mapper = new ObjectMapper();
+    EsSinkConfig config = mapper.convertValue(tableProperties, EsSinkConfig.class);
+    return new SinkWriterV1.Adapter(new EsSink(config, tableSchema));
+  }
+
+  @Override
+  public void validate(
+      TableSchema tableSchema, Map<String, String> tableProperties, Catalog.SinkType sinkType) {
+    ObjectMapper mapper = new ObjectMapper();
+    mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
+    EsSinkConfig config = mapper.convertValue(tableProperties, EsSinkConfig.class);
+
+    // 1. check url
+    HttpHost host;
+    try {
+      host = HttpHost.create(config.getUrl());
+    } catch (IllegalArgumentException e) {
+      throw Status.INVALID_ARGUMENT.withDescription(e.getMessage()).asRuntimeException();
     }
 
-    @Override
-    public void validate(
-            TableSchema tableSchema,
-            Map<String, String> tableProperties,
-            Catalog.SinkType sinkType) {
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
-        EsSinkConfig config = mapper.convertValue(tableProperties, EsSinkConfig.class);
-
-        // 1. check url
-        HttpHost host;
-        try {
-            host = HttpHost.create(config.getUrl());
-        } catch (IllegalArgumentException e) {
-            throw Status.INVALID_ARGUMENT.withDescription(e.getMessage()).asRuntimeException();
-        }
-
-        // 2. check connection
-        RestClientBuilder builder = RestClient.builder(host);
-        if (config.getPassword() != null && config.getUsername() != null) {
-            final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
-            credentialsProvider.setCredentials(
-                    AuthScope.ANY,
-                    new UsernamePasswordCredentials(config.getUsername(), config.getPassword()));
-            builder.setHttpClientConfigCallback(
-                    httpClientBuilder ->
-                            httpClientBuilder.setDefaultCredentialsProvider(credentialsProvider));
-        }
-        RestHighLevelClient client = new RestHighLevelClient(builder);
-        // Test connection
-        try {
-            boolean isConnected = client.ping(RequestOptions.DEFAULT);
-            if (!isConnected) {
-                throw Status.INVALID_ARGUMENT
-                        .withDescription("Cannot connect to " + config.getUrl())
-                        .asRuntimeException();
-            }
-        } catch (Exception e) {
-            throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
-        }
-
-        // 3. close client
-        try {
-            client.close();
-        } catch (IOException e) {
-            throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
-        }
+    // 2. check connection
+    RestClientBuilder builder = RestClient.builder(host);
+    if (config.getPassword() != null && config.getUsername() != null) {
+      final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
+      credentialsProvider.setCredentials(
+          AuthScope.ANY,
+          new UsernamePasswordCredentials(config.getUsername(), config.getPassword()));
+      builder.setHttpClientConfigCallback(
+          httpClientBuilder ->
+              httpClientBuilder.setDefaultCredentialsProvider(credentialsProvider));
     }
+    RestHighLevelClient client = new RestHighLevelClient(builder);
+    // Test connection
+    try {
+      boolean isConnected = client.ping(RequestOptions.DEFAULT);
+      if (!isConnected) {
+        throw Status.INVALID_ARGUMENT
+            .withDescription("Cannot connect to " + config.getUrl())
+            .asRuntimeException();
+      }
+    } catch (Exception e) {
+      throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
+    }
+
+    // 3. close client
+    try {
+      client.close();
+    } catch (IOException e) {
+      throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
+    }
+  }
 }

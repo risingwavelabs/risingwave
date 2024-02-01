@@ -21,45 +21,45 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.risingwave.connector.api.sink.CommonSinkConfig;
 
 public class JDBCSinkConfig extends CommonSinkConfig {
-    private String jdbcUrl;
+  private String jdbcUrl;
 
-    private String tableName;
+  private String tableName;
 
-    private String sinkType;
+  private String sinkType;
 
-    private final boolean isUpsertSink;
+  private final boolean isUpsertSink;
 
-    @JsonProperty(value = "schema.name")
-    private String schemaName;
+  @JsonProperty(value = "schema.name")
+  private String schemaName;
 
-    @JsonCreator
-    public JDBCSinkConfig(
-            @JsonProperty(value = "jdbc.url") String jdbcUrl,
-            @JsonProperty(value = "table.name") String tableName,
-            @JsonProperty(value = "type") String sinkType) {
-        this.jdbcUrl = jdbcUrl;
-        this.tableName = tableName;
-        this.sinkType = sinkType;
-        this.isUpsertSink = "upsert".equalsIgnoreCase(sinkType);
-    }
+  @JsonCreator
+  public JDBCSinkConfig(
+      @JsonProperty(value = "jdbc.url") String jdbcUrl,
+      @JsonProperty(value = "table.name") String tableName,
+      @JsonProperty(value = "type") String sinkType) {
+    this.jdbcUrl = jdbcUrl;
+    this.tableName = tableName;
+    this.sinkType = sinkType;
+    this.isUpsertSink = "upsert".equalsIgnoreCase(sinkType);
+  }
 
-    public String getSchemaName() {
-        return schemaName;
-    }
+  public String getSchemaName() {
+    return schemaName;
+  }
 
-    public String getJdbcUrl() {
-        return jdbcUrl;
-    }
+  public String getJdbcUrl() {
+    return jdbcUrl;
+  }
 
-    public String getTableName() {
-        return tableName;
-    }
+  public String getTableName() {
+    return tableName;
+  }
 
-    public String getSinkType() {
-        return sinkType;
-    }
+  public String getSinkType() {
+    return sinkType;
+  }
 
-    public boolean isUpsertSink() {
-        return this.isUpsertSink;
-    }
+  public boolean isUpsertSink() {
+    return this.isUpsertSink;
+  }
 }

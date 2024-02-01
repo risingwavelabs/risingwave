@@ -20,37 +20,37 @@ package com.risingwave.tracing;
 import com.risingwave.java.binding.Binding;
 
 public class TracingSlf4jImpl {
-    public static final int ERROR = 0;
-    public static final int WARN = 1;
-    public static final int INFO = 2;
-    public static final int DEBUG = 3;
-    public static final int TRACE = 4;
+  public static final int ERROR = 0;
+  public static final int WARN = 1;
+  public static final int INFO = 2;
+  public static final int DEBUG = 3;
+  public static final int TRACE = 4;
 
-    // TODO: We may support changing the log level at runtime in the future.
-    private static final boolean isErrorEnabled = Binding.tracingSlf4jEventEnabled(ERROR);
-    private static final boolean isWarnEnabled = Binding.tracingSlf4jEventEnabled(WARN);
-    private static final boolean isInfoEnabled = Binding.tracingSlf4jEventEnabled(INFO);
-    private static final boolean isDebugEnabled = Binding.tracingSlf4jEventEnabled(DEBUG);
-    private static final boolean isTraceEnabled = Binding.tracingSlf4jEventEnabled(TRACE);
+  // TODO: We may support changing the log level at runtime in the future.
+  private static final boolean isErrorEnabled = Binding.tracingSlf4jEventEnabled(ERROR);
+  private static final boolean isWarnEnabled = Binding.tracingSlf4jEventEnabled(WARN);
+  private static final boolean isInfoEnabled = Binding.tracingSlf4jEventEnabled(INFO);
+  private static final boolean isDebugEnabled = Binding.tracingSlf4jEventEnabled(DEBUG);
+  private static final boolean isTraceEnabled = Binding.tracingSlf4jEventEnabled(TRACE);
 
-    public static void event(String name, int level, String message) {
-        Binding.tracingSlf4jEvent(Thread.currentThread().getName(), name, level, message);
+  public static void event(String name, int level, String message) {
+    Binding.tracingSlf4jEvent(Thread.currentThread().getName(), name, level, message);
+  }
+
+  public static boolean isEnabled(int level) {
+    switch (level) {
+      case ERROR:
+        return isErrorEnabled;
+      case WARN:
+        return isWarnEnabled;
+      case INFO:
+        return isInfoEnabled;
+      case DEBUG:
+        return isDebugEnabled;
+      case TRACE:
+        return isTraceEnabled;
+      default:
+        return false;
     }
-
-    public static boolean isEnabled(int level) {
-        switch (level) {
-            case ERROR:
-                return isErrorEnabled;
-            case WARN:
-                return isWarnEnabled;
-            case INFO:
-                return isInfoEnabled;
-            case DEBUG:
-                return isDebugEnabled;
-            case TRACE:
-                return isTraceEnabled;
-            default:
-                return false;
-        }
-    }
+  }
 }

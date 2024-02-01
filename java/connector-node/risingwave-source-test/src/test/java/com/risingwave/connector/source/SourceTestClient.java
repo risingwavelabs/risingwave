@@ -38,171 +38,171 @@ import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.JdbcDatabaseContainer;
 
 public class SourceTestClient {
-    static final Logger LOG = LoggerFactory.getLogger(SourceTestClient.class.getName());
+  static final Logger LOG = LoggerFactory.getLogger(SourceTestClient.class.getName());
 
-    // default port for connector service
-    static final int DEFAULT_PORT = 60051;
-    private final ConnectorServiceGrpc.ConnectorServiceBlockingStub blockingStub;
+  // default port for connector service
+  static final int DEFAULT_PORT = 60051;
+  private final ConnectorServiceGrpc.ConnectorServiceBlockingStub blockingStub;
 
-    public Properties sqlStmts = new Properties();
+  public Properties sqlStmts = new Properties();
 
-    public SourceTestClient(Channel channel) {
-        blockingStub = ConnectorServiceGrpc.newBlockingStub(channel);
-        try (InputStream input =
-                getClass().getClassLoader().getResourceAsStream("stored_queries.properties")) {
-            sqlStmts.load(input);
-        } catch (IOException e) {
-            fail("failed to load sql statements", e);
-        }
+  public SourceTestClient(Channel channel) {
+    blockingStub = ConnectorServiceGrpc.newBlockingStub(channel);
+    try (InputStream input =
+        getClass().getClassLoader().getResourceAsStream("stored_queries.properties")) {
+      sqlStmts.load(input);
+    } catch (IOException e) {
+      fail("failed to load sql statements", e);
     }
+  }
 
-    protected static Connection connect(DataSource dataSource) {
-        Connection connection = null;
-        try {
-            connection = dataSource.getConnection();
-        } catch (SQLException e) {
-            fail("SQL Exception: {}", e);
-        }
-        return connection;
+  protected static Connection connect(DataSource dataSource) {
+    Connection connection = null;
+    try {
+      connection = dataSource.getConnection();
+    } catch (SQLException e) {
+      fail("SQL Exception: {}", e);
     }
+    return connection;
+  }
 
-    protected static ResultSet performQuery(Connection connection, String sql) {
-        ResultSet resultSet = null;
-        try {
-            Statement statement = connection.createStatement();
-            if (statement.execute(sql)) {
-                resultSet = statement.getResultSet();
-                resultSet.next();
-            } else {
-                LOG.info("updated: " + statement.getUpdateCount());
-            }
-        } catch (SQLException e) {
-            LOG.warn("SQL Exception: {}", e.getMessage());
-        }
-        return resultSet;
+  protected static ResultSet performQuery(Connection connection, String sql) {
+    ResultSet resultSet = null;
+    try {
+      Statement statement = connection.createStatement();
+      if (statement.execute(sql)) {
+        resultSet = statement.getResultSet();
+        resultSet.next();
+      } else {
+        LOG.info("updated: " + statement.getUpdateCount());
+      }
+    } catch (SQLException e) {
+      LOG.warn("SQL Exception: {}", e.getMessage());
     }
+    return resultSet;
+  }
 
-    protected static DataSource getDataSource(
-            String jdbcUrl, String username, String password, String driverClassName) {
-        HikariConfig hikariConfig = new HikariConfig();
-        hikariConfig.setJdbcUrl(jdbcUrl);
-        hikariConfig.setUsername(username);
-        hikariConfig.setPassword(password);
-        hikariConfig.setDriverClassName(driverClassName);
-        return new HikariDataSource(hikariConfig);
-    }
+  protected static DataSource getDataSource(
+      String jdbcUrl, String username, String password, String driverClassName) {
+    HikariConfig hikariConfig = new HikariConfig();
+    hikariConfig.setJdbcUrl(jdbcUrl);
+    hikariConfig.setUsername(username);
+    hikariConfig.setPassword(password);
+    hikariConfig.setDriverClassName(driverClassName);
+    return new HikariDataSource(hikariConfig);
+  }
 
-    protected ConnectorServiceProto.ValidateSourceResponse validateSource(
-            String jdbcUrl,
-            String host,
-            String username,
-            String password,
-            ConnectorServiceProto.SourceType sourceType,
-            ConnectorServiceProto.TableSchema tableSchema,
-            String databaseName,
-            String tableName) {
-        String port = String.valueOf(URI.create(jdbcUrl.substring(5)).getPort());
-        ConnectorServiceProto.ValidateSourceRequest req =
-                ConnectorServiceProto.ValidateSourceRequest.newBuilder()
-                        .setSourceId(0)
-                        .setSourceType(sourceType)
-                        .setTableSchema(tableSchema)
-                        .putProperties("hostname", host)
-                        .putProperties("port", port)
-                        .putProperties("username", username)
-                        .putProperties("password", password)
-                        .putProperties("database.name", databaseName)
-                        .putProperties("table.name", tableName)
-                        .putProperties("schema.name", "public") // pg only
-                        .putProperties("slot.name", "orders") // pg only
-                        .putProperties("server.id", "1") // mysql only
-                        .putProperties("publication.name", "rw_publication") // pg only
-                        .putProperties("publication.create.enable", "true") // pg only
-                        .build();
-        return blockingStub.validateSource(req);
-    }
+  protected ConnectorServiceProto.ValidateSourceResponse validateSource(
+      String jdbcUrl,
+      String host,
+      String username,
+      String password,
+      ConnectorServiceProto.SourceType sourceType,
+      ConnectorServiceProto.TableSchema tableSchema,
+      String databaseName,
+      String tableName) {
+    String port = String.valueOf(URI.create(jdbcUrl.substring(5)).getPort());
+    ConnectorServiceProto.ValidateSourceRequest req =
+        ConnectorServiceProto.ValidateSourceRequest.newBuilder()
+            .setSourceId(0)
+            .setSourceType(sourceType)
+            .setTableSchema(tableSchema)
+            .putProperties("hostname", host)
+            .putProperties("port", port)
+            .putProperties("username", username)
+            .putProperties("password", password)
+            .putProperties("database.name", databaseName)
+            .putProperties("table.name", tableName)
+            .putProperties("schema.name", "public") // pg only
+            .putProperties("slot.name", "orders") // pg only
+            .putProperties("server.id", "1") // mysql only
+            .putProperties("publication.name", "rw_publication") // pg only
+            .putProperties("publication.create.enable", "true") // pg only
+            .build();
+    return blockingStub.validateSource(req);
+  }
 
-    protected Iterator<ConnectorServiceProto.GetEventStreamResponse> getEventStreamStart(
-            JdbcDatabaseContainer<?> container,
-            ConnectorServiceProto.SourceType sourceType,
-            String databaseName,
-            String tableName) {
-        String port = String.valueOf(URI.create(container.getJdbcUrl().substring(5)).getPort());
-        ConnectorServiceProto.GetEventStreamRequest req =
-                ConnectorServiceProto.GetEventStreamRequest.newBuilder()
-                        .setSourceId(1005)
-                        .setSourceType(sourceType)
-                        .setStartOffset("")
-                        .putProperties("hostname", container.getHost())
-                        .putProperties("port", port)
-                        .putProperties("username", container.getUsername())
-                        .putProperties("password", container.getPassword())
-                        .putProperties("database.name", databaseName)
-                        .putProperties("table.name", tableName)
-                        .putProperties("schema.name", "public") // pg only
-                        .putProperties("slot.name", "orders") // pg only
-                        .putProperties("server.id", "1") // mysql only
-                        .build();
-        Iterator<ConnectorServiceProto.GetEventStreamResponse> responses = null;
-        try {
-            responses = blockingStub.getEventStream(req);
-        } catch (StatusRuntimeException e) {
-            fail("RPC failed: {}", e.getStatus());
-        }
-        return responses;
+  protected Iterator<ConnectorServiceProto.GetEventStreamResponse> getEventStreamStart(
+      JdbcDatabaseContainer<?> container,
+      ConnectorServiceProto.SourceType sourceType,
+      String databaseName,
+      String tableName) {
+    String port = String.valueOf(URI.create(container.getJdbcUrl().substring(5)).getPort());
+    ConnectorServiceProto.GetEventStreamRequest req =
+        ConnectorServiceProto.GetEventStreamRequest.newBuilder()
+            .setSourceId(1005)
+            .setSourceType(sourceType)
+            .setStartOffset("")
+            .putProperties("hostname", container.getHost())
+            .putProperties("port", port)
+            .putProperties("username", container.getUsername())
+            .putProperties("password", container.getPassword())
+            .putProperties("database.name", databaseName)
+            .putProperties("table.name", tableName)
+            .putProperties("schema.name", "public") // pg only
+            .putProperties("slot.name", "orders") // pg only
+            .putProperties("server.id", "1") // mysql only
+            .build();
+    Iterator<ConnectorServiceProto.GetEventStreamResponse> responses = null;
+    try {
+      responses = blockingStub.getEventStream(req);
+    } catch (StatusRuntimeException e) {
+      fail("RPC failed: {}", e.getStatus());
     }
+    return responses;
+  }
 
-    // generates an orders.tbl in class path using random data
-    // if file does not contain 10000 lines
-    static void genOrdersTable(int numRows) {
-        String[] orderStatusArr = {"O", "F"};
-        String[] orderPriorityArr = {"1-URGENT", "2-HIGH", "3-MEDIUM", "4-NOT SPECIFIED", "5-LOW"};
-        String path =
-                SourceTestClient.class.getProtectionDomain().getCodeSource().getLocation().getFile()
-                        + "orders.tbl";
-        try (BufferedReader reader = new BufferedReader(new FileReader(path))) {
-            int lines = 0;
-            while (reader.readLine() != null) {
-                lines++;
-            }
-            if (lines == 10000) {
-                LOG.info("orders.tbl contains 10000 lines, skipping data generation");
-                return;
-            }
-        } catch (Exception e) {
-            fail("Runtime Exception: {}", e);
-        }
-        Random rand = new Random();
-        try (PrintWriter writer = new PrintWriter(path, "UTF-8")) {
-            for (int i = 1; i <= numRows; i++) {
-                String custKey = String.valueOf(Math.abs(rand.nextLong()));
-                String orderStatus = orderStatusArr[rand.nextInt(orderStatusArr.length)];
-                String totalPrice = rand.nextInt(1000000) + "." + rand.nextInt(9) + rand.nextInt(9);
-                String orderDate =
-                        (rand.nextInt(60) + 1970)
-                                + "-"
-                                + String.format("%02d", rand.nextInt(12) + 1)
-                                + "-"
-                                + String.format("%02d", rand.nextInt(28) + 1);
-                String orderPriority = orderPriorityArr[rand.nextInt(orderPriorityArr.length)];
-                String clerk = "Clerk#" + String.format("%09d", rand.nextInt(1024));
-                String shipPriority = "0";
-                String comment = UUID.randomUUID() + " " + UUID.randomUUID();
-                writer.printf(
-                        "%s|%s|%s|%s|%s|%s|%s|%s|%s\n",
-                        i,
-                        custKey,
-                        orderStatus,
-                        totalPrice,
-                        orderDate,
-                        orderPriority,
-                        clerk,
-                        shipPriority,
-                        comment);
-            }
-        } catch (Exception e) {
-            fail("Runtime Exception: {}", e);
-        }
-        LOG.info("10000 lines written to orders.tbl");
+  // generates an orders.tbl in class path using random data
+  // if file does not contain 10000 lines
+  static void genOrdersTable(int numRows) {
+    String[] orderStatusArr = {"O", "F"};
+    String[] orderPriorityArr = {"1-URGENT", "2-HIGH", "3-MEDIUM", "4-NOT SPECIFIED", "5-LOW"};
+    String path =
+        SourceTestClient.class.getProtectionDomain().getCodeSource().getLocation().getFile()
+            + "orders.tbl";
+    try (BufferedReader reader = new BufferedReader(new FileReader(path))) {
+      int lines = 0;
+      while (reader.readLine() != null) {
+        lines++;
+      }
+      if (lines == 10000) {
+        LOG.info("orders.tbl contains 10000 lines, skipping data generation");
+        return;
+      }
+    } catch (Exception e) {
+      fail("Runtime Exception: {}", e);
     }
+    Random rand = new Random();
+    try (PrintWriter writer = new PrintWriter(path, "UTF-8")) {
+      for (int i = 1; i <= numRows; i++) {
+        String custKey = String.valueOf(Math.abs(rand.nextLong()));
+        String orderStatus = orderStatusArr[rand.nextInt(orderStatusArr.length)];
+        String totalPrice = rand.nextInt(1000000) + "." + rand.nextInt(9) + rand.nextInt(9);
+        String orderDate =
+            (rand.nextInt(60) + 1970)
+                + "-"
+                + String.format("%02d", rand.nextInt(12) + 1)
+                + "-"
+                + String.format("%02d", rand.nextInt(28) + 1);
+        String orderPriority = orderPriorityArr[rand.nextInt(orderPriorityArr.length)];
+        String clerk = "Clerk#" + String.format("%09d", rand.nextInt(1024));
+        String shipPriority = "0";
+        String comment = UUID.randomUUID() + " " + UUID.randomUUID();
+        writer.printf(
+            "%s|%s|%s|%s|%s|%s|%s|%s|%s\n",
+            i,
+            custKey,
+            orderStatus,
+            totalPrice,
+            orderDate,
+            orderPriority,
+            clerk,
+            shipPriority,
+            comment);
+      }
+    } catch (Exception e) {
+      fail("Runtime Exception: {}", e);
+    }
+    LOG.info("10000 lines written to orders.tbl");
+  }
 }

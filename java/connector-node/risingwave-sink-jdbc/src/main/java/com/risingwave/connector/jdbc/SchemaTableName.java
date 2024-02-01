@@ -16,27 +16,27 @@ package com.risingwave.connector.jdbc;
 
 /** A simple class to hold the necessary information to identify a table in the database. */
 public class SchemaTableName {
-    protected String schemaName;
-    protected String tableName;
+  protected String schemaName;
+  protected String tableName;
 
-    public SchemaTableName(String schemaName, String tableName) {
-        this.schemaName = schemaName;
-        this.tableName = tableName;
-    }
+  public SchemaTableName(String schemaName, String tableName) {
+    this.schemaName = schemaName;
+    this.tableName = tableName;
+  }
 
-    public String getSchemaName() {
-        return schemaName;
-    }
+  public String getSchemaName() {
+    return schemaName;
+  }
 
-    public String getTableName() {
-        return tableName;
-    }
+  public String getTableName() {
+    return tableName;
+  }
 
-    public void setSchemaName(String schemaName) {
-        this.schemaName = schemaName;
-    }
+  public void setSchemaName(String schemaName) {
+    this.schemaName = schemaName;
+  }
 
-    public void setTableName(String tableName) {
-        this.tableName = tableName;
-    }
+  public void setTableName(String tableName) {
+    this.tableName = tableName;
+  }
 }

@@ -19,11 +19,11 @@ import java.time.Period;
 
 /** Combination of Period and Duration. */
 public class PeriodDuration extends org.apache.arrow.vector.PeriodDuration {
-    public PeriodDuration(Period period, Duration duration) {
-        super(period, duration);
-    }
+  public PeriodDuration(Period period, Duration duration) {
+    super(period, duration);
+  }
 
-    PeriodDuration(org.apache.arrow.vector.PeriodDuration base) {
-        super(base.getPeriod(), base.getDuration());
-    }
+  PeriodDuration(org.apache.arrow.vector.PeriodDuration base) {
+    super(base.getPeriod(), base.getDuration());
+  }
 }

@@ -35,50 +35,49 @@ import org.apache.hadoop.conf.Configuration;
 import org.junit.Test;
 
 public class DeltaLakeSinkFactoryTest {
-    public static String location = "/tmp/rw-sinknode/delta-lake/delta";
+  public static String location = "/tmp/rw-sinknode/delta-lake/delta";
 
-    public static void createMockTable(String location) {
-        if (Files.exists(Paths.get(location))) {
-            try {
-                FileUtils.deleteDirectory(new File(location));
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        }
-
-        Configuration conf = new Configuration();
-        DeltaLog log = DeltaLog.forTable(conf, location);
-
-        // should be synchronized with `TestUtils.getMockTableSchema()`;
-        StructType schema =
-                new StructType(
-                        new StructField[] {
-                            new StructField("id", new IntegerType()),
-                            new StructField("name", new StringType())
-                        });
-
-        Operation operation = new Operation(Operation.Name.CREATE_TABLE);
-        OptimisticTransaction txn = log.startTransaction();
-        txn.updateMetadata(
-                Metadata.builder().schema(schema).createdTime(System.currentTimeMillis()).build());
-        txn.commit(List.of(), operation, "RisingWave Test");
+  public static void createMockTable(String location) {
+    if (Files.exists(Paths.get(location))) {
+      try {
+        FileUtils.deleteDirectory(new File(location));
+      } catch (IOException e) {
+        throw new RuntimeException(e);
+      }
     }
 
-    public static void dropMockTable(String location) throws IOException {
-        FileUtils.deleteDirectory(Paths.get(location).toFile());
-    }
+    Configuration conf = new Configuration();
+    DeltaLog log = DeltaLog.forTable(conf, location);
 
-    @Test
-    public void testCreate() throws IOException {
-        createMockTable(location);
-        DeltaLakeSinkFactory sinkFactory = new DeltaLakeSinkFactory();
-        sinkFactory.createWriter(
-                TestUtils.getMockTableSchema(),
-                new HashMap<>() {
-                    {
-                        put("location", String.format("file://%s", location));
-                    }
-                });
-        dropMockTable(location);
-    }
+    // should be synchronized with `TestUtils.getMockTableSchema()`;
+    StructType schema =
+        new StructType(
+            new StructField[] {
+              new StructField("id", new IntegerType()), new StructField("name", new StringType())
+            });
+
+    Operation operation = new Operation(Operation.Name.CREATE_TABLE);
+    OptimisticTransaction txn = log.startTransaction();
+    txn.updateMetadata(
+        Metadata.builder().schema(schema).createdTime(System.currentTimeMillis()).build());
+    txn.commit(List.of(), operation, "RisingWave Test");
+  }
+
+  public static void dropMockTable(String location) throws IOException {
+    FileUtils.deleteDirectory(Paths.get(location).toFile());
+  }
+
+  @Test
+  public void testCreate() throws IOException {
+    createMockTable(location);
+    DeltaLakeSinkFactory sinkFactory = new DeltaLakeSinkFactory();
+    sinkFactory.createWriter(
+        TestUtils.getMockTableSchema(),
+        new HashMap<>() {
+          {
+            put("location", String.format("file://%s", location));
+          }
+        });
+    dropMockTable(location);
+  }
 }

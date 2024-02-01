@@ -26,78 +26,76 @@ import org.apache.commons.lang3.StringUtils;
 
 public class MySqlDialect implements JdbcDialect {
 
-    @Override
-    public SchemaTableName createSchemaTableName(String schemaName, String tableName) {
-        return new SchemaTableName(schemaName, tableName);
-    }
+  @Override
+  public SchemaTableName createSchemaTableName(String schemaName, String tableName) {
+    return new SchemaTableName(schemaName, tableName);
+  }
 
-    @Override
-    public String getNormalizedTableName(SchemaTableName schemaTableName) {
-        return quoteIdentifier(schemaTableName.getTableName());
-    }
+  @Override
+  public String getNormalizedTableName(SchemaTableName schemaTableName) {
+    return quoteIdentifier(schemaTableName.getTableName());
+  }
 
-    @Override
-    public String quoteIdentifier(String identifier) {
-        return "`" + identifier + "`";
-    }
+  @Override
+  public String quoteIdentifier(String identifier) {
+    return "`" + identifier + "`";
+  }
 
-    @Override
-    public Optional<String> getUpsertStatement(
-            SchemaTableName schemaTableName,
-            List<String> fieldNames,
-            List<String> uniqueKeyFields) {
-        String updateClause =
-                fieldNames.stream()
-                        .map(f -> quoteIdentifier(f) + "=VALUES(" + quoteIdentifier(f) + ")")
-                        .collect(Collectors.joining(", "));
-        return Optional.of(
-                getInsertIntoStatement(schemaTableName, fieldNames)
-                        + " ON DUPLICATE KEY UPDATE "
-                        + updateClause);
-    }
+  @Override
+  public Optional<String> getUpsertStatement(
+      SchemaTableName schemaTableName, List<String> fieldNames, List<String> uniqueKeyFields) {
+    String updateClause =
+        fieldNames.stream()
+            .map(f -> quoteIdentifier(f) + "=VALUES(" + quoteIdentifier(f) + ")")
+            .collect(Collectors.joining(", "));
+    return Optional.of(
+        getInsertIntoStatement(schemaTableName, fieldNames)
+            + " ON DUPLICATE KEY UPDATE "
+            + updateClause);
+  }
 
-    @Override
-    public void bindUpsertStatement(
-            PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
-            throws SQLException {
-        bindInsertIntoStatement(stmt, conn, tableSchema, row);
-    }
+  @Override
+  public void bindUpsertStatement(
+      PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
+      throws SQLException {
+    bindInsertIntoStatement(stmt, conn, tableSchema, row);
+  }
 
-    @Override
-    public void bindInsertIntoStatement(
-            PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
-            throws SQLException {
-        var columnDescs = tableSchema.getColumnDescs();
-        int placeholderIdx = 1;
-        for (int i = 0; i < row.size(); i++) {
-            var column = columnDescs.get(i);
-            switch (column.getDataType().getTypeName()) {
-                case DECIMAL:
-                    stmt.setBigDecimal(placeholderIdx++, (java.math.BigDecimal) row.get(i));
-                    break;
-                case INTERVAL:
-                case JSONB:
-                    stmt.setObject(placeholderIdx++, row.get(i));
-                    break;
-                case BYTEA:
-                    stmt.setBytes(placeholderIdx++, (byte[]) row.get(i));
-                    break;
-                case LIST:
-                    var val = row.get(i);
-                    assert (val instanceof Object[]);
-                    Object[] objArray = (Object[]) val;
-                    // convert Array type to a string for other database
-                    // reference:
-                    // https://dev.mysql.com/doc/workbench/en/wb-migration-database-postgresql-typemapping.html
-                    var arrayString = StringUtils.join(objArray, ",");
-                    stmt.setString(placeholderIdx++, arrayString);
-                    break;
-                case STRUCT:
-                    throw new RuntimeException("STRUCT type is not supported yet");
-                default:
-                    stmt.setObject(placeholderIdx++, row.get(i));
-                    break;
-            }
-        }
+  @Override
+  public void bindInsertIntoStatement(
+      PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
+      throws SQLException {
+    var columnDescs = tableSchema.getColumnDescs();
+    int placeholderIdx = 1;
+    for (int i = 0; i < row.size(); i++) {
+      var column = columnDescs.get(i);
+      switch (column.getDataType().getTypeName()) {
+        case DECIMAL:
+          stmt.setBigDecimal(placeholderIdx++, (java.math.BigDecimal) row.get(i));
+          break;
+        case INTERVAL:
+        case JSONB:
+          stmt.setObject(placeholderIdx++, row.get(i));
+          break;
+        case BYTEA:
+          stmt.setBytes(placeholderIdx++, (byte[]) row.get(i));
+          break;
+        case LIST:
+          var val = row.get(i);
+          assert (val instanceof Object[]);
+          Object[] objArray = (Object[]) val;
+          // convert Array type to a string for other database
+          // reference:
+          // https://dev.mysql.com/doc/workbench/en/wb-migration-database-postgresql-typemapping.html
+          var arrayString = StringUtils.join(objArray, ",");
+          stmt.setString(placeholderIdx++, arrayString);
+          break;
+        case STRUCT:
+          throw new RuntimeException("STRUCT type is not supported yet");
+        default:
+          stmt.setObject(placeholderIdx++, row.get(i));
+          break;
+      }
     }
+  }
 }

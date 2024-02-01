@@ -21,75 +21,76 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.risingwave.connector.api.sink.CommonSinkConfig;
 
 public class CassandraConfig extends CommonSinkConfig {
-    /** Required */
-    private String type;
-    /** Required */
-    private String url;
+  /** Required */
+  private String type;
 
-    /** Required */
-    private String keyspace;
+  /** Required */
+  private String url;
 
-    /** Required */
-    private String table;
+  /** Required */
+  private String keyspace;
 
-    /** Required */
-    private String datacenter;
+  /** Required */
+  private String table;
 
-    @JsonProperty(value = "cassandra.username")
-    private String username;
+  /** Required */
+  private String datacenter;
 
-    @JsonProperty(value = "cassandra.password")
-    private String password;
+  @JsonProperty(value = "cassandra.username")
+  private String username;
 
-    @JsonCreator
-    public CassandraConfig(
-            @JsonProperty(value = "cassandra.url") String url,
-            @JsonProperty(value = "cassandra.keyspace") String keyspace,
-            @JsonProperty(value = "cassandra.table") String table,
-            @JsonProperty(value = "cassandra.datacenter") String datacenter,
-            @JsonProperty(value = "type") String type) {
-        this.url = url;
-        this.keyspace = keyspace;
-        this.table = table;
-        this.datacenter = datacenter;
-        this.type = type;
-    }
+  @JsonProperty(value = "cassandra.password")
+  private String password;
 
-    public String getType() {
-        return type;
-    }
+  @JsonCreator
+  public CassandraConfig(
+      @JsonProperty(value = "cassandra.url") String url,
+      @JsonProperty(value = "cassandra.keyspace") String keyspace,
+      @JsonProperty(value = "cassandra.table") String table,
+      @JsonProperty(value = "cassandra.datacenter") String datacenter,
+      @JsonProperty(value = "type") String type) {
+    this.url = url;
+    this.keyspace = keyspace;
+    this.table = table;
+    this.datacenter = datacenter;
+    this.type = type;
+  }
 
-    public String getUrl() {
-        return url;
-    }
+  public String getType() {
+    return type;
+  }
 
-    public String getKeyspace() {
-        return keyspace;
-    }
+  public String getUrl() {
+    return url;
+  }
 
-    public String getTable() {
-        return table;
-    }
+  public String getKeyspace() {
+    return keyspace;
+  }
 
-    public String getDatacenter() {
-        return datacenter;
-    }
+  public String getTable() {
+    return table;
+  }
 
-    public String getUsername() {
-        return username;
-    }
+  public String getDatacenter() {
+    return datacenter;
+  }
 
-    public String getPassword() {
-        return password;
-    }
+  public String getUsername() {
+    return username;
+  }
 
-    public CassandraConfig withUsername(String username) {
-        this.username = username;
-        return this;
-    }
+  public String getPassword() {
+    return password;
+  }
 
-    public CassandraConfig withPassword(String password) {
-        this.password = password;
-        return this;
-    }
+  public CassandraConfig withUsername(String username) {
+    this.username = username;
+    return this;
+  }
+
+  public CassandraConfig withPassword(String password) {
+    this.password = password;
+    return this;
+  }
 }

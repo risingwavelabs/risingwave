@@ -23,27 +23,26 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class JniSourceValidateHandler {
-    static final Logger LOG = LoggerFactory.getLogger(JniSourceValidateHandler.class);
+  static final Logger LOG = LoggerFactory.getLogger(JniSourceValidateHandler.class);
 
-    public static byte[] validate(byte[] validateSourceRequestBytes)
-            throws com.google.protobuf.InvalidProtocolBufferException {
-        try {
-            var request =
-                    ConnectorServiceProto.ValidateSourceRequest.parseFrom(
-                            validateSourceRequestBytes);
+  public static byte[] validate(byte[] validateSourceRequestBytes)
+      throws com.google.protobuf.InvalidProtocolBufferException {
+    try {
+      var request =
+          ConnectorServiceProto.ValidateSourceRequest.parseFrom(validateSourceRequestBytes);
 
-            // For jni.rs
-            java.lang.Thread.currentThread()
-                    .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
-            validateSource(request);
-            // validate pass
-            return ConnectorServiceProto.ValidateSourceResponse.newBuilder().build().toByteArray();
-        } catch (StatusRuntimeException e) {
-            LOG.warn("Source validation failed", e);
-            return validateResponse(e.getMessage()).toByteArray();
-        } catch (Exception e) {
-            LOG.error("Internal error on source validation", e);
-            return validateResponse("Internal error: " + e.getMessage()).toByteArray();
-        }
+      // For jni.rs
+      java.lang.Thread.currentThread()
+          .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
+      validateSource(request);
+      // validate pass
+      return ConnectorServiceProto.ValidateSourceResponse.newBuilder().build().toByteArray();
+    } catch (StatusRuntimeException e) {
+      LOG.warn("Source validation failed", e);
+      return validateResponse(e.getMessage()).toByteArray();
+    } catch (Exception e) {
+      LOG.error("Internal error on source validation", e);
+      return validateResponse("Internal error: " + e.getMessage()).toByteArray();
     }
+  }
 }

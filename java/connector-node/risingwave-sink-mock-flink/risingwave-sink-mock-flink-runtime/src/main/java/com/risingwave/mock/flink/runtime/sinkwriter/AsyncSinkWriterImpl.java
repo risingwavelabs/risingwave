@@ -32,95 +32,95 @@ import org.apache.flink.table.data.RowData;
  * re-creating a writer for subsequent writing. This is different from the usage in Flink.
  */
 public class AsyncSinkWriterImpl implements com.risingwave.connector.api.sink.SinkWriter {
-    final org.apache.flink.api.connector.sink2.Sink<RowData> sink;
+  final org.apache.flink.api.connector.sink2.Sink<RowData> sink;
 
-    SinkWriter<RowData> writer;
-    final TableSchema tableSchema;
+  SinkWriter<RowData> writer;
+  final TableSchema tableSchema;
 
-    public AsyncSinkWriterImpl(
-            TableSchema tableSchema, org.apache.flink.api.connector.sink2.Sink<RowData> sink) {
-        this.tableSchema = tableSchema;
-        try {
-            this.sink = sink;
-            this.writer = sink.createWriter(new SinkWriterContextV2());
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+  public AsyncSinkWriterImpl(
+      TableSchema tableSchema, org.apache.flink.api.connector.sink2.Sink<RowData> sink) {
+    this.tableSchema = tableSchema;
+    try {
+      this.sink = sink;
+      this.writer = sink.createWriter(new SinkWriterContextV2());
+    } catch (IOException e) {
+      throw new RuntimeException(e);
     }
+  }
 
-    private void writeRow(RowData rowData) {
-        try {
-            if (this.writer == null) {
-                this.writer = sink.createWriter(new SinkWriterContextV2());
+  private void writeRow(RowData rowData) {
+    try {
+      if (this.writer == null) {
+        this.writer = sink.createWriter(new SinkWriterContextV2());
+      }
+      this.writer.write(
+          rowData,
+          new SinkWriter.Context() {
+            @Override
+            public long currentWatermark() {
+              return 0;
             }
-            this.writer.write(
-                    rowData,
-                    new SinkWriter.Context() {
-                        @Override
-                        public long currentWatermark() {
-                            return 0;
-                        }
 
-                        @Override
-                        public Long timestamp() {
-                            return null;
-                        }
-                    });
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
-    public void beginEpoch(long epoch) {}
-
-    @Override
-    public boolean write(Iterable<SinkRow> rows) {
-        for (SinkRow row : rows) {
-            writeRow(new RowDataImpl(row, tableSchema.getNumColumns()));
-        }
-        return true;
-    }
-
-    @Override
-    public Optional<ConnectorServiceProto.SinkMetadata> barrier(boolean isCheckpoint) {
-        if (isCheckpoint) {
-            try {
-                if (writer != null) {
-                    this.writer.flush(true);
-                    // The reason we need to close writer here is that:
-                    // Flink's async doesn't provide a commit method in the same sense as RW, so
-                    // here we are
-                    // using close writer for commit-like behavior, but closing writer will cause
-                    // the old
-                    // writer to no longer be able to write, so we need to close it here and
-                    // recreate it the
-                    // next time we need to write the data
-                    closeWriter();
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+            @Override
+            public Long timestamp() {
+              return null;
             }
-        }
-        return Optional.empty();
+          });
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    } catch (InterruptedException e) {
+      throw new RuntimeException(e);
     }
+  }
 
-    @Override
-    public void drop() {
-        closeWriter();
-    }
+  @Override
+  public void beginEpoch(long epoch) {}
 
-    private void closeWriter() {
-        if (writer == null) {
-            return;
-        }
-        try {
-            writer.close();
-            this.writer = null;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+  @Override
+  public boolean write(Iterable<SinkRow> rows) {
+    for (SinkRow row : rows) {
+      writeRow(new RowDataImpl(row, tableSchema.getNumColumns()));
     }
+    return true;
+  }
+
+  @Override
+  public Optional<ConnectorServiceProto.SinkMetadata> barrier(boolean isCheckpoint) {
+    if (isCheckpoint) {
+      try {
+        if (writer != null) {
+          this.writer.flush(true);
+          // The reason we need to close writer here is that:
+          // Flink's async doesn't provide a commit method in the same sense as RW, so
+          // here we are
+          // using close writer for commit-like behavior, but closing writer will cause
+          // the old
+          // writer to no longer be able to write, so we need to close it here and
+          // recreate it the
+          // next time we need to write the data
+          closeWriter();
+        }
+      } catch (Exception e) {
+        throw new RuntimeException(e);
+      }
+    }
+    return Optional.empty();
+  }
+
+  @Override
+  public void drop() {
+    closeWriter();
+  }
+
+  private void closeWriter() {
+    if (writer == null) {
+      return;
+    }
+    try {
+      writer.close();
+      this.writer = null;
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+  }
 }

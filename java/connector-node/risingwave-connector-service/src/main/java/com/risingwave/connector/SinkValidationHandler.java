@@ -26,60 +26,58 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class SinkValidationHandler {
-    private final StreamObserver<ConnectorServiceProto.ValidateSinkResponse> responseObserver;
-    static final Logger LOG = LoggerFactory.getLogger(SinkValidationHandler.class);
+  private final StreamObserver<ConnectorServiceProto.ValidateSinkResponse> responseObserver;
+  static final Logger LOG = LoggerFactory.getLogger(SinkValidationHandler.class);
 
-    public SinkValidationHandler(
-            StreamObserver<ConnectorServiceProto.ValidateSinkResponse> responseObserver) {
-        this.responseObserver = responseObserver;
+  public SinkValidationHandler(
+      StreamObserver<ConnectorServiceProto.ValidateSinkResponse> responseObserver) {
+    this.responseObserver = responseObserver;
+  }
+
+  public void handle(ConnectorServiceProto.ValidateSinkRequest request) {
+    try {
+      ConnectorServiceProto.SinkParam sinkParam = request.getSinkParam();
+      TableSchema tableSchema = TableSchema.fromProto(sinkParam.getTableSchema());
+      String connectorName = getConnectorName(request.getSinkParam());
+      SinkFactory sinkFactory = SinkUtils.getSinkFactory(connectorName);
+      sinkFactory.validate(tableSchema, sinkParam.getPropertiesMap(), sinkParam.getSinkType());
+
+      responseObserver.onNext(ConnectorServiceProto.ValidateSinkResponse.newBuilder().build());
+      responseObserver.onCompleted();
+
+    } catch (IllegalArgumentException e) {
+      LOG.error("sink validation failed", e);
+      // Extract useful information from the error thrown by Jackson and convert it into a
+      // more concise message.
+      String errorMessage = e.getLocalizedMessage();
+      Pattern missingFieldPattern = Pattern.compile("Missing creator property '([^']*)'");
+      Pattern unrecognizedFieldPattern = Pattern.compile("Unrecognized field \"([^\"]*)\"");
+      Matcher missingFieldMatcher = missingFieldPattern.matcher(errorMessage);
+      Matcher unrecognizedFieldMatcher = unrecognizedFieldPattern.matcher(errorMessage);
+      if (missingFieldMatcher.find()) {
+        errorMessage = "missing field `" + missingFieldMatcher.group(1) + "`";
+      } else if (unrecognizedFieldMatcher.find()) {
+        errorMessage = "unknown field `" + unrecognizedFieldMatcher.group(1) + "`";
+      }
+      responseObserver.onNext(
+          ConnectorServiceProto.ValidateSinkResponse.newBuilder()
+              .setError(
+                  ConnectorServiceProto.ValidationError.newBuilder()
+                      .setErrorMessage(errorMessage)
+                      .build())
+              .build());
+      responseObserver.onCompleted();
+
+    } catch (Exception e) {
+      LOG.error("sink validation failed", e);
+      responseObserver.onNext(
+          ConnectorServiceProto.ValidateSinkResponse.newBuilder()
+              .setError(
+                  ConnectorServiceProto.ValidationError.newBuilder()
+                      .setErrorMessage(e.getMessage())
+                      .build())
+              .build());
+      responseObserver.onCompleted();
     }
-
-    public void handle(ConnectorServiceProto.ValidateSinkRequest request) {
-        try {
-            ConnectorServiceProto.SinkParam sinkParam = request.getSinkParam();
-            TableSchema tableSchema = TableSchema.fromProto(sinkParam.getTableSchema());
-            String connectorName = getConnectorName(request.getSinkParam());
-            SinkFactory sinkFactory = SinkUtils.getSinkFactory(connectorName);
-            sinkFactory.validate(
-                    tableSchema, sinkParam.getPropertiesMap(), sinkParam.getSinkType());
-
-            responseObserver.onNext(
-                    ConnectorServiceProto.ValidateSinkResponse.newBuilder().build());
-            responseObserver.onCompleted();
-
-        } catch (IllegalArgumentException e) {
-            LOG.error("sink validation failed", e);
-            // Extract useful information from the error thrown by Jackson and convert it into a
-            // more concise message.
-            String errorMessage = e.getLocalizedMessage();
-            Pattern missingFieldPattern = Pattern.compile("Missing creator property '([^']*)'");
-            Pattern unrecognizedFieldPattern = Pattern.compile("Unrecognized field \"([^\"]*)\"");
-            Matcher missingFieldMatcher = missingFieldPattern.matcher(errorMessage);
-            Matcher unrecognizedFieldMatcher = unrecognizedFieldPattern.matcher(errorMessage);
-            if (missingFieldMatcher.find()) {
-                errorMessage = "missing field `" + missingFieldMatcher.group(1) + "`";
-            } else if (unrecognizedFieldMatcher.find()) {
-                errorMessage = "unknown field `" + unrecognizedFieldMatcher.group(1) + "`";
-            }
-            responseObserver.onNext(
-                    ConnectorServiceProto.ValidateSinkResponse.newBuilder()
-                            .setError(
-                                    ConnectorServiceProto.ValidationError.newBuilder()
-                                            .setErrorMessage(errorMessage)
-                                            .build())
-                            .build());
-            responseObserver.onCompleted();
-
-        } catch (Exception e) {
-            LOG.error("sink validation failed", e);
-            responseObserver.onNext(
-                    ConnectorServiceProto.ValidateSinkResponse.newBuilder()
-                            .setError(
-                                    ConnectorServiceProto.ValidationError.newBuilder()
-                                            .setErrorMessage(e.getMessage())
-                                            .build())
-                            .build());
-            responseObserver.onCompleted();
-        }
-    }
+  }
 }

@@ -21,22 +21,22 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.risingwave.connector.common.S3Config;
 
 public class DeltaLakeSinkConfig extends S3Config {
-    private String location;
+  private String location;
 
-    private String sinkType;
+  private String sinkType;
 
-    @JsonProperty(value = "force_append_only")
-    private Boolean forceAppendOnly;
+  @JsonProperty(value = "force_append_only")
+  private Boolean forceAppendOnly;
 
-    @JsonCreator
-    public DeltaLakeSinkConfig(
-            @JsonProperty(value = "location") String location,
-            @JsonProperty(value = "type") String sinkType) {
-        this.location = location;
-        this.sinkType = sinkType;
-    }
+  @JsonCreator
+  public DeltaLakeSinkConfig(
+      @JsonProperty(value = "location") String location,
+      @JsonProperty(value = "type") String sinkType) {
+    this.location = location;
+    this.sinkType = sinkType;
+  }
 
-    public String getLocation() {
-        return location;
-    }
+  public String getLocation() {
+    return location;
+  }
 }

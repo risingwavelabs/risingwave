@@ -28,12 +28,12 @@ import org.apache.flink.table.factories.DynamicTableSinkFactory;
  * counterpart of the `DynamicTableSinkFactory`. And `validate` don't need to do anything.
  */
 public class HttpFlinkMockSinkFactory implements FlinkMockSinkFactory {
-    @Override
-    public void validate(TableSchema tableSchema, FlinkDynamicAdapterConfig config)
-            throws StatusRuntimeException {}
+  @Override
+  public void validate(TableSchema tableSchema, FlinkDynamicAdapterConfig config)
+      throws StatusRuntimeException {}
 
-    @Override
-    public DynamicTableSinkFactory getDynamicTableSinkFactory() {
-        return new HttpDynamicTableSinkFactory();
-    }
+  @Override
+  public DynamicTableSinkFactory getDynamicTableSinkFactory() {
+    return new HttpDynamicTableSinkFactory();
+  }
 }

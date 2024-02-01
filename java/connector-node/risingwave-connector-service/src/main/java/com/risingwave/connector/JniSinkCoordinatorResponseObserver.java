@@ -22,37 +22,36 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class JniSinkCoordinatorResponseObserver
-        implements StreamObserver<ConnectorServiceProto.SinkCoordinatorStreamResponse> {
-    private static final Logger LOG =
-            LoggerFactory.getLogger(JniSinkCoordinatorResponseObserver.class);
-    private long responseTxPtr;
+    implements StreamObserver<ConnectorServiceProto.SinkCoordinatorStreamResponse> {
+  private static final Logger LOG =
+      LoggerFactory.getLogger(JniSinkCoordinatorResponseObserver.class);
+  private long responseTxPtr;
 
-    private boolean success = true;
+  private boolean success = true;
 
-    public JniSinkCoordinatorResponseObserver(long responseTxPtr) {
-        this.responseTxPtr = responseTxPtr;
+  public JniSinkCoordinatorResponseObserver(long responseTxPtr) {
+    this.responseTxPtr = responseTxPtr;
+  }
+
+  @Override
+  public void onNext(ConnectorServiceProto.SinkCoordinatorStreamResponse response) {
+    if (!Binding.sendSinkCoordinatorResponseToChannel(this.responseTxPtr, response.toByteArray())) {
+      throw Status.INTERNAL.withDescription("unable to send response").asRuntimeException();
     }
+  }
 
-    @Override
-    public void onNext(ConnectorServiceProto.SinkCoordinatorStreamResponse response) {
-        if (!Binding.sendSinkCoordinatorResponseToChannel(
-                this.responseTxPtr, response.toByteArray())) {
-            throw Status.INTERNAL.withDescription("unable to send response").asRuntimeException();
-        }
-    }
+  @Override
+  public void onError(Throwable throwable) {
+    this.success = false;
+    LOG.error("JniSinkCoordinatorHandler onError: ", throwable);
+  }
 
-    @Override
-    public void onError(Throwable throwable) {
-        this.success = false;
-        LOG.error("JniSinkCoordinatorHandler onError: ", throwable);
-    }
+  @Override
+  public void onCompleted() {
+    LOG.info("JniSinkCoordinatorHandler onCompleted");
+  }
 
-    @Override
-    public void onCompleted() {
-        LOG.info("JniSinkCoordinatorHandler onCompleted");
-    }
-
-    public boolean isSuccess() {
-        return success;
-    }
+  public boolean isSuccess() {
+    return success;
+  }
 }

@@ -27,91 +27,86 @@ import org.slf4j.LoggerFactory;
 
 /** * handler for starting a debezium source connectors */
 public class DbzSourceHandler implements SourceHandler {
-    static final Logger LOG = LoggerFactory.getLogger(DbzSourceHandler.class);
+  static final Logger LOG = LoggerFactory.getLogger(DbzSourceHandler.class);
 
-    private final DbzConnectorConfig config;
+  private final DbzConnectorConfig config;
 
-    public DbzSourceHandler(DbzConnectorConfig config) {
-        this.config = config;
-    }
+  public DbzSourceHandler(DbzConnectorConfig config) {
+    this.config = config;
+  }
 
-    class OnReadyHandler implements Runnable {
-        private final CdcEngineRunner runner;
-        private final ServerCallStreamObserver<GetEventStreamResponse> responseObserver;
+  class OnReadyHandler implements Runnable {
+    private final CdcEngineRunner runner;
+    private final ServerCallStreamObserver<GetEventStreamResponse> responseObserver;
 
-        public OnReadyHandler(
-                CdcEngineRunner runner,
-                ServerCallStreamObserver<GetEventStreamResponse> responseObserver) {
-            this.runner = runner;
-            this.responseObserver = responseObserver;
-        }
-
-        @Override
-        public void run() {
-            while (runner.isRunning()) {
-                try {
-                    if (Context.current().isCancelled()) {
-                        LOG.info(
-                                "Engine#{}: Connection broken detected, stop the engine",
-                                config.getSourceId());
-                        runner.stop();
-                        return;
-                    }
-                    // check whether the send queue has room for new messages
-                    if (responseObserver.isReady()) {
-                        // Thread will block on the channel to get output from engine
-                        var resp =
-                                runner.getEngine()
-                                        .getOutputChannel()
-                                        .poll(500, TimeUnit.MILLISECONDS);
-                        if (resp != null) {
-                            ConnectorNodeMetrics.incSourceRowsReceived(
-                                    config.getSourceType().toString(),
-                                    String.valueOf(config.getSourceId()),
-                                    resp.getEventsCount());
-                            LOG.debug(
-                                    "Engine#{}: emit one chunk {} events to network ",
-                                    config.getSourceId(),
-                                    resp.getEventsCount());
-                            responseObserver.onNext(resp);
-                        }
-                    } else { // back pressure detected, return to avoid oom
-                        return;
-                    }
-                } catch (Exception e) {
-                    LOG.error("Poll engine output channel fail. ", e);
-                }
-            }
-        }
+    public OnReadyHandler(
+        CdcEngineRunner runner, ServerCallStreamObserver<GetEventStreamResponse> responseObserver) {
+      this.runner = runner;
+      this.responseObserver = responseObserver;
     }
 
     @Override
-    public void startSource(ServerCallStreamObserver<GetEventStreamResponse> responseObserver) {
-        var runner = DbzCdcEngineRunner.newCdcEngineRunner(config, responseObserver);
-        if (runner == null) {
-            responseObserver.onCompleted();
-            return;
-        }
-
+    public void run() {
+      while (runner.isRunning()) {
         try {
-            // Start the engine
-            runner.start();
-            LOG.info("Start consuming events of table {}", config.getSourceId());
-
-            final OnReadyHandler onReadyHandler = new OnReadyHandler(runner, responseObserver);
-
-            responseObserver.disableAutoRequest();
-            responseObserver.setOnReadyHandler(onReadyHandler);
-
-            onReadyHandler.run();
-
-        } catch (Throwable t) {
-            LOG.error("Cdc engine failed.", t);
-            try {
-                runner.stop();
-            } catch (Exception e) {
-                LOG.warn("Failed to stop Engine#{}", config.getSourceId(), e);
+          if (Context.current().isCancelled()) {
+            LOG.info(
+                "Engine#{}: Connection broken detected, stop the engine", config.getSourceId());
+            runner.stop();
+            return;
+          }
+          // check whether the send queue has room for new messages
+          if (responseObserver.isReady()) {
+            // Thread will block on the channel to get output from engine
+            var resp = runner.getEngine().getOutputChannel().poll(500, TimeUnit.MILLISECONDS);
+            if (resp != null) {
+              ConnectorNodeMetrics.incSourceRowsReceived(
+                  config.getSourceType().toString(),
+                  String.valueOf(config.getSourceId()),
+                  resp.getEventsCount());
+              LOG.debug(
+                  "Engine#{}: emit one chunk {} events to network ",
+                  config.getSourceId(),
+                  resp.getEventsCount());
+              responseObserver.onNext(resp);
             }
+          } else { // back pressure detected, return to avoid oom
+            return;
+          }
+        } catch (Exception e) {
+          LOG.error("Poll engine output channel fail. ", e);
         }
+      }
     }
+  }
+
+  @Override
+  public void startSource(ServerCallStreamObserver<GetEventStreamResponse> responseObserver) {
+    var runner = DbzCdcEngineRunner.newCdcEngineRunner(config, responseObserver);
+    if (runner == null) {
+      responseObserver.onCompleted();
+      return;
+    }
+
+    try {
+      // Start the engine
+      runner.start();
+      LOG.info("Start consuming events of table {}", config.getSourceId());
+
+      final OnReadyHandler onReadyHandler = new OnReadyHandler(runner, responseObserver);
+
+      responseObserver.disableAutoRequest();
+      responseObserver.setOnReadyHandler(onReadyHandler);
+
+      onReadyHandler.run();
+
+    } catch (Throwable t) {
+      LOG.error("Cdc engine failed.", t);
+      try {
+        runner.stop();
+      } catch (Exception e) {
+        LOG.warn("Failed to stop Engine#{}", config.getSourceId(), e);
+      }
+    }
+  }
 }

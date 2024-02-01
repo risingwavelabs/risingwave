@@ -35,73 +35,73 @@ import org.slf4j.LoggerFactory;
  * downstream, when the downstream call yield, back to the fifo way to pick the mail execution
  */
 public class MailBoxExecImpl implements MailboxExecutor {
-    // The size of queue is Integer.MAX. In other words, we won't limit the number of emails.
-    BlockingQueue<Mail> queue = new LinkedBlockingQueue<>();
+  // The size of queue is Integer.MAX. In other words, we won't limit the number of emails.
+  BlockingQueue<Mail> queue = new LinkedBlockingQueue<>();
 
-    private static final Logger LOG = LoggerFactory.getLogger(MailBoxExecImpl.class);
+  private static final Logger LOG = LoggerFactory.getLogger(MailBoxExecImpl.class);
 
-    class Mail {
-        ThrowingRunnable<? extends Exception> command;
-        String descriptionFormat;
-        Object[] descriptionArgs;
+  class Mail {
+    ThrowingRunnable<? extends Exception> command;
+    String descriptionFormat;
+    Object[] descriptionArgs;
 
-        public Mail(
-                ThrowingRunnable<? extends Exception> command,
-                String descriptionFormat,
-                Object... descriptionArgs) {
-            this.command = command;
-            this.descriptionFormat = descriptionFormat;
-            this.descriptionArgs = Arrays.stream(descriptionArgs).toArray();
-        }
+    public Mail(
+        ThrowingRunnable<? extends Exception> command,
+        String descriptionFormat,
+        Object... descriptionArgs) {
+      this.command = command;
+      this.descriptionFormat = descriptionFormat;
+      this.descriptionArgs = Arrays.stream(descriptionArgs).toArray();
     }
+  }
 
-    /**
-     * Create a mail and add it to the queue
-     *
-     * @param command the runnable task to add to the mailbox for execution.
-     * @param descriptionFormat the optional description for the command that is used for debugging
-     *     and error-reporting.
-     * @param descriptionArgs the parameters used to format the final description string.
-     */
-    @Override
-    public void execute(
-            ThrowingRunnable<? extends Exception> command,
-            String descriptionFormat,
-            Object... descriptionArgs) {
-        queue.add(new Mail(command, descriptionFormat, descriptionArgs));
-    }
+  /**
+   * Create a mail and add it to the queue
+   *
+   * @param command the runnable task to add to the mailbox for execution.
+   * @param descriptionFormat the optional description for the command that is used for debugging
+   *     and error-reporting.
+   * @param descriptionArgs the parameters used to format the final description string.
+   */
+  @Override
+  public void execute(
+      ThrowingRunnable<? extends Exception> command,
+      String descriptionFormat,
+      Object... descriptionArgs) {
+    queue.add(new Mail(command, descriptionFormat, descriptionArgs));
+  }
 
-    /** Pick a mail to execute, join the queue as empty, then block and wait */
-    @Override
-    public void yield() throws InterruptedException, FlinkRuntimeException {
-        Mail headMail;
-        while (true) {
-            if ((headMail = queue.poll(1, TimeUnit.SECONDS)) != null) {
-                break;
-            } else {
-                LOG.warn("Query mail queue wait timeout, will continue to wait");
-            }
-        }
-        try {
-            headMail.command.run();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+  /** Pick a mail to execute, join the queue as empty, then block and wait */
+  @Override
+  public void yield() throws InterruptedException, FlinkRuntimeException {
+    Mail headMail;
+    while (true) {
+      if ((headMail = queue.poll(1, TimeUnit.SECONDS)) != null) {
+        break;
+      } else {
+        LOG.warn("Query mail queue wait timeout, will continue to wait");
+      }
     }
+    try {
+      headMail.command.run();
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+  }
 
-    /** Pick a mail to execute, join the queue as empty, then return false. */
-    @Override
-    public boolean tryYield() throws FlinkRuntimeException {
-        Mail headMail = queue.poll();
-        if (headMail != null) {
-            try {
-                headMail.command.run();
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-            return true;
-        } else {
-            return false;
-        }
+  /** Pick a mail to execute, join the queue as empty, then return false. */
+  @Override
+  public boolean tryYield() throws FlinkRuntimeException {
+    Mail headMail = queue.poll();
+    if (headMail != null) {
+      try {
+        headMail.command.run();
+      } catch (Exception e) {
+        throw new RuntimeException(e);
+      }
+      return true;
+    } else {
+      return false;
     }
+  }
 }

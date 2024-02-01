@@ -23,26 +23,21 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public abstract class SourceHandlerFactory {
-    static final Logger LOG = LoggerFactory.getLogger(SourceHandlerFactory.class);
+  static final Logger LOG = LoggerFactory.getLogger(SourceHandlerFactory.class);
 
-    public static SourceHandler createSourceHandler(
-            SourceTypeE source,
-            long sourceId,
-            String startOffset,
-            Map<String, String> userProps,
-            boolean snapshotDone,
-            boolean isMultiTableShared) {
-        // userProps extracted from grpc request, underlying implementation is UnmodifiableMap
-        Map<String, String> mutableUserProps = new HashMap<>(userProps);
-        mutableUserProps.put("source.id", Long.toString(sourceId));
-        var config =
-                new DbzConnectorConfig(
-                        source,
-                        sourceId,
-                        startOffset,
-                        mutableUserProps,
-                        snapshotDone,
-                        isMultiTableShared);
-        return new DbzSourceHandler(config);
-    }
+  public static SourceHandler createSourceHandler(
+      SourceTypeE source,
+      long sourceId,
+      String startOffset,
+      Map<String, String> userProps,
+      boolean snapshotDone,
+      boolean isMultiTableShared) {
+    // userProps extracted from grpc request, underlying implementation is UnmodifiableMap
+    Map<String, String> mutableUserProps = new HashMap<>(userProps);
+    mutableUserProps.put("source.id", Long.toString(sourceId));
+    var config =
+        new DbzConnectorConfig(
+            source, sourceId, startOffset, mutableUserProps, snapshotDone, isMultiTableShared);
+    return new DbzSourceHandler(config);
+  }
 }

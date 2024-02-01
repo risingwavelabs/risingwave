@@ -17,21 +17,21 @@ package com.risingwave.connector.api.source;
 import com.risingwave.proto.ConnectorServiceProto;
 
 public enum SourceTypeE {
-    MYSQL,
-    POSTGRES,
-    CITUS,
-    INVALID;
+  MYSQL,
+  POSTGRES,
+  CITUS,
+  INVALID;
 
-    public static SourceTypeE valueOf(ConnectorServiceProto.SourceType type) {
-        switch (type) {
-            case MYSQL:
-                return SourceTypeE.MYSQL;
-            case POSTGRES:
-                return SourceTypeE.POSTGRES;
-            case CITUS:
-                return SourceTypeE.CITUS;
-            default:
-                return SourceTypeE.INVALID;
-        }
+  public static SourceTypeE valueOf(ConnectorServiceProto.SourceType type) {
+    switch (type) {
+      case MYSQL:
+        return SourceTypeE.MYSQL;
+      case POSTGRES:
+        return SourceTypeE.POSTGRES;
+      case CITUS:
+        return SourceTypeE.CITUS;
+      default:
+        return SourceTypeE.INVALID;
     }
+  }
 }

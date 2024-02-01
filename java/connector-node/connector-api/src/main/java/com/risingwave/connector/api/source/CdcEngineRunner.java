@@ -15,11 +15,11 @@
 package com.risingwave.connector.api.source;
 
 public interface CdcEngineRunner {
-    boolean start() throws Exception;
+  boolean start() throws Exception;
 
-    void stop() throws Exception;
+  void stop() throws Exception;
 
-    CdcEngine getEngine();
+  CdcEngine getEngine();
 
-    boolean isRunning();
+  boolean isRunning();
 }

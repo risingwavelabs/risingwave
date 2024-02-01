@@ -17,9 +17,9 @@ package com.risingwave.connector.api.sink;
 import com.risingwave.proto.Data;
 
 public interface SinkRow {
-    Object get(int index);
+  Object get(int index);
 
-    Data.Op getOp();
+  Data.Op getOp();
 
-    int size();
+  int size();
 }

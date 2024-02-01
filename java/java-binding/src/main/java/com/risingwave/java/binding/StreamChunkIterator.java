@@ -15,27 +15,27 @@
 package com.risingwave.java.binding;
 
 public class StreamChunkIterator implements AutoCloseable {
-    private final long pointer;
-    private boolean isClosed;
+  private final long pointer;
+  private boolean isClosed;
 
-    public StreamChunkIterator(StreamChunk chunk) {
-        this.pointer = Binding.iteratorNewStreamChunk(chunk.getPointer());
-        this.isClosed = false;
-    }
+  public StreamChunkIterator(StreamChunk chunk) {
+    this.pointer = Binding.iteratorNewStreamChunk(chunk.getPointer());
+    this.isClosed = false;
+  }
 
-    public StreamChunkRow next() {
-        boolean hasNext = Binding.iteratorNext(this.pointer);
-        if (!hasNext) {
-            return null;
-        }
-        return new StreamChunkRow(pointer);
+  public StreamChunkRow next() {
+    boolean hasNext = Binding.iteratorNext(this.pointer);
+    if (!hasNext) {
+      return null;
     }
+    return new StreamChunkRow(pointer);
+  }
 
-    @Override
-    public void close() {
-        if (!isClosed) {
-            isClosed = true;
-            Binding.iteratorClose(pointer);
-        }
+  @Override
+  public void close() {
+    if (!isClosed) {
+      isClosed = true;
+      Binding.iteratorClose(pointer);
     }
+  }
 }

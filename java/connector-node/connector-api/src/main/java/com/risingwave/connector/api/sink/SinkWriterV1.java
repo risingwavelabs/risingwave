@@ -19,52 +19,52 @@ import java.util.Iterator;
 import java.util.Optional;
 
 public interface SinkWriterV1 {
-    void write(Iterator<SinkRow> rows);
+  void write(Iterator<SinkRow> rows);
 
-    void sync();
+  void sync();
 
-    void drop();
+  void drop();
 
-    class Adapter implements SinkWriter {
+  class Adapter implements SinkWriter {
 
-        private final SinkWriterV1 inner;
-        private boolean hasBegun;
+    private final SinkWriterV1 inner;
+    private boolean hasBegun;
 
-        public Adapter(SinkWriterV1 inner) {
-            this.inner = inner;
-            this.hasBegun = false;
-        }
-
-        public SinkWriterV1 getInner() {
-            return inner;
-        }
-
-        @Override
-        public void beginEpoch(long epoch) {}
-
-        @Override
-        public boolean write(Iterable<SinkRow> rows) {
-            if (!hasBegun) {
-                hasBegun = true;
-            }
-            this.inner.write(rows.iterator());
-            return false;
-        }
-
-        @Override
-        public Optional<ConnectorServiceProto.SinkMetadata> barrier(boolean isCheckpoint) {
-            if (isCheckpoint) {
-                if (hasBegun) {
-                    this.inner.sync();
-                    this.hasBegun = false;
-                }
-            }
-            return Optional.empty();
-        }
-
-        @Override
-        public void drop() {
-            this.inner.drop();
-        }
+    public Adapter(SinkWriterV1 inner) {
+      this.inner = inner;
+      this.hasBegun = false;
     }
+
+    public SinkWriterV1 getInner() {
+      return inner;
+    }
+
+    @Override
+    public void beginEpoch(long epoch) {}
+
+    @Override
+    public boolean write(Iterable<SinkRow> rows) {
+      if (!hasBegun) {
+        hasBegun = true;
+      }
+      this.inner.write(rows.iterator());
+      return false;
+    }
+
+    @Override
+    public Optional<ConnectorServiceProto.SinkMetadata> barrier(boolean isCheckpoint) {
+      if (isCheckpoint) {
+        if (hasBegun) {
+          this.inner.sync();
+          this.hasBegun = false;
+        }
+      }
+      return Optional.empty();
+    }
+
+    @Override
+    public void drop() {
+      this.inner.drop();
+    }
+  }
 }

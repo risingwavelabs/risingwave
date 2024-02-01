@@ -23,39 +23,38 @@ import org.apache.arrow.vector.VectorSchemaRoot;
 
 /** Batch-processing wrapper over a user-defined scalar function. */
 class ScalarFunctionBatch extends UserDefinedFunctionBatch {
-    ScalarFunction function;
-    MethodHandle methodHandle;
-    Function<Object, Object>[] processInputs;
+  ScalarFunction function;
+  MethodHandle methodHandle;
+  Function<Object, Object>[] processInputs;
 
-    ScalarFunctionBatch(ScalarFunction function) {
-        this.function = function;
-        var method = Reflection.getEvalMethod(function);
-        this.methodHandle = Reflection.getMethodHandle(method);
-        this.inputSchema = TypeUtils.methodToInputSchema(method);
-        this.outputSchema = TypeUtils.methodToOutputSchema(method);
-        this.processInputs = TypeUtils.methodToProcessInputs(method);
-    }
+  ScalarFunctionBatch(ScalarFunction function) {
+    this.function = function;
+    var method = Reflection.getEvalMethod(function);
+    this.methodHandle = Reflection.getMethodHandle(method);
+    this.inputSchema = TypeUtils.methodToInputSchema(method);
+    this.outputSchema = TypeUtils.methodToOutputSchema(method);
+    this.processInputs = TypeUtils.methodToProcessInputs(method);
+  }
 
-    @Override
-    Iterator<VectorSchemaRoot> evalBatch(VectorSchemaRoot batch, BufferAllocator allocator) {
-        var row = new Object[batch.getSchema().getFields().size() + 1];
-        row[0] = this.function;
-        var outputValues = new Object[batch.getRowCount()];
-        for (int i = 0; i < batch.getRowCount(); i++) {
-            for (int j = 0; j < row.length - 1; j++) {
-                var val = batch.getVector(j).getObject(i);
-                row[j + 1] = this.processInputs[j].apply(val);
-            }
-            try {
-                outputValues[i] = this.methodHandle.invokeWithArguments(row);
-            } catch (Throwable e) {
-                throw new RuntimeException(e);
-            }
-        }
-        var outputVector =
-                TypeUtils.createVector(
-                        this.outputSchema.getFields().get(0), allocator, outputValues);
-        var outputBatch = VectorSchemaRoot.of(outputVector);
-        return Collections.singleton(outputBatch).iterator();
+  @Override
+  Iterator<VectorSchemaRoot> evalBatch(VectorSchemaRoot batch, BufferAllocator allocator) {
+    var row = new Object[batch.getSchema().getFields().size() + 1];
+    row[0] = this.function;
+    var outputValues = new Object[batch.getRowCount()];
+    for (int i = 0; i < batch.getRowCount(); i++) {
+      for (int j = 0; j < row.length - 1; j++) {
+        var val = batch.getVector(j).getObject(i);
+        row[j + 1] = this.processInputs[j].apply(val);
+      }
+      try {
+        outputValues[i] = this.methodHandle.invokeWithArguments(row);
+      } catch (Throwable e) {
+        throw new RuntimeException(e);
+      }
     }
+    var outputVector =
+        TypeUtils.createVector(this.outputSchema.getFields().get(0), allocator, outputValues);
+    var outputBatch = VectorSchemaRoot.of(outputVector);
+    return Collections.singleton(outputBatch).iterator();
+  }
 }

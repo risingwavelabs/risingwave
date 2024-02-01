@@ -26,55 +26,53 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 
 public class DbzCdcEngine implements CdcEngine {
-    static final int DEFAULT_QUEUE_CAPACITY = 16;
+  static final int DEFAULT_QUEUE_CAPACITY = 16;
 
-    private final DebeziumEngine<?> engine;
-    private final DbzCdcEventConsumer consumer;
-    private final long id;
+  private final DebeziumEngine<?> engine;
+  private final DbzCdcEventConsumer consumer;
+  private final long id;
 
-    /** If config is not valid will throw exceptions */
-    public DbzCdcEngine(
-            long sourceId,
-            Properties config,
-            DebeziumEngine.CompletionCallback completionCallback) {
-        var heartbeatTopicPrefix = config.getProperty(TOPIC_HEARTBEAT_PREFIX.name());
-        var topicPrefix = config.getProperty(TOPIC_PREFIX.name());
-        var transactionTopic = String.format("%s.%s", topicPrefix, DEFAULT_TRANSACTION_TOPIC);
-        var consumer =
-                new DbzCdcEventConsumer(
-                        sourceId,
-                        heartbeatTopicPrefix,
-                        transactionTopic,
-                        new ArrayBlockingQueue<>(DEFAULT_QUEUE_CAPACITY));
+  /** If config is not valid will throw exceptions */
+  public DbzCdcEngine(
+      long sourceId, Properties config, DebeziumEngine.CompletionCallback completionCallback) {
+    var heartbeatTopicPrefix = config.getProperty(TOPIC_HEARTBEAT_PREFIX.name());
+    var topicPrefix = config.getProperty(TOPIC_PREFIX.name());
+    var transactionTopic = String.format("%s.%s", topicPrefix, DEFAULT_TRANSACTION_TOPIC);
+    var consumer =
+        new DbzCdcEventConsumer(
+            sourceId,
+            heartbeatTopicPrefix,
+            transactionTopic,
+            new ArrayBlockingQueue<>(DEFAULT_QUEUE_CAPACITY));
 
-        // Builds a debezium engine but not start it
-        this.id = sourceId;
-        this.consumer = consumer;
-        this.engine =
-                DebeziumEngine.create(Connect.class)
-                        .using(config)
-                        .using(completionCallback)
-                        .notifying(consumer)
-                        .build();
-    }
+    // Builds a debezium engine but not start it
+    this.id = sourceId;
+    this.consumer = consumer;
+    this.engine =
+        DebeziumEngine.create(Connect.class)
+            .using(config)
+            .using(completionCallback)
+            .notifying(consumer)
+            .build();
+  }
 
-    /** Start to run the cdc engine */
-    @Override
-    public void run() {
-        engine.run();
-    }
+  /** Start to run the cdc engine */
+  @Override
+  public void run() {
+    engine.run();
+  }
 
-    @Override
-    public long getId() {
-        return id;
-    }
+  @Override
+  public long getId() {
+    return id;
+  }
 
-    public void stop() throws Exception {
-        engine.close();
-    }
+  public void stop() throws Exception {
+    engine.close();
+  }
 
-    @Override
-    public BlockingQueue<ConnectorServiceProto.GetEventStreamResponse> getOutputChannel() {
-        return consumer.getOutputChannel();
-    }
+  @Override
+  public BlockingQueue<ConnectorServiceProto.GetEventStreamResponse> getOutputChannel() {
+    return consumer.getOutputChannel();
+  }
 }

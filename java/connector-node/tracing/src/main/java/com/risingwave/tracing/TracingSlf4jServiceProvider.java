@@ -26,30 +26,30 @@ import org.slf4j.spi.SLF4JServiceProvider;
 
 public class TracingSlf4jServiceProvider implements SLF4JServiceProvider {
 
-    private final ILoggerFactory loggerFactory = new TracingSlf4jLoggerFactory();
-    private final IMarkerFactory markerFactory = new BasicMarkerFactory();
-    private final MDCAdapter mdcAdapter = new NOPMDCAdapter();
+  private final ILoggerFactory loggerFactory = new TracingSlf4jLoggerFactory();
+  private final IMarkerFactory markerFactory = new BasicMarkerFactory();
+  private final MDCAdapter mdcAdapter = new NOPMDCAdapter();
 
-    @Override
-    public ILoggerFactory getLoggerFactory() {
-        return this.loggerFactory;
-    }
+  @Override
+  public ILoggerFactory getLoggerFactory() {
+    return this.loggerFactory;
+  }
 
-    @Override
-    public IMarkerFactory getMarkerFactory() {
-        return this.markerFactory;
-    }
+  @Override
+  public IMarkerFactory getMarkerFactory() {
+    return this.markerFactory;
+  }
 
-    @Override
-    public MDCAdapter getMDCAdapter() {
-        return this.mdcAdapter;
-    }
+  @Override
+  public MDCAdapter getMDCAdapter() {
+    return this.mdcAdapter;
+  }
 
-    @Override
-    public String getRequestedApiVersion() {
-        return "2.0.99";
-    }
+  @Override
+  public String getRequestedApiVersion() {
+    return "2.0.99";
+  }
 
-    @Override
-    public void initialize() {}
+  @Override
+  public void initialize() {}
 }

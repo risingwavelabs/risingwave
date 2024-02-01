@@ -19,7 +19,6 @@ import io.grpc.stub.ServerCallStreamObserver;
 
 /** Handler for RPC request */
 public interface SourceHandler {
-    void startSource(
-            ServerCallStreamObserver<ConnectorServiceProto.GetEventStreamResponse>
-                    responseObserver);
+  void startSource(
+      ServerCallStreamObserver<ConnectorServiceProto.GetEventStreamResponse> responseObserver);
 }

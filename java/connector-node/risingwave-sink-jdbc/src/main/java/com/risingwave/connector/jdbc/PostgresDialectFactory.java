@@ -16,8 +16,8 @@ package com.risingwave.connector.jdbc;
 
 public class PostgresDialectFactory implements JdbcDialectFactory {
 
-    @Override
-    public JdbcDialect create(int[] columnSqlTypes) {
-        return new PostgresDialect(columnSqlTypes);
-    }
+  @Override
+  public JdbcDialect create(int[] columnSqlTypes) {
+    return new PostgresDialect(columnSqlTypes);
+  }
 }

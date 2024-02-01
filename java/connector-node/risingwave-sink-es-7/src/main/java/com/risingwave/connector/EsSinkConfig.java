@@ -21,61 +21,61 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.risingwave.connector.api.sink.CommonSinkConfig;
 
 public class EsSinkConfig extends CommonSinkConfig {
-    /** Required */
-    private String url;
+  /** Required */
+  private String url;
 
-    /** Required */
-    private String index;
+  /** Required */
+  private String index;
 
-    /** Optional, delimiter for generating id */
-    @JsonProperty(value = "delimiter")
-    private String delimiter;
+  /** Optional, delimiter for generating id */
+  @JsonProperty(value = "delimiter")
+  private String delimiter;
 
-    @JsonProperty(value = "username")
-    private String username;
+  @JsonProperty(value = "username")
+  private String username;
 
-    @JsonProperty(value = "password")
-    private String password;
+  @JsonProperty(value = "password")
+  private String password;
 
-    @JsonCreator
-    public EsSinkConfig(
-            @JsonProperty(value = "url") String url, @JsonProperty(value = "index") String index) {
-        this.url = url;
-        this.index = index;
-    }
+  @JsonCreator
+  public EsSinkConfig(
+      @JsonProperty(value = "url") String url, @JsonProperty(value = "index") String index) {
+    this.url = url;
+    this.index = index;
+  }
 
-    public String getUrl() {
-        return url;
-    }
+  public String getUrl() {
+    return url;
+  }
 
-    public String getIndex() {
-        return index;
-    }
+  public String getIndex() {
+    return index;
+  }
 
-    public String getDelimiter() {
-        return delimiter;
-    }
+  public String getDelimiter() {
+    return delimiter;
+  }
 
-    public String getUsername() {
-        return username;
-    }
+  public String getUsername() {
+    return username;
+  }
 
-    public String getPassword() {
-        return password;
-    }
+  public String getPassword() {
+    return password;
+  }
 
-    public EsSinkConfig withDelimiter(String delimiter) {
-        this.delimiter = delimiter;
-        return this;
-    }
+  public EsSinkConfig withDelimiter(String delimiter) {
+    this.delimiter = delimiter;
+    return this;
+  }
 
-    public EsSinkConfig withUsername(String username) {
-        this.username = username;
-        return this;
-    }
+  public EsSinkConfig withUsername(String username) {
+    this.username = username;
+    return this;
+  }
 
-    public EsSinkConfig withPassword(String password) {
-        this.password = password;
-        return this;
-    }
+  public EsSinkConfig withPassword(String password) {
+    this.password = password;
+    return this;
+  }
 }

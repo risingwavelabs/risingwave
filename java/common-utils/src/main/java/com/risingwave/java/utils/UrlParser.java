@@ -20,21 +20,21 @@ import java.net.URI;
 import java.net.URISyntaxException;
 
 public class UrlParser {
-    public static String parseLocationScheme(String location) {
-        try {
-            URI uri = new URI(location);
-            String scheme = uri.getScheme();
-            if (scheme == null) {
-                throw INVALID_ARGUMENT
-                        .withDescription("location should set scheme (e.g. s3a://)")
-                        .asRuntimeException();
-            }
-            return scheme;
-        } catch (URISyntaxException e) {
-            throw INVALID_ARGUMENT
-                    .withDescription(String.format("invalid location uri: %s", e.getMessage()))
-                    .withCause(e)
-                    .asRuntimeException();
-        }
+  public static String parseLocationScheme(String location) {
+    try {
+      URI uri = new URI(location);
+      String scheme = uri.getScheme();
+      if (scheme == null) {
+        throw INVALID_ARGUMENT
+            .withDescription("location should set scheme (e.g. s3a://)")
+            .asRuntimeException();
+      }
+      return scheme;
+    } catch (URISyntaxException e) {
+      throw INVALID_ARGUMENT
+          .withDescription(String.format("invalid location uri: %s", e.getMessage()))
+          .withCause(e)
+          .asRuntimeException();
     }
+  }
 }

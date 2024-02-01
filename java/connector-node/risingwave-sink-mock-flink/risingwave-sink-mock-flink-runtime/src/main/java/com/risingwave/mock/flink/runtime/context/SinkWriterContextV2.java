@@ -36,146 +36,145 @@ import org.apache.flink.util.UserCodeClassLoader;
  */
 public class SinkWriterContextV2 implements Sink.InitContext {
 
-    /** A character timer. */
-    class ProcessingTimeServiceImpl implements ProcessingTimeService {
-        private final ScheduledThreadPoolExecutor timerService;
+  /** A character timer. */
+  class ProcessingTimeServiceImpl implements ProcessingTimeService {
+    private final ScheduledThreadPoolExecutor timerService;
 
-        ProcessingTimeServiceImpl() {
-            this.timerService = new ScheduledThreadPoolExecutor(1);
-        }
-
-        @Override
-        public long getCurrentProcessingTime() {
-            return System.currentTimeMillis();
-        }
-
-        /**
-         * @param timestamp Time when the task is to be executed (in processing time)
-         * @param target The task to be executed
-         * @return
-         */
-        @Override
-        public ScheduledFuture<?> registerTimer(long timestamp, ProcessingTimeCallback target) {
-            long delay = 0;
-            if (timestamp >= getCurrentProcessingTime()) {
-                delay = timestamp - getCurrentProcessingTime() + 1;
-            }
-            return timerService.schedule(
-                    new Runnable() {
-                        @Override
-                        public void run() {
-                            try {
-                                target.onProcessingTime(timestamp);
-                            } catch (Exception e) {
-                                throw new RuntimeException("Callback error" + e.getMessage());
-                            }
-                        }
-                    },
-                    delay,
-                    TimeUnit.MILLISECONDS);
-        }
+    ProcessingTimeServiceImpl() {
+      this.timerService = new ScheduledThreadPoolExecutor(1);
     }
 
-    // The sinkWriter's monitor, which is responsible for monitoring downstream data for errors,
-    // currently just mocks one and doesn't do anything with the error
-    SinkWriterMetricGroup sinkWriterMetricGroup;
-    // A character timer.
-    ProcessingTimeService processingTimeService;
-    SimpleUserCodeClassLoader simpleUserCodeClassLoader;
-    // Downstream executes some tasks serially by registering them with `MailboxExecutor`
-    MailboxExecutor mailboxExecutor;
+    @Override
+    public long getCurrentProcessingTime() {
+      return System.currentTimeMillis();
+    }
 
-    InitializationContextImpl initializationContext;
+    /**
+     * @param timestamp Time when the task is to be executed (in processing time)
+     * @param target The task to be executed
+     * @return
+     */
+    @Override
+    public ScheduledFuture<?> registerTimer(long timestamp, ProcessingTimeCallback target) {
+      long delay = 0;
+      if (timestamp >= getCurrentProcessingTime()) {
+        delay = timestamp - getCurrentProcessingTime() + 1;
+      }
+      return timerService.schedule(
+          new Runnable() {
+            @Override
+            public void run() {
+              try {
+                target.onProcessingTime(timestamp);
+              } catch (Exception e) {
+                throw new RuntimeException("Callback error" + e.getMessage());
+              }
+            }
+          },
+          delay,
+          TimeUnit.MILLISECONDS);
+    }
+  }
 
-    public SinkWriterContextV2() {
-        sinkWriterMetricGroup = new SinkWriterMetircGroupImpl();
-        processingTimeService = new ProcessingTimeServiceImpl();
-        simpleUserCodeClassLoader =
-                SimpleUserCodeClassLoader.create(Thread.currentThread().getContextClassLoader());
-        mailboxExecutor = new MailBoxExecImpl();
-        initializationContext =
-                new InitializationContextImpl(sinkWriterMetricGroup, simpleUserCodeClassLoader);
+  // The sinkWriter's monitor, which is responsible for monitoring downstream data for errors,
+  // currently just mocks one and doesn't do anything with the error
+  SinkWriterMetricGroup sinkWriterMetricGroup;
+  // A character timer.
+  ProcessingTimeService processingTimeService;
+  SimpleUserCodeClassLoader simpleUserCodeClassLoader;
+  // Downstream executes some tasks serially by registering them with `MailboxExecutor`
+  MailboxExecutor mailboxExecutor;
+
+  InitializationContextImpl initializationContext;
+
+  public SinkWriterContextV2() {
+    sinkWriterMetricGroup = new SinkWriterMetircGroupImpl();
+    processingTimeService = new ProcessingTimeServiceImpl();
+    simpleUserCodeClassLoader =
+        SimpleUserCodeClassLoader.create(Thread.currentThread().getContextClassLoader());
+    mailboxExecutor = new MailBoxExecImpl();
+    initializationContext =
+        new InitializationContextImpl(sinkWriterMetricGroup, simpleUserCodeClassLoader);
+  }
+
+  @Override
+  public UserCodeClassLoader getUserCodeClassLoader() {
+    return simpleUserCodeClassLoader;
+  }
+
+  @Override
+  public MailboxExecutor getMailboxExecutor() {
+    return mailboxExecutor;
+  }
+
+  @Override
+  public ProcessingTimeService getProcessingTimeService() {
+    return processingTimeService;
+  }
+
+  @Override
+  public int getSubtaskId() {
+    return (int) (Math.random() * 1000000);
+  }
+
+  @Override
+  public int getNumberOfParallelSubtasks() {
+    return 0;
+  }
+
+  @Override
+  public int getAttemptNumber() {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public SinkWriterMetricGroup metricGroup() {
+    return sinkWriterMetricGroup;
+  }
+
+  @Override
+  public OptionalLong getRestoredCheckpointId() {
+    return OptionalLong.empty();
+  }
+
+  @Override
+  public SerializationSchema.InitializationContext asSerializationSchemaInitializationContext() {
+    return initializationContext;
+  }
+
+  @Override
+  public boolean isObjectReuseEnabled() {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public <IN> TypeSerializer<IN> createInputSerializer() {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public JobID getJobId() {
+    throw new UnsupportedOperationException();
+  }
+
+  class InitializationContextImpl implements SerializationSchema.InitializationContext {
+
+    MetricGroup metricGroup;
+    UserCodeClassLoader userCodeClassLoader;
+
+    InitializationContextImpl(MetricGroup metricGroup, UserCodeClassLoader userCodeClassLoader) {
+      this.metricGroup = metricGroup;
+      this.userCodeClassLoader = userCodeClassLoader;
+    }
+
+    @Override
+    public MetricGroup getMetricGroup() {
+      return metricGroup;
     }
 
     @Override
     public UserCodeClassLoader getUserCodeClassLoader() {
-        return simpleUserCodeClassLoader;
+      return userCodeClassLoader;
     }
-
-    @Override
-    public MailboxExecutor getMailboxExecutor() {
-        return mailboxExecutor;
-    }
-
-    @Override
-    public ProcessingTimeService getProcessingTimeService() {
-        return processingTimeService;
-    }
-
-    @Override
-    public int getSubtaskId() {
-        return (int) (Math.random() * 1000000);
-    }
-
-    @Override
-    public int getNumberOfParallelSubtasks() {
-        return 0;
-    }
-
-    @Override
-    public int getAttemptNumber() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public SinkWriterMetricGroup metricGroup() {
-        return sinkWriterMetricGroup;
-    }
-
-    @Override
-    public OptionalLong getRestoredCheckpointId() {
-        return OptionalLong.empty();
-    }
-
-    @Override
-    public SerializationSchema.InitializationContext asSerializationSchemaInitializationContext() {
-        return initializationContext;
-    }
-
-    @Override
-    public boolean isObjectReuseEnabled() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public <IN> TypeSerializer<IN> createInputSerializer() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public JobID getJobId() {
-        throw new UnsupportedOperationException();
-    }
-
-    class InitializationContextImpl implements SerializationSchema.InitializationContext {
-
-        MetricGroup metricGroup;
-        UserCodeClassLoader userCodeClassLoader;
-
-        InitializationContextImpl(
-                MetricGroup metricGroup, UserCodeClassLoader userCodeClassLoader) {
-            this.metricGroup = metricGroup;
-            this.userCodeClassLoader = userCodeClassLoader;
-        }
-
-        @Override
-        public MetricGroup getMetricGroup() {
-            return metricGroup;
-        }
-
-        @Override
-        public UserCodeClassLoader getUserCodeClassLoader() {
-            return userCodeClassLoader;
-        }
-    }
+  }
 }

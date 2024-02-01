@@ -25,45 +25,45 @@ import org.apache.kafka.connect.data.SchemaBuilder;
 /** RisingWave assumes DATE type in JSON is a string in "yyyy-MM-dd" pattern */
 public class DatetimeTypeConverter implements CustomConverter<SchemaBuilder, RelationalColumn> {
 
-    private DateTimeFormatter dateFormatter = DateTimeFormatter.ISO_DATE;
+  private DateTimeFormatter dateFormatter = DateTimeFormatter.ISO_DATE;
 
-    @Override
-    public void configure(Properties props) {
-        dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+  @Override
+  public void configure(Properties props) {
+    dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+  }
+
+  @Override
+  public void converterFor(
+      RelationalColumn column, ConverterRegistration<SchemaBuilder> registration) {
+    String sqlType = column.typeName().toUpperCase();
+    SchemaBuilder schemaBuilder = null;
+    Converter converter = null;
+    if ("DATE".equals(sqlType)) {
+      // field schema should be optional
+      schemaBuilder = SchemaBuilder.string().name("rw.cdc.date.string").optional();
+      converter = this::convertDate;
     }
-
-    @Override
-    public void converterFor(
-            RelationalColumn column, ConverterRegistration<SchemaBuilder> registration) {
-        String sqlType = column.typeName().toUpperCase();
-        SchemaBuilder schemaBuilder = null;
-        Converter converter = null;
-        if ("DATE".equals(sqlType)) {
-            // field schema should be optional
-            schemaBuilder = SchemaBuilder.string().name("rw.cdc.date.string").optional();
-            converter = this::convertDate;
-        }
-        if (schemaBuilder != null) {
-            registration.register(schemaBuilder, converter);
-        }
+    if (schemaBuilder != null) {
+      registration.register(schemaBuilder, converter);
     }
+  }
 
-    private String convertDate(Object input) {
-        if (input == null) {
-            return null;
-        }
-        var epochDay = Date.toEpochDay(input, null);
-        LocalDate date = LocalDate.ofEpochDay(epochDay);
-        return dateFormatter.format(date);
+  private String convertDate(Object input) {
+    if (input == null) {
+      return null;
     }
+    var epochDay = Date.toEpochDay(input, null);
+    LocalDate date = LocalDate.ofEpochDay(epochDay);
+    return dateFormatter.format(date);
+  }
 
-    public static void main(String[] args) {
-        var converter = new DatetimeTypeConverter();
-        var d1 = LocalDate.of(1988, 5, 4);
-        Integer d3 = 8989;
+  public static void main(String[] args) {
+    var converter = new DatetimeTypeConverter();
+    var d1 = LocalDate.of(1988, 5, 4);
+    Integer d3 = 8989;
 
-        System.out.println(converter.convertDate(null));
-        System.out.println(converter.convertDate(d1));
-        System.out.println(converter.convertDate(d3));
-    }
+    System.out.println(converter.convertDate(null));
+    System.out.println(converter.convertDate(d1));
+    System.out.println(converter.convertDate(d3));
+  }
 }

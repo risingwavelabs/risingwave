@@ -17,27 +17,27 @@ package com.risingwave.java.binding;
 import com.risingwave.proto.JavaBinding.ReadPlan;
 
 public class HummockIterator implements AutoCloseable {
-    private final long pointer;
-    private boolean isClosed;
+  private final long pointer;
+  private boolean isClosed;
 
-    public HummockIterator(ReadPlan readPlan) {
-        this.pointer = Binding.iteratorNewHummock(readPlan.toByteArray());
-        this.isClosed = false;
-    }
+  public HummockIterator(ReadPlan readPlan) {
+    this.pointer = Binding.iteratorNewHummock(readPlan.toByteArray());
+    this.isClosed = false;
+  }
 
-    public KeyedRow next() {
-        boolean hasNext = Binding.iteratorNext(this.pointer);
-        if (!hasNext) {
-            return null;
-        }
-        return new KeyedRow(pointer);
+  public KeyedRow next() {
+    boolean hasNext = Binding.iteratorNext(this.pointer);
+    if (!hasNext) {
+      return null;
     }
+    return new KeyedRow(pointer);
+  }
 
-    @Override
-    public void close() {
-        if (!isClosed) {
-            isClosed = true;
-            Binding.iteratorClose(pointer);
-        }
+  @Override
+  public void close() {
+    if (!isClosed) {
+      isClosed = true;
+      Binding.iteratorClose(pointer);
     }
+  }
 }

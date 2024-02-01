@@ -20,31 +20,29 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class JniSinkCoordinatorHandler {
-    private static final Logger LOG = LoggerFactory.getLogger(JniSinkCoordinatorHandler.class);
+  private static final Logger LOG = LoggerFactory.getLogger(JniSinkCoordinatorHandler.class);
 
-    public static void runJniSinkCoordinatorThread(long requestRxPtr, long responseTxPtr) {
-        // For jni.rs
-        java.lang.Thread.currentThread()
-                .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
-        JniSinkCoordinatorResponseObserver responseObserver =
-                new JniSinkCoordinatorResponseObserver(responseTxPtr);
-        SinkCoordinatorStreamObserver sinkCoordinatorStreamObserver =
-                new SinkCoordinatorStreamObserver(responseObserver);
-        try {
-            byte[] requestBytes;
-            while ((requestBytes = Binding.recvSinkCoordinatorRequestFromChannel(requestRxPtr))
-                    != null) {
-                var request =
-                        ConnectorServiceProto.SinkCoordinatorStreamRequest.parseFrom(requestBytes);
-                sinkCoordinatorStreamObserver.onNext(request);
-                if (!responseObserver.isSuccess()) {
-                    throw new RuntimeException("fail to sendSinkCoordinatorResponseToChannel");
-                }
-            }
-            sinkCoordinatorStreamObserver.onCompleted();
-        } catch (Throwable t) {
-            sinkCoordinatorStreamObserver.onError(t);
+  public static void runJniSinkCoordinatorThread(long requestRxPtr, long responseTxPtr) {
+    // For jni.rs
+    java.lang.Thread.currentThread()
+        .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
+    JniSinkCoordinatorResponseObserver responseObserver =
+        new JniSinkCoordinatorResponseObserver(responseTxPtr);
+    SinkCoordinatorStreamObserver sinkCoordinatorStreamObserver =
+        new SinkCoordinatorStreamObserver(responseObserver);
+    try {
+      byte[] requestBytes;
+      while ((requestBytes = Binding.recvSinkCoordinatorRequestFromChannel(requestRxPtr)) != null) {
+        var request = ConnectorServiceProto.SinkCoordinatorStreamRequest.parseFrom(requestBytes);
+        sinkCoordinatorStreamObserver.onNext(request);
+        if (!responseObserver.isSuccess()) {
+          throw new RuntimeException("fail to sendSinkCoordinatorResponseToChannel");
         }
-        LOG.info("end of runJniSinkCoordinatorThread");
+      }
+      sinkCoordinatorStreamObserver.onCompleted();
+    } catch (Throwable t) {
+      sinkCoordinatorStreamObserver.onError(t);
     }
+    LOG.info("end of runJniSinkCoordinatorThread");
+  }
 }

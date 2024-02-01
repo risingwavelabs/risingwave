@@ -28,29 +28,29 @@ import org.apache.flink.table.types.logical.LogicalType;
  * throws an exception here.
  */
 public class DynamicTableSinkContextImpl implements DynamicTableSink.Context {
-    @Override
-    public boolean isBounded() {
-        return false;
-    }
+  @Override
+  public boolean isBounded() {
+    return false;
+  }
 
-    @Override
-    public <T> TypeInformation<T> createTypeInformation(DataType consumedDataType) {
-        throw new UnsupportedOperationException();
-    }
+  @Override
+  public <T> TypeInformation<T> createTypeInformation(DataType consumedDataType) {
+    throw new UnsupportedOperationException();
+  }
 
-    @Override
-    public <T> TypeInformation<T> createTypeInformation(LogicalType consumedLogicalType) {
-        throw new UnsupportedOperationException();
-    }
+  @Override
+  public <T> TypeInformation<T> createTypeInformation(LogicalType consumedLogicalType) {
+    throw new UnsupportedOperationException();
+  }
 
-    @Override
-    public DynamicTableSink.DataStructureConverter createDataStructureConverter(
-            DataType consumedDataType) {
-        throw new UnsupportedOperationException();
-    }
+  @Override
+  public DynamicTableSink.DataStructureConverter createDataStructureConverter(
+      DataType consumedDataType) {
+    throw new UnsupportedOperationException();
+  }
 
-    @Override
-    public Optional<int[][]> getTargetColumns() {
-        throw new UnsupportedOperationException();
-    }
+  @Override
+  public Optional<int[][]> getTargetColumns() {
+    throw new UnsupportedOperationException();
+  }
 }

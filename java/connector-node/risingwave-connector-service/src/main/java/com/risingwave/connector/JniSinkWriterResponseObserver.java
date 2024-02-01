@@ -22,38 +22,38 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class JniSinkWriterResponseObserver
-        implements StreamObserver<ConnectorServiceProto.SinkWriterStreamResponse> {
-    private static final Logger LOG = LoggerFactory.getLogger(JniSinkWriterResponseObserver.class);
-    private long responseTxPtr;
+    implements StreamObserver<ConnectorServiceProto.SinkWriterStreamResponse> {
+  private static final Logger LOG = LoggerFactory.getLogger(JniSinkWriterResponseObserver.class);
+  private long responseTxPtr;
 
-    private boolean success = true;
+  private boolean success = true;
 
-    public JniSinkWriterResponseObserver(long responseTxPtr) {
-        this.responseTxPtr = responseTxPtr;
+  public JniSinkWriterResponseObserver(long responseTxPtr) {
+    this.responseTxPtr = responseTxPtr;
+  }
+
+  @Override
+  public void onNext(ConnectorServiceProto.SinkWriterStreamResponse response) {
+    if (!Binding.sendSinkWriterResponseToChannel(this.responseTxPtr, response.toByteArray())) {
+      throw Status.INTERNAL.withDescription("unable to send response").asRuntimeException();
     }
+  }
 
-    @Override
-    public void onNext(ConnectorServiceProto.SinkWriterStreamResponse response) {
-        if (!Binding.sendSinkWriterResponseToChannel(this.responseTxPtr, response.toByteArray())) {
-            throw Status.INTERNAL.withDescription("unable to send response").asRuntimeException();
-        }
+  @Override
+  public void onError(Throwable throwable) {
+    if (!Binding.sendSinkWriterErrorToChannel(this.responseTxPtr, throwable.getMessage())) {
+      LOG.warn("unable to send error: {}", throwable.getMessage());
     }
+    this.success = false;
+    LOG.error("JniSinkWriterHandler onError: ", throwable);
+  }
 
-    @Override
-    public void onError(Throwable throwable) {
-        if (!Binding.sendSinkWriterErrorToChannel(this.responseTxPtr, throwable.getMessage())) {
-            LOG.warn("unable to send error: {}", throwable.getMessage());
-        }
-        this.success = false;
-        LOG.error("JniSinkWriterHandler onError: ", throwable);
-    }
+  @Override
+  public void onCompleted() {
+    LOG.info("JniSinkWriterHandler onCompleted");
+  }
 
-    @Override
-    public void onCompleted() {
-        LOG.info("JniSinkWriterHandler onCompleted");
-    }
-
-    public boolean isSuccess() {
-        return success;
-    }
+  public boolean isSuccess() {
+    return success;
+  }
 }

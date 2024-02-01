@@ -23,22 +23,22 @@ import com.risingwave.proto.Data;
 import junit.framework.TestCase;
 
 public class DeserializerTest extends TestCase {
-    public void testJsonDeserializer() {
-        JsonDeserializer deserializer = new JsonDeserializer(TestUtils.getMockTableSchema());
-        JsonPayload jsonPayload =
-                JsonPayload.newBuilder()
-                        .addRowOps(
-                                JsonPayload.RowOp.newBuilder()
-                                        .setOpType(Data.Op.INSERT)
-                                        .setLine("{\"id\": 1, \"name\": \"John\"}")
-                                        .build())
-                        .build();
-        ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch writeBatch =
-                ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch.newBuilder()
-                        .setJsonPayload(jsonPayload)
-                        .build();
-        SinkRow outcome = deserializer.deserialize(writeBatch).iterator().next();
-        assertEquals(outcome.get(0), 1);
-        assertEquals(outcome.get(1), "John");
-    }
+  public void testJsonDeserializer() {
+    JsonDeserializer deserializer = new JsonDeserializer(TestUtils.getMockTableSchema());
+    JsonPayload jsonPayload =
+        JsonPayload.newBuilder()
+            .addRowOps(
+                JsonPayload.RowOp.newBuilder()
+                    .setOpType(Data.Op.INSERT)
+                    .setLine("{\"id\": 1, \"name\": \"John\"}")
+                    .build())
+            .build();
+    ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch writeBatch =
+        ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch.newBuilder()
+            .setJsonPayload(jsonPayload)
+            .build();
+    SinkRow outcome = deserializer.deserialize(writeBatch).iterator().next();
+    assertEquals(outcome.get(0), 1);
+    assertEquals(outcome.get(1), "John");
+  }
 }

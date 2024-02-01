@@ -18,37 +18,37 @@ import com.risingwave.connector.api.sink.SinkRow;
 import java.util.Iterator;
 
 public class MonitoredRowIterable implements Iterable<SinkRow> {
-    private final Iterable<SinkRow> inner;
-    private final String connectorName;
-    private final String sinkId;
+  private final Iterable<SinkRow> inner;
+  private final String connectorName;
+  private final String sinkId;
 
-    public MonitoredRowIterable(Iterable<SinkRow> inner, String connectorName, String sinkId) {
-        this.inner = inner;
-        this.connectorName = connectorName;
-        this.sinkId = sinkId;
+  public MonitoredRowIterable(Iterable<SinkRow> inner, String connectorName, String sinkId) {
+    this.inner = inner;
+    this.connectorName = connectorName;
+    this.sinkId = sinkId;
+  }
+
+  @Override
+  public Iterator<SinkRow> iterator() {
+    return new MonitoredRowIterator(this.inner.iterator());
+  }
+
+  class MonitoredRowIterator implements Iterator<SinkRow> {
+    private final Iterator<SinkRow> inner;
+
+    MonitoredRowIterator(Iterator<SinkRow> inner) {
+      this.inner = inner;
     }
 
     @Override
-    public Iterator<SinkRow> iterator() {
-        return new MonitoredRowIterator(this.inner.iterator());
+    public boolean hasNext() {
+      return inner.hasNext();
     }
 
-    class MonitoredRowIterator implements Iterator<SinkRow> {
-        private final Iterator<SinkRow> inner;
-
-        MonitoredRowIterator(Iterator<SinkRow> inner) {
-            this.inner = inner;
-        }
-
-        @Override
-        public boolean hasNext() {
-            return inner.hasNext();
-        }
-
-        @Override
-        public SinkRow next() {
-            ConnectorNodeMetrics.incSinkRowsReceived(connectorName, sinkId, 1);
-            return inner.next();
-        }
+    @Override
+    public SinkRow next() {
+      ConnectorNodeMetrics.incSinkRowsReceived(connectorName, sinkId, 1);
+      return inner.next();
     }
+  }
 }

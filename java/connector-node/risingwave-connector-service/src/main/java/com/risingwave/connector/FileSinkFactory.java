@@ -24,18 +24,18 @@ import com.risingwave.proto.Catalog.SinkType;
 import java.util.Map;
 
 public class FileSinkFactory implements SinkFactory {
-    @Override
-    public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
-        ObjectMapper mapper = new ObjectMapper();
-        FileSinkConfig config = mapper.convertValue(tableProperties, FileSinkConfig.class);
-        return new SinkWriterV1.Adapter(new FileSink(config, tableSchema));
-    }
+  @Override
+  public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
+    ObjectMapper mapper = new ObjectMapper();
+    FileSinkConfig config = mapper.convertValue(tableProperties, FileSinkConfig.class);
+    return new SinkWriterV1.Adapter(new FileSink(config, tableSchema));
+  }
 
-    @Override
-    public void validate(
-            TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
-        mapper.convertValue(tableProperties, FileSinkConfig.class);
-    }
+  @Override
+  public void validate(
+      TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
+    ObjectMapper mapper = new ObjectMapper();
+    mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
+    mapper.convertValue(tableProperties, FileSinkConfig.class);
+  }
 }

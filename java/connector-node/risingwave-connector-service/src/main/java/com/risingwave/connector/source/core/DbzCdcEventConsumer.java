@@ -35,176 +35,165 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 enum EventType {
-    HEARTBEAT,
-    TRANSACTION,
-    DATA,
+  HEARTBEAT,
+  TRANSACTION,
+  DATA,
 }
 
 public class DbzCdcEventConsumer
-        implements DebeziumEngine.ChangeConsumer<ChangeEvent<SourceRecord, SourceRecord>> {
-    static final Logger LOG = LoggerFactory.getLogger(DbzCdcEventConsumer.class);
+    implements DebeziumEngine.ChangeConsumer<ChangeEvent<SourceRecord, SourceRecord>> {
+  static final Logger LOG = LoggerFactory.getLogger(DbzCdcEventConsumer.class);
 
-    private final BlockingQueue<GetEventStreamResponse> outputChannel;
-    private final long sourceId;
-    private final JsonConverter converter;
-    private final String heartbeatTopicPrefix;
-    private final String transactionTopic;
+  private final BlockingQueue<GetEventStreamResponse> outputChannel;
+  private final long sourceId;
+  private final JsonConverter converter;
+  private final String heartbeatTopicPrefix;
+  private final String transactionTopic;
 
-    DbzCdcEventConsumer(
-            long sourceId,
-            String heartbeatTopicPrefix,
-            String transactionTopic,
-            BlockingQueue<GetEventStreamResponse> queue) {
-        this.sourceId = sourceId;
-        this.outputChannel = queue;
-        this.heartbeatTopicPrefix = heartbeatTopicPrefix;
-        this.transactionTopic = transactionTopic;
-        LOG.info("heartbeat topic: {}, trnx topic: {}", heartbeatTopicPrefix, transactionTopic);
+  DbzCdcEventConsumer(
+      long sourceId,
+      String heartbeatTopicPrefix,
+      String transactionTopic,
+      BlockingQueue<GetEventStreamResponse> queue) {
+    this.sourceId = sourceId;
+    this.outputChannel = queue;
+    this.heartbeatTopicPrefix = heartbeatTopicPrefix;
+    this.transactionTopic = transactionTopic;
+    LOG.info("heartbeat topic: {}, trnx topic: {}", heartbeatTopicPrefix, transactionTopic);
 
-        // The default JSON converter will output the schema field in the JSON which is unnecessary
-        // to source parser, we use a customized JSON converter to avoid outputting the `schema`
-        // field.
-        var jsonConverter = new DbzJsonConverter();
-        final HashMap<String, Object> configs = new HashMap<>(2);
-        // only serialize the value part
-        configs.put(ConverterConfig.TYPE_CONFIG, ConverterType.VALUE.getName());
-        // include record schema to output JSON in { "schema": { ... }, "payload": { ... } } format
-        configs.put(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, true);
-        jsonConverter.configure(configs);
-        this.converter = jsonConverter;
+    // The default JSON converter will output the schema field in the JSON which is unnecessary
+    // to source parser, we use a customized JSON converter to avoid outputting the `schema`
+    // field.
+    var jsonConverter = new DbzJsonConverter();
+    final HashMap<String, Object> configs = new HashMap<>(2);
+    // only serialize the value part
+    configs.put(ConverterConfig.TYPE_CONFIG, ConverterType.VALUE.getName());
+    // include record schema to output JSON in { "schema": { ... }, "payload": { ... } } format
+    configs.put(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, true);
+    jsonConverter.configure(configs);
+    this.converter = jsonConverter;
+  }
+
+  private EventType getEventType(SourceRecord record) {
+    if (isHeartbeatEvent(record)) {
+      return EventType.HEARTBEAT;
+    } else if (isTransactionMetaEvent(record)) {
+      return EventType.TRANSACTION;
+    } else {
+      return EventType.DATA;
     }
+  }
 
-    private EventType getEventType(SourceRecord record) {
-        if (isHeartbeatEvent(record)) {
-            return EventType.HEARTBEAT;
-        } else if (isTransactionMetaEvent(record)) {
-            return EventType.TRANSACTION;
-        } else {
-            return EventType.DATA;
-        }
-    }
+  private boolean isHeartbeatEvent(SourceRecord record) {
+    String topic = record.topic();
+    return topic != null && heartbeatTopicPrefix != null && topic.startsWith(heartbeatTopicPrefix);
+  }
 
-    private boolean isHeartbeatEvent(SourceRecord record) {
-        String topic = record.topic();
-        return topic != null
-                && heartbeatTopicPrefix != null
-                && topic.startsWith(heartbeatTopicPrefix);
-    }
+  private boolean isTransactionMetaEvent(SourceRecord record) {
+    String topic = record.topic();
+    return topic != null && topic.equals(transactionTopic);
+  }
 
-    private boolean isTransactionMetaEvent(SourceRecord record) {
-        String topic = record.topic();
-        return topic != null && topic.equals(transactionTopic);
-    }
+  @Override
+  public void handleBatch(
+      List<ChangeEvent<SourceRecord, SourceRecord>> events,
+      DebeziumEngine.RecordCommitter<ChangeEvent<SourceRecord, SourceRecord>> committer)
+      throws InterruptedException {
+    var respBuilder = GetEventStreamResponse.newBuilder();
+    for (ChangeEvent<SourceRecord, SourceRecord> event : events) {
+      var record = event.value();
+      EventType eventType = getEventType(record);
+      DebeziumOffset offset =
+          new DebeziumOffset(
+              record.sourcePartition(), record.sourceOffset(), (eventType == EventType.HEARTBEAT));
+      // serialize the offset to a JSON, so that kernel doesn't need to
+      // aware its layout
+      String offsetStr = "";
+      try {
+        byte[] serialized = DebeziumOffsetSerializer.INSTANCE.serialize(offset);
+        offsetStr = new String(serialized, StandardCharsets.UTF_8);
+      } catch (IOException e) {
+        LOG.warn("failed to serialize debezium offset", e);
+      }
 
-    @Override
-    public void handleBatch(
-            List<ChangeEvent<SourceRecord, SourceRecord>> events,
-            DebeziumEngine.RecordCommitter<ChangeEvent<SourceRecord, SourceRecord>> committer)
-            throws InterruptedException {
-        var respBuilder = GetEventStreamResponse.newBuilder();
-        for (ChangeEvent<SourceRecord, SourceRecord> event : events) {
-            var record = event.value();
-            EventType eventType = getEventType(record);
-            DebeziumOffset offset =
-                    new DebeziumOffset(
-                            record.sourcePartition(),
-                            record.sourceOffset(),
-                            (eventType == EventType.HEARTBEAT));
-            // serialize the offset to a JSON, so that kernel doesn't need to
-            // aware its layout
-            String offsetStr = "";
-            try {
-                byte[] serialized = DebeziumOffsetSerializer.INSTANCE.serialize(offset);
-                offsetStr = new String(serialized, StandardCharsets.UTF_8);
-            } catch (IOException e) {
-                LOG.warn("failed to serialize debezium offset", e);
+      var msgBuilder =
+          CdcMessage.newBuilder().setOffset(offsetStr).setPartition(String.valueOf(sourceId));
+
+      switch (eventType) {
+        case HEARTBEAT:
+          {
+            var message = msgBuilder.build();
+            LOG.debug("heartbeat => {}", message.getOffset());
+            respBuilder.addEvents(message);
+            break;
+          }
+        case TRANSACTION:
+          {
+            long trxTs = ((Struct) record.value()).getInt64("ts_ms");
+            byte[] payload =
+                converter.fromConnectData(record.topic(), record.valueSchema(), record.value());
+            var message =
+                msgBuilder
+                    .setIsTransactionMeta(true)
+                    .setPayload(new String(payload, StandardCharsets.UTF_8))
+                    .setSourceTsMs(trxTs)
+                    .build();
+            LOG.debug("transaction => {}", message);
+            respBuilder.addEvents(message);
+            break;
+          }
+        case DATA:
+          {
+            // Topic naming conventions
+            // - PG: serverName.schemaName.tableName
+            // - MySQL: serverName.databaseName.tableName
+            // We can extract the full table name from the topic
+            var fullTableName = record.topic().substring(record.topic().indexOf('.') + 1);
+
+            // ignore null record
+            if (record.value() == null) {
+              break;
             }
+            // get upstream event time from the "source" field
+            var sourceStruct = ((Struct) record.value()).getStruct("source");
+            long sourceTsMs =
+                sourceStruct == null ? System.currentTimeMillis() : sourceStruct.getInt64("ts_ms");
+            byte[] payload =
+                converter.fromConnectData(record.topic(), record.valueSchema(), record.value());
+            var message =
+                msgBuilder
+                    .setFullTableName(fullTableName)
+                    .setPayload(new String(payload, StandardCharsets.UTF_8))
+                    .setSourceTsMs(sourceTsMs)
+                    .build();
+            LOG.debug("record => {}", message.getPayload());
+            respBuilder.addEvents(message);
+            break;
+          }
+        default:
+          break;
+      }
 
-            var msgBuilder =
-                    CdcMessage.newBuilder()
-                            .setOffset(offsetStr)
-                            .setPartition(String.valueOf(sourceId));
-
-            switch (eventType) {
-                case HEARTBEAT:
-                    {
-                        var message = msgBuilder.build();
-                        LOG.debug("heartbeat => {}", message.getOffset());
-                        respBuilder.addEvents(message);
-                        break;
-                    }
-                case TRANSACTION:
-                    {
-                        long trxTs = ((Struct) record.value()).getInt64("ts_ms");
-                        byte[] payload =
-                                converter.fromConnectData(
-                                        record.topic(), record.valueSchema(), record.value());
-                        var message =
-                                msgBuilder
-                                        .setIsTransactionMeta(true)
-                                        .setPayload(new String(payload, StandardCharsets.UTF_8))
-                                        .setSourceTsMs(trxTs)
-                                        .build();
-                        LOG.debug("transaction => {}", message);
-                        respBuilder.addEvents(message);
-                        break;
-                    }
-                case DATA:
-                    {
-                        // Topic naming conventions
-                        // - PG: serverName.schemaName.tableName
-                        // - MySQL: serverName.databaseName.tableName
-                        // We can extract the full table name from the topic
-                        var fullTableName =
-                                record.topic().substring(record.topic().indexOf('.') + 1);
-
-                        // ignore null record
-                        if (record.value() == null) {
-                            break;
-                        }
-                        // get upstream event time from the "source" field
-                        var sourceStruct = ((Struct) record.value()).getStruct("source");
-                        long sourceTsMs =
-                                sourceStruct == null
-                                        ? System.currentTimeMillis()
-                                        : sourceStruct.getInt64("ts_ms");
-                        byte[] payload =
-                                converter.fromConnectData(
-                                        record.topic(), record.valueSchema(), record.value());
-                        var message =
-                                msgBuilder
-                                        .setFullTableName(fullTableName)
-                                        .setPayload(new String(payload, StandardCharsets.UTF_8))
-                                        .setSourceTsMs(sourceTsMs)
-                                        .build();
-                        LOG.debug("record => {}", message.getPayload());
-                        respBuilder.addEvents(message);
-                        break;
-                    }
-                default:
-                    break;
-            }
-
-            // mark the event as processed
-            committer.markProcessed(event);
-        }
-
-        // skip empty batch
-        if (respBuilder.getEventsCount() > 0) {
-            respBuilder.setSourceId(sourceId);
-            var response = respBuilder.build();
-            outputChannel.put(response);
-        }
-
-        committer.markBatchFinished();
+      // mark the event as processed
+      committer.markProcessed(event);
     }
 
-    @Override
-    public boolean supportsTombstoneEvents() {
-        return DebeziumEngine.ChangeConsumer.super.supportsTombstoneEvents();
+    // skip empty batch
+    if (respBuilder.getEventsCount() > 0) {
+      respBuilder.setSourceId(sourceId);
+      var response = respBuilder.build();
+      outputChannel.put(response);
     }
 
-    public BlockingQueue<GetEventStreamResponse> getOutputChannel() {
-        return this.outputChannel;
-    }
+    committer.markBatchFinished();
+  }
+
+  @Override
+  public boolean supportsTombstoneEvents() {
+    return DebeziumEngine.ChangeConsumer.super.supportsTombstoneEvents();
+  }
+
+  public BlockingQueue<GetEventStreamResponse> getOutputChannel() {
+    return this.outputChannel;
+  }
 }

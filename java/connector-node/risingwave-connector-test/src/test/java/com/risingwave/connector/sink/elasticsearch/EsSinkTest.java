@@ -41,75 +41,75 @@ import org.testcontainers.elasticsearch.ElasticsearchContainer;
 
 public class EsSinkTest {
 
-    static TableSchema getTestTableSchema() {
-        return new TableSchema(
-                Lists.newArrayList("id", "name"),
-                Lists.newArrayList(
-                        Data.DataType.newBuilder().setTypeName(TypeName.INT32).build(),
-                        Data.DataType.newBuilder().setTypeName(TypeName.VARCHAR).build()),
-                Lists.newArrayList("id", "name"));
+  static TableSchema getTestTableSchema() {
+    return new TableSchema(
+        Lists.newArrayList("id", "name"),
+        Lists.newArrayList(
+            Data.DataType.newBuilder().setTypeName(TypeName.INT32).build(),
+            Data.DataType.newBuilder().setTypeName(TypeName.VARCHAR).build()),
+        Lists.newArrayList("id", "name"));
+  }
+
+  public void testEsSink(ElasticsearchContainer container, String username, String password)
+      throws IOException {
+    EsSink sink =
+        new EsSink(
+            new EsSinkConfig(container.getHttpHostAddress(), "test")
+                .withDelimiter("$")
+                .withUsername(username)
+                .withPassword(password),
+            getTestTableSchema());
+    sink.write(
+        Iterators.forArray(
+            new ArraySinkRow(Op.INSERT, "1$Alice", "{\"id\":1,\"name\":\"Alice\"}"),
+            new ArraySinkRow(Op.INSERT, "2$Bob", "{\"id\":2,\"name\":\"Bob\"}")));
+    sink.sync();
+    // container is slow here, but our default flush time is 5s,
+    // so 3s is enough for sync test
+    try {
+      Thread.sleep(3000);
+    } catch (InterruptedException e) {
+      fail(e.getMessage());
     }
 
-    public void testEsSink(ElasticsearchContainer container, String username, String password)
-            throws IOException {
-        EsSink sink =
-                new EsSink(
-                        new EsSinkConfig(container.getHttpHostAddress(), "test")
-                                .withDelimiter("$")
-                                .withUsername(username)
-                                .withPassword(password),
-                        getTestTableSchema());
-        sink.write(
-                Iterators.forArray(
-                        new ArraySinkRow(Op.INSERT, "1$Alice", "{\"id\":1,\"name\":\"Alice\"}"),
-                        new ArraySinkRow(Op.INSERT, "2$Bob", "{\"id\":2,\"name\":\"Bob\"}")));
-        sink.sync();
-        // container is slow here, but our default flush time is 5s,
-        // so 3s is enough for sync test
-        try {
-            Thread.sleep(3000);
-        } catch (InterruptedException e) {
-            fail(e.getMessage());
-        }
+    RestHighLevelClient client = sink.getClient();
+    SearchRequest searchRequest = new SearchRequest("test");
+    SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
+    searchSourceBuilder.query(QueryBuilders.matchAllQuery());
+    searchRequest.source(searchSourceBuilder);
+    SearchResponse searchResponse = client.search(searchRequest, RequestOptions.DEFAULT);
 
-        RestHighLevelClient client = sink.getClient();
-        SearchRequest searchRequest = new SearchRequest("test");
-        SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
-        searchSourceBuilder.query(QueryBuilders.matchAllQuery());
-        searchRequest.source(searchSourceBuilder);
-        SearchResponse searchResponse = client.search(searchRequest, RequestOptions.DEFAULT);
+    SearchHits hits = searchResponse.getHits();
+    assertEquals(2, hits.getHits().length);
 
-        SearchHits hits = searchResponse.getHits();
-        assertEquals(2, hits.getHits().length);
+    SearchHit hit = hits.getAt(0);
+    Map<String, Object> sourceAsMap = hit.getSourceAsMap();
+    assertEquals(1, sourceAsMap.get("id"));
+    assertEquals("Alice", sourceAsMap.get("name"));
+    assertEquals("1$Alice", hit.getId());
 
-        SearchHit hit = hits.getAt(0);
-        Map<String, Object> sourceAsMap = hit.getSourceAsMap();
-        assertEquals(1, sourceAsMap.get("id"));
-        assertEquals("Alice", sourceAsMap.get("name"));
-        assertEquals("1$Alice", hit.getId());
+    hit = hits.getAt(1);
+    sourceAsMap = hit.getSourceAsMap();
+    assertEquals(2, sourceAsMap.get("id"));
+    assertEquals("Bob", sourceAsMap.get("name"));
+    assertEquals("2$Bob", hit.getId());
 
-        hit = hits.getAt(1);
-        sourceAsMap = hit.getSourceAsMap();
-        assertEquals(2, sourceAsMap.get("id"));
-        assertEquals("Bob", sourceAsMap.get("name"));
-        assertEquals("2$Bob", hit.getId());
+    sink.drop();
+  }
 
-        sink.drop();
-    }
+  @Test
+  public void testElasticSearch() throws IOException {
+    ElasticsearchContainer containerWithoutAuth =
+        new ElasticsearchContainer("docker.elastic.co/elasticsearch/elasticsearch:7.11.0");
+    containerWithoutAuth.start();
+    testEsSink(containerWithoutAuth, null, null);
+    containerWithoutAuth.stop();
 
-    @Test
-    public void testElasticSearch() throws IOException {
-        ElasticsearchContainer containerWithoutAuth =
-                new ElasticsearchContainer("docker.elastic.co/elasticsearch/elasticsearch:7.11.0");
-        containerWithoutAuth.start();
-        testEsSink(containerWithoutAuth, null, null);
-        containerWithoutAuth.stop();
-
-        ElasticsearchContainer containerWithAuth =
-                new ElasticsearchContainer("docker.elastic.co/elasticsearch/elasticsearch:7.11.0")
-                        .withPassword("test");
-        containerWithAuth.start();
-        testEsSink(containerWithAuth, "elastic", "test");
-        containerWithAuth.stop();
-    }
+    ElasticsearchContainer containerWithAuth =
+        new ElasticsearchContainer("docker.elastic.co/elasticsearch/elasticsearch:7.11.0")
+            .withPassword("test");
+    containerWithAuth.start();
+    testEsSink(containerWithAuth, "elastic", "test");
+    containerWithAuth.stop();
+  }
 }

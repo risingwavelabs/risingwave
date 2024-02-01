@@ -20,32 +20,32 @@ import org.apache.hadoop.conf.Configuration;
 
 public class S3Utils {
 
-    private static final String confEndpoint = "fs.s3a.endpoint";
-    private static final String confKey = "fs.s3a.access.key";
-    private static final String confSecret = "fs.s3a.secret.key";
-    private static final String confPathStyleAccess = "fs.s3a.path.style.access";
+  private static final String confEndpoint = "fs.s3a.endpoint";
+  private static final String confKey = "fs.s3a.access.key";
+  private static final String confSecret = "fs.s3a.secret.key";
+  private static final String confPathStyleAccess = "fs.s3a.path.style.access";
 
-    public static Configuration getHadoopConf(S3Config config) {
-        Configuration hadoopConf = new Configuration();
-        hadoopConf.setBoolean(confPathStyleAccess, true);
-        if (!config.hasS3Endpoint()) {
-            throw INVALID_ARGUMENT
-                    .withDescription(String.format("Should set `%s`", confEndpoint))
-                    .asRuntimeException();
-        }
-        hadoopConf.set(confEndpoint, config.getS3Endpoint());
-        if (!config.hasS3AccessKey()) {
-            throw INVALID_ARGUMENT
-                    .withDescription(String.format("Should set `%s`", confKey))
-                    .asRuntimeException();
-        }
-        hadoopConf.set(confKey, config.getS3AccessKey());
-        if (!config.hasS3SecretKey()) {
-            throw INVALID_ARGUMENT
-                    .withDescription(String.format("Should set `%s`", confSecret))
-                    .asRuntimeException();
-        }
-        hadoopConf.set(confSecret, config.getS3SecretKey());
-        return hadoopConf;
+  public static Configuration getHadoopConf(S3Config config) {
+    Configuration hadoopConf = new Configuration();
+    hadoopConf.setBoolean(confPathStyleAccess, true);
+    if (!config.hasS3Endpoint()) {
+      throw INVALID_ARGUMENT
+          .withDescription(String.format("Should set `%s`", confEndpoint))
+          .asRuntimeException();
     }
+    hadoopConf.set(confEndpoint, config.getS3Endpoint());
+    if (!config.hasS3AccessKey()) {
+      throw INVALID_ARGUMENT
+          .withDescription(String.format("Should set `%s`", confKey))
+          .asRuntimeException();
+    }
+    hadoopConf.set(confKey, config.getS3AccessKey());
+    if (!config.hasS3SecretKey()) {
+      throw INVALID_ARGUMENT
+          .withDescription(String.format("Should set `%s`", confSecret))
+          .asRuntimeException();
+    }
+    hadoopConf.set(confSecret, config.getS3SecretKey());
+    return hadoopConf;
+  }
 }

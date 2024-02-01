@@ -20,17 +20,17 @@ import java.util.Iterator;
 
 public class TrivialCloseIterable<E> implements CloseableIterable<E> {
 
-    private final Iterable<E> inner;
+  private final Iterable<E> inner;
 
-    public TrivialCloseIterable(Iterable<E> inner) {
-        this.inner = inner;
-    }
+  public TrivialCloseIterable(Iterable<E> inner) {
+    this.inner = inner;
+  }
 
-    @Override
-    public void close() throws Exception {}
+  @Override
+  public void close() throws Exception {}
 
-    @Override
-    public Iterator<E> iterator() {
-        return inner.iterator();
-    }
+  @Override
+  public Iterator<E> iterator() {
+    return inner.iterator();
+  }
 }

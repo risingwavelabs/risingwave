@@ -25,29 +25,29 @@ import java.util.Properties;
 
 public abstract class JdbcUtils {
 
-    public static Optional<JdbcDialectFactory> getDialectFactory(String jdbcUrl) {
-        if (jdbcUrl.startsWith("jdbc:mysql")) {
-            return Optional.of(new MySqlDialectFactory());
-        } else if (jdbcUrl.startsWith("jdbc:postgresql")) {
-            return Optional.of(new PostgresDialectFactory());
-        } else {
-            return Optional.empty();
-        }
+  public static Optional<JdbcDialectFactory> getDialectFactory(String jdbcUrl) {
+    if (jdbcUrl.startsWith("jdbc:mysql")) {
+      return Optional.of(new MySqlDialectFactory());
+    } else if (jdbcUrl.startsWith("jdbc:postgresql")) {
+      return Optional.of(new PostgresDialectFactory());
+    } else {
+      return Optional.empty();
     }
+  }
 
-    /** The connection returned by this method is *not* autoCommit */
-    public static Connection getConnection(String jdbcUrl) throws SQLException {
-        var props = new Properties();
-        // enable TCP keep alive to avoid connection closed by server
-        // both MySQL and PG support this property
-        // https://jdbc.postgresql.org/documentation/use/
-        // https://dev.mysql.com/doc/connectors/en/connector-j-connp-props-networking.html#cj-conn-prop_tcpKeepAlive
-        props.setProperty("tcpKeepAlive", "true");
-        var conn = DriverManager.getConnection(jdbcUrl, props);
-        // disable auto commit can improve performance
-        conn.setAutoCommit(false);
-        // explicitly set isolation level to RC
-        conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
-        return conn;
-    }
+  /** The connection returned by this method is *not* autoCommit */
+  public static Connection getConnection(String jdbcUrl) throws SQLException {
+    var props = new Properties();
+    // enable TCP keep alive to avoid connection closed by server
+    // both MySQL and PG support this property
+    // https://jdbc.postgresql.org/documentation/use/
+    // https://dev.mysql.com/doc/connectors/en/connector-j-connp-props-networking.html#cj-conn-prop_tcpKeepAlive
+    props.setProperty("tcpKeepAlive", "true");
+    var conn = DriverManager.getConnection(jdbcUrl, props);
+    // disable auto commit can improve performance
+    conn.setAutoCommit(false);
+    // explicitly set isolation level to RC
+    conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+    return conn;
+  }
 }

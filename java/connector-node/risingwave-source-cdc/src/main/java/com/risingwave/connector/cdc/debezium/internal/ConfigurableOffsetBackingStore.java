@@ -55,154 +55,151 @@ import org.slf4j.LoggerFactory;
  * <p>The original version is from https://github.com/ververica/flink-cdc-connectors
  */
 public class ConfigurableOffsetBackingStore implements OffsetBackingStore {
-    private static final Logger LOG = LoggerFactory.getLogger(ConfigurableOffsetBackingStore.class);
+  private static final Logger LOG = LoggerFactory.getLogger(ConfigurableOffsetBackingStore.class);
 
-    public static final String OFFSET_STATE_VALUE = "offset.storage.risingwave.state.value";
-    public static final int FLUSH_TIMEOUT_SECONDS = 10;
+  public static final String OFFSET_STATE_VALUE = "offset.storage.risingwave.state.value";
+  public static final int FLUSH_TIMEOUT_SECONDS = 10;
 
-    protected Map<ByteBuffer, ByteBuffer> data = new HashMap<>();
-    protected ExecutorService executor;
+  protected Map<ByteBuffer, ByteBuffer> data = new HashMap<>();
+  protected ExecutorService executor;
 
-    @Override
-    public void configure(WorkerConfig config) {
-        // eagerly initialize the executor, because OffsetStorageWriter will use it later
-        start();
+  @Override
+  public void configure(WorkerConfig config) {
+    // eagerly initialize the executor, because OffsetStorageWriter will use it later
+    start();
 
-        Map<String, ?> conf = config.originals();
-        if (!conf.containsKey(OFFSET_STATE_VALUE)) {
-            // a normal startup from clean state, not need to initialize the offset
-            return;
-        }
-
-        String stateJson = (String) conf.get(OFFSET_STATE_VALUE);
-        DebeziumOffsetSerializer serializer = new DebeziumOffsetSerializer();
-        DebeziumOffset debeziumOffset;
-        try {
-            debeziumOffset = serializer.deserialize(stateJson.getBytes(StandardCharsets.UTF_8));
-        } catch (IOException e) {
-            LOG.error("Can't deserialize debezium offset state from JSON: " + stateJson, e);
-            throw new RuntimeException(e);
-        }
-
-        String engineName = (String) conf.get(EmbeddedEngine.ENGINE_NAME.name());
-        Map<String, String> converterConfig =
-                Collections.singletonMap(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, "false");
-
-        Converter keyConverter = Instantiator.getInstance(JsonConverter.class.getName());
-        keyConverter.configure(converterConfig, true);
-        Converter valueConverter = new JsonConverter();
-        valueConverter.configure(converterConfig, true);
-        OffsetStorageWriter offsetWriter =
-                new OffsetStorageWriter(
-                        this,
-                        // must use engineName as namespace to align with Debezium Engine
-                        // implementation
-                        engineName,
-                        keyConverter,
-                        valueConverter);
-
-        offsetWriter.offset(
-                (Map<String, Object>) debeziumOffset.sourcePartition,
-                (Map<String, Object>) debeziumOffset.sourceOffset);
-
-        // flush immediately
-        if (!offsetWriter.beginFlush()) {
-            // if nothing is needed to be flushed, there must be something wrong with the
-            // initialization
-            LOG.warn(
-                    "Initialize ConfigurableOffsetBackingStore from empty offset state, this shouldn't happen.");
-            return;
-        }
-
-        // trigger flushing
-        Future<Void> flushFuture =
-                offsetWriter.doFlush(
-                        (error, result) -> {
-                            if (error != null) {
-                                LOG.error("Failed to flush initial offset.", error);
-                            } else {
-                                LOG.debug("Successfully flush initial offset.");
-                            }
-                        });
-
-        // wait until flushing finished
-        try {
-            flushFuture.get(FLUSH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            LOG.info(
-                    "Flush offsets successfully, partition: {}, offsets: {}",
-                    debeziumOffset.sourcePartition,
-                    debeziumOffset.sourceOffset);
-        } catch (InterruptedException e) {
-            LOG.warn("Flush offsets interrupted, cancelling.", e);
-            offsetWriter.cancelFlush();
-        } catch (ExecutionException e) {
-            LOG.error("Flush offsets threw an unexpected exception.", e);
-            offsetWriter.cancelFlush();
-        } catch (TimeoutException e) {
-            LOG.error("Timed out waiting to flush offsets to storage.", e);
-            offsetWriter.cancelFlush();
-        }
+    Map<String, ?> conf = config.originals();
+    if (!conf.containsKey(OFFSET_STATE_VALUE)) {
+      // a normal startup from clean state, not need to initialize the offset
+      return;
     }
 
-    @Override
-    public void start() {
-        if (executor == null) {
-            executor =
-                    Executors.newFixedThreadPool(
-                            1,
-                            ThreadUtils.createThreadFactory(
-                                    this.getClass().getSimpleName() + "-%d", false));
-        }
+    String stateJson = (String) conf.get(OFFSET_STATE_VALUE);
+    DebeziumOffsetSerializer serializer = new DebeziumOffsetSerializer();
+    DebeziumOffset debeziumOffset;
+    try {
+      debeziumOffset = serializer.deserialize(stateJson.getBytes(StandardCharsets.UTF_8));
+    } catch (IOException e) {
+      LOG.error("Can't deserialize debezium offset state from JSON: " + stateJson, e);
+      throw new RuntimeException(e);
     }
 
-    @Override
-    public void stop() {
-        if (executor != null) {
-            executor.shutdown();
-            // Best effort wait for any get() and set() tasks (and caller's callbacks) to complete.
-            try {
-                executor.awaitTermination(30, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            if (!executor.shutdownNow().isEmpty()) {
-                throw new ConnectException(
-                        "Failed to stop ConfigurableOffsetBackingStore. Exiting without cleanly "
-                                + "shutting down pending tasks and/or callbacks.");
-            }
-            executor = null;
-        }
+    String engineName = (String) conf.get(EmbeddedEngine.ENGINE_NAME.name());
+    Map<String, String> converterConfig =
+        Collections.singletonMap(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, "false");
+
+    Converter keyConverter = Instantiator.getInstance(JsonConverter.class.getName());
+    keyConverter.configure(converterConfig, true);
+    Converter valueConverter = new JsonConverter();
+    valueConverter.configure(converterConfig, true);
+    OffsetStorageWriter offsetWriter =
+        new OffsetStorageWriter(
+            this,
+            // must use engineName as namespace to align with Debezium Engine
+            // implementation
+            engineName,
+            keyConverter,
+            valueConverter);
+
+    offsetWriter.offset(
+        (Map<String, Object>) debeziumOffset.sourcePartition,
+        (Map<String, Object>) debeziumOffset.sourceOffset);
+
+    // flush immediately
+    if (!offsetWriter.beginFlush()) {
+      // if nothing is needed to be flushed, there must be something wrong with the
+      // initialization
+      LOG.warn(
+          "Initialize ConfigurableOffsetBackingStore from empty offset state, this shouldn't happen.");
+      return;
     }
 
-    @Override
-    public Future<Map<ByteBuffer, ByteBuffer>> get(final Collection<ByteBuffer> keys) {
-        return executor.submit(
-                () -> {
-                    Map<ByteBuffer, ByteBuffer> result = new HashMap<>();
-                    for (ByteBuffer key : keys) {
-                        result.put(key, data.get(key));
-                    }
-                    return result;
-                });
-    }
+    // trigger flushing
+    Future<Void> flushFuture =
+        offsetWriter.doFlush(
+            (error, result) -> {
+              if (error != null) {
+                LOG.error("Failed to flush initial offset.", error);
+              } else {
+                LOG.debug("Successfully flush initial offset.");
+              }
+            });
 
-    @Override
-    public Future<Void> set(
-            final Map<ByteBuffer, ByteBuffer> values, final Callback<Void> callback) {
-        return executor.submit(
-                () -> {
-                    for (Map.Entry<ByteBuffer, ByteBuffer> entry : values.entrySet()) {
-                        data.put(entry.getKey(), entry.getValue());
-                    }
-                    if (callback != null) {
-                        callback.onCompletion(null, null);
-                    }
-                    return null;
-                });
+    // wait until flushing finished
+    try {
+      flushFuture.get(FLUSH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+      LOG.info(
+          "Flush offsets successfully, partition: {}, offsets: {}",
+          debeziumOffset.sourcePartition,
+          debeziumOffset.sourceOffset);
+    } catch (InterruptedException e) {
+      LOG.warn("Flush offsets interrupted, cancelling.", e);
+      offsetWriter.cancelFlush();
+    } catch (ExecutionException e) {
+      LOG.error("Flush offsets threw an unexpected exception.", e);
+      offsetWriter.cancelFlush();
+    } catch (TimeoutException e) {
+      LOG.error("Timed out waiting to flush offsets to storage.", e);
+      offsetWriter.cancelFlush();
     }
+  }
 
-    @Override
-    public Set<Map<String, Object>> connectorPartitions(String connectorName) {
-        return null;
+  @Override
+  public void start() {
+    if (executor == null) {
+      executor =
+          Executors.newFixedThreadPool(
+              1, ThreadUtils.createThreadFactory(this.getClass().getSimpleName() + "-%d", false));
     }
+  }
+
+  @Override
+  public void stop() {
+    if (executor != null) {
+      executor.shutdown();
+      // Best effort wait for any get() and set() tasks (and caller's callbacks) to complete.
+      try {
+        executor.awaitTermination(30, TimeUnit.SECONDS);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+      if (!executor.shutdownNow().isEmpty()) {
+        throw new ConnectException(
+            "Failed to stop ConfigurableOffsetBackingStore. Exiting without cleanly "
+                + "shutting down pending tasks and/or callbacks.");
+      }
+      executor = null;
+    }
+  }
+
+  @Override
+  public Future<Map<ByteBuffer, ByteBuffer>> get(final Collection<ByteBuffer> keys) {
+    return executor.submit(
+        () -> {
+          Map<ByteBuffer, ByteBuffer> result = new HashMap<>();
+          for (ByteBuffer key : keys) {
+            result.put(key, data.get(key));
+          }
+          return result;
+        });
+  }
+
+  @Override
+  public Future<Void> set(final Map<ByteBuffer, ByteBuffer> values, final Callback<Void> callback) {
+    return executor.submit(
+        () -> {
+          for (Map.Entry<ByteBuffer, ByteBuffer> entry : values.entrySet()) {
+            data.put(entry.getKey(), entry.getValue());
+          }
+          if (callback != null) {
+            callback.onCompletion(null, null);
+          }
+          return null;
+        });
+  }
+
+  @Override
+  public Set<Map<String, Object>> connectorPartitions(String connectorName) {
+    return null;
+  }
 }

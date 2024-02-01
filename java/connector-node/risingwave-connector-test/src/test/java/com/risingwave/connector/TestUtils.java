@@ -23,38 +23,30 @@ import java.util.List;
 
 public class TestUtils {
 
-    public static TableSchema getMockTableSchema() {
-        return new TableSchema(
-                Lists.newArrayList("id", "name"),
-                Lists.newArrayList(
-                        Data.DataType.newBuilder()
-                                .setTypeName(Data.DataType.TypeName.INT32)
-                                .build(),
-                        Data.DataType.newBuilder()
-                                .setTypeName(Data.DataType.TypeName.VARCHAR)
-                                .build()),
-                Lists.newArrayList("id"));
-    }
+  public static TableSchema getMockTableSchema() {
+    return new TableSchema(
+        Lists.newArrayList("id", "name"),
+        Lists.newArrayList(
+            Data.DataType.newBuilder().setTypeName(Data.DataType.TypeName.INT32).build(),
+            Data.DataType.newBuilder().setTypeName(Data.DataType.TypeName.VARCHAR).build()),
+        Lists.newArrayList("id"));
+  }
 
-    public static ConnectorServiceProto.TableSchema getMockTableProto() {
-        return ConnectorServiceProto.TableSchema.newBuilder()
-                .addColumns(
-                        PlanCommon.ColumnDesc.newBuilder()
-                                .setName("id")
-                                .setColumnType(
-                                        Data.DataType.newBuilder()
-                                                .setTypeName(Data.DataType.TypeName.INT32)
-                                                .build())
-                                .build())
-                .addColumns(
-                        PlanCommon.ColumnDesc.newBuilder()
-                                .setName("name")
-                                .setColumnType(
-                                        Data.DataType.newBuilder()
-                                                .setTypeName(Data.DataType.TypeName.VARCHAR)
-                                                .build())
-                                .build())
-                .addAllPkIndices(List.of(1))
-                .build();
-    }
+  public static ConnectorServiceProto.TableSchema getMockTableProto() {
+    return ConnectorServiceProto.TableSchema.newBuilder()
+        .addColumns(
+            PlanCommon.ColumnDesc.newBuilder()
+                .setName("id")
+                .setColumnType(
+                    Data.DataType.newBuilder().setTypeName(Data.DataType.TypeName.INT32).build())
+                .build())
+        .addColumns(
+            PlanCommon.ColumnDesc.newBuilder()
+                .setName("name")
+                .setColumnType(
+                    Data.DataType.newBuilder().setTypeName(Data.DataType.TypeName.VARCHAR).build())
+                .build())
+        .addAllPkIndices(List.of(1))
+        .build();
+  }
 }

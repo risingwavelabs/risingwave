@@ -23,53 +23,51 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class ConnectorService {
-    private static final Logger LOG = LoggerFactory.getLogger(ConnectorService.class);
-    static final int DEFAULT_PORT = 50051;
-    static final String DEFAULT_PROMETHEUS_HOST = "0.0.0.0";
-    static final int DEFAULT_PROMETHEUS_PORT = 50052;
-    static final String PORT_ENV_NAME = "RW_CONNECTOR_NODE_PORT";
-    static final String PROMETHEUS_PORT_ENV_NAME = "RW_CONNECTOR_NODE_PROMETHEUS_PORT";
+  private static final Logger LOG = LoggerFactory.getLogger(ConnectorService.class);
+  static final int DEFAULT_PORT = 50051;
+  static final String DEFAULT_PROMETHEUS_HOST = "0.0.0.0";
+  static final int DEFAULT_PROMETHEUS_PORT = 50052;
+  static final String PORT_ENV_NAME = "RW_CONNECTOR_NODE_PORT";
+  static final String PROMETHEUS_PORT_ENV_NAME = "RW_CONNECTOR_NODE_PROMETHEUS_PORT";
 
-    public static void main(String[] args) throws Exception {
-        Options options = new Options();
-        options.addOption("p", "port", true, "listening port of connector service");
-        options.addOption("P", "prometheus-http-host", true, "host of prometheus HTTP server");
-        CommandLineParser parser = new DefaultParser();
-        CommandLine cmd = parser.parse(options, args);
+  public static void main(String[] args) throws Exception {
+    Options options = new Options();
+    options.addOption("p", "port", true, "listening port of connector service");
+    options.addOption("P", "prometheus-http-host", true, "host of prometheus HTTP server");
+    CommandLineParser parser = new DefaultParser();
+    CommandLine cmd = parser.parse(options, args);
 
-        // Quoted from the debezium document:
-        // > Your application should always properly stop the engine to ensure graceful and complete
-        // > shutdown and that each source record is sent to the application exactly one time.
-        // However, in RisingWave we assume the upstream changelog may contain duplicate events and
-        // handle conflicts in the mview operator, thus we don't need to obey the above
-        // instructions.
-        // So we decrease the wait time to 1 second here to reclaim grpc resources faster when the
-        // grpc channel is broken.
-        System.setProperty(DbzConnectorConfig.WAIT_FOR_CONNECTOR_EXIT_BEFORE_INTERRUPT_MS, "1000");
+    // Quoted from the debezium document:
+    // > Your application should always properly stop the engine to ensure graceful and complete
+    // > shutdown and that each source record is sent to the application exactly one time.
+    // However, in RisingWave we assume the upstream changelog may contain duplicate events and
+    // handle conflicts in the mview operator, thus we don't need to obey the above
+    // instructions.
+    // So we decrease the wait time to 1 second here to reclaim grpc resources faster when the
+    // grpc channel is broken.
+    System.setProperty(DbzConnectorConfig.WAIT_FOR_CONNECTOR_EXIT_BEFORE_INTERRUPT_MS, "1000");
 
-        int port = DEFAULT_PORT;
-        String prometheusHttpHost = DEFAULT_PROMETHEUS_HOST;
-        if (cmd.hasOption("p")) {
-            var portVal = cmd.getOptionValue("p");
-            port = Integer.parseInt(portVal);
-        } else if (cmd.hasOption("prometheus-http-host")) {
-            prometheusHttpHost = cmd.getOptionValue("prometheus-http-host");
-        } else if (System.getenv().containsKey(PORT_ENV_NAME)) {
-            port = Integer.parseInt(System.getenv(PORT_ENV_NAME));
-        }
-        Server server =
-                ServerBuilder.forPort(port).addService(new ConnectorServiceImpl()).build().start();
-        LOG.info("Server started, listening on {}", server.getPort());
-
-        int prometheusPort = DEFAULT_PROMETHEUS_PORT;
-        if (System.getenv().containsKey(PROMETHEUS_PORT_ENV_NAME)) {
-            prometheusPort = Integer.parseInt(System.getenv(PROMETHEUS_PORT_ENV_NAME));
-        }
-        ConnectorNodeMetrics.startHTTPServer(prometheusHttpHost, prometheusPort);
-        LOG.info(
-                "Prometheus metrics server started, https://{}:{}",
-                prometheusHttpHost,
-                prometheusPort);
-        server.awaitTermination();
+    int port = DEFAULT_PORT;
+    String prometheusHttpHost = DEFAULT_PROMETHEUS_HOST;
+    if (cmd.hasOption("p")) {
+      var portVal = cmd.getOptionValue("p");
+      port = Integer.parseInt(portVal);
+    } else if (cmd.hasOption("prometheus-http-host")) {
+      prometheusHttpHost = cmd.getOptionValue("prometheus-http-host");
+    } else if (System.getenv().containsKey(PORT_ENV_NAME)) {
+      port = Integer.parseInt(System.getenv(PORT_ENV_NAME));
     }
+    Server server =
+        ServerBuilder.forPort(port).addService(new ConnectorServiceImpl()).build().start();
+    LOG.info("Server started, listening on {}", server.getPort());
+
+    int prometheusPort = DEFAULT_PROMETHEUS_PORT;
+    if (System.getenv().containsKey(PROMETHEUS_PORT_ENV_NAME)) {
+      prometheusPort = Integer.parseInt(System.getenv(PROMETHEUS_PORT_ENV_NAME));
+    }
+    ConnectorNodeMetrics.startHTTPServer(prometheusHttpHost, prometheusPort);
+    LOG.info(
+        "Prometheus metrics server started, https://{}:{}", prometheusHttpHost, prometheusPort);
+    server.awaitTermination();
+  }
 }

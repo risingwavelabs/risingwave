@@ -19,43 +19,43 @@ package com.risingwave.connector.api.sink;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 public class CommonSinkConfig {
-    private String connector;
+  private String connector;
 
-    @JsonProperty(value = "force_append_only")
-    protected Boolean forceAppendOnly;
+  @JsonProperty(value = "force_append_only")
+  protected Boolean forceAppendOnly;
 
-    @JsonProperty(value = "primary_key")
-    protected String primaryKey;
+  @JsonProperty(value = "primary_key")
+  protected String primaryKey;
 
-    public CommonSinkConfig() {}
+  public CommonSinkConfig() {}
 
-    public CommonSinkConfig(String connector, Boolean forceAppendOnly, String primaryKey) {
-        this.connector = connector;
-        this.forceAppendOnly = forceAppendOnly;
-        this.primaryKey = primaryKey;
-    }
+  public CommonSinkConfig(String connector, Boolean forceAppendOnly, String primaryKey) {
+    this.connector = connector;
+    this.forceAppendOnly = forceAppendOnly;
+    this.primaryKey = primaryKey;
+  }
 
-    public String getConnector() {
-        return connector;
-    }
+  public String getConnector() {
+    return connector;
+  }
 
-    public void setConnector(String connector) {
-        this.connector = connector;
-    }
+  public void setConnector(String connector) {
+    this.connector = connector;
+  }
 
-    public Boolean getForceAppendOnly() {
-        return forceAppendOnly;
-    }
+  public Boolean getForceAppendOnly() {
+    return forceAppendOnly;
+  }
 
-    public String getPrimaryKey() {
-        return primaryKey;
-    }
+  public String getPrimaryKey() {
+    return primaryKey;
+  }
 
-    public void setForceAppendOnly(Boolean forceAppendOnly) {
-        this.forceAppendOnly = forceAppendOnly;
-    }
+  public void setForceAppendOnly(Boolean forceAppendOnly) {
+    this.forceAppendOnly = forceAppendOnly;
+  }
 
-    public void setPrimaryKey(String primaryKey) {
-        this.primaryKey = primaryKey;
-    }
+  public void setPrimaryKey(String primaryKey) {
+    this.primaryKey = primaryKey;
+  }
 }

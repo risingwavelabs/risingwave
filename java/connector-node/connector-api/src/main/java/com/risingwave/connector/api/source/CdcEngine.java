@@ -18,9 +18,9 @@ import com.risingwave.proto.ConnectorServiceProto;
 import java.util.concurrent.BlockingQueue;
 
 public interface CdcEngine extends Runnable {
-    long getId();
+  long getId();
 
-    void stop() throws Exception;
+  void stop() throws Exception;
 
-    BlockingQueue<ConnectorServiceProto.GetEventStreamResponse> getOutputChannel();
+  BlockingQueue<ConnectorServiceProto.GetEventStreamResponse> getOutputChannel();
 }

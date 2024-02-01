@@ -25,12 +25,12 @@ import org.apache.flink.table.factories.DynamicTableSinkFactory;
  * `DynamicTableSinkFactory` for flink sinks
  */
 public interface FlinkMockSinkFactory {
-    /**
-     * It is responsible for validating our schema, the default use of the flink catalog interface.
-     * But some sinks do not implement the catalog, we need to implement their own checksums
-     */
-    public void validate(TableSchema tableSchema, FlinkDynamicAdapterConfig config)
-            throws StatusRuntimeException;
+  /**
+   * It is responsible for validating our schema, the default use of the flink catalog interface.
+   * But some sinks do not implement the catalog, we need to implement their own checksums
+   */
+  public void validate(TableSchema tableSchema, FlinkDynamicAdapterConfig config)
+      throws StatusRuntimeException;
 
-    public DynamicTableSinkFactory getDynamicTableSinkFactory();
+  public DynamicTableSinkFactory getDynamicTableSinkFactory();
 }

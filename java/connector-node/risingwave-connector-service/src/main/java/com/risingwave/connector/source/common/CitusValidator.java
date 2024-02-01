@@ -19,16 +19,16 @@ import java.sql.SQLException;
 import java.util.Map;
 
 public class CitusValidator extends PostgresValidator {
-    public CitusValidator(Map<String, String> userProps, TableSchema tableSchema)
-            throws SQLException {
-        super(userProps, tableSchema, false);
-    }
+  public CitusValidator(Map<String, String> userProps, TableSchema tableSchema)
+      throws SQLException {
+    super(userProps, tableSchema, false);
+  }
 
-    @Override
-    protected void alterPublicationIfNeeded() throws SQLException {
-        // do nothing for citus worker node,
-        // since we created a FOR ALL TABLES publication when creating the connector,
-        // which will replicates changes for all tables in the database, including tables created in
-        // the future.
-    }
+  @Override
+  protected void alterPublicationIfNeeded() throws SQLException {
+    // do nothing for citus worker node,
+    // since we created a FOR ALL TABLES publication when creating the connector,
+    // which will replicates changes for all tables in the database, including tables created in
+    // the future.
+  }
 }

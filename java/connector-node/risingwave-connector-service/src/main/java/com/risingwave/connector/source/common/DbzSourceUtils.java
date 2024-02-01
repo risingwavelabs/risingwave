@@ -30,144 +30,138 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class DbzSourceUtils {
-    static final Logger LOG = LoggerFactory.getLogger(DbzSourceUtils.class);
+  static final Logger LOG = LoggerFactory.getLogger(DbzSourceUtils.class);
 
-    /**
-     * This method is used to create a publication for the cdc source job or cdc table if it doesn't
-     * exist.
-     */
-    public static void createPostgresPublicationIfNeeded(
-            Map<String, String> properties, long sourceId) throws SQLException {
-        boolean pubAutoCreate =
-                properties.get(DbzConnectorConfig.PG_PUB_CREATE).equalsIgnoreCase("true");
-        if (!pubAutoCreate) {
-            LOG.info(
-                    "Postgres publication auto creation is disabled, skip creation for source {}.",
-                    sourceId);
-            return;
-        }
-
-        var pubName = properties.get(DbzConnectorConfig.PG_PUB_NAME);
-        var dbHost = properties.get(DbzConnectorConfig.HOST);
-        var dbPort = properties.get(DbzConnectorConfig.PORT);
-        var dbName = properties.get(DbzConnectorConfig.DB_NAME);
-        var jdbcUrl = ValidatorUtils.getJdbcUrl(SourceTypeE.POSTGRES, dbHost, dbPort, dbName);
-        var user = properties.get(DbzConnectorConfig.USER);
-        var password = properties.get(DbzConnectorConfig.PASSWORD);
-        try (var jdbcConnection = DriverManager.getConnection(jdbcUrl, user, password)) {
-            boolean isPubExist = false;
-            try (var stmt =
-                    jdbcConnection.prepareStatement(
-                            ValidatorUtils.getSql("postgres.publication_exist"))) {
-                stmt.setString(1, pubName);
-                var res = stmt.executeQuery();
-                if (res.next()) {
-                    isPubExist = res.getBoolean(1);
-                }
-            }
-
-            if (!isPubExist) {
-                var schemaName = properties.get(DbzConnectorConfig.PG_SCHEMA_NAME);
-                var tableName = properties.get(DbzConnectorConfig.TABLE_NAME);
-                Optional<String> schemaTableName;
-                if (StringUtils.isBlank(schemaName) || StringUtils.isBlank(tableName)) {
-                    schemaTableName = Optional.empty();
-                } else {
-                    schemaTableName =
-                            Optional.of(quotePostgres(schemaName) + "." + quotePostgres(tableName));
-                }
-
-                // create the publication if it doesn't exist
-                String createPublicationSql;
-                if (schemaTableName.isPresent()) {
-                    createPublicationSql =
-                            String.format(
-                                    "CREATE PUBLICATION %s FOR TABLE %s;",
-                                    quotePostgres(pubName), schemaTableName.get());
-                } else {
-                    createPublicationSql =
-                            String.format("CREATE PUBLICATION %s", quotePostgres(pubName));
-                }
-                try (var stmt = jdbcConnection.createStatement()) {
-                    LOG.info(
-                            "Publication '{}' doesn't exist, created publication with statement: {}",
-                            pubName,
-                            createPublicationSql);
-                    stmt.execute(createPublicationSql);
-                }
-            }
-        }
+  /**
+   * This method is used to create a publication for the cdc source job or cdc table if it doesn't
+   * exist.
+   */
+  public static void createPostgresPublicationIfNeeded(
+      Map<String, String> properties, long sourceId) throws SQLException {
+    boolean pubAutoCreate =
+        properties.get(DbzConnectorConfig.PG_PUB_CREATE).equalsIgnoreCase("true");
+    if (!pubAutoCreate) {
+      LOG.info(
+          "Postgres publication auto creation is disabled, skip creation for source {}.", sourceId);
+      return;
     }
 
-    private static String quotePostgres(String identifier) {
-        return "\"" + identifier + "\"";
-    }
+    var pubName = properties.get(DbzConnectorConfig.PG_PUB_NAME);
+    var dbHost = properties.get(DbzConnectorConfig.HOST);
+    var dbPort = properties.get(DbzConnectorConfig.PORT);
+    var dbName = properties.get(DbzConnectorConfig.DB_NAME);
+    var jdbcUrl = ValidatorUtils.getJdbcUrl(SourceTypeE.POSTGRES, dbHost, dbPort, dbName);
+    var user = properties.get(DbzConnectorConfig.USER);
+    var password = properties.get(DbzConnectorConfig.PASSWORD);
+    try (var jdbcConnection = DriverManager.getConnection(jdbcUrl, user, password)) {
+      boolean isPubExist = false;
+      try (var stmt =
+          jdbcConnection.prepareStatement(ValidatorUtils.getSql("postgres.publication_exist"))) {
+        stmt.setString(1, pubName);
+        var res = stmt.executeQuery();
+        if (res.next()) {
+          isPubExist = res.getBoolean(1);
+        }
+      }
 
-    public static boolean waitForStreamingRunning(SourceTypeE sourceType, String dbServerName) {
-        // Wait for streaming source of source that supported backfill
-        LOG.info("Waiting for streaming source of {} to start", dbServerName);
-        if (sourceType == SourceTypeE.MYSQL) {
-            return waitForStreamingRunningInner("mysql", dbServerName);
-        } else if (sourceType == SourceTypeE.POSTGRES) {
-            return waitForStreamingRunningInner("postgres", dbServerName);
+      if (!isPubExist) {
+        var schemaName = properties.get(DbzConnectorConfig.PG_SCHEMA_NAME);
+        var tableName = properties.get(DbzConnectorConfig.TABLE_NAME);
+        Optional<String> schemaTableName;
+        if (StringUtils.isBlank(schemaName) || StringUtils.isBlank(tableName)) {
+          schemaTableName = Optional.empty();
         } else {
-            LOG.info("Unsupported backfill source, just return true for {}", dbServerName);
-            return true;
+          schemaTableName = Optional.of(quotePostgres(schemaName) + "." + quotePostgres(tableName));
         }
+
+        // create the publication if it doesn't exist
+        String createPublicationSql;
+        if (schemaTableName.isPresent()) {
+          createPublicationSql =
+              String.format(
+                  "CREATE PUBLICATION %s FOR TABLE %s;",
+                  quotePostgres(pubName), schemaTableName.get());
+        } else {
+          createPublicationSql = String.format("CREATE PUBLICATION %s", quotePostgres(pubName));
+        }
+        try (var stmt = jdbcConnection.createStatement()) {
+          LOG.info(
+              "Publication '{}' doesn't exist, created publication with statement: {}",
+              pubName,
+              createPublicationSql);
+          stmt.execute(createPublicationSql);
+        }
+      }
     }
+  }
 
-    private static boolean waitForStreamingRunningInner(String connector, String dbServerName) {
-        int timeoutSecs =
-                Integer.parseInt(
-                        System.getProperty(
-                                DbzConnectorConfig.WAIT_FOR_STREAMING_START_BEFORE_EXIT_SECS));
-        int pollCount = 0;
-        while (!isStreamingRunning(connector, dbServerName, "streaming")) {
-            if (pollCount > timeoutSecs) {
-                LOG.error(
-                        "Debezium streaming source of {} failed to start in timeout {}",
-                        dbServerName,
-                        timeoutSecs);
-                return false;
-            }
-            try {
-                TimeUnit.SECONDS.sleep(1); // poll interval
-                pollCount++;
-            } catch (InterruptedException e) {
-                LOG.warn("Interrupted while waiting for streaming source to start", e);
-            }
-        }
+  private static String quotePostgres(String identifier) {
+    return "\"" + identifier + "\"";
+  }
 
-        LOG.info("Debezium streaming source of {} started", dbServerName);
-        return true;
+  public static boolean waitForStreamingRunning(SourceTypeE sourceType, String dbServerName) {
+    // Wait for streaming source of source that supported backfill
+    LOG.info("Waiting for streaming source of {} to start", dbServerName);
+    if (sourceType == SourceTypeE.MYSQL) {
+      return waitForStreamingRunningInner("mysql", dbServerName);
+    } else if (sourceType == SourceTypeE.POSTGRES) {
+      return waitForStreamingRunningInner("postgres", dbServerName);
+    } else {
+      LOG.info("Unsupported backfill source, just return true for {}", dbServerName);
+      return true;
     }
+  }
 
-    // Copy from debezium test suite: io.debezium.embedded.AbstractConnectorTest
-    // Notes: although this method is recommended by the community
-    // (https://debezium.zulipchat.com/#narrow/stream/302529-community-general/topic/.E2.9C.94.20Embedded.20engine.20has.20started.20StreamingChangeEventSource/near/405121659),
-    // but it is not solid enough. As the jmx bean metric is marked as true before starting the
-    // binlog client, which may fail to connect the upstream database.
-    private static boolean isStreamingRunning(String connector, String server, String contextName) {
-        final MBeanServer mbeanServer = ManagementFactory.getPlatformMBeanServer();
-        try {
-            return (boolean)
-                    mbeanServer.getAttribute(
-                            getStreamingMetricsObjectName(connector, server, contextName),
-                            "Connected");
-        } catch (JMException ex) {
-            LOG.warn("Failed to get streaming metrics", ex);
-        }
+  private static boolean waitForStreamingRunningInner(String connector, String dbServerName) {
+    int timeoutSecs =
+        Integer.parseInt(
+            System.getProperty(DbzConnectorConfig.WAIT_FOR_STREAMING_START_BEFORE_EXIT_SECS));
+    int pollCount = 0;
+    while (!isStreamingRunning(connector, dbServerName, "streaming")) {
+      if (pollCount > timeoutSecs) {
+        LOG.error(
+            "Debezium streaming source of {} failed to start in timeout {}",
+            dbServerName,
+            timeoutSecs);
         return false;
+      }
+      try {
+        TimeUnit.SECONDS.sleep(1); // poll interval
+        pollCount++;
+      } catch (InterruptedException e) {
+        LOG.warn("Interrupted while waiting for streaming source to start", e);
+      }
     }
 
-    private static ObjectName getStreamingMetricsObjectName(
-            String connector, String server, String context) throws MalformedObjectNameException {
-        return new ObjectName(
-                "debezium."
-                        + connector
-                        + ":type=connector-metrics,context="
-                        + context
-                        + ",server="
-                        + server);
+    LOG.info("Debezium streaming source of {} started", dbServerName);
+    return true;
+  }
+
+  // Copy from debezium test suite: io.debezium.embedded.AbstractConnectorTest
+  // Notes: although this method is recommended by the community
+  // (https://debezium.zulipchat.com/#narrow/stream/302529-community-general/topic/.E2.9C.94.20Embedded.20engine.20has.20started.20StreamingChangeEventSource/near/405121659),
+  // but it is not solid enough. As the jmx bean metric is marked as true before starting the
+  // binlog client, which may fail to connect the upstream database.
+  private static boolean isStreamingRunning(String connector, String server, String contextName) {
+    final MBeanServer mbeanServer = ManagementFactory.getPlatformMBeanServer();
+    try {
+      return (boolean)
+          mbeanServer.getAttribute(
+              getStreamingMetricsObjectName(connector, server, contextName), "Connected");
+    } catch (JMException ex) {
+      LOG.warn("Failed to get streaming metrics", ex);
     }
+    return false;
+  }
+
+  private static ObjectName getStreamingMetricsObjectName(
+      String connector, String server, String context) throws MalformedObjectNameException {
+    return new ObjectName(
+        "debezium."
+            + connector
+            + ":type=connector-metrics,context="
+            + context
+            + ",server="
+            + server);
+  }
 }

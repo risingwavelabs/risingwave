@@ -45,102 +45,98 @@ import org.apache.flink.table.factories.FactoryUtil;
 
 public class FlinkDynamicAdapterFactory implements SinkFactory {
 
-    FlinkMockSinkFactory flinkMockSinkFactory;
+  FlinkMockSinkFactory flinkMockSinkFactory;
 
-    public FlinkDynamicAdapterFactory(FlinkMockSinkFactory flinkMockSinkFactory) {
-        this.flinkMockSinkFactory = flinkMockSinkFactory;
-    }
+  public FlinkDynamicAdapterFactory(FlinkMockSinkFactory flinkMockSinkFactory) {
+    this.flinkMockSinkFactory = flinkMockSinkFactory;
+  }
 
-    // Create corresponding Sink according to different configurations.
-    public DynamicTableSink.SinkRuntimeProvider buildDynamicTableSinkProvider(
-            TableSchema tableSchema, FlinkDynamicAdapterConfig config) {
-        List<Column> flinkColumns = FlinkDynamicUtil.getFlinkColumnsFromSchema(tableSchema);
+  // Create corresponding Sink according to different configurations.
+  public DynamicTableSink.SinkRuntimeProvider buildDynamicTableSinkProvider(
+      TableSchema tableSchema, FlinkDynamicAdapterConfig config) {
+    List<Column> flinkColumns = FlinkDynamicUtil.getFlinkColumnsFromSchema(tableSchema);
 
-        // Start with the default value, and add as needed later
-        ObjectIdentifier objectIdentifier =
-                ObjectIdentifier.of("catalog_name", "database_name", "obj_name");
-        ClassLoader contextClassLoader = Thread.currentThread().getContextClassLoader();
-        DynamicTableSinkFactory dynamicTableSinkFactory =
-                flinkMockSinkFactory.getDynamicTableSinkFactory();
-        Set<ConfigOption<?>> configOptions = new HashSet<>();
-        configOptions.addAll(
-                dynamicTableSinkFactory.requiredOptions() == null
-                        ? Collections.emptyList()
-                        : dynamicTableSinkFactory.requiredOptions());
-        configOptions.addAll(
-                dynamicTableSinkFactory.optionalOptions() == null
-                        ? Collections.emptyList()
-                        : dynamicTableSinkFactory.optionalOptions());
-        config.processOption(configOptions);
+    // Start with the default value, and add as needed later
+    ObjectIdentifier objectIdentifier =
+        ObjectIdentifier.of("catalog_name", "database_name", "obj_name");
+    ClassLoader contextClassLoader = Thread.currentThread().getContextClassLoader();
+    DynamicTableSinkFactory dynamicTableSinkFactory =
+        flinkMockSinkFactory.getDynamicTableSinkFactory();
+    Set<ConfigOption<?>> configOptions = new HashSet<>();
+    configOptions.addAll(
+        dynamicTableSinkFactory.requiredOptions() == null
+            ? Collections.emptyList()
+            : dynamicTableSinkFactory.requiredOptions());
+    configOptions.addAll(
+        dynamicTableSinkFactory.optionalOptions() == null
+            ? Collections.emptyList()
+            : dynamicTableSinkFactory.optionalOptions());
+    config.processOption(configOptions);
 
-        Schema.Builder schemaBuilder = Schema.newBuilder();
-        flinkColumns.forEach(
-                (column) -> schemaBuilder.column(column.getName(), column.getDataType()));
-        Schema shcema = schemaBuilder.primaryKey(tableSchema.getPrimaryKeys()).build();
+    Schema.Builder schemaBuilder = Schema.newBuilder();
+    flinkColumns.forEach((column) -> schemaBuilder.column(column.getName(), column.getDataType()));
+    Schema shcema = schemaBuilder.primaryKey(tableSchema.getPrimaryKeys()).build();
 
-        ResolvedCatalogTable resolvedCatalogTable =
-                new ResolvedCatalogTable(
-                        CatalogTable.of(
-                                shcema, null, tableSchema.getPrimaryKeys(), config.getOption()),
-                        ResolvedSchema.of(flinkColumns));
+    ResolvedCatalogTable resolvedCatalogTable =
+        new ResolvedCatalogTable(
+            CatalogTable.of(shcema, null, tableSchema.getPrimaryKeys(), config.getOption()),
+            ResolvedSchema.of(flinkColumns));
 
-        FactoryUtil.DefaultDynamicTableContext defaultDynamicTableContext =
-                new FactoryUtil.DefaultDynamicTableContext(
-                        objectIdentifier,
-                        resolvedCatalogTable,
-                        new HashMap<String, String>(),
-                        new Configuration(),
-                        contextClassLoader,
-                        false);
-        DynamicTableSink.Context context = new DynamicTableSinkContextImpl();
-        // Start with the default value, and add as needed later
-        return dynamicTableSinkFactory
-                .createDynamicTableSink(defaultDynamicTableContext)
-                .getSinkRuntimeProvider(context);
-    }
+    FactoryUtil.DefaultDynamicTableContext defaultDynamicTableContext =
+        new FactoryUtil.DefaultDynamicTableContext(
+            objectIdentifier,
+            resolvedCatalogTable,
+            new HashMap<String, String>(),
+            new Configuration(),
+            contextClassLoader,
+            false);
+    DynamicTableSink.Context context = new DynamicTableSinkContextImpl();
+    // Start with the default value, and add as needed later
+    return dynamicTableSinkFactory
+        .createDynamicTableSink(defaultDynamicTableContext)
+        .getSinkRuntimeProvider(context);
+  }
 
-    /**
-     * According to different implementations, create different sink writer, and package it as a
-     * RW-recognizable method(SinkWriterV1), after which the RW can call the method to complete
-     * write directly.
-     */
-    @Override
-    public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
-        ObjectMapper mapper = new ObjectMapper();
-        FlinkDynamicAdapterConfig flinkDynamicAdapterConfig =
-                mapper.convertValue(tableProperties, FlinkDynamicAdapterConfig.class);
+  /**
+   * According to different implementations, create different sink writer, and package it as a
+   * RW-recognizable method(SinkWriterV1), after which the RW can call the method to complete write
+   * directly.
+   */
+  @Override
+  public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
+    ObjectMapper mapper = new ObjectMapper();
+    FlinkDynamicAdapterConfig flinkDynamicAdapterConfig =
+        mapper.convertValue(tableProperties, FlinkDynamicAdapterConfig.class);
 
-        DynamicTableSink.SinkRuntimeProvider sinkRuntimeProvider =
-                buildDynamicTableSinkProvider(tableSchema, flinkDynamicAdapterConfig);
-        if (sinkRuntimeProvider instanceof SinkProvider) {
-            Sink<RowData, ?, ?, ?> sink = ((SinkProvider) sinkRuntimeProvider).createSink();
-            return new SinkWriterImpl<>(tableSchema, sink);
-        } else if (sinkRuntimeProvider instanceof SinkV2Provider) {
-            org.apache.flink.api.connector.sink2.Sink<RowData> sink =
-                    ((SinkV2Provider) sinkRuntimeProvider).createSink();
+    DynamicTableSink.SinkRuntimeProvider sinkRuntimeProvider =
+        buildDynamicTableSinkProvider(tableSchema, flinkDynamicAdapterConfig);
+    if (sinkRuntimeProvider instanceof SinkProvider) {
+      Sink<RowData, ?, ?, ?> sink = ((SinkProvider) sinkRuntimeProvider).createSink();
+      return new SinkWriterImpl<>(tableSchema, sink);
+    } else if (sinkRuntimeProvider instanceof SinkV2Provider) {
+      org.apache.flink.api.connector.sink2.Sink<RowData> sink =
+          ((SinkV2Provider) sinkRuntimeProvider).createSink();
 
-            try {
-                if (sink.createWriter(new SinkWriterContextV2()) instanceof AsyncSinkWriter) {
-                    return new AsyncSinkWriterImpl(tableSchema, sink);
-                }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-
-            return new SinkWriterV2Impl(tableSchema, sink);
-        } else {
-            throw new TableException("Unsupported sink runtime provider.");
+      try {
+        if (sink.createWriter(new SinkWriterContextV2()) instanceof AsyncSinkWriter) {
+          return new AsyncSinkWriterImpl(tableSchema, sink);
         }
-    }
+      } catch (IOException e) {
+        throw new RuntimeException(e);
+      }
 
-    @Override
-    public void validate(
-            TableSchema tableSchema,
-            Map<String, String> tableProperties,
-            Catalog.SinkType sinkType) {
-        ObjectMapper mapper = new ObjectMapper();
-        FlinkDynamicAdapterConfig flinkDynamicAdapterConfig =
-                mapper.convertValue(tableProperties, FlinkDynamicAdapterConfig.class);
-        flinkMockSinkFactory.validate(tableSchema, flinkDynamicAdapterConfig);
+      return new SinkWriterV2Impl(tableSchema, sink);
+    } else {
+      throw new TableException("Unsupported sink runtime provider.");
     }
+  }
+
+  @Override
+  public void validate(
+      TableSchema tableSchema, Map<String, String> tableProperties, Catalog.SinkType sinkType) {
+    ObjectMapper mapper = new ObjectMapper();
+    FlinkDynamicAdapterConfig flinkDynamicAdapterConfig =
+        mapper.convertValue(tableProperties, FlinkDynamicAdapterConfig.class);
+    flinkMockSinkFactory.validate(tableSchema, flinkDynamicAdapterConfig);
+  }
 }

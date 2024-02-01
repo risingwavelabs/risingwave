@@ -39,42 +39,42 @@ import java.util.Map;
  * <p>The original version is from https://github.com/ververica/flink-cdc-connectors
  */
 public class DebeziumOffset implements Serializable {
-    private static final long serialVersionUID = 1L;
+  private static final long serialVersionUID = 1L;
 
-    public Map<String, ?> sourcePartition;
-    public Map<String, ?> sourceOffset;
-    public boolean isHeartbeat;
+  public Map<String, ?> sourcePartition;
+  public Map<String, ?> sourceOffset;
+  public boolean isHeartbeat;
 
-    public DebeziumOffset() {}
+  public DebeziumOffset() {}
 
-    public DebeziumOffset(
-            Map<String, ?> sourcePartition, Map<String, ?> sourceOffset, boolean isHeartbeat) {
-        this.sourcePartition = sourcePartition;
-        this.sourceOffset = sourceOffset;
-        this.isHeartbeat = isHeartbeat;
-    }
+  public DebeziumOffset(
+      Map<String, ?> sourcePartition, Map<String, ?> sourceOffset, boolean isHeartbeat) {
+    this.sourcePartition = sourcePartition;
+    this.sourceOffset = sourceOffset;
+    this.isHeartbeat = isHeartbeat;
+  }
 
-    public void setSourcePartition(Map<String, ?> sourcePartition) {
-        this.sourcePartition = sourcePartition;
-    }
+  public void setSourcePartition(Map<String, ?> sourcePartition) {
+    this.sourcePartition = sourcePartition;
+  }
 
-    public void setSourceOffset(Map<String, ?> sourceOffset) {
-        this.sourceOffset = sourceOffset;
-    }
+  public void setSourceOffset(Map<String, ?> sourceOffset) {
+    this.sourceOffset = sourceOffset;
+  }
 
-    public void setHeartbeat(boolean heartbeat) {
-        isHeartbeat = heartbeat;
-    }
+  public void setHeartbeat(boolean heartbeat) {
+    isHeartbeat = heartbeat;
+  }
 
-    @Override
-    public String toString() {
-        return "DebeziumOffset{"
-                + "isHeartbeat="
-                + isHeartbeat
-                + ", sourcePartition="
-                + sourcePartition
-                + ", sourceOffset="
-                + sourceOffset
-                + '}';
-    }
+  @Override
+  public String toString() {
+    return "DebeziumOffset{"
+        + "isHeartbeat="
+        + isHeartbeat
+        + ", sourcePartition="
+        + sourcePartition
+        + ", sourceOffset="
+        + sourceOffset
+        + '}';
+  }
 }

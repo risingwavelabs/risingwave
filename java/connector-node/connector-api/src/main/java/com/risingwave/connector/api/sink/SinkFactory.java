@@ -19,12 +19,12 @@ import com.risingwave.proto.Catalog.SinkType;
 import java.util.Map;
 
 public interface SinkFactory {
-    SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties);
+  SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties);
 
-    void validate(TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType);
+  void validate(TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType);
 
-    default SinkCoordinator createCoordinator(
-            TableSchema tableSchema, Map<String, String> tableProperties) {
-        throw new UnsupportedOperationException("not support create coordinator");
-    }
+  default SinkCoordinator createCoordinator(
+      TableSchema tableSchema, Map<String, String> tableProperties) {
+    throw new UnsupportedOperationException("not support create coordinator");
+  }
 }
