@@ -186,6 +186,8 @@ message ExprNode {
     PGWIRE_RECV = 321;
     CONVERT_FROM = 322;
     CONVERT_TO = 323;
+    DECRYPT = 324;
+    ENCRYPT = 325;
 
     // Unary operators
     NEG = 401;
