@@ -763,6 +763,10 @@ impl HummockUploader {
         self.context.pinned_version.max_committed_epoch()
     }
 
+    pub(crate) fn hummock_version(&self) -> &PinnedVersion {
+        &self.context.pinned_version
+    }
+
     pub(crate) fn get_synced_data(&self, epoch: HummockEpoch) -> Option<&SyncedDataState> {
         assert!(self.max_committed_epoch() < epoch && epoch <= self.max_synced_epoch);
         self.synced_data.get(&epoch)

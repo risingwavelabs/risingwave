@@ -248,7 +248,7 @@ impl CacheRefiller {
     pub fn start_cache_refill(
         &mut self,
         deltas: Vec<SstDeltaInfo>,
-        pinned_version: Arc<PinnedVersion>,
+        pinned_version: PinnedVersion,
         new_pinned_version: PinnedVersion,
     ) {
         let task = CacheRefillTask {
@@ -296,7 +296,7 @@ impl CacheRefiller {
 }
 
 pub struct CacheRefillerEvent {
-    pub pinned_version: Arc<PinnedVersion>,
+    pub pinned_version: PinnedVersion,
     pub new_pinned_version: PinnedVersion,
 }
 
