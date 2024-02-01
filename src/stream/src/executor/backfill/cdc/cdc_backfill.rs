@@ -74,6 +74,8 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     metrics: Arc<StreamingMetrics>,
 
     chunk_size: usize,
+
+    disable_backfill: bool,
 }
 
 impl<S: StateStore> CdcBackfillExecutor<S> {
@@ -88,6 +90,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         metrics: Arc<StreamingMetrics>,
         state_table: StateTable<S>,
         chunk_size: usize,
+        disable_backfill: bool,
     ) -> Self {
         Self {
             actor_ctx,
@@ -99,6 +102,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             progress,
             metrics,
             chunk_size,
+            disable_backfill,
         }
     }
 
@@ -140,7 +144,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let state = state_impl.restore_state().await?;
         current_pk_pos = state.current_pk_pos.clone();
 
-        let to_backfill = !state.is_finished;
+        let to_backfill = !self.disable_backfill && !state.is_finished;
 
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
@@ -153,6 +157,10 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .last_cdc_offset
             .map_or(upstream_table_reader.current_binlog_offset().await?, Some);
 
+        let offset_parse_func = upstream_table_reader
+            .inner()
+            .table_reader()
+            .get_cdc_offset_parser();
         let mut consumed_binlog_offset: Option<CdcOffset> = None;
 
         tracing::info!(
@@ -161,6 +169,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             initial_binlog_offset = ?last_binlog_offset,
             ?current_pk_pos,
             is_finished = state.is_finished,
+            disable_backfill = self.disable_backfill,
             snapshot_row_count = total_snapshot_row_count,
             chunk_size = self.chunk_size,
             "start cdc backfill"
@@ -201,10 +210,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         break;
                     }
                     Message::Chunk(ref chunk) => {
-                        last_binlog_offset = get_cdc_chunk_last_offset(
-                            upstream_table_reader.inner().table_reader(),
-                            chunk,
-                        )?;
+                        last_binlog_offset = get_cdc_chunk_last_offset(&offset_parse_func, chunk)?;
                     }
                     Message::Watermark(_) => {
                         // Ignore watermark
@@ -250,12 +256,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             // record the consumed binlog offset that will be
                                             // persisted later
                                             consumed_binlog_offset = get_cdc_chunk_last_offset(
-                                                upstream_table_reader.inner().table_reader(),
+                                                &offset_parse_func,
                                                 &chunk,
                                             )?;
                                             yield Message::Chunk(mapping_chunk(
                                                 mark_cdc_chunk(
-                                                    upstream_table_reader.inner().table_reader(),
+                                                    &offset_parse_func,
                                                     chunk,
                                                     current_pos,
                                                     &pk_in_output_indices,
@@ -318,10 +324,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         continue;
                                     }
 
-                                    let chunk_binlog_offset = get_cdc_chunk_last_offset(
-                                        upstream_table_reader.inner().table_reader(),
-                                        &chunk,
-                                    )?;
+                                    let chunk_binlog_offset =
+                                        get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
 
                                     tracing::trace!(
                                         target: "events::stream::cdc_backfill",
@@ -411,6 +415,21 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     }
                 }
             }
+        } else if self.disable_backfill {
+            // If backfill is disabled, we just mark the backfill as finished
+            tracing::info!(
+                upstream_table_id,
+                upstream_table_name,
+                "CdcBackfill has been disabled"
+            );
+            state_impl
+                .mutate_state(
+                    current_pk_pos,
+                    last_binlog_offset.clone(),
+                    total_snapshot_row_count,
+                    true,
+                )
+                .await?;
         }
 
         // drop reader to release db connection
@@ -418,6 +437,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         tracing::info!(
             upstream_table_id,
+            upstream_table_name,
             "CdcBackfill has already finished and will forward messages directly to the downstream"
         );
 

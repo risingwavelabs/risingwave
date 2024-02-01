@@ -1049,9 +1049,8 @@ impl LogicalJoin {
         let lookup_prefix_len = reorder_idx.len();
         let predicate = predicate.reorder(&reorder_idx);
 
-        let left = if dist_key_in_order_key_pos.is_empty() {
-            self.left()
-                .to_stream_with_dist_required(&RequiredDist::single(), ctx)?
+        let required_dist = if dist_key_in_order_key_pos.is_empty() {
+            RequiredDist::single()
         } else {
             let left_eq_indexes = predicate.left_eq_indexes();
             let left_dist_key = dist_key_in_order_key_pos
@@ -1059,11 +1058,12 @@ impl LogicalJoin {
                 .map(|pos| left_eq_indexes[*pos])
                 .collect_vec();
 
-            self.left().to_stream_with_dist_required(
-                &RequiredDist::shard_by_key(self.left().schema().len(), &left_dist_key),
-                ctx,
-            )?
+            RequiredDist::hash_shard(&left_dist_key)
         };
+
+        let left = self.left().to_stream(ctx)?;
+        // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule the join fragment together with the RHS with a `no_shuffle` exchange.
+        let left = required_dist.enforce(left, &Order::any());
 
         if !left.append_only() {
             return Err(RwError::from(ErrorCode::NotSupported(
