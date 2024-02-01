@@ -484,7 +484,7 @@ class Panels:
             filterable=True,
             transformations=transformations,
         )
-        
+
 
     def sub_panel(self):
         return Panels(self.datasource)
