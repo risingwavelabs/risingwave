@@ -349,7 +349,7 @@ impl IcebergConfig {
         Ok((base_catalog_config, java_catalog_configs))
     }
 
-    pub async fn create_catalog(&self) -> anyhow::Result<CatalogRef> {
+    async fn create_catalog(&self) -> anyhow::Result<CatalogRef> {
         match self.catalog_type() {
             "storage" | "rest" => {
                 let iceberg_configs = self.build_iceberg_configs()?;
@@ -380,25 +380,25 @@ impl IcebergConfig {
             }
         }
     }
-}
 
-pub async fn create_table(config: &IcebergConfig) -> Result<Table> {
-    let catalog = config
-        .create_catalog()
-        .await
-        .map_err(|e| SinkError::Iceberg(anyhow!("Unable to load iceberg catalog: {e}")))?;
+    pub async fn load_table(&self) -> anyhow::Result<Table> {
+        let catalog = self
+            .create_catalog()
+            .await
+            .map_err(|e| anyhow!("Unable to load iceberg catalog: {e}"))?;
 
-    let table_id = TableIdentifier::new(
-        vec![config.database_name.as_str()]
-            .into_iter()
-            .chain(config.table_name.split('.')),
-    )
-    .map_err(|e| SinkError::Iceberg(anyhow!("Unable to parse table name: {e}")))?;
+        let table_id = TableIdentifier::new(
+            vec![self.database_name.as_str()]
+                .into_iter()
+                .chain(self.table_name.split('.')),
+        )
+            .map_err(|e| anyhow!("Unable to parse table name: {e}"))?;
 
-    catalog
-        .load_table(&table_id)
-        .await
-        .map_err(|err| SinkError::Iceberg(anyhow!(err)))
+        catalog
+            .load_table(&table_id)
+            .await
+            .map_err(|err| anyhow!(err))
+    }
 }
 
 pub struct IcebergSink {
@@ -427,7 +427,7 @@ impl Debug for IcebergSink {
 
 impl IcebergSink {
     async fn create_and_validate_table(&self) -> Result<Table> {
-        let table = create_table(&self.config).await?;
+        let table = self.config.load_table().await.map_err(SinkError::Iceberg)?;
 
         let sink_schema = self.param.schema();
         let iceberg_schema = table

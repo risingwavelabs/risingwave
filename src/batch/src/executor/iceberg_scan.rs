@@ -20,7 +20,6 @@ use arrow_array::RecordBatch;
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use icelake::io::{FileScan, TableScan};
-use icelake::TableIdentifier;
 use risingwave_common::catalog::Schema;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 
@@ -105,13 +104,10 @@ impl Executor for IcebergScanExecutor {
 impl IcebergScanExecutor {
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
-        let catalog = self.iceberg_config.create_catalog().await?;
-
-        let table_ident = TableIdentifier::new(vec![self.database_name, self.table_name]).unwrap();
-        let table = catalog
-            .load_table(&table_ident)
+        let table = self.iceberg_config
+            .load_table()
             .await
-            .map_err(BatchError::Iceberg)?;
+            .map_err(BatchError::Internal)?;
 
         let table_scan: TableScan = table
             .new_scan_builder()
