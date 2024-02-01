@@ -70,6 +70,7 @@ define_keywords!(
     ABORT,
     ABS,
     ACTION,
+    ADAPTIVE,
     ADD,
     AGGREGATE,
     ALL,

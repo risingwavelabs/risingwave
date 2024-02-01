@@ -23,6 +23,7 @@ use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
+use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
@@ -605,13 +606,98 @@ impl GlobalBarrierManagerContext {
     async fn scale_actors(&self, info: &InflightActorInfo) -> MetaResult<bool> {
         match &self.metadata_manager {
             MetadataManager::V1(_) => self.scale_actors_v1(info).await,
-            MetadataManager::V2(_) => self.scale_actors_v2(info),
+            MetadataManager::V2(_) => self.scale_actors_v2(info).await,
         }
     }
 
-    fn scale_actors_v2(&self, _info: &InflightActorInfo) -> MetaResult<bool> {
-        let _mgr = self.metadata_manager.as_v2_ref();
-        unimplemented!("implement auto-scale funcs in sql backend")
+    async fn scale_actors_v2(&self, _info: &InflightActorInfo) -> MetaResult<bool> {
+        let mgr = self.metadata_manager.as_v2_ref();
+        debug!("start resetting actors distribution");
+
+        let table_parallelisms: HashMap<_, _> = {
+            let streaming_parallelisms = mgr
+                .catalog_controller
+                .get_all_streaming_parallelisms()
+                .await?;
+
+            streaming_parallelisms
+                .into_iter()
+                .map(|(table_id, parallelism)| {
+                    // no custom for sql backend
+                    let table_parallelism = match parallelism {
+                        StreamingParallelism::Adaptive => TableParallelism::Adaptive,
+                        StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
+                    };
+
+                    (table_id as u32, table_parallelism)
+                })
+                .collect()
+        };
+
+        let workers = mgr
+            .cluster_controller
+            .list_active_streaming_workers()
+            .await?;
+
+        let schedulable_worker_ids = workers
+            .iter()
+            .filter(|worker| {
+                !worker
+                    .property
+                    .as_ref()
+                    .map(|p| p.is_unschedulable)
+                    .unwrap_or(false)
+            })
+            .map(|worker| worker.id)
+            .collect();
+
+        let plan = self
+            .scale_controller
+            .generate_table_resize_plan(TableResizePolicy {
+                worker_ids: schedulable_worker_ids,
+                table_parallelisms: table_parallelisms.clone(),
+            })
+            .await?;
+
+        let table_parallelisms: HashMap<_, _> = table_parallelisms
+            .into_iter()
+            .map(|(table_id, parallelism)| {
+                debug_assert_ne!(parallelism, TableParallelism::Custom);
+                (TableId::new(table_id), parallelism)
+            })
+            .collect();
+
+        let mut compared_table_parallelisms = table_parallelisms.clone();
+
+        let (reschedule_fragment, _) = self
+            .scale_controller
+            .prepare_reschedule_command(
+                plan,
+                RescheduleOptions {
+                    resolve_no_shuffle_upstream: true,
+                },
+                Some(&mut compared_table_parallelisms),
+            )
+            .await?;
+
+        // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
+        debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
+
+        if let Err(e) = self
+            .scale_controller
+            .post_apply_reschedule(&reschedule_fragment, &table_parallelisms)
+            .await
+        {
+            tracing::error!(
+                error = %e.as_report(),
+                "failed to apply reschedule for offline scaling in recovery",
+            );
+
+            return Err(e);
+        }
+
+        debug!("scaling-in actors succeed.");
+        Ok(true)
     }
 
     async fn scale_actors_v1(&self, info: &InflightActorInfo) -> MetaResult<bool> {
@@ -639,12 +725,12 @@ impl GlobalBarrierManagerContext {
                 if let Some(fragment) = derive_from_fragment {
                     let fragment_parallelism = fragment.get_actors().len();
                     if fragment_parallelism >= current_parallelism {
-                        TableParallelism::Auto
+                        TableParallelism::Adaptive
                     } else {
                         TableParallelism::Fixed(fragment_parallelism)
                     }
                 } else {
-                    TableParallelism::Auto
+                    TableParallelism::Adaptive
                 }
             } else {
                 table.assigned_parallelism
@@ -685,8 +771,6 @@ impl GlobalBarrierManagerContext {
 
         let plan = self
             .scale_controller
-            .as_ref()
-            .unwrap()
             .generate_table_resize_plan(TableResizePolicy {
                 worker_ids: schedulable_worker_ids,
                 table_parallelisms: table_parallelisms.clone(),
@@ -705,8 +789,6 @@ impl GlobalBarrierManagerContext {
 
         let (reschedule_fragment, applied_reschedules) = self
             .scale_controller
-            .as_ref()
-            .unwrap()
             .prepare_reschedule_command(
                 plan,
                 RescheduleOptions {
@@ -721,8 +803,6 @@ impl GlobalBarrierManagerContext {
 
         if let Err(e) = self
             .scale_controller
-            .as_ref()
-            .unwrap()
             .post_apply_reschedule(&reschedule_fragment, &table_parallelisms)
             .await
         {

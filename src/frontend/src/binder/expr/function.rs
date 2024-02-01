@@ -876,6 +876,8 @@ impl Binder {
                 ("sha256", raw_call(ExprType::Sha256)),
                 ("sha384", raw_call(ExprType::Sha384)),
                 ("sha512", raw_call(ExprType::Sha512)),
+                ("encrypt", raw_call(ExprType::Encrypt)),
+                ("decrypt", raw_call(ExprType::Decrypt)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
                 ("int8send", raw_call(ExprType::PgwireSend)),
