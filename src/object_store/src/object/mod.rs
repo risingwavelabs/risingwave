@@ -820,10 +820,10 @@ pub async fn build_remote_object_store(
     match url {
         s3 if s3.starts_with("s3://") => {
             if std::env::var("RW_USE_OPENDAL_FOR_S3").is_ok() {
-                let s3 = s3.strip_prefix("s3://").unwrap();
-                let (bucket, root) = s3.split_once('@').unwrap_or((s3, ""));
+                let bucket = s3.strip_prefix("s3://").unwrap();
+
                 ObjectStoreImpl::Opendal(
-                    OpendalObjectStore::new_s3_engine(bucket.to_string(), root.to_string(), config)
+                    OpendalObjectStore::new_s3_engine(bucket.to_string(), config)
                         .unwrap()
                         .monitored(metrics),
                 )

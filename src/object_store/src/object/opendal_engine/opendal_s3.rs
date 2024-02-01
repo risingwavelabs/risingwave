@@ -26,13 +26,11 @@ impl OpendalObjectStore {
     /// create opendal s3 engine.
     pub fn new_s3_engine(
         bucket: String,
-        root: String,
         object_store_config: ObjectStoreConfig,
     ) -> ObjectResult<Self> {
         // Create s3 builder.
         let mut builder = S3::default();
         builder.bucket(&bucket);
-        builder.root(&root);
 
         // For AWS S3, there is no need to set an endpoint; for other S3 compatible object stores, it is necessary to set this field.
         if let Ok(endpoint_url) = std::env::var("RW_S3_ENDPOINT") {
@@ -61,7 +59,6 @@ impl OpendalObjectStore {
             builder.enable_virtual_host_style();
         }
 
-        builder.disable_config_load();
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(
@@ -79,7 +76,7 @@ impl OpendalObjectStore {
             .finish();
         Ok(Self {
             op,
-            engine_type: EngineType::OpendalS3,
+            engine_type: EngineType::S3,
         })
     }
 }
