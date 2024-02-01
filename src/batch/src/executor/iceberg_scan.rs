@@ -104,7 +104,8 @@ impl Executor for IcebergScanExecutor {
 impl IcebergScanExecutor {
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
-        let table = self.iceberg_config
+        let table = self
+            .iceberg_config
             .load_table()
             .await
             .map_err(BatchError::Internal)?;

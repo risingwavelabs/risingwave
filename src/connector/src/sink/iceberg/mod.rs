@@ -392,7 +392,7 @@ impl IcebergConfig {
                 .into_iter()
                 .chain(self.table_name.split('.')),
         )
-            .map_err(|e| anyhow!("Unable to parse table name: {e}"))?;
+        .map_err(|e| anyhow!("Unable to parse table name: {e}"))?;
 
         catalog
             .load_table(&table_id)
