@@ -24,7 +24,7 @@ use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, 
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, object, sink, streaming_job, ActorId, ConnectorSplits,
     ExprContext, FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId, SinkId, SourceId,
-    StreamNode, TableId, VnodeBitmap, WorkerId,
+    StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::meta::subscribe_response::{
@@ -634,13 +634,16 @@ impl CatalogController {
         )
     }
 
-    pub async fn list_streaming_job_states(&self) -> MetaResult<Vec<(ObjectId, JobStatus)>> {
+    pub async fn list_streaming_job_states(
+        &self,
+    ) -> MetaResult<Vec<(ObjectId, JobStatus, StreamingParallelism)>> {
         let inner = self.inner.read().await;
-        let job_states: Vec<(ObjectId, JobStatus)> = StreamingJob::find()
+        let job_states: Vec<(ObjectId, JobStatus, StreamingParallelism)> = StreamingJob::find()
             .select_only()
             .columns([
                 streaming_job::Column::JobId,
                 streaming_job::Column::JobStatus,
+                streaming_job::Column::Parallelism,
             ])
             .into_tuple()
             .all(&inner.db)

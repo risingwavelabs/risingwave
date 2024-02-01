@@ -669,7 +669,7 @@ where
     Ok(actor_dispatchers_map)
 }
 
-/// `get_fragment_parallel_unit_mappings` returns the fragment vnode mappings of the given job.
+/// `get_fragment_mappings` returns the fragment vnode mappings of the given job.
 pub async fn get_fragment_mappings<C>(
     db: &C,
     job_id: ObjectId,
@@ -681,6 +681,35 @@ where
         .select_only()
         .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
         .filter(fragment::Column::JobId.eq(job_id))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    Ok(fragment_mappings
+        .into_iter()
+        .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
+            fragment_id: fragment_id as _,
+            mapping: Some(mapping.into_inner()),
+        })
+        .collect())
+}
+
+/// `get_fragment_mappings_by_jobs` returns the fragment vnode mappings of the given job list.
+pub async fn get_fragment_mappings_by_jobs<C>(
+    db: &C,
+    job_ids: Vec<ObjectId>,
+) -> MetaResult<Vec<PbFragmentParallelUnitMapping>>
+where
+    C: ConnectionTrait,
+{
+    if job_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
+        .select_only()
+        .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
+        .filter(fragment::Column::JobId.is_in(job_ids))
         .into_tuple()
         .all(db)
         .await?;
