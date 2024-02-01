@@ -637,6 +637,8 @@ mod tests {
             .await
             .unwrap();
 
+        drop(writer);
+
         // Recovery
         test_env.storage.clear_shared_buffer().await.unwrap();
 
@@ -839,6 +841,8 @@ mod tests {
             .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
             .await
             .unwrap();
+
+        drop(writer);
 
         // Recovery
         test_env.storage.clear_shared_buffer().await.unwrap();
@@ -1063,6 +1067,9 @@ mod tests {
             .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
             .await
             .unwrap();
+
+        drop(writer1);
+        drop(writer2);
 
         // Recovery
         test_env.storage.clear_shared_buffer().await.unwrap();

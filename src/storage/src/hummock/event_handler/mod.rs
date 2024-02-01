@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use parking_lot::RwLock;
+use parking_lot::{RwLock, RwLockReadGuard};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
 use thiserror_ext::AsReport;
@@ -88,8 +88,7 @@ pub enum HummockEvent {
 
     RegisterReadVersion {
         table_id: TableId,
-        new_read_version_sender:
-            oneshot::Sender<(Arc<RwLock<HummockReadVersion>>, LocalInstanceGuard)>,
+        new_read_version_sender: oneshot::Sender<(HummockReadVersionRef, LocalInstanceGuard)>,
         is_replicated: bool,
     },
 
@@ -173,8 +172,27 @@ impl std::fmt::Debug for HummockEvent {
 }
 
 pub type LocalInstanceId = u64;
-pub type ReadVersionMappingType =
-    RwLock<HashMap<TableId, HashMap<LocalInstanceId, Arc<RwLock<HummockReadVersion>>>>>;
+pub type HummockReadVersionRef = Arc<RwLock<HummockReadVersion>>;
+pub type ReadVersionMappingType = HashMap<TableId, HashMap<LocalInstanceId, HummockReadVersionRef>>;
+pub type ReadOnlyReadVersionMapping = ReadOnlyRwLockRef<ReadVersionMappingType>;
+
+pub struct ReadOnlyRwLockRef<T>(Arc<RwLock<T>>);
+
+impl<T> Clone for ReadOnlyRwLockRef<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<T> ReadOnlyRwLockRef<T> {
+    pub fn new(inner: Arc<RwLock<T>>) -> Self {
+        Self(inner)
+    }
+
+    pub fn read(&self) -> RwLockReadGuard<'_, T> {
+        self.0.read()
+    }
+}
 
 pub struct LocalInstanceGuard {
     pub table_id: TableId,
