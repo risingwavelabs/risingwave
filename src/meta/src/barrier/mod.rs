@@ -144,7 +144,7 @@ pub struct GlobalBarrierManagerContext {
 
     source_manager: SourceManagerRef,
 
-    scale_controller: Option<ScaleControllerRef>,
+    scale_controller: ScaleControllerRef,
 
     sink_manager: SinkCoordinatorManager,
 
@@ -398,15 +398,13 @@ impl GlobalBarrierManager {
 
         let tracker = CreateMviewProgressTracker::new();
 
-        let scale_controller = match &metadata_manager {
-            MetadataManager::V1(_) => Some(Arc::new(ScaleController::new(
-                &metadata_manager,
-                source_manager.clone(),
-                stream_rpc_manager.clone(),
-                env.clone(),
-            ))),
-            MetadataManager::V2(_) => None,
-        };
+        let scale_controller = Arc::new(ScaleController::new(
+            &metadata_manager,
+            source_manager.clone(),
+            stream_rpc_manager.clone(),
+            env.clone(),
+        ));
+
         let context = GlobalBarrierManagerContext {
             status: Arc::new(Mutex::new(BarrierManagerStatus::Starting)),
             metadata_manager,
@@ -468,6 +466,7 @@ impl GlobalBarrierManager {
             } else {
                 self.env
                     .system_params_manager()
+                    .unwrap()
                     .set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
                     .await?;
             }

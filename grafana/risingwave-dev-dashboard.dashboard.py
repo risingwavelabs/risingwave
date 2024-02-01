@@ -24,22 +24,21 @@ logging.basicConfig(level=logging.WARN)
 
 def section_actor_info(outer_panels):
     panels = outer_panels.sub_panel()
-    excluded_cols = ["Time", "Value", "__name__", f"{COMPONENT_LABEL}", f"{NODE_LABEL}"]
     return [
         outer_panels.row_collapsed(
             "Actor/Table Id Info",
             [
                 panels.table_info(
-                    "Actor Id Info",
-                    "Mapping from actor id to fragment id",
-                    [panels.table_target(f"{metric('actor_info')}")],
-                    excluded_cols,
+                    "Actor Info",
+                    "Information about actors",
+                    [panels.table_target(f"group({metric('actor_info')}) by (actor_id, fragment_id, compute_node)")],
+                    ["actor_id", "fragment_id", "compute_node"],
                 ),
                 panels.table_info(
-                    "Materialized View Info",
-                    "Mapping from materialized view table id to it's internal table ids",
-                    [panels.table_target(f"{metric('table_info')}")],
-                    excluded_cols,
+                    "State Table Info",
+                    "Information about state tables. Column `materialized_view_id` is the id of the materialized view that this state table belongs to.",
+                    [panels.table_target(f"group({metric('table_info')}) by (table_id, table_name, table_type, materialized_view_id, fragment_id, compaction_group_id)")],
+                    ["table_id", "table_name", "table_type", "materialized_view_id", "fragment_id", "compaction_group_id"],
                 ),
             ],
         )
@@ -684,9 +683,8 @@ def section_streaming(outer_panels):
                     "The figure shows the number of rows read by each source per second.",
                     [
                         panels.target(
-                            f"rate({metric('stream_source_output_rows_counts')}[$__rate_interval])",
-                            "source={{source_name}} actor={{actor_id}} @ {{%s}}"
-                            % NODE_LABEL,
+                            f"sum(rate({metric('stream_source_output_rows_counts')}[$__rate_interval])) by (source_id, source_name, fragment_id)",
+                            "{{source_id}} {{source_name}} (fragment {{fragment_id}})",
                         ),
                     ],
                 ),
@@ -697,7 +695,7 @@ def section_streaming(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('source_partition_input_count')}[$__rate_interval])",
-                            "actor={{actor_id}} source={{source_id}} partition={{partition}}",
+                            "actor={{actor_id}} source={{source_id}} partition={{partition}} fragmend_id={{fragment_id}}",
                         )
                     ],
                 ),
@@ -706,8 +704,8 @@ def section_streaming(outer_panels):
                     "The figure shows the number of bytes read by each source per second.",
                     [
                         panels.target(
-                            f"(sum by (source_id)(rate({metric('source_partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
-                            "source={{source_id}}",
+                            f"(sum by (source_id, source_name, fragment_id)(rate({metric('source_partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
+                            "{{source_id}} {{source_name}} (fragment {{fragment_id}})",
                         )
                     ],
                 ),
@@ -718,7 +716,7 @@ def section_streaming(outer_panels):
                     [
                         panels.target(
                             f"(rate({metric('source_partition_input_bytes')}[$__rate_interval]))/(1000*1000)",
-                            "actor={{actor_id}} source={{source_id}} partition={{partition}}",
+                            "actor={{actor_id}} source={{source_id}} partition={{partition}} fragmend_id={{fragment_id}}",
                         )
                     ],
                 ),

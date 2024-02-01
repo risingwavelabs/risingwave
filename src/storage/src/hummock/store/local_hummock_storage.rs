@@ -18,7 +18,6 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use parking_lot::RwLock;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{is_empty_key_range, TableKey, TableKeyRange};
@@ -26,9 +25,9 @@ use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 use tokio::sync::mpsc;
 use tracing::{warn, Instrument};
 
-use super::version::{HummockReadVersion, StagingData, VersionUpdate};
+use super::version::{StagingData, VersionUpdate};
 use crate::error::StorageResult;
-use crate::hummock::event_handler::{HummockEvent, LocalInstanceGuard};
+use crate::hummock::event_handler::{HummockEvent, HummockReadVersionRef, LocalInstanceGuard};
 use crate::hummock::iterator::{
     ConcatIteratorInner, Forward, HummockIteratorUnion, MergeIterator, SkipWatermarkIterator,
     UserIterator,
@@ -64,7 +63,7 @@ pub struct LocalHummockStorage {
     instance_guard: LocalInstanceGuard,
 
     /// Read handle.
-    read_version: Arc<RwLock<HummockReadVersion>>,
+    read_version: HummockReadVersionRef,
 
     /// This indicates that this `LocalHummockStorage` replicates another `LocalHummockStorage`.
     /// It's used by executors in different CNs to synchronize states.
@@ -517,7 +516,7 @@ impl LocalHummockStorage {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         instance_guard: LocalInstanceGuard,
-        read_version: Arc<RwLock<HummockReadVersion>>,
+        read_version: HummockReadVersionRef,
         hummock_version_reader: HummockVersionReader,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
@@ -548,7 +547,7 @@ impl LocalHummockStorage {
     }
 
     /// See `HummockReadVersion::update` for more details.
-    pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
+    pub fn read_version(&self) -> HummockReadVersionRef {
         self.read_version.clone()
     }
 

@@ -33,7 +33,9 @@ pub(crate) async fn into_chunk_stream(
     source_ctx: SourceContextRef,
 ) {
     let actor_id = source_ctx.source_info.actor_id.to_string();
+    let fragment_id = source_ctx.source_info.fragment_id.to_string();
     let source_id = source_ctx.source_info.source_id.to_string();
+    let source_name = source_ctx.source_info.source_name.to_string();
     let metrics = source_ctx.metrics.clone();
 
     let data_stream = reader.into_data_stream();
@@ -52,7 +54,13 @@ pub(crate) async fn into_chunk_stream(
             for (split_id, msgs) in by_split_id {
                 metrics
                     .partition_input_count
-                    .with_label_values(&[&actor_id, &source_id, split_id])
+                    .with_label_values(&[
+                        &actor_id,
+                        &source_id,
+                        split_id,
+                        &source_name,
+                        &fragment_id,
+                    ])
                     .inc_by(msgs.len() as u64);
 
                 let sum_bytes = msgs
@@ -62,7 +70,13 @@ pub(crate) async fn into_chunk_stream(
 
                 metrics
                     .partition_input_bytes
-                    .with_label_values(&[&actor_id, &source_id, split_id])
+                    .with_label_values(&[
+                        &actor_id,
+                        &source_id,
+                        split_id,
+                        &source_name,
+                        &fragment_id,
+                    ])
                     .inc_by(sum_bytes);
             }
         })

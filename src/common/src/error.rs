@@ -109,7 +109,7 @@ pub enum ErrorCode {
     InternalError(String),
     // TODO: unify with the above
     #[error(transparent)]
-    InternalErrorAnyhow(
+    Uncategorized(
         #[from]
         #[backtrace]
         anyhow::Error,
@@ -236,6 +236,12 @@ pub enum ErrorCode {
     ),
 }
 
+impl RwError {
+    pub fn uncategorized(err: impl Into<anyhow::Error>) -> Self {
+        Self::from(ErrorCode::Uncategorized(err.into()))
+    }
+}
+
 impl From<RwError> for tonic::Status {
     fn from(err: RwError) -> Self {
         use tonic::Code;
@@ -278,13 +284,13 @@ impl From<tonic::Status> for RwError {
 
 impl From<JoinError> for RwError {
     fn from(join_error: JoinError) -> Self {
-        anyhow::anyhow!(join_error).into()
+        Self::uncategorized(join_error)
     }
 }
 
 impl From<std::net::AddrParseError> for RwError {
     fn from(addr_parse_error: std::net::AddrParseError) -> Self {
-        anyhow::anyhow!(addr_parse_error).into()
+        Self::uncategorized(addr_parse_error)
     }
 }
 
@@ -456,7 +462,7 @@ mod tests {
     use anyhow::anyhow;
 
     use super::*;
-    use crate::error::ErrorCode::InternalErrorAnyhow;
+    use crate::error::ErrorCode::Uncategorized;
 
     #[test]
     fn test_display_internal_error() {
@@ -477,7 +483,7 @@ mod tests {
             .unwrap_err();
 
             assert_eq!(
-                RwError::from(InternalErrorAnyhow(anyhow!(err_msg))).to_string(),
+                RwError::from(Uncategorized(anyhow!(err_msg))).to_string(),
                 error.to_string(),
             );
         }
@@ -490,7 +496,7 @@ mod tests {
             })()
             .unwrap_err();
             assert_eq!(
-                RwError::from(InternalErrorAnyhow(anyhow!(err_msg))).to_string(),
+                RwError::from(Uncategorized(anyhow!(err_msg))).to_string(),
                 error.to_string()
             );
         }
@@ -502,11 +508,7 @@ mod tests {
             })()
             .unwrap_err();
             assert_eq!(
-                RwError::from(InternalErrorAnyhow(anyhow!(
-                    "error msg with args: {}",
-                    "xx"
-                )))
-                .to_string(),
+                RwError::from(Uncategorized(anyhow!("error msg with args: {}", "xx"))).to_string(),
                 error.to_string()
             );
         }

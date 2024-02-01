@@ -195,7 +195,7 @@ pub struct GlobalStreamManager {
 
     pub reschedule_lock: RwLock<()>,
 
-    pub(crate) scale_controller: Option<ScaleControllerRef>,
+    pub(crate) scale_controller: ScaleControllerRef,
 
     pub stream_rpc_manager: StreamRpcManager,
 }
@@ -209,18 +209,13 @@ impl GlobalStreamManager {
         hummock_manager: HummockManagerRef,
         stream_rpc_manager: StreamRpcManager,
     ) -> MetaResult<Self> {
-        let scale_controller = match &metadata_manager {
-            MetadataManager::V1(_) => {
-                let scale_controller = ScaleController::new(
-                    &metadata_manager,
-                    source_manager.clone(),
-                    stream_rpc_manager.clone(),
-                    env.clone(),
-                );
-                Some(Arc::new(scale_controller))
-            }
-            MetadataManager::V2(_) => None,
-        };
+        let scale_controller = Arc::new(ScaleController::new(
+            &metadata_manager,
+            source_manager.clone(),
+            stream_rpc_manager.clone(),
+            env.clone(),
+        ));
+
         Ok(Self {
             env,
             metadata_manager,
@@ -355,7 +350,6 @@ impl GlobalStreamManager {
         res
     }
 
-    /// First broadcasts the actor info to `WorkerNodes`, and then let them build actors and channels.
     async fn build_actors(
         &self,
         table_fragments: &TableFragments,
@@ -694,16 +688,14 @@ impl GlobalStreamManager {
         &self,
         table_id: u32,
         parallelism: TableParallelism,
+        deferred: bool,
     ) -> MetaResult<()> {
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unimplemented!("support alter table parallelism in v2");
-        };
         let _reschedule_job_lock = self.reschedule_lock.write().await;
 
-        let worker_nodes = mgr
-            .cluster_manager
+        let worker_nodes = self
+            .metadata_manager
             .list_active_streaming_compute_nodes()
-            .await;
+            .await?;
 
         let worker_ids = worker_nodes
             .iter()
@@ -711,24 +703,45 @@ impl GlobalStreamManager {
             .map(|node| node.id)
             .collect::<BTreeSet<_>>();
 
-        let reschedules = self
-            .scale_controller
-            .as_ref()
-            .unwrap()
-            .generate_table_resize_plan(TableResizePolicy {
-                worker_ids,
-                table_parallelisms: vec![(table_id, parallelism)].into_iter().collect(),
-            })
-            .await?;
+        let table_parallelism_assignment = HashMap::from([(TableId::new(table_id), parallelism)]);
 
-        self.reschedule_actors(
-            reschedules,
-            RescheduleOptions {
-                resolve_no_shuffle_upstream: false,
-            },
-            Some(HashMap::from([(TableId::new(table_id), parallelism)])),
-        )
-        .await?;
+        if deferred {
+            tracing::debug!(
+                "deferred mode enabled for job {}, set the parallelism directly to {:?}",
+                table_id,
+                parallelism
+            );
+            self.scale_controller
+                .post_apply_reschedule(&HashMap::new(), &table_parallelism_assignment)
+                .await?;
+        } else {
+            let reschedules = self
+                .scale_controller
+                .generate_table_resize_plan(TableResizePolicy {
+                    worker_ids,
+                    table_parallelisms: table_parallelism_assignment
+                        .iter()
+                        .map(|(id, parallelism)| (id.table_id, *parallelism))
+                        .collect(),
+                })
+                .await?;
+
+            if reschedules.is_empty() {
+                tracing::debug!("empty reschedule plan generated for job {}, set the parallelism directly to {:?}", table_id, parallelism);
+                self.scale_controller
+                    .post_apply_reschedule(&HashMap::new(), &table_parallelism_assignment)
+                    .await?;
+            } else {
+                self.reschedule_actors(
+                    reschedules,
+                    RescheduleOptions {
+                        resolve_no_shuffle_upstream: false,
+                    },
+                    Some(table_parallelism_assignment),
+                )
+                .await?;
+            }
+        };
 
         Ok(())
     }
@@ -1037,7 +1050,9 @@ mod tests {
                 let actor_locations = fragments
                     .values()
                     .flat_map(|f| &f.actors)
-                    .map(|a| (a.actor_id, parallel_units[&0].clone()))
+                    .sorted_by(|a, b| a.actor_id.cmp(&b.actor_id))
+                    .enumerate()
+                    .map(|(idx, a)| (a.actor_id, parallel_units[&(idx as u32)].clone()))
                     .collect();
 
                 Locations {
@@ -1055,7 +1070,7 @@ mod tests {
                 fragments,
                 &locations.actor_locations,
                 Default::default(),
-                TableParallelism::Auto,
+                TableParallelism::Adaptive,
             );
             let ctx = CreateStreamingJobContext {
                 building_locations: locations,
@@ -1126,6 +1141,14 @@ mod tests {
         let table_id = TableId::new(0);
         let actors = make_mview_stream_actors(&table_id, 4);
 
+        let StreamingClusterInfo { parallel_units, .. } = services
+            .global_stream_manager
+            .metadata_manager
+            .get_streaming_cluster_info()
+            .await?;
+
+        let parallel_unit_ids = parallel_units.keys().cloned().sorted().collect_vec();
+
         let mut fragments = BTreeMap::default();
         fragments.insert(
             0,
@@ -1135,7 +1158,9 @@ mod tests {
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 state_table_ids: vec![0],
-                vnode_mapping: Some(ParallelUnitMapping::new_single(0).to_protobuf()),
+                vnode_mapping: Some(
+                    ParallelUnitMapping::new_uniform(parallel_unit_ids.into_iter()).to_protobuf(),
+                ),
                 ..Default::default()
             },
         );
