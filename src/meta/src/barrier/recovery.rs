@@ -625,7 +625,7 @@ impl GlobalBarrierManagerContext {
                 .map(|(table_id, parallelism)| {
                     // no custom for sql backend
                     let table_parallelism = match parallelism {
-                        StreamingParallelism::Auto => TableParallelism::Auto,
+                        StreamingParallelism::Adaptive => TableParallelism::Adaptive,
                         StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
                     };
 
@@ -725,12 +725,12 @@ impl GlobalBarrierManagerContext {
                 if let Some(fragment) = derive_from_fragment {
                     let fragment_parallelism = fragment.get_actors().len();
                     if fragment_parallelism >= current_parallelism {
-                        TableParallelism::Auto
+                        TableParallelism::Adaptive
                     } else {
                         TableParallelism::Fixed(fragment_parallelism)
                     }
                 } else {
-                    TableParallelism::Auto
+                    TableParallelism::Adaptive
                 }
             } else {
                 table.assigned_parallelism
