@@ -39,7 +39,7 @@ futures-async-stream = { workspace = true }
 iana-time-zone = "0.1"
 icelake = { workspace = true }
 itertools = "0.12"
-linkme = "0.3"
+linkme = { version = "0.3", features = ["used_linker"] }
 maplit = "1"
 md5 = "0.7.0"
 num-integer = "0.1"

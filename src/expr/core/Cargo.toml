@@ -36,7 +36,7 @@ enum-as-inner = "0.6"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
 itertools = "0.12"
-linkme = "0.3"
+linkme = { version = "0.3", features = ["used_linker"] }
 moka = { version = "0.12", features = ["future"] }
 num-traits = "0.2"
 parse-display = "0.8"
