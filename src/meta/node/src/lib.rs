@@ -61,7 +61,7 @@ pub struct MetaNodeOpts {
 
     /// We will start a http server at this address via `MetricsManager`.
     /// Then the prometheus instance will poll the metrics from this address.
-    #[clap(long, env = "RW_PROMETHEUS_HOST", alias = "prometheus_host")]
+    #[clap(long, env = "RW_PROMETHEUS_HOST", alias = "prometheus-host")]
     pub prometheus_listener_addr: Option<String>,
 
     #[clap(long, env = "RW_ETCD_ENDPOINTS", default_value_t = String::from(""))]
