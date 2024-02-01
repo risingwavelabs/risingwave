@@ -158,9 +158,6 @@ KafkaConfig:
     field_type: String
     required: true
     alias: kafka.brokers
-  - name: broker.rewrite.endpoints
-    field_type: HashMap<String,String>
-    required: false
   - name: topic
     field_type: String
     required: true
@@ -305,6 +302,15 @@ KafkaConfig:
     comments: The maximum number of unacknowledged requests the client will send on a single connection before blocking.
     required: false
     default: '5'
+  - name: privatelink.targets
+    field_type: String
+    required: false
+  - name: privatelink.endpoint
+    field_type: String
+    required: false
+  - name: broker.rewrite.endpoints
+    field_type: HashMap<String,String>
+    required: false
 KinesisSinkConfig:
   fields:
   - name: stream
