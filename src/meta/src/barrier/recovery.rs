@@ -17,9 +17,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context};
-use futures::future::try_join_all;
-use futures::stream::FuturesUnordered;
-use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
@@ -30,14 +27,10 @@ use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
-use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, UpdateActorsRequest,
-};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, warn, Instrument};
-use uuid::Uuid;
 
 use super::TracedEpoch;
 use crate::barrier::command::CommandContext;
@@ -991,31 +984,19 @@ impl GlobalBarrierManagerContext {
             return Err(anyhow!("actors dropped during update").into());
         }
 
-        info.actor_map.iter().map(|(node_id, actors)| {
-            let node_actors = all_node_actors.remove(node_id).unwrap_or_default();
-            let node = info.node_map.get(node_id).unwrap();
-            let actor_infos = actor_infos.clone();
-
-            async move {
-                let client = self.env.stream_client_pool().get(node).await?;
-                client
-                    .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
-                        info: actor_infos,
-                    })
-                    .await?;
-
-                let request_id = Uuid::new_v4().to_string();
-                tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
-                client
-                    .update_actors(UpdateActorsRequest {
-                        request_id,
-                        actors: node_actors,
-                    })
-                    .await?;
-
-                Ok(()) as MetaResult<()>
-            }
-        }).collect::<FuturesUnordered<_>>().try_collect::<()>().await?;
+        self.stream_rpc_manager
+            .broadcast_update_actor_info(
+                &info.node_map,
+                info.actor_map.keys().cloned(),
+                actor_infos.into_iter(),
+                info.actor_map.keys().map(|node_id| {
+                    (
+                        *node_id,
+                        all_node_actors.remove(node_id).unwrap_or_default(),
+                    )
+                }),
+            )
+            .await?;
 
         Ok(())
     }
@@ -1027,26 +1008,14 @@ impl GlobalBarrierManagerContext {
             return Ok(());
         }
 
-        info.actor_map
-            .iter()
-            .map(|(node_id, actors)| async move {
-                let actors = actors.iter().cloned().collect();
-                let node = info.node_map.get(node_id).unwrap();
-                let client = self.env.stream_client_pool().get(node).await?;
-
-                let request_id = Uuid::new_v4().to_string();
-                tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
-                client
-                    .build_actors(BuildActorsRequest {
-                        request_id,
-                        actor_id: actors,
-                    })
-                    .await?;
-
-                Ok(()) as MetaResult<_>
-            })
-            .collect::<FuturesUnordered<_>>()
-            .try_collect::<()>()
+        self.stream_rpc_manager
+            .build_actors(
+                &info.node_map,
+                info.actor_map.iter().map(|(node_id, actors)| {
+                    let actors = actors.iter().cloned().collect();
+                    (*node_id, actors)
+                }),
+            )
             .await?;
 
         Ok(())
@@ -1054,17 +1023,11 @@ impl GlobalBarrierManagerContext {
 
     /// Reset all compute nodes by calling `force_stop_actors`.
     async fn reset_compute_nodes(&self, info: &InflightActorInfo) -> MetaResult<()> {
-        let futures = info.node_map.values().map(|worker_node| async move {
-            let client = self.env.stream_client_pool().get(worker_node).await?;
-            debug!(worker = ?worker_node.id, "force stop actors");
-            client
-                .force_stop_actors(ForceStopActorsRequest {
-                    request_id: Uuid::new_v4().to_string(),
-                })
-                .await
-        });
+        debug!(worker = ?info.node_map.keys().collect_vec(), "force stop actors");
+        self.stream_rpc_manager
+            .force_stop_actors(info.node_map.values())
+            .await?;
 
-        try_join_all(futures).await?;
         debug!("all compute nodes have been reset.");
 
         Ok(())
