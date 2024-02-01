@@ -1111,7 +1111,7 @@ mod tests {
                 fragments,
                 &locations.actor_locations,
                 Default::default(),
-                TableParallelism::Auto,
+                TableParallelism::Adaptive,
             );
             let ctx = CreateStreamingJobContext {
                 building_locations: locations,

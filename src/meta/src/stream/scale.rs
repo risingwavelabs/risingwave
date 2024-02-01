@@ -1794,7 +1794,7 @@ impl ScaleController {
                         );
                     }
                     FragmentDistributionType::Hash => match parallelism {
-                        TableParallelism::Auto => {
+                        TableParallelism::Adaptive => {
                             target_plan.insert(
                                 fragment_id,
                                 Self::diff_parallel_unit_change(
