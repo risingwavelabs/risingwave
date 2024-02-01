@@ -324,7 +324,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
     session
         .run("select parallelism from rw_table_fragments")
         .await?
-        .assert_result_eq("AUTO");
+        .assert_result_eq("ADAPTIVE");
 
     async fn locate_table_fragment(cluster: &mut Cluster) -> Result<Fragment> {
         cluster
@@ -434,12 +434,14 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     // We alter parallelism back to auto
 
-    session.run("alter table t set parallelism = auto").await?;
+    session
+        .run("alter table t set parallelism = adaptive")
+        .await?;
 
     session
         .run("select parallelism from rw_table_fragments")
         .await?
-        .assert_result_eq("AUTO");
+        .assert_result_eq("ADAPTIVE");
 
     let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
 
@@ -523,7 +525,7 @@ async fn test_compatibility_with_low_level() -> Result<()> {
     session
         .run("select parallelism from table_parallelism")
         .await?
-        .assert_result_eq("AUTO");
+        .assert_result_eq("ADAPTIVE");
 
     let table_mat_fragment = cluster
         .locate_one_fragment(vec![
@@ -554,7 +556,7 @@ async fn test_compatibility_with_low_level() -> Result<()> {
     session
         .run("select parallelism from mview_parallelism where name = 'm_simple'")
         .await?
-        .assert_result_eq("AUTO");
+        .assert_result_eq("ADAPTIVE");
 
     let simple_mv_fragment = cluster
         .locate_one_fragment(vec![
@@ -575,16 +577,16 @@ async fn test_compatibility_with_low_level() -> Result<()> {
     // Since `m_simple` only has 1 fragment, and this fragment is a downstream of NO_SHUFFLE relation,
     // in reality, `m_simple` does not have a fragment of its own.
     // Therefore, any low-level modifications to this fragment will only be passed up to the highest level through the NO_SHUFFLE relationship and then passed back down.
-    // Hence, the parallelism of `m_simple` should still be equivalent to AUTO of 0 fragment.
+    // Hence, the parallelism of `m_simple` should still be equivalent to ADAPTIVE of 0 fragment.
     session
         .run("select parallelism from mview_parallelism where name = 'm_simple'")
         .await?
-        .assert_result_eq("AUTO");
+        .assert_result_eq("ADAPTIVE");
 
     session
         .run("select parallelism from mview_parallelism where name = 'm_join'")
         .await?
-        .assert_result_eq("AUTO");
+        .assert_result_eq("ADAPTIVE");
 
     let hash_join_fragment = cluster
         .locate_one_fragment(vec![identity_contains("hashJoin")])
@@ -660,7 +662,7 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
     session
         .run("select parallelism from table_parallelism")
         .await?
-        .assert_result_eq("AUTO");
+        .assert_result_eq("ADAPTIVE");
 
     // Find the table materialize fragment
     let table_mat_fragment = cluster
@@ -693,7 +695,7 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
     session
         .run("select parallelism from mview_parallelism where name = 'm_simple'")
         .await?
-        .assert_result_eq("AUTO");
+        .assert_result_eq("ADAPTIVE");
 
     // Find the table fragment for materialized view
     let simple_mv_fragment = cluster
