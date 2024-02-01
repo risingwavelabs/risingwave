@@ -137,15 +137,17 @@ impl DdlController {
 
         let affected_table_replace_info = match affected_table_replace_info {
             Some(replace_table_info) => {
-                let mgr = self.metadata_manager.as_v2_ref();
-
                 let ReplaceTableInfo {
                     mut streaming_job,
                     fragment_graph,
                     ..
                 } = replace_table_info;
 
-                // todo
+                let fragment_graph =
+                    StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job).await?;
+                streaming_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+                streaming_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
+                let streaming_job = streaming_job;
 
                 Some((streaming_job, fragment_graph))
             }

@@ -53,6 +53,7 @@ use risingwave_pb::ddl_service::{
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
@@ -70,7 +71,7 @@ use crate::manager::{
     NotificationVersion, RelationIdEnum, SchemaId, SinkId, SourceId, StreamingClusterInfo,
     StreamingJob, TableId, UserId, ViewId, IGNORED_NOTIFICATION_VERSION,
 };
-use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
+use crate::model::{FragmentId, MetadataModel, StreamContext, TableFragments, TableParallelism};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
     validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
@@ -845,6 +846,7 @@ impl DdlController {
     // Meanwhile, the Dispatcher corresponding to the upstream of the merge will also be added to the replace table context here.
     async fn inject_replace_table_job_for_table_sink(
         &self,
+        dummy_id: u32,
         mgr: &MetadataManager,
         stream_ctx: StreamContext,
         sink: Option<&Sink>,
@@ -853,12 +855,6 @@ impl DdlController {
         streaming_job: &StreamingJob,
         fragment_graph: StreamFragmentGraph,
     ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
-        let dummy_id = self
-            .env
-            .id_gen_manager()
-            .generate::<{ IdCategory::Table }>()
-            .await? as u32;
-
         let (mut replace_table_ctx, mut table_fragments) = self
             .build_replace_table(stream_ctx, streaming_job, fragment_graph, None, dummy_id)
             .await?;
@@ -1128,17 +1124,110 @@ impl DdlController {
                 self.drop_streaming_job_v1(job_id, drop_mode, target_replace_info)
                     .await
             }
-            MetadataManager::V2(_) => {
-                if target_replace_info.is_some() {
-                    unimplemented!("support replace table for drop in v2");
-                }
+            MetadataManager::V2(mgr) => {
                 let (object_id, object_type) = match job_id {
                     StreamingJobId::MaterializedView(id) => (id as _, ObjectType::Table),
                     StreamingJobId::Sink(id) => (id as _, ObjectType::Sink),
                     StreamingJobId::Table(_, id) => (id as _, ObjectType::Table),
                     StreamingJobId::Index(idx) => (idx as _, ObjectType::Index),
                 };
-                self.drop_object(object_type, object_id, drop_mode).await
+
+                let mut version = self.drop_object(object_type, object_id, drop_mode).await?;
+
+                if let Some(replace_table_info) = target_replace_info {
+                    let stream_ctx = StreamContext::from_protobuf(
+                        replace_table_info.fragment_graph.get_ctx().unwrap(),
+                    );
+
+                    let StreamingJobId::Sink(sink_id) = job_id else {
+                        panic!("additional replace table event only occurs when dropping sink into table")
+                    };
+
+                    let ReplaceTableInfo {
+                        mut streaming_job,
+                        fragment_graph,
+                        ..
+                    } = replace_table_info;
+
+                    let fragment_graph =
+                        StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job).await?;
+                    streaming_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+                    streaming_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
+                    let streaming_job = streaming_job;
+
+                    let table = streaming_job.table().unwrap();
+
+                    tracing::debug!(id = streaming_job.id(), "replacing table for dropped sink");
+                    let dummy_id = mgr
+                        .catalog_controller
+                        .create_job_catalog_for_replace(
+                            &streaming_job,
+                            &stream_ctx,
+                            table.get_version()?,
+                            &fragment_graph.default_parallelism(),
+                        )
+                        .await? as u32;
+
+                    let (ctx, table_fragments) = self
+                        .inject_replace_table_job_for_table_sink(
+                            dummy_id,
+                            &self.metadata_manager,
+                            stream_ctx,
+                            None,
+                            None,
+                            Some(sink_id),
+                            &streaming_job,
+                            fragment_graph,
+                        )
+                        .await?;
+
+                    let result: MetaResult<Vec<PbMergeUpdate>> = try {
+                        let merge_updates = ctx.merge_updates.clone();
+
+                        mgr.catalog_controller
+                            .prepare_streaming_job(
+                                table_fragments.to_protobuf(),
+                                &streaming_job,
+                                true,
+                            )
+                            .await?;
+
+                        self.stream_manager
+                            .replace_table(table_fragments, ctx)
+                            .await?;
+                        merge_updates
+                    };
+
+                    version = match result {
+                        Ok(merge_updates) => {
+                            let version = mgr
+                                .catalog_controller
+                                .finish_replace_streaming_job(
+                                    dummy_id as _,
+                                    streaming_job,
+                                    merge_updates,
+                                    None,
+                                    None,
+                                    None,
+                                )
+                                .await?;
+                            Ok(version)
+                        }
+                        Err(err) => {
+                            // tracing::error!(id = job_id, error = ?err.as_report(), "failed to replace table");
+                            let _ = mgr
+                                .catalog_controller
+                                .try_abort_replacing_streaming_job(dummy_id as _)
+                                .await
+                                .inspect_err(|err| {
+                                    // tracing::error!(id = job_id, error = ?err.as_report(), "failed to abort replacing table");
+                                });
+                            Err(err)
+                        }
+                    }?;
+                }
+
+                Ok(version)
             }
         }
     }
@@ -1206,7 +1295,6 @@ impl DdlController {
             } = replace_table_info;
             let fragment_graph = self
                 .prepare_replace_table(
-
                     mgr.catalog_manager.clone(),
                     &mut streaming_job,
                     fragment_graph,
@@ -1215,8 +1303,16 @@ impl DdlController {
 
             let result: MetaResult<()> = try {
                 tracing::debug!(id = streaming_job.id(), "replacing table for dropped sink");
+
+                let dummy_id = self
+                    .env
+                    .id_gen_manager()
+                    .generate::<{ IdCategory::Table }>()
+                    .await? as u32;
+
                 let (context, table_fragments) = self
                     .inject_replace_table_job_for_table_sink(
+                        dummy_id,
                         &self.metadata_manager,
                         stream_ctx,
                         None,
@@ -1385,8 +1481,29 @@ impl DdlController {
                     bail!("additional replace table event only occurs when sinking into table");
                 };
 
+                let dummy_id = match &self.metadata_manager {
+                    MetadataManager::V1(_) => {
+                        self.env
+                            .id_gen_manager()
+                            .generate::<{ IdCategory::Table }>()
+                            .await? as u32
+                    }
+                    MetadataManager::V2(mgr) => {
+                        let table = streaming_job.table().unwrap();
+                        mgr.catalog_controller
+                            .create_job_catalog_for_replace(
+                                &streaming_job,
+                                &stream_ctx,
+                                table.get_version()?,
+                                &fragment_graph.default_parallelism(),
+                            )
+                            .await? as u32
+                    }
+                };
+
                 let (context, table_fragments) = self
                     .inject_replace_table_job_for_table_sink(
+                        dummy_id,
                         &self.metadata_manager,
                         stream_ctx,
                         Some(s),
