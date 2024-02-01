@@ -196,6 +196,7 @@ pub async fn rpc_serve(
                     Arc::new(SqlBackendElectionClient::new(id, MySqlDriver::new(conn)))
                 }
             };
+            election_client.init().await?;
 
             rpc_serve_with_store(
                 None,
