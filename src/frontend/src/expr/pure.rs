@@ -216,6 +216,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Sha256
             | expr_node::Type::Sha384
             | expr_node::Type::Sha512
+            | expr_node::Type::Decrypt
+            | expr_node::Type::Encrypt
             | expr_node::Type::Tand
             | expr_node::Type::ArrayPositions
             | expr_node::Type::StringToArray
@@ -245,8 +247,6 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::PgGetIndexdef
             | expr_node::Type::ColDescription
             | expr_node::Type::PgGetViewdef
-            | expr_node::Type::Decrypt
-            | expr_node::Type::Encrypt
             | expr_node::Type::MakeTimestamptz => self.impure = true,
         }
     }
