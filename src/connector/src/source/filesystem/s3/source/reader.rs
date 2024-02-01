@@ -39,7 +39,9 @@ use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::nd_streaming;
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::s3::S3Properties;
-use crate::source::{BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta};
+use crate::source::{
+    self, BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta,
+};
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
@@ -63,7 +65,9 @@ impl S3FileReader {
         source_ctx: SourceContextRef,
     ) {
         let actor_id = source_ctx.source_info.actor_id.to_string();
+        let fragment_id = source_ctx.source_info.fragment_id.to_string();
         let source_id = source_ctx.source_info.source_id.to_string();
+        let source_name = source_ctx.source_info.source_name.to_string();
         let max_chunk_size = source_ctx.source_ctrl_opts.chunk_size;
         let split_id = split.id();
 
@@ -122,7 +126,13 @@ impl S3FileReader {
                 source_ctx
                     .metrics
                     .partition_input_bytes
-                    .with_label_values(&[&actor_id, &source_id, &split_id])
+                    .with_label_values(&[
+                        &actor_id,
+                        &source_id,
+                        &split_id,
+                        &source_name,
+                        &fragment_id,
+                    ])
                     .inc_by(batch_size as u64);
                 let yield_batch = std::mem::take(&mut batch);
                 batch_size = 0;
@@ -133,7 +143,7 @@ impl S3FileReader {
             source_ctx
                 .metrics
                 .partition_input_bytes
-                .with_label_values(&[&actor_id, &source_id, &split_id])
+                .with_label_values(&[&actor_id, &source_id, &split_id, &source_name, &fragment_id])
                 .inc_by(batch_size as u64);
             yield batch;
         }
@@ -207,7 +217,9 @@ impl S3FileReader {
     async fn into_chunk_stream(self) {
         for split in self.splits {
             let actor_id = self.source_ctx.source_info.actor_id.to_string();
+            let fragment_id = self.source_ctx.source_info.fragment_id.to_string();
             let source_id = self.source_ctx.source_info.source_id.to_string();
+            let source_name = self.source_ctx.source_info.source_name.to_string();
             let source_ctx = self.source_ctx.clone();
 
             let split_id = split.id();
@@ -232,7 +244,13 @@ impl S3FileReader {
                 self.source_ctx
                     .metrics
                     .partition_input_count
-                    .with_label_values(&[&actor_id, &source_id, &split_id])
+                    .with_label_values(&[
+                        &actor_id,
+                        &source_id,
+                        &split_id,
+                        &source_name,
+                        &fragment_id,
+                    ])
                     .inc_by(msg.cardinality() as u64);
                 yield msg;
             }

@@ -107,6 +107,11 @@ impl<S: StateStore> SourceExecutor<S> {
             self.connector_params.connector_client.clone(),
             self.actor_ctx.error_suppressor.clone(),
             source_desc.source.config.clone(),
+            self.stream_source_core
+                .as_ref()
+                .unwrap()
+                .source_name
+                .clone(),
         );
         source_desc
             .source
@@ -116,7 +121,7 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 
     #[inline]
-    fn get_metric_labels(&self) -> [String; 3] {
+    fn get_metric_labels(&self) -> [String; 4] {
         [
             self.stream_source_core
                 .as_ref()
@@ -129,6 +134,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 .source_name
                 .clone(),
             self.actor_ctx.id.to_string(),
+            self.actor_ctx.fragment_id.to_string(),
         ]
     }
 
@@ -536,6 +542,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                             .source_id
                                             .to_string()
                                             .as_ref(),
+                                        self.actor_ctx.fragment_id.to_string().as_str(),
                                     ])
                                     .inc_by(metric_row_per_barrier);
                                 metric_row_per_barrier = 0;
