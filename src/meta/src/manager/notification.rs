@@ -84,7 +84,10 @@ pub struct NotificationManager {
 }
 
 impl NotificationManager {
-    pub async fn new(meta_store: MetaStoreRef, meta_store_sql: Option<SqlMetaStore>) -> Self {
+    pub async fn new(
+        meta_store: Option<MetaStoreRef>,
+        meta_store_sql: Option<SqlMetaStore>,
+    ) -> Self {
         // notification waiting queue.
         let (task_tx, mut task_rx) = mpsc::unbounded_channel::<Task>();
         let core = Arc::new(Mutex::new(NotificationManagerCore::new()));
@@ -418,7 +421,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_subscribers_one_worker() {
-        let mgr = NotificationManager::new(MemStore::new().into_ref(), None).await;
+        let mgr = NotificationManager::new(Some(MemStore::new().into_ref()), None).await;
         let worker_key1 = WorkerKey(HostAddress {
             host: "a".to_string(),
             port: 1,

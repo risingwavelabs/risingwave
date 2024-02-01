@@ -87,7 +87,7 @@ macro_rules! commit_meta_with_trx {
                     $val_txn.apply_to_txn(&mut $trx).await?;
                 )*
                 // Commit to meta store
-                $manager.env.meta_store().txn($trx).await?;
+                $manager.env.meta_store_checked().txn($trx).await?;
                 // Upon successful commit, commit the change to in-mem meta
                 $(
                     $val_txn.commit();
@@ -3399,7 +3399,7 @@ impl CatalogManager {
                     ..Default::default()
                 };
 
-                default_user.insert(self.env.meta_store()).await?;
+                default_user.insert(self.env.meta_store_checked()).await?;
                 core.user_info.insert(default_user.id, default_user);
             }
         }
