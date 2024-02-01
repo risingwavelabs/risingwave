@@ -301,9 +301,8 @@ pub static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
     let mut table_name_by_id = HashMap::new();
     let mut view_by_schema_name = HashMap::new();
     tracing::info!("found {} catalogs", SYS_CATALOGS_SLICE.len());
-    for (id, catalog) in SYS_CATALOGS_SLICE.iter().enumerate() {
-        let id = (id + 1) as u32;
-        let catalog = catalog();
+    for catalog in SYS_CATALOGS_SLICE {
+        let (id, catalog) = catalog();
         assert!(id < NON_RESERVED_SYS_CATALOG_ID as u32);
         match catalog {
             BuiltinCatalog::Table(table) => {
@@ -331,15 +330,15 @@ pub static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
 });
 
 #[linkme::distributed_slice]
-pub static SYS_CATALOGS_SLICE: [fn() -> BuiltinCatalog];
+pub static SYS_CATALOGS_SLICE: [fn() -> (u32, BuiltinCatalog)];
 
 macro_rules! prepare_sys_catalog {
     ($( { $builtin_catalog:expr $(, $func:ident $($await:ident)?)? } ),* $(,)?) => {
         $(
             const _: () = {
                 #[linkme::distributed_slice(crate::catalog::system_catalog::SYS_CATALOGS_SLICE)]
-                fn catalog() -> BuiltinCatalog {
-                    $builtin_catalog
+                fn catalog() -> (u32, BuiltinCatalog) {
+                    (${index()} as u32 + 1, $builtin_catalog)
                 }
             };
         )*
