@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(non_snake_case)] // for `ctor` generated code
 #![feature(let_chains)]
 #![feature(lint_reasons)]
 #![feature(iterator_try_collect)]
@@ -20,6 +19,7 @@
 #![feature(coroutines)]
 #![feature(never_type)]
 #![feature(error_generic_member_access)]
+#![feature(used_with_arg)]
 
 extern crate self as risingwave_expr;
 
