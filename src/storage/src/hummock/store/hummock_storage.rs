@@ -479,6 +479,8 @@ impl StateStore for HummockStorage {
             .store(HummockEpoch::MAX, MemOrdering::SeqCst);
         self.seal_epoch.store(epoch, MemOrdering::SeqCst);
 
+        tracing::trace!("clear shared buffer success at epoch: {}", epoch);
+
         Ok(())
     }
 

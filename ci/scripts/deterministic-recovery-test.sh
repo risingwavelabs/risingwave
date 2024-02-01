@@ -16,7 +16,9 @@ risingwave_meta::rpc::ddl_controller=debug,\
 risingwave_meta::barrier::mod=debug,\
 risingwave_simulation=debug,\
 risingwave_stream::executor::backfill=trace,\
-risingwave_stream::task::stream_manager=debug"
+risingwave_stream::task::stream_manager=debug,\
+risingwave_storage::hummock::store::hummock_storage=trace,\
+"
 
 # Extra logs you can enable if the existing trace does not give enough info.
 #risingwave_stream::executor::backfill=trace,
