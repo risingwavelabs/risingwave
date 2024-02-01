@@ -336,6 +336,7 @@ impl<K: Ord, V: Clone> WindowImpl for RowsWindow<K, V> {
     }
 }
 
+/// The sliding window implementation for `RANGE` frames.
 pub(super) struct RangeWindow<V: Clone> {
     frame_bounds: RangeFrameBounds,
     _phantom: std::marker::PhantomData<V>,
