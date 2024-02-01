@@ -33,6 +33,7 @@ pub(super) struct WindowBuffer<W: WindowImpl> {
     curr_delta: Option<Vec<(Op, W::Value)>>,
 }
 
+/// A key-value pair in the buffer.
 struct Entry<K: Ord, V> {
     key: K,
     value: V,
@@ -44,9 +45,9 @@ pub(super) struct CurrWindow<'a, K> {
 
     // XXX(rc): Maybe will be used in the future, let's keep it for now.
     #[cfg_attr(not(test), expect(dead_code))]
-    /// The preceding half, if any, of the current window is saturated.
+    /// The preceding half of the current window is saturated.
     pub preceding_saturated: bool,
-    /// The following half, if any, of the current window is saturated.
+    /// The following half of the current window is saturated.
     pub following_saturated: bool,
 }
 
@@ -196,6 +197,7 @@ impl<W: WindowImpl> WindowBuffer<W> {
     }
 }
 
+/// Wraps a reference to the buffer and some indices, to be used by [`WindowImpl`]s.
 #[derive(Educe)]
 #[educe(Clone, Copy)]
 pub(super) struct BufferRef<'a, K: Ord, V: Clone> {
@@ -205,6 +207,7 @@ pub(super) struct BufferRef<'a, K: Ord, V: Clone> {
     right_excl_idx: usize,
 }
 
+/// Wraps a reference to the buffer and some mutable indices, to be used by [`WindowImpl`]s.
 pub(super) struct BufferRefMut<'a, K: Ord, V: Clone> {
     buffer: &'a VecDeque<Entry<K, V>>,
     curr_idx: &'a mut usize,
@@ -212,15 +215,26 @@ pub(super) struct BufferRefMut<'a, K: Ord, V: Clone> {
     right_excl_idx: &'a mut usize,
 }
 
+/// A trait for sliding window implementations. This trait is used by [`WindowBuffer`] to
+/// determine the status of current window and how to slide the window.
 pub(super) trait WindowImpl {
     type Key: Ord;
     type Value: Clone;
 
+    /// Whether the preceding half of the current window is saturated.
+    /// By "saturated" we mean that every row that is possible to be in the preceding half of the
+    /// current window is already in the buffer.
     fn preceding_saturated(&self, buffer_ref: BufferRef<'_, Self::Key, Self::Value>) -> bool;
+
+    /// Whether the following half of the current window is saturated.
     fn following_saturated(&self, buffer_ref: BufferRef<'_, Self::Key, Self::Value>) -> bool;
+
+    /// Recalculate the left and right indices of the current window, according to the latest
+    /// `curr_idx`. The indices are indices in the buffer vector.
     fn recalculate_left_right(&self, buffer_ref: BufferRefMut<'_, Self::Key, Self::Value>);
 }
 
+/// The sliding window implementation for `ROWS` frames.
 pub(super) struct RowsWindow<K: Ord, V: Clone> {
     frame_bounds: RowsFrameBounds,
     _phantom: std::marker::PhantomData<K>,
