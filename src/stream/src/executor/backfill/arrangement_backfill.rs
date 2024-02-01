@@ -436,9 +436,10 @@ where
 
                 // Persist state on barrier
                 tracing::trace!(
-                    "Persisting state on barrier at epoch {:#?}, actor {:#?}",
+                    "Persisting state on barrier at epoch {:#?}, actor_id={:#?}, table_id={}",
                     barrier.epoch,
-                    self.actor_id
+                    self.actor_id,
+                    self.state_table.table_id()
                 );
                 persist_state_per_vnode(
                     barrier.epoch,
@@ -496,9 +497,10 @@ where
                         }
 
                         tracing::trace!(
-                            "Persisting state finally at epoch {:#?}, actor {:#?}",
+                            "Persisting state finally at epoch {:#?}, actor_id={:#?}, table_id={}",
                             barrier.epoch,
-                            self.actor_id
+                            self.actor_id,
+                            self.state_table.table_id()
                         );
                         persist_state_per_vnode(
                             barrier.epoch,

@@ -769,7 +769,11 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
                 }
             }
             if vnode == VirtualNode::from_scalar(0) {
-                tracing::trace!("update vnode: vnode=0, actor_id={}", actor_id);
+                tracing::trace!(
+                    "update vnode: vnode=0, actor_id={}, table_id={}",
+                    actor_id,
+                    table.table_id()
+                );
             }
 
             table.write_record(Record::Update {
@@ -787,7 +791,11 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
                 assert_eq!(encoded_current_state.len(), state_len);
             }
             if vnode == VirtualNode::from_scalar(0) {
-                tracing::trace!("insert vnode: vnode=0, actor_id={}", actor_id);
+                tracing::trace!(
+                    "insert vnode: vnode=0, actor_id={}, table_id={}",
+                    actor_id,
+                    table.table_id()
+                );
             }
 
             table.write_record(Record::Insert {
@@ -798,7 +806,12 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
         backfill_state.mark_committed(vnode);
     }
     if has_progress {
-        tracing::trace!("committing on epoch, {:#?}, actor_id={}", epoch, actor_id);
+        tracing::trace!(
+            "committing on epoch, {:#?}, actor_id={}, table_id={}",
+            epoch,
+            actor_id,
+            table.table_id()
+        );
         table.commit(epoch).await?;
     } else {
         table.commit_no_data_expected(epoch);
