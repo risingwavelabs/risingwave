@@ -225,7 +225,7 @@ pub struct MetaConfig {
     #[serde(default)]
     pub disable_recovery: bool,
 
-    /// Whether to disable auto-scaling feature.
+    /// Whether to disable adaptive-scaling feature.
     #[serde(default)]
     pub disable_automatic_parallelism_control: bool,
 
