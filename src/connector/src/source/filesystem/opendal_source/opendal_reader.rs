@@ -19,7 +19,6 @@ use futures_async_stream::try_stream;
 use opendal::Operator;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::error::RwError;
-use risingwave_pb::meta::table_fragments::fragment;
 use tokio::io::BufReader;
 use tokio_util::io::{ReaderStream, StreamReader};
 
@@ -29,7 +28,7 @@ use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
-    self, BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
+    BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
     SplitReader,
 };
 
