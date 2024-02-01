@@ -22,7 +22,9 @@ apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "d0846a16c
     "xz",
 ] }
 arrow-array = { workspace = true }
+arrow-row = { workspace = true }
 arrow-schema = { workspace = true }
+arrow-select = { workspace = true }
 async-nats = "0.33"
 async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
@@ -92,6 +94,8 @@ pulsar = { version = "6.1", default-features = false, features = [
     "tokio-runtime",
     "telemetry",
     "auth-oauth2",
+    "lz4",
+    "zstd",
 ] }
 rdkafka = { workspace = true, features = [
     "cmake-build",
@@ -117,7 +121,7 @@ serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
 simd-json = "0.13.3"
 strum = "0.25"
-strum_macros = "0.25"
+strum_macros = "0.26"
 tempfile = "3"
 thiserror = "1"
 thiserror-ext = { workspace = true }
