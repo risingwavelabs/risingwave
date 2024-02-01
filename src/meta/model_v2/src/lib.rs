@@ -227,3 +227,11 @@ derive_from_json_struct!(
     FragmentVnodeMapping,
     risingwave_pb::common::ParallelUnitMapping
 );
+
+#[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize)]
+pub enum StreamingParallelism {
+    Auto,
+    Fixed(usize),
+}
+
+impl Eq for StreamingParallelism {}
