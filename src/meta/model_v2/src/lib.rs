@@ -230,7 +230,7 @@ derive_from_json_struct!(
 
 #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize)]
 pub enum StreamingParallelism {
-    Auto,
+    Adaptive,
     Fixed(usize),
 }
 
