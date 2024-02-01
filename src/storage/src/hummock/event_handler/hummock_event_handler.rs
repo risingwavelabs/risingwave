@@ -34,7 +34,7 @@ use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::filter_key_extractor::FilterKeyExtractorManager;
 use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::event_handler::refiller::CacheRefillerEvent;
+use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
 use crate::hummock::event_handler::uploader::{
     default_spawn_merging_task, HummockUploader, SpawnMergingTask, SpawnUploadTask, SyncedData,
     UploadTaskInfo, UploadTaskPayload, UploaderEvent,
@@ -187,6 +187,7 @@ impl HummockEventHandler {
                 ))
             }),
             default_spawn_merging_task(compactor_context.compaction_executor.clone()),
+            CacheRefiller::default_spawn_refill_task(),
         )
     }
 
@@ -199,6 +200,7 @@ impl HummockEventHandler {
         storage_opts: &StorageOpts,
         spawn_upload_task: SpawnUploadTask,
         spawn_merging_task: SpawnMergingTask,
+        spawn_refill_task: SpawnRefillTask,
     ) -> Self {
         let (hummock_event_tx, hummock_event_rx) = unbounded_channel();
         let (version_update_notifier_tx, _) =
@@ -222,6 +224,7 @@ impl HummockEventHandler {
         let refiller = CacheRefiller::new(
             CacheRefillConfig::from_storage_opts(storage_opts),
             sstable_store,
+            spawn_refill_task,
         );
 
         Self {
@@ -836,7 +839,7 @@ fn to_sync_result(result: &HummockResult<SyncedData>) -> HummockResult<SyncResul
 
 #[cfg(test)]
 mod tests {
-    use std::future::poll_fn;
+    use std::future::{poll_fn, Future};
     use std::iter::once;
     use std::sync::Arc;
     use std::task::Poll;
@@ -854,7 +857,8 @@ mod tests {
     use tokio::sync::oneshot;
     use tokio::task::yield_now;
 
-    use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
+    use crate::hummock::event_handler::refiller::CacheRefiller;
+    use crate::hummock::event_handler::{HummockEvent, HummockEventHandler, HummockVersionUpdate};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::shared_buffer::shared_buffer_batch::{
@@ -867,7 +871,7 @@ mod tests {
     use crate::monitor::HummockStateStoreMetrics;
 
     #[tokio::test]
-    async fn test_event_handler() {
+    async fn test_event_handler_merging_task() {
         let table_id = TableId::new(123);
         let epoch0 = 233;
         let pinned_version = PinnedVersion::new(
@@ -924,6 +928,7 @@ mod tests {
                     })
                 })
             }),
+            CacheRefiller::default_spawn_refill_task(),
         );
 
         let tx = event_handler.event_sender();
@@ -1044,5 +1049,130 @@ mod tests {
                 .collect_vec(),
             vec![*imm_ids.last().unwrap(), imm1.batch_id()]
         );
+    }
+
+    #[tokio::test]
+    async fn test_clear_shared_buffer() {
+        let epoch0 = 233;
+        let mut next_version_id = 1;
+        let mut make_new_version = |max_committed_epoch| {
+            let id = next_version_id;
+            next_version_id += 1;
+            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
+                id,
+                max_committed_epoch,
+                ..Default::default()
+            })
+        };
+
+        let initial_version = PinnedVersion::new(make_new_version(epoch0), unbounded_channel().0);
+
+        let (version_update_tx, version_update_rx) = unbounded_channel();
+        let (refill_task_tx, mut refill_task_rx) = unbounded_channel();
+
+        let refill_task_tx_clone = refill_task_tx.clone();
+
+        let event_handler = HummockEventHandler::new_inner(
+            version_update_rx,
+            initial_version.clone(),
+            None,
+            mock_sstable_store(),
+            Arc::new(HummockStateStoreMetrics::unused()),
+            &default_opts_for_test(),
+            Arc::new(|_, _| unreachable!("should not spawn upload task")),
+            Arc::new(|_, _, _, _| unreachable!("should not spawn merging task")),
+            Arc::new(move |_, _, old_version, new_version| {
+                let (tx, rx) = oneshot::channel();
+                refill_task_tx_clone
+                    .send((old_version, new_version, tx))
+                    .unwrap();
+                spawn(async move {
+                    let _ = rx.await;
+                })
+            }),
+        );
+
+        let event_tx = event_handler.event_sender();
+        let latest_version = event_handler.pinned_version.clone();
+        let latest_version_update_tx = event_handler.version_update_notifier_tx.clone();
+
+        let send_clear = |epoch| {
+            let (tx, rx) = oneshot::channel();
+            event_tx.send(HummockEvent::Clear(tx, epoch)).unwrap();
+            rx
+        };
+
+        let _join_handle = spawn(event_handler.start_hummock_event_handler_worker());
+
+        // test normal recovery
+        send_clear(epoch0).await.unwrap();
+
+        // test normal refill finish
+        let epoch1 = epoch0 + 1;
+        let version1 = make_new_version(epoch1);
+        {
+            version_update_tx
+                .send(HummockVersionUpdate::PinnedVersion(version1.clone()))
+                .unwrap();
+            let (old_version, new_version, refill_finish_tx) = refill_task_rx.recv().await.unwrap();
+            assert_eq!(old_version.version(), initial_version.version());
+            assert_eq!(new_version.version(), &version1);
+            assert_eq!(latest_version.load().version(), initial_version.version());
+
+            let mut changed = latest_version_update_tx.subscribe();
+            refill_finish_tx.send(()).unwrap();
+            changed.changed().await.unwrap();
+            assert_eq!(latest_version.load().version(), &version1);
+        }
+
+        // test recovery with pending refill task
+        let epoch2 = epoch1 + 1;
+        let version2 = make_new_version(epoch2);
+        let epoch3 = epoch2 + 1;
+        let version3 = make_new_version(epoch3);
+        {
+            version_update_tx
+                .send(HummockVersionUpdate::PinnedVersion(version2.clone()))
+                .unwrap();
+            version_update_tx
+                .send(HummockVersionUpdate::PinnedVersion(version3.clone()))
+                .unwrap();
+            let (old_version2, new_version2, _refill_finish_tx2) =
+                refill_task_rx.recv().await.unwrap();
+            assert_eq!(old_version2.version(), &version1);
+            assert_eq!(new_version2.version(), &version2);
+            let (old_version3, new_version3, _refill_finish_tx3) =
+                refill_task_rx.recv().await.unwrap();
+            assert_eq!(old_version3.version(), &version2);
+            assert_eq!(new_version3.version(), &version3);
+            assert_eq!(latest_version.load().version(), &version1);
+
+            let rx = send_clear(epoch3);
+            rx.await.unwrap();
+            assert_eq!(latest_version.load().version(), &version3);
+        }
+
+        async fn assert_pending(fut: &mut (impl Future + Unpin)) {
+            assert!(poll_fn(|cx| Poll::Ready(fut.poll_unpin(cx).is_pending())).await);
+        }
+
+        // test recovery with later arriving version update
+        let epoch4 = epoch3 + 1;
+        let version4 = make_new_version(epoch4);
+        let epoch5 = epoch4 + 1;
+        let version5 = make_new_version(epoch5);
+        {
+            let mut rx = send_clear(epoch5);
+            assert_pending(&mut rx).await;
+            version_update_tx
+                .send(HummockVersionUpdate::PinnedVersion(version4.clone()))
+                .unwrap();
+            assert_pending(&mut rx).await;
+            version_update_tx
+                .send(HummockVersionUpdate::PinnedVersion(version5.clone()))
+                .unwrap();
+            rx.await.unwrap();
+            assert_eq!(latest_version.load().version(), &version5);
+        }
     }
 }

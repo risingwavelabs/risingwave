@@ -80,7 +80,7 @@ impl Drop for HummockStorageShutdownGuard {
 pub struct HummockStorage {
     hummock_event_sender: UnboundedSender<HummockEvent>,
     // only used in test for setting hummock version in uploader
-    version_update_sender: UnboundedSender<HummockVersionUpdate>,
+    _version_update_sender: UnboundedSender<HummockVersionUpdate>,
 
     context: CompactorContext,
 
@@ -209,7 +209,7 @@ impl HummockStorage {
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
             seal_epoch,
             hummock_event_sender: event_tx.clone(),
-            version_update_sender: version_update_tx,
+            _version_update_sender: version_update_tx,
             pinned_version: hummock_event_handler.pinned_version(),
             hummock_version_reader: HummockVersionReader::new(
                 sstable_store,
@@ -529,10 +529,11 @@ impl HummockStorage {
     }
 
     /// Used in the compaction test tool
+    #[cfg(any(test, feature = "test"))]
     pub async fn update_version_and_wait(&self, version: HummockVersion) {
         use tokio::task::yield_now;
         let version_id = version.id;
-        self.version_update_sender
+        self._version_update_sender
             .send(HummockVersionUpdate::PinnedVersion(version))
             .unwrap();
         loop {
