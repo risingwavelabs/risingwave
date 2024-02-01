@@ -326,7 +326,7 @@ mod tests {
             },
 
             scan_startup_mode: None,
-            timestamp_offset: Some(123456789098765432),
+            timestamp_offset: Some("123456789098765432".to_string()),
         };
         let client = KinesisSplitReader::new(
             properties,

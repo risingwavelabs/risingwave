@@ -31,7 +31,6 @@
 #![feature(if_let_guard)]
 #![feature(iterator_try_collect)]
 #![feature(try_blocks)]
-#![feature(let_else)]
 
 use std::time::Duration;
 

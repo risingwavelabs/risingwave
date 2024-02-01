@@ -474,3 +474,19 @@
     - stream_plan
     - optimized_logical_plan_for_batch
     - batch_plan
+
+# With filter
+- sql: |
+    create table t (id int, cat varchar, rule varchar, at timestamptz);
+    select * from (select cat, rule, at, lag(rule) over (partition by cat order by at) as prev_rule from t) as with_prev
+    where rule = 'B' and cat is not null and at = '2023-11-23T12:00:42Z'::timestamptz;
+  expected_outputs:
+    - optimized_logical_plan_for_stream
+    - optimized_logical_plan_for_batch
+- sql: |
+    create table t (id int, cat varchar, rule varchar, at timestamptz);
+    select cat, rule, at, lag(rule) over (partition by cat order by at) as prev_rule from t
+    where rule = 'B' and cat is not null and at = '2023-11-23T12:00:42Z'::timestamptz;
+  expected_outputs:
+    - optimized_logical_plan_for_stream
+    - optimized_logical_plan_for_batch

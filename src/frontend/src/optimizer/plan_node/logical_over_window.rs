@@ -23,9 +23,9 @@ use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalProject,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamEowcSort,
-    StreamOverWindow, ToBatch, ToStream,
+    gen_filter_and_pushdown, BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalFilter,
+    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow,
+    StreamEowcSort, StreamOverWindow, ToBatch, ToStream,
 };
 use crate::expr::{
     Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, WindowFunction,
@@ -691,10 +691,19 @@ impl PredicatePushdown for LogicalOverWindow {
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        let mut window_col = FixedBitSet::with_capacity(self.schema().len());
-        window_col.insert_range(self.core.input.schema().len()..self.schema().len());
-        let (window_pred, other_pred) = predicate.split_disjoint(&window_col);
-        gen_filter_and_pushdown(self, window_pred, other_pred, ctx)
+        if !self.core.funcs_have_same_partition_and_order() {
+            // Window function calls with different PARTITION BY and ORDER BY clauses are not split yet.
+            return LogicalFilter::create(self.clone().into(), predicate);
+        }
+
+        let all_out_cols: FixedBitSet = (0..self.schema().len()).collect();
+        let mut remain_cols: FixedBitSet = all_out_cols
+            .difference(&self.core.partition_key_indices().into_iter().collect())
+            .collect();
+        remain_cols.grow(self.schema().len());
+
+        let (remain_pred, pushed_pred) = predicate.split_disjoint(&remain_cols);
+        gen_filter_and_pushdown(self, remain_pred, pushed_pred, ctx)
     }
 }
 
