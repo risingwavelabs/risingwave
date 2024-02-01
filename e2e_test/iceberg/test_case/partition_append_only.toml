@@ -14,7 +14,7 @@ init_sqls = [
     v_timestamp timestamp,
     v_ts_ntz timestamp_ntz
     )
-    PARTITIONED BY (v_int,v_long,v_float,v_double,v_varchar,v_bool,v_date,v_timestamp,v_ts_ntz)
+    PARTITIONED BY (v_int,bucket(10,v_long),truncate(30,v_long),years(v_date),months(v_timestamp),days(v_ts_ntz))
     TBLPROPERTIES ('format-version'='2');
     '''
 ]

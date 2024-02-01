@@ -41,7 +41,7 @@ use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::CompactorContext;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::{
-    HummockEvent, HummockEventHandler, HummockVersionUpdate, ReadVersionMappingType,
+    HummockEvent, HummockEventHandler, HummockVersionUpdate, ReadOnlyReadVersionMapping,
 };
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
@@ -100,7 +100,7 @@ pub struct HummockStorage {
 
     _shutdown_guard: Arc<HummockStorageShutdownGuard>,
 
-    read_version_mapping: Arc<ReadVersionMappingType>,
+    read_version_mapping: ReadOnlyReadVersionMapping,
 
     backup_reader: BackupReaderRef,
 

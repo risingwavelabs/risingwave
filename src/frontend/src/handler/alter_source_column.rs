@@ -58,6 +58,13 @@ pub async fn handle_alter_source_column(
         (db.id(), schema.id(), (**source).clone())
     };
 
+    if catalog.associated_table_id.is_some() {
+        Err(ErrorCode::NotSupported(
+            "alter table with connector with ALTER SOURCE statement".to_string(),
+            "try to use ALTER TABLE instead".to_string(),
+        ))?
+    };
+
     // Currently only allow source without schema registry
     let SourceStruct { encode, .. } = extract_source_struct(&catalog.info)?;
     match encode {

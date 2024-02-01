@@ -23,6 +23,7 @@ use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
+use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
@@ -373,7 +374,7 @@ impl GlobalBarrierManagerContext {
 
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
-                    let mut info = if self.env.opts.enable_scale_in_when_recovery {
+                    let mut info = if !self.env.opts.disable_automatic_parallelism_control {
                         let info = self.resolve_actor_info().await;
                         let scaled = self.scale_actors(&info).await.inspect_err(|err| {
                             warn!(error = %err.as_report(), "scale actors failed");
@@ -587,7 +588,7 @@ impl GlobalBarrierManagerContext {
             .migrate_fragment_actors(&migration_plan)
             .await?;
         // 3. remove the migration plan.
-        migration_plan.delete(self.env.meta_store()).await?;
+        migration_plan.delete(self.env.meta_store_checked()).await?;
         debug!("migrate actors succeed.");
 
         let info = self.resolve_actor_info().await;
@@ -597,24 +598,118 @@ impl GlobalBarrierManagerContext {
     async fn scale_actors(&self, info: &InflightActorInfo) -> MetaResult<bool> {
         match &self.metadata_manager {
             MetadataManager::V1(_) => self.scale_actors_v1(info).await,
-            MetadataManager::V2(_) => self.scale_actors_v2(info),
+            MetadataManager::V2(_) => self.scale_actors_v2(info).await,
         }
     }
 
-    fn scale_actors_v2(&self, _info: &InflightActorInfo) -> MetaResult<bool> {
-        let _mgr = self.metadata_manager.as_v2_ref();
-        unimplemented!("implement auto-scale funcs in sql backend")
+    async fn scale_actors_v2(&self, _info: &InflightActorInfo) -> MetaResult<bool> {
+        let mgr = self.metadata_manager.as_v2_ref();
+        debug!("start resetting actors distribution");
+
+        let table_parallelisms: HashMap<_, _> = {
+            let streaming_parallelisms = mgr
+                .catalog_controller
+                .get_all_streaming_parallelisms()
+                .await?;
+
+            streaming_parallelisms
+                .into_iter()
+                .map(|(table_id, parallelism)| {
+                    // no custom for sql backend
+                    let table_parallelism = match parallelism {
+                        StreamingParallelism::Adaptive => TableParallelism::Adaptive,
+                        StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
+                    };
+
+                    (table_id as u32, table_parallelism)
+                })
+                .collect()
+        };
+
+        let workers = mgr
+            .cluster_controller
+            .list_active_streaming_workers()
+            .await?;
+
+        let schedulable_worker_ids = workers
+            .iter()
+            .filter(|worker| {
+                !worker
+                    .property
+                    .as_ref()
+                    .map(|p| p.is_unschedulable)
+                    .unwrap_or(false)
+            })
+            .map(|worker| worker.id)
+            .collect();
+
+        let plan = self
+            .scale_controller
+            .generate_table_resize_plan(TableResizePolicy {
+                worker_ids: schedulable_worker_ids,
+                table_parallelisms: table_parallelisms.clone(),
+            })
+            .await?;
+
+        let table_parallelisms: HashMap<_, _> = table_parallelisms
+            .into_iter()
+            .map(|(table_id, parallelism)| {
+                debug_assert_ne!(parallelism, TableParallelism::Custom);
+                (TableId::new(table_id), parallelism)
+            })
+            .collect();
+
+        let mut compared_table_parallelisms = table_parallelisms.clone();
+
+        let (reschedule_fragment, _) = self
+            .scale_controller
+            .prepare_reschedule_command(
+                plan,
+                RescheduleOptions {
+                    resolve_no_shuffle_upstream: true,
+                },
+                Some(&mut compared_table_parallelisms),
+            )
+            .await?;
+
+        // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
+        debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
+
+        if let Err(e) = self
+            .scale_controller
+            .post_apply_reschedule(&reschedule_fragment, &table_parallelisms)
+            .await
+        {
+            tracing::error!(
+                error = %e.as_report(),
+                "failed to apply reschedule for offline scaling in recovery",
+            );
+
+            return Err(e);
+        }
+
+        debug!("scaling-in actors succeed.");
+        Ok(true)
     }
 
     async fn scale_actors_v1(&self, info: &InflightActorInfo) -> MetaResult<bool> {
         let mgr = self.metadata_manager.as_v1_ref();
         debug!("start resetting actors distribution");
 
+        if info.actor_location_map.is_empty() {
+            debug!("empty cluster, skipping");
+            return Ok(true);
+        }
+
         let current_parallelism = info
             .node_map
             .values()
             .flat_map(|worker_node| worker_node.parallel_units.iter())
             .count();
+
+        if current_parallelism == 0 {
+            return Err(anyhow!("no available parallel units for auto scaling").into());
+        }
 
         /// We infer the new parallelism strategy based on the prior level of parallelism of the table.
         /// If the parallelism strategy is Fixed or Auto, we won't make any modifications.
@@ -631,12 +726,12 @@ impl GlobalBarrierManagerContext {
                 if let Some(fragment) = derive_from_fragment {
                     let fragment_parallelism = fragment.get_actors().len();
                     if fragment_parallelism >= current_parallelism {
-                        TableParallelism::Auto
+                        TableParallelism::Adaptive
                     } else {
                         TableParallelism::Fixed(fragment_parallelism)
                     }
                 } else {
-                    TableParallelism::Auto
+                    TableParallelism::Adaptive
                 }
             } else {
                 table.assigned_parallelism
@@ -677,8 +772,6 @@ impl GlobalBarrierManagerContext {
 
         let plan = self
             .scale_controller
-            .as_ref()
-            .unwrap()
             .generate_table_resize_plan(TableResizePolicy {
                 worker_ids: schedulable_worker_ids,
                 table_parallelisms: table_parallelisms.clone(),
@@ -697,8 +790,6 @@ impl GlobalBarrierManagerContext {
 
         let (reschedule_fragment, applied_reschedules) = self
             .scale_controller
-            .as_ref()
-            .unwrap()
             .prepare_reschedule_command(
                 plan,
                 RescheduleOptions {
@@ -713,8 +804,6 @@ impl GlobalBarrierManagerContext {
 
         if let Err(e) = self
             .scale_controller
-            .as_ref()
-            .unwrap()
             .post_apply_reschedule(&reschedule_fragment, &table_parallelisms)
             .await
         {
@@ -742,7 +831,7 @@ impl GlobalBarrierManagerContext {
     ) -> MetaResult<MigrationPlan> {
         let mgr = self.metadata_manager.as_v1_ref();
 
-        let mut cached_plan = MigrationPlan::get(self.env.meta_store()).await?;
+        let mut cached_plan = MigrationPlan::get(self.env.meta_store_checked()).await?;
 
         let all_worker_parallel_units = mgr.fragment_manager.all_worker_parallel_units().await;
 
@@ -839,7 +928,7 @@ impl GlobalBarrierManagerContext {
             new_plan.parallel_unit_plan
         );
 
-        new_plan.insert(self.env.meta_store()).await?;
+        new_plan.insert(self.env.meta_store_checked()).await?;
         Ok(new_plan)
     }
 

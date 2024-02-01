@@ -569,7 +569,7 @@ impl<P: ByteStreamSourceParser> P {
     /// A [`ChunkSourceStream`] which is a stream of parsed messages.
     pub fn into_stream(self, data_stream: BoxSourceStream) -> impl ChunkSourceStream {
         // Enable tracing to provide more information for parsing failures.
-        let source_info = self.source_ctx().source_info;
+        let source_info = self.source_ctx().source_info.clone();
 
         // The parser stream will be long-lived. We use `instrument_with` here to create
         // a new span for the polling of each chunk.

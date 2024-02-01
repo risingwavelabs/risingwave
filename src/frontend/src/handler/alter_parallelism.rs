@@ -15,7 +15,9 @@
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::meta::table_parallelism::{AutoParallelism, FixedParallelism, PbParallelism};
+use risingwave_pb::meta::table_parallelism::{
+    AdaptiveParallelism, FixedParallelism, PbParallelism,
+};
 use risingwave_pb::meta::{PbTableParallelism, TableParallelism};
 use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSingle, Value};
 use risingwave_sqlparser::keywords::Keyword;
@@ -107,8 +109,8 @@ pub async fn handle_alter_parallelism(
 }
 
 fn extract_table_parallelism(parallelism: SetVariableValue) -> Result<TableParallelism> {
-    let auto_parallelism = PbTableParallelism {
-        parallelism: Some(PbParallelism::Auto(AutoParallelism {})),
+    let adaptive_parallelism = PbTableParallelism {
+        parallelism: Some(PbParallelism::Adaptive(AdaptiveParallelism {})),
     };
 
     // If the target parallelism is set to 0/auto/default, we would consider it as auto parallelism.
@@ -116,22 +118,22 @@ fn extract_table_parallelism(parallelism: SetVariableValue) -> Result<TableParal
         SetVariableValue::Single(SetVariableValueSingle::Ident(ident))
             if ident
                 .real_value()
-                .eq_ignore_ascii_case(&Keyword::AUTO.to_string()) =>
+                .eq_ignore_ascii_case(&Keyword::ADAPTIVE.to_string()) =>
         {
-            auto_parallelism
+            adaptive_parallelism
         }
 
-        SetVariableValue::Default => auto_parallelism,
+        SetVariableValue::Default => adaptive_parallelism,
         SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Number(v))) => {
             let fixed_parallelism = v.parse::<u32>().map_err(|e| {
                 ErrorCode::InvalidInputSyntax(format!(
-                    "target parallelism must be a valid number or auto: {}",
+                    "target parallelism must be a valid number or adaptive: {}",
                     e.as_report()
                 ))
             })?;
 
             if fixed_parallelism == 0 {
-                auto_parallelism
+                adaptive_parallelism
             } else {
                 PbTableParallelism {
                     parallelism: Some(PbParallelism::Fixed(FixedParallelism {
@@ -143,7 +145,7 @@ fn extract_table_parallelism(parallelism: SetVariableValue) -> Result<TableParal
 
         _ => {
             return Err(ErrorCode::InvalidInputSyntax(
-                "target parallelism must be a valid number or auto".to_string(),
+                "target parallelism must be a valid number or adaptive".to_string(),
             )
             .into());
         }

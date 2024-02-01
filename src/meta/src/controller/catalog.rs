@@ -27,7 +27,8 @@ use risingwave_meta_model_v2::{
     connection, database, function, index, object, object_dependency, schema, sink, source,
     streaming_job, table, user_privilege, view, ActorId, ColumnCatalogArray, ConnectionId,
     CreateType, DatabaseId, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
-    PrivateLinkService, Property, SchemaId, SourceId, StreamSourceInfo, TableId, UserId,
+    PrivateLinkService, Property, SchemaId, SourceId, StreamSourceInfo, StreamingParallelism,
+    TableId, UserId,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
@@ -2079,6 +2080,26 @@ impl CatalogController {
             .into_iter()
             .map(|(id, property)| (id, TableOption::build_table_option(&property.into_inner())))
             .collect())
+    }
+
+    pub async fn get_all_streaming_parallelisms(
+        &self,
+    ) -> MetaResult<HashMap<ObjectId, StreamingParallelism>> {
+        let inner = self.inner.read().await;
+
+        let job_parallelisms = StreamingJob::find()
+            .select_only()
+            .columns([
+                streaming_job::Column::JobId,
+                streaming_job::Column::Parallelism,
+            ])
+            .into_tuple::<(ObjectId, StreamingParallelism)>()
+            .all(&inner.db)
+            .await?;
+
+        Ok(job_parallelisms
+            .into_iter()
+            .collect::<HashMap<ObjectId, StreamingParallelism>>())
     }
 
     pub async fn get_table_name_type_mapping(
