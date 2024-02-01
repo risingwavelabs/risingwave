@@ -201,7 +201,7 @@ pub struct GlobalStreamManager {
 
     pub reschedule_lock: RwLock<()>,
 
-    pub(crate) scale_controller: Option<ScaleControllerRef>,
+    pub(crate) scale_controller: ScaleControllerRef,
 }
 
 impl GlobalStreamManager {
@@ -212,14 +212,12 @@ impl GlobalStreamManager {
         source_manager: SourceManagerRef,
         hummock_manager: HummockManagerRef,
     ) -> MetaResult<Self> {
-        let scale_controller = match &metadata_manager {
-            MetadataManager::V1(_) => {
-                let scale_controller =
-                    ScaleController::new(&metadata_manager, source_manager.clone(), env.clone());
-                Some(Arc::new(scale_controller))
-            }
-            MetadataManager::V2(_) => None,
-        };
+        let scale_controller = Arc::new(ScaleController::new(
+            &metadata_manager,
+            source_manager.clone(),
+            env.clone(),
+        ));
+
         Ok(Self {
             env,
             metadata_manager,
@@ -739,15 +737,12 @@ impl GlobalStreamManager {
         parallelism: TableParallelism,
         deferred: bool,
     ) -> MetaResult<()> {
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unimplemented!("support alter table parallelism in v2");
-        };
         let _reschedule_job_lock = self.reschedule_lock.write().await;
 
-        let worker_nodes = mgr
-            .cluster_manager
+        let worker_nodes = self
+            .metadata_manager
             .list_active_streaming_compute_nodes()
-            .await;
+            .await?;
 
         let worker_ids = worker_nodes
             .iter()
@@ -764,15 +759,11 @@ impl GlobalStreamManager {
                 parallelism
             );
             self.scale_controller
-                .as_ref()
-                .unwrap()
                 .post_apply_reschedule(&HashMap::new(), &table_parallelism_assignment)
                 .await?;
         } else {
             let reschedules = self
                 .scale_controller
-                .as_ref()
-                .unwrap()
                 .generate_table_resize_plan(TableResizePolicy {
                     worker_ids,
                     table_parallelisms: table_parallelism_assignment
@@ -785,8 +776,6 @@ impl GlobalStreamManager {
             if reschedules.is_empty() {
                 tracing::debug!("empty reschedule plan generated for job {}, set the parallelism directly to {:?}", table_id, parallelism);
                 self.scale_controller
-                    .as_ref()
-                    .unwrap()
                     .post_apply_reschedule(&HashMap::new(), &table_parallelism_assignment)
                     .await?;
             } else {
