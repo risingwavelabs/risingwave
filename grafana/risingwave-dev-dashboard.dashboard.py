@@ -214,6 +214,10 @@ def section_compaction(outer_panels):
                             f"sum({metric('storage_level_compact_frequency', successful_compaction_fiiler)}) by (compactor, group, task_type, result)",
                             "{{task_type}} - {{result}} - group-{{group}} @ {{compactor}}",
                         ),
+                        panels.target(
+                            f"sum({metric('storage_compaction_result_check_count')}) by (compactor, type)",
+                            "{{type}} @ {{compactor}}",
+                        ),
                     ],
                 ),
                 panels.timeseries_count(
