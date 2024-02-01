@@ -40,7 +40,6 @@ use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::{
     FragmentParallelUnitMapping, PbRelation, PbRelationGroup, PbTableFragments,
@@ -956,7 +955,7 @@ impl CatalogController {
                 // actor_status
                 PbActorStatus {
                     parallel_unit,
-                    state,
+                    state: _,
                 },
             ) in newly_created_actors
             {
