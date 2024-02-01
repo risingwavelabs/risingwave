@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::str::FromStr;
 use std::collections::{BTreeMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, TableId, UserId, OBJECT_ID_PLACEHOLDER};
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::Interval;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{PbStreamJobStatus, PbSubscription};
 
@@ -92,6 +95,23 @@ impl SubscriptionCatalog {
         dependent_relations.extend(self.dependent_relations);
         self.dependent_relations = dependent_relations.into_iter().collect();
         self
+    }
+
+    pub fn get_retention_seconds(&self) -> Result<u64> {
+        let retention_seconds_str = self.properties.get("retention").ok_or_else(|| {
+            ErrorCode::InternalError("Subscription retention time not set.".to_string())
+        })?;
+        let retention_seconds = (Interval::from_str(retention_seconds_str)
+            .map_err(|err| {
+                ErrorCode::InternalError(format!(
+                    "Retention needs to be set in Interval format: {:?}",
+                    err.to_string()
+                ))
+            })?
+            .epoch_in_micros()
+            / 1000000) as u64;
+
+        Ok(retention_seconds)
     }
 
     pub fn to_proto(&self) -> PbSubscription {

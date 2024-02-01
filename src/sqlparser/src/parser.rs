@@ -240,6 +240,8 @@ impl Parser {
                     self.prev_token();
                     Ok(Statement::Query(Box::new(self.parse_query()?)))
                 }
+                Keyword::DECLARE => Ok(self.parse_declare()?),
+                Keyword::FETCH => Ok(self.parse_fetch_cursor()?),
                 Keyword::TRUNCATE => Ok(self.parse_truncate()?),
                 Keyword::CREATE => Ok(self.parse_create()?),
                 Keyword::DROP => Ok(self.parse_drop()?),
@@ -2293,6 +2295,18 @@ impl Parser {
         })
     }
 
+    pub fn parse_declare(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::DeclareCursor {
+            stmt: DeclareCursorStatement::parse_to(self)?,
+        })
+    }
+
+    pub fn parse_fetch_cursor(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::FetchCursor {
+            stmt: FetchCursorStatement::parse_to(self)?,
+        })
+    }
+
     fn parse_table_column_def(&mut self) -> Result<TableColumnDef, ParserError> {
         Ok(TableColumnDef {
             name: self.parse_identifier_non_reserved()?,
@@ -2875,6 +2889,15 @@ impl Parser {
         self.expect_token(&Token::Eq)?;
         let value = self.parse_value()?;
         Ok(SqlOption { name, value })
+    }
+
+    pub fn parse_rw_timestamp(&mut self) -> Result<RwTimestamp, ParserError> {
+        let rw_timestamp = if self.parse_keyword(Keyword::SINCE) {
+            Some(Ident::from(self.parse_number_value()?.as_str()))
+        } else {
+            None
+        };
+        Ok(RwTimestamp::from(rw_timestamp))
     }
 
     pub fn parse_emit_mode(&mut self) -> Result<Option<EmitMode>, ParserError> {

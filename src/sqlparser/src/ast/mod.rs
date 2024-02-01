@@ -1160,6 +1160,7 @@ pub enum Statement {
     CreateSubscription {
         stmt: CreateSubscriptionStatement,
     },
+
     /// CREATE CONNECTION
     CreateConnection {
         stmt: CreateConnectionStatement,
@@ -1188,6 +1189,17 @@ pub enum Statement {
         append_only: bool,
         params: CreateFunctionBody,
     },
+
+    /// DECLARE CURSOR
+    DeclareCursor {
+        stmt: DeclareCursorStatement,
+    },
+
+    // FETCH CURSOR
+    FetchCursor {
+        stmt: FetchCursorStatement,
+    },
+
     /// ALTER DATABASE
     AlterDatabase {
         name: ObjectName,
@@ -1727,6 +1739,8 @@ impl fmt::Display for Statement {
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::CreateSubscription { stmt } => write!(f, "CREATE SUBSCRIPTION {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
+            Statement::DeclareCursor { stmt } => write!(f, "DECLARE CURSOR {}", stmt,),
+            Statement::FetchCursor { stmt } => write!(f, "DECLARE {}", stmt),
             Statement::AlterDatabase { name, operation } => {
                 write!(f, "ALTER DATABASE {} {}", name, operation)
             }

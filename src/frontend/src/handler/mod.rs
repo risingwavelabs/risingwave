@@ -60,6 +60,7 @@ pub mod create_table;
 pub mod create_table_as;
 pub mod create_user;
 pub mod create_view;
+pub mod declare_cursor;
 mod describe;
 mod drop_connection;
 mod drop_database;
@@ -75,6 +76,7 @@ pub mod drop_user;
 mod drop_view;
 pub mod explain;
 pub mod extended_handle;
+pub mod fetch_cursor;
 mod flush;
 pub mod handle_privilege;
 mod kill_process;
@@ -310,6 +312,12 @@ pub async fn handle(
             if_not_exists,
         } => create_schema::handle_create_schema(handler_args, schema_name, if_not_exists).await,
         Statement::CreateUser(stmt) => create_user::handle_create_user(handler_args, stmt).await,
+        Statement::DeclareCursor { stmt } => {
+            declare_cursor::handle_declare_cursor(handler_args, stmt, formats).await
+        }
+        Statement::FetchCursor { stmt } => {
+            fetch_cursor::handle_fetch_cursor(handler_args, stmt, formats).await
+        }
         Statement::AlterUser(stmt) => alter_user::handle_alter_user(handler_args, stmt).await,
         Statement::Grant { .. } => {
             handle_privilege::handle_grant_privilege(handler_args, stmt).await

@@ -33,7 +33,10 @@ use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl, Timestamptz};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::KAFKA_CONNECTOR;
-use risingwave_sqlparser::ast::{display_comma_separated, CompatibleSourceSchema, ConnectorSchema};
+use risingwave_sqlparser::ast::{
+    display_comma_separated, CompatibleSourceSchema, ConnectorSchema, ObjectName, Query, Select,
+    SelectItem, SetExpr, TableFactor, TableWithJoins,
+};
 
 use crate::catalog::IndexCatalog;
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
@@ -278,6 +281,32 @@ impl CompatibleSourceSchema {
             CompatibleSourceSchema::V2(inner) => inner,
         }
     }
+}
+
+pub fn gen_query_from_table_name(from_name: ObjectName) -> risingwave_common::error::Result<Query> {
+    let table_factor = TableFactor::Table {
+        name: from_name,
+        alias: None,
+        for_system_time_as_of_proctime: false,
+    };
+    let from = vec![TableWithJoins {
+        relation: table_factor,
+        joins: vec![],
+    }];
+    let select = Select {
+        from,
+        projection: vec![SelectItem::Wildcard(None)],
+        ..Default::default()
+    };
+    let body = SetExpr::Select(Box::new(select));
+    Ok(Query {
+        with: None,
+        body,
+        order_by: vec![],
+        limit: None,
+        offset: None,
+        fetch: None,
+    })
 }
 
 #[cfg(test)]

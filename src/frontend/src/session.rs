@@ -72,10 +72,12 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::info;
 
+use self::cursor_manager::CursorManager;
 use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
+use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::{
     check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId,
 };
@@ -104,6 +106,7 @@ use crate::utils::infer_stmt_row_desc::{infer_show_object, infer_show_variable};
 use crate::{FrontendOpts, PgResponseStream};
 
 pub(crate) mod current;
+pub(crate) mod cursor_manager;
 pub(crate) mod transaction;
 
 /// The global environment for the frontend server.
@@ -554,6 +557,8 @@ pub struct SessionImpl {
 
     /// Last idle instant
     last_idle_instant: Arc<Mutex<Option<Instant>>>,
+
+    cursor_manager: Arc<tokio::sync::Mutex<CursorManager>>,
 }
 
 #[derive(Error, Debug)]
@@ -593,6 +598,7 @@ impl SessionImpl {
             notices: Default::default(),
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
+            cursor_manager: Arc::new(tokio::sync::Mutex::new(CursorManager::new())),
         }
     }
 
@@ -619,6 +625,7 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
+            cursor_manager: Arc::new(tokio::sync::Mutex::new(CursorManager::new())),
         }
     }
 
@@ -686,6 +693,10 @@ impl SessionImpl {
             .as_ref()
             .and_then(|weak| weak.upgrade())
             .map(|context| context.running_sql.clone())
+    }
+
+    pub fn get_cursor_manager(&self) -> Arc<tokio::sync::Mutex<CursorManager>> {
+        self.cursor_manager.clone()
     }
 
     pub fn peer_addr(&self) -> &Address {
@@ -813,6 +824,32 @@ impl SessionImpl {
                 )))
             })?;
         Ok(connection.clone())
+    }
+
+    pub fn get_subscription_by_name(
+        &self,
+        schema_name: Option<String>,
+        subscription_name: &str,
+    ) -> Result<Arc<SubscriptionCatalog>> {
+        let db_name = self.database();
+        let search_path = self.config().search_path();
+        let user_name = &self.auth_context().user_name;
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let schema = match schema_name {
+            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
+            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
+        };
+        let schema = catalog_reader.get_schema_by_name(db_name, schema.name().as_str())?;
+        let subscription = schema
+            .get_subscription_by_name(subscription_name)
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::ItemNotFound(format!(
+                    "subscription {} not found",
+                    subscription_name
+                )))
+            })?;
+        Ok(subscription.clone())
     }
 
     pub fn clear_cancel_query_flag(&self) {

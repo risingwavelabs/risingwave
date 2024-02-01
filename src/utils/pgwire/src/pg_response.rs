@@ -55,6 +55,7 @@ pub enum StatementType {
     CREATE_FUNCTION,
     CREATE_CONNECTION,
     COMMENT,
+    DECLARE_CURSOR,
     DESCRIBE,
     GRANT_PRIVILEGE,
     DROP_TABLE,

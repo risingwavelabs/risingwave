@@ -21,8 +21,8 @@ use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{CreateSubscriptionStatement, Query};
 
-use super::create_sink::gen_sink_subscription_query_from_name;
 use super::privilege::resolve_query_privileges;
+use super::util::gen_query_from_table_name;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::optimizer::RelationCollectorVisitor;
@@ -54,9 +54,7 @@ pub fn gen_subscription_plan(
         .unwrap()
         .real_value()
         .clone();
-    let query = Box::new(gen_sink_subscription_query_from_name(
-        stmt.subscription_from,
-    )?);
+    let query = Box::new(gen_query_from_table_name(stmt.subscription_from)?);
 
     let (database_id, schema_id) =
         session.get_database_and_schema_id_for_create(schema_name.clone())?;

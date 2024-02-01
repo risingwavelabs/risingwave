@@ -37,12 +37,12 @@ use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatcherType, MergeNode, StreamFragmentGraph, StreamNode};
 use risingwave_sqlparser::ast::{
-    ConnectorSchema, CreateSink, CreateSinkStatement, EmitMode, Encode, Format, ObjectName, Query,
-    Select, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins,
+    ConnectorSchema, CreateSink, CreateSinkStatement, EmitMode, Encode, Format, Query, Statement,
 };
 use risingwave_sqlparser::parser::Parser;
 
 use super::create_mv::get_column_names;
+use super::util::gen_query_from_table_name;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReadGuard;
@@ -59,32 +59,6 @@ use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::resolve_privatelink_in_with_option;
 use crate::{Planner, TableCatalog, WithOptions};
-
-pub fn gen_sink_subscription_query_from_name(from_name: ObjectName) -> Result<Query> {
-    let table_factor = TableFactor::Table {
-        name: from_name,
-        alias: None,
-        for_system_time_as_of_proctime: false,
-    };
-    let from = vec![TableWithJoins {
-        relation: table_factor,
-        joins: vec![],
-    }];
-    let select = Select {
-        from,
-        projection: vec![SelectItem::Wildcard(None)],
-        ..Default::default()
-    };
-    let body = SetExpr::Select(Box::new(select));
-    Ok(Query {
-        with: None,
-        body,
-        order_by: vec![],
-        limit: None,
-        offset: None,
-        fetch: None,
-    })
-}
 
 // used to store result of `gen_sink_plan`
 pub struct SinkPlanContext {
@@ -112,7 +86,7 @@ pub fn gen_sink_plan(
         CreateSink::From(from_name) => {
             sink_from_table_name = from_name.0.last().unwrap().real_value();
             direct_sink = true;
-            Box::new(gen_sink_subscription_query_from_name(from_name)?)
+            Box::new(gen_query_from_table_name(from_name)?)
         }
         CreateSink::AsQuery(query) => {
             sink_from_table_name = sink_table_name.clone();
