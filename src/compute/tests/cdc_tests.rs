@@ -302,7 +302,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
                     snapshot_done: false,
                 },
             }),
-            pg_split: None,
+            postgres_split: None,
             _phantom: PhantomData,
         })],
     );

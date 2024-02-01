@@ -21,22 +21,20 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.*;
-import javax.sql.DataSource;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
 import org.junit.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.testcontainers.containers.MongoDBContainer;
 
 public class MongoDbSourceTest {
     private static final Logger LOG = LoggerFactory.getLogger(MongoDbSourceTest.class.getName());
 
-    // private static final PostgreSQLContainer<?> pg =
-    //         new PostgreSQLContainer<>("postgres:15-alpine")
-    //                 .withDatabaseName("test")
-    //                 .withUsername("postgres")
-    //                 .withCommand("postgres -c wal_level=logical -c max_wal_senders=10");
+    private static final MongoDBContainer mongoDbContainer = null;
+    // new MongoDBContainer("mongodb/mongodb-community-server:4.4.23-ubi8");
 
-    public static Server connectorServer =
+    public static Server connectorService =
             ServerBuilder.forPort(SourceTestClient.DEFAULT_PORT)
                     .addService(new ConnectorServiceImpl())
                     .build();
@@ -48,45 +46,66 @@ public class MongoDbSourceTest {
                                     InsecureChannelCredentials.create())
                             .build());
 
-    private static DataSource pgDataSource;
-
     @BeforeClass
     public static void init() {
         try {
-            connectorServer.start();
+            connectorService.start();
+
         } catch (Exception e) {
-            e.printStackTrace();
+            LOG.error("failed to start connector service", e);
+            Assert.fail();
         }
+
+        // TODO: init data into mongodb
+
     }
 
     @AfterClass
     public static void cleanup() {
-        connectorServer.shutdown();
+        connectorService.shutdown();
     }
 
-    // create a TPC-H orders table in postgres
-    // insert 10,000 rows into orders
-    // check if the number of changes debezium captures is 10,000
+    static String getConnectionString() {
+        return mongoDbContainer.getConnectionString() + "?replicaSet=docker-rs";
+    }
+
     @Test
-    public void testMongoDbSource() throws Exception {
-        ExecutorService executorService = Executors.newFixedThreadPool(1);
+    public void testSnapshotLoad() throws Exception {
         Map<String, String> props = new HashMap<>();
-        props.put("mongodb.url", "mongodb://localhost:7017/?replicaSet=rs0");
+        props.put("mongodb.url", "mongodb://localhost:27017/?replicaSet=rs0");
         props.put("collection.name", "dev.test");
         Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
                 testClient.getEventStream(ConnectorServiceProto.SourceType.MONGODB, 3001, props);
-        int count = 0;
-        while (eventStream.hasNext()) {
-            List<ConnectorServiceProto.CdcMessage> messages = eventStream.next().getEventsList();
-            for (ConnectorServiceProto.CdcMessage msg : messages) {
-                if (!msg.getPayload().isBlank()) {
-                    count++;
-                }
-            }
-            if (count >= 10000) {
-                break;
-            }
-        }
-        LOG.info("number of cdc messages received: {}", count);
+        Callable<Integer> countTask =
+                () -> {
+                    int count = 0;
+                    while (eventStream.hasNext()) {
+                        List<ConnectorServiceProto.CdcMessage> messages =
+                                eventStream.next().getEventsList();
+                        for (ConnectorServiceProto.CdcMessage msg : messages) {
+                            System.out.println("recv msg: " + msg.getPayload());
+                            if (!msg.getPayload().isBlank()) {
+                                count++;
+                            }
+                        }
+                        if (count >= 13) {
+                            return count;
+                        }
+                    }
+                    return count;
+                };
+
+        var pool = Executors.newFixedThreadPool(1);
+        var result = pool.submit(countTask);
+        Assert.assertEquals(11, result.get().intValue());
+    }
+
+    @Test
+    public void testIncrementalLoad() throws Exception {
+        Map<String, String> props = new HashMap<>();
+        props.put("mongodb.url", getConnectionString());
+        props.put("collection.name", "dev.test");
+        Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
+                testClient.getEventStream(ConnectorServiceProto.SourceType.MONGODB, 3001, props);
     }
 }

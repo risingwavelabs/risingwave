@@ -133,6 +133,10 @@ public class SourceValidateHandler {
                     validator.validateAll(isMultiTableShared);
                 }
                 break;
+            case MONGODB:
+                ensurePropNotBlank(props, DbzConnectorConfig.MongoDb.MONGO_URL);
+                ensurePropNotBlank(props, DbzConnectorConfig.MongoDb.MONGO_COLLECTION_NAME);
+                break;
             default:
                 LOG.warn("Unknown source type");
                 throw ValidatorUtils.invalidArgument("Unknown source type");

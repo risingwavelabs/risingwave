@@ -71,10 +71,13 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
 
         let mut properties = conn_props.properties.clone();
 
+        let mut citus_server_addr = None;
         // For citus, we need to rewrite the `table.name` to capture sharding tables
         if matches!(T::source_type(), CdcSourceType::Citus)
-            && let Some(server_addr) = split.server_addr()
+            && let Some(ref citus_split) = split.citus_split
+            && let Some(ref server_addr) = citus_split.server_addr
         {
+            citus_server_addr = Some(server_addr.clone());
             let host_addr = HostAddr::from_str(&server_addr)
                 .map_err(|err| anyhow!("invalid server address for cdc split. {}", err))?;
             properties.insert("hostname".to_string(), host_addr.host);
@@ -158,7 +161,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         tracing::info!(?source_id, "cdc connector started");
 
         match T::source_type() {
-            CdcSourceType::Mysql | CdcSourceType::Postgres => Ok(Self {
+            CdcSourceType::Mysql | CdcSourceType::Postgres | CdcSourceType::Mongodb => Ok(Self {
                 source_id: split.split_id() as u64,
                 start_offset: split.start_offset().clone(),
                 server_addr: None,
@@ -172,7 +175,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
             CdcSourceType::Citus => Ok(Self {
                 source_id: split.split_id() as u64,
                 start_offset: split.start_offset().clone(),
-                server_addr: split.server_addr(),
+                server_addr: citus_server_addr,
                 conn_props,
                 split_id,
                 snapshot_done: split.snapshot_done(),

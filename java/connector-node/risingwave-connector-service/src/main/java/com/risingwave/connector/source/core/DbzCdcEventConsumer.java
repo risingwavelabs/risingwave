@@ -46,7 +46,8 @@ public class DbzCdcEventConsumer
 
     private final BlockingQueue<GetEventStreamResponse> outputChannel;
     private final long sourceId;
-    private final JsonConverter converter;
+    private final JsonConverter payloadConverter;
+    private final JsonConverter keyConverter;
     private final String heartbeatTopicPrefix;
     private final String transactionTopic;
 
@@ -64,14 +65,19 @@ public class DbzCdcEventConsumer
         // The default JSON converter will output the schema field in the JSON which is unnecessary
         // to source parser, we use a customized JSON converter to avoid outputting the `schema`
         // field.
-        var jsonConverter = new DbzJsonConverter();
+        var payloadConverter = new DbzJsonConverter();
         final HashMap<String, Object> configs = new HashMap<>(2);
         // only serialize the value part
         configs.put(ConverterConfig.TYPE_CONFIG, ConverterType.VALUE.getName());
         // include record schema to output JSON in { "schema": { ... }, "payload": { ... } } format
         configs.put(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, true);
-        jsonConverter.configure(configs);
-        this.converter = jsonConverter;
+        payloadConverter.configure(configs);
+        this.payloadConverter = payloadConverter;
+
+        var keyConverter = new DbzJsonConverter();
+        configs.put(ConverterConfig.TYPE_CONFIG, ConverterType.KEY.getName());
+        keyConverter.configure(configs);
+        this.keyConverter = keyConverter;
     }
 
     private EventType getEventType(SourceRecord record) {
@@ -137,7 +143,7 @@ public class DbzCdcEventConsumer
                     {
                         long trxTs = ((Struct) record.value()).getInt64("ts_ms");
                         byte[] payload =
-                                converter.fromConnectData(
+                                payloadConverter.fromConnectData(
                                         record.topic(), record.valueSchema(), record.value());
                         var message =
                                 msgBuilder
@@ -170,15 +176,20 @@ public class DbzCdcEventConsumer
                                         ? System.currentTimeMillis()
                                         : sourceStruct.getInt64("ts_ms");
                         byte[] payload =
-                                converter.fromConnectData(
+                                payloadConverter.fromConnectData(
                                         record.topic(), record.valueSchema(), record.value());
+                        byte[] key =
+                                keyConverter.fromConnectData(
+                                        record.topic(), record.keySchema(), record.key());
                         var message =
                                 msgBuilder
                                         .setFullTableName(fullTableName)
                                         .setPayload(new String(payload, StandardCharsets.UTF_8))
+                                        .setKey(new String(key, StandardCharsets.UTF_8))
                                         .setSourceTsMs(sourceTsMs)
                                         .build();
-                        LOG.debug("record => {}", message.getPayload());
+                        LOG.info(
+                                "key => {}, payload => {}", message.getKey(), message.getPayload());
                         respBuilder.addEvents(message);
                         break;
                     }

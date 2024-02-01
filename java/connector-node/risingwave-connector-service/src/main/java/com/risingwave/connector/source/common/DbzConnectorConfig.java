@@ -68,6 +68,11 @@ public class DbzConnectorConfig {
     private static final String SNAPSHOT_MODE_KEY = "debezium.snapshot.mode";
     private static final String SNAPSHOT_MODE_BACKFILL = "rw_cdc_backfill";
 
+    public static class MongoDb {
+        public static final String MONGO_URL = "mongodb.url";
+        public static final String MONGO_COLLECTION_NAME = "collection.name";
+    }
+
     private static Map<String, String> extractDebeziumProperties(
             Map<String, String> userProperties) {
         // retain only debezium properties if any
