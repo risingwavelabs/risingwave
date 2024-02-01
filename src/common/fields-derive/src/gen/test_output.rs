@@ -9,4 +9,30 @@ impl ::risingwave_common::types::Fields for Data {
             ::default_data_type())
         ]
     }
+    fn into_owned_row(self) -> ::risingwave_common::row::OwnedRow {
+        ::risingwave_common::row::OwnedRow::new(
+            vec![
+                ::risingwave_common::types::ToOwnedDatum::to_owned_datum(self.v1),
+                ::risingwave_common::types::ToOwnedDatum::to_owned_datum(self.v2),
+                ::risingwave_common::types::ToOwnedDatum::to_owned_datum(self.v3),
+                ::risingwave_common::types::ToOwnedDatum::to_owned_datum(self.v4)
+            ],
+        )
+    }
+    fn primary_key() -> &'static [usize] {
+        &[1usize, 0usize]
+    }
+}
+impl From<Data> for ::risingwave_common::types::ScalarImpl {
+    fn from(v: Data) -> Self {
+        ::risingwave_common::types::StructValue::new(
+                vec![
+                    ::risingwave_common::types::ToOwnedDatum::to_owned_datum(v.v1),
+                    ::risingwave_common::types::ToOwnedDatum::to_owned_datum(v.v2),
+                    ::risingwave_common::types::ToOwnedDatum::to_owned_datum(v.v3),
+                    ::risingwave_common::types::ToOwnedDatum::to_owned_datum(v.v4)
+                ],
+            )
+            .into()
+    }
 }

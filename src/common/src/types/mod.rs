@@ -570,10 +570,17 @@ pub trait ToOwnedDatum {
     fn to_owned_datum(self) -> Datum;
 }
 
-impl ToOwnedDatum for DatumRef<'_> {
+impl<T: Into<ScalarImpl>> ToOwnedDatum for T {
     #[inline(always)]
     fn to_owned_datum(self) -> Datum {
-        self.map(ScalarRefImpl::into_scalar_impl)
+        Some(self.into())
+    }
+}
+
+impl<T: Into<ScalarImpl>> ToOwnedDatum for Option<T> {
+    #[inline(always)]
+    fn to_owned_datum(self) -> Datum {
+        self.map(Into::into)
     }
 }
 
@@ -762,6 +769,30 @@ impl From<&[u8]> for ScalarImpl {
 impl From<JsonbRef<'_>> for ScalarImpl {
     fn from(jsonb: JsonbRef<'_>) -> Self {
         Self::Jsonb(jsonb.to_owned_scalar())
+    }
+}
+
+impl<T: PrimitiveArrayItemType> From<Vec<T>> for ScalarImpl {
+    fn from(v: Vec<T>) -> Self {
+        Self::List(v.into_iter().collect())
+    }
+}
+
+impl From<Vec<String>> for ScalarImpl {
+    fn from(v: Vec<String>) -> Self {
+        Self::List(v.iter().map(|s| s.as_str()).collect())
+    }
+}
+
+impl From<Vec<u8>> for ScalarImpl {
+    fn from(v: Vec<u8>) -> Self {
+        Self::Bytea(v.into())
+    }
+}
+
+impl From<Bytes> for ScalarImpl {
+    fn from(v: Bytes) -> Self {
+        Self::Bytea(v.as_ref().into())
     }
 }
 
