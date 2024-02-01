@@ -9,6 +9,7 @@ init_sqls = [
     v3 string,
     v4 date
     ) USING iceberg
+    PARTITIONED BY (days(v4))
     TBLPROPERTIES ('format-version'='2');
     '''
 ]

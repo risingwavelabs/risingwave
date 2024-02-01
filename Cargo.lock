@@ -5073,7 +5073,7 @@ dependencies = [
 [[package]]
 name = "icelake"
 version = "0.0.10"
-source = "git+https://github.com/icelake-io/icelake?rev=32c0bbf242f5c47b1e743f10577012fe7436c770#32c0bbf242f5c47b1e743f10577012fe7436c770"
+source = "git+https://github.com/icelake-io/icelake?rev=3f61f900d6914d4a28c00c2af6374a4dda6d95d4#3f61f900d6914d4a28c00c2af6374a4dda6d95d4"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
@@ -8952,7 +8952,9 @@ dependencies = [
  "anyhow",
  "apache-avro 0.16.0",
  "arrow-array 50.0.0",
+ "arrow-row 50.0.0",
  "arrow-schema 50.0.0",
+ "arrow-select 50.0.0",
  "assert_matches",
  "async-nats",
  "async-trait",
@@ -9261,6 +9263,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "iana-time-zone",
+ "icelake",
  "itertools 0.12.0",
  "madsim-tokio",
  "madsim-tonic",
