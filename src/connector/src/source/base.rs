@@ -713,8 +713,11 @@ mod tests {
 
         let props = ConnectorProperties::extract(props, true).unwrap();
         if let ConnectorProperties::Kafka(k) = props {
-            assert!(k.privatelink_common.broker_rewrite_map.is_some());
-            println!("{:?}", k.privatelink_common.broker_rewrite_map);
+            let hashmap: HashMap<String, String> = hashmap! {
+                "b-1:9092".to_string() => "dns-1".to_string(),
+                "b-2:9092".to_string() => "dns-2".to_string(),
+            };
+            assert_eq!(k.privatelink_common.broker_rewrite_map, Some(hashmap));
         } else {
             panic!("extract kafka config failed");
         }
