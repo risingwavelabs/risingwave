@@ -33,7 +33,7 @@ use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam};
-use crate::common::{KafkaCommon, RdKafkaPropertiesCommon};
+use crate::common::{KafkaCommon, KafkaPrivateLinkCommon, RdKafkaPropertiesCommon};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
@@ -232,6 +232,9 @@ pub struct KafkaConfig {
 
     #[serde(flatten)]
     pub rdkafka_properties_producer: RdKafkaPropertiesProducer,
+
+    #[serde(flatten)]
+    pub privatelink_common: KafkaPrivateLinkCommon,
 }
 
 impl KafkaConfig {
@@ -261,6 +264,7 @@ impl From<KafkaConfig> for KafkaProperties {
             common: val.common,
             rdkafka_properties_common: val.rdkafka_properties_common,
             rdkafka_properties_consumer: Default::default(),
+            privatelink_common: val.privatelink_common,
             unknown_fields: Default::default(),
         }
     }
@@ -403,7 +407,7 @@ impl KafkaSinkWriter {
 
             // Create the producer context, will be used to create the producer
             let producer_ctx = PrivateLinkProducerContext::new(
-                config.common.broker_rewrite_map.clone(),
+                config.privatelink_common.broker_rewrite_map.clone(),
                 // fixme: enable kafka native metrics for sink
                 None,
                 None,
@@ -656,12 +660,30 @@ mod test {
             "properties.sasl.password".to_string() => "test".to_string(),
             "properties.retry.max".to_string() => "20".to_string(),
             "properties.retry.interval".to_string() => "500ms".to_string(),
+            // PrivateLink
+            "privatelink.targets".to_string() => "[{\"port\": 9292}]".to_string(),
+            "privatelink.endpoint".to_string() => "10.0.0.1".to_string(),
+            "privatelink.broker.rewrite.endpoints".to_string() => "{\"broker1\": \"10.0.0.1:8001\"}".to_string(),
         };
         let config = KafkaConfig::from_hashmap(properties).unwrap();
         assert_eq!(config.common.brokers, "localhost:9092");
         assert_eq!(config.common.topic, "test");
         assert_eq!(config.max_retry_num, 20);
         assert_eq!(config.retry_interval, Duration::from_millis(500));
+
+        // PrivateLink fields
+        assert_eq!(
+            config.privatelink_common.private_link_endpoint,
+            Some("10.0.0.1".into())
+        );
+        assert_eq!(
+            config.privatelink_common.private_link_targets,
+            Some("[{\"port\": 9292}]".into())
+        );
+        let hashmap: HashMap<String, String> = hashmap! {
+            "broker1".to_string() => "10.0.0.1:8001".to_string()
+        };
+        assert_eq!(config.privatelink_common.broker_rewrite_map, Some(hashmap));
 
         // Optional fields eliminated.
         let properties: HashMap<String, String> = hashmap! {

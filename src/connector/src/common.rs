@@ -41,7 +41,7 @@ use crate::source::nats::source::NatsOffset;
 // The file describes the common abstractions for each connector and can be used in both source and
 // sink.
 
-pub const BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
+pub const PRIVATE_LINK_BROKER_REWRITE_MAP_KEY: &str = "privatelink.broker.rewrite.endpoints";
 pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
 
 #[derive(Debug, Clone, Deserialize)]
@@ -148,10 +148,6 @@ pub struct KafkaCommon {
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
 
-    #[serde(rename = "broker.rewrite.endpoints")]
-    #[serde_as(as = "Option<JsonString>")]
-    pub broker_rewrite_map: Option<HashMap<String, String>>,
-
     #[serde(rename = "topic", alias = "kafka.topic")]
     pub topic: String,
 
@@ -222,6 +218,20 @@ pub struct KafkaCommon {
     /// Configurations for SASL/OAUTHBEARER.
     #[serde(rename = "properties.sasl.oauthbearer.config")]
     sasl_oathbearer_config: Option<String>,
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
+pub struct KafkaPrivateLinkCommon {
+    #[serde(rename = "privatelink.targets")]
+    pub private_link_targets: Option<String>,
+
+    #[serde(rename = "privatelink.endpoint")]
+    pub private_link_endpoint: Option<String>,
+
+    #[serde(rename = "privatelink.broker.rewrite.endpoints")]
+    #[serde_as(as = "Option<JsonString>")]
+    pub broker_rewrite_map: Option<HashMap<String, String>>,
 }
 
 const fn default_kafka_sync_call_timeout() -> Duration {

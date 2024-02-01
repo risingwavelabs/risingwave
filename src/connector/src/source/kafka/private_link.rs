@@ -26,7 +26,9 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::connection::PrivateLinkService;
 
-use crate::common::{AwsPrivateLinkItem, BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY};
+use crate::common::{
+    AwsPrivateLinkItem, PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
+};
 use crate::source::kafka::stats::RdKafkaStats;
 use crate::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use crate::source::KAFKA_CONNECTOR;
@@ -259,6 +261,6 @@ pub fn insert_privatelink_broker_rewrite_map(
     // save private link dns names into source properties, which
     // will be extracted into KafkaProperties
     let json = serde_json::to_string(&broker_rewrite_map).map_err(|e| anyhow!(e))?;
-    properties.insert(BROKER_REWRITE_MAP_KEY.to_string(), json);
+    properties.insert(PRIVATE_LINK_BROKER_REWRITE_MAP_KEY.to_string(), json);
     Ok(())
 }
