@@ -553,7 +553,7 @@ message StreamCdcScanNode {
   // Strips the primary key columns if they're unnecessary.
   repeated uint32 output_indices = 3;
 
-  /// The state table used by Backfill operator for persisting internal state
+  // The state table used by CdcBackfill operator for persisting internal state
   catalog.Table state_table = 4;
 
   // The external table that will be backfilled for CDC.
@@ -561,6 +561,9 @@ message StreamCdcScanNode {
 
   // The rate limit for the stream cdc scan node.
   optional uint32 rate_limit = 6;
+
+  // Whether skip the backfill and only consume from upstream.
+  bool disable_backfill = 7;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
