@@ -544,6 +544,7 @@ impl CatalogController {
 
         let table = table::ActiveModel::from(table).update(&txn).await?;
 
+        let old_fragment_mappings = get_fragment_mappings(&txn, job_id).await?;
         // 1. replace old fragments/actors with new ones.
         Fragment::delete_many()
             .filter(fragment::Column::JobId.eq(job_id))
@@ -701,6 +702,8 @@ impl CatalogController {
 
         txn.commit().await?;
 
+        self.notify_fragment_mapping(NotificationOperation::Delete, old_fragment_mappings)
+            .await;
         self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
             .await;
         let version = self
@@ -1121,6 +1124,9 @@ impl CatalogController {
 
                 for dispatcher in all_dispatchers {
                     debug_assert!(assert_dispatcher_update_checker.insert(dispatcher.id));
+                    if new_created_actors.contains(&dispatcher.actor_id) {
+                        continue;
+                    }
 
                     let mut dispatcher = dispatcher.into_active_model();
 
@@ -1188,7 +1194,7 @@ impl CatalogController {
                 TableParallelism::Adaptive => StreamingParallelism::Adaptive,
                 TableParallelism::Fixed(n) => StreamingParallelism::Fixed(n as _),
                 TableParallelism::Custom => {
-                    unreachable!("sql backend does't support custom parallelism")
+                    unreachable!("sql backend doesn't support custom parallelism")
                 }
             });
 
