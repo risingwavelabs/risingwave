@@ -1029,7 +1029,7 @@ impl CatalogController {
                         ));
                     }
                 }
-                // FIXME: frontend will update index/primary table from cache, requires apply updates of indexs after tables.
+                // FIXME: frontend will update index/primary table from cache, requires apply updates of indexes after tables.
                 if !index_ids.is_empty() {
                     let index_objs = Index::find()
                         .find_also_related(Object)
