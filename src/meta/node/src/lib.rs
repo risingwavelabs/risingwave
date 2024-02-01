@@ -277,10 +277,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             config.meta.meta_leader_lease_secs,
             MetaOpts {
                 enable_recovery: !config.meta.disable_recovery,
-                enable_scale_in_when_recovery: config.meta.enable_scale_in_when_recovery,
-                enable_automatic_parallelism_control: config
+                disable_automatic_parallelism_control: config
                     .meta
-                    .enable_automatic_parallelism_control,
+                    .disable_automatic_parallelism_control,
                 in_flight_barrier_nums,
                 max_idle_ms,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
