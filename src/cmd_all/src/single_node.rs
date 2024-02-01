@@ -37,6 +37,9 @@ pub struct SingleNodeOpts {
 
     #[clap(long, env = "RW_SINGLE_NODE_CONFIG_PATH")]
     config_path: Option<String>,
+
+    #[clap(long, env = "RW_SINGLE_NODE_META_ADDR", default_value = "")]
+    data_directory: Option<String>,
 }
 
 pub fn map_single_node_opts_to_standalone_opts(opts: &SingleNodeOpts) -> ParsedStandaloneOpts {
