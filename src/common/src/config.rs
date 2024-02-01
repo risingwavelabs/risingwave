@@ -167,6 +167,7 @@ pub enum MetaBackend {
     #[default]
     Mem,
     Etcd,
+    Sql,
 }
 
 /// The section `[meta]` in `risingwave.toml`.
@@ -406,6 +407,12 @@ pub struct MetaDeveloperConfig {
     /// in the meta node.
     #[serde(default = "default::developer::meta_cached_traces_memory_limit_bytes")]
     pub cached_traces_memory_limit_bytes: usize,
+
+    /// Compaction picker config
+    #[serde(default = "default::developer::enable_trivial_move")]
+    pub enable_trivial_move: bool,
+    #[serde(default = "default::developer::enable_check_task_level_overlap")]
+    pub enable_check_task_level_overlap: bool,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -958,7 +965,23 @@ impl SystemConfig {
             };
         }
 
-        for_all_params!(fields)
+        let mut system_params = for_all_params!(fields);
+
+        // Initialize backup_storage_url and backup_storage_directory if not set.
+        if let Some(state_store) = &system_params.state_store
+            && let Some(data_directory) = &system_params.data_directory
+            && let Some(hummock_state_store) = state_store.strip_prefix("hummock+")
+        {
+            if system_params.backup_storage_url.is_none() {
+                system_params.backup_storage_url = Some(hummock_state_store.to_owned());
+                tracing::info!("initialize backup_storage_url based on state_store");
+            }
+            if system_params.backup_storage_directory.is_none() {
+                system_params.backup_storage_directory = Some(format!("{data_directory}/backup"));
+                tracing::info!("initialize backup_storage_directory based on data_directory");
+            }
+        }
+        system_params
     }
 }
 
@@ -1405,6 +1428,14 @@ pub mod default {
 
         pub fn stream_hash_agg_max_dirty_groups_heap_size() -> usize {
             64 << 20 // 64MB
+        }
+
+        pub fn enable_trivial_move() -> bool {
+            true
+        }
+
+        pub fn enable_check_task_level_overlap() -> bool {
+            false
         }
     }
 

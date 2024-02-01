@@ -74,6 +74,20 @@ impl MetadataManager {
         })
     }
 
+    pub fn as_v1_ref(&self) -> &MetadataManagerV1 {
+        match self {
+            MetadataManager::V1(mgr) => mgr,
+            MetadataManager::V2(_) => panic!("expect v1, found v2"),
+        }
+    }
+
+    pub fn as_v2_ref(&self) -> &MetadataManagerV2 {
+        match self {
+            MetadataManager::V1(_) => panic!("expect v2, found v1"),
+            MetadataManager::V2(mgr) => mgr,
+        }
+    }
+
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> MetaResult<Option<PbWorkerNode>> {
         match &self {
             MetadataManager::V1(mgr) => Ok(mgr

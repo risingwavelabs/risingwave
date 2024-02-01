@@ -60,8 +60,8 @@ use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::generic::{self, PhysicalPlanRef};
 use self::plan_node::{
     stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject, LogicalSource,
-    StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
-    ToStreamContext,
+    PartitionComputeInfo, StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink,
+    StreamWatermarkFilter, ToStreamContext,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
@@ -774,6 +774,7 @@ impl PlanRoot {
     }
 
     /// Optimize and generate a create sink plan.
+    #[allow(clippy::too_many_arguments)]
     pub fn gen_sink_plan(
         &mut self,
         sink_name: String,
@@ -785,6 +786,7 @@ impl PlanRoot {
         format_desc: Option<SinkFormatDesc>,
         without_backfill: bool,
         target_table: Option<TableId>,
+        partition_info: Option<PartitionComputeInfo>,
     ) -> Result<StreamSink> {
         let stream_scan_type = if without_backfill {
             StreamScanType::UpstreamOnly
@@ -815,6 +817,7 @@ impl PlanRoot {
             definition,
             properties,
             format_desc,
+            partition_info,
         )
     }
 

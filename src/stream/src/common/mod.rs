@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use builder::*;
 pub use column_mapping::*;
+pub use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 
-mod builder;
 pub mod cache;
 mod column_mapping;
 pub mod log_store_impl;

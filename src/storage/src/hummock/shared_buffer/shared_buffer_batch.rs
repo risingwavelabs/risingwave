@@ -418,12 +418,7 @@ impl SharedBufferBatch {
             if item.0.len() <= VirtualNode::SIZE {
                 break;
             }
-            let current_vnode_id = VirtualNode::from_be_bytes(
-                item.0.as_ref()[..VirtualNode::SIZE]
-                    .try_into()
-                    .expect("slice with incorrect length"),
-            )
-            .to_index();
+            let current_vnode_id = item.0.vnode_part().to_index();
             vnodes.push(current_vnode_id);
             next_vnode_id = current_vnode_id + 1;
         }

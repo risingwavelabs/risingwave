@@ -502,18 +502,17 @@ pub fn start_compactor(
                                                 .as_millis() as u64,
                                         }) {
                                             tracing::warn!(error = %e.as_report(), "Failed to report task {task_id:?}");
-                                            if enable_check_compaction_result && need_check_task {
-                                                match check_compaction_result(&compact_task, context.clone()).await {
-                                                    Err(e) => {
-                                                        tracing::warn!(error = %e.as_report(), "Failed to check compaction task {}",compact_task.task_id);
-                                                    },
-                                                    Ok(true) => (),
-                                                    Ok(false) => {
-                                                        panic!("Failed to pass consistency check for result of compaction task:\n{:?}", compact_task_to_string(&compact_task));
-                                                    }
+                                        }
+                                        if enable_check_compaction_result && need_check_task {
+                                            match check_compaction_result(&compact_task, context.clone()).await {
+                                                Err(e) => {
+                                                    tracing::warn!(error = %e.as_report(), "Failed to check compaction task {}",compact_task.task_id);
+                                                },
+                                                Ok(true) => (),
+                                                Ok(false) => {
+                                                    panic!("Failed to pass consistency check for result of compaction task:\n{:?}", compact_task_to_string(&compact_task));
                                                 }
                                             }
-
                                         }
                                     }
                                     ResponseEvent::VacuumTask(vacuum_task) => {

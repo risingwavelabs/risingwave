@@ -39,8 +39,7 @@ use risingwave_pb::meta::{
 use risingwave_pb::source::PbConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    PbDispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext, PbStreamNode,
-    StreamSource,
+    PbDispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext,
 };
 use sea_orm::sea_query::{Expr, Value};
 use sea_orm::ActiveValue::Set;
@@ -51,8 +50,8 @@ use sea_orm::{
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
-    get_actor_dispatchers, get_parallel_unit_mapping, FragmentDesc, PartialActorLocation,
-    PartialFragmentStateTables,
+    find_stream_source, get_actor_dispatchers, get_parallel_unit_mapping, FragmentDesc,
+    PartialActorLocation, PartialFragmentStateTables,
 };
 use crate::manager::{ActorInfos, LocalNotification};
 use crate::stream::SplitAssignment;
@@ -1160,23 +1159,6 @@ impl CatalogController {
         Ok(chain_fragments)
     }
 
-    /// Find the external stream source info inside the stream node, if any.
-    fn find_stream_source(stream_node: &PbStreamNode) -> Option<&StreamSource> {
-        if let Some(NodeBody::Source(source)) = &stream_node.node_body {
-            if let Some(inner) = &source.source_inner {
-                return Some(inner);
-            }
-        }
-
-        for child in &stream_node.input {
-            if let Some(source) = Self::find_stream_source(child) {
-                return Some(source);
-            }
-        }
-
-        None
-    }
-
     pub async fn load_source_fragment_ids(
         &self,
     ) -> MetaResult<HashMap<SourceId, BTreeSet<FragmentId>>> {
@@ -1195,7 +1177,7 @@ impl CatalogController {
 
         let mut source_fragment_ids = HashMap::new();
         for (fragment_id, _, stream_node) in fragments {
-            if let Some(source) = Self::find_stream_source(stream_node.inner_ref()) {
+            if let Some(source) = find_stream_source(stream_node.inner_ref()) {
                 source_fragment_ids
                     .entry(source.source_id as SourceId)
                     .or_insert_with(BTreeSet::new)
@@ -1225,7 +1207,7 @@ impl CatalogController {
 
         let mut source_fragment_ids = HashMap::new();
         for (fragment_id, _, stream_node) in fragments {
-            if let Some(source) = Self::find_stream_source(stream_node.inner_ref()) {
+            if let Some(source) = find_stream_source(stream_node.inner_ref()) {
                 source_fragment_ids
                     .entry(source.source_id as SourceId)
                     .or_insert_with(BTreeSet::new)
