@@ -22,7 +22,6 @@ use risingwave_expr::{function, CryptographyError, CryptographyStage, ExprError,
 
 #[derive(Debug, Clone, PartialEq)]
 enum Algorithm {
-    Blowfish,
     Aes,
 }
 
@@ -59,7 +58,7 @@ impl std::fmt::Debug for CipherConfig {
 }
 
 static CIPHER_CONFIG_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(aes|bf)(?:-(cbc|ecb))?(?:/pad:(pkcs|none))?$").unwrap());
+    LazyLock::new(|| Regex::new(r"^(aes)(?:-(cbc|ecb))?(?:/pad:(pkcs|none))?$").unwrap());
 
 impl CipherConfig {
     fn parse_cipher_config(key: &[u8], input: &str) -> Result<CipherConfig> {
@@ -75,12 +74,11 @@ impl CipherConfig {
         };
 
         let algorithm = match caps.get(1).map(|s| s.as_str()) {
-            Some("bf") => Algorithm::Blowfish,
             Some("aes") => Algorithm::Aes,
             algo => {
                 return Err(ExprError::InvalidParam {
                     name: "mode",
-                    reason: format!("expect bf or aes for algorithm, but got: {:?}", algo).into(),
+                    reason: format!("expect aes for algorithm, but got: {:?}", algo).into(),
                 })
             }
         };
@@ -108,8 +106,6 @@ impl CipherConfig {
         };
 
         let cipher = match (&algorithm, key.len(), &mode) {
-            (Algorithm::Blowfish, _, Mode::Cbc) => Cipher::bf_cbc(),
-            (Algorithm::Blowfish, _, Mode::Ecb) => Cipher::bf_ecb(),
             (Algorithm::Aes, 16, Mode::Cbc) => Cipher::aes_128_cbc(),
             (Algorithm::Aes, 16, Mode::Ecb) => Cipher::aes_128_ecb(),
             (Algorithm::Aes, 24, Mode::Cbc) => Cipher::aes_192_cbc(),
@@ -247,13 +243,7 @@ mod test {
         assert_eq!(config.mode, Mode::Cbc);
         assert_eq!(config.padding, Padding::Pkcs);
 
-        let mode_4 = "bf/pad:none";
-        let config = CipherConfig::parse_cipher_config(key, mode_4).unwrap();
-        assert_eq!(config.algorithm, Algorithm::Blowfish);
-        assert_eq!(config.mode, Mode::Cbc);
-        assert_eq!(config.padding, Padding::None);
-
-        let mode_5 = "cbc";
-        assert!(CipherConfig::parse_cipher_config(key, mode_5).is_err());
+        let mode_4 = "cbc";
+        assert!(CipherConfig::parse_cipher_config(key, mode_4).is_err());
     }
 }
