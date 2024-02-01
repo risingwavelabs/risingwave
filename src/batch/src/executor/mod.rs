@@ -20,6 +20,7 @@ mod generic_exchange;
 mod group_top_n;
 mod hash_agg;
 mod hop_window;
+mod iceberg_scan;
 mod insert;
 mod join;
 mod limit;

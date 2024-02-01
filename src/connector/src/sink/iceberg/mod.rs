@@ -67,7 +67,7 @@ pub const ICEBERG_SINK: &str = "iceberg";
 
 static RW_CATALOG_NAME: &str = "risingwave";
 
-#[derive(Debug, Clone, Deserialize, WithOptions)]
+#[derive(Debug, Clone, Deserialize, WithOptions, Default)]
 #[serde(deny_unknown_fields)]
 pub struct IcebergConfig {
     pub connector: String, // Avoid deny unknown field. Must be "iceberg"
@@ -348,42 +348,43 @@ impl IcebergConfig {
 
         Ok((base_catalog_config, java_catalog_configs))
     }
-}
 
-async fn create_catalog(config: &IcebergConfig) -> Result<CatalogRef> {
-    match config.catalog_type() {
-        "storage" | "rest" => {
-            let iceberg_configs = config.build_iceberg_configs()?;
-            let catalog = load_catalog(&iceberg_configs)
-                .await
-                .map_err(|e| SinkError::Iceberg(anyhow!(e)))?;
-            Ok(catalog)
-        }
-        catalog_type if catalog_type == "hive" || catalog_type == "sql" || catalog_type == "glue" || catalog_type == "dynamodb" => {
-            // Create java catalog
-            let (base_catalog_config, java_catalog_props) = config.build_jni_catalog_configs()?;
-            let catalog_impl = match catalog_type {
-                "hive" => "org.apache.iceberg.hive.HiveCatalog",
-                "sql" => "org.apache.iceberg.jdbc.JdbcCatalog",
-                "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
-                "dynamodb" => "org.apache.iceberg.aws.dynamodb.DynamoDbCatalog",
-                _ => unreachable!(),
-            };
+    pub async fn create_catalog(&self) -> anyhow::Result<CatalogRef> {
+        match self.catalog_type() {
+            "storage" | "rest" => {
+                let iceberg_configs = self.build_iceberg_configs()?;
+                let catalog = load_catalog(&iceberg_configs)
+                    .await
+                    .map_err(|e| anyhow!(e))?;
+                Ok(catalog)
+            }
+            catalog_type if catalog_type == "hive" || catalog_type == "sql" || catalog_type == "glue" || catalog_type == "dynamodb" => {
+                // Create java catalog
+                let (base_catalog_config, java_catalog_props) = self.build_jni_catalog_configs()?;
+                let catalog_impl = match catalog_type {
+                    "hive" => "org.apache.iceberg.hive.HiveCatalog",
+                    "sql" => "org.apache.iceberg.jdbc.JdbcCatalog",
+                    "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
+                    "dynamodb" => "org.apache.iceberg.aws.dynamodb.DynamoDbCatalog",
+                    _ => unreachable!(),
+                };
 
-            jni_catalog::JniCatalog::build(base_catalog_config, "risingwave", catalog_impl, java_catalog_props)
-        }
-        "mock" => Ok(Arc::new(MockCatalog{})),
-        _ => {
-            Err(SinkError::Iceberg(anyhow!(
+                jni_catalog::JniCatalog::build(base_catalog_config, "risingwave", catalog_impl, java_catalog_props)
+            }
+            "mock" => Ok(Arc::new(MockCatalog{})),
+            _ => {
+                Err(anyhow!(
                 "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `sql`, `glue`, `dynamodb`",
-                config.catalog_type()
-            )))
+                self.catalog_type()
+            ))
+            }
         }
     }
 }
 
 pub async fn create_table(config: &IcebergConfig) -> Result<Table> {
-    let catalog = create_catalog(config)
+    let catalog = config
+        .create_catalog()
         .await
         .map_err(|e| SinkError::Iceberg(anyhow!("Unable to load iceberg catalog: {e}")))?;
 
