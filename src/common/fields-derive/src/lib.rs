@@ -50,7 +50,11 @@ fn gen(tokens: TokenStream) -> Result<TokenStream> {
         .fields
         .iter()
         .map(|field| {
-            let name = field.ident.as_ref().expect("field no name").to_string();
+            let mut name = field.ident.as_ref().expect("field no name").to_string();
+            // strip leading `r#`
+            if name.starts_with("r#") {
+                name = name[2..].to_string();
+            }
             let ty = &field.ty;
             quote! {
                 (#name, <#ty as ::risingwave_common::types::WithDataType>::default_data_type())
@@ -149,6 +153,7 @@ mod tests {
                 v2: std::primitive::i32,
                 v3: bool,
                 v4: Serial,
+                r#type: i32,
             }
         "#};
 
