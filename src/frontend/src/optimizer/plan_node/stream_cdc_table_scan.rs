@@ -199,7 +199,6 @@ impl StreamCdcTableScan {
             node_body: Some(PbNodeBody::CdcFilter(CdcFilterNode {
                 search_condition: Some(filter_expr.to_expr_proto()),
                 upstream_source_id,
-                upstream_column_ids: vec![], // not used,
             })),
         };
 
