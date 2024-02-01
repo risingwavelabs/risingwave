@@ -1491,4 +1491,8 @@ impl FragmentManager {
             .await
             .running_fragment_parallelisms(id_filter)
     }
+
+    pub async fn count_streaming_job(&self) -> usize {
+        self.core.read().await.table_fragments().len()
+    }
 }

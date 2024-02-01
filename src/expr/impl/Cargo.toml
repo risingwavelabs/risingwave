@@ -35,6 +35,7 @@ jsonbb = "0.1.2"
 linkme = { version = "0.3", features = ["used_linker"] }
 md5 = "0.7"
 num-traits = "0.2"
+openssl = { version = "0.10", features = ["vendored"] }
 regex = "1"
 risingwave_common = { workspace = true }
 risingwave_expr = { workspace = true }

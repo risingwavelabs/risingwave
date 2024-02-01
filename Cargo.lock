@@ -5063,7 +5063,7 @@ dependencies = [
 [[package]]
 name = "icelake"
 version = "0.0.10"
-source = "git+https://github.com/icelake-io/icelake?rev=3f61f900d6914d4a28c00c2af6374a4dda6d95d4#3f61f900d6914d4a28c00c2af6374a4dda6d95d4"
+source = "git+https://github.com/icelake-io/icelake?rev=56943d203464d32701c20d74b278b6b3ef2eefc7#56943d203464d32701c20d74b278b6b3ef2eefc7"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
@@ -9184,6 +9184,7 @@ dependencies = [
  "madsim-tokio",
  "moka",
  "num-traits",
+ "openssl",
  "parse-display",
  "paste",
  "risingwave_common",
@@ -9222,6 +9223,7 @@ dependencies = [
  "madsim-tokio",
  "md5",
  "num-traits",
+ "openssl",
  "regex",
  "risingwave_common",
  "risingwave_expr",
@@ -10107,26 +10109,27 @@ dependencies = [
 
 [[package]]
 name = "rquickjs"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0db265d331ae1b1a9fdb68466a8359bc9dcc5e78a9c323f790322f8442e005ac"
+checksum = "511ee02660e19cf451ebcbda6151a4023044293066e9ccd2b0498047203f6ab1"
 dependencies = [
  "rquickjs-core",
 ]
 
 [[package]]
 name = "rquickjs-core"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48e51f2fc99917699385bfa290b776e712e414b222d7c2a9b2cd67b8e93585f3"
+checksum = "c10ce0bc11e249e738aadb8119e9a7619125cb866208236d88d2ee3dcdb7a67d"
 dependencies = [
  "rquickjs-sys",
 ]
 
 [[package]]
 name = "rquickjs-sys"
-version = "0.4.2"
-source = "git+https://github.com/DelSkayn/rquickjs.git?rev=60696e8#60696e88dfb903d8f5cd81b2667fb3f64f9e9f67"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86030d52fc20e68115f93738c2cb960d6f900f64d99e1013ea0e170381eb0a72"
 dependencies = [
  "cc",
 ]
@@ -13770,6 +13773,8 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
+ "openssl",
+ "openssl-sys",
  "opentelemetry_api",
  "opentelemetry_sdk",
  "ordered-float 3.9.1",

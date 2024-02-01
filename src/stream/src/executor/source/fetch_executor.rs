@@ -164,7 +164,12 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             .map_err(StreamExecutorError::connector_error)
     }
 
-    fn build_source_ctx(&self, source_desc: &SourceDesc, source_id: TableId) -> SourceContext {
+    fn build_source_ctx(
+        &self,
+        source_desc: &SourceDesc,
+        source_id: TableId,
+        source_name: &str,
+    ) -> SourceContext {
         SourceContext::new_with_suppressor(
             self.actor_ctx.id,
             source_id,
@@ -174,6 +179,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             self.connector_params.connector_client.clone(),
             self.actor_ctx.error_suppressor.clone(),
             source_desc.source.config.clone(),
+            source_name.to_owned(),
         )
     }
 
@@ -215,7 +221,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             &mut splits_on_fetch,
             &state_store_handler,
             core.column_ids.clone(),
-            self.build_source_ctx(&source_desc, core.source_id),
+            self.build_source_ctx(&source_desc, core.source_id, &core.source_name),
             &source_desc,
             &mut stream,
         )
@@ -267,7 +273,11 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                             &mut splits_on_fetch,
                                             &state_store_handler,
                                             core.column_ids.clone(),
-                                            self.build_source_ctx(&source_desc, core.source_id),
+                                            self.build_source_ctx(
+                                                &source_desc,
+                                                core.source_id,
+                                                &core.source_name,
+                                            ),
                                             &source_desc,
                                             &mut stream,
                                         )
