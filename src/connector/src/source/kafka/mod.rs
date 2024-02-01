@@ -216,7 +216,7 @@ mod test {
             // PrivateLink
             "privatelink.targets".to_string() => "[{\"port\": 9292}]".to_string(),
             "privatelink.endpoint".to_string() => "10.0.0.1".to_string(),
-            "privatelink.broker.rewrite.endpoints".to_string() => "{\"broker1\": \"10.0.0.1:8001\"}".to_string(),
+            "broker.rewrite.endpoints".to_string() => "{\"broker1\": \"10.0.0.1:8001\"}".to_string(),
         };
 
         let props: KafkaProperties =

@@ -41,7 +41,7 @@ use crate::source::nats::source::NatsOffset;
 // The file describes the common abstractions for each connector and can be used in both source and
 // sink.
 
-pub const PRIVATE_LINK_BROKER_REWRITE_MAP_KEY: &str = "privatelink.broker.rewrite.endpoints";
+pub const PRIVATE_LINK_BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
 pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
 
 #[derive(Debug, Clone, Deserialize)]
@@ -229,7 +229,7 @@ pub struct KafkaPrivateLinkCommon {
     #[serde(rename = "privatelink.endpoint")]
     pub private_link_endpoint: Option<String>,
 
-    #[serde(rename = "privatelink.broker.rewrite.endpoints")]
+    #[serde(rename = "broker.rewrite.endpoints")]
     #[serde_as(as = "Option<JsonString>")]
     pub broker_rewrite_map: Option<HashMap<String, String>>,
 }
