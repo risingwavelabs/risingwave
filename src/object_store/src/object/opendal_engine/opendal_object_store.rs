@@ -208,7 +208,11 @@ pub struct OpendalStreamingUploader {
 }
 impl OpendalStreamingUploader {
     pub async fn new(op: Operator, path: String) -> ObjectResult<Self> {
-        let writer = op.writer_with(&path).buffer(OPENDAL_BUFFER_SIZE).await?;
+        let writer = op
+            .writer_with(&path)
+            .concurrent(8)
+            .buffer(OPENDAL_BUFFER_SIZE)
+            .await?;
         Ok(Self { writer })
     }
 }

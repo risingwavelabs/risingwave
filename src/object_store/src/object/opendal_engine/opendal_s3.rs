@@ -12,16 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Duration;
+
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::S3;
 use opendal::Operator;
+use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
     /// create opendal s3 engine.
-    pub fn new_s3_engine(bucket: String, root: String) -> ObjectResult<Self> {
+    pub fn new_s3_engine(
+        bucket: String,
+        root: String,
+        object_store_config: ObjectStoreConfig,
+    ) -> ObjectResult<Self> {
         // Create s3 builder.
         let mut builder = S3::default();
         builder.bucket(&bucket);
@@ -57,7 +64,18 @@ impl OpendalObjectStore {
         builder.disable_config_load();
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
-            .layer(RetryLayer::default())
+            .layer(
+                RetryLayer::new()
+                    .with_min_delay(Duration::from_millis(
+                        object_store_config.s3.object_store_req_retry_interval_ms,
+                    ))
+                    .with_max_delay(Duration::from_millis(
+                        object_store_config.s3.object_store_req_retry_max_delay_ms,
+                    ))
+                    .with_max_times(object_store_config.s3.object_store_req_retry_max_attempts)
+                    .with_factor(1.0)
+                    .with_jitter(),
+            )
             .finish();
         Ok(Self {
             op,
