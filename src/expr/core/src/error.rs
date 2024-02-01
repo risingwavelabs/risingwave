@@ -129,7 +129,7 @@ pub enum CryptographyStage {
 }
 
 #[derive(Debug, Error)]
-#[error("{stage:?} stage, reason: {reason:?}")]
+#[error("{stage:?} stage, reason: {reason}")]
 pub struct CryptographyError {
     pub stage: CryptographyStage,
     #[source]
