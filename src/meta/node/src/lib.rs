@@ -59,6 +59,8 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_DASHBOARD_HOST")]
     dashboard_host: Option<String>,
 
+    /// We will start a http server at this address via `MetricsManager`.
+    /// Then the prometheus instance will poll the metrics from this address.
     #[clap(long, env = "RW_PROMETHEUS_HOST")]
     pub prometheus_host: Option<String>,
 
@@ -84,7 +86,9 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_DASHBOARD_UI_PATH")]
     dashboard_ui_path: Option<String>,
 
-    /// For dashboard service to fetch cluster info.
+    /// The HTTP REST-API address of the Prometheus instance associated to this cluster.
+    /// This address is used to serve PromQL queries to Prometheus.
+    /// It is also used by Grafana Dashboard Service to fetch metrics and visualize them.
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
     prometheus_endpoint: Option<String>,
 
