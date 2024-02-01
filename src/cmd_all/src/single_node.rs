@@ -26,10 +26,10 @@ use crate::common::osstrs;
 
 #[derive(Eq, PartialOrd, PartialEq, Debug, Clone, Parser)]
 #[command(
-    version,
-    about = "The Standalone mode allows users to start multiple services in one process, it exposes node-level options for each service"
+version,
+about = "[DEFAULT] The Single Node mode. Start all services in one process, with process-level options. This will be executed if no subcommand is specified"
 )]
-pub struct StandaloneOpts {
+pub struct SingleNodeOpts {
     /// Compute node options
     /// If missing, compute node won't start
     #[clap(short, long, env = "RW_STANDALONE_COMPUTE_OPTS")]
@@ -64,16 +64,16 @@ pub struct StandaloneOpts {
 }
 
 #[derive(Debug)]
-pub struct ParsedStandaloneOpts {
+pub struct ParsedSingleNodeOpts {
     pub meta_opts: Option<MetaNodeOpts>,
     pub compute_opts: Option<ComputeNodeOpts>,
     pub frontend_opts: Option<FrontendOpts>,
     pub compactor_opts: Option<CompactorOpts>,
 }
 
-impl risingwave_common::opts::Opts for ParsedStandaloneOpts {
+impl risingwave_common::opts::Opts for ParsedSingleNodeOpts {
     fn name() -> &'static str {
-        "standalone"
+        "single_node"
     }
 
     fn meta_addr(&self) -> MetaAddressStrategy {
@@ -91,7 +91,7 @@ impl risingwave_common::opts::Opts for ParsedStandaloneOpts {
     }
 }
 
-pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
+pub fn parse_single_node_opt_args(opts: &SingleNodeOpts) -> ParsedSingleNodeOpts {
     let meta_opts = opts.meta_opts.as_ref().map(|s| {
         let mut s = split(s).unwrap();
         s.insert(0, "meta-node".into());
@@ -145,7 +145,7 @@ pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts 
             compactor_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
         }
         if let Some(meta_opts) = meta_opts.as_mut() {
-            meta_opts.prometheus_listener_addr = Some(prometheus_listener_addr.clone());
+            meta_opts.prometheus_host = Some(prometheus_listener_addr.clone());
         }
     }
 
@@ -157,7 +157,7 @@ pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts 
         panic!("No service is specified to start.");
     }
 
-    ParsedStandaloneOpts {
+    ParsedSingleNodeOpts {
         meta_opts,
         compute_opts,
         frontend_opts,
@@ -165,23 +165,23 @@ pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts 
     }
 }
 
-/// For `standalone` mode, we can configure and start multiple services in one process.
+/// For `single_node` mode, we can configure and start multiple services in one process.
 /// Note that this is different from `single` mode, where we start
 /// pre-defined services all-in-one process,
 /// the pre-defined services are not configurable.
 /// `single` mode is meant to be user-facing, where users can just use `./risingwave`
 /// to start the service.
-/// `standalone` mode is meant to be used by our cloud service, where we can configure
+/// `single_node` mode is meant to be used by our cloud service, where we can configure
 /// and start multiple services in one process.
-pub async fn standalone(
-    ParsedStandaloneOpts {
+pub async fn single_node(
+    ParsedSingleNodeOpts {
         meta_opts,
         compute_opts,
         frontend_opts,
         compactor_opts,
-    }: ParsedStandaloneOpts,
+    }: ParsedSingleNodeOpts,
 ) -> Result<()> {
-    tracing::info!("launching Risingwave in standalone mode");
+    tracing::info!("launching Risingwave in single_node mode");
 
     if let Some(opts) = meta_opts {
         tracing::info!("starting meta-node thread with cli args: {:?}", opts);
@@ -210,7 +210,7 @@ pub async fn standalone(
     // wait for log messages to be flushed
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     eprintln!("-------------------------------");
-    eprintln!("RisingWave standalone mode is ready.");
+    eprintln!("RisingWave single_node mode is ready.");
 
     // TODO: should we join all handles?
     // Currently, not all services can be shutdown gracefully, just quit on Ctrl-C now.
@@ -237,7 +237,7 @@ mod test {
 
     #[test]
     fn test_parse_opt_args() {
-        // Test parsing into standalone-level opts.
+        // Test parsing into single_node-level opts.
         let raw_opts = "
 --compute-opts=--listen-addr 127.0.0.1:8000 --total-memory-bytes 34359738368 --parallelism 10
 --meta-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001 --etcd-password 1234
@@ -245,8 +245,8 @@ mod test {
 --prometheus-listener-addr=127.0.0.1:1234
 --config-path=src/config/test.toml
 ";
-        let actual = StandaloneOpts::parse_from(raw_opts.lines());
-        let opts = StandaloneOpts {
+        let actual = SingleNodeOpts::parse_from(raw_opts.lines());
+        let opts = SingleNodeOpts {
             compute_opts: Some("--listen-addr 127.0.0.1:8000 --total-memory-bytes 34359738368 --parallelism 10".into()),
             meta_opts: Some("--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001 --etcd-password 1234".into()),
             frontend_opts: Some("--config-path=src/config/original.toml".into()),
@@ -257,12 +257,11 @@ mod test {
         assert_eq!(actual, opts);
 
         // Test parsing into node-level opts.
-        let actual = parse_standalone_opt_args(&opts);
-
+        let actual = parse_single_node_opt_args(&opts);
         check(
             actual,
             expect![[r#"
-                ParsedStandaloneOpts {
+                ParsedSingleNodeOpts {
                     meta_opts: Some(
                         MetaNodeOpts {
                             vpc_id: None,
@@ -270,7 +269,7 @@ mod test {
                             listen_addr: "127.0.0.1:8001",
                             advertise_addr: "127.0.0.1:9999",
                             dashboard_host: None,
-                            prometheus_listener_addr: Some(
+                            prometheus_host: Some(
                                 "127.0.0.1:1234",
                             ),
                             etcd_endpoints: "",
