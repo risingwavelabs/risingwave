@@ -56,16 +56,18 @@
     ├── columns:
     │   ┌── kv_log_store_epoch: bigint
     │   ├── kv_log_store_seq_id: integer
+    │   ├── kv_log_store_vnode: smallint
     │   ├── kv_log_store_row_op: smallint
     │   ├── v1: integer
     │   ├── v2: double precision
     │   ├── v3: character varying
     │   ├── v5: numeric
     │   └── t1.v4: bigint
-    ├── primary key: [ $0 ASC, $1 ASC ]
-    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
-    ├── distribution key: [ 3, 4 ]
-    └── read pk prefix len hint: 2
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]
+    ├── distribution key: [ 4, 5 ]
+    ├── read pk prefix len hint: 3
+    └── vnode column idx: 2
 
     Table 1
     ├── columns: [ vnode: smallint, v3: character varying, v4: bigint, t1_backfill_finished: boolean, t1_row_count: bigint ]
@@ -106,15 +108,17 @@
     ├── columns:
     │   ┌── kv_log_store_epoch: bigint
     │   ├── kv_log_store_seq_id: integer
+    │   ├── kv_log_store_vnode: smallint
     │   ├── kv_log_store_row_op: smallint
     │   ├── v1: integer
     │   ├── v2: double precision
     │   ├── v3: character varying
     │   └── v5: numeric
-    ├── primary key: [ $0 ASC, $1 ASC ]
-    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
-    ├── distribution key: [ 5, 6 ]
-    └── read pk prefix len hint: 2
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
+    ├── distribution key: [ 6, 7 ]
+    ├── read pk prefix len hint: 3
+    └── vnode column idx: 2
 
     Table 1
     ├── columns: [ vnode: smallint, v1: integer, v2: double precision, t1_backfill_finished: boolean, t1_row_count: bigint ]

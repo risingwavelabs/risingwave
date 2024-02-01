@@ -15,26 +15,20 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use futures::future::{join_all, try_join_all, BoxFuture};
-use futures::stream::FuturesUnordered;
-use futures::TryStreamExt;
+use futures::future::{join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
-use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, UpdateActorsRequest,
-};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{oneshot, Mutex, RwLock};
 use tracing::Instrument;
-use uuid::Uuid;
 
 use super::{Locations, RescheduleOptions, ScaleController, ScaleControllerRef, TableResizePolicy};
-use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan};
+use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan, StreamRpcManager};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
 use crate::model::{ActorId, TableFragments, TableParallelism};
@@ -202,6 +196,8 @@ pub struct GlobalStreamManager {
     pub reschedule_lock: RwLock<()>,
 
     pub(crate) scale_controller: ScaleControllerRef,
+
+    pub stream_rpc_manager: StreamRpcManager,
 }
 
 impl GlobalStreamManager {
@@ -211,10 +207,12 @@ impl GlobalStreamManager {
         barrier_scheduler: BarrierScheduler,
         source_manager: SourceManagerRef,
         hummock_manager: HummockManagerRef,
+        stream_rpc_manager: StreamRpcManager,
     ) -> MetaResult<Self> {
         let scale_controller = Arc::new(ScaleController::new(
             &metadata_manager,
             source_manager.clone(),
+            stream_rpc_manager.clone(),
             env.clone(),
         ));
 
@@ -227,6 +225,7 @@ impl GlobalStreamManager {
             creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
             reschedule_lock: RwLock::new(()),
             scale_controller,
+            stream_rpc_manager,
         })
     }
 
@@ -306,28 +305,12 @@ impl GlobalStreamManager {
                                 let node_actors = table_fragments.worker_actor_ids();
                                 let cluster_info =
                                     self.metadata_manager.get_streaming_cluster_info().await?;
-                                let node_actors = node_actors
-                                    .into_iter()
-                                    .map(|(id, actor_ids)| {
-                                        (
-                                            cluster_info.worker_nodes.get(&id).cloned().unwrap(),
-                                            actor_ids,
-                                        )
-                                    })
-                                    .collect_vec();
-                                let futures = node_actors.into_iter().map(|(node, actor_ids)| {
-                                    let request_id = Uuid::new_v4().to_string();
-                                    async move {
-                                        let client =
-                                            self.env.stream_client_pool().get(&node).await?;
-                                        let request = DropActorsRequest {
-                                            request_id,
-                                            actor_ids,
-                                        };
-                                        client.drop_actors(request).await
-                                    }
-                                });
-                                try_join_all(futures).await?;
+                                self.stream_rpc_manager
+                                    .drop_actors(
+                                        &cluster_info.worker_nodes,
+                                        node_actors.into_iter(),
+                                    )
+                                    .await?;
 
                                 if let MetadataManager::V1(mgr) = &self.metadata_manager {
                                     mgr.fragment_manager
@@ -381,8 +364,7 @@ impl GlobalStreamManager {
         // 2. all upstream actors.
         let actor_infos_to_broadcast = building_locations
             .actor_infos()
-            .chain(existing_locations.actor_infos())
-            .collect_vec();
+            .chain(existing_locations.actor_infos());
 
         let building_worker_actors = building_locations.worker_actors();
 
@@ -390,57 +372,28 @@ impl GlobalStreamManager {
         // The first stage does 2 things: broadcast actor info, and send local actor ids to
         // different WorkerNodes. Such that each WorkerNode knows the overall actor
         // allocation, but not actually builds it. We initialize all channels in this stage.
-        building_worker_actors.iter().map(|(worker_id, actors)| {
-            let stream_actors = actors
-                .iter()
-                .map(|actor_id| actor_map[actor_id].clone())
-                .collect::<Vec<_>>();
-            let worker_node = building_locations.worker_locations.get(worker_id).unwrap();
-            let actor_infos_to_broadcast = &actor_infos_to_broadcast;
-            async move {
-                let client = self.env.stream_client_pool().get(worker_node).await?;
-
-                client
-                    .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
-                        info: actor_infos_to_broadcast.clone(),
-                    })
-                    .await?;
-
-                let request_id = Uuid::new_v4().to_string();
-                tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
-                client
-                    .update_actors(UpdateActorsRequest {
-                        request_id,
-                        actors: stream_actors.clone(),
-                    })
-                    .await?;
-
-                Ok(()) as MetaResult<_>
-            }
-        }).collect::<FuturesUnordered<_>>().try_collect::<()>().await?;
+        self.stream_rpc_manager
+            .broadcast_update_actor_info(
+                &building_locations.worker_locations,
+                building_worker_actors.keys().cloned(),
+                actor_infos_to_broadcast,
+                building_worker_actors.iter().map(|(worker_id, actors)| {
+                    let stream_actors = actors
+                        .iter()
+                        .map(|actor_id| actor_map[actor_id].clone())
+                        .collect::<Vec<_>>();
+                    (*worker_id, stream_actors)
+                }),
+            )
+            .await?;
 
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
-        building_worker_actors
-            .iter()
-            .map(|(worker_id, actors)| async move {
-                let worker_node = building_locations.worker_locations.get(worker_id).unwrap();
-
-                let client = self.env.stream_client_pool().get(worker_node).await?;
-
-                let request_id = Uuid::new_v4().to_string();
-                tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
-                client
-                    .build_actors(BuildActorsRequest {
-                        request_id,
-                        actor_id: actors.clone(),
-                    })
-                    .await?;
-
-                Ok(()) as MetaResult<()>
-            })
-            .collect::<FuturesUnordered<_>>()
-            .try_collect::<()>()
+        self.stream_rpc_manager
+            .build_actors(
+                &building_locations.worker_locations,
+                building_worker_actors.into_iter(),
+            )
             .await?;
 
         Ok(())
@@ -825,7 +778,7 @@ mod tests {
     use tonic::{Request, Response, Status};
 
     use super::*;
-    use crate::barrier::GlobalBarrierManager;
+    use crate::barrier::{GlobalBarrierManager, StreamRpcManager};
     use crate::hummock::{CompactorManager, HummockManager};
     use crate::manager::sink_coordination::SinkCoordinatorManager;
     use crate::manager::{
@@ -852,7 +805,7 @@ mod tests {
     impl StreamService for FakeStreamService {
         async fn update_actors(
             &self,
-            request: Request<UpdateActorsRequest>,
+            request: Request<risingwave_pb::stream_service::UpdateActorsRequest>,
         ) -> std::result::Result<Response<UpdateActorsResponse>, Status> {
             let req = request.into_inner();
             let mut guard = self.inner.actor_streams.lock().unwrap();
@@ -881,7 +834,7 @@ mod tests {
 
         async fn broadcast_actor_info_table(
             &self,
-            request: Request<BroadcastActorInfoTableRequest>,
+            request: Request<risingwave_pb::stream_service::BroadcastActorInfoTableRequest>,
         ) -> std::result::Result<Response<BroadcastActorInfoTableResponse>, Status> {
             let req = request.into_inner();
             let mut guard = self.inner.actor_infos.lock().unwrap();
@@ -1033,6 +986,8 @@ mod tests {
 
             let (sink_manager, _) = SinkCoordinatorManager::start_worker();
 
+            let stream_rpc_manager = StreamRpcManager::new(env.clone());
+
             let barrier_manager = GlobalBarrierManager::new(
                 scheduled_barriers,
                 env.clone(),
@@ -1041,6 +996,7 @@ mod tests {
                 source_manager.clone(),
                 sink_manager,
                 meta_metrics.clone(),
+                stream_rpc_manager.clone(),
             );
 
             let stream_manager = GlobalStreamManager::new(
@@ -1049,6 +1005,7 @@ mod tests {
                 barrier_scheduler.clone(),
                 source_manager.clone(),
                 hummock_manager,
+                stream_rpc_manager,
             )?;
 
             let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager);
@@ -1093,7 +1050,9 @@ mod tests {
                 let actor_locations = fragments
                     .values()
                     .flat_map(|f| &f.actors)
-                    .map(|a| (a.actor_id, parallel_units[&0].clone()))
+                    .sorted_by(|a, b| a.actor_id.cmp(&b.actor_id))
+                    .enumerate()
+                    .map(|(idx, a)| (a.actor_id, parallel_units[&(idx as u32)].clone()))
                     .collect();
 
                 Locations {
@@ -1182,6 +1141,14 @@ mod tests {
         let table_id = TableId::new(0);
         let actors = make_mview_stream_actors(&table_id, 4);
 
+        let StreamingClusterInfo { parallel_units, .. } = services
+            .global_stream_manager
+            .metadata_manager
+            .get_streaming_cluster_info()
+            .await?;
+
+        let parallel_unit_ids = parallel_units.keys().cloned().sorted().collect_vec();
+
         let mut fragments = BTreeMap::default();
         fragments.insert(
             0,
@@ -1191,7 +1158,9 @@ mod tests {
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 state_table_ids: vec![0],
-                vnode_mapping: Some(ParallelUnitMapping::new_single(0).to_protobuf()),
+                vnode_mapping: Some(
+                    ParallelUnitMapping::new_uniform(parallel_unit_ids.into_iter()).to_protobuf(),
+                ),
                 ..Default::default()
             },
         );

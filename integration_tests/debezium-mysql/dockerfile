@@ -1,0 +1,18 @@
+FROM quay.io/debezium/connect:2.5.0.Final
+
+ENV AVRO_PLUGION_DIR=$KAFKA_CONNECT_PLUGINS_DIR/confluent-avro-plugin
+
+ARG CONFLUENT_PLUGIN_VERSION=5.3.0
+
+RUN mkdir $AVRO_PLUGION_DIR && cd $AVRO_PLUGION_DIR && \
+  curl -sO https://packages.confluent.io/maven/io/confluent/kafka-connect-avro-converter/$CONFLUENT_PLUGIN_VERSION/kafka-connect-avro-converter-$CONFLUENT_PLUGIN_VERSION.jar && \
+  curl -sO https://packages.confluent.io/maven/io/confluent/kafka-connect-avro-data/$CONFLUENT_PLUGIN_VERSION/kafka-connect-avro-data-$CONFLUENT_PLUGIN_VERSION.jar && \
+  curl -sO https://packages.confluent.io/maven/io/confluent/common-config/$CONFLUENT_PLUGIN_VERSION/common-config-$CONFLUENT_PLUGIN_VERSION.jar && \
+  curl -sO https://packages.confluent.io/maven/io/confluent/common-utils/$CONFLUENT_PLUGIN_VERSION/common-utils-$CONFLUENT_PLUGIN_VERSION.jar && \
+  curl -sO https://packages.confluent.io/maven/io/confluent/kafka-schema-serializer/$CONFLUENT_PLUGIN_VERSION/kafka-schema-serializer-$CONFLUENT_PLUGIN_VERSION.jar && \
+  curl -sO https://packages.confluent.io/maven/io/confluent/kafka-schema-registry-client/$CONFLUENT_PLUGIN_VERSION/kafka-schema-registry-client-$CONFLUENT_PLUGIN_VERSION.jar && \
+  curl -sO https://packages.confluent.io/maven/io/confluent/kafka-avro-serializer/$CONFLUENT_PLUGIN_VERSION/kafka-avro-serializer-$CONFLUENT_PLUGIN_VERSION.jar && \
+  curl -sO https://repo1.maven.org/maven2/com/google/guava/guava/31.0.1-jre/guava-31.0.1-jre.jar && \
+  curl -sO https://repo1.maven.org/maven2/org/apache/avro/avro/1.8.2/avro-1.8.2.jar && \
+  curl -sO https://repo1.maven.org/maven2/org/codehaus/jackson/jackson-core-asl/1.9.13/jackson-core-asl-1.9.13.jar && \
+  curl -sO https://repo1.maven.org/maven2/org/codehaus/jackson/jackson-mapper-asl/1.9.13/jackson-mapper-asl-1.9.13.jar
