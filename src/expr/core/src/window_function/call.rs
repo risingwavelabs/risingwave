@@ -143,6 +143,10 @@ impl FrameBounds {
     }
 }
 
+pub trait FrameBoundsImpl {
+    fn validate(&self) -> Result<()>;
+}
+
 #[derive(Display, Debug, Clone, Eq, PartialEq, Hash)]
 #[display("ROWS BETWEEN {start} AND {end}")]
 pub struct RowsFrameBounds {
@@ -151,10 +155,6 @@ pub struct RowsFrameBounds {
 }
 
 impl RowsFrameBounds {
-    fn validate(&self) -> Result<()> {
-        FrameBound::validate_bounds(&self.start, &self.end)
-    }
-
     /// Check if the `ROWS` frame is canonical.
     ///
     /// A canonical `ROWS` frame is defined as:
@@ -187,6 +187,12 @@ impl RowsFrameBounds {
             (_, Following(n)) => Some(*n),
             (_, CurrentRow | Preceding(_) | UnboundedPreceding) => Some(0),
         }
+    }
+}
+
+impl FrameBoundsImpl for RowsFrameBounds {
+    fn validate(&self) -> Result<()> {
+        FrameBound::validate_bounds(&self.start, &self.end)
     }
 }
 
