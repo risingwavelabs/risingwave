@@ -223,6 +223,7 @@ message SinkDesc {
   string sink_from_name = 12;
   catalog.SinkFormatDesc format_desc = 13;
   optional uint32 target_table = 14;
+  optional uint64 extra_partition_col_idx = 15;
 }
 
 enum SinkLogStoreType {
@@ -237,6 +238,13 @@ message SinkNode {
   // A sink with a kv log store should have a table.
   catalog.Table table = 2;
   SinkLogStoreType log_store_type = 3;
+}
+
+message SubscriptionNode {
+  // log store should have a table.
+  catalog.Table log_store_table = 1;
+  //retention time with seconds
+  uint64 retention_seconds = 2;
 }
 
 message ProjectNode {
@@ -557,6 +565,9 @@ message StreamCdcScanNode {
 
   // The external table that will be backfilled for CDC.
   plan_common.ExternalTableDesc cdc_table_desc = 5;
+
+  // The rate limit for the stream cdc scan node.
+  optional uint32 rate_limit = 6;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -756,6 +767,7 @@ message StreamNode {
     StreamFsFetchNode stream_fs_fetch = 138;
     StreamCdcScanNode stream_cdc_scan = 139;
     CdcFilterNode cdc_filter = 140;
+    SubscriptionNode subscription = 141;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

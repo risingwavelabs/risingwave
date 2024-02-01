@@ -13,6 +13,7 @@ members = [
   "src/connector",
   "src/connector/with_options",
   "src/ctl",
+  "src/dml",
   "src/error",
   "src/expr/core",
   "src/expr/impl",
@@ -33,7 +34,6 @@ members = [
   "src/risedevtool",
   "src/risedevtool/config",
   "src/rpc_client",
-  "src/source",
   "src/sqlparser",
   "src/sqlparser/test_runner",
   "src/storage",
@@ -121,19 +121,20 @@ tonic = { package = "madsim-tonic", version = "0.4.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "58c1f003484449d7c6dd693b348bf19dd44889cb" }
 prost = { version = "0.12" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "32c0bbf242f5c47b1e743f10577012fe7436c770", features = [
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "3f61f900d6914d4a28c00c2af6374a4dda6d95d4", features = [
   "prometheus",
 ] }
-arrow-array = "49"
-arrow-arith = "49"
-arrow-cast = "49"
-arrow-schema = "49"
-arrow-buffer = "49"
-arrow-flight = "49"
-arrow-select = "49"
-arrow-ord = "49"
-arrow-row = "49"
-arrow-udf-wasm = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "f9a9e0d" }
+arrow-array = "50"
+arrow-arith = "50"
+arrow-cast = "50"
+arrow-schema = "50"
+arrow-buffer = "50"
+arrow-flight = "50"
+arrow-select = "50"
+arrow-ord = "50"
+arrow-row = "50"
+arrow-udf-js = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "7ba1c22" }
+arrow-udf-wasm = "0.1"
 arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
 arrow-buffer-deltalake = { package = "arrow-buffer", version = "48.0.1" }
 arrow-cast-deltalake = { package = "arrow-cast", version = "48.0.1" }
@@ -143,13 +144,15 @@ arrow-schema-deltalake = { package = "arrow-schema", version = "48.0.1" }
 deltalake = { git = "https://github.com/risingwavelabs/delta-rs", rev = "5c2dccd4640490202ffe98adbd13b09cef8e007b", features = [
   "s3-no-concurrent-write",
 ] }
-parquet = "49"
+lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "95f347b" }
+parquet = "50"
 thiserror-ext = "0.0.11"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
   "profiling",
   "stats",
 ], rev = "64a2d9" }
+tokio-util = "0.7"
 
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
@@ -161,6 +164,7 @@ risingwave_compactor = { path = "./src/storage/compactor" }
 risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }
 risingwave_connector = { path = "./src/connector" }
+risingwave_dml = { path = "./src/dml" }
 risingwave_error = { path = "./src/error" }
 risingwave_expr = { path = "./src/expr/core" }
 risingwave_expr_impl = { path = "./src/expr/impl" }
@@ -178,7 +182,6 @@ risingwave_object_store = { path = "./src/object_store" }
 risingwave_pb = { path = "./src/prost" }
 risingwave_rpc_client = { path = "./src/rpc_client" }
 risingwave_rt = { path = "./src/utils/runtime" }
-risingwave_source = { path = "./src/source" }
 risingwave_sqlparser = { path = "./src/sqlparser" }
 risingwave_sqlsmith = { path = "./src/tests/sqlsmith" }
 risingwave_storage = { path = "./src/storage" }
@@ -189,7 +192,6 @@ risingwave_variables = { path = "./src/utils/variables" }
 risingwave_java_binding = { path = "./src/java_binding" }
 risingwave_jni_core = { path = "src/jni_core" }
 rw_futures_util = { path = "src/utils/futures_util" }
-tokio-util = "0.7"
 
 [workspace.lints.rust]
 # `forbid` will also prevent the misuse of `#[allow(unused)]`
@@ -280,6 +282,8 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
+# need binding on aarch64-unknown-linux-gnu, waiting for new release
+rquickjs-sys = { git = "https://github.com/DelSkayn/rquickjs.git", rev = "60696e8" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]

@@ -82,6 +82,9 @@ message ExprNode {
     LTRIM = 210;
     RTRIM = 211;
     CASE = 212;
+    // Optimize case-when expression to constant lookup
+    // when arms are in a large scale with simple form
+    CONSTANT_LOOKUP = 624;
     // ROUND(numeric, integer) -> numeric
     ROUND_DIGIT = 213;
     // ROUND(numeric) -> numeric
@@ -471,21 +474,27 @@ message WindowFunction {
 message UserDefinedFunction {
   repeated ExprNode children = 1;
   string name = 2;
+  repeated string arg_names = 8;
   repeated data.DataType arg_types = 3;
   string language = 4;
   // For external UDF: the link to the external function service.
   // For WASM UDF: the link to the wasm binary file.
-  string link = 5;
+  optional string link = 5;
   // An unique identifier for the function.
   // For external UDF, it's the name of the function in the external function service.
   // For WASM UDF, it's the name of the function in the wasm binary file.
-  string identifier = 6;
+  // For JavaScript UDF, it's the name of the function.
+  optional string identifier = 6;
+  // For JavaScript UDF, it's the body of the function.
+  optional string body = 7;
 }
 
 // Additional information for user defined table functions.
 message UserDefinedTableFunction {
+  repeated string arg_names = 8;
   repeated data.DataType arg_types = 3;
   string language = 4;
-  string link = 5;
-  string identifier = 6;
+  optional string link = 5;
+  optional string identifier = 6;
+  optional string body = 7;
 }

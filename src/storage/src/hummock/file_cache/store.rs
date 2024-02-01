@@ -455,7 +455,7 @@ impl Value for CachedBlock {
 
     fn serialized_len(&self) -> usize {
         1 /* type */ + match self {
-            CachedBlock::Loaded { block } => block.raw_data().len(),
+            CachedBlock::Loaded { block } => block.raw().len(),
             CachedBlock::Fetched { bytes, uncompressed_capacity: _ } => 8 + bytes.len(),
         }
     }
@@ -506,7 +506,7 @@ impl std::io::Read for CachedBlockCursor {
                 if self.pos < 1 {
                     self.pos += copy([0], &mut buf);
                 }
-                self.pos += copy(&block.raw_data()[self.pos - 1..], &mut buf);
+                self.pos += copy(&block.raw()[self.pos - 1..], &mut buf);
             }
             CachedBlock::Fetched {
                 bytes,
@@ -541,7 +541,7 @@ impl Value for Box<Block> {
     type Cursor = BoxBlockCursor;
 
     fn serialized_len(&self) -> usize {
-        self.raw_data().len()
+        self.raw().len()
     }
 
     fn read(buf: &[u8]) -> CodingResult<Self> {
@@ -571,7 +571,7 @@ impl BoxBlockCursor {
 impl std::io::Read for BoxBlockCursor {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let pos = self.pos;
-        self.pos += copy(&self.inner.raw_data()[self.pos..], buf);
+        self.pos += copy(&self.inner.raw()[self.pos..], buf);
         let n = self.pos - pos;
         Ok(n)
     }
@@ -748,7 +748,7 @@ mod tests {
             std::io::copy(&mut cursor, &mut buf).unwrap();
             let target = cursor.into_inner();
             let block = Box::<Block>::read(&buf[..]).unwrap();
-            assert_eq!(target.raw_data(), block.raw_data());
+            assert_eq!(target.raw(), block.raw());
         }
 
         {
@@ -779,7 +779,7 @@ mod tests {
                 CachedBlock::Loaded { block } => block,
                 CachedBlock::Fetched { .. } => panic!(),
             };
-            assert_eq!(target.raw_data(), block.raw_data());
+            assert_eq!(target.raw(), block.raw());
         }
 
         {

@@ -269,10 +269,9 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                                 table.insert(row);
                             }
                         }
-                        table.commit(barrier.epoch).await?;
-                    } else {
-                        table.commit_no_data_expected(barrier.epoch);
                     }
+
+                    table.commit(barrier.epoch).await?;
 
                     if barrier.kind.is_checkpoint() {
                         if idle_input {
@@ -487,7 +486,7 @@ mod tests {
 
         (
             WatermarkFilterExecutor::new(
-                ActorContext::create(123),
+                ActorContext::for_test(123),
                 info,
                 source.boxed(),
                 watermark_expr,

@@ -117,6 +117,7 @@ pub struct MetaOpts {
     pub vacuum_spin_interval_ms: u64,
     /// Interval of hummock version checkpoint.
     pub hummock_version_checkpoint_interval_sec: u64,
+    pub enable_hummock_data_archive: bool,
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected. Greater value reduces object store IO, meanwhile it results in
     /// more loss of in memory `HummockVersionCheckpoint::stale_objects` state when meta node is
@@ -212,6 +213,12 @@ pub struct MetaOpts {
     /// The maximum memory usage in bytes for the tracing collector embedded
     /// in the meta node.
     pub cached_traces_memory_limit_bytes: usize,
+
+    /// l0 picker whether to select trivial move task
+    pub enable_trivial_move: bool,
+
+    /// l0 multi level picker whether to check the overlap accuracy between sub levels
+    pub enable_check_task_level_overlap: bool,
 }
 
 impl MetaOpts {
@@ -228,6 +235,7 @@ impl MetaOpts {
             vacuum_interval_sec: 30,
             vacuum_spin_interval_ms: 0,
             hummock_version_checkpoint_interval_sec: 30,
+            enable_hummock_data_archive: false,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             full_gc_interval_sec: 3600 * 24 * 7,
@@ -262,6 +270,8 @@ impl MetaOpts {
             advertise_addr: "".to_string(),
             cached_traces_num: 1,
             cached_traces_memory_limit_bytes: usize::MAX,
+            enable_trivial_move: true,
+            enable_check_task_level_overlap: true,
         }
     }
 }
@@ -276,7 +286,8 @@ impl MetaSrvEnv {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
-        let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
+        let notification_manager =
+            Arc::new(NotificationManager::new(meta_store.clone(), meta_store_sql.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
         let (mut cluster_id, cluster_first_launch) =
             if let Some(id) = ClusterId::from_meta_store(&meta_store).await? {
@@ -453,7 +464,8 @@ impl MetaSrvEnv {
         let meta_store_sql = Some(SqlMetaStore::for_test().await);
 
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
-        let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
+        let notification_manager =
+            Arc::new(NotificationManager::new(meta_store.clone(), meta_store_sql.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let idle_manager = Arc::new(IdleManager::disabled());
         let (cluster_id, cluster_first_launch) = (ClusterId::new(), true);

@@ -17,7 +17,7 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included, Unbounded};
-use std::ops::{Bound, RangeBounds};
+use std::ops::RangeBounds;
 
 use bytes::Bytes;
 use futures::{pin_mut, StreamExt};
@@ -29,14 +29,14 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::WatermarkDirection;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tracing::error;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::iterator::{FromRustIterator, RustIteratorBuilder};
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::utils::{
-    cmp_delete_range_left_bounds, do_delete_sanity_check, do_insert_sanity_check,
-    do_update_sanity_check, filter_with_delete_range, ENABLE_SANITY_CHECK,
+    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, ENABLE_SANITY_CHECK,
 };
 use crate::hummock::value::HummockValue;
 use crate::row_serde::value_serde::ValueRowSerde;
@@ -516,17 +516,10 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         Ok(self.mem_table.delete(key, old_val)?)
     }
 
-    async fn flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> StorageResult<usize> {
-        debug_assert!(delete_ranges
-            .iter()
-            .map(|(key, _)| key)
-            .is_sorted_by(|a, b| Some(cmp_delete_range_left_bounds(a.as_ref(), b.as_ref()))));
+    async fn flush(&mut self) -> StorageResult<usize> {
         let buffer = self.mem_table.drain().into_parts();
         let mut kv_pairs = Vec::with_capacity(buffer.len());
-        for (key, key_op) in filter_with_delete_range(buffer.into_iter(), delete_ranges.iter()) {
+        for (key, key_op) in buffer {
             match key_op {
                 // Currently, some executors do not strictly comply with these semantics. As
                 // a workaround you may call disable the check by initializing the
@@ -581,7 +574,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         }
         self.inner.ingest_batch(
             kv_pairs,
-            delete_ranges,
+            vec![],
             WriteOptions {
                 epoch: self.epoch(),
                 table_id: self.table_id,
@@ -609,6 +602,9 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
 
     fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
         assert!(!self.is_dirty());
+        if let Some(value_checker) = opts.switch_op_consistency_level {
+            self.mem_table.op_consistency_level.update(&value_checker);
+        }
         let prev_epoch = self
             .epoch
             .replace(next_epoch)
@@ -649,7 +645,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                     table_id: self.table_id,
                 },
             ) {
-                error!(err = ?e, "failed to write delete ranges of table watermark");
+                error!(error = %e.as_report(), "failed to write delete ranges of table watermark");
             }
         }
     }

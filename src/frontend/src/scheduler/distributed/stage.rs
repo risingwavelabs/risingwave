@@ -940,6 +940,7 @@ impl StageRunner {
                         identity,
                         node_body: Some(NodeBody::Exchange(ExchangeNode {
                             sources: exchange_sources,
+                            sequential: true,
                             input_schema: execution_plan_node.schema.clone(),
                         })),
                     },
@@ -949,6 +950,7 @@ impl StageRunner {
                         node_body: Some(NodeBody::MergeSortExchange(MergeSortExchangeNode {
                             exchange: Some(ExchangeNode {
                                 sources: exchange_sources,
+                                sequential: true,
                                 input_schema: execution_plan_node.schema.clone(),
                             }),
                             column_orders: sort_merge_exchange_node.column_orders.clone(),

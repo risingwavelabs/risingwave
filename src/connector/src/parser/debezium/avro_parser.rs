@@ -151,6 +151,7 @@ mod tests {
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_pb::catalog::StreamSourceInfo;
+    use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
 
     use super::*;
@@ -254,6 +255,64 @@ mod tests {
             .map(|d| d.name)
             .collect();
         assert_eq!(names, vec!["id".to_owned()])
+    }
+
+    #[test]
+    fn test_ref_avro_type() {
+        let test_schema_str = r#"{
+    "type": "record",
+    "name": "Key",
+    "namespace": "dbserver1.inventory.customers",
+    "fields": [{
+        "name": "id",
+        "type": "int"
+    },
+    {
+      "name": "unconstrained_decimal",
+      "type": [
+        "null",
+        {
+          "type": "record",
+          "name": "VariableScaleDecimal",
+          "namespace": "io.debezium.data",
+          "fields": [
+            {
+              "name": "scale",
+              "type": "int"
+            },
+            {
+              "name": "value",
+              "type": "bytes"
+            }
+          ],
+          "connect.doc": "Variable scaled decimal",
+          "connect.name": "io.debezium.data.VariableScaleDecimal",
+          "connect.version": 1
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "unconstrained_numeric",
+      "type": [
+        "null",
+        "io.debezium.data.VariableScaleDecimal"
+      ],
+      "default": null
+    }
+    ],
+    "connect.name": "dbserver1.inventory.customers.Key"
+}
+"#;
+        let schema = Schema::parse_str(test_schema_str).unwrap();
+        let columns = avro_schema_to_column_descs(&schema).unwrap();
+        for col in &columns {
+            let dtype = col.column_type.as_ref().unwrap();
+            println!("name = {}, type = {:?}", col.name, dtype.type_name);
+            if col.name.contains("unconstrained") {
+                assert_eq!(dtype.type_name, TypeName::Decimal as i32);
+            }
+        }
     }
 
     #[test]

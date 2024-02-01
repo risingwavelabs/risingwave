@@ -56,7 +56,7 @@ hytra = { workspace = true }
 itertools = "0.12"
 itoa = "1.0"
 jsonbb = "0.1.2"
-lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
+lru = { workspace = true }
 memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"
 num-traits = "0.2"
@@ -93,7 +93,7 @@ smallbitset = "0.7.1"
 speedate = "0.13.0"
 static_assertions = "1"
 strum = "0.25"
-strum_macros = "0.25"
+strum_macros = "0.26"
 sysinfo = { version = "0.30", default-features = false }
 thiserror = "1"
 thiserror-ext = { workspace = true }

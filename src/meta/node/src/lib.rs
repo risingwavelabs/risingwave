@@ -291,6 +291,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 hummock_version_checkpoint_interval_sec: config
                     .meta
                     .hummock_version_checkpoint_interval_sec,
+                enable_hummock_data_archive: config.meta.enable_hummock_data_archive,
                 min_delta_log_num_for_hummock_version_checkpoint: config
                     .meta
                     .min_delta_log_num_for_hummock_version_checkpoint,
@@ -344,6 +345,11 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .meta
                     .developer
                     .cached_traces_memory_limit_bytes,
+                enable_trivial_move: config.meta.developer.enable_trivial_move,
+                enable_check_task_level_overlap: config
+                    .meta
+                    .developer
+                    .enable_check_task_level_overlap,
             },
             config.system.into_init_system_params(),
         )

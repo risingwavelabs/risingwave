@@ -63,10 +63,8 @@ pub trait LocalReplay: LocalReplayRead + ReplayWrite + Send + Sync {
     fn seal_current_epoch(&mut self, next_epoch: u64, opts: TracedSealCurrentEpochOptions);
     fn is_dirty(&self) -> bool;
     fn epoch(&self) -> u64;
-    async fn flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<TracedBytes>, Bound<TracedBytes>)>,
-    ) -> Result<usize>;
+    async fn try_flush(&mut self) -> Result<()>;
+    async fn flush(&mut self) -> Result<usize>;
 }
 pub trait GlobalReplay: ReplayRead + ReplayStateStore + Send + Sync {}
 
@@ -188,7 +186,8 @@ mock! {
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: TracedSealCurrentEpochOptions);
         fn is_dirty(&self) -> bool;
         fn epoch(&self) -> u64;
-        async fn flush(&mut self, delete_ranges: Vec<(Bound<TracedBytes>, Bound<TracedBytes>)>) -> Result<usize>;
+        async fn flush(&mut self) -> Result<usize>;
+        async fn try_flush(&mut self) -> Result<()>;
     }
 }
 
