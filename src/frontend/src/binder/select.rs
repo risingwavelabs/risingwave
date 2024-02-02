@@ -16,9 +16,9 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema, RW_CATALOG_SCHEMA_NAME};
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{
     DataType as AstDataType, Distinct, Expr, Select, SelectItem, Value,
@@ -29,10 +29,6 @@ use super::statement::RewriteExprsRecursive;
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
-use crate::catalog::system_catalog::rw_catalog::{
-    RW_TABLE_STATS_KEY_SIZE_INDEX, RW_TABLE_STATS_TABLE_ID_INDEX, RW_TABLE_STATS_TABLE_NAME,
-    RW_TABLE_STATS_VALUE_SIZE_INDEX,
-};
 use crate::expr::{CorrelatedId, Depth, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::utils::group_by::GroupBy;
 
@@ -520,85 +516,6 @@ impl Binder {
             })
             .try_collect()?;
         Ok((returning_list, fields))
-    }
-
-    pub fn bind_get_table_size_select(
-        &mut self,
-        output_name: &str,
-        table: &ExprImpl,
-    ) -> Result<BoundSelect> {
-        // define the output schema
-        let result_schema = Schema {
-            fields: vec![Field::with_name(DataType::Int64, output_name.to_string())],
-        };
-
-        // Get table stats data
-        let from = Some(self.bind_relation_by_name_inner(
-            Some(RW_CATALOG_SCHEMA_NAME),
-            RW_TABLE_STATS_TABLE_NAME,
-            None,
-            false,
-        )?);
-
-        let table_id = self.table_id_query(table)?;
-
-        // Filter to only the Indexes on this table
-        let where_clause: Option<ExprImpl> = Some(
-            FunctionCall::new(
-                ExprType::Equal,
-                vec![
-                    table_id,
-                    InputRef::new(RW_TABLE_STATS_TABLE_ID_INDEX, DataType::Int32).into(),
-                ],
-            )?
-            .into(),
-        );
-
-        // Add the space used by keys and the space used by values to get the total space used by
-        // the table
-        let key_value_size_sum = FunctionCall::new(
-            ExprType::Add,
-            vec![
-                InputRef::new(RW_TABLE_STATS_KEY_SIZE_INDEX, DataType::Int64).into(),
-                InputRef::new(RW_TABLE_STATS_VALUE_SIZE_INDEX, DataType::Int64).into(),
-            ],
-        )?
-        .into();
-        let select_items = vec![key_value_size_sum];
-
-        Ok(BoundSelect {
-            distinct: BoundDistinct::All,
-            select_items,
-            aliases: vec![None],
-            from,
-            where_clause,
-            group_by: GroupBy::GroupKey(vec![]),
-            having: None,
-            schema: result_schema,
-        })
-    }
-
-    /// Given literal varchar this will return the Object ID of the table or index whose
-    /// name matches the varchar.  Given a literal integer, this will return the integer regardless
-    /// of whether an object exists with an Object ID that matches the integer.
-    fn table_id_query(&mut self, table: &ExprImpl) -> Result<ExprImpl> {
-        match table.as_literal() {
-            Some(literal) if literal.return_type().is_int() => Ok(table.clone()),
-            Some(literal) if literal.return_type() == DataType::Varchar => {
-                let table_name = literal
-                    .get_data()
-                    .as_ref()
-                    .expect("ExprImpl value is a Literal but cannot get ref to data")
-                    .as_utf8();
-                self.bind_cast(
-                    Expr::Value(Value::SingleQuotedString(table_name.to_string())),
-                    AstDataType::Regclass,
-                )
-            }
-            _ => Err(RwError::from(ErrorCode::ExprError(
-                "Expected an integer or varchar literal".into(),
-            ))),
-        }
     }
 
     pub fn iter_bound_columns<'a>(

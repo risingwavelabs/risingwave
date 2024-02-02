@@ -37,10 +37,10 @@ use risingwave_sqlparser::parser::ParserError;
 use thiserror_ext::AsReport;
 
 use crate::binder::bind_context::Clause;
-use crate::binder::{Binder, BoundQuery, BoundSetExpr, UdfContext};
+use crate::binder::{Binder, UdfContext};
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal, Now, OrderBy,
-    Subquery, SubqueryKind, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
+    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
 };
 use crate::utils::Condition;
 
@@ -1088,78 +1088,8 @@ impl Binder {
                 ("pg_get_userbyid", raw_call(ExprType::PgGetUserbyid)),
                 ("pg_get_indexdef", raw_call(ExprType::PgGetIndexdef)),
                 ("pg_get_viewdef", raw_call(ExprType::PgGetViewdef)),
-                ("pg_relation_size", dispatch_by_len(vec![
-                    (1, raw(|binder, inputs|{
-                        let table_name = &inputs[0];
-                        let bound_query = binder.bind_get_table_size_select("pg_relation_size", table_name)?;
-                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
-                            BoundQuery {
-                                body: BoundSetExpr::Select(Box::new(bound_query)),
-                                order: vec![],
-                                limit: None,
-                                offset: None,
-                                with_ties: false,
-                                extra_order_exprs: vec![],
-                            },
-                            SubqueryKind::Scalar,
-                        ))))
-                    })),
-                    (2, raw(|binder, inputs|{
-                        let table_name = &inputs[0];
-                        match inputs[1].as_literal() {
-                            Some(literal) if literal.return_type() == DataType::Varchar => {
-                                match literal
-                                     .get_data()
-                                     .as_ref()
-                                     .expect("ExprImpl value is a Literal but cannot get ref to data")
-                                     .as_utf8()
-                                     .as_ref() {
-                                        "main" => {
-                                            let bound_query = binder.bind_get_table_size_select("pg_relation_size", table_name)?;
-                                            Ok(ExprImpl::Subquery(Box::new(Subquery::new(
-                                                BoundQuery {
-                                                    body: BoundSetExpr::Select(Box::new(bound_query)),
-                                                    order: vec![],
-                                                    limit: None,
-                                                    offset: None,
-                                                    with_ties: false,
-                                                    extra_order_exprs: vec![],
-                                                },
-                                                SubqueryKind::Scalar,
-                                            ))))
-                                        },
-                                        // These options are invalid in RW so we return 0 value as the result
-                                        "fsm"|"vm"|"init" => {
-                                            Ok(ExprImpl::literal_int(0))
-                                        },
-                                        _ => Err(ErrorCode::InvalidInputSyntax(
-                                            "invalid fork name. Valid fork names are \"main\", \"fsm\", \"vm\", and \"init\"".into()).into())
-                                    }
-                            },
-                            _ => Err(ErrorCode::ExprError(
-                                "The 2nd argument of `pg_relation_size` must be string literal.".into(),
-                            )
-                            .into())
-                        }
-                    })),
-                    ]
-                )),
-                ("pg_table_size", guard_by_len(1, raw(|binder, inputs|{
-                        let input = &inputs[0];
-                        let bound_query = binder.bind_get_table_size_select("pg_table_size", input)?;
-                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
-                            BoundQuery {
-                                body: BoundSetExpr::Select(Box::new(bound_query)),
-                                order: vec![],
-                                limit: None,
-                                offset: None,
-                                with_ties: false,
-                                extra_order_exprs: vec![],
-                            },
-                            SubqueryKind::Scalar,
-                        ))))
-                    }
-                ))),
+                ("pg_relation_size", raw_call(ExprType::PgRelationSize)),
+                ("pg_table_size", raw_call(ExprType::PgRelationSize)),
                 ("pg_indexes_size", raw_call(ExprType::PgIndexesSize)),
                 ("pg_get_expr", raw(|_binder, inputs|{
                     if inputs.len() == 2 || inputs.len() == 3 {

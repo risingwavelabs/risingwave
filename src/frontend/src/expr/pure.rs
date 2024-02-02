@@ -252,6 +252,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::PgGetViewdef
             | expr_node::Type::PgGetUserbyid
             | expr_node::Type::PgIndexesSize
+            | expr_node::Type::PgRelationSize
             | expr_node::Type::MakeTimestamptz => self.impure = true,
         }
     }
