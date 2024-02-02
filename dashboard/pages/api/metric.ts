@@ -48,11 +48,11 @@ export interface BackPressureRateInfo {
 function convertToMapAndAgg(
   back_pressures: BackPressureInfo[]
 ): Map<string, number> {
-  // fragementId-downstreamFragementId, total value
+  // FragmentId-downstreamFragmentId, total value
   const map_value = new Map<string, number>()
-  // fragementId-downstreamFragementId, total count
+  // FragmentId-downstreamFragmentId, total count
   const map_number = new Map<string, number>()
-  // fragementId-downstreamFragementId, average value
+  // FragmentId-downstreamFragmentId, average value
   const map = new Map<string, number>()
   for (const item of back_pressures) {
     const key = `${item.fragmentId}-${item.downstreamFragmentId}`
