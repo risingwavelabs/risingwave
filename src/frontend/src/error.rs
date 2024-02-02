@@ -26,11 +26,6 @@ use thiserror_ext::Box;
 
 /// The error type for the frontend crate, acting as the top-level error type for the
 /// entire RisingWave project.
-// TODO(error-handling): this is migrated from the `common` crate, and there could
-// be some further refactoring to do:
-// - Some variants are never constructed.
-// - Some variants store a type-erased `BoxedError` to resolve the reverse dependency.
-//   It's not necessary anymore as the error type is now defined at the top-level.
 #[derive(Error, Debug, Box)]
 #[thiserror_ext(newtype(name = RwError, backtrace, report_debug))]
 pub enum ErrorCode {
@@ -43,12 +38,6 @@ pub enum ErrorCode {
         #[backtrace]
         anyhow::Error,
     ),
-    #[error("connector error: {0}")]
-    ConnectorError(
-        #[source]
-        #[backtrace]
-        BoxedError,
-    ),
     #[error(transparent)]
     NotImplemented(#[from] NotImplemented),
     // Tips: Use this only if it's intended to reject the query
@@ -56,40 +45,23 @@ pub enum ErrorCode {
     NotSupported(String, String),
     #[error(transparent)]
     NoFunction(#[from] NoFunction),
-    #[error(transparent)]
-    IoError(#[from] std::io::Error),
-    #[error("Storage error: {0}")]
-    StorageError(
-        #[backtrace]
-        #[source]
-        BoxedError,
-    ),
     #[error("Expr error: {0}")]
     ExprError(
         #[source]
         #[backtrace]
         BoxedError,
     ),
-    // TODO(error-handling): there's a limitation that `#[transparent]` can't be used with `#[backtrace]` if no `#[from]`
-    // So we emulate a transparent error with "{0}" display here.
-    #[error("{0}")]
+    #[error(transparent)]
     BatchError(
-        #[source]
+        #[from]
         #[backtrace]
-        // `BatchError`
-        BoxedError,
+        BatchError,
     ),
-    #[error("Array error: {0}")]
+    #[error(transparent)]
     ArrayError(
         #[from]
         #[backtrace]
         ArrayError,
-    ),
-    #[error("Stream error: {0}")]
-    StreamError(
-        #[backtrace]
-        #[source]
-        BoxedError,
     ),
     // TODO(error-handling): there's a limitation that `#[transparent]` can't be used with `#[backtrace]` if no `#[from]`
     // So we emulate a transparent error with "{0}" display here.
@@ -112,6 +84,7 @@ pub enum ErrorCode {
         #[backtrace]
         error: BoxedError,
     },
+    // TODO: only allow `CatalogError` here
     #[error("Catalog error: {0}")]
     CatalogError(
         #[source]
@@ -120,33 +93,25 @@ pub enum ErrorCode {
     ),
     #[error("Protocol error: {0}")]
     ProtocolError(String),
+    // TODO: only allow `SchedulerError` here
     #[error("Scheduler error: {0}")]
     SchedulerError(
         #[source]
         #[backtrace]
         BoxedError,
     ),
-    #[error("Task not found")]
-    TaskNotFound,
     #[error("Session not found")]
     SessionNotFound,
     #[error("Item not found: {0}")]
     ItemNotFound(String),
     #[error("Invalid input syntax: {0}")]
     InvalidInputSyntax(String),
-    #[error("Can not compare in memory: {0}")]
-    MemComparableError(#[from] memcomparable::Error),
-    #[error("Error while de/se values: {0}")]
+    #[error(transparent)]
     ValueEncodingError(
         #[from]
         #[backtrace]
         ValueEncodingError,
     ),
-    #[error("Invalid value `{config_value}` for `{config_entry}`")]
-    InvalidConfigValue {
-        config_entry: String,
-        config_value: String,
-    },
     #[error("Invalid Parameter Value: {0}")]
     InvalidParameterValue(String),
     #[error("Sink error: {0}")]
@@ -214,11 +179,5 @@ impl From<PbFieldNotFound> for RwError {
             err.0
         ))
         .into()
-    }
-}
-
-impl From<BatchError> for RwError {
-    fn from(s: BatchError) -> Self {
-        ErrorCode::BatchError(Box::new(s)).into()
     }
 }
