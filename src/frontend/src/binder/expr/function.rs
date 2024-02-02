@@ -1088,9 +1088,24 @@ impl Binder {
                 ("pg_get_userbyid", raw_call(ExprType::PgGetUserbyid)),
                 ("pg_get_indexdef", raw_call(ExprType::PgGetIndexdef)),
                 ("pg_get_viewdef", raw_call(ExprType::PgGetViewdef)),
-                ("pg_relation_size", raw_call(ExprType::PgRelationSize)),
-                ("pg_table_size", raw_call(ExprType::PgRelationSize)),
-                ("pg_indexes_size", raw_call(ExprType::PgIndexesSize)),
+                ("pg_relation_size", raw(|_binder, mut inputs|{
+                    if inputs.len() < 1 {
+                        return Err(ErrorCode::ExprError(
+                            "function pg_relation_size() does not exist".into(),
+                        )
+                        .into());
+                    }
+                    inputs[0].cast_to_regclass_mut()?;
+                    Ok(FunctionCall::new(ExprType::PgRelationSize, inputs)?.into())
+                })),
+                ("pg_table_size", guard_by_len(1, raw(|_binder, mut inputs|{
+                    inputs[0].cast_to_regclass_mut()?;
+                    Ok(FunctionCall::new(ExprType::PgRelationSize, inputs)?.into())
+                }))),
+                ("pg_indexes_size", guard_by_len(1, raw(|_binder, mut inputs|{
+                    inputs[0].cast_to_regclass_mut()?;
+                    Ok(FunctionCall::new(ExprType::PgIndexesSize, inputs)?.into())
+                }))),
                 ("pg_get_expr", raw(|_binder, inputs|{
                     if inputs.len() == 2 || inputs.len() == 3 {
                         // TODO: implement pg_get_expr rather than just return empty as an workaround.

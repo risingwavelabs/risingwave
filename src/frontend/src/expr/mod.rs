@@ -264,6 +264,26 @@ impl ExprImpl {
         FunctionCall::cast_mut(self, target, CastContext::Explicit)
     }
 
+    /// Casting to Regclass type means getting the oid of expr.
+    /// See https://www.postgresql.org/docs/current/datatype-oid.html.
+    pub fn cast_to_regclass(self) -> Result<ExprImpl, CastError> {
+        match self.return_type() {
+            DataType::Varchar => Ok(ExprImpl::FunctionCall(Box::new(
+                FunctionCall::new_unchecked(ExprType::CastRegclass, vec![self], DataType::Int32),
+            ))),
+            DataType::Int32 => Ok(self),
+            dt if dt.is_int() => Ok(self.cast_explicit(DataType::Int32)?),
+            _ => Err(CastError("Unsupported input type".to_string())),
+        }
+    }
+
+    /// Shorthand to inplace cast expr to `regclass` type.
+    pub fn cast_to_regclass_mut(&mut self) -> Result<(), CastError> {
+        let owned = std::mem::replace(self, ExprImpl::literal_bool(false));
+        *self = owned.cast_to_regclass()?;
+        Ok(())
+    }
+
     /// Ensure the return type of this expression is an array of some type.
     pub fn ensure_array_type(&self) -> Result<(), ErrorCode> {
         if self.is_untyped() {
