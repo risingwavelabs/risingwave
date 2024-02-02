@@ -37,10 +37,9 @@ use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef = Arc<GlobalStreamManager>;
 
+#[derive(Default)]
 pub struct CreateStreamingJobOption {
-
     pub new_independent_compaction_group: bool,
-
 }
 
 /// [`CreateStreamingJobContext`] carries one-time infos for creating a streaming job.

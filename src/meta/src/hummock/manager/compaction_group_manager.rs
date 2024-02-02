@@ -1001,6 +1001,7 @@ mod tests {
     use crate::hummock::test_utils::setup_compute_env;
     use crate::hummock::HummockManager;
     use crate::model::TableFragments;
+    use crate::stream::CreateStreamingJobOption;
 
     #[tokio::test]
     async fn test_inner() {
@@ -1102,7 +1103,9 @@ mod tests {
             .register_table_fragments(
                 Some(table_fragment_1.table_id().table_id),
                 table_fragment_1.internal_table_ids(),
-                false,
+                CreateStreamingJobOption {
+                    new_independent_compaction_group: false,
+                },
             )
             .await
             .unwrap();
@@ -1111,7 +1114,9 @@ mod tests {
             .register_table_fragments(
                 Some(table_fragment_2.table_id().table_id),
                 table_fragment_2.internal_table_ids(),
-                false,
+                CreateStreamingJobOption {
+                    new_independent_compaction_group: false,
+                },
             )
             .await
             .unwrap();
@@ -1138,7 +1143,9 @@ mod tests {
             .register_table_fragments(
                 Some(table_fragment_1.table_id().table_id),
                 table_fragment_1.internal_table_ids(),
-                true,
+                CreateStreamingJobOption {
+                    new_independent_compaction_group: true,
+                },
             )
             .await
             .unwrap();
