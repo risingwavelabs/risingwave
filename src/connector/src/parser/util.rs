@@ -92,7 +92,10 @@ macro_rules! extract_key_config {
 /// * local file, for on-premise or testing.
 /// * http/https, for common usage.
 /// * s3 file location format: <s3://bucket_name/file_name>
-pub(super) async fn bytes_from_url(url: &Url, config: Option<&AwsAuthProps>) -> anyhow::Result<Vec<u8>> {
+pub(super) async fn bytes_from_url(
+    url: &Url,
+    config: Option<&AwsAuthProps>,
+) -> anyhow::Result<Vec<u8>> {
     match (url.scheme(), config) {
         // TODO(Tao): support local file only when it's compiled in debug mode.
         ("file", _) => {

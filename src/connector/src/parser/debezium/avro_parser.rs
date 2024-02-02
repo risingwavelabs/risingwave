@@ -67,7 +67,10 @@ impl AccessBuilder for DebeziumAvroAccessBuilder {
 }
 
 impl DebeziumAvroAccessBuilder {
-    pub fn new(config: DebeziumAvroParserConfig, encoding_type: EncodingType) -> anyhow::Result<Self> {
+    pub fn new(
+        config: DebeziumAvroParserConfig,
+        encoding_type: EncodingType,
+    ) -> anyhow::Result<Self> {
         let DebeziumAvroParserConfig {
             outer_schema,
             schema_resolver,

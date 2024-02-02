@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use futures::future::try_join_all;
 use futures::stream::pending;
 use futures::StreamExt;
@@ -23,8 +23,6 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::ColumnId;
-use risingwave_common::error::ErrorCode::ConnectorError;
-use risingwave_common::error::{Result, RwError};
 use rw_futures_util::select_all;
 
 use crate::dispatch_source_prop;
@@ -53,9 +51,8 @@ impl SourceReader {
         columns: Vec<SourceColumnDesc>,
         connector_message_buffer_size: usize,
         parser_config: SpecificParserConfig,
-    ) -> Result<Self> {
-        let config = ConnectorProperties::extract(properties, false)
-            .map_err(|e| ConnectorError(e.into()))?;
+    ) -> anyhow::Result<Self> {
+        let config = ConnectorProperties::extract(properties, false)?;
 
         Ok(Self {
             config,
@@ -65,22 +62,25 @@ impl SourceReader {
         })
     }
 
-    fn get_target_columns(&self, column_ids: Vec<ColumnId>) -> Result<Vec<SourceColumnDesc>> {
+    fn get_target_columns(
+        &self,
+        column_ids: Vec<ColumnId>,
+    ) -> anyhow::Result<Vec<SourceColumnDesc>> {
         column_ids
             .iter()
             .map(|id| {
                 self.columns
                     .iter()
                     .find(|c| c.column_id == *id)
-                    .ok_or_else(|| {
-                        anyhow!("Failed to find column id: {} in source: {:?}", id, self).into()
+                    .with_context(|| {
+                        format!("Failed to find column id: {} in source: {:?}", id, self)
                     })
                     .cloned()
             })
-            .collect::<Result<Vec<SourceColumnDesc>>>()
+            .try_collect()
     }
 
-    pub fn get_source_list(&self) -> Result<BoxTryStream<FsPageItem>> {
+    pub fn get_source_list(&self) -> anyhow::Result<BoxTryStream<FsPageItem>> {
         let config = self.config.clone();
         match config {
             ConnectorProperties::Gcs(prop) => {
@@ -107,7 +107,7 @@ impl SourceReader {
         state: ConnectorState,
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
-    ) -> Result<BoxChunkSourceStream> {
+    ) -> anyhow::Result<BoxChunkSourceStream> {
         let Some(splits) = state else {
             return Ok(pending().boxed());
         };
@@ -165,7 +165,7 @@ impl SourceReader {
     }
 }
 
-#[try_stream(boxed, ok = FsPageItem, error = RwError)]
+#[try_stream(boxed, ok = FsPageItem, error = anyhow::Error)]
 async fn build_opendal_fs_list_stream<Src: OpendalSource>(lister: OpendalEnumerator<Src>) {
     let matcher = lister.get_matcher();
     let mut object_metadata_iter = lister.list().await?;
