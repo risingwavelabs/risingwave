@@ -36,7 +36,7 @@ use crate::executor::test_utils::agg_executor::{
     generate_agg_schema, new_boxed_simple_agg_executor,
 };
 use crate::executor::{Executor, MergeExecutor, ProjectExecutor, StatelessSimpleAggExecutor};
-use crate::task::SharedContext;
+use crate::task::{LocalBarrierManager, SharedContext};
 
 /// This test creates a merger-dispatcher pair, and run a sum. Each chunk
 /// has 0~9 elements. We first insert the 10 chunks, then delete them,
@@ -47,7 +47,7 @@ async fn test_merger_sum_aggr() {
         time_zone: String::from("UTC"),
     };
 
-    let actor_ctx = ActorContext::create(0);
+    let actor_ctx = ActorContext::for_test(0);
     // `make_actor` build an actor to do local aggregation
     let make_actor = |input_rx| {
         let _schema = Schema {
@@ -76,14 +76,13 @@ async fn test_merger_sum_aggr() {
             input: aggregator.boxed(),
             channel: Box::new(LocalOutput::new(233, tx)),
         };
-        let context = SharedContext::for_test().into();
         let actor = Actor::new(
             consumer,
             vec![],
-            context,
             StreamingMetrics::unused().into(),
             actor_ctx.clone(),
             expr_context.clone(),
+            LocalBarrierManager::for_test(),
         );
         (actor, rx)
     };
@@ -128,14 +127,13 @@ async fn test_merger_sum_aggr() {
         ctx,
         metrics,
     );
-    let context = SharedContext::for_test().into();
     let actor = Actor::new(
         dispatcher,
         vec![],
-        context,
         StreamingMetrics::unused().into(),
         actor_ctx.clone(),
         expr_context.clone(),
+        LocalBarrierManager::for_test(),
     );
     handles.push(tokio::spawn(actor.run()));
 
@@ -184,14 +182,13 @@ async fn test_merger_sum_aggr() {
         input: projection.boxed(),
         data: items.clone(),
     };
-    let context = SharedContext::for_test().into();
     let actor = Actor::new(
         consumer,
         vec![],
-        context,
         StreamingMetrics::unused().into(),
         actor_ctx.clone(),
         expr_context.clone(),
+        LocalBarrierManager::for_test(),
     );
     handles.push(tokio::spawn(actor.run()));
 

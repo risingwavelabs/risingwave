@@ -244,6 +244,7 @@ pub async fn handle(
         Statement::CreateTable {
             name,
             columns,
+            wildcard_idx,
             constraints,
             query,
             with_options: _, // It is put in OptimizerContext
@@ -279,6 +280,7 @@ pub async fn handle(
                 handler_args,
                 name,
                 columns,
+                wildcard_idx,
                 constraints,
                 if_not_exists,
                 source_schema,
@@ -526,13 +528,18 @@ pub async fn handle(
         }
         Statement::AlterTable {
             name,
-            operation: AlterTableOperation::SetParallelism { parallelism },
+            operation:
+                AlterTableOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
         } => {
             alter_parallelism::handle_alter_parallelism(
                 handler_args,
                 name,
                 parallelism,
                 StatementType::ALTER_TABLE,
+                deferred,
             )
             .await
         }
@@ -555,13 +562,18 @@ pub async fn handle(
         } => alter_rename::handle_rename_index(handler_args, name, index_name).await,
         Statement::AlterIndex {
             name,
-            operation: AlterIndexOperation::SetParallelism { parallelism },
+            operation:
+                AlterIndexOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
         } => {
             alter_parallelism::handle_alter_parallelism(
                 handler_args,
                 name,
                 parallelism,
                 StatementType::ALTER_INDEX,
+                deferred,
             )
             .await
         }
@@ -585,13 +597,18 @@ pub async fn handle(
         Statement::AlterView {
             materialized,
             name,
-            operation: AlterViewOperation::SetParallelism { parallelism },
+            operation:
+                AlterViewOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
         } if materialized => {
             alter_parallelism::handle_alter_parallelism(
                 handler_args,
                 name,
                 parallelism,
                 StatementType::ALTER_MATERIALIZED_VIEW,
+                deferred,
             )
             .await
         }
@@ -675,13 +692,18 @@ pub async fn handle(
         }
         Statement::AlterSink {
             name,
-            operation: AlterSinkOperation::SetParallelism { parallelism },
+            operation:
+                AlterSinkOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
         } => {
             alter_parallelism::handle_alter_parallelism(
                 handler_args,
                 name,
                 parallelism,
                 StatementType::ALTER_SINK,
+                deferred,
             )
             .await
         }

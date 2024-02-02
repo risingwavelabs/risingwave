@@ -81,7 +81,7 @@ impl ObserverState for HummockObserverNode {
                         ),
                     ))
                     .inspect_err(|e| {
-                        tracing::error!("unable to send version delta: {:?}", e);
+                        tracing::error!(event = ?e.0, "unable to send version delta");
                     });
             }
 
@@ -131,7 +131,7 @@ impl ObserverState for HummockObserverNode {
                 )),
             ))
             .inspect_err(|e| {
-                tracing::error!("unable to send full version: {:?}", e);
+                tracing::error!(event = ?e.0, "unable to send full version");
             });
         let snapshot_version = snapshot.version.unwrap();
         self.version = snapshot_version.catalog_version;

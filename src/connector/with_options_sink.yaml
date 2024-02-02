@@ -149,6 +149,9 @@ IcebergConfig:
     field_type: Vec<String>
     required: false
     default: Default::default
+  - name: java_catalog_props
+    field_type: HashMap<String,String>
+    required: false
 KafkaConfig:
   fields:
   - name: properties.bootstrap.server
@@ -447,5 +450,38 @@ PulsarConfig:
 RedisConfig:
   fields:
   - name: redis.url
+    field_type: String
+    required: true
+StarrocksConfig:
+  fields:
+  - name: starrocks.host
+    field_type: String
+    comments: The StarRocks host address.
+    required: true
+  - name: starrocks.mysqlport
+    field_type: String
+    comments: The port to the MySQL server of StarRocks FE.
+    required: true
+  - name: starrocks.httpport
+    field_type: String
+    comments: The port to the HTTP server of StarRocks FE.
+    required: true
+  - name: starrocks.user
+    field_type: String
+    comments: The user name used to access the StarRocks database.
+    required: true
+  - name: starrocks.password
+    field_type: String
+    comments: The password associated with the user.
+    required: true
+  - name: starrocks.database
+    field_type: String
+    comments: The StarRocks database where the target table is located
+    required: true
+  - name: starrocks.table
+    field_type: String
+    comments: The StarRocks table you want to sink data to.
+    required: true
+  - name: r#type
     field_type: String
     required: true

@@ -37,6 +37,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -70,6 +71,7 @@ mod state;
 mod trace;
 
 pub use self::command::{Command, ReplaceTablePlan, Reschedule};
+pub use self::rpc::StreamRpcManager;
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
 
@@ -142,11 +144,13 @@ pub struct GlobalBarrierManagerContext {
 
     source_manager: SourceManagerRef,
 
-    scale_controller: Option<ScaleControllerRef>,
+    scale_controller: ScaleControllerRef,
 
     sink_manager: SinkCoordinatorManager,
 
     metrics: Arc<MetaMetrics>,
+
+    stream_rpc_manager: StreamRpcManager,
 
     env: MetaSrvEnv,
 }
@@ -380,6 +384,7 @@ impl GlobalBarrierManager {
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         metrics: Arc<MetaMetrics>,
+        stream_rpc_manager: StreamRpcManager,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
@@ -393,14 +398,13 @@ impl GlobalBarrierManager {
 
         let tracker = CreateMviewProgressTracker::new();
 
-        let scale_controller = match &metadata_manager {
-            MetadataManager::V1(_) => Some(Arc::new(ScaleController::new(
-                &metadata_manager,
-                source_manager.clone(),
-                env.clone(),
-            ))),
-            MetadataManager::V2(_) => None,
-        };
+        let scale_controller = Arc::new(ScaleController::new(
+            &metadata_manager,
+            source_manager.clone(),
+            stream_rpc_manager.clone(),
+            env.clone(),
+        ));
+
         let context = GlobalBarrierManagerContext {
             status: Arc::new(Mutex::new(BarrierManagerStatus::Starting)),
             metadata_manager,
@@ -410,6 +414,7 @@ impl GlobalBarrierManager {
             sink_manager,
             metrics,
             tracker: Arc::new(Mutex::new(tracker)),
+            stream_rpc_manager,
             env: env.clone(),
         };
 
@@ -461,6 +466,7 @@ impl GlobalBarrierManager {
             } else {
                 self.env
                     .system_params_manager()
+                    .unwrap()
                     .set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
                     .await?;
             }
@@ -668,7 +674,7 @@ impl GlobalBarrierManager {
             // back to frontend
             fail_point!("inject_barrier_err_success");
             let fail_node = self.checkpoint_control.barrier_failed();
-            tracing::warn!("Failed to complete epoch {}: {:?}", prev_epoch, err);
+            tracing::warn!(%prev_epoch, error = %err.as_report(), "Failed to complete epoch");
             self.failure_recovery(err, fail_node).await;
             return;
         }
@@ -693,7 +699,7 @@ impl GlobalBarrierManager {
                 .drain(index..)
                 .chain(self.checkpoint_control.barrier_failed().into_iter())
                 .collect_vec();
-            tracing::warn!("Failed to commit epoch {}: {:?}", prev_epoch, err);
+            tracing::warn!(%prev_epoch, error = %err.as_report(), "Failed to commit epoch");
             self.failure_recovery(err, fail_nodes).await;
         }
     }
@@ -728,7 +734,7 @@ impl GlobalBarrierManager {
             let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch
             let span = tracing::info_span!(
                 "failure_recovery",
-                %err,
+                error = %err.as_report(),
                 prev_epoch = prev_epoch.value().0
             );
 
@@ -741,7 +747,7 @@ impl GlobalBarrierManager {
                 .await;
             self.context.set_status(BarrierManagerStatus::Running).await;
         } else {
-            panic!("failed to execute barrier: {:?}", err);
+            panic!("failed to execute barrier: {}", err.as_report());
         }
     }
 

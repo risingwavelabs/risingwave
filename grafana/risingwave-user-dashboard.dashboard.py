@@ -31,26 +31,26 @@ panels = Panels(datasource)
 logging.basicConfig(level=logging.WARN)
 
 
-def section_actor_info(panels):
-    excluded_cols = ["Time", "Value", "__name__", f"{COMPONENT_LABEL}", f"{NODE_LABEL}"]
+def section_actor_info(outer_panels):
+    panels = outer_panels.sub_panel()
     return [
-        panels.row("Actor/Table Id Info"),
-        panels.table_info(
-            "Actor Id Info",
-            "Mapping from actor id to fragment id",
-            [panels.table_target(f"{metric('actor_info')}")],
-            excluded_cols,
-        ),
-        panels.table_info(
-            "Materialized View Info",
-            "Mapping from materialized view table id to it's internal table ids",
+        outer_panels.row_collapsed(
+            "Actor/Table Id Info",
             [
-                panels.table_target(
-                    f"group({metric('table_info')}) by (materialized_view_id, table_id, table_name, table_type)"
-                )
+                panels.table_info(
+                    "Actor Info",
+                    "Information about actors",
+                    [panels.table_target(f"group({metric('actor_info')}) by (actor_id, fragment_id, compute_node)")],
+                    ["actor_id", "fragment_id", "compute_node"],
+                ),
+                panels.table_info(
+                    "State Table Info",
+                    "Information about state tables. Column `materialized_view_id` is the id of the materialized view that this state table belongs to.",
+                    [panels.table_target(f"group({metric('table_info')}) by (table_id, table_name, table_type, materialized_view_id, fragment_id, compaction_group_id)")],
+                    ["table_id", "table_name", "table_type", "materialized_view_id", "fragment_id", "compaction_group_id"],
+                ),
             ],
-            excluded_cols,
-        ),
+        )
     ]
 
 
@@ -60,22 +60,22 @@ def section_overview(panels):
     return [
         panels.row("Overview"),
         panels.timeseries_rowsps(
-            "Aggregated Source Throughput(rows/s)",
+            "Source Throughput(rows/s)",
             "The figure shows the number of rows read by each source per second.",
             [
                 panels.target(
-                    f"sum(rate({metric('stream_source_output_rows_counts')}[$__rate_interval])) by (source_name)",
-                    "{{source_name}}",
+                    f"sum(rate({metric('stream_source_output_rows_counts')}[$__rate_interval])) by (source_id, source_name, fragment_id)",
+                    "{{source_id}} {{source_name}} (fragment {{fragment_id}})",
                 ),
             ],
         ),
         panels.timeseries_bytesps(
-            "Aggregated Source Throughput(MB/s)",
+            "Source Throughput(MB/s)",
             "The figure shows the number of bytes read by each source per second.",
             [
                 panels.target(
-                    f"(sum by (source_id)(rate({metric('partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
-                    "source_id {{source_id}}",
+                    f"(sum by (source_id, source_name, fragment_id)(rate({metric('source_partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
+                    "{{source_id}} {{source_name}} (fragment {{fragment_id}})",
                 )
             ],
         ),

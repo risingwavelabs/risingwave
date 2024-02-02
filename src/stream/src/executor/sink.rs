@@ -90,11 +90,21 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         log_store_factory: F,
     ) -> StreamExecutorResult<Self> {
         let sink = build_sink(sink_param.clone())?;
-        let input_schema: Schema = columns
+        let sink_input_schema: Schema = columns
             .iter()
             .map(|column| Field::from(&column.column_desc))
             .collect();
-        assert_eq!(input_schema.data_types(), info.schema.data_types());
+
+        if let Some(col_dix) = sink_writer_param.extra_partition_col_idx {
+            // Remove the partition column from the schema.
+            assert_eq!(sink_input_schema.data_types(), {
+                let mut data_type = info.schema.data_types();
+                data_type.remove(col_dix);
+                data_type
+            });
+        } else {
+            assert_eq!(sink_input_schema.data_types(), info.schema.data_types());
+        }
 
         Ok(Self {
             actor_context,
@@ -510,7 +520,7 @@ mod test {
         };
 
         let sink_executor = SinkExecutor::new(
-            ActorContext::create(0),
+            ActorContext::for_test(0),
             info,
             Box::new(mock),
             SinkWriterParam::for_test(),
@@ -637,7 +647,7 @@ mod test {
         };
 
         let sink_executor = SinkExecutor::new(
-            ActorContext::create(0),
+            ActorContext::for_test(0),
             info,
             Box::new(mock),
             SinkWriterParam::for_test(),
@@ -761,7 +771,7 @@ mod test {
         };
 
         let sink_executor = SinkExecutor::new(
-            ActorContext::create(0),
+            ActorContext::for_test(0),
             info,
             Box::new(mock),
             SinkWriterParam::for_test(),

@@ -167,6 +167,7 @@ pub enum MetaBackend {
     #[default]
     Mem,
     Etcd,
+    Sql,
 }
 
 /// The section `[meta]` in `risingwave.toml`.
@@ -203,6 +204,14 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
     pub hummock_version_checkpoint_interval_sec: u64,
 
+    /// If enabled, SSTable object file and version delta will be retained.
+    ///
+    /// SSTable object file need to be deleted via full GC.
+    ///
+    /// version delta need to be manually deleted.
+    #[serde(default = "default::meta::enable_hummock_data_archive")]
+    pub enable_hummock_data_archive: bool,
+
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected.
     #[serde(default = "default::meta::min_delta_log_num_for_hummock_version_checkpoint")]
@@ -216,13 +225,9 @@ pub struct MetaConfig {
     #[serde(default)]
     pub disable_recovery: bool,
 
-    /// Whether to enable scale-in when recovery.
+    /// Whether to disable adaptive-scaling feature.
     #[serde(default)]
-    pub enable_scale_in_when_recovery: bool,
-
-    /// Whether to enable auto-scaling feature.
-    #[serde(default)]
-    pub enable_automatic_parallelism_control: bool,
+    pub disable_automatic_parallelism_control: bool,
 
     #[serde(default = "default::meta::meta_leader_lease_secs")]
     pub meta_leader_lease_secs: u64,
@@ -398,6 +403,12 @@ pub struct MetaDeveloperConfig {
     /// in the meta node.
     #[serde(default = "default::developer::meta_cached_traces_memory_limit_bytes")]
     pub cached_traces_memory_limit_bytes: usize,
+
+    /// Compaction picker config
+    #[serde(default = "default::developer::enable_trivial_move")]
+    pub enable_trivial_move: bool,
+    #[serde(default = "default::developer::enable_check_task_level_overlap")]
+    pub enable_check_task_level_overlap: bool,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -913,9 +924,29 @@ pub struct S3ObjectStoreConfig {
     pub object_store_req_retry_max_delay_ms: u64,
     #[serde(default = "default::object_store_config::s3::object_store_req_retry_max_attempts")]
     pub object_store_req_retry_max_attempts: usize,
-    /// Whether to retry s3 sdk error from which no error metadata is provided.
-    #[serde(default = "default::object_store_config::s3::retry_unknown_service_error")]
+    /// For backwards compatibility, users should use `S3ObjectStoreDeveloperConfig` instead.
+    #[serde(
+        default = "default::object_store_config::s3::developer::object_store_retry_unknown_service_error"
+    )]
     pub retry_unknown_service_error: bool,
+    #[serde(default)]
+    pub developer: S3ObjectStoreDeveloperConfig,
+}
+
+/// The subsections `[storage.object_store.s3.developer]`.
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct S3ObjectStoreDeveloperConfig {
+    /// Whether to retry s3 sdk error from which no error metadata is provided.
+    #[serde(
+        default = "default::object_store_config::s3::developer::object_store_retry_unknown_service_error"
+    )]
+    pub object_store_retry_unknown_service_error: bool,
+    /// An array of error codes that should be retried.
+    /// e.g. `["SlowDown", "TooManyRequests"]`
+    #[serde(
+        default = "default::object_store_config::s3::developer::object_store_retryable_service_error_codes"
+    )]
+    pub object_store_retryable_service_error_codes: Vec<String>,
 }
 
 impl SystemConfig {
@@ -930,7 +961,26 @@ impl SystemConfig {
             };
         }
 
-        for_all_params!(fields)
+        let mut system_params = for_all_params!(fields);
+
+        // Initialize backup_storage_url and backup_storage_directory if not set.
+        if let Some(state_store) = &system_params.state_store
+            && let Some(data_directory) = &system_params.data_directory
+        {
+            if system_params.backup_storage_url.is_none() {
+                if let Some(hummock_state_store) = state_store.strip_prefix("hummock+") {
+                    system_params.backup_storage_url = Some(hummock_state_store.to_owned());
+                } else {
+                    system_params.backup_storage_url = Some("memory".to_string());
+                }
+                tracing::info!("initialize backup_storage_url based on state_store");
+            }
+            if system_params.backup_storage_directory.is_none() {
+                system_params.backup_storage_directory = Some(format!("{data_directory}/backup"));
+                tracing::info!("initialize backup_storage_directory based on data_directory");
+            }
+        }
+        system_params
     }
 }
 
@@ -964,6 +1014,10 @@ pub mod default {
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
             30
+        }
+
+        pub fn enable_hummock_data_archive() -> bool {
+            false
         }
 
         pub fn min_delta_log_num_for_hummock_version_checkpoint() -> u64 {
@@ -1374,6 +1428,14 @@ pub mod default {
         pub fn stream_hash_agg_max_dirty_groups_heap_size() -> usize {
             64 << 20 // 64MB
         }
+
+        pub fn enable_trivial_move() -> bool {
+            true
+        }
+
+        pub fn enable_check_task_level_overlap() -> bool {
+            false
+        }
     }
 
     pub use crate::system_param::default as system;
@@ -1514,8 +1576,14 @@ pub mod default {
                 DEFAULT_RETRY_MAX_ATTEMPTS
             }
 
-            pub fn retry_unknown_service_error() -> bool {
-                false
+            pub mod developer {
+                pub fn object_store_retry_unknown_service_error() -> bool {
+                    false
+                }
+
+                pub fn object_store_retryable_service_error_codes() -> Vec<String> {
+                    vec!["SlowDown".into(), "TooManyRequests".into()]
+                }
             }
         }
     }

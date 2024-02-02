@@ -24,7 +24,7 @@ use thiserror_ext::AsReport;
 
 use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
-use super::create_sink::gen_sink_plan;
+use super::create_sink::{gen_sink_plan, get_partition_compute_info};
 use super::create_table::ColumnIdGenerator;
 use super::query::gen_batch_plan_by_statement;
 use super::util::SourceSchemaCompatExt;
@@ -64,6 +64,7 @@ async fn do_handle_explain(
                 append_only,
                 cdc_table_info,
                 include_column_options,
+                wildcard_idx,
                 ..
             } => {
                 let col_id_gen = ColumnIdGenerator::new_initial();
@@ -77,12 +78,20 @@ async fn do_handle_explain(
                     cdc_table_info,
                     name.clone(),
                     columns,
+                    wildcard_idx,
                     constraints,
                     source_watermarks,
                     append_only,
                     include_column_options,
                 )
                 .await?;
+                let context = plan.ctx();
+                (Ok(plan), context)
+            }
+            Statement::CreateSink { stmt } => {
+                let partition_info = get_partition_compute_info(context.with_options()).await?;
+                let plan = gen_sink_plan(&session, context.into(), stmt, partition_info)
+                    .map(|plan| plan.sink_plan)?;
                 let context = plan.ctx();
                 (Ok(plan), context)
             }
@@ -120,10 +129,6 @@ async fn do_handle_explain(
                             "A created VIEW is just an alias. Instead, use EXPLAIN on the queries which reference the view.".into()
                         ).into());
                     }
-                    Statement::CreateSink { stmt } => {
-                        gen_sink_plan(&session, context.clone(), stmt).map(|plan| plan.sink_plan)
-                    }
-
                     Statement::CreateIndex {
                         name,
                         table_name,

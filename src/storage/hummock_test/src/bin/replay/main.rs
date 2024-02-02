@@ -16,6 +16,9 @@
 #![feature(coroutines)]
 #![feature(stmt_expr_attributes)]
 #![feature(proc_macro_hygiene)]
+#![feature(register_tool)]
+#![register_tool(rw)]
+#![allow(rw::format_error)] // test code
 
 #[macro_use]
 mod replay_impl;
@@ -40,7 +43,7 @@ use risingwave_object_store::object::build_remote_object_store;
 use risingwave_storage::filter_key_extractor::{
     FakeRemoteTableAccessor, RpcFilterKeyExtractorManager,
 };
-use risingwave_storage::hummock::{FileCache, HummockStorage, SstableStore};
+use risingwave_storage::hummock::{FileCache, HummockStorage, SstableStore, SstableStoreConfig};
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics, ObjectStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
 use serde::{Deserialize, Serialize};
@@ -94,33 +97,32 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         &storage_memory_config,
     )));
 
-    let state_store_stats = Arc::new(HummockStateStoreMetrics::unused());
-    let object_store_stats = Arc::new(ObjectStoreMetrics::unused());
+    let state_store_metrics = Arc::new(HummockStateStoreMetrics::unused());
+    let object_store_metrics = Arc::new(ObjectStoreMetrics::unused());
 
     let compactor_metrics = Arc::new(CompactorMetrics::unused());
 
     let object_store = build_remote_object_store(
         &args.object_storage,
-        object_store_stats,
+        object_store_metrics,
         "Hummock",
         ObjectStoreConfig::default(),
     )
     .await;
 
-    let sstable_store = {
-        Arc::new(SstableStore::new(
-            Arc::new(object_store),
-            storage_opts.data_directory.to_string(),
-            storage_opts.block_cache_capacity_mb * (1 << 20),
-            storage_opts.meta_cache_capacity_mb * (1 << 20),
-            storage_opts.high_priority_ratio,
-            storage_opts.prefetch_buffer_capacity_mb * (1 << 20),
-            storage_opts.max_prefetch_block_number,
-            FileCache::none(),
-            FileCache::none(),
-            None,
-        ))
-    };
+    let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
+        store: Arc::new(object_store),
+        path: storage_opts.data_directory.to_string(),
+        block_cache_capacity: storage_opts.block_cache_capacity_mb * (1 << 20),
+        meta_cache_capacity: storage_opts.meta_cache_capacity_mb * (1 << 20),
+        high_priority_ratio: storage_opts.high_priority_ratio,
+        prefetch_buffer_capacity: storage_opts.prefetch_buffer_capacity_mb * (1 << 20),
+        max_prefetch_block_number: storage_opts.max_prefetch_block_number,
+        data_file_cache: FileCache::none(),
+        meta_file_cache: FileCache::none(),
+        recent_filter: None,
+        state_store_metrics: state_store_metrics.clone(),
+    }));
 
     let (hummock_meta_client, notification_client, notifier) = {
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -155,7 +157,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         hummock_meta_client.clone(),
         notification_client,
         key_filter_manager,
-        state_store_stats,
+        state_store_metrics,
         compactor_metrics,
     )
     .await

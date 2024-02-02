@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::bail;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_expr::expr::{BoxedExpression, Expression};
 use risingwave_expr::{build_function, Result};
 
@@ -106,6 +107,148 @@ impl Expression for CaseExpression {
     }
 }
 
+/// With large scale of simple form match arms in case-when expression,
+/// we could optimize the `CaseExpression` to `ConstantLookupExpression`,
+/// which could significantly facilitate the evaluation of case-when.
+#[derive(Debug)]
+struct ConstantLookupExpression {
+    return_type: DataType,
+    arms: HashMap<ScalarImpl, BoxedExpression>,
+    fallback: Option<BoxedExpression>,
+    /// `operand` must exist at present
+    operand: BoxedExpression,
+}
+
+impl ConstantLookupExpression {
+    fn new(
+        return_type: DataType,
+        arms: HashMap<ScalarImpl, BoxedExpression>,
+        fallback: Option<BoxedExpression>,
+        operand: BoxedExpression,
+    ) -> Self {
+        Self {
+            return_type,
+            arms,
+            fallback,
+            operand,
+        }
+    }
+
+    /// Evaluate the fallback arm with the given input
+    async fn eval_fallback(&self, input: &OwnedRow) -> Result<Datum> {
+        let Some(ref fallback) = self.fallback else {
+            return Ok(None);
+        };
+        let Ok(res) = fallback.eval_row(input).await else {
+            bail!("failed to evaluate the input for fallback arm");
+        };
+        Ok(res)
+    }
+
+    /// The actual lookup & evaluation logic
+    /// used in both `eval_row` & `eval`
+    async fn lookup(&self, datum: Datum, input: &OwnedRow) -> Result<Datum> {
+        if datum.is_none() {
+            return self.eval_fallback(input).await;
+        }
+
+        if let Some(expr) = self.arms.get(datum.as_ref().unwrap()) {
+            let Ok(res) = expr.eval_row(input).await else {
+                bail!("failed to evaluate the input for normal arm");
+            };
+            Ok(res)
+        } else {
+            // Fallback arm goes here
+            self.eval_fallback(input).await
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Expression for ConstantLookupExpression {
+    fn return_type(&self) -> DataType {
+        self.return_type.clone()
+    }
+
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let input_len = input.capacity();
+        let mut builder = self.return_type().create_array_builder(input_len);
+
+        // Evaluate the input DataChunk at first
+        let eval_result = self.operand.eval(input).await?;
+
+        for i in 0..input_len {
+            let datum = eval_result.datum_at(i);
+            let (row, vis) = input.row_at(i);
+
+            // Check for visibility
+            if !vis {
+                builder.append_null();
+                continue;
+            }
+
+            // Note that the `owned_row` here is extracted from input
+            // rather than from `eval_result`
+            let owned_row = row.into_owned_row();
+
+            // Lookup and evaluate the current input datum
+            if let Ok(datum) = self.lookup(datum, &owned_row).await {
+                builder.append(datum.as_ref());
+            } else {
+                bail!("failed to lookup and evaluate the expression in `eval`");
+            }
+        }
+
+        Ok(Arc::new(builder.finish()))
+    }
+
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let datum = self.operand.eval_row(input).await?;
+        self.lookup(datum, input).await
+    }
+}
+
+#[build_function("constant_lookup(...) -> any", type_infer = "panic")]
+fn build_constant_lookup_expr(
+    return_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    if children.is_empty() {
+        bail!("children expression must not be empty for constant lookup expression");
+    }
+
+    let mut children = children;
+
+    let operand = children.remove(0);
+
+    let mut arms = HashMap::new();
+
+    // Build the `arms` with iterating over `when` & `then` clauses
+    let mut iter = children.into_iter().array_chunks();
+    for [when, then] in iter.by_ref() {
+        let Ok(Some(s)) = when.eval_const() else {
+            bail!("expect when expression to be const");
+        };
+        arms.insert(s, then);
+    }
+
+    let fallback = if let Some(else_clause) = iter.into_remainder().unwrap().next() {
+        if else_clause.return_type() != return_type {
+            bail!("Type mismatched between else and case.");
+        }
+        Some(else_clause)
+    } else {
+        None
+    };
+
+    Ok(Box::new(ConstantLookupExpression::new(
+        return_type,
+        arms,
+        fallback,
+        operand,
+    )))
+}
+
 #[build_function("case(...) -> any", type_infer = "panic")]
 fn build_case_expr(
     return_type: DataType,
@@ -132,6 +275,7 @@ fn build_case_expr(
     } else {
         None
     };
+
     Ok(Box::new(CaseExpression::new(
         return_type,
         when_clauses,
