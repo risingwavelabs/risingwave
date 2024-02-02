@@ -32,4 +32,4 @@ download_and_prepare_rw "$profile" source
 
 ################ TESTS
 
-profile=$profile ./ci/scripts/run-backfill-tests.sh
+BUILDKITE=${BUILDKITE:-} profile=$profile ./ci/scripts/run-backfill-tests.sh

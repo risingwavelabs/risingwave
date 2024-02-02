@@ -213,11 +213,12 @@ message Function {
   uint32 database_id = 3;
   string name = 4;
   uint32 owner = 9;
+  repeated string arg_names = 15;
   repeated data.DataType arg_types = 5;
   data.DataType return_type = 6;
   string language = 7;
-  string link = 8;
-  string identifier = 10;
+  optional string link = 8;
+  optional string identifier = 10;
   optional string body = 14;
 
   oneof kind {

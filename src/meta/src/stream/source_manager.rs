@@ -361,7 +361,7 @@ impl SourceManagerCore {
     fn drop_source_fragments(
         &mut self,
         source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-        actor_splits: &HashSet<ActorId>,
+        removed_actors: &HashSet<ActorId>,
     ) {
         for (source_id, fragment_ids) in source_fragments {
             if let Entry::Occupied(mut entry) = self.source_fragments.entry(source_id) {
@@ -380,7 +380,7 @@ impl SourceManagerCore {
             }
         }
 
-        for actor_id in actor_splits {
+        for actor_id in removed_actors {
             self.actor_splits.remove(actor_id);
         }
     }
@@ -611,6 +611,15 @@ impl SourceManager {
             paused: Mutex::new(()),
             metrics,
         })
+    }
+
+    pub async fn drop_source_fragments_v2(
+        &self,
+        source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+        removed_actors: HashSet<ActorId>,
+    ) {
+        let mut core = self.core.lock().await;
+        core.drop_source_fragments(source_fragments, &removed_actors);
     }
 
     /// For dropping MV.

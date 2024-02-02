@@ -1,5 +1,7 @@
 use sea_orm_migration::prelude::{Index as MigrationIndex, Table as MigrationTable, *};
 
+use crate::{assert_not_has_tables, drop_tables};
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -7,38 +9,30 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // 1. check if the table exists.
-        assert!(!manager.has_table(Cluster::Table.to_string()).await?);
-        assert!(!manager.has_table(Worker::Table.to_string()).await?);
-        assert!(!manager.has_table(WorkerProperty::Table.to_string()).await?);
-        assert!(!manager.has_table(User::Table.to_string()).await?);
-        assert!(!manager.has_table(UserPrivilege::Table.to_string()).await?);
-        assert!(!manager.has_table(Database::Table.to_string()).await?);
-        assert!(!manager.has_table(Schema::Table.to_string()).await?);
-        assert!(!manager.has_table(StreamingJob::Table.to_string()).await?);
-        assert!(!manager.has_table(Fragment::Table.to_string()).await?);
-        assert!(!manager.has_table(Actor::Table.to_string()).await?);
-        assert!(
-            !manager
-                .has_table(ActorDispatcher::Table.to_string())
-                .await?
-        );
-        assert!(!manager.has_table(Table::Table.to_string()).await?);
-        assert!(!manager.has_table(Source::Table.to_string()).await?);
-        assert!(!manager.has_table(Sink::Table.to_string()).await?);
-        assert!(!manager.has_table(Connection::Table.to_string()).await?);
-        assert!(!manager.has_table(View::Table.to_string()).await?);
-        assert!(!manager.has_table(Index::Table.to_string()).await?);
-        assert!(!manager.has_table(Function::Table.to_string()).await?);
-        assert!(!manager.has_table(Object::Table.to_string()).await?);
-        assert!(
-            !manager
-                .has_table(ObjectDependency::Table.to_string())
-                .await?
-        );
-        assert!(
-            !manager
-                .has_table(SystemParameter::Table.to_string())
-                .await?
+        assert_not_has_tables!(
+            manager,
+            Cluster,
+            Worker,
+            WorkerProperty,
+            User,
+            UserPrivilege,
+            Database,
+            Schema,
+            StreamingJob,
+            Fragment,
+            Actor,
+            ActorDispatcher,
+            Table,
+            Source,
+            Sink,
+            Connection,
+            View,
+            Index,
+            Function,
+            Object,
+            ObjectDependency,
+            SystemParameter,
+            CatalogVersion
         );
 
         // 2. create tables.
@@ -334,6 +328,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(StreamingJob::JobStatus).string().not_null())
                     .col(ColumnDef::new(StreamingJob::CreateType).string().not_null())
                     .col(ColumnDef::new(StreamingJob::Timezone).string())
+                    .col(ColumnDef::new(StreamingJob::Parallelism).json().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_streaming_job_object_id")
@@ -703,11 +698,12 @@ impl MigrationTrait for Migration {
                     .table(Function::Table)
                     .col(ColumnDef::new(Function::FunctionId).integer().primary_key())
                     .col(ColumnDef::new(Function::Name).string().not_null())
+                    .col(ColumnDef::new(Function::ArgNames).json().not_null())
                     .col(ColumnDef::new(Function::ArgTypes).json().not_null())
                     .col(ColumnDef::new(Function::ReturnType).json().not_null())
                     .col(ColumnDef::new(Function::Language).string().not_null())
-                    .col(ColumnDef::new(Function::Link).string().not_null())
-                    .col(ColumnDef::new(Function::Identifier).string().not_null())
+                    .col(ColumnDef::new(Function::Link).string())
+                    .col(ColumnDef::new(Function::Identifier).string())
                     .col(ColumnDef::new(Function::Body).string())
                     .col(ColumnDef::new(Function::Kind).string().not_null())
                     .foreign_key(
@@ -738,6 +734,24 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(ColumnDef::new(SystemParameter::Description).string())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                crate::Table::create()
+                    .table(CatalogVersion::Table)
+                    .col(
+                        ColumnDef::new(CatalogVersion::Name)
+                            .string()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(CatalogVersion::Version)
+                            .big_integer()
+                            .not_null(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -835,22 +849,6 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        macro_rules! drop_tables {
-            ($manager:expr, $( $table:ident ),+) => {
-                $(
-                    $manager
-                        .drop_table(
-                            MigrationTable::drop()
-                                .table($table::Table)
-                                .if_exists()
-                                .cascade()
-                                .to_owned(),
-                        )
-                        .await?;
-                )+
-            };
-        }
-
         // drop tables cascade.
         drop_tables!(
             manager,
@@ -874,7 +872,8 @@ impl MigrationTrait for Migration {
             Function,
             Object,
             ObjectDependency,
-            SystemParameter
+            SystemParameter,
+            CatalogVersion
         );
         Ok(())
     }
@@ -993,6 +992,7 @@ enum StreamingJob {
     JobStatus,
     Timezone,
     CreateType,
+    Parallelism,
 }
 
 #[derive(DeriveIden)]
@@ -1095,6 +1095,7 @@ enum Function {
     Table,
     FunctionId,
     Name,
+    ArgNames,
     ArgTypes,
     ReturnType,
     Language,
@@ -1133,4 +1134,11 @@ enum SystemParameter {
     Value,
     IsMutable,
     Description,
+}
+
+#[derive(DeriveIden)]
+enum CatalogVersion {
+    Table,
+    Name,
+    Version,
 }

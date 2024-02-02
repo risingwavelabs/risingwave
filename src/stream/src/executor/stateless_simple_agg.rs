@@ -170,7 +170,7 @@ mod tests {
 
         let simple_agg = Box::new(
             StatelessSimpleAggExecutor::new(
-                ActorContext::create(123),
+                ActorContext::for_test(123),
                 info,
                 Box::new(source),
                 agg_calls,
@@ -228,7 +228,7 @@ mod tests {
 
         let simple_agg = Box::new(
             StatelessSimpleAggExecutor::new(
-                ActorContext::create(123),
+                ActorContext::for_test(123),
                 info,
                 Box::new(source),
                 agg_calls,

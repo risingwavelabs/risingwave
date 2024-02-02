@@ -518,7 +518,7 @@ impl MetaMetrics {
 
         let actor_info = register_int_gauge_vec_with_registry!(
             "actor_info",
-            "Mapping from actor id to (fragment id, compute node",
+            "Mapping from actor id to (fragment id, compute node)",
             &["actor_id", "fragment_id", "compute_node"],
             registry
         )

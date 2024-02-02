@@ -31,7 +31,7 @@ use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_meta::*;
 use risingwave_meta_service::*;
 pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
-use server::{rpc_serve, MetaStoreSqlBackend};
+use server::rpc_serve;
 
 use crate::manager::MetaOpts;
 
@@ -59,8 +59,10 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_DASHBOARD_HOST")]
     dashboard_host: Option<String>,
 
-    #[clap(long, env = "RW_PROMETHEUS_HOST")]
-    pub prometheus_host: Option<String>,
+    /// We will start a http server at this address via `MetricsManager`.
+    /// Then the prometheus instance will poll the metrics from this address.
+    #[clap(long, env = "RW_PROMETHEUS_HOST", alias = "prometheus-host")]
+    pub prometheus_listener_addr: Option<String>,
 
     #[clap(long, env = "RW_ETCD_ENDPOINTS", default_value_t = String::from(""))]
     etcd_endpoints: String,
@@ -84,7 +86,9 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_DASHBOARD_UI_PATH")]
     dashboard_ui_path: Option<String>,
 
-    /// For dashboard service to fetch cluster info.
+    /// The HTTP REST-API address of the Prometheus instance associated to this cluster.
+    /// This address is used to serve PromQL queries to Prometheus.
+    /// It is also used by Grafana Dashboard Service to fetch metrics and visualize them.
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
     prometheus_endpoint: Option<String>,
 
@@ -196,7 +200,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         info!("> version: {} ({})", RW_VERSION, GIT_SHA);
         let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
-        let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
+        let prometheus_addr = opts.prometheus_listener_addr.map(|x| x.parse().unwrap());
         let backend = match config.meta.backend {
             MetaBackend::Etcd => MetaStoreBackend::Etcd {
                 endpoints: opts
@@ -213,10 +217,10 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 },
             },
             MetaBackend::Mem => MetaStoreBackend::Mem,
+            MetaBackend::Sql => MetaStoreBackend::Sql {
+                endpoint: opts.sql_endpoint.expect("sql endpoint is required"),
+            },
         };
-        let sql_backend = opts
-            .sql_endpoint
-            .map(|endpoint| MetaStoreSqlBackend { endpoint });
 
         validate_config(&config);
 
@@ -273,15 +277,13 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
             add_info,
             backend,
-            sql_backend,
             max_heartbeat_interval,
             config.meta.meta_leader_lease_secs,
             MetaOpts {
                 enable_recovery: !config.meta.disable_recovery,
-                enable_scale_in_when_recovery: config.meta.enable_scale_in_when_recovery,
-                enable_automatic_parallelism_control: config
+                disable_automatic_parallelism_control: config
                     .meta
-                    .enable_automatic_parallelism_control,
+                    .disable_automatic_parallelism_control,
                 in_flight_barrier_nums,
                 max_idle_ms,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
@@ -291,6 +293,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 hummock_version_checkpoint_interval_sec: config
                     .meta
                     .hummock_version_checkpoint_interval_sec,
+                enable_hummock_data_archive: config.meta.enable_hummock_data_archive,
                 min_delta_log_num_for_hummock_version_checkpoint: config
                     .meta
                     .min_delta_log_num_for_hummock_version_checkpoint,
@@ -344,6 +347,11 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .meta
                     .developer
                     .cached_traces_memory_limit_bytes,
+                enable_trivial_move: config.meta.developer.enable_trivial_move,
+                enable_check_task_level_overlap: config
+                    .meta
+                    .developer
+                    .enable_check_task_level_overlap,
             },
             config.system.into_init_system_params(),
         )

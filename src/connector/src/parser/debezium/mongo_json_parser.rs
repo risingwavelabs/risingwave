@@ -50,22 +50,23 @@ impl DebeziumMongoJsonParser {
                     )
             })
             .ok_or_else(|| RwError::from(ProtocolError(
-                "Debezuim Mongo needs a `_id` column with supported types (Varchar Jsonb int32 int64) in table".into(),
+                "Debezium Mongo needs a `_id` column with supported types (Varchar Jsonb int32 int64) in table".into(),
             )))?.clone();
         let payload_column = rw_columns
             .iter()
             .find(|desc| desc.name == "payload" && matches!(desc.data_type, DataType::Jsonb))
             .ok_or_else(|| {
                 RwError::from(ProtocolError(
-                    "Debezuim Mongo needs a `payload` column with supported types Jsonb in table"
+                    "Debezium Mongo needs a `payload` column with supported types Jsonb in table"
                         .into(),
                 ))
             })?
             .clone();
 
-        if rw_columns.len() != 2 {
+        // _rw_{connector}_file/partition & _rw_{connector}_offset are created automatically.
+        if rw_columns.iter().filter(|desc| desc.is_visible()).count() != 2 {
             return Err(RwError::from(ProtocolError(
-                "Debezuim Mongo needs no more columns except `_id` and `payload` in table".into(),
+                "Debezium Mongo needs no more columns except `_id` and `payload` in table".into(),
             )));
         }
 

@@ -20,7 +20,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{key_with_epoch, map_table_key_range};
-use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 use risingwave_storage::hummock::iterator::test_utils::{
@@ -31,7 +31,7 @@ use risingwave_storage::hummock::store::version::{
     read_filter_for_batch, read_filter_for_local, HummockReadVersion, StagingData,
     StagingSstableInfo, VersionUpdate,
 };
-use risingwave_storage::hummock::test_utils::gen_dummy_batch;
+use risingwave_storage::hummock::test_utils::{gen_dummy_batch, gen_dummy_sst_info};
 
 use crate::test_utils::prepare_first_valid_version;
 
@@ -52,15 +52,12 @@ async fn test_read_version_basic() {
         let kv_pairs = gen_dummy_batch(epoch);
         let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
         let size = SharedBufferBatch::measure_batch_size(&sorted_items);
-        let imm = SharedBufferBatch::build_shared_buffer_batch(
+        let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
             epoch,
             0,
             sorted_items,
             size,
-            vec![],
             TableId::from(table_id),
-            None,
-            None,
         );
 
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
@@ -91,15 +88,12 @@ async fn test_read_version_basic() {
             let kv_pairs = gen_dummy_batch(epoch);
             let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
             let size = SharedBufferBatch::measure_batch_size(&sorted_items);
-            let imm = SharedBufferBatch::build_shared_buffer_batch(
+            let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
                 epoch,
                 0,
                 sorted_items,
                 size,
-                vec![],
                 TableId::from(table_id),
-                None,
-                None,
             );
 
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
@@ -278,15 +272,12 @@ async fn test_read_filter_basic() {
         let kv_pairs = gen_dummy_batch(epoch);
         let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
         let size = SharedBufferBatch::measure_batch_size(&sorted_items);
-        let imm = SharedBufferBatch::build_shared_buffer_batch(
+        let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
             epoch,
             0,
             sorted_items,
             size,
-            vec![],
             TableId::from(table_id),
-            None,
-            None,
         );
 
         read_version
@@ -343,4 +334,70 @@ async fn test_read_filter_basic() {
             assert_eq!(0, hummock_read_snapshot.1.len());
         }
     }
+}
+
+#[tokio::test]
+async fn test_read_filter_for_batch_issue_14659() {
+    use std::ops::Bound::Unbounded;
+
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+
+    let (pinned_version, _, _) =
+        prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
+
+    const NUM_SHARDS: u64 = 2;
+    let table_id = TableId::from(2);
+    let epoch = 1;
+    let mut read_version_vec = vec![];
+    let mut imms = vec![];
+
+    // Populate IMMs
+    for i in 0..NUM_SHARDS {
+        let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
+            table_id,
+            pinned_version.clone(),
+        )));
+
+        let items = SharedBufferBatch::build_shared_buffer_item_batches(gen_dummy_batch(i));
+        let size = SharedBufferBatch::measure_batch_size(&items);
+        let imm =
+            SharedBufferBatch::build_shared_buffer_batch_for_test(epoch, 0, items, size, table_id);
+
+        imms.push(imm.clone());
+
+        read_version
+            .write()
+            .update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
+
+        read_version_vec.push(read_version);
+    }
+
+    // Update read version via staging SSTs
+    let sst_id = 233;
+    let staging_sst = gen_dummy_sst_info(sst_id, imms.clone(), table_id, epoch);
+    read_version_vec.iter().for_each(|v| {
+        v.write().update(VersionUpdate::Staging(StagingData::Sst(
+            StagingSstableInfo::new(
+                vec![LocalSstableInfo::for_test(staging_sst.clone())],
+                vec![epoch],
+                imms.iter().map(|imm| imm.batch_id()).collect_vec(),
+                imms.iter().map(|imm| imm.size()).sum(),
+            ),
+        )));
+    });
+
+    // build for batch with max epoch
+    let (_, hummock_read_snapshot) = read_filter_for_batch(
+        HummockEpoch::MAX,
+        table_id,
+        (Unbounded, Unbounded),
+        read_version_vec,
+    )
+    .unwrap();
+
+    // No imms should be proivided
+    assert_eq!(0, hummock_read_snapshot.0.len());
+    // Only 1 staging sst is provided
+    assert_eq!(1, hummock_read_snapshot.1.len());
 }

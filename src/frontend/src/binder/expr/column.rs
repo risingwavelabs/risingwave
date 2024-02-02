@@ -45,8 +45,20 @@ impl Binder {
         // to the name of the defined sql udf parameters stored in `udf_context`.
         // If so, we will treat this bind as an special bind, the actual expression
         // stored in `udf_context` will then be bound instead of binding the non-existing column.
-        if let Some(expr) = self.udf_context.get_expr(&column_name) {
-            return Ok(expr.clone());
+        if self.udf_binding_flag {
+            if let Some(expr) = self.udf_context.get_expr(&column_name) {
+                return Ok(expr.clone());
+            } else {
+                // The reason that we directly return error here,
+                // is because during a valid sql udf binding,
+                // there will not exist any column identifiers
+                // And invalid cases should already be caught
+                // during semantic check phase
+                return Err(ErrorCode::BindError(format!(
+                    "failed to find named parameter {column_name}"
+                ))
+                .into());
+            }
         }
 
         match self

@@ -51,12 +51,14 @@ pub struct ActorContext {
 
     pub streaming_metrics: Arc<StreamingMetrics>,
     pub error_suppressor: Arc<Mutex<ErrorSuppressor>>,
+
+    pub dispatch_num: usize,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
 
 impl ActorContext {
-    pub fn create(id: ActorId) -> ActorContextRef {
+    pub fn for_test(id: ActorId) -> ActorContextRef {
         Arc::new(Self {
             id,
             fragment_id: 0,
@@ -66,14 +68,17 @@ impl ActorContext {
             total_mem_val: Arc::new(TrAdder::new()),
             streaming_metrics: Arc::new(StreamingMetrics::unused()),
             error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(10))),
+            // Set 1 for test to enable sanity check on table
+            dispatch_num: 1,
         })
     }
 
-    pub fn create_with_metrics(
+    pub fn create(
         stream_actor: &PbStreamActor,
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
         unique_user_errors: usize,
+        dispatch_num: usize,
     ) -> ActorContextRef {
         Arc::new(Self {
             id: stream_actor.actor_id,
@@ -84,6 +89,7 @@ impl ActorContext {
             total_mem_val,
             streaming_metrics,
             error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(unique_user_errors))),
+            dispatch_num,
         })
     }
 

@@ -24,7 +24,7 @@ use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, 
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, object, sink, streaming_job, ActorId, ConnectorSplits,
     ExprContext, FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId, SinkId, SourceId,
-    StreamNode, TableId, VnodeBitmap, WorkerId,
+    StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::meta::subscribe_response::{
@@ -39,8 +39,7 @@ use risingwave_pb::meta::{
 use risingwave_pb::source::PbConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    PbDispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext, PbStreamNode,
-    StreamSource,
+    PbDispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext,
 };
 use sea_orm::sea_query::{Expr, Value};
 use sea_orm::ActiveValue::Set;
@@ -51,10 +50,11 @@ use sea_orm::{
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
-    get_actor_dispatchers, get_parallel_unit_mapping, FragmentDesc, PartialActorLocation,
-    PartialFragmentStateTables,
+    find_stream_source, get_actor_dispatchers, get_parallel_unit_mapping, FragmentDesc,
+    PartialActorLocation, PartialFragmentStateTables,
 };
 use crate::manager::{ActorInfos, LocalNotification};
+use crate::model::TableParallelism;
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
@@ -312,6 +312,7 @@ impl CatalogController {
             HashMap<ActorId, Vec<actor_dispatcher::Model>>,
         )>,
         parallel_units_map: &HashMap<u32, PbParallelUnit>,
+        parallelism: StreamingParallelism,
     ) -> MetaResult<PbTableFragments> {
         let mut pb_fragments = HashMap::new();
         let mut pb_actor_splits = HashMap::new();
@@ -334,8 +335,13 @@ impl CatalogController {
             actor_status: pb_actor_status,
             actor_splits: pb_actor_splits,
             ctx: Some(ctx.unwrap_or_default()),
-            // TODO(peng): fix this for model v2
-            parallelism: None,
+            parallelism: Some(
+                match parallelism {
+                    StreamingParallelism::Adaptive => TableParallelism::Adaptive,
+                    StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n as _),
+                }
+                .into(),
+            ),
         };
 
         Ok(table_fragments)
@@ -577,6 +583,23 @@ impl CatalogController {
         Ok(upstream_job_counts)
     }
 
+    pub async fn get_fragment_job_id(
+        &self,
+        fragment_ids: Vec<FragmentId>,
+    ) -> MetaResult<Vec<ObjectId>> {
+        let inner = self.inner.read().await;
+
+        let object_ids: Vec<ObjectId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::JobId)
+            .filter(fragment::Column::FragmentId.is_in(fragment_ids))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(object_ids)
+    }
+
     pub async fn get_job_fragments_by_id(&self, job_id: ObjectId) -> MetaResult<PbTableFragments> {
         let inner = self.inner.read().await;
         let fragment_actors = Fragment::find()
@@ -615,16 +638,20 @@ impl CatalogController {
             job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
             fragment_info,
             &parallel_units_map,
+            job_info.parallelism.clone(),
         )
     }
 
-    pub async fn list_streaming_job_states(&self) -> MetaResult<Vec<(ObjectId, JobStatus)>> {
+    pub async fn list_streaming_job_states(
+        &self,
+    ) -> MetaResult<Vec<(ObjectId, JobStatus, StreamingParallelism)>> {
         let inner = self.inner.read().await;
-        let job_states: Vec<(ObjectId, JobStatus)> = StreamingJob::find()
+        let job_states: Vec<(ObjectId, JobStatus, StreamingParallelism)> = StreamingJob::find()
             .select_only()
             .columns([
                 streaming_job::Column::JobId,
                 streaming_job::Column::JobStatus,
+                streaming_job::Column::Parallelism,
             ])
             .into_tuple()
             .all(&inner.db)
@@ -717,6 +744,7 @@ impl CatalogController {
                     job.timezone.map(|tz| PbStreamContext { timezone: tz }),
                     fragment_info,
                     &parallel_units_map,
+                    job.parallelism.clone(),
                 )?,
             );
         }
@@ -1160,23 +1188,6 @@ impl CatalogController {
         Ok(chain_fragments)
     }
 
-    /// Find the external stream source info inside the stream node, if any.
-    fn find_stream_source(stream_node: &PbStreamNode) -> Option<&StreamSource> {
-        if let Some(NodeBody::Source(source)) = &stream_node.node_body {
-            if let Some(inner) = &source.source_inner {
-                return Some(inner);
-            }
-        }
-
-        for child in &stream_node.input {
-            if let Some(source) = Self::find_stream_source(child) {
-                return Some(source);
-            }
-        }
-
-        None
-    }
-
     pub async fn load_source_fragment_ids(
         &self,
     ) -> MetaResult<HashMap<SourceId, BTreeSet<FragmentId>>> {
@@ -1195,7 +1206,7 @@ impl CatalogController {
 
         let mut source_fragment_ids = HashMap::new();
         for (fragment_id, _, stream_node) in fragments {
-            if let Some(source) = Self::find_stream_source(stream_node.inner_ref()) {
+            if let Some(source) = find_stream_source(stream_node.inner_ref()) {
                 source_fragment_ids
                     .entry(source.source_id as SourceId)
                     .or_insert_with(BTreeSet::new)
@@ -1225,7 +1236,7 @@ impl CatalogController {
 
         let mut source_fragment_ids = HashMap::new();
         for (fragment_id, _, stream_node) in fragments {
-            if let Some(source) = Self::find_stream_source(stream_node.inner_ref()) {
+            if let Some(source) = find_stream_source(stream_node.inner_ref()) {
                 source_fragment_ids
                     .entry(source.source_id as SourceId)
                     .or_insert_with(BTreeSet::new)

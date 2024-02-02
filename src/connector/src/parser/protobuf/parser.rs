@@ -20,15 +20,19 @@ use prost_reflect::{
     ReflectMessage, Value,
 };
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
+use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Datum, Decimal, JsonbVal, ScalarImpl, F32, F64};
-use risingwave_pb::plan_common::{AdditionalColumnType, ColumnDesc, ColumnDescVersion};
+use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
+use thiserror::Error;
+use thiserror_ext::{AsReport, Macro};
 
 use super::schema_resolver::*;
 use crate::parser::unified::protobuf::ProtobufAccess;
-use crate::parser::unified::AccessImpl;
+use crate::parser::unified::{
+    bail_uncategorized, uncategorized, AccessError, AccessImpl, AccessResult,
+};
 use crate::parser::util::bytes_from_url;
 use crate::parser::{AccessBuilder, EncodingProperties};
 use crate::schema::schema_registry::{
@@ -157,7 +161,8 @@ impl ProtobufParserConfig {
         index: &mut i32,
         parse_trace: &mut Vec<String>,
     ) -> Result<ColumnDesc> {
-        let field_type = protobuf_type_mapping(field_descriptor, parse_trace)?;
+        let field_type =
+            protobuf_type_mapping(field_descriptor, parse_trace).map_err(RwError::uncategorized)?;
         if let Kind::Message(m) = field_descriptor.kind() {
             let field_descs = if let DataType::List { .. } = field_type {
                 vec![]
@@ -175,7 +180,7 @@ impl ProtobufParserConfig {
                 type_name: m.full_name().to_string(),
                 generated_or_default_column: None,
                 description: None,
-                additional_column_type: AdditionalColumnType::Normal as i32,
+                additional_columns: Some(AdditionalColumn { column_type: None }),
                 version: ColumnDescVersion::Pr13707 as i32,
             })
         } else {
@@ -184,7 +189,7 @@ impl ProtobufParserConfig {
                 column_id: *index,
                 name: field_descriptor.name().to_string(),
                 column_type: Some(field_type.to_protobuf()),
-                additional_column_type: AdditionalColumnType::Normal as i32,
+                additional_columns: Some(AdditionalColumn { column_type: None }),
                 version: ColumnDescVersion::Pr13707 as i32,
                 ..Default::default()
             })
@@ -192,15 +197,22 @@ impl ProtobufParserConfig {
     }
 }
 
-fn detect_loop_and_push(trace: &mut Vec<String>, fd: &FieldDescriptor) -> Result<()> {
+#[derive(Error, Debug, Macro)]
+#[error("{0}")]
+struct ProtobufTypeError(#[message] String);
+
+fn detect_loop_and_push(
+    trace: &mut Vec<String>,
+    fd: &FieldDescriptor,
+) -> std::result::Result<(), ProtobufTypeError> {
     let identifier = format!("{}({})", fd.name(), fd.full_name());
     if trace.iter().any(|s| s == identifier.as_str()) {
-        return Err(RwError::from(ProtocolError(format!(
+        bail_protobuf_type_error!(
             "circular reference detected: {}, conflict with {}, kind {:?}",
-            trace.iter().join("->"),
+            trace.iter().format("->"),
             identifier,
             fd.kind(),
-        ))));
+        );
     }
     trace.push(identifier);
     Ok(())
@@ -341,7 +353,9 @@ pub fn from_protobuf_value(
     field_desc: &FieldDescriptor,
     value: &Value,
     descriptor_pool: &Arc<DescriptorPool>,
-) -> Result<Datum> {
+) -> AccessResult {
+    let kind = field_desc.kind();
+
     let v = match value {
         Value::Bool(v) => ScalarImpl::Bool(*v),
         Value::I32(i) => ScalarImpl::Int32(*i),
@@ -352,17 +366,13 @@ pub fn from_protobuf_value(
         Value::F64(f) => ScalarImpl::Float64(F64::from(*f)),
         Value::String(s) => ScalarImpl::Utf8(s.as_str().into()),
         Value::EnumNumber(idx) => {
-            let kind = field_desc.kind();
-            let enum_desc = kind.as_enum().ok_or_else(|| {
-                let err_msg = format!("protobuf parse error.not a enum desc {:?}", field_desc);
-                RwError::from(ProtocolError(err_msg))
+            let enum_desc = kind.as_enum().ok_or_else(|| AccessError::TypeError {
+                expected: "enum".to_owned(),
+                got: format!("{kind:?}"),
+                value: value.to_string(),
             })?;
             let enum_symbol = enum_desc.get_value(*idx).ok_or_else(|| {
-                let err_msg = format!(
-                    "protobuf parse error.unknown enum index {} of enum {:?}",
-                    idx, enum_desc
-                );
-                RwError::from(ProtocolError(err_msg))
+                uncategorized!("unknown enum index {} of enum {:?}", idx, enum_desc)
             })?;
             ScalarImpl::Utf8(enum_symbol.name().into())
         }
@@ -389,18 +399,14 @@ pub fn from_protobuf_value(
                 let Some(ScalarImpl::Bytea(payload)) =
                     from_protobuf_value(&payload_field_desc, &payload, descriptor_pool)?
                 else {
-                    let err_msg = "Expected ScalarImpl::Bytea for payload".to_string();
-                    return Err(RwError::from(ProtocolError(err_msg)));
+                    bail_uncategorized!("expected bytes for dynamic message payload");
                 };
 
                 // Get the corresponding schema from the descriptor pool
                 let msg_desc = descriptor_pool
                     .get_message_by_name(&type_url)
                     .ok_or_else(|| {
-                        ProtocolError(format!(
-                        "Cannot find message {} in from_protobuf_value.\nDescriptor pool is {:#?}",
-                        type_url, descriptor_pool
-                    ))
+                        uncategorized!("message `{type_url}` not found in descriptor pool")
                     })?;
 
                 let f = msg_desc
@@ -439,11 +445,10 @@ pub fn from_protobuf_value(
                     if !dyn_msg.has_field(&field_desc)
                         && field_desc.cardinality() == Cardinality::Required
                     {
-                        let err_msg = format!(
-                            "protobuf parse error.missing required field {:?}",
-                            field_desc
-                        );
-                        return Err(RwError::from(ProtocolError(err_msg)));
+                        return Err(AccessError::Undefined {
+                            name: field_desc.name().to_owned(),
+                            path: dyn_msg.descriptor().full_name().to_owned(),
+                        });
                     }
                     // use default value if dyn_msg doesn't has this field
                     let value = dyn_msg.get_field(&field_desc);
@@ -453,7 +458,8 @@ pub fn from_protobuf_value(
             }
         }
         Value::List(values) => {
-            let data_type = protobuf_type_mapping(field_desc, &mut vec![])?;
+            let data_type = protobuf_type_mapping(field_desc, &mut vec![])
+                .map_err(|e| uncategorized!("{}", e.to_report_string()))?;
             let mut builder = data_type.as_list().create_array_builder(values.len());
             for value in values {
                 builder.append(from_protobuf_value(field_desc, value, descriptor_pool)?);
@@ -462,11 +468,9 @@ pub fn from_protobuf_value(
         }
         Value::Bytes(value) => ScalarImpl::Bytea(value.to_vec().into_boxed_slice()),
         _ => {
-            let err_msg = format!(
-                "protobuf parse error.unsupported type {:?}, value {:?}",
-                field_desc, value
-            );
-            return Err(RwError::from(InternalError(err_msg)));
+            return Err(AccessError::UnsupportedType {
+                ty: format!("{kind:?}"),
+            });
         }
     };
     Ok(Some(v))
@@ -476,7 +480,7 @@ pub fn from_protobuf_value(
 fn protobuf_type_mapping(
     field_descriptor: &FieldDescriptor,
     parse_trace: &mut Vec<String>,
-) -> Result<DataType> {
+) -> std::result::Result<DataType, ProtobufTypeError> {
     detect_loop_and_push(parse_trace, field_descriptor)?;
     let field_type = field_descriptor.kind();
     let mut t = match field_type {
@@ -494,7 +498,7 @@ fn protobuf_type_mapping(
             let fields = m
                 .fields()
                 .map(|f| protobuf_type_mapping(&f, parse_trace))
-                .collect::<Result<Vec<_>>>()?;
+                .try_collect()?;
             let field_names = m.fields().map(|f| f.name().to_string()).collect_vec();
 
             // Note that this part is useful for actual parsing
@@ -513,10 +517,10 @@ fn protobuf_type_mapping(
         Kind::Bytes => DataType::Bytea,
     };
     if field_descriptor.is_map() {
-        return Err(RwError::from(ProtocolError(format!(
-            "map type is unsupported (field: '{}')",
+        bail_protobuf_type_error!(
+            "protobuf map type (on field `{}`) is not supported",
             field_descriptor.full_name()
-        ))));
+        );
     }
     if field_descriptor.cardinality() == Cardinality::Repeated {
         t = DataType::List(Box::new(t))

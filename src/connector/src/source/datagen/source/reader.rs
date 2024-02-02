@@ -25,8 +25,8 @@ use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit, FieldDesc};
 use crate::source::{
-    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, DataType,
-    SourceContextRef, SourceMessage, SplitId, SplitMetaData, SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, DataType, SourceContextRef,
+    SourceMessage, SplitId, SplitMetaData, SplitReader,
 };
 
 pub struct DatagenSplitReader {
@@ -138,7 +138,7 @@ impl SplitReader for DatagenSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;
         // spawn_data_generation_stream(self.generator.into_native_stream(), BUFFER_SIZE).boxed()
@@ -148,17 +148,25 @@ impl SplitReader for DatagenSplitReader {
         ) {
             (ProtocolProperties::Native, EncodingProperties::Native) => {
                 let actor_id = self.source_ctx.source_info.actor_id.to_string();
+                let fragment_id = self.source_ctx.source_info.fragment_id.to_string();
                 let source_id = self.source_ctx.source_info.source_id.to_string();
+                let source_name = self.source_ctx.source_info.source_name.to_string();
                 let split_id = self.split_id.to_string();
                 let metrics = self.source_ctx.metrics.clone();
                 spawn_data_generation_stream(
                     self.generator
                         .into_native_stream()
-                        .inspect_ok(move |chunk_with_states| {
+                        .inspect_ok(move |stream_chunk| {
                             metrics
                                 .partition_input_count
-                                .with_label_values(&[&actor_id, &source_id, &split_id])
-                                .inc_by(chunk_with_states.chunk.cardinality() as u64);
+                                .with_label_values(&[
+                                    &actor_id,
+                                    &source_id,
+                                    &split_id,
+                                    &source_name,
+                                    &fragment_id,
+                                ])
+                                .inc_by(stream_chunk.cardinality() as u64);
                         }),
                     BUFFER_SIZE,
                 )
@@ -397,7 +405,7 @@ mod tests {
         .into_stream();
 
         let stream_chunk = reader.next().await.unwrap().unwrap();
-        let (op, row) = stream_chunk.chunk.rows().next().unwrap();
+        let (op, row) = stream_chunk.rows().next().unwrap();
         assert_eq!(op, Op::Insert);
         assert_eq!(row.datum_at(0), Some(ScalarImpl::Int32(533)).to_datum_ref(),);
         assert_eq!(

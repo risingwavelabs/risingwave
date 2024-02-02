@@ -58,6 +58,7 @@ impl ConfluentSchemaResolver {
         self.confluent_client
             .get_schema_by_subject(subject_name)
             .await
+            .map_err(Into::into)
     }
 
     // get the writer schema by id

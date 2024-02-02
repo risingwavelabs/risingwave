@@ -23,12 +23,17 @@ BACKGROUND_DDL_DIR=$TEST_DIR/background_ddl
 COMMON_DIR=$BACKGROUND_DDL_DIR/common
 
 CLUSTER_PROFILE='ci-1cn-1fe-kafka-with-recovery'
+echo "--- Configuring cluster profiles"
 if [[ -n "${BUILDKITE:-}" ]]; then
-  RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe-with-monitoring'
-else
+  echo "Running in buildkite"
   RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe'
+  MINIO_RATE_LIMIT_CLUSTER_PROFILE='ci-3cn-1fe-with-minio-rate-limit'
+else
+  echo "Running locally"
+  RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe-with-monitoring'
+  MINIO_RATE_LIMIT_CLUSTER_PROFILE='ci-3cn-1fe-with-monitoring-and-minio-rate-limit'
 fi
-export RUST_LOG="info,risingwave_meta::barrier::progress=debug,risingwave_meta::rpc::ddl_controller=debug"
+export RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 
 run_sql_file() {
   psql -h localhost -p 4566 -d dev -U root -f "$@"
@@ -60,8 +65,8 @@ rename_logs_with_prefix() {
 }
 
 kill_cluster() {
-  cargo make kill
-  cargo make wait-processes-exit
+  cargo make ci-kill-no-dump-logs
+  wait
 }
 
 restart_cluster() {
@@ -150,7 +155,6 @@ test_backfill_tombstone() {
   ./risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
   echo "--- Kill cluster"
   kill_cluster
-  cargo make wait-processes-exit
   wait
 }
 
@@ -171,9 +175,7 @@ test_replication_with_column_pruning() {
   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/select.sql </dev/null
   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/drop.sql
   echo "--- Kill cluster"
-  cargo make kill
-  cargo make wait-processes-exit
-  wait
+  kill_cluster
 }
 
 # Test sink backfill recovery
@@ -200,13 +202,11 @@ test_sink_backfill_recovery() {
 
   # Verify data matches upstream table.
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/validate_sink.slt'
-  cargo make kill
-  cargo make wait-processes-exit
-  wait
+  kill_cluster
 }
 
 test_arrangement_backfill_snapshot_and_upstream_runtime() {
-  echo "--- e2e, test_backfill_snapshot_and_upstream_runtime"
+  echo "--- e2e, test_arrangement_backfill_snapshot_and_upstream_runtime, $RUNTIME_CLUSTER_PROFILE"
   cargo make ci-start $RUNTIME_CLUSTER_PROFILE
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
@@ -218,12 +218,11 @@ test_arrangement_backfill_snapshot_and_upstream_runtime() {
 
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_arrangement.slt'
 
-  cargo make kill
-  cargo make wait-processes-exit
+  cargo make ci-kill
 }
 
 test_no_shuffle_backfill_snapshot_and_upstream_runtime() {
-  echo "--- e2e, test_backfill_snapshot_and_upstream_runtime"
+  echo "--- e2e, test_no_shuffle_backfill_snapshot_and_upstream_runtime, $RUNTIME_CLUSTER_PROFILE"
   cargo make ci-start $RUNTIME_CLUSTER_PROFILE
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
@@ -235,12 +234,11 @@ test_no_shuffle_backfill_snapshot_and_upstream_runtime() {
 
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_no_shuffle.slt'
 
-  cargo make kill
-  cargo make wait-processes-exit
+  kill_cluster
 }
 
 test_backfill_snapshot_runtime() {
-  echo "--- e2e, test_backfill_snapshot_runtime"
+  echo "--- e2e, test_backfill_snapshot_runtime, $RUNTIME_CLUSTER_PROFILE"
   cargo make ci-start $RUNTIME_CLUSTER_PROFILE
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
@@ -249,8 +247,36 @@ test_backfill_snapshot_runtime() {
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_no_shuffle.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_arrangement.slt'
 
-  cargo make kill
-  cargo make wait-processes-exit
+  kill_cluster
+}
+
+# Throttle the storage throughput.
+# Arrangement Backfill should not fail because of this.
+test_backfill_snapshot_with_limited_storage_throughput() {
+  echo "--- e2e, test_backfill_snapshot_with_limited_storage_throughput, $MINIO_RATE_LIMIT_CLUSTER_PROFILE"
+  cargo make ci-start $MINIO_RATE_LIMIT_CLUSTER_PROFILE
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_no_shuffle.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_arrangement.slt'
+
+  kill_cluster
+}
+
+# Test case where we do backfill with PK of 10 columns to measure performance impact.
+test_backfill_snapshot_with_wider_rows() {
+  echo "--- e2e, test_backfill_snapshot_with_wider_rows, $RUNTIME_CLUSTER_PROFILE"
+  cargo make ci-start $RUNTIME_CLUSTER_PROFILE
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_wide_table.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_wide_snapshot.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_no_shuffle.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_arrangement.slt'
+
+  kill_cluster
 }
 
 main() {
@@ -270,6 +296,8 @@ main() {
 
     # Backfill will happen in sequence here.
     test_backfill_snapshot_runtime
+    test_backfill_snapshot_with_wider_rows
+    test_backfill_snapshot_with_limited_storage_throughput
 
     # No upstream only tests, because if there's no snapshot,
     # Backfill will complete almost immediately.

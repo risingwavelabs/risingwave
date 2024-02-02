@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
@@ -22,10 +24,34 @@ use risingwave_sqlparser::ast::{
     CreateFunctionBody, FunctionDefinition, ObjectName, OperateFunctionArg,
 };
 use risingwave_sqlparser::parser::{Parser, ParserError};
+use thiserror_ext::AsReport;
 
 use super::*;
+use crate::binder::UdfContext;
 use crate::catalog::CatalogError;
+use crate::expr::{Expr, ExprImpl, Literal};
 use crate::{bind_data_type, Binder};
+
+/// Create a mock `udf_context`, which is used for semantic check
+fn create_mock_udf_context(
+    arg_types: Vec<DataType>,
+    arg_names: Vec<String>,
+) -> HashMap<String, ExprImpl> {
+    let mut ret: HashMap<String, ExprImpl> = (1..=arg_types.len())
+        .map(|i| {
+            let mock_expr =
+                ExprImpl::Literal(Box::new(Literal::new(None, arg_types[i - 1].clone())));
+            (format!("${i}"), mock_expr)
+        })
+        .collect();
+
+    for (i, arg_name) in arg_names.into_iter().enumerate() {
+        let mock_expr = ExprImpl::Literal(Box::new(Literal::new(None, arg_types[i].clone())));
+        ret.insert(arg_name, mock_expr);
+    }
+
+    ret
+}
 
 pub async fn handle_create_sql_function(
     handler_args: HandlerArgs,
@@ -45,7 +71,8 @@ pub async fn handle_create_sql_function(
     }
 
     let language = "sql".to_string();
-    // Just a basic sanity check for language
+
+    // Just a basic sanity check for `language`
     if !matches!(params.language, Some(lang) if lang.real_value().to_lowercase() == "sql") {
         return Err(ErrorCode::InvalidParameterValue(
             "`language` for sql udf must be `sql`".to_string(),
@@ -113,8 +140,10 @@ pub async fn handle_create_sql_function(
         }
     };
 
+    let mut arg_names = vec![];
     let mut arg_types = vec![];
     for arg in args.unwrap_or_default() {
+        arg_names.push(arg.name.map_or("".to_string(), |n| n.real_value()));
         arg_types.push(bind_data_type(&arg.data_type)?);
     }
 
@@ -147,6 +176,49 @@ pub async fn handle_create_sql_function(
         return Err(ErrorCode::InvalidInputSyntax(err).into());
     } else {
         debug_assert!(parse_result.is_ok());
+
+        // Conduct semantic check (e.g., see if the inner calling functions exist, etc.)
+        let ast = parse_result.unwrap();
+        let mut binder = Binder::new_for_system(session);
+
+        binder
+            .udf_context_mut()
+            .update_context(create_mock_udf_context(
+                arg_types.clone(),
+                arg_names.clone(),
+            ));
+
+        binder.set_udf_binding_flag();
+
+        if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
+            match binder.bind_expr(expr) {
+                Ok(expr) => {
+                    // Check if the return type mismatches
+                    if expr.return_type() != return_type {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "\nreturn type mismatch detected\nexpected: [{}]\nactual: [{}]\nplease adjust your function definition accordingly",
+                            return_type,
+                            expr.return_type()
+                        ))
+                        .into());
+                    }
+                }
+                Err(e) => return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "failed to conduct semantic check, please see if you are calling non-existence functions: {}",
+                    e.as_report()
+                ))
+                .into()),
+            }
+        } else {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "failed to parse the input query and extract the udf expression,
+                please recheck the syntax"
+                    .to_string(),
+            )
+            .into());
+        }
+
+        binder.unset_udf_binding_flag();
     }
 
     // Create the actual function, will be stored in function catalog
@@ -156,12 +228,13 @@ pub async fn handle_create_sql_function(
         database_id,
         name: function_name,
         kind: Some(kind),
+        arg_names,
         arg_types: arg_types.into_iter().map(|t| t.into()).collect(),
         return_type: Some(return_type.into()),
         language,
-        identifier: "".to_string(),
+        identifier: None,
         body: Some(body),
-        link: "".to_string(),
+        link: None,
         owner: session.user_id(),
     };
 

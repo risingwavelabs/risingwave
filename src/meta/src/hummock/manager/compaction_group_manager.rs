@@ -34,6 +34,7 @@ use risingwave_pb::hummock::{
     compact_task, CompactionConfig, CompactionGroupInfo, CompatibilityVersion, GroupConstruct,
     GroupDelta, GroupDestroy, GroupMetaChange, GroupTableChange,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::{OnceCell, RwLock};
 use tracing::warn;
 
@@ -393,7 +394,9 @@ impl HummockManager {
     pub async fn unregister_table_ids_fail_fast(&self, table_ids: &[StateTableId]) {
         self.unregister_table_ids(table_ids)
             .await
-            .unwrap_or_else(|e| panic!("unregister table ids fail: {table_ids:?} {e}"));
+            .unwrap_or_else(|e| {
+                panic!("unregister table ids fail: {table_ids:?} {}", e.as_report())
+            });
     }
 
     pub async fn update_compaction_config(
@@ -775,10 +778,10 @@ pub(super) struct CompactionGroupManager {
 }
 
 impl CompactionGroupManager {
-    async fn init<S: MetaStore>(&mut self, meta_store: &S) -> Result<()> {
+    async fn init<S: MetaStore>(&mut self, meta_store: Option<&S>) -> Result<()> {
         let loaded_compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup> =
             match &self.sql_meta_store {
-                None => CompactionGroup::list(meta_store)
+                None => CompactionGroup::list(meta_store.unwrap())
                     .await?
                     .into_iter()
                     .map(|cg| (cg.group_id(), cg))
@@ -804,7 +807,7 @@ impl CompactionGroupManager {
     pub(super) async fn get_or_insert_compaction_group_config<S: MetaStore>(
         &mut self,
         compaction_group_id: CompactionGroupId,
-        meta_store: &S,
+        meta_store: Option<&S>,
     ) -> Result<CompactionGroup> {
         let r = self
             .get_or_insert_compaction_group_configs(&[compaction_group_id], meta_store)
@@ -816,7 +819,7 @@ impl CompactionGroupManager {
     pub(super) async fn get_or_insert_compaction_group_configs<S: MetaStore>(
         &mut self,
         compaction_group_ids: &[CompactionGroupId],
-        meta_store: &S,
+        meta_store: Option<&S>,
     ) -> Result<HashMap<CompactionGroupId, CompactionGroup>> {
         let mut compaction_groups = create_trx_wrapper!(
             self.sql_meta_store,
@@ -855,7 +858,7 @@ impl CompactionGroupManager {
         &mut self,
         compaction_group_ids: &[CompactionGroupId],
         config_to_update: &[MutableConfig],
-        meta_store: &S,
+        meta_store: Option<&S>,
     ) -> Result<Vec<CompactionGroup>> {
         let mut compaction_groups = create_trx_wrapper!(
             self.sql_meta_store,
@@ -887,7 +890,7 @@ impl CompactionGroupManager {
         &mut self,
         group_id: CompactionGroupId,
         config: CompactionConfig,
-        meta_store: &S,
+        meta_store: Option<&S>,
     ) -> Result<()> {
         let insert = create_trx_wrapper!(
             self.sql_meta_store,
@@ -909,7 +912,7 @@ impl CompactionGroupManager {
     async fn purge<S: MetaStore>(
         &mut self,
         existing_groups: HashSet<CompactionGroupId>,
-        meta_store: &S,
+        meta_store: Option<&S>,
     ) -> Result<()> {
         let mut compaction_groups = create_trx_wrapper!(
             self.sql_meta_store,

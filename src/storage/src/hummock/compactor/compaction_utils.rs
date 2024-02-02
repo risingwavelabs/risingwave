@@ -241,7 +241,6 @@ pub async fn generate_splits(
                     .sstable_store
                     .sstable(sstable_info, &mut StoreLocalStatistic::default())
                     .await?
-                    .value()
                     .meta
                     .block_metas
                     .iter()
