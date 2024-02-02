@@ -18,3 +18,4 @@ pub mod context;
 mod pg_get_indexdef;
 mod pg_get_userbyid;
 mod pg_get_viewdef;
+mod pg_indexes_size;
