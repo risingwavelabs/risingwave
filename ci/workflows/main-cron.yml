@@ -263,8 +263,8 @@ steps:
     timeout_in_minutes: 70
     retry: *auto-retry
 
-  - label: "integration test (madsim) - backfill_tests"
-    key: "integration-test-deterministic-others"
+  - label: "integration test (madsim) - backfill"
+    key: "integration-test-deterministic-backfill"
     command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh backfill_tests::"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -281,7 +281,7 @@ steps:
     retry: *auto-retry
 
   - label: "integration test (madsim) - storage"
-    key: "integration-test-deterministic-others"
+    key: "integration-test-deterministic-storage"
     command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh storage::"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
@@ -298,7 +298,7 @@ steps:
     retry: *auto-retry
 
   - label: "integration test (madsim) - sink"
-    key: "integration-test-deterministic-others"
+    key: "integration-test-deterministic-sink"
     command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh sink::"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
