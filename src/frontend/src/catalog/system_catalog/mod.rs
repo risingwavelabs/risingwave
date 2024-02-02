@@ -26,7 +26,6 @@ use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, SysCatalogReader, TableDesc, TableId, DEFAULT_SUPER_USER_ID,
     NON_RESERVED_SYS_CATALOG_ID,
 };
-use risingwave_common::error::BoxedError;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
@@ -38,6 +37,7 @@ use crate::catalog::system_catalog::information_schema::*;
 use crate::catalog::system_catalog::pg_catalog::*;
 use crate::catalog::system_catalog::rw_catalog::*;
 use crate::catalog::view_catalog::ViewCatalog;
+use crate::error::BoxedError;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::session::AuthContext;

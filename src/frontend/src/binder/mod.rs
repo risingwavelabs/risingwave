@@ -17,13 +17,14 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_common::error::Result;
 use risingwave_common::session_config::{ConfigMap, SearchPath};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_sqlparser::ast::{
     Expr as AstExpr, FunctionArg, FunctionArgExpr, SelectItem, SetExpr, Statement,
 };
+
+use crate::error::Result;
 
 mod bind_context;
 mod bind_param;
@@ -51,7 +52,6 @@ pub use relation::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
     BoundWindowTableFunction, Relation, ResolveQualifiedNameError, WindowTableFunctionKind,
 };
-use risingwave_common::error::ErrorCode;
 pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::*;
 pub use statement::BoundStatement;
@@ -62,6 +62,7 @@ use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, TableId, ViewId};
+use crate::error::ErrorCode;
 use crate::expr::ExprImpl;
 use crate::session::{AuthContext, SessionImpl};
 

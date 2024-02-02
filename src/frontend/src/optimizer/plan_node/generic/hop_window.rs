@@ -17,13 +17,13 @@ use std::num::NonZeroUsize;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Interval};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_expr::ExprError;
 
 use super::super::utils::IndicesDisplay;
 use super::{impl_distill_unit_from_fields, GenericPlanNode, GenericPlanRef};
+use crate::error::Result;
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanRef;

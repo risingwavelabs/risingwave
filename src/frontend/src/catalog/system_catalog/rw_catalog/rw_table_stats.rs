@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::error::Result;
 
 pub const RW_TABLE_STATS_TABLE_NAME: &str = "rw_table_stats";
 pub const RW_TABLE_STATS_TABLE_ID_INDEX: usize = 0;
