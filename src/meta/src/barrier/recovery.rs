@@ -658,16 +658,23 @@ impl GlobalBarrierManagerContext {
 
         let mut compared_table_parallelisms = table_parallelisms.clone();
 
-        let (reschedule_fragment, _) = self
-            .scale_controller
-            .prepare_reschedule_command(
-                plan,
-                RescheduleOptions {
-                    resolve_no_shuffle_upstream: true,
-                },
-                Some(&mut compared_table_parallelisms),
-            )
-            .await?;
+        // skip reschedule if no reschedule is generated.
+        let reschedule_fragment = if plan.is_empty() {
+            HashMap::new()
+        } else {
+            let (reschedule_fragment, _) = self
+                .scale_controller
+                .prepare_reschedule_command(
+                    plan,
+                    RescheduleOptions {
+                        resolve_no_shuffle_upstream: true,
+                    },
+                    Some(&mut compared_table_parallelisms),
+                )
+                .await?;
+
+            reschedule_fragment
+        };
 
         // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
         debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
@@ -787,16 +794,20 @@ impl GlobalBarrierManagerContext {
 
         let mut compared_table_parallelisms = table_parallelisms.clone();
 
-        let (reschedule_fragment, applied_reschedules) = self
-            .scale_controller
-            .prepare_reschedule_command(
-                plan,
-                RescheduleOptions {
-                    resolve_no_shuffle_upstream: true,
-                },
-                Some(&mut compared_table_parallelisms),
-            )
-            .await?;
+        // skip reschedule if no reschedule is generated.
+        let (reschedule_fragment, applied_reschedules) = if plan.is_empty() {
+            (HashMap::new(), HashMap::new())
+        } else {
+            self.scale_controller
+                .prepare_reschedule_command(
+                    plan,
+                    RescheduleOptions {
+                        resolve_no_shuffle_upstream: true,
+                    },
+                    Some(&mut compared_table_parallelisms),
+                )
+                .await?
+        };
 
         // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
         debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
