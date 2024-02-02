@@ -2833,7 +2833,7 @@ impl HummockManager {
                                 unreachable!()
                             }
 
-                            e => {
+                            e @ (RequestEvent::PullTask(_) | RequestEvent::ReportTask(_)) => {
                                 let _ = tx.send((context_id, e));
                             }
                         }
