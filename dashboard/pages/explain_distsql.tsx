@@ -77,7 +77,7 @@ function layoutElements(
   nodeList: any,
   edgeList: any,
   stageToNode: { [key: string]: number },
-  rootStageId: string
+  rootStageId: string,
 ) {
   const idToNode = new Map()
   nodeList.forEach((node: { id: any }) => {
@@ -112,7 +112,7 @@ function parseSubElements(
   nodeList: any,
   edgeList: any,
   visited: Set<string>,
-  nodeStagePairs: number[][]
+  nodeStagePairs: number[][],
 ) {
   if (root.children.length == 0) return
   for (var i = 0; i < root.children.length; i++) {
@@ -146,7 +146,7 @@ function parseSubElements(
       nodeList,
       edgeList,
       visited,
-      nodeStagePairs
+      nodeStagePairs,
     )
     nodeList.push(node)
   }
@@ -201,7 +201,7 @@ function parseElements(input: any) {
       nodeList,
       edgeList,
       visited,
-      nodeStagePairs
+      nodeStagePairs,
     )
     nodeList.push(node)
   }

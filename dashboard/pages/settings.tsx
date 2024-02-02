@@ -35,7 +35,7 @@ export default function Settings() {
 function ClientSettings() {
   const [apiEndpoint, saveApiEndpoint] = useLocalStorage(
     API_ENDPOINT_KEY,
-    DEFAULT_API_ENDPOINT
+    DEFAULT_API_ENDPOINT,
   )
 
   return (

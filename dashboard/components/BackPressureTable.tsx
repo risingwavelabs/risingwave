@@ -51,7 +51,7 @@ export default function BackPressureTable({
           let metrics = await getActorBackPressures()
           metrics.outputBufferBlockingDuration = sortBy(
             metrics.outputBufferBlockingDuration,
-            (m) => (m.metric.fragment_id, m.metric.downstream_fragment_id)
+            (m) => (m.metric.fragment_id, m.metric.downstream_fragment_id),
           )
           setBackPressuresMetrics(metrics)
           await new Promise((resolve) => setTimeout(resolve, 5000)) // refresh every 5 secs

@@ -66,12 +66,12 @@ export default function FragmentDependencyGraph({
         .attr("d", ({ points }: DagLink) => line(points))
         .attr("fill", "none")
         .attr("stroke-width", (d) =>
-          isSelected(d.source) || isSelected(d.target) ? 2 : 1
+          isSelected(d.source) || isSelected(d.target) ? 2 : 1,
         )
         .attr("stroke", (d) =>
           isSelected(d.source) || isSelected(d.target)
             ? theme.colors.blue["500"]
-            : theme.colors.gray["300"]
+            : theme.colors.gray["300"],
         )
     const createEdge = (sel: Enter<EdgeSelection>) =>
       sel.append("path").attr("class", "edge").call(applyEdge)
@@ -90,7 +90,7 @@ export default function FragmentDependencyGraph({
       sel
         .attr("transform", (d) => `translate(${d.x! + MARGIN_X}, ${d.y})`)
         .attr("fill", (d) =>
-          isSelected(d) ? theme.colors.blue["500"] : theme.colors.gray["500"]
+          isSelected(d) ? theme.colors.blue["500"] : theme.colors.gray["500"],
         )
 
     const createNode = (sel: Enter<NodeSelection>) =>
@@ -119,7 +119,7 @@ export default function FragmentDependencyGraph({
         .attr("alignment-baseline", "middle")
         .attr("y", (d) => d.y!)
         .attr("fill", (d) =>
-          isSelected(d) ? theme.colors.black["500"] : theme.colors.gray["500"]
+          isSelected(d) ? theme.colors.black["500"] : theme.colors.gray["500"],
         )
         .attr("font-weight", "600")
     const createLabel = (sel: Enter<LabelSelection>) =>
@@ -141,12 +141,12 @@ export default function FragmentDependencyGraph({
         .attr("x", STROKE_WIDTH)
         .attr(
           "height",
-          nodeRadius * 2 + edgeRadius * 2 - MARGIN_Y * 2 - STROKE_WIDTH * 2
+          nodeRadius * 2 + edgeRadius * 2 - MARGIN_Y * 2 - STROKE_WIDTH * 2,
         )
         .attr("width", svgWidth - STROKE_WIDTH * 2)
         .attr(
           "y",
-          (d) => d.y! - nodeRadius - edgeRadius + MARGIN_Y + STROKE_WIDTH
+          (d) => d.y! - nodeRadius - edgeRadius + MARGIN_Y + STROKE_WIDTH,
         )
         .attr("rx", 5)
         .attr("fill", theme.colors.gray["500"])

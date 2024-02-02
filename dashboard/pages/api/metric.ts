@@ -23,7 +23,7 @@ export interface BackPressuresMetrics {
 
 export async function getActorBackPressures() {
   const res: BackPressuresMetrics = await api.get(
-    "/metrics/actor/back_pressures"
+    "/metrics/actor/back_pressures",
   )
   return res
 }

@@ -28,7 +28,7 @@ export async function getActors(): Promise<ActorLocation[]> {
 
 export async function getFragments(): Promise<TableFragments[]> {
   let fragmentList: TableFragments[] = (await api.get("/fragments2")).map(
-    TableFragments.fromJSON
+    TableFragments.fromJSON,
   )
   fragmentList = sortBy(fragmentList, (x) => x.tableId)
   return fragmentList
@@ -72,7 +72,7 @@ export async function getStreamingJobs() {
     await getMaterializedViews(),
     await getTables(),
     await getIndexes(),
-    await getSinks()
+    await getSinks(),
   )
   jobs = sortBy(jobs, (x) => x.id)
   return jobs
@@ -84,14 +84,14 @@ export async function getRelations() {
     await getTables(),
     await getIndexes(),
     await getSinks(),
-    await getSources()
+    await getSources(),
   )
   relations = sortBy(relations, (x) => x.id)
   return relations
 }
 
 async function getTableCatalogsInner(
-  path: "tables" | "materialized_views" | "indexes" | "internal_tables"
+  path: "tables" | "materialized_views" | "indexes" | "internal_tables",
 ) {
   let list: Table[] = (await api.get(`/${path}`)).map(Table.fromJSON)
   list = sortBy(list, (x) => x.id)

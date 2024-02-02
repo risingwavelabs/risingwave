@@ -20,14 +20,10 @@ import { Relation } from "../pages/api/streaming"
 import { TableFragments_Fragment } from "../proto/gen/meta"
 import { GraphNode } from "./algo"
 
-export type Enter<Type> = Type extends d3.Selection<
-  any,
-  infer B,
-  infer C,
-  infer D
->
-  ? d3.Selection<d3.EnterElement, B, C, D>
-  : never
+export type Enter<Type> =
+  Type extends d3.Selection<any, infer B, infer C, infer D>
+    ? d3.Selection<d3.EnterElement, B, C, D>
+    : never
 
 interface DagNode {
   node: GraphNode
@@ -164,7 +160,7 @@ function dagLayout(nodes: GraphNode[]) {
             isStraightLineOccupied(
               node2Layer.get(node),
               node2Layer.get(nextNode),
-              ++r
+              ++r,
             )
           ) {}
           putNodeInPosition(node, r)
@@ -189,7 +185,7 @@ function dagLayout(nodes: GraphNode[]) {
           !isStraightLineOccupied(
             node2Layer.get(node) + 1,
             node2Layer.get(nextNode),
-            r
+            r,
           )
         ) {
           putNodeInPosition(nextNode, r)
@@ -202,7 +198,7 @@ function dagLayout(nodes: GraphNode[]) {
           isStraightLineOccupied(
             node2Layer.get(node) + 1,
             node2Layer.get(nextNode),
-            ++r
+            ++r,
           )
         ) {}
         putNodeInPosition(nextNode, r)
@@ -224,7 +220,7 @@ function dagLayout(nodes: GraphNode[]) {
  * @returns Layer and row of the item
  */
 function gridLayout<I extends LayoutItemBase>(
-  items: Array<I>
+  items: Array<I>,
 ): Map<I, [number, number]> {
   // turn item to GraphNode
   let idToItem = new Map<String, I>()
@@ -318,7 +314,7 @@ export interface Edge {
 export function layoutItem<I extends LayoutItemBase>(
   items: Array<I>,
   layerMargin: number,
-  rowMargin: number
+  rowMargin: number,
 ): (I & Position)[] {
   let layoutMap = gridLayout(items)
   let layerRequiredWidth = new Map<number, number>()
@@ -350,7 +346,7 @@ export function layoutItem<I extends LayoutItemBase>(
     index: number,
     margin: number,
     resultMap: Map<number, number>,
-    marginMap: Map<number, number>
+    marginMap: Map<number, number>,
   ): number => {
     let rtn = resultMap.get(index)
     if (rtn) {
@@ -377,7 +373,7 @@ export function layoutItem<I extends LayoutItemBase>(
       i,
       layerMargin,
       layerCumulativeWidth,
-      layerRequiredWidth
+      layerRequiredWidth,
     )
   }
   for (let i = 0; i <= maxRow; ++i) {
@@ -406,7 +402,7 @@ function layoutRelation(
   relations: Array<RelationPoint>,
   layerMargin: number,
   rowMargin: number,
-  nodeRadius: number
+  nodeRadius: number,
 ): RelationPointPosition[] {
   const result = layoutItem(relations, layerMargin, rowMargin)
   return result.map(({ x, y, ...data }) => ({
@@ -420,13 +416,13 @@ export function flipLayoutRelation(
   relations: Array<RelationPoint>,
   layerMargin: number,
   rowMargin: number,
-  nodeRadius: number
+  nodeRadius: number,
 ): RelationPointPosition[] {
   const fragmentPosition = layoutRelation(
     relations,
     rowMargin,
     layerMargin,
-    nodeRadius
+    nodeRadius,
   )
   return fragmentPosition.map(({ x, y, ...data }) => ({
     x: y,
@@ -436,7 +432,7 @@ export function flipLayoutRelation(
 }
 
 export function generateRelationEdges(
-  layoutMap: RelationPointPosition[]
+  layoutMap: RelationPointPosition[],
 ): Edge[] {
   const links = []
   const relationMap = new Map<string, RelationPointPosition>()
@@ -460,7 +456,7 @@ export function generateRelationEdges(
 }
 
 export function generateFragmentEdges(
-  layoutMap: FragmentBoxPosition[]
+  layoutMap: FragmentBoxPosition[],
 ): Edge[] {
   const links = []
   const fragmentMap = new Map<string, FragmentBoxPosition>()

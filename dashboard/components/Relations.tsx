@@ -112,7 +112,7 @@ export const streamingJobColumns = [dependentsColumn, fragmentsColumn]
 export function Relations<R extends Relation>(
   title: string,
   getRelations: () => Promise<R[]>,
-  extraColumns: Column<R>[]
+  extraColumns: Column<R>[],
 ) {
   const { response: relationList } = useFetch(getRelations)
   const [modalData, setModalId] = useCatalogModal(relationList)

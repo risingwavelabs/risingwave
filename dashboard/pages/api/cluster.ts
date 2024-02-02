@@ -24,14 +24,14 @@ export async function getClusterMetrics() {
 
 export async function getClusterInfoFrontend() {
   const res: WorkerNode[] = (await api.get("/clusters/1")).map(
-    WorkerNode.fromJSON
+    WorkerNode.fromJSON,
   )
   return res
 }
 
 export async function getClusterInfoComputeNode() {
   const res: WorkerNode[] = (await api.get("/clusters/2")).map(
-    WorkerNode.fromJSON
+    WorkerNode.fromJSON,
   )
   return res
 }

@@ -36,7 +36,7 @@ import { CatalogModal, useCatalogModal } from "./CatalogModal"
 
 function boundBox(
   relationPosition: RelationPointPosition[],
-  nodeRadius: number
+  nodeRadius: number,
 ): {
   width: number
   height: number
@@ -73,14 +73,14 @@ export default function RelationDependencyGraph({
       nodes,
       layerMargin,
       rowMargin,
-      nodeRadius
+      nodeRadius,
     ).map(
       ({ x, y, ...data }) =>
         ({
           x: x + layoutMargin,
           y: y + layoutMargin,
           ...data,
-        } as RelationPointPosition)
+        }) as RelationPointPosition,
     )
     const links = generateRelationEdges(layoutMap)
     const { width, height } = boundBox(layoutMap, nodeRadius)
@@ -120,15 +120,15 @@ export default function RelationDependencyGraph({
         .attr("fill", "none")
         .attr("stroke-width", 1)
         .attr("stroke-width", (d) =>
-          isSelected(d.source) || isSelected(d.target) ? 4 : 2
+          isSelected(d.source) || isSelected(d.target) ? 4 : 2,
         )
         .attr("opacity", (d) =>
-          isSelected(d.source) || isSelected(d.target) ? 1 : 0.5
+          isSelected(d.source) || isSelected(d.target) ? 1 : 0.5,
         )
         .attr("stroke", (d) =>
           isSelected(d.source) || isSelected(d.target)
             ? theme.colors.blue["500"]
-            : theme.colors.gray["300"]
+            : theme.colors.gray["300"],
         )
 
     const createEdge = (sel: Enter<EdgeSelection>) =>
@@ -200,7 +200,7 @@ export default function RelationDependencyGraph({
 
       typeTooltip.text(
         ({ relation }) =>
-          `${relation.name} (${relationTypeTitleCase(relation)})`
+          `${relation.name} (${relationTypeTitleCase(relation)})`,
       )
 
       // Relation modal

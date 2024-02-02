@@ -67,7 +67,7 @@ export default function AwaitTreeDump() {
 
     try {
       const response: StackTraceResponse = StackTraceResponse.fromJSON(
-        await api.get(`/monitor/await_tree/${computeNodeId}`)
+        await api.get(`/monitor/await_tree/${computeNodeId}`),
       )
 
       const actorTraces = _(response.actorTraces)

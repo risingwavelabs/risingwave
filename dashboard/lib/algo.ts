@@ -52,7 +52,7 @@ export function treeBfs(root: GraphNode, step: GraphTraverseStep) {
 export function graphBfs(
   root: GraphNode,
   step: GraphTraverseStep,
-  neighborListKey?: string
+  neighborListKey?: string,
 ) {
   let key = (neighborListKey || "nextNodes") as keyof typeof root
   let visitedNodes = new Set()

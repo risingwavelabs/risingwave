@@ -165,7 +165,7 @@ export default function Cluster() {
           metrics.cpuData = sortBy(metrics.cpuData, (m) => m.metric.instance)
           metrics.memoryData = sortBy(
             metrics.memoryData,
-            (m) => m.metric.instance
+            (m) => m.metric.instance,
           )
           setMetrics(metrics)
           await new Promise((resolve) => setTimeout(resolve, 5000)) // refresh every 5 secs

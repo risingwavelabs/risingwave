@@ -58,7 +58,7 @@ export interface PlanNodeDatum {
 }
 
 function buildPlanNodeDependency(
-  fragment: TableFragments_Fragment
+  fragment: TableFragments_Fragment,
 ): d3.HierarchyNode<PlanNodeDatum> {
   const firstActor = fragment.actors[0]
 
@@ -75,12 +75,12 @@ function buildPlanNodeDependency(
 
   if (firstActor.dispatcher.length > 0) {
     const firstDispatcherName = _.camelCase(
-      firstActor.dispatcher[0].type.replace(/^DISPATCHER_TYPE_/, "")
+      firstActor.dispatcher[0].type.replace(/^DISPATCHER_TYPE_/, ""),
     )
     if (firstActor.dispatcher.length > 1) {
       if (
         firstActor.dispatcher.every(
-          (d) => d.type === firstActor.dispatcher[0].type
+          (d) => d.type === firstActor.dispatcher[0].type,
         )
       ) {
         dispatcherName = `${firstDispatcherName}Dispatchers`
@@ -125,7 +125,7 @@ function findMergeNodes(root: StreamNode): MergeNode[] {
 }
 
 function buildFragmentDependencyAsEdges(
-  fragments: TableFragments
+  fragments: TableFragments,
 ): FragmentBox[] {
   const nodes: FragmentBox[] = []
   const actorToFragmentMapping = new Map<number, number>()
@@ -182,7 +182,7 @@ export default function Streaming() {
   const { response: actorBackPressures } = useFetch(
     getActorBackPressures,
     5000,
-    backPressureAlgo !== null
+    backPressureAlgo !== null,
   )
 
   const fragmentDependencyCallback = useCallback(() => {
@@ -305,7 +305,7 @@ export default function Streaming() {
         const value = algoFunc(m.sample) * 100
         map.set(
           `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
-          value
+          value,
         )
       }
       return map
@@ -330,7 +330,7 @@ export default function Streaming() {
               spellCheck={false}
               onChange={(event) => {
                 const id = relationList?.find(
-                  (x) => x.name == event.target.value
+                  (x) => x.name == event.target.value,
                 )?.id
                 if (id) {
                   setRelationId(id)
@@ -388,7 +388,7 @@ export default function Streaming() {
                 setBackPressureAlgo(
                   event.target.value === "disabled"
                     ? null
-                    : (event.target.value as BackPressureAlgo)
+                    : (event.target.value as BackPressureAlgo),
                 )
               }
             >

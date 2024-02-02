@@ -28,7 +28,7 @@ import useErrorToast from "../../hook/useErrorToast"
 export default function useFetch<T>(
   fetchFn: () => Promise<T>,
   intervalMs: number | null = null,
-  when: boolean = true
+  when: boolean = true,
 ) {
   const [response, setResponse] = useState<T>()
   const toast = useErrorToast()

@@ -39,7 +39,7 @@ type FragmentLayout = {
 
 function treeLayoutFlip<Datum>(
   root: d3.HierarchyNode<Datum>,
-  { dx, dy }: { dx: number; dy: number }
+  { dx, dy }: { dx: number; dy: number },
 ): d3.HierarchyPointNode<Datum> {
   const tree = d3.tree<Datum>().nodeSize([dy, dx])
 
@@ -59,7 +59,7 @@ function boundBox<Datum>(
   root: d3.HierarchyPointNode<Datum>,
   {
     margin: { top, bottom, left, right },
-  }: { margin: { top: number; bottom: number; left: number; right: number } }
+  }: { margin: { top: number; bottom: number; left: number; right: number } },
 ): { width: number; height: number } {
   let x0 = Infinity
   let x1 = -x0
@@ -111,7 +111,7 @@ export default function FragmentGraph({
       setCurrentStreamNode(node)
       onOpen()
     },
-    [onOpen, setCurrentStreamNode]
+    [onOpen, setCurrentStreamNode],
   )
 
   const planNodeDependencyDagCallback = useCallback(() => {
@@ -148,7 +148,7 @@ export default function FragmentGraph({
         return { width, height, id, ...data }
       }),
       fragmentDistanceX,
-      fragmentDistanceY
+      fragmentDistanceY,
     )
     const fragmentLayoutPosition = new Map<string, Position>()
     fragmentLayout.forEach(({ id, x, y }: FragmentBoxPosition) => {
@@ -250,7 +250,7 @@ export default function FragmentGraph({
           .attr("stroke-width", ({ id }) => (isSelected(id) ? 3 : 1))
           .attr("rx", 5)
           .attr("stroke", ({ id }) =>
-            isSelected(id) ? theme.colors.blue[500] : theme.colors.gray[500]
+            isSelected(id) ? theme.colors.blue[500] : theme.colors.gray[500],
           )
 
         // Stream node edges
