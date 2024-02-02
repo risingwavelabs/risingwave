@@ -217,7 +217,7 @@ impl Block {
                 let mut decoded = BytesMut::with_capacity(uncompressed_capacity);
                 unsafe { decoded.set_len(uncompressed_capacity) }
                 decoder
-                    .read_exact(&mut decoded)
+                    .read(&mut decoded)
                     .map_err(HummockError::decode_error)?;
                 debug_assert_eq!(decoded.capacity(), uncompressed_capacity);
                 decoded.freeze()
@@ -228,7 +228,7 @@ impl Block {
                 let mut decoded = BytesMut::with_capacity(uncompressed_capacity);
                 unsafe { decoded.set_len(uncompressed_capacity) }
                 decoder
-                    .read_exact(&mut decoded)
+                    .read(&mut decoded)
                     .map_err(HummockError::decode_error)?;
                 debug_assert_eq!(decoded.capacity(), uncompressed_capacity);
                 decoded.freeze()
