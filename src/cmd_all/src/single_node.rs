@@ -16,6 +16,9 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use clap::Parser;
+use risingwave_common::single_process_config::{
+    make_single_node_sql_endpoint, make_single_node_state_store_url,
+};
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
@@ -30,19 +33,23 @@ use crate::ParsedStandaloneOpts;
 #[derive(Eq, PartialOrd, PartialEq, Debug, Clone, Parser)]
 #[command(
     version,
-    about = "[DEFAULT] The Single Node mode. Start all services in one process, with process-level options. This will be executed if no subcommand is specified"
+    about = "[default] The Single Node mode. Start all services in one process, with process-level options. This will be executed if no subcommand is specified"
 )]
 /// Here we define our own defaults for the single node mode.
 pub struct SingleNodeOpts {
+    /// The prometheus address used by the single-node cluster.
+    /// If you have a prometheus instance,
+    /// it will poll the metrics from this address.
     #[clap(long, env = "RW_SINGLE_NODE_PROMETHEUS_LISTENER_ADDR")]
     prometheus_listener_addr: Option<String>,
 
+    /// The path to the cluster configuration file.
     #[clap(long, env = "RW_SINGLE_NODE_CONFIG_PATH")]
     config_path: Option<String>,
 
-    /// The data directory used by meta store and object store.
-    #[clap(long, env = "RW_SINGLE_NODE_DATA_DIRECTORY")]
-    data_directory: Option<String>,
+    /// The store directory used by meta store and object store.
+    #[clap(long, env = "RW_SINGLE_NODE_STORE_DIRECTORY")]
+    store_directory: Option<String>,
 
     /// The address of the meta node.
     #[clap(long, env = "RW_SINGLE_NODE_META_ADDR")]
@@ -79,8 +86,11 @@ pub fn map_single_node_opts_to_standalone_opts(opts: &SingleNodeOpts) -> ParsedS
         compactor_opts.config_path = config_path.clone();
     }
     // TODO(kwannoel): Also update state store URL
-    if let Some(data_directory) = &opts.data_directory {
-        meta_opts.data_directory = Some(data_directory.clone());
+    if let Some(store_directory) = &opts.store_directory {
+        let state_store_url = make_single_node_state_store_url(store_directory);
+        let meta_store_endpoint = make_single_node_sql_endpoint(store_directory);
+        meta_opts.state_store = Some(state_store_url);
+        meta_opts.sql_endpoint = Some(meta_store_endpoint);
     }
     if let Some(meta_addr) = &opts.meta_addr {
         meta_opts.listen_addr = meta_addr.clone();

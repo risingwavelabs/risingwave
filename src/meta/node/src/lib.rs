@@ -84,7 +84,7 @@ pub struct MetaNodeOpts {
 
     /// Endpoint of the SQL service, make it non-option when SQL service is required.
     #[clap(long, env = "RW_SQL_ENDPOINT")]
-    sql_endpoint: Option<String>,
+    pub sql_endpoint: Option<String>,
 
     #[clap(long, env = "RW_DASHBOARD_UI_PATH")]
     dashboard_ui_path: Option<String>,
@@ -145,7 +145,7 @@ pub struct MetaNodeOpts {
     /// State store url
     #[clap(long, env = "RW_STATE_STORE")]
     #[override_opts(path = system.state_store)]
-    state_store: Option<String>,
+    pub state_store: Option<String>,
 
     /// Remote directory for storing data and metadata objects.
     #[clap(long, env = "RW_DATA_DIRECTORY")]
@@ -198,9 +198,7 @@ impl MetaNodeOpts {
             sstable_size_mb: None,
             block_size_kb: None,
             bloom_false_positive: None,
-            // TODO: Update the state store
             state_store: Some(DEFAULT_SINGLE_NODE_STATE_STORE_URL.clone()),
-            // TODO: Update the data directory
             data_directory: Some("hummock_001".to_string()),
             do_not_config_object_storage_lifecycle: None,
             backup_storage_url: None,

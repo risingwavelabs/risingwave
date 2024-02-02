@@ -18,25 +18,28 @@ use std::sync::LazyLock;
 
 use home::home_dir;
 
-pub static DEFAULT_DATA_DIRECTORY: LazyLock<String> = LazyLock::new(|| {
+pub static DEFAULT_STORE_DIRECTORY: LazyLock<String> = LazyLock::new(|| {
     let mut home_path = home_dir().unwrap();
     home_path.push(".risingwave");
     let home_path = home_path.to_str().unwrap();
     home_path.to_string()
 });
 
-pub static DEFAULT_SINGLE_NODE_SQLITE_PATH: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "{}/meta_store/single_node.db",
-        DEFAULT_DATA_DIRECTORY.clone()
-    )
-});
+pub static DEFAULT_SINGLE_NODE_SQLITE_PATH: LazyLock<String> =
+    LazyLock::new(|| format!("{}/meta_store/single_node.db", &*DEFAULT_STORE_DIRECTORY));
 
 pub static DEFAULT_SINGLE_NODE_SQL_ENDPOINT: LazyLock<String> =
     LazyLock::new(|| format!("sqlite://{}?mode=rwc", *DEFAULT_SINGLE_NODE_SQLITE_PATH));
 
+pub fn make_single_node_sql_endpoint(store_directory: &String) -> String {
+    format!(
+        "sqlite://{}/meta_store/single_node.db?mode=rwc",
+        store_directory
+    )
+}
+
 pub static DEFAULT_SINGLE_NODE_STATE_STORE_PATH: LazyLock<String> =
-    LazyLock::new(|| format!("{}/state_store", DEFAULT_DATA_DIRECTORY.clone()));
+    LazyLock::new(|| format!("{}/state_store", DEFAULT_STORE_DIRECTORY.clone()));
 
 pub static DEFAULT_SINGLE_NODE_STATE_STORE_URL: LazyLock<String> = LazyLock::new(|| {
     format!(
@@ -44,3 +47,7 @@ pub static DEFAULT_SINGLE_NODE_STATE_STORE_URL: LazyLock<String> = LazyLock::new
         DEFAULT_SINGLE_NODE_STATE_STORE_PATH.clone()
     )
 });
+
+pub fn make_single_node_state_store_url(store_directory: &String) -> String {
+    format!("hummock+fs://{}/state_store", store_directory)
+}
