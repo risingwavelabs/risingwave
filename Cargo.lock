@@ -8620,6 +8620,7 @@ dependencies = [
 name = "risingwave_bench"
 version = "1.7.0-alpha"
 dependencies = [
+ "anyhow",
  "async-trait",
  "aws-config",
  "aws-sdk-s3",
