@@ -64,6 +64,8 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_ADVERTISE_ADDR")]
     pub advertise_addr: Option<String>,
 
+    /// We will start a http server at this address via `MetricsManager`.
+    /// Then the prometheus instance will poll the metrics from this address.
     #[clap(
         long,
         env = "RW_PROMETHEUS_LISTENER_ADDR",
