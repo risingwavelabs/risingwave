@@ -33,9 +33,9 @@ use risingwave_pb::plan_common::ColumnDescVersion;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
 use thiserror_ext::AsReport;
 
+use crate::array::DataChunk;
 pub use crate::constants::hummock;
 use crate::error::BoxedError;
-use crate::row::OwnedRow;
 use crate::types::DataType;
 
 /// The global version of the catalog.
@@ -148,7 +148,7 @@ pub fn cdc_table_name_column_desc() -> ColumnDesc {
 /// The local system catalog reader in the frontend node.
 #[async_trait]
 pub trait SysCatalogReader: Sync + Send + 'static {
-    async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>, BoxedError>;
+    async fn read_table(&self, table_id: &TableId) -> Result<DataChunk, BoxedError>;
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;

@@ -9303,6 +9303,7 @@ dependencies = [
  "risingwave_dml",
  "risingwave_expr",
  "risingwave_expr_impl",
+ "risingwave_frontend_macro",
  "risingwave_hummock_sdk",
  "risingwave_object_store",
  "risingwave_pb",
@@ -9323,6 +9324,15 @@ dependencies = [
  "tracing",
  "uuid",
  "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_frontend_macro"
+version = "1.7.0-alpha"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.48",
 ]
 
 [[package]]

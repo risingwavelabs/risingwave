@@ -61,6 +61,7 @@ risingwave_common_service = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_dml = { workspace = true }
 risingwave_expr = { workspace = true }
+risingwave_frontend_macro = { path = "macro" }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }

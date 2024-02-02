@@ -31,13 +31,6 @@ use super::statement::RewriteExprsRecursive;
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
-use crate::catalog::system_catalog::pg_catalog::{
-    PG_INDEX_COLUMNS, PG_INDEX_TABLE_NAME, PG_USER_ID_INDEX, PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
-};
-use crate::catalog::system_catalog::rw_catalog::{
-    RW_TABLE_STATS_COLUMNS, RW_TABLE_STATS_KEY_SIZE_INDEX, RW_TABLE_STATS_TABLE_ID_INDEX,
-    RW_TABLE_STATS_TABLE_NAME, RW_TABLE_STATS_VALUE_SIZE_INDEX,
-};
 use crate::expr::{
     AggCall, CorrelatedId, CorrelatedInputRef, Depth, Expr as _, ExprImpl, ExprType, FunctionCall,
     InputRef,
@@ -533,7 +526,6 @@ impl Binder {
     /// `bind_get_user_by_id_select` binds a select statement that returns a single user name by id,
     /// this is used for function `pg_catalog.get_user_by_id()`.
     pub fn bind_get_user_by_id_select(&mut self, input: &ExprImpl) -> Result<BoundSelect> {
-        let select_items = vec![InputRef::new(PG_USER_NAME_INDEX, DataType::Varchar).into()];
         let schema = Schema {
             fields: vec![Field::with_name(
                 DataType::Varchar,
@@ -555,16 +547,17 @@ impl Binder {
         };
         let from = Some(self.bind_relation_by_name_inner(
             Some(PG_CATALOG_SCHEMA_NAME),
-            PG_USER_TABLE_NAME,
+            "pg_user",
             None,
             false,
         )?);
+        let select_items = vec![self.bind_column(&["pg_user".into(), "usename".into()])?];
         let where_clause = Some(
             FunctionCall::new(
                 ExprType::Equal,
                 vec![
                     input,
-                    InputRef::new(PG_USER_ID_INDEX, DataType::Int32).into(),
+                    self.bind_column(&["pg_user".into(), "usesysid".into()])?,
                 ],
             )?
             .into(),
@@ -590,32 +583,23 @@ impl Binder {
         //     JOIN pg_index on stats.id = pg_index.indexrelid
         //     WHERE pg_index.indrelid = 'table_name'::regclass
 
-        let indexrelid_col = PG_INDEX_COLUMNS[0].1;
-        let tbl_stats_id_col = RW_TABLE_STATS_COLUMNS[0].1;
-
         // Filter to only the Indexes on this table
         let table_id = self.table_id_query(table)?;
 
         let constraint = JoinConstraint::On(Expr::BinaryOp {
-            left: Box::new(Expr::Identifier(Ident::new_unchecked(tbl_stats_id_col))),
+            left: Box::new(Expr::Identifier(Ident::new_unchecked("id"))),
             op: BinaryOperator::Eq,
-            right: Box::new(Expr::Identifier(Ident::new_unchecked(indexrelid_col))),
+            right: Box::new(Expr::Identifier(Ident::new_unchecked("indexrelid"))),
         });
         let indexes_with_stats = self.bind_table_with_joins(TableWithJoins {
             relation: TableFactor::Table {
-                name: ObjectName(vec![
-                    RW_CATALOG_SCHEMA_NAME.into(),
-                    RW_TABLE_STATS_TABLE_NAME.into(),
-                ]),
+                name: ObjectName(vec![RW_CATALOG_SCHEMA_NAME.into(), "rw_table_stats".into()]),
                 alias: None,
                 for_system_time_as_of_proctime: false,
             },
             joins: vec![Join {
                 relation: TableFactor::Table {
-                    name: ObjectName(vec![
-                        PG_CATALOG_SCHEMA_NAME.into(),
-                        PG_INDEX_TABLE_NAME.into(),
-                    ]),
+                    name: ObjectName(vec![PG_CATALOG_SCHEMA_NAME.into(), "pg_index".into()]),
                     alias: None,
                     for_system_time_as_of_proctime: false,
                 },
@@ -627,8 +611,8 @@ impl Binder {
         let sum = FunctionCall::new(
             ExprType::Add,
             vec![
-                InputRef::new(RW_TABLE_STATS_KEY_SIZE_INDEX, DataType::Int64).into(),
-                InputRef::new(RW_TABLE_STATS_VALUE_SIZE_INDEX, DataType::Int64).into(),
+                self.bind_column(&["rw_table_stats".into(), "total_key_size".into()])?,
+                self.bind_column(&["rw_table_stats".into(), "total_value_size".into()])?,
             ],
         )?
         .into();
@@ -637,8 +621,7 @@ impl Binder {
         let select_items: Vec<ExprImpl> =
             vec![AggCall::new_unchecked(AggKind::Sum0, vec![sum], DataType::Int64)?.into()];
 
-        let indrelid_col = PG_INDEX_COLUMNS[1].1;
-        let indrelid_ref = self.bind_column(&[indrelid_col.into()])?;
+        let indrelid_ref = self.bind_column(&["indrelid".into()])?;
         let where_clause: Option<ExprImpl> =
             Some(FunctionCall::new(ExprType::Equal, vec![indrelid_ref, table_id])?.into());
 
@@ -675,7 +658,7 @@ impl Binder {
         // Get table stats data
         let from = Some(self.bind_relation_by_name_inner(
             Some(RW_CATALOG_SCHEMA_NAME),
-            RW_TABLE_STATS_TABLE_NAME,
+            "rw_table_stats",
             None,
             false,
         )?);
@@ -688,7 +671,7 @@ impl Binder {
                 ExprType::Equal,
                 vec![
                     table_id,
-                    InputRef::new(RW_TABLE_STATS_TABLE_ID_INDEX, DataType::Int32).into(),
+                    self.bind_column(&["rw_table_stats".into(), "id".into()])?,
                 ],
             )?
             .into(),
@@ -699,8 +682,8 @@ impl Binder {
         let key_value_size_sum = FunctionCall::new(
             ExprType::Add,
             vec![
-                InputRef::new(RW_TABLE_STATS_KEY_SIZE_INDEX, DataType::Int64).into(),
-                InputRef::new(RW_TABLE_STATS_VALUE_SIZE_INDEX, DataType::Int64).into(),
+                self.bind_column(&["rw_table_stats".into(), "total_key_size".into()])?,
+                self.bind_column(&["rw_table_stats".into(), "total_value_size".into()])?,
             ],
         )?
         .into();

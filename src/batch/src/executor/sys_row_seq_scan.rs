@@ -16,8 +16,6 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, SysCatalogReaderRef, TableId};
-use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::ToOwnedDatum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
@@ -107,26 +105,13 @@ impl Executor for SysRowSeqScanExecutor {
 impl SysRowSeqScanExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_executor(self: Box<Self>) {
-        let rows = self
+        let chunk = self
             .sys_catalog_reader
             .read_table(&self.table_id)
             .await
             .map_err(BatchError::SystemTable)?;
-        let filtered_rows = rows
-            .iter()
-            .map(|row| {
-                let datums = self
-                    .column_ids
-                    .iter()
-                    .map(|column_id| row.datum_at(column_id.get_id() as usize).to_owned_datum())
-                    .collect_vec();
-                OwnedRow::new(datums)
-            })
-            .collect_vec();
-
-        if !filtered_rows.is_empty() {
-            let chunk = DataChunk::from_rows(&filtered_rows, &self.schema.data_types());
-            yield chunk
+        if chunk.cardinality() != 0 {
+            yield chunk;
         }
     }
 }

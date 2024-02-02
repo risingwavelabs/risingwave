@@ -12,58 +12,49 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
-
-use itertools::Itertools;
-use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
-use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::user::user_authentication::encrypted_raw_password;
 
 /// `rw_user_secret` stores all user encrypted passwords in the database, which is only readable by
 /// super users.
-pub static RW_USER_SECRETS: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
-    name: "rw_user_secrets",
-    schema: RW_CATALOG_SCHEMA_NAME,
-    columns: &[(DataType::Int32, "id"), (DataType::Varchar, "password")],
-    pk: &[0],
-});
+#[derive(Fields)]
+struct RwUserSecret {
+    #[primary_key]
+    id: i32,
+    password: Option<String>,
+}
 
-impl SysCatalogReaderImpl {
-    pub fn read_rw_user_secrets_info(&self) -> Result<Vec<OwnedRow>> {
-        let reader = self.user_info_reader.read_guard();
-        // Since this catalog contains passwords, it must not be publicly readable.
-        match reader.get_user_by_name(&self.auth_context.user_name) {
-            None => {
-                return Err(ErrorCode::CatalogError(
-                    format!("user {} not found", self.auth_context.user_name).into(),
+#[system_catalog(table, "rw_catalog.rw_user_secrets")]
+fn read_rw_user_secrets_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwUserSecret>> {
+    let user_info_reader = reader.user_info_reader.read_guard();
+    // Since this catalog contains passwords, it must not be publicly readable.
+    match user_info_reader.get_user_by_name(&reader.auth_context.user_name) {
+        None => {
+            return Err(ErrorCode::CatalogError(
+                format!("user {} not found", reader.auth_context.user_name).into(),
+            )
+            .into());
+        }
+        Some(user) => {
+            if !user.is_super {
+                return Err(ErrorCode::PermissionDenied(
+                    "permission denied for table rw_user_secrets".to_string(),
                 )
                 .into());
             }
-            Some(user) => {
-                if !user.is_super {
-                    return Err(ErrorCode::PermissionDenied(
-                        "permission denied for table rw_user_secrets".to_string(),
-                    )
-                    .into());
-                }
-            }
         }
-        let users = reader.get_all_users();
-
-        Ok(users
-            .into_iter()
-            .map(|user| {
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Int32(user.id as i32)),
-                    user.auth_info
-                        .as_ref()
-                        .map(|info| ScalarImpl::Utf8(encrypted_raw_password(info).into())),
-                ])
-            })
-            .collect_vec())
     }
+    let users = user_info_reader.get_all_users();
+
+    Ok(users
+        .into_iter()
+        .map(|user| RwUserSecret {
+            id: user.id as i32,
+            password: user.auth_info.as_ref().map(encrypted_raw_password),
+        })
+        .collect())
 }

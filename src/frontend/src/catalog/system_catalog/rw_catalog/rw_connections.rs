@@ -12,48 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
-use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::SysCatalogReaderImpl;
 
-pub const RW_CONNECTIONS: BuiltinTable = BuiltinTable {
-    name: "rw_connections",
-    schema: RW_CATALOG_SCHEMA_NAME,
-    columns: &[
-        (DataType::Int32, "id"),
-        (DataType::Varchar, "name"),
-        (DataType::Int32, "schema_id"),
-        (DataType::Int32, "owner"),
-        (DataType::Varchar, "type"),
-        (DataType::Varchar, "provider"),
-        (DataType::Varchar, "acl"),
-    ],
-    pk: &[0],
-};
+#[derive(Fields)]
+struct RwConnection {
+    #[primary_key]
+    id: i32,
+    name: String,
+    schema_id: i32,
+    owner: i32,
+    type_: String,
+    provider: String,
+    acl: String,
+}
 
-impl SysCatalogReaderImpl {
-    pub fn read_rw_connections_info(&self) -> Result<Vec<OwnedRow>> {
-        let reader = self.catalog_reader.read_guard();
-        let schemas = reader.iter_schemas(&self.auth_context.database)?;
+#[system_catalog(table, "rw_catalog.rw_connections")]
+fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection>> {
+    let catalog_reader = reader.catalog_reader.read_guard();
+    let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
 
-        Ok(schemas
-            .flat_map(|schema| {
-                schema.iter_connections().map(|conn| {
-                    OwnedRow::new(vec![
-                        Some(ScalarImpl::Int32(conn.id as i32)),
-                        Some(ScalarImpl::Utf8(conn.name.clone().into())),
-                        Some(ScalarImpl::Int32(schema.id() as i32)),
-                        Some(ScalarImpl::Int32(conn.owner as i32)),
-                        Some(ScalarImpl::Utf8(conn.connection_type().into())),
-                        Some(ScalarImpl::Utf8(conn.provider().into())),
-                        Some(ScalarImpl::Utf8("".into())),
-                    ])
-                })
+    Ok(schemas
+        .flat_map(|schema| {
+            schema.iter_connections().map(|conn| RwConnection {
+                id: conn.id as i32,
+                name: conn.name.clone(),
+                schema_id: schema.id() as i32,
+                owner: conn.owner as i32,
+                type_: conn.connection_type().into(),
+                provider: conn.provider().into(),
+                acl: "".into(),
             })
-            .collect_vec())
-    }
+        })
+        .collect())
 }
