@@ -204,9 +204,9 @@ select add_named(a, b) from t3 order by a asc;
 8
 10
 
-##############################
+################################
 # Corner & Special cases tests #
-##############################
+################################
 
 # Mixed parameter with calling inner sql udfs
 # statement ok
