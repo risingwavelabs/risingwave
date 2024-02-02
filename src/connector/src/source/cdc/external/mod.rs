@@ -39,6 +39,7 @@ use crate::source::cdc::external::postgres::{PostgresExternalTableReader, Postgr
 
 pub type ConnectorResult<T> = std::result::Result<T, ConnectorError>;
 
+// TODO: may replace with `CdcSourceType`
 #[derive(Debug)]
 pub enum CdcTableType {
     Undefined,

@@ -39,10 +39,7 @@ use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
 };
 use risingwave_connector::source::cdc::external::CdcTableType;
-use risingwave_connector::source::cdc::{
-    CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CITUS_CDC_CONNECTOR,
-    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
-};
+use risingwave_connector::source::cdc::{CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY, CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR};
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
@@ -1196,6 +1193,8 @@ pub async fn handle_create_source(
         with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
         // enable cdc sharing mode, which will capture all tables in the given `database.name`
         with_properties.insert(CDC_SHARING_MODE_KEY.into(), "true".into());
+        // enable transactional cdc
+        with_properties.insert(CDC_TRANSACTIONAL_KEY.into(), "true".into());
     }
 
     // must behind `handle_addition_columns`
