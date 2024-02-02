@@ -99,6 +99,7 @@ mod values;
 mod watermark;
 mod watermark_filter;
 mod wrapper;
+mod nested_loop_join;
 
 #[cfg(test)]
 mod integration_tests;
