@@ -1599,6 +1599,7 @@ mod tests {
                 status,
                 splits,
                 parallel_unit_id,
+                worker_id: _,
                 upstream_actor_ids,
                 vnode_bitmap,
                 expr_context,
