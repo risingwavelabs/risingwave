@@ -100,10 +100,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         &self.matcher
     }
 
-    pub async fn list_splits_batch(
-        &mut self,
-        _file_source_scan_info: FileSourceScanInfo,
-    ) -> anyhow::Result<Vec<OpendalFsSplit<Src>>> {
+    pub async fn list_splits_batch(&mut self) -> anyhow::Result<Vec<OpendalFsSplit<Src>>> {
         let mut object_metadata_iter = self.list().await?;
         let mut split_res = vec![];
         while let Some(list_res) = object_metadata_iter.next().await {
@@ -125,19 +122,12 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
                 }
                 Err(err) => {
                     tracing::error!("list object fail, err {}", err);
-                    return Err(err.into());
+                    return Err(err);
                 }
             }
         }
         Ok(split_res)
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct FileSourceScanInfo {
-    pub prefix: Option<String>,
-    pub matcher: Option<glob::Pattern>,
-    pub timebound: (Option<i64>, Option<i64>),
 }
 
 pub type ObjectMetadataIter = BoxStream<'static, anyhow::Result<FsPageItem>>;

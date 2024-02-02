@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -33,7 +34,7 @@ use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumer
 use crate::source::filesystem::opendal_source::{
     OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
-use crate::source::filesystem::FsPageItem;
+use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{
     create_split_reader, BoxChunkSourceStream, BoxTryStream, Column, ConnectorProperties,
     ConnectorState, SourceColumnDesc, SourceContext, SplitReader,
@@ -181,6 +182,38 @@ async fn build_opendal_fs_list_stream<Src: OpendalSource>(lister: OpendalEnumera
                     yield res
                 } else {
                     // Currrntly due to the lack of prefix list, we just skip the unmatched files.
+                    continue;
+                }
+            }
+            Err(err) => {
+                tracing::error!("list object fail, err {}", err);
+                return Err(err.into());
+            }
+        }
+    }
+}
+
+#[try_stream(boxed, ok = OpendalFsSplit<Src>, error = RwError)]
+pub async fn build_opendal_fs_list_for_batch<Src: OpendalSource>(lister: OpendalEnumerator<Src>) {
+    let matcher = lister.get_matcher();
+    let mut object_metadata_iter = lister.list().await?;
+
+    while let Some(list_res) = object_metadata_iter.next().await {
+        match list_res {
+            Ok(res) => {
+                if matcher
+                    .as_ref()
+                    .map(|m| m.matches(&res.name))
+                    .unwrap_or(true)
+                {
+                    let split = OpendalFsSplit {
+                        name: res.name,
+                        offset: 0,
+                        size: res.size as usize,
+                        _marker: PhantomData,
+                    };
+                    yield split
+                } else {
                     continue;
                 }
             }

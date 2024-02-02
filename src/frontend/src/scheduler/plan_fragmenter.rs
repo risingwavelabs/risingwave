@@ -21,6 +21,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use async_recursion::async_recursion;
 use enum_as_inner::EnumAsInner;
+use futures::{StreamExt, TryStreamExt};
 use itertools::Itertools;
 use pgwire::pg_server::SessionId;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
@@ -28,11 +29,10 @@ use risingwave_common::catalog::TableDesc;
 use risingwave_common::error::RwError;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::scan_range::ScanRange;
-use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::{
-    FileSourceScanInfo, OpendalEnumerator,
-};
+use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{OpendalGcs, OpendalS3};
 use risingwave_connector::source::kafka::KafkaSplitEnumerator;
+use risingwave_connector::source::reader::reader::build_opendal_fs_list_for_batch;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SplitEnumerator, SplitImpl,
 };
@@ -51,7 +51,6 @@ use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
-use crate::scheduler::plan_fragmenter::ConnectorProperties::Gcs;
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::SchedulerResult;
 
@@ -253,16 +252,6 @@ impl Query {
 #[derive(Debug, Clone)]
 pub struct SourceFetchInfo {
     pub connector: ConnectorProperties,
-    pub scan_info: ConnectorScanInfo,
-}
-
-#[derive(Clone, Debug)]
-pub enum ConnectorScanInfo {
-    Kafka(KafkaScanInfo),
-    FileSource(FileSourceScanInfo),
-}
-#[derive(Clone, Debug)]
-pub struct KafkaScanInfo {
     pub timebound: (Option<i64>, Option<i64>),
 }
 
@@ -272,6 +261,8 @@ pub enum SourceScanInfo {
     Incomplete(SourceFetchInfo),
     Complete(Vec<SplitImpl>),
 }
+
+const CHUNK_SIZE: usize = 1024;
 
 impl SourceScanInfo {
     pub fn new(fetch_info: SourceFetchInfo) -> Self {
@@ -287,19 +278,11 @@ impl SourceScanInfo {
         };
         match fetch_info.connector {
             ConnectorProperties::Kafka(prop) => {
-                let kafka_prop = *prop;
-                let scan_info = if let ConnectorScanInfo::Kafka(scan_info) = fetch_info.scan_info {
-                    scan_info
-                } else {
-                    unreachable!()
-                };
-                let mut kafka_enumerator = KafkaSplitEnumerator::new(
-                    kafka_prop,
-                    SourceEnumeratorContext::default().into(),
-                )
-                .await?;
+                let mut kafka_enumerator =
+                    KafkaSplitEnumerator::new(*prop, SourceEnumeratorContext::default().into())
+                        .await?;
                 let split_info = kafka_enumerator
-                    .list_splits_batch(scan_info.timebound.0, scan_info.timebound.1)
+                    .list_splits_batch(fetch_info.timebound.0, fetch_info.timebound.1)
                     .await?
                     .into_iter()
                     .map(SplitImpl::Kafka)
@@ -308,44 +291,30 @@ impl SourceScanInfo {
                 Ok(SourceScanInfo::Complete(split_info))
             }
             ConnectorProperties::OpendalS3(prop) => {
-                let mut opendal_s3_enumerator: OpendalEnumerator<OpendalS3> =
+                let lister: OpendalEnumerator<OpendalS3> =
                     OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
-                let scan_info =
-                    if let ConnectorScanInfo::FileSource(scan_info) = fetch_info.scan_info {
-                        scan_info
-                    } else {
-                        unreachable!()
-                    };
-                let split_info = opendal_s3_enumerator
-                    .list_splits_batch(scan_info)
-                    .await?
+                let stream = build_opendal_fs_list_for_batch(lister);
+
+                let batch_res: Vec<_> = stream.take(CHUNK_SIZE).try_collect().await?;
+                let res = batch_res
                     .into_iter()
                     .map(SplitImpl::OpendalS3)
                     .collect_vec();
-                Ok(SourceScanInfo::Complete(split_info.into()))
+
+                Ok(SourceScanInfo::Complete(res))
             }
             ConnectorProperties::Gcs(prop) => {
-                let mut opendal_gcs_enumerator: OpendalEnumerator<OpendalGcs> =
+                let lister: OpendalEnumerator<OpendalGcs> =
                     OpendalEnumerator::new_gcs_source(*prop)?;
-                let scan_info =
-                    if let ConnectorScanInfo::FileSource(scan_info) = fetch_info.scan_info {
-                        scan_info
-                    } else {
-                        unreachable!()
-                    };
-                let split_info = opendal_gcs_enumerator
-                    .list_splits_batch(scan_info)
-                    .await?
-                    .into_iter()
-                    .map(SplitImpl::Gcs)
-                    .collect_vec();
-                Ok(SourceScanInfo::Complete(split_info.into()))
+                let stream = build_opendal_fs_list_for_batch(lister);
+                let batch_res: Vec<_> = stream.take(CHUNK_SIZE).try_collect().await?;
+                let res = batch_res.into_iter().map(SplitImpl::Gcs).collect_vec();
+
+                Ok(SourceScanInfo::Complete(res))
             }
-            _ => {
-                return Err(SchedulerError::Internal(anyhow!(
-                    "Unsupported to query directly from this source"
-                )))
-            }
+            _ => Err(SchedulerError::Internal(anyhow!(
+                "Unsupported to query directly from this source"
+            ))),
         }
     }
 
@@ -977,9 +946,7 @@ impl BatchPlanFragmenter {
                 let timestamp_bound = source_node.kafka_timestamp_range_value();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
                     connector: property,
-                    scan_info: ConnectorScanInfo::Kafka(KafkaScanInfo {
-                        timebound: timestamp_bound,
-                    }),
+                    timebound: timestamp_bound,
                 })));
             }
         }
