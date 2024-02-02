@@ -14,10 +14,15 @@
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
+use crate::optimizer::plan_expr_rewriter::ConstCaseWhenRewriter;
 
 pub struct ConstCaseWhenEvalRule {}
 impl Rule for ConstCaseWhenEvalRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+        println!("Current plan: {:#?}", plan);
+        let values: &LogicalValues = plan.as_logical_values()?;
+        println!("Current values: {:#?}", values);
+        let _const_case_when_rewriter = ConstCaseWhenRewriter {};
         todo!()
     }
 }

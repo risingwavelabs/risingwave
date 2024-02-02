@@ -11,3 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use crate::expr::{ExprImpl, ExprRewriter, FunctionCall};
+
+pub struct ConstCaseWhenRewriter {}
+
+impl ExprRewriter for ConstCaseWhenRewriter {
+    fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
+        println!("Current func_call: {:#?}", func_call);
+        todo!()
+    }
+}
