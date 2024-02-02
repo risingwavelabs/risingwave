@@ -186,7 +186,7 @@ async fn build_opendal_fs_list_stream<Src: OpendalSource>(lister: OpendalEnumera
             }
             Err(err) => {
                 tracing::error!("list object fail, err {}", err);
-                return Err(err.into());
+                return Err(err);
             }
         }
     }
