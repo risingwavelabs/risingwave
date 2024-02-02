@@ -504,7 +504,7 @@ impl Binder {
                 constant_lookup_inputs.push(input);
             } else {
                 // If at least one condition is not in the simple form / not constant,
-                // we can NOT do the subsequent optimization then
+                // we can NOT do the subsequent optimization pass
                 return false;
             }
 
