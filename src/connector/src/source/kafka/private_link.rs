@@ -213,16 +213,18 @@ fn is_kafka_connector(with_properties: &BTreeMap<String, String>) -> bool {
 }
 
 pub fn insert_privatelink_broker_rewrite_map(
-    properties: &mut BTreeMap<String, String>,
+    with_options: &mut BTreeMap<String, String>,
     svc: Option<&PrivateLinkService>,
     privatelink_endpoint: Option<String>,
 ) -> anyhow::Result<()> {
     let mut broker_rewrite_map = HashMap::new();
-    let servers = get_property_required(properties, kafka_props_broker_key(properties))?;
+    let servers = get_property_required(with_options, kafka_props_broker_key(with_options))?;
     let broker_addrs = servers.split(',').collect_vec();
-    let link_target_value = get_property_required(properties, PRIVATE_LINK_TARGETS_KEY)?;
+    let link_target_value = get_property_required(with_options, PRIVATE_LINK_TARGETS_KEY)?;
     let link_targets: Vec<AwsPrivateLinkItem> =
         serde_json::from_str(link_target_value.as_str()).map_err(|e| anyhow!(e))?;
+    // remove the private link targets from WITH options, as they are useless after we constructed the rewrite mapping
+    with_options.remove(PRIVATE_LINK_TARGETS_KEY);
 
     if broker_addrs.len() != link_targets.len() {
         return Err(anyhow!(
@@ -261,6 +263,6 @@ pub fn insert_privatelink_broker_rewrite_map(
     // save private link dns names into source properties, which
     // will be extracted into KafkaProperties
     let json = serde_json::to_string(&broker_rewrite_map).map_err(|e| anyhow!(e))?;
-    properties.insert(PRIVATE_LINK_BROKER_REWRITE_MAP_KEY.to_string(), json);
+    with_options.insert(PRIVATE_LINK_BROKER_REWRITE_MAP_KEY.to_string(), json);
     Ok(())
 }
