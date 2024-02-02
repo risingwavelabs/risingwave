@@ -17,6 +17,11 @@ pub mod report;
 
 use std::time::SystemTime;
 
+use risingwave_pb::telemetry::{
+    ReportBase as PbTelemetryReportBase, SystemCpu as PbSystemCpu, SystemData as PbSystemData,
+    SystemMemory as PbSystemMemory, SystemOs as PbSystemOs,
+    TelemetryNodeType as PbTelemetryNodeType,
+};
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 use thiserror_ext::AsReport;
@@ -63,6 +68,19 @@ pub struct TelemetryReportBase {
     pub time_stamp: u64,
     /// node_type is the node that creates the report
     pub node_type: TelemetryNodeType,
+}
+
+impl Into<PbTelemetryReportBase> for TelemetryReportBase {
+    fn into(self) -> PbTelemetryReportBase {
+        PbTelemetryReportBase {
+            tracking_id: self.tracking_id,
+            session_id: self.session_id,
+            system_data: Some(self.system_data.into()),
+            up_time: self.up_time,
+            report_time: self.time_stamp,
+            node_type: from_telemetry_node_type(self.node_type) as i32,
+        }
+    }
 }
 
 pub trait TelemetryReport: Serialize {}
@@ -153,6 +171,63 @@ pub fn current_timestamp() -> u64 {
         .duration_since(SystemTime::UNIX_EPOCH)
         .expect("Clock might go backward")
         .as_secs()
+}
+
+fn from_telemetry_node_type(t: TelemetryNodeType) -> PbTelemetryNodeType {
+    match t {
+        TelemetryNodeType::Meta => PbTelemetryNodeType::Meta,
+        TelemetryNodeType::Compute => PbTelemetryNodeType::Compute,
+        TelemetryNodeType::Frontend => PbTelemetryNodeType::Frontend,
+        TelemetryNodeType::Compactor => PbTelemetryNodeType::Compactor,
+    }
+}
+
+impl Into<PbTelemetryNodeType> for TelemetryNodeType {
+    fn into(self) -> PbTelemetryNodeType {
+        match self {
+            TelemetryNodeType::Meta => PbTelemetryNodeType::Meta,
+            TelemetryNodeType::Compute => PbTelemetryNodeType::Compute,
+            TelemetryNodeType::Frontend => PbTelemetryNodeType::Frontend,
+            TelemetryNodeType::Compactor => PbTelemetryNodeType::Compactor,
+        }
+    }
+}
+
+impl Into<PbSystemCpu> for Cpu {
+    fn into(self) -> PbSystemCpu {
+        PbSystemCpu {
+            available: self.available,
+        }
+    }
+}
+
+impl Into<PbSystemMemory> for Memory {
+    fn into(self) -> PbSystemMemory {
+        PbSystemMemory {
+            used: self.used as u64,
+            total: self.total as u64,
+        }
+    }
+}
+
+impl Into<PbSystemOs> for Os {
+    fn into(self) -> PbSystemOs {
+        PbSystemOs {
+            name: self.name,
+            kernel_version: self.kernel_version,
+            version: self.version,
+        }
+    }
+}
+
+impl Into<PbSystemData> for SystemData {
+    fn into(self) -> PbSystemData {
+        PbSystemData {
+            memory: Some(self.memory.into()),
+            os: Some(self.os.into()),
+            cpu: Some(self.cpu.into()),
+        }
+    }
 }
 
 #[cfg(test)]
