@@ -30,6 +30,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::get_reschedule_plan_request::{Policy, StableResizePolicy};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -1365,9 +1366,6 @@ impl ScaleController {
             }
 
             for created_parallel_unit_id in added_parallel_units {
-                // self.env.sql_id_gen_manager_ref().map(|id_gen| id_gen.actors.generate_interval(1))
-                //
-
                 let id = match self.env.sql_id_gen_manager_ref() {
                     None => {
                         self.env
@@ -2488,8 +2486,64 @@ impl GlobalStreamManager {
                 )
                 .await?;
             }
-            MetadataManager::V2(_mgr) => {
-                todo!()
+            MetadataManager::V2(mgr) => {
+                let table_parallelisms: HashMap<_, _> = {
+                    let streaming_parallelisms = mgr
+                        .catalog_controller
+                        .get_all_streaming_parallelisms()
+                        .await?;
+
+                    streaming_parallelisms
+                        .into_iter()
+                        .map(|(table_id, parallelism)| {
+                            // no custom for sql backend
+                            let table_parallelism = match parallelism {
+                                StreamingParallelism::Adaptive => TableParallelism::Adaptive,
+                                StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
+                            };
+
+                            (table_id as u32, table_parallelism)
+                        })
+                        .collect()
+                };
+
+                let workers = mgr
+                    .cluster_controller
+                    .list_active_streaming_workers()
+                    .await?;
+
+                let schedulable_worker_ids = workers
+                    .iter()
+                    .filter(|worker| {
+                        !worker
+                            .property
+                            .as_ref()
+                            .map(|p| p.is_unschedulable)
+                            .unwrap_or(false)
+                    })
+                    .map(|worker| worker.id)
+                    .collect();
+
+                let reschedules = self
+                    .scale_controller
+                    .generate_table_resize_plan(TableResizePolicy {
+                        worker_ids: schedulable_worker_ids,
+                        table_parallelisms: table_parallelisms.clone(),
+                    })
+                    .await?;
+
+                if reschedules.is_empty() {
+                    return Ok(());
+                }
+
+                self.reschedule_actors(
+                    reschedules,
+                    RescheduleOptions {
+                        resolve_no_shuffle_upstream: true,
+                    },
+                    None,
+                )
+                .await?;
             }
         }
 
