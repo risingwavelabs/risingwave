@@ -15,7 +15,7 @@
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, SysCatalogReaderRef, TableId};
+use risingwave_common::catalog::{ColumnDesc, Schema, SysCatalogReaderRef, TableId};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
@@ -27,7 +27,7 @@ use crate::task::BatchTaskContext;
 pub struct SysRowSeqScanExecutor {
     table_id: TableId,
     schema: Schema,
-    column_ids: Vec<ColumnId>,
+    column_indices: Vec<usize>,
     identity: String,
 
     sys_catalog_reader: SysCatalogReaderRef,
@@ -37,14 +37,14 @@ impl SysRowSeqScanExecutor {
     pub fn new(
         table_id: TableId,
         schema: Schema,
-        column_id: Vec<ColumnId>,
+        column_indices: Vec<usize>,
         identity: String,
         sys_catalog_reader: SysCatalogReaderRef,
     ) -> Self {
         Self {
             table_id,
             schema,
-            column_ids: column_id,
+            column_indices,
             identity,
             sys_catalog_reader,
         }
@@ -76,12 +76,15 @@ impl BoxedExecutorBuilder for SysRowSeqScanExecutorBuilder {
             .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
 
-        let column_ids = column_descs.iter().map(|d| d.column_id).collect_vec();
+        let column_indices = column_descs
+            .iter()
+            .map(|d| d.column_id.get_id() as usize)
+            .collect_vec();
         let schema = Schema::new(column_descs.iter().map(Into::into).collect_vec());
         Ok(Box::new(SysRowSeqScanExecutor::new(
             table_id,
             schema,
-            column_ids,
+            column_indices,
             source.plan_node().get_identity().clone(),
             sys_catalog_reader,
         )))
@@ -111,7 +114,7 @@ impl SysRowSeqScanExecutor {
             .await
             .map_err(BatchError::SystemTable)?;
         if chunk.cardinality() != 0 {
-            yield chunk;
+            yield chunk.project(&self.column_indices);
         }
     }
 }
