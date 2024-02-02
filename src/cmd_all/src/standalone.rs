@@ -27,7 +27,8 @@ use crate::common::osstrs;
 #[derive(Eq, PartialOrd, PartialEq, Debug, Clone, Parser)]
 #[command(
     version,
-    about = "The Standalone mode allows users to start multiple services in one process, it exposes node-level options for each service"
+    about = "The Standalone mode allows users to start multiple services in one process, it exposes node-level options for each service",
+    hide = true
 )]
 pub struct StandaloneOpts {
     /// Compute node options
