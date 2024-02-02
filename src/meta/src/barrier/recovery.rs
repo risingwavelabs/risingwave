@@ -527,8 +527,7 @@ impl GlobalBarrierManagerContext {
                 .list_active_parallel_units()
                 .await?
                 .into_iter()
-                .map(|pu| pu.id as i32)
-                .filter(|pu| !inuse_parallel_units.contains(pu))
+                .filter(|pu| !inuse_parallel_units.contains(&(pu.id as i32)))
                 .collect_vec();
             if !new_parallel_units.is_empty() {
                 debug!("new parallel units found: {:#?}", new_parallel_units);
@@ -536,9 +535,9 @@ impl GlobalBarrierManagerContext {
                     if let Some(from) = to_migrate_parallel_units.pop() {
                         debug!(
                             "plan to migrate from parallel unit {} to {}",
-                            from, target_parallel_unit
+                            from, target_parallel_unit.id
                         );
-                        inuse_parallel_units.insert(target_parallel_unit);
+                        inuse_parallel_units.insert(target_parallel_unit.id as i32);
                         plan.insert(from, target_parallel_unit);
                     } else {
                         break 'discovery;

@@ -937,15 +937,7 @@ impl GlobalBarrierManagerContext {
                     .list_active_streaming_workers()
                     .await
                     .unwrap();
-                let pu_mappings = all_nodes
-                    .iter()
-                    .flat_map(|node| node.parallel_units.iter().map(|pu| (pu.id, pu.clone())))
-                    .collect();
-                let all_actor_infos = mgr
-                    .catalog_controller
-                    .load_all_actors(&pu_mappings)
-                    .await
-                    .unwrap();
+                let all_actor_infos = mgr.catalog_controller.load_all_actors().await.unwrap();
 
                 InflightActorInfo::resolve(all_nodes, all_actor_infos)
             }
