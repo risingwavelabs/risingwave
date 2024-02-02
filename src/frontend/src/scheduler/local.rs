@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::stream::BoxStream;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
@@ -177,12 +177,13 @@ impl LocalQueryExecution {
             AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH, USER_INFO_READER,
         };
 
-        let exec = async move { CATALOG_READER::scope(catalog_reader, exec).await };
-        let exec = async move { USER_INFO_READER::scope(user_info_reader, exec).await };
-        let exec = async move { DB_NAME::scope(db_name, exec).await };
-        let exec = async move { SEARCH_PATH::scope(search_path, exec).await };
-        let exec = async move { AUTH_CONTEXT::scope(auth_context, exec).await };
-        let exec = async move { TIME_ZONE::scope(time_zone, exec).await };
+        // box is necessary, otherwise the size of `exec` will double each time it is nested.
+        let exec = async move { CATALOG_READER::scope(catalog_reader, exec).await }.boxed();
+        let exec = async move { USER_INFO_READER::scope(user_info_reader, exec).await }.boxed();
+        let exec = async move { DB_NAME::scope(db_name, exec).await }.boxed();
+        let exec = async move { SEARCH_PATH::scope(search_path, exec).await }.boxed();
+        let exec = async move { AUTH_CONTEXT::scope(auth_context, exec).await }.boxed();
+        let exec = async move { TIME_ZONE::scope(time_zone, exec).await }.boxed();
 
         if let Some(timeout) = timeout {
             let exec = async move {
