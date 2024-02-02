@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::error::NewError;
-
 pub mod avro;
 pub mod protobuf;
 pub mod schema_registry;
@@ -60,6 +58,6 @@ pub enum SchemaFetchError {
     NewError(
         #[from]
         #[backtrace]
-        NewError,
+        anyhow::Error,
     ),
 }

@@ -22,11 +22,10 @@ use risingwave_pb::data::DataType as PbDataType;
 
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::common::AwsAuthProps;
-use crate::error::NewResult;
 use crate::source::SourceMeta;
 
 /// get kafka topic name
-pub(super) fn get_kafka_topic(props: &HashMap<String, String>) -> NewResult<&String> {
+pub(super) fn get_kafka_topic(props: &HashMap<String, String>) -> anyhow::Result<&String> {
     const KAFKA_TOPIC_KEY1: &str = "kafka.topic";
     const KAFKA_TOPIC_KEY2: &str = "topic";
 
@@ -46,7 +45,7 @@ pub(super) fn get_kafka_topic(props: &HashMap<String, String>) -> NewResult<&Str
 }
 
 /// download bytes from http(s) url
-pub(super) async fn download_from_http(location: &Url) -> NewResult<Bytes> {
+pub(super) async fn download_from_http(location: &Url) -> anyhow::Result<Bytes> {
     let res = reqwest::get(location.clone())
         .await
         .with_context(|| format!("failed to make request to {location}"))?
@@ -93,7 +92,7 @@ macro_rules! extract_key_config {
 /// * local file, for on-premise or testing.
 /// * http/https, for common usage.
 /// * s3 file location format: <s3://bucket_name/file_name>
-pub(super) async fn bytes_from_url(url: &Url, config: Option<&AwsAuthProps>) -> NewResult<Vec<u8>> {
+pub(super) async fn bytes_from_url(url: &Url, config: Option<&AwsAuthProps>) -> anyhow::Result<Vec<u8>> {
     match (url.scheme(), config) {
         // TODO(Tao): support local file only when it's compiled in debug mode.
         ("file", _) => {

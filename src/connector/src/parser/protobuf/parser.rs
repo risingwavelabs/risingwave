@@ -30,7 +30,6 @@ use thiserror::Error;
 use thiserror_ext::{AsReport, Macro};
 
 use super::schema_resolver::*;
-use crate::error::NewResult;
 use crate::parser::unified::protobuf::ProtobufAccess;
 use crate::parser::unified::{
     bail_uncategorized, uncategorized, AccessError, AccessImpl, AccessResult,
@@ -92,7 +91,7 @@ pub struct ProtobufParserConfig {
 }
 
 impl ProtobufParserConfig {
-    pub async fn new(encoding_properties: EncodingProperties) -> NewResult<Self> {
+    pub async fn new(encoding_properties: EncodingProperties) -> anyhow::Result<Self> {
         let protobuf_config = try_match_expand!(encoding_properties, EncodingProperties::Protobuf)?;
         let location = &protobuf_config.row_schema_location;
         let message_name = &protobuf_config.message_name;

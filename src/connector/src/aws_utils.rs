@@ -21,7 +21,6 @@ use aws_sdk_s3::{client as s3_client, config as s3_config};
 use url::Url;
 
 use crate::common::AwsAuthProps;
-use crate::error::NewResult;
 
 const AWS_CUSTOM_CONFIG_KEY: [&str; 3] = ["retry_times", "conn_timeout", "read_timeout"];
 
@@ -107,7 +106,7 @@ pub fn s3_client(
 pub async fn load_file_descriptor_from_s3(
     location: &Url,
     config: &AwsAuthProps,
-) -> NewResult<Vec<u8>> {
+) -> anyhow::Result<Vec<u8>> {
     let bucket = location
         .domain()
         .with_context(|| format!("illegal file path {}", location))?;
