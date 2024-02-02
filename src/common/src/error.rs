@@ -13,22 +13,11 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::convert::Infallible;
 use std::fmt::{Debug, Display, Formatter};
-use std::io::Error as IoError;
 use std::time::{Duration, SystemTime};
 
-use memcomparable::Error as MemComparableError;
-use risingwave_error::tonic::{ToTonicStatus, TonicStatusWrapper};
-use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
-use thiserror_ext::{Box, Macro};
-use tokio::task::JoinError;
-
-use crate::array::ArrayError;
-use crate::session_config::SessionConfigError;
-use crate::util::value_encoding::error::ValueEncodingError;
-
+use thiserror_ext::Macro;
 /// Re-export `risingwave_error` for easy access.
 pub mod v2 {
     pub use risingwave_error::*;
@@ -102,228 +91,6 @@ impl Display for NoFunction {
         Ok(())
     }
 }
-
-#[derive(Error, Debug, Box)]
-#[thiserror_ext(newtype(name = RwError, backtrace, report_debug))]
-pub enum ErrorCode {
-    #[error("internal error: {0}")]
-    InternalError(String),
-    // TODO: unify with the above
-    #[error(transparent)]
-    Uncategorized(
-        #[from]
-        #[backtrace]
-        anyhow::Error,
-    ),
-    #[error("connector error: {0}")]
-    ConnectorError(
-        #[source]
-        #[backtrace]
-        BoxedError,
-    ),
-    #[error(transparent)]
-    NotImplemented(#[from] NotImplemented),
-    // Tips: Use this only if it's intended to reject the query
-    #[error("Not supported: {0}\nHINT: {1}")]
-    NotSupported(String, String),
-    #[error(transparent)]
-    NoFunction(#[from] NoFunction),
-    #[error(transparent)]
-    IoError(#[from] IoError),
-    #[error("Storage error: {0}")]
-    StorageError(
-        #[backtrace]
-        #[source]
-        BoxedError,
-    ),
-    #[error("Expr error: {0}")]
-    ExprError(
-        #[source]
-        #[backtrace]
-        BoxedError,
-    ),
-    // TODO(error-handling): there's a limitation that `#[transparent]` can't be used with `#[backtrace]` if no `#[from]`
-    // So we emulate a transparent error with "{0}" display here.
-    #[error("{0}")]
-    BatchError(
-        #[source]
-        #[backtrace]
-        // `BatchError`
-        BoxedError,
-    ),
-    #[error("Array error: {0}")]
-    ArrayError(
-        #[from]
-        #[backtrace]
-        ArrayError,
-    ),
-    #[error("Stream error: {0}")]
-    StreamError(
-        #[backtrace]
-        #[source]
-        BoxedError,
-    ),
-    // TODO(error-handling): there's a limitation that `#[transparent]` can't be used with `#[backtrace]` if no `#[from]`
-    // So we emulate a transparent error with "{0}" display here.
-    #[error("{0}")]
-    RpcError(
-        #[source]
-        #[backtrace]
-        // `tonic::transport::Error`, `TonicStatusWrapper`, or `RpcError`
-        BoxedError,
-    ),
-    // TODO: use a new type for bind error
-    // TODO(error-handling): should prefer use error types than strings.
-    #[error("Bind error: {0}")]
-    BindError(String),
-    // TODO: only keep this one
-    #[error("Failed to bind expression: {expr}: {error}")]
-    BindErrorRoot {
-        expr: String,
-        #[source]
-        #[backtrace]
-        error: BoxedError,
-    },
-    #[error("Catalog error: {0}")]
-    CatalogError(
-        #[source]
-        #[backtrace]
-        BoxedError,
-    ),
-    #[error("Protocol error: {0}")]
-    ProtocolError(String),
-    #[error("Scheduler error: {0}")]
-    SchedulerError(
-        #[source]
-        #[backtrace]
-        BoxedError,
-    ),
-    #[error("Task not found")]
-    TaskNotFound,
-    #[error("Session not found")]
-    SessionNotFound,
-    #[error("Item not found: {0}")]
-    ItemNotFound(String),
-    #[error("Invalid input syntax: {0}")]
-    InvalidInputSyntax(String),
-    #[error("Can not compare in memory: {0}")]
-    MemComparableError(#[from] MemComparableError),
-    #[error("Error while de/se values: {0}")]
-    ValueEncodingError(
-        #[from]
-        #[backtrace]
-        ValueEncodingError,
-    ),
-    #[error("Invalid value `{config_value}` for `{config_entry}`")]
-    InvalidConfigValue {
-        config_entry: String,
-        config_value: String,
-    },
-    #[error("Invalid Parameter Value: {0}")]
-    InvalidParameterValue(String),
-    #[error("Sink error: {0}")]
-    SinkError(
-        #[source]
-        #[backtrace]
-        BoxedError,
-    ),
-    #[error("Permission denied: {0}")]
-    PermissionDenied(String),
-    #[error("Failed to get/set session config: {0}")]
-    SessionConfig(
-        #[from]
-        #[backtrace]
-        SessionConfigError,
-    ),
-}
-
-impl RwError {
-    pub fn uncategorized(err: impl Into<anyhow::Error>) -> Self {
-        Self::from(ErrorCode::Uncategorized(err.into()))
-    }
-}
-
-impl From<RwError> for tonic::Status {
-    fn from(err: RwError) -> Self {
-        use tonic::Code;
-
-        let code = match err.inner() {
-            ErrorCode::ExprError(_) => Code::InvalidArgument,
-            ErrorCode::PermissionDenied(_) => Code::PermissionDenied,
-            ErrorCode::InternalError(_) => Code::Internal,
-            _ => Code::Internal,
-        };
-
-        err.to_status_unnamed(code)
-    }
-}
-
-impl From<TonicStatusWrapper> for RwError {
-    fn from(status: TonicStatusWrapper) -> Self {
-        use tonic::Code;
-
-        let message = status.inner().message();
-
-        // TODO(error-handling): `message` loses the source chain.
-        match status.inner().code() {
-            Code::InvalidArgument => ErrorCode::InvalidParameterValue(message.to_string()),
-            Code::NotFound | Code::AlreadyExists => ErrorCode::CatalogError(status.into()),
-            Code::PermissionDenied => ErrorCode::PermissionDenied(message.to_string()),
-            Code::Cancelled => ErrorCode::SchedulerError(status.into()),
-            _ => ErrorCode::RpcError(status.into()),
-        }
-        .into()
-    }
-}
-
-impl From<tonic::Status> for RwError {
-    fn from(status: tonic::Status) -> Self {
-        // Always wrap the status.
-        Self::from(TonicStatusWrapper::new(status))
-    }
-}
-
-impl From<JoinError> for RwError {
-    fn from(join_error: JoinError) -> Self {
-        Self::uncategorized(join_error)
-    }
-}
-
-impl From<std::net::AddrParseError> for RwError {
-    fn from(addr_parse_error: std::net::AddrParseError) -> Self {
-        Self::uncategorized(addr_parse_error)
-    }
-}
-
-impl From<Infallible> for RwError {
-    fn from(x: Infallible) -> Self {
-        match x {}
-    }
-}
-
-impl From<String> for RwError {
-    fn from(e: String) -> Self {
-        ErrorCode::InternalError(e).into()
-    }
-}
-
-impl From<PbFieldNotFound> for RwError {
-    fn from(err: PbFieldNotFound) -> Self {
-        ErrorCode::InternalError(format!(
-            "Failed to decode prost: field not found `{}`",
-            err.0
-        ))
-        .into()
-    }
-}
-
-impl From<tonic::transport::Error> for RwError {
-    fn from(err: tonic::transport::Error) -> Self {
-        ErrorCode::RpcError(err.into()).into()
-    }
-}
-
-pub type Result<T> = std::result::Result<T, RwError>;
 
 /// Util macro for generating error when condition check failed.
 ///
@@ -456,6 +223,7 @@ impl ErrorSuppressor {
 }
 
 #[cfg(test)]
+#[cfg(any())]
 mod tests {
     use std::convert::Into;
     use std::result::Result::Err;

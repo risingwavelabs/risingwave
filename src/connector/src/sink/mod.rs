@@ -48,7 +48,6 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
-use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
 };
@@ -561,11 +560,5 @@ impl From<DeltaTableError> for SinkError {
 impl From<RedisError> for SinkError {
     fn from(value: RedisError) -> Self {
         SinkError::Redis(format!("{}", value))
-    }
-}
-
-impl From<SinkError> for RwError {
-    fn from(e: SinkError) -> Self {
-        ErrorCode::SinkError(Box::new(e)).into()
     }
 }

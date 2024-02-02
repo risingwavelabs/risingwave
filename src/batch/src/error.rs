@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 pub use anyhow::anyhow;
 use risingwave_common::array::ArrayError;
-use risingwave_common::error::{BoxedError, ErrorCode, RwError};
+use risingwave_common::error::BoxedError;
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_dml::error::DmlError;
 use risingwave_expr::ExprError;
@@ -135,19 +135,6 @@ impl From<tonic::Status> for BatchError {
     fn from(status: tonic::Status) -> Self {
         // Always wrap the status into a `RpcError`.
         Self::from(RpcError::from(status))
-    }
-}
-
-impl From<BatchError> for RwError {
-    fn from(s: BatchError) -> Self {
-        ErrorCode::BatchError(Box::new(s)).into()
-    }
-}
-
-// TODO(error-handling): remove after eliminating RwError from connector.
-impl From<RwError> for BatchError {
-    fn from(s: RwError) -> Self {
-        Self::Internal(anyhow!(s))
     }
 }
 
