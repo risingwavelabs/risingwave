@@ -42,6 +42,7 @@ itertools = "0.12"
 linkme = { version = "0.3", features = ["used_linker"] }
 maplit = "1"
 md5 = "0.7.0"
+memcomparable = "0.2"
 num-integer = "0.1"
 parking_lot = "0.12"
 parse-display = "0.8"
