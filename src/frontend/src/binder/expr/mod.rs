@@ -608,6 +608,12 @@ impl Binder {
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<ExprImpl> {
         match &data_type {
+            // Casting to Regclass type means getting the oid of expr.
+            // See https://www.postgresql.org/docs/current/datatype-oid.html.
+            AstDataType::Regclass => {
+                let input = self.bind_expr_inner(expr)?;
+                Ok(input.cast_to_regclass()?)
+            }
             AstDataType::Regproc => {
                 let lhs = self.bind_expr_inner(expr)?;
                 let lhs_ty = lhs.return_type();

@@ -265,7 +265,7 @@ impl ExprImpl {
     }
 
     /// Casting to Regclass type means getting the oid of expr.
-    /// See https://www.postgresql.org/docs/current/datatype-oid.html.
+    /// See <https://www.postgresql.org/docs/current/datatype-oid.html>
     pub fn cast_to_regclass(self) -> Result<ExprImpl, CastError> {
         match self.return_type() {
             DataType::Varchar => Ok(ExprImpl::FunctionCall(Box::new(

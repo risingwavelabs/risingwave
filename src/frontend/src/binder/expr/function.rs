@@ -1089,7 +1089,7 @@ impl Binder {
                 ("pg_get_indexdef", raw_call(ExprType::PgGetIndexdef)),
                 ("pg_get_viewdef", raw_call(ExprType::PgGetViewdef)),
                 ("pg_relation_size", raw(|_binder, mut inputs|{
-                    if inputs.len() < 1 {
+                    if inputs.is_empty() {
                         return Err(ErrorCode::ExprError(
                             "function pg_relation_size() does not exist".into(),
                         )
