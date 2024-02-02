@@ -67,7 +67,7 @@ pub fn map_single_node_opts_to_standalone_opts(opts: &SingleNodeOpts) -> ParsedS
     let mut frontend_opts = FrontendOpts::new_for_single_node();
     let mut compactor_opts = CompactorOpts::new_for_single_node();
     if let Some(prometheus_listener_addr) = &opts.prometheus_listener_addr {
-        meta_opts.prometheus_host = Some(prometheus_listener_addr.clone());
+        meta_opts.prometheus_listener_addr = Some(prometheus_listener_addr.clone());
         compute_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
         frontend_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
         compactor_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
