@@ -23,8 +23,6 @@ select sub(1, 1);
 ----
 0
 
-
-
 # Create an anonymous function that calls other pre-defined sql udfs
 statement ok
 create function add_sub_binding() returns int language sql as 'select add(1, 1) + sub(2, 2)';
@@ -370,20 +368,11 @@ drop function call_regexp_replace;
 statement ok
 drop function add_sub_wrapper;
 
-# statement ok
-# drop function recursive;
-
 statement ok
 drop function foo;
 
-# statement ok
-# drop function recursive_non_recursive;
-
 statement ok
 drop function add_sub_types;
-
-# statement ok
-# drop function fib;
 
 statement ok
 drop function print;
