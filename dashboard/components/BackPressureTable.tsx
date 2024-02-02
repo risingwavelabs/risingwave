@@ -63,7 +63,7 @@ export default function BackPressureTable({
     }
     doFetch()
     return () => {}
-  }, [toast])
+  }, [])
 
   const isSelected = (fragmentId: string) => selectedFragmentIds.has(fragmentId)
 

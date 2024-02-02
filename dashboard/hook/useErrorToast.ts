@@ -40,6 +40,6 @@ export default function useErrorToast() {
         isClosable: true,
       })
     },
-    [toast]
+    []
   )
 }
