@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{Date, Decimal, Time, Timestamp, Timestamptz};
 
 use super::unified::{AccessError, AccessResult};
@@ -60,15 +58,14 @@ impl CsvParser {
         })
     }
 
-    fn read_row(&self, buf: &[u8]) -> Result<Vec<String>> {
+    fn read_row(&self, buf: &[u8]) -> anyhow::Result<Vec<String>> {
         let mut reader_builder = csv::ReaderBuilder::default();
         reader_builder.delimiter(self.delimiter).has_headers(false);
         let record = reader_builder
             .from_reader(buf)
             .records()
             .next()
-            .transpose()
-            .map_err(|err| RwError::from(ProtocolError(err.to_string())))?;
+            .transpose()?;
         Ok(record
             .map(|record| record.iter().map(|field| field.to_string()).collect())
             .unwrap_or_default())

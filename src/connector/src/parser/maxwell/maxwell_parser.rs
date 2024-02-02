@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::bail;
 
 use crate::only_parse_payload;
 use crate::parser::unified::maxwell::MaxwellChangeEvent;
@@ -35,7 +35,7 @@ impl MaxwellParser {
         props: SpecificParserConfig,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         match props.encoding_config {
             EncodingProperties::Json(_) => {
                 let payload_builder =
@@ -47,9 +47,7 @@ impl MaxwellParser {
                     source_ctx,
                 })
             }
-            _ => Err(RwError::from(ErrorCode::ProtocolError(
-                "unsupported encoding for Maxwell".to_string(),
-            ))),
+            _ => bail!("unsupported encoding for Maxwell"),
         }
     }
 

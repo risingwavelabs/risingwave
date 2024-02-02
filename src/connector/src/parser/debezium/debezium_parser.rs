@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::bail;
 
 use super::simd_json_parser::DebeziumJsonAccessBuilder;
 use super::{DebeziumAvroAccessBuilder, DebeziumAvroParserConfig};
@@ -38,7 +37,7 @@ pub struct DebeziumParser {
 async fn build_accessor_builder(
     config: EncodingProperties,
     encoding_type: EncodingType,
-) -> Result<AccessBuilderImpl> {
+) -> anyhow::Result<AccessBuilderImpl> {
     match config {
         EncodingProperties::Avro(_) => {
             let config = DebeziumAvroParserConfig::new(config).await?;
@@ -52,9 +51,7 @@ async fn build_accessor_builder(
         EncodingProperties::Protobuf(_) => {
             Ok(AccessBuilderImpl::new_default(config, encoding_type).await?)
         }
-        _ => Err(RwError::from(ProtocolError(
-            "unsupported encoding for Debezium".to_string(),
-        ))),
+        _ => bail!("unsupported encoding for Debezium"),
     }
 }
 
@@ -63,7 +60,7 @@ impl DebeziumParser {
         props: SpecificParserConfig,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         let (key_config, key_type) = extract_key_config!(props);
         let key_builder = build_accessor_builder(key_config, key_type).await?;
         let payload_builder =
@@ -76,7 +73,7 @@ impl DebeziumParser {
         })
     }
 
-    pub async fn new_for_test(rw_columns: Vec<SourceColumnDesc>) -> Result<Self> {
+    pub async fn new_for_test(rw_columns: Vec<SourceColumnDesc>) -> anyhow::Result<Self> {
         let props = SpecificParserConfig {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {

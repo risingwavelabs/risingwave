@@ -46,6 +46,7 @@ pub fn apply_row_accessor_on_stream_chunk_writer(
     writer.insert(|column| accessor.access(&[&column.name], Some(&column.data_type)))
 }
 
+// TODO(error-handling): remove this
 impl From<AccessError> for RwError {
     fn from(val: AccessError) -> Self {
         ErrorCode::InternalError(format!("AccessError: {:?}", val)).into()

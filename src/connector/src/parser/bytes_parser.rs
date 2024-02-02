@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 
 use super::unified::bytes::BytesAccess;
@@ -35,7 +34,7 @@ impl AccessBuilder for BytesAccessBuilder {
 }
 
 impl BytesAccessBuilder {
-    pub fn new(encoding_properties: EncodingProperties) -> Result<Self> {
+    pub fn new(encoding_properties: EncodingProperties) -> anyhow::Result<Self> {
         let config = try_match_expand!(encoding_properties, EncodingProperties::Bytes)?;
         Ok(Self {
             column_name: config.column_name,
