@@ -34,6 +34,7 @@ use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
+use thiserror_ext::AsReport;
 
 use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
@@ -214,11 +215,11 @@ impl SourceContext {
         ctx
     }
 
-    pub(crate) fn report_user_source_error(&self, e: RwError) {
+    pub(crate) fn report_user_source_error(&self, e: &(impl AsReport + ?Sized)) {
         if self.source_info.fragment_id == u32::MAX {
             return;
         }
-        let mut err_str = e.inner().to_string();
+        let mut err_str = e.to_report_string();
         if let Some(suppressor) = &self.error_suppressor
             && suppressor.lock().suppress_error(&err_str)
         {

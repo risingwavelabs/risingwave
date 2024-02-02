@@ -46,7 +46,7 @@ impl CsvParser {
         rw_columns: Vec<SourceColumnDesc>,
         csv_props: CsvProperties,
         source_ctx: SourceContextRef,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         let CsvProperties {
             delimiter,
             has_header,
@@ -105,7 +105,7 @@ impl CsvParser {
         &mut self,
         payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         let mut fields = self.read_row(&payload)?;
 
         if let Some(headers) = &mut self.headers {
@@ -161,7 +161,7 @@ impl ByteStreamSourceParser for CsvParser {
         _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         only_parse_payload!(self, payload, writer)
     }
 }

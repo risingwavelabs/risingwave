@@ -41,7 +41,7 @@ pub struct AvroAccessBuilder {
 }
 
 impl AccessBuilder for AvroAccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>> {
         self.value = self.parse_avro_value(&payload, Some(&*self.schema)).await?;
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_ref().unwrap(),

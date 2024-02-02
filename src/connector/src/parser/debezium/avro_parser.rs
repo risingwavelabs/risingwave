@@ -50,7 +50,7 @@ pub struct DebeziumAvroAccessBuilder {
 
 // TODO: reduce encodingtype match
 impl AccessBuilder for DebeziumAvroAccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>> {
         let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
         let schema = self.schema_resolver.get(schema_id).await?;
         self.value = Some(

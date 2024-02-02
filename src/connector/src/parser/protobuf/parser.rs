@@ -49,7 +49,7 @@ pub struct ProtobufAccessBuilder {
 
 impl AccessBuilder for ProtobufAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>> {
         let payload = if self.confluent_wire_type {
             resolve_pb_header(&payload)?
         } else {

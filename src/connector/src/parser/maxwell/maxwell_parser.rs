@@ -57,7 +57,7 @@ impl MaxwellParser {
         &mut self,
         payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         let payload_accessor = self.payload_builder.generate_accessor(payload).await?;
         let row_op = MaxwellChangeEvent::new(payload_accessor);
 
@@ -83,7 +83,7 @@ impl ByteStreamSourceParser for MaxwellParser {
         _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         // restrict the behaviours since there is no corresponding
         // key/value test for maxwell yet.
         only_parse_payload!(self, payload, writer)

@@ -98,7 +98,7 @@ impl UpsertParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         let mut row_op: UpsertChangeEvent<AccessImpl<'_, '_>, AccessImpl<'_, '_>> =
             UpsertChangeEvent::default();
         let mut change_event_op = ChangeEventOperation::Delete;
@@ -136,7 +136,7 @@ impl ByteStreamSourceParser for UpsertParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         self.parse_inner(key, payload, writer).await
     }
 }

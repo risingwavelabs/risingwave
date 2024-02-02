@@ -35,7 +35,7 @@ impl DebeziumJsonAccessBuilder {
 
 impl AccessBuilder for DebeziumJsonAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>> {
         self.value = Some(payload);
         let mut event: BorrowedValue<'_> =
             simd_json::to_borrowed_value(self.value.as_mut().unwrap())

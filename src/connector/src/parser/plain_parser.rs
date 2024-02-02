@@ -86,7 +86,7 @@ impl PlainParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<ParseResult> {
+    ) -> anyhow::Result<ParseResult> {
         // if the message is transaction metadata, parse it and return
         if let Some(msg_meta) = writer.row_meta
             && let SourceMeta::DebeziumCdc(cdc_meta) = msg_meta.meta
@@ -150,7 +150,7 @@ impl ByteStreamSourceParser for PlainParser {
         _key: Option<Vec<u8>>,
         _payload: Option<Vec<u8>>,
         _writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         unreachable!("should call `parse_one_with_txn` instead")
     }
 
@@ -159,7 +159,7 @@ impl ByteStreamSourceParser for PlainParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<ParseResult> {
+    ) -> anyhow::Result<ParseResult> {
         self.parse_inner(key, payload, writer).await
     }
 }

@@ -92,7 +92,7 @@ impl DebeziumParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<ParseResult> {
+    ) -> anyhow::Result<ParseResult> {
         // tombetone messages are handled implicitly by these accessors
         let key_accessor = match key {
             None => None,
@@ -140,7 +140,7 @@ impl ByteStreamSourceParser for DebeziumParser {
         _key: Option<Vec<u8>>,
         _payload: Option<Vec<u8>>,
         _writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         unreachable!("should call `parse_one_with_txn` instead")
     }
 
@@ -149,7 +149,7 @@ impl ByteStreamSourceParser for DebeziumParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<ParseResult> {
+    ) -> anyhow::Result<ParseResult> {
         self.parse_inner(key, payload, writer).await
     }
 }
