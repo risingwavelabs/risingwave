@@ -79,7 +79,7 @@ pub struct OpendalFsSplit<Src: OpendalSource> {
     pub name: String,
     pub offset: usize,
     pub size: usize,
-    pub _marker: PhantomData<Src>,
+    _marker: PhantomData<Src>,
 }
 
 impl<Src: OpendalSource> From<&Object> for OpendalFsSplit<Src> {

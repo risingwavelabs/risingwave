@@ -99,35 +99,6 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
     pub fn get_matcher(&self) -> &Option<glob::Pattern> {
         &self.matcher
     }
-
-    pub async fn list_splits_batch(&mut self) -> anyhow::Result<Vec<OpendalFsSplit<Src>>> {
-        let mut object_metadata_iter = self.list().await?;
-        let mut split_res = vec![];
-        while let Some(list_res) = object_metadata_iter.next().await {
-            match list_res {
-                Ok(res) => {
-                    if true
-                    // todo: filter by time
-                    {
-                        split_res.push(OpendalFsSplit {
-                            name: res.name,
-                            offset: 0,
-                            size: res.size as usize,
-                            _marker: PhantomData,
-                        });
-                    } else {
-                        // Currrntly due to the lack of prefix list, we just skip the unmatched files.
-                        continue;
-                    }
-                }
-                Err(err) => {
-                    tracing::error!("list object fail, err {}", err);
-                    return Err(err);
-                }
-            }
-        }
-        Ok(split_res)
-    }
 }
 
 pub type ObjectMetadataIter = BoxStream<'static, anyhow::Result<FsPageItem>>;

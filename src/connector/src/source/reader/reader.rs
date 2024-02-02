@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -206,12 +205,7 @@ pub async fn build_opendal_fs_list_for_batch<Src: OpendalSource>(lister: Opendal
                     .map(|m| m.matches(&res.name))
                     .unwrap_or(true)
                 {
-                    let split = OpendalFsSplit {
-                        name: res.name,
-                        offset: 0,
-                        size: res.size as usize,
-                        _marker: PhantomData,
-                    };
+                    let split = OpendalFsSplit::new(res.name, 0, res.size as usize);
                     yield split
                 } else {
                     continue;
