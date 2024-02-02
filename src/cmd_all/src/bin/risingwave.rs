@@ -193,6 +193,11 @@ fn main() -> Result<()> {
     let matches = match command.try_get_matches() {
         Ok(m) => m,
         Err(e) if e.kind() == ErrorKind::MissingSubcommand => {
+            // `$ ./risingwave`
+            // NOTE(kwannoel): This is a hack to make `risingwave`
+            // work as an alias of `risingwave single-process`.
+            // If invocation is not a multicall and there's no subcommand,
+            // we will try to invoke it as a single node.
             let command = Component::SingleNode.augment_args(risingwave());
             let matches = command.get_matches();
             Component::SingleNode.start(&matches);
@@ -230,6 +235,9 @@ fn standalone(opts: StandaloneOpts) {
     risingwave_rt::main_okk(risingwave_cmd_all::standalone(opts)).unwrap();
 }
 
+/// For single node, the internals are just a config mapping from its
+/// high level options to standalone mode node-level options.
+/// We will start a standalone instance, with all nodes in the same process.
 fn single_node(opts: SingleNodeOpts) {
     let opts = risingwave_cmd_all::map_single_node_opts_to_standalone_opts(&opts);
     let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
