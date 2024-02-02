@@ -49,6 +49,7 @@ fs-err = "2"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 governor = { version = "0.6", default-features = false, features = ["std"] }
 hex = "0.4.3"
+home = "0.5"
 http = "0.2"
 humantime = "2.1"
 hyper = "0.14"

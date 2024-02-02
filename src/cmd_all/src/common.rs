@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::env::home_dir;
 use std::ffi::OsString;
+use std::sync::LazyLock;
 
 pub fn osstrs<T: Into<OsString> + AsRef<std::ffi::OsStr>>(s: impl AsRef<[T]>) -> Vec<OsString> {
     s.as_ref().iter().map(OsString::from).collect()

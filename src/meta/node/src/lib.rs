@@ -24,6 +24,7 @@ use clap::Parser;
 pub use error::{MetaError, MetaResult};
 use redact::Secret;
 use risingwave_common::config::OverrideConfig;
+use risingwave_common::single_process_config::DEFAULT_SINGLE_NODE_SQLITE_PATH;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
@@ -183,7 +184,10 @@ impl MetaNodeOpts {
             etcd_auth: false,
             etcd_username: Default::default(),
             etcd_password: Default::default(),
-            sql_endpoint: None,
+            sql_endpoint: Some(format!(
+                "sqlite://{}?mode=rwc",
+                *DEFAULT_SINGLE_NODE_SQLITE_PATH,
+            )),
             dashboard_ui_path: None,
             prometheus_endpoint: None,
             prometheus_selector: None,

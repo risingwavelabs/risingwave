@@ -74,6 +74,7 @@ pub mod opts;
 pub mod range;
 pub mod row;
 pub mod session_config;
+pub mod single_process_config;
 pub mod system_param;
 pub mod telemetry;
 pub mod test_utils;
