@@ -29,7 +29,7 @@ import {
 } from "@chakra-ui/react"
 import * as d3 from "d3"
 import { dagStratify } from "d3-dag"
-import _ from "lodash"
+import _, { sortBy } from "lodash"
 import Head from "next/head"
 import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
@@ -41,9 +41,19 @@ import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 import useFetch from "./api/fetch"
-import { BackPressureInfo, getBackPressureWithoutPrometheus, BackPressuresMetrics, getActorBackPressures, BackPressureRateInfo, p50, p90, p95, p99, calculateBPRate, INTERVAL } from "./api/metric"
+import {
+  BackPressureInfo,
+  BackPressuresMetrics,
+  INTERVAL,
+  calculateBPRate,
+  getActorBackPressures,
+  getBackPressureWithoutPrometheus,
+  p50,
+  p90,
+  p95,
+  p99,
+} from "./api/metric"
 import { getFragments, getStreamingJobs } from "./api/streaming"
-import { sortBy } from "lodash"
 
 interface DispatcherNode {
   [actorId: number]: Dispatcher[]
@@ -169,8 +179,20 @@ function buildFragmentDependencyAsEdges(
 
 const SIDEBAR_WIDTH = 200
 
-type BackPressureAlgo = "p50" | "p90" | "p95" | "p99" | "current"
-const backPressureAlgos: BackPressureAlgo[] = ["p50", "p90", "p95", "p99", "current"]
+type BackPressureAlgo = "disable" | "p50" | "p90" | "p95" | "p99"
+const backPressureAlgos: BackPressureAlgo[] = [
+  "disable",
+  "p50",
+  "p90",
+  "p95",
+  "p99",
+]
+
+type BackPressureDataSourceAlgo = "Embedded" | "Prometheus"
+const backPressureDataSourceAlgos: BackPressureDataSourceAlgo[] = [
+  "Embedded",
+  "Prometheus",
+]
 
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
@@ -179,6 +201,13 @@ export default function Streaming() {
   const [relationId, setRelationId] = useQueryState("id", parseAsInteger)
   const [backPressureAlgo, setBackPressureAlgo] = useQueryState("backPressure")
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
+  // used to get the data source
+  const [backPressureDataSourceAlgo, setBackPressureDataSourceAlgo] =
+    useState("Embedded")
+  // used to set the back pressure choice list
+  const [backPressureAlgoOptions, setBackPressureAlgoOptions] = useState(
+    [] as BackPressureAlgo[]
+  )
 
   const { response: actorBackPressures } = useFetch(
     getActorBackPressures,
@@ -211,46 +240,48 @@ export default function Streaming() {
         }
       }
     }
-    return () => { }
+    return () => {}
   }, [relationId, relationList, setRelationId])
 
+  useEffect(() => {
+    if (backPressureDataSourceAlgo === "Prometheus") {
+      setBackPressureAlgoOptions(backPressureAlgos)
+    } else {
+      setBackPressureAlgoOptions([])
+    }
+  }, [backPressureDataSourceAlgo])
 
   // get back pressure rate without prometheus
   const [backPressuresMetricsWithoutPromtheus, setBackPressuresMetrics] =
     useState<BackPressuresMetrics>()
   const [previousBP, setPreviousBP] = useState<BackPressureInfo[]>([])
-  const [backPressureRate, setBackPressureRate] = useState<
-    BackPressureRateInfo[]
-  >([])
+  const [currentBP, setCurrentBP] = useState<BackPressureInfo[]>([])
   const toast = useErrorToast()
 
   useEffect(() => {
-    let localPreviousBP = previousBP
-
-    async function doFetch() {
-      while (true) {
-        try {
-          const currentBP = await getBackPressureWithoutPrometheus()
-          const metrics = calculateBPRate(currentBP, localPreviousBP)
-          setBackPressureRate(backPressureRate)
-          localPreviousBP = currentBP
-          setPreviousBP(currentBP)
-          metrics.outputBufferBlockingDuration = sortBy(
-            metrics.outputBufferBlockingDuration,
-            (m) => (m.metric.fragment_id, m.metric.downstream_fragment_id)
-          )
-
-          setBackPressuresMetrics(metrics)
-          await new Promise((resolve) => setTimeout(resolve, INTERVAL))
-        } catch (e: any) {
-          toast(e, "warning")
-          break
-        }
+    const interval = setInterval(() => {
+      const fetchNewBP = async () => {
+        const newBP = await getBackPressureWithoutPrometheus()
+        setPreviousBP(currentBP)
+        setCurrentBP(newBP)
       }
+
+      fetchNewBP().catch(console.error)
+    }, INTERVAL)
+
+    return () => clearInterval(interval)
+  }, [currentBP])
+
+  useEffect(() => {
+    if (currentBP !== null && previousBP !== null) {
+      const metrics = calculateBPRate(currentBP, previousBP)
+      metrics.outputBufferBlockingDuration = sortBy(
+        metrics.outputBufferBlockingDuration,
+        (m) => (m.metric.fragment_id, m.metric.downstream_fragment_id)
+      )
+      setBackPressuresMetrics(metrics)
     }
-    doFetch()
-    return () => { }
-  }, [toast])
+  }, [currentBP, previousBP])
 
   const fragmentDependency = fragmentDependencyCallback()?.fragmentDep
   const fragmentDependencyDag = fragmentDependencyCallback()?.fragmentDepDag
@@ -316,19 +347,29 @@ export default function Streaming() {
   }
 
   const backPressures = useMemo(() => {
-    if ((actorBackPressures || backPressuresMetricsWithoutPromtheus) && backPressureAlgo) {
+    if (
+      (actorBackPressures &&
+        backPressureAlgo &&
+        backPressureAlgo !== "disable") ||
+      backPressuresMetricsWithoutPromtheus
+    ) {
       let map = new Map()
 
-      if (backPressureAlgo === "current" && backPressuresMetricsWithoutPromtheus) {
+      if (
+        backPressureDataSourceAlgo === "Embedded" &&
+        backPressuresMetricsWithoutPromtheus
+      ) {
         for (const m of backPressuresMetricsWithoutPromtheus.outputBufferBlockingDuration) {
           map.set(
             `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
             m.sample[0].value
           )
         }
-      } else if (backPressureAlgo !== "current" && actorBackPressures) {
+      } else if (
+        backPressureDataSourceAlgo !== "Embedded" &&
+        actorBackPressures
+      ) {
         for (const m of actorBackPressures.outputBufferBlockingDuration) {
-          console.log(backPressureAlgo)
           let algoFunc
           switch (backPressureAlgo) {
             case "p50":
@@ -356,7 +397,12 @@ export default function Streaming() {
       }
       return map
     }
-  }, [actorBackPressures, backPressureAlgo, backPressuresMetricsWithoutPromtheus])
+  }, [
+    backPressureDataSourceAlgo,
+    actorBackPressures,
+    backPressureAlgo,
+    backPressuresMetricsWithoutPromtheus,
+  ])
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
@@ -427,19 +473,30 @@ export default function Streaming() {
             </VStack>
           </FormControl>
           <FormControl>
+            <FormLabel>Data Source</FormLabel>
+            <Select
+              value={backPressureDataSourceAlgo}
+              onChange={(event) =>
+                setBackPressureDataSourceAlgo(event.target.value)
+              }
+            >
+              {backPressureDataSourceAlgos.map((algo) => (
+                <option value={algo} key={algo}>
+                  {algo}
+                </option>
+              ))}
+            </Select>
+          </FormControl>
+          <FormControl>
             <FormLabel>Back Pressure</FormLabel>
             <Select
               value={backPressureAlgo ?? undefined}
-              onChange={(event) =>
-                setBackPressureAlgo(
-                  event.target.value === "disabled"
-                    ? null
-                    : (event.target.value as BackPressureAlgo)
-                )
-              }
+              onChange={(event) => {
+                setBackPressureAlgo(event.target.value as BackPressureAlgo)
+              }}
+              disabled={backPressureAlgoOptions.length === 0}
             >
-              <option value="disabled">Disabled</option>
-              {backPressureAlgos.map((algo) => (
+              {backPressureAlgoOptions.map((algo) => (
                 <option value={algo} key={algo}>
                   {algo}
                 </option>

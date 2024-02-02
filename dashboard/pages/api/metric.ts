@@ -17,15 +17,16 @@
 import { Metrics, MetricsSample } from "../../components/metrics"
 import api from "./api"
 
-export const INTERVAL = 20000
+export const INTERVAL = 5000
 export interface BackPressuresMetrics {
   outputBufferBlockingDuration: Metrics[]
 }
 
 // Get back pressure from meta node -> prometheus
 export async function getActorBackPressures() {
+  console.log("send api")
   const res: BackPressuresMetrics = await api.get(
-    "/metrics/actor/back_pressures",
+    "/metrics/actor/back_pressures"
   )
   return res
 }
@@ -44,25 +45,38 @@ export interface BackPressureRateInfo {
   backPressureRate: number
 }
 
-function convertToMapAndAgg(back_pressures: BackPressureInfo[]): Map<string, number> {
+function convertToMapAndAgg(
+  back_pressures: BackPressureInfo[]
+): Map<string, number> {
+  // fragementId-downstreamFragementId, total value
+  const map_value = new Map<string, number>()
+  // fragementId-downstreamFragementId, total count
+  const map_number = new Map<string, number>()
+  // fragementId-downstreamFragementId, average value
   const map = new Map<string, number>()
   for (const item of back_pressures) {
     const key = `${item.fragmentId}-${item.downstreamFragmentId}`
-    if (map.has(key)) {
-      map.set(key, map.get(key) + item.value)
+    if (map_value.has(key)) {
+      map_value.set(key, map_value.get(key) + item.value)
+      map_number.set(key, map_number.get(key) + 1)
     } else {
-      map.set(key, item.value)
+      map_value.set(key, item.value)
+      map_number.set(key, 1)
     }
+  }
+
+  for (const [key, value] of map_value) {
+    map.set(key, value / map_number.get(key))
   }
   return map
 }
 
-function convertFromMapAndAgg(map: Map<string, number>): BackPressureRateInfo[] {
+function convertFromMapAndAgg(
+  map: Map<string, number>
+): BackPressureRateInfo[] {
   const result: BackPressureRateInfo[] = []
   map.forEach((value, key) => {
-    const [fragmentId, downstreamFragmentId] = key
-      .split("-")
-      .map(Number)
+    const [fragmentId, downstreamFragmentId] = key.split("-").map(Number)
     const backPressureRateInfo: BackPressureRateInfo = {
       actorId: 0,
       fragmentId,
@@ -74,7 +88,9 @@ function convertFromMapAndAgg(map: Map<string, number>): BackPressureRateInfo[] 
   return result
 }
 
-function convertToBackPressureMetrics(bp_rates: BackPressureRateInfo[]): BackPressuresMetrics {
+function convertToBackPressureMetrics(
+  bp_rates: BackPressureRateInfo[]
+): BackPressuresMetrics {
   const bp_metrics: BackPressuresMetrics = {
     outputBufferBlockingDuration: [],
   }
@@ -85,10 +101,12 @@ function convertToBackPressureMetrics(bp_rates: BackPressureRateInfo[]): BackPre
         fragment_id: item.fragmentId.toString(),
         downstream_fragment_id: item.downstreamFragmentId.toString(),
       },
-      sample: [{
-        timestamp: Date.now()
-        , value: item.backPressureRate
-      }],
+      sample: [
+        {
+          timestamp: Date.now(),
+          value: item.backPressureRate,
+        },
+      ],
     })
   }
   return bp_metrics
@@ -96,7 +114,7 @@ function convertToBackPressureMetrics(bp_rates: BackPressureRateInfo[]): BackPre
 
 export function calculateBPRate(
   back_pressure_new: BackPressureInfo[],
-  back_pressure_old: BackPressureInfo[],
+  back_pressure_old: BackPressureInfo[]
 ): BackPressuresMetrics {
   let map_new = convertToMapAndAgg(back_pressure_new)
   let map_old = convertToMapAndAgg(back_pressure_old)
@@ -105,7 +123,7 @@ export function calculateBPRate(
     if (map_old.has(key)) {
       result.set(
         key,
-        (value - map_old.get(key)) / (INTERVAL * 1000000000),
+        (value - map_old.get(key)) / ((INTERVAL / 1000) * 1000000000)
       )
     } else {
       result.set(key, 0)
@@ -132,10 +150,10 @@ export const BackPressureInfo = {
 export async function getBackPressureWithoutPrometheus() {
   const response = await api.get("/metrics/back_pressures")
   let back_pressure_infos: BackPressureInfo[] = response.backPressureInfos.map(
-    BackPressureInfo.fromJSON,
+    BackPressureInfo.fromJSON
   )
   back_pressure_infos = back_pressure_infos.sort(
-    (a, b) => a.actorId - b.actorId,
+    (a, b) => a.actorId - b.actorId
   )
   return back_pressure_infos
 }
