@@ -40,7 +40,6 @@ use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::{
     FragmentParallelUnitMapping, PbRelation, PbRelationGroup, PbTableFragments,
@@ -544,6 +543,7 @@ impl CatalogController {
 
         let table = table::ActiveModel::from(table).update(&txn).await?;
 
+        let old_fragment_mappings = get_fragment_mappings(&txn, job_id).await?;
         // 1. replace old fragments/actors with new ones.
         Fragment::delete_many()
             .filter(fragment::Column::JobId.eq(job_id))
@@ -701,6 +701,8 @@ impl CatalogController {
 
         txn.commit().await?;
 
+        self.notify_fragment_mapping(NotificationOperation::Delete, old_fragment_mappings)
+            .await;
         self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
             .await;
         let version = self
@@ -953,7 +955,7 @@ impl CatalogController {
                 // actor_status
                 PbActorStatus {
                     parallel_unit,
-                    state,
+                    state: _,
                 },
             ) in newly_created_actors
             {
@@ -990,8 +992,6 @@ impl CatalogController {
                 );
 
                 let actor_upstreams = ActorUpstreamActors(actor_upstreams);
-
-                let status = ActorStatus::from(PbActorState::try_from(state).unwrap());
                 let parallel_unit_id = parallel_unit.unwrap().id;
 
                 let splits = actor_splits
@@ -1001,7 +1001,7 @@ impl CatalogController {
                 new_actors.push(actor::ActiveModel {
                     actor_id: Set(actor_id as _),
                     fragment_id: Set(fragment_id as _),
-                    status: Set(status),
+                    status: Set(ActorStatus::Running),
                     splits: Set(splits.map(|splits| PbConnectorSplits { splits }.into())),
                     parallel_unit_id: Set(parallel_unit_id as _),
                     upstream_actor_ids: Set(actor_upstreams),
@@ -1121,6 +1121,9 @@ impl CatalogController {
 
                 for dispatcher in all_dispatchers {
                     debug_assert!(assert_dispatcher_update_checker.insert(dispatcher.id));
+                    if new_created_actors.contains(&dispatcher.actor_id) {
+                        continue;
+                    }
 
                     let mut dispatcher = dispatcher.into_active_model();
 
@@ -1188,7 +1191,7 @@ impl CatalogController {
                 TableParallelism::Adaptive => StreamingParallelism::Adaptive,
                 TableParallelism::Fixed(n) => StreamingParallelism::Fixed(n as _),
                 TableParallelism::Custom => {
-                    unreachable!("sql backend does't support custom parallelism")
+                    unreachable!("sql backend doesn't support custom parallelism")
                 }
             });
 
