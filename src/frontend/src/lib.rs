@@ -150,7 +150,7 @@ impl FrontendOpts {
             advertise_addr: Some("0.0.0.0:4566".to_string()),
             port: None,
             meta_addr: "http://0.0.0.0:5690".parse().unwrap(),
-            prometheus_listener_addr: "".to_string(),
+            prometheus_listener_addr: "0.0.0.0:1250".to_string(),
             health_check_listener_addr: "0.0.0.0:6786".to_string(),
             config_path: "".to_string(),
             metrics_level: None,

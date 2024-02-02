@@ -41,23 +41,23 @@ pub struct SingleNodeOpts {
     config_path: Option<String>,
 
     /// The data directory used by meta store and object store.
-    #[clap(long, env = "RW_SINGLE_NODE_DATA_DIRECTORY", default_value = "")]
+    #[clap(long, env = "RW_SINGLE_NODE_DATA_DIRECTORY")]
     data_directory: Option<String>,
 
     /// The address of the meta node.
-    #[clap(long, env = "RW_SINGLE_NODE_META_ADDR", default_value = "")]
+    #[clap(long, env = "RW_SINGLE_NODE_META_ADDR")]
     meta_addr: Option<String>,
 
     /// The address of the compute node
-    #[clap(long, env = "RW_SINGLE_NODE_COMPUTE_ADDR", default_value = "")]
+    #[clap(long, env = "RW_SINGLE_NODE_COMPUTE_ADDR")]
     compute_addr: Option<String>,
 
     /// The address of the frontend node
-    #[clap(long, env = "RW_SINGLE_NODE_FRONTEND_ADDR", default_value = "")]
+    #[clap(long, env = "RW_SINGLE_NODE_FRONTEND_ADDR")]
     frontend_addr: Option<String>,
 
     /// The address of the compactor node
-    #[clap(long, env = "RW_SINGLE_NODE_COMPACTOR_ADDR", default_value = "")]
+    #[clap(long, env = "RW_SINGLE_NODE_COMPACTOR_ADDR")]
     compactor_addr: Option<String>,
 }
 

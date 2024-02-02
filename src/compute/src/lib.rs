@@ -137,9 +137,9 @@ pub struct ComputeNodeOpts {
 impl ComputeNodeOpts {
     pub fn new_for_single_node() -> Self {
         Self {
-            listen_addr: "".to_string(),
-            advertise_addr: Default::default(),
-            prometheus_listener_addr: Default::default(),
+            listen_addr: "0.0.0.0:5688".to_string(),
+            advertise_addr: Some("0.0.0.0:5688".to_string()),
+            prometheus_listener_addr: "0.0.0.0:1250".to_string(),
             meta_address: "http://0.0.0.0:5690".parse().unwrap(),
             connector_rpc_endpoint: None,
             connector_rpc_sink_payload_format: None,

@@ -181,7 +181,7 @@ impl MetaNodeOpts {
             listen_addr: "0.0.0.0:5690".to_string(),
             advertise_addr: "0.0.0.0:5690".to_string(),
             dashboard_host: Some("0.0.0.0:5691".to_string()),
-            prometheus_host: None,
+            prometheus_host: Some("0.0.0.0:1250".to_string()),
             etcd_endpoints: Default::default(),
             etcd_auth: false,
             etcd_username: Default::default(),

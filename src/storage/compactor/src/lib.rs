@@ -98,7 +98,7 @@ impl CompactorOpts {
             listen_addr: "0.0.0.0:6660".to_string(),
             advertise_addr: Some("0.0.0.0:6660".to_string()),
             port: None,
-            prometheus_listener_addr: "".to_string(),
+            prometheus_listener_addr: "0.0.0.0:1250".to_string(),
             meta_address: "http://0.0.0.0:5690".parse().unwrap(),
             compaction_worker_threads_number: None,
             config_path: "".to_string(),
