@@ -570,7 +570,7 @@ profile:
     steps:
       - use: minio
         api-requests-max: 30
-        api-requests-deadline: 2s
+        api-requests-deadline: 3s
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
@@ -860,11 +860,6 @@ profile:
     config-path: src/config/ci-meta-backup-test.toml
     steps:
       - use: etcd
-      - use: minio
-
-  ci-delete-range-test:
-    config-path: src/config/ci-delete-range-test.toml
-    steps:
       - use: minio
 
   ci-iceberg-test:

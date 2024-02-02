@@ -148,7 +148,9 @@ impl SplitReader for DatagenSplitReader {
         ) {
             (ProtocolProperties::Native, EncodingProperties::Native) => {
                 let actor_id = self.source_ctx.source_info.actor_id.to_string();
+                let fragment_id = self.source_ctx.source_info.fragment_id.to_string();
                 let source_id = self.source_ctx.source_info.source_id.to_string();
+                let source_name = self.source_ctx.source_info.source_name.to_string();
                 let split_id = self.split_id.to_string();
                 let metrics = self.source_ctx.metrics.clone();
                 spawn_data_generation_stream(
@@ -157,7 +159,13 @@ impl SplitReader for DatagenSplitReader {
                         .inspect_ok(move |stream_chunk| {
                             metrics
                                 .partition_input_count
-                                .with_label_values(&[&actor_id, &source_id, &split_id])
+                                .with_label_values(&[
+                                    &actor_id,
+                                    &source_id,
+                                    &split_id,
+                                    &source_name,
+                                    &fragment_id,
+                                ])
                                 .inc_by(stream_chunk.cardinality() as u64);
                         }),
                     BUFFER_SIZE,

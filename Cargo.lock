@@ -2746,16 +2746,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ctor"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30d2b3721e861707777e3195b0158f950ae6dc4a27e4d02ff9f67e3eb3de199e"
-dependencies = [
- "quote",
- "syn 2.0.48",
-]
-
-[[package]]
 name = "curve25519-dalek"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5073,7 +5063,7 @@ dependencies = [
 [[package]]
 name = "icelake"
 version = "0.0.10"
-source = "git+https://github.com/icelake-io/icelake?rev=32c0bbf242f5c47b1e743f10577012fe7436c770#32c0bbf242f5c47b1e743f10577012fe7436c770"
+source = "git+https://github.com/icelake-io/icelake?rev=56943d203464d32701c20d74b278b6b3ef2eefc7#56943d203464d32701c20d74b278b6b3ef2eefc7"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
@@ -5680,6 +5670,26 @@ name = "linked-hash-map"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
+
+[[package]]
+name = "linkme"
+version = "0.3.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b53ad6a33de58864705954edb5ad5d571a010f9e296865ed43dc72a5621b430"
+dependencies = [
+ "linkme-impl",
+]
+
+[[package]]
+name = "linkme-impl"
+version = "0.3.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04e542a18c94a9b6fcc7adb090fa3ba6b79ee220a16404f325672729f32a66ff"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.48",
+]
 
 [[package]]
 name = "linux-raw-sys"
@@ -8952,7 +8962,9 @@ dependencies = [
  "anyhow",
  "apache-avro 0.16.0",
  "arrow-array 50.0.0",
+ "arrow-row 50.0.0",
  "arrow-schema 50.0.0",
+ "arrow-select 50.0.0",
  "assert_matches",
  "async-nats",
  "async-trait",
@@ -9157,18 +9169,20 @@ dependencies = [
  "await-tree",
  "cfg-or-panic",
  "chrono",
- "ctor",
  "downcast-rs",
  "easy-ext",
+ "educe 0.5.7",
  "either",
  "enum-as-inner",
  "expect-test",
  "futures-async-stream",
  "futures-util",
  "itertools 0.12.0",
+ "linkme",
  "madsim-tokio",
  "moka",
  "num-traits",
+ "openssl",
  "parse-display",
  "paste",
  "risingwave_common",
@@ -9203,9 +9217,11 @@ dependencies = [
  "icelake",
  "itertools 0.12.0",
  "jsonbb",
+ "linkme",
  "madsim-tokio",
  "md5",
  "num-traits",
+ "openssl",
  "regex",
  "risingwave_common",
  "risingwave_expr",
@@ -9250,7 +9266,6 @@ dependencies = [
  "bk-tree",
  "bytes",
  "clap",
- "ctor",
  "downcast-rs",
  "dyn-clone",
  "easy-ext",
@@ -9261,7 +9276,9 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "iana-time-zone",
+ "icelake",
  "itertools 0.12.0",
+ "linkme",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -9610,6 +9627,7 @@ dependencies = [
  "hyper-rustls",
  "hyper-tls",
  "itertools 0.12.0",
+ "madsim",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
  "opendal",
@@ -9775,6 +9793,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_hummock_sdk",
  "risingwave_meta_node",
+ "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_sqlparser",
@@ -10088,26 +10107,27 @@ dependencies = [
 
 [[package]]
 name = "rquickjs"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0db265d331ae1b1a9fdb68466a8359bc9dcc5e78a9c323f790322f8442e005ac"
+checksum = "511ee02660e19cf451ebcbda6151a4023044293066e9ccd2b0498047203f6ab1"
 dependencies = [
  "rquickjs-core",
 ]
 
 [[package]]
 name = "rquickjs-core"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48e51f2fc99917699385bfa290b776e712e414b222d7c2a9b2cd67b8e93585f3"
+checksum = "c10ce0bc11e249e738aadb8119e9a7619125cb866208236d88d2ee3dcdb7a67d"
 dependencies = [
  "rquickjs-sys",
 ]
 
 [[package]]
 name = "rquickjs-sys"
-version = "0.4.2"
-source = "git+https://github.com/DelSkayn/rquickjs.git?rev=60696e8#60696e88dfb903d8f5cd81b2667fb3f64f9e9f67"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86030d52fc20e68115f93738c2cb960d6f900f64d99e1013ea0e170381eb0a72"
 dependencies = [
  "cc",
 ]
@@ -10805,9 +10825,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.5.0"
+version = "3.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f58c3a1b3e418f61c25b2aeb43fc6c95eaa252b8cecdda67f401943e9e08d33f"
+checksum = "1b0ed1662c5a68664f45b76d18deb0e234aff37207086803165c961eb695e981"
 dependencies = [
  "base64 0.21.4",
  "chrono",
@@ -10822,9 +10842,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.5.0"
+version = "3.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2068b437a31fc68f25dd7edc296b078f04b45145c199d8eed9866e45f1ff274"
+checksum = "568577ff0ef47b879f736cd66740e022f3672788cdf002a05a4e609ea5a6fb15"
 dependencies = [
  "darling 0.20.3",
  "proc-macro2",
@@ -13751,6 +13771,8 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
+ "openssl",
+ "openssl-sys",
  "opentelemetry_api",
  "opentelemetry_sdk",
  "ordered-float 3.9.1",

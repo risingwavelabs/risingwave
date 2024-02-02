@@ -71,6 +71,7 @@ mod state;
 mod trace;
 
 pub use self::command::{Command, ReplaceTablePlan, Reschedule};
+pub use self::rpc::StreamRpcManager;
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
 
@@ -143,11 +144,13 @@ pub struct GlobalBarrierManagerContext {
 
     source_manager: SourceManagerRef,
 
-    scale_controller: Option<ScaleControllerRef>,
+    scale_controller: ScaleControllerRef,
 
     sink_manager: SinkCoordinatorManager,
 
     metrics: Arc<MetaMetrics>,
+
+    stream_rpc_manager: StreamRpcManager,
 
     env: MetaSrvEnv,
 }
@@ -381,6 +384,7 @@ impl GlobalBarrierManager {
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         metrics: Arc<MetaMetrics>,
+        stream_rpc_manager: StreamRpcManager,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
@@ -394,14 +398,13 @@ impl GlobalBarrierManager {
 
         let tracker = CreateMviewProgressTracker::new();
 
-        let scale_controller = match &metadata_manager {
-            MetadataManager::V1(_) => Some(Arc::new(ScaleController::new(
-                &metadata_manager,
-                source_manager.clone(),
-                env.clone(),
-            ))),
-            MetadataManager::V2(_) => None,
-        };
+        let scale_controller = Arc::new(ScaleController::new(
+            &metadata_manager,
+            source_manager.clone(),
+            stream_rpc_manager.clone(),
+            env.clone(),
+        ));
+
         let context = GlobalBarrierManagerContext {
             status: Arc::new(Mutex::new(BarrierManagerStatus::Starting)),
             metadata_manager,
@@ -411,6 +414,7 @@ impl GlobalBarrierManager {
             sink_manager,
             metrics,
             tracker: Arc::new(Mutex::new(tracker)),
+            stream_rpc_manager,
             env: env.clone(),
         };
 
@@ -462,6 +466,7 @@ impl GlobalBarrierManager {
             } else {
                 self.env
                     .system_params_manager()
+                    .unwrap()
                     .set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
                     .await?;
             }

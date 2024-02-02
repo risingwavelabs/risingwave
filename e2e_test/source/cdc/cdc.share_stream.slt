@@ -105,7 +105,30 @@ create materialized view orders_test_cnt as select count(*) as cnt from orders_t
 system ok
 mysql --protocol=tcp -u root mytest -e "INSERT INTO products VALUES(default, 'Juice', '100ml Juice');"
 
+system ok
+mysql --protocol=tcp -u root mytest -e "FLUSH LOGS"
+
+# Should not contain records inserted before the table is created (e.g. 'Bob' inserted above)
+statement ok
+create table orders_no_backfill (
+   order_id int,
+   order_date timestamp,
+   customer_name string,
+   price decimal,
+   product_id int,
+   order_status smallint,
+   PRIMARY KEY (order_id)
+) with (
+  snapshot = 'false'
+) from mysql_mytest table 'mytest.orders';
+
 sleep 5s
+
+# table without backfill should not contain historical records
+query I
+select count(*) from orders_no_backfill
+----
+0
 
 # check ingestion results
 query I

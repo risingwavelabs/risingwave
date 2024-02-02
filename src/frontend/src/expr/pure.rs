@@ -63,6 +63,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::ToTimestamp
             | expr_node::Type::AtTimeZone
             | expr_node::Type::DateTrunc
+            | expr_node::Type::MakeDate
+            | expr_node::Type::MakeTime
+            | expr_node::Type::MakeTimestamp
             | expr_node::Type::ToTimestamp1
             | expr_node::Type::CharToDate
             | expr_node::Type::CastWithTimeZone
@@ -216,6 +219,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Sha256
             | expr_node::Type::Sha384
             | expr_node::Type::Sha512
+            | expr_node::Type::Decrypt
+            | expr_node::Type::Encrypt
             | expr_node::Type::Tand
             | expr_node::Type::ArrayPositions
             | expr_node::Type::StringToArray

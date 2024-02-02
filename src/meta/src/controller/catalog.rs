@@ -27,7 +27,8 @@ use risingwave_meta_model_v2::{
     connection, database, function, index, object, object_dependency, schema, sink, source,
     streaming_job, table, user_privilege, view, ActorId, ColumnCatalogArray, ConnectionId,
     CreateType, DatabaseId, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
-    PrivateLinkService, Property, SchemaId, SourceId, StreamSourceInfo, TableId, UserId,
+    PrivateLinkService, Property, SchemaId, SourceId, StreamSourceInfo, StreamingParallelism,
+    TableId, UserId,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
@@ -55,9 +56,9 @@ use crate::controller::utils::{
     check_connection_name_duplicate, check_database_name_duplicate,
     check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
     ensure_object_id, ensure_object_not_refer, ensure_schema_empty, ensure_user_id,
-    get_fragment_mappings, get_referring_objects, get_referring_objects_cascade,
-    get_user_privilege, list_user_info_by_ids, resolve_source_register_info_for_jobs,
-    PartialObject,
+    get_fragment_mappings, get_fragment_mappings_by_jobs, get_referring_objects,
+    get_referring_objects_cascade, get_user_privilege, list_user_info_by_ids,
+    resolve_source_register_info_for_jobs, PartialObject,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
@@ -266,6 +267,7 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
+        let fragment_mappings = get_fragment_mappings_by_jobs(&txn, streaming_jobs).await?;
 
         // The schema and objects in the database will be delete cascade.
         let res = Object::delete_by_id(database_id).exec(&txn).await?;
@@ -285,6 +287,8 @@ impl CatalogController {
                     ..Default::default()
                 }),
             )
+            .await;
+        self.notify_fragment_mapping(NotificationOperation::Delete, fragment_mappings)
             .await;
         Ok((
             ReleaseContext {
@@ -1013,18 +1017,6 @@ impl CatalogController {
                         .await?;
                 }
 
-                if !index_ids.is_empty() {
-                    let index_objs = Index::find()
-                        .find_also_related(Object)
-                        .filter(index::Column::IndexId.is_in(index_ids))
-                        .all(&txn)
-                        .await?;
-                    for (index, index_obj) in index_objs {
-                        relations.push(PbRelationInfo::Index(
-                            ObjectModel(index, index_obj.unwrap()).into(),
-                        ));
-                    }
-                }
                 if !table_ids.is_empty() {
                     let table_objs = Table::find()
                         .find_also_related(Object)
@@ -1034,6 +1026,19 @@ impl CatalogController {
                     for (table, table_obj) in table_objs {
                         relations.push(PbRelationInfo::Table(
                             ObjectModel(table, table_obj.unwrap()).into(),
+                        ));
+                    }
+                }
+                // FIXME: frontend will update index/primary table from cache, requires apply updates of indexes after tables.
+                if !index_ids.is_empty() {
+                    let index_objs = Index::find()
+                        .find_also_related(Object)
+                        .filter(index::Column::IndexId.is_in(index_ids))
+                        .all(&txn)
+                        .await?;
+                    for (index, index_obj) in index_objs {
+                        relations.push(PbRelationInfo::Index(
+                            ObjectModel(index, index_obj.unwrap()).into(),
                         ));
                     }
                 }
@@ -1425,7 +1430,16 @@ impl CatalogController {
             DropMode::Cascade => get_referring_objects_cascade(object_id, &txn).await?,
             DropMode::Restrict => {
                 ensure_object_not_refer(object_type, object_id, &txn).await?;
-                vec![]
+                if obj.obj_type == ObjectType::Table {
+                    let indexes = get_referring_objects(object_id, &txn).await?;
+                    assert!(
+                        indexes.iter().all(|obj| obj.obj_type == ObjectType::Index),
+                        "only index could be dropped in restrict mode"
+                    );
+                    indexes
+                } else {
+                    vec![]
+                }
             }
         };
         assert!(
@@ -1439,11 +1453,15 @@ impl CatalogController {
 
         let to_drop_table_ids = to_drop_objects
             .iter()
-            .filter(|obj| obj.obj_type == ObjectType::Table)
+            .filter(|obj| obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Index)
             .map(|obj| obj.oid);
         let mut to_drop_streaming_jobs = to_drop_objects
             .iter()
-            .filter(|obj| obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Sink)
+            .filter(|obj| {
+                obj.obj_type == ObjectType::Table
+                    || obj.obj_type == ObjectType::Sink
+                    || obj.obj_type == ObjectType::Index
+            })
             .map(|obj| obj.oid)
             .collect_vec();
 
@@ -1478,11 +1496,6 @@ impl CatalogController {
         }
 
         let mut to_drop_state_table_ids = to_drop_table_ids.clone().collect_vec();
-        let to_drop_index_ids = to_drop_objects
-            .iter()
-            .filter(|obj| obj.obj_type == ObjectType::Index)
-            .map(|obj| obj.oid)
-            .collect_vec();
 
         // Add associated sources.
         let mut to_drop_source_ids: Vec<SourceId> = Table::find()
@@ -1506,16 +1519,6 @@ impl CatalogController {
             to_drop_source_ids.push(object_id);
         }
 
-        // add internal tables.
-        let index_table_ids: Vec<TableId> = Index::find()
-            .select_only()
-            .column(index::Column::IndexTableId)
-            .filter(index::Column::IndexId.is_in(to_drop_index_ids))
-            .into_tuple()
-            .all(&txn)
-            .await?;
-        to_drop_streaming_jobs.extend(index_table_ids);
-
         if !to_drop_streaming_jobs.is_empty() {
             let to_drop_internal_table_objs: Vec<PartialObject> = Object::find()
                 .select_only()
@@ -1536,7 +1539,8 @@ impl CatalogController {
         }
 
         let (source_fragments, removed_actors) =
-            resolve_source_register_info_for_jobs(&txn, to_drop_streaming_jobs).await?;
+            resolve_source_register_info_for_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
+        let fragment_mappings = get_fragment_mappings_by_jobs(&txn, to_drop_streaming_jobs).await?;
 
         // Find affect users with privileges on all this objects.
         let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
@@ -1565,57 +1569,69 @@ impl CatalogController {
 
         // notify about them.
         self.notify_users_update(user_infos).await;
-        let relations = to_drop_objects
-            .into_iter()
-            .map(|obj| match obj.obj_type {
-                ObjectType::Table => PbRelation {
+        let mut relations = vec![];
+        for obj in to_drop_objects {
+            match obj.obj_type {
+                ObjectType::Table => relations.push(PbRelation {
                     relation_info: Some(PbRelationInfo::Table(PbTable {
                         id: obj.oid as _,
                         schema_id: obj.schema_id.unwrap() as _,
                         database_id: obj.database_id.unwrap() as _,
                         ..Default::default()
                     })),
-                },
-                ObjectType::Source => PbRelation {
+                }),
+                ObjectType::Source => relations.push(PbRelation {
                     relation_info: Some(PbRelationInfo::Source(PbSource {
                         id: obj.oid as _,
                         schema_id: obj.schema_id.unwrap() as _,
                         database_id: obj.database_id.unwrap() as _,
                         ..Default::default()
                     })),
-                },
-                ObjectType::Sink => PbRelation {
+                }),
+                ObjectType::Sink => relations.push(PbRelation {
                     relation_info: Some(PbRelationInfo::Sink(PbSink {
                         id: obj.oid as _,
                         schema_id: obj.schema_id.unwrap() as _,
                         database_id: obj.database_id.unwrap() as _,
                         ..Default::default()
                     })),
-                },
-                ObjectType::View => PbRelation {
+                }),
+                ObjectType::View => relations.push(PbRelation {
                     relation_info: Some(PbRelationInfo::View(PbView {
                         id: obj.oid as _,
                         schema_id: obj.schema_id.unwrap() as _,
                         database_id: obj.database_id.unwrap() as _,
                         ..Default::default()
                     })),
-                },
-                ObjectType::Index => PbRelation {
-                    relation_info: Some(PbRelationInfo::Index(PbIndex {
-                        id: obj.oid as _,
-                        schema_id: obj.schema_id.unwrap() as _,
-                        database_id: obj.database_id.unwrap() as _,
-                        ..Default::default()
-                    })),
-                },
+                }),
+                ObjectType::Index => {
+                    relations.push(PbRelation {
+                        relation_info: Some(PbRelationInfo::Index(PbIndex {
+                            id: obj.oid as _,
+                            schema_id: obj.schema_id.unwrap() as _,
+                            database_id: obj.database_id.unwrap() as _,
+                            ..Default::default()
+                        })),
+                    });
+                    relations.push(PbRelation {
+                        relation_info: Some(PbRelationInfo::Table(PbTable {
+                            id: obj.oid as _,
+                            schema_id: obj.schema_id.unwrap() as _,
+                            database_id: obj.database_id.unwrap() as _,
+                            ..Default::default()
+                        })),
+                    });
+                }
                 _ => unreachable!("only relations will be dropped."),
-            })
-            .collect_vec();
+            }
+        }
         let version = self
             .notify_frontend(
                 NotificationOperation::Delete,
                 NotificationInfo::RelationGroup(PbRelationGroup { relations }),
             )
+            .await;
+        self.notify_fragment_mapping(NotificationOperation::Delete, fragment_mappings)
             .await;
 
         Ok((
@@ -1729,9 +1745,12 @@ impl CatalogController {
                     .one(&txn)
                     .await?
                     .unwrap();
+                let obj = obj.unwrap();
                 let old_name = relation.name.clone();
                 relation.name = object_name.into();
-                relation.definition = alter_relation_rename(&relation.definition, object_name);
+                if obj.obj_type != ObjectType::Index {
+                    relation.definition = alter_relation_rename(&relation.definition, object_name);
+                }
                 let active_model = $table::ActiveModel {
                     $identity: Set(relation.$identity),
                     name: Set(object_name.into()),
@@ -1740,9 +1759,7 @@ impl CatalogController {
                 };
                 active_model.update(&txn).await?;
                 to_update_relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::$entity(
-                        ObjectModel(relation, obj.unwrap()).into(),
-                    )),
+                    relation_info: Some(PbRelationInfo::$entity(ObjectModel(relation, obj).into())),
                 });
                 old_name
             }};
@@ -1803,6 +1820,22 @@ impl CatalogController {
             }};
         }
         let objs = get_referring_objects(object_id, &txn).await?;
+        // TODO: For sink into table. when sink into table is ready.
+        // if object_type == ObjectType::Table {
+        //     let incoming_sinks: Vec<_> = Table::find_by_id(object_id)
+        //         .select_only()
+        //         .column(table::Column::IncomingSinks)
+        //         .into_tuple()
+        //         .one(&txn)
+        //         .await?
+        //         .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
+        //     objs.extend(incoming_sinks.into_iter().map(|id| PartialObject {
+        //         oid: id as _,
+        //         obj_type: ObjectType::Sink,
+        //         ..Default::default()
+        //     }));
+        // }
+
         for obj in objs {
             match obj.obj_type {
                 ObjectType::Table => rename_relation_ref!(Table, table, table_id, obj.oid),
@@ -2063,6 +2096,26 @@ impl CatalogController {
             .into_iter()
             .map(|(id, property)| (id, TableOption::build_table_option(&property.into_inner())))
             .collect())
+    }
+
+    pub async fn get_all_streaming_parallelisms(
+        &self,
+    ) -> MetaResult<HashMap<ObjectId, StreamingParallelism>> {
+        let inner = self.inner.read().await;
+
+        let job_parallelisms = StreamingJob::find()
+            .select_only()
+            .columns([
+                streaming_job::Column::JobId,
+                streaming_job::Column::Parallelism,
+            ])
+            .into_tuple::<(ObjectId, StreamingParallelism)>()
+            .all(&inner.db)
+            .await?;
+
+        Ok(job_parallelisms
+            .into_iter()
+            .collect::<HashMap<ObjectId, StreamingParallelism>>())
     }
 
     pub async fn get_table_name_type_mapping(
