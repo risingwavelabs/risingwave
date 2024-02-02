@@ -310,6 +310,7 @@ KafkaConfig:
     required: false
   - name: broker.rewrite.endpoints
     field_type: HashMap<String,String>
+    comments: This is generated from `private_link_targets` and `private_link_endpoint`, instead of given by users.
     required: false
 KinesisSinkConfig:
   fields:
