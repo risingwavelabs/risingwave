@@ -54,6 +54,7 @@ use crate::controller::utils::{
     PartialActorLocation, PartialFragmentStateTables,
 };
 use crate::manager::{ActorInfos, LocalNotification};
+use crate::model::TableParallelism;
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
@@ -311,6 +312,7 @@ impl CatalogController {
             HashMap<ActorId, Vec<actor_dispatcher::Model>>,
         )>,
         parallel_units_map: &HashMap<u32, PbParallelUnit>,
+        parallelism: StreamingParallelism,
     ) -> MetaResult<PbTableFragments> {
         let mut pb_fragments = HashMap::new();
         let mut pb_actor_splits = HashMap::new();
@@ -333,8 +335,13 @@ impl CatalogController {
             actor_status: pb_actor_status,
             actor_splits: pb_actor_splits,
             ctx: Some(ctx.unwrap_or_default()),
-            // TODO(peng): fix this for model v2
-            parallelism: None,
+            parallelism: Some(
+                match parallelism {
+                    StreamingParallelism::Adaptive => TableParallelism::Adaptive,
+                    StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n as _),
+                }
+                .into(),
+            ),
         };
 
         Ok(table_fragments)
@@ -631,6 +638,7 @@ impl CatalogController {
             job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
             fragment_info,
             &parallel_units_map,
+            job_info.parallelism.clone(),
         )
     }
 
@@ -736,6 +744,7 @@ impl CatalogController {
                     job.timezone.map(|tz| PbStreamContext { timezone: tz }),
                     fragment_info,
                     &parallel_units_map,
+                    job.parallelism.clone(),
                 )?,
             );
         }
