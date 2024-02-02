@@ -139,7 +139,7 @@ impl Component {
             Component::Ctl => vec!["risectl"],
             Component::Playground => vec!["play"],
             Component::Standalone => vec![],
-            Component::SingleNode => vec![],
+            Component::SingleNode => vec!["single-node", "single"],
         }
     }
 
