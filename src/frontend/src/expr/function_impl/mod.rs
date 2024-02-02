@@ -16,4 +16,5 @@ mod cast_regclass;
 mod col_description;
 pub mod context;
 mod pg_get_indexdef;
+mod pg_get_userbyid;
 mod pg_get_viewdef;

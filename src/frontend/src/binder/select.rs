@@ -31,16 +31,13 @@ use super::statement::RewriteExprsRecursive;
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
-use crate::catalog::system_catalog::pg_catalog::{
-    PG_INDEX_COLUMNS, PG_INDEX_TABLE_NAME, PG_USER_ID_INDEX, PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
-};
+use crate::catalog::system_catalog::pg_catalog::{PG_INDEX_COLUMNS, PG_INDEX_TABLE_NAME};
 use crate::catalog::system_catalog::rw_catalog::{
     RW_TABLE_STATS_COLUMNS, RW_TABLE_STATS_KEY_SIZE_INDEX, RW_TABLE_STATS_TABLE_ID_INDEX,
     RW_TABLE_STATS_TABLE_NAME, RW_TABLE_STATS_VALUE_SIZE_INDEX,
 };
 use crate::expr::{
-    AggCall, CorrelatedId, CorrelatedInputRef, Depth, Expr as _, ExprImpl, ExprType, FunctionCall,
-    InputRef,
+    AggCall, CorrelatedId, Depth, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef,
 };
 use crate::utils::group_by::GroupBy;
 
@@ -528,58 +525,6 @@ impl Binder {
             })
             .try_collect()?;
         Ok((returning_list, fields))
-    }
-
-    /// `bind_get_user_by_id_select` binds a select statement that returns a single user name by id,
-    /// this is used for function `pg_catalog.get_user_by_id()`.
-    pub fn bind_get_user_by_id_select(&mut self, input: &ExprImpl) -> Result<BoundSelect> {
-        let select_items = vec![InputRef::new(PG_USER_NAME_INDEX, DataType::Varchar).into()];
-        let schema = Schema {
-            fields: vec![Field::with_name(
-                DataType::Varchar,
-                UNNAMED_COLUMN.to_string(),
-            )],
-        };
-        let input = match input {
-            ExprImpl::InputRef(input_ref) => {
-                CorrelatedInputRef::new(input_ref.index(), input_ref.return_type(), 1).into()
-            }
-            ExprImpl::CorrelatedInputRef(col_input_ref) => CorrelatedInputRef::new(
-                col_input_ref.index(),
-                col_input_ref.return_type(),
-                col_input_ref.depth() + 1,
-            )
-            .into(),
-            ExprImpl::Literal(_) => input.clone(),
-            _ => return Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
-        };
-        let from = Some(self.bind_relation_by_name_inner(
-            Some(PG_CATALOG_SCHEMA_NAME),
-            PG_USER_TABLE_NAME,
-            None,
-            false,
-        )?);
-        let where_clause = Some(
-            FunctionCall::new(
-                ExprType::Equal,
-                vec![
-                    input,
-                    InputRef::new(PG_USER_ID_INDEX, DataType::Int32).into(),
-                ],
-            )?
-            .into(),
-        );
-
-        Ok(BoundSelect {
-            distinct: BoundDistinct::All,
-            select_items,
-            aliases: vec![None],
-            from,
-            where_clause,
-            group_by: GroupBy::GroupKey(vec![]),
-            having: None,
-            schema,
-        })
     }
 
     /// This returns the size of all the indexes that are on the specified table.

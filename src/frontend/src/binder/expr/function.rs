@@ -1085,22 +1085,7 @@ impl Binder {
                 ("current_role", current_user()),
                 ("current_user", current_user()),
                 ("user", current_user()),
-                ("pg_get_userbyid", guard_by_len(1, raw(|binder, inputs|{
-                        let input = &inputs[0];
-                        let bound_query = binder.bind_get_user_by_id_select(input)?;
-                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
-                            BoundQuery {
-                                body: BoundSetExpr::Select(Box::new(bound_query)),
-                                order: vec![],
-                                limit: None,
-                                offset: None,
-                                with_ties: false,
-                                extra_order_exprs: vec![],
-                            },
-                            SubqueryKind::Scalar,
-                        ))))
-                    }
-                ))),
+                ("pg_get_userbyid", raw_call(ExprType::PgGetUserbyid)),
                 ("pg_get_indexdef", raw_call(ExprType::PgGetIndexdef)),
                 ("pg_get_viewdef", raw_call(ExprType::PgGetViewdef)),
                 ("pg_relation_size", dispatch_by_len(vec![
