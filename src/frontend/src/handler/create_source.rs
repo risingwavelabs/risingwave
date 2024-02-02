@@ -44,6 +44,7 @@ use risingwave_connector::source::cdc::{
     MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
+use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
@@ -977,6 +978,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 ),
                 TEST_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json],
+                ),
+                ICEBERG_CONNECTOR => hashmap!(
+                    Format::Native => vec![Encode::Native],
                 )
         ))
     });
@@ -1213,8 +1217,10 @@ pub async fn handle_create_source(
         )
         .into());
     }
-
-    let (mut columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names)?;
+    let connector = get_connector(&with_properties)
+        .ok_or_else(|| RwError::from(ProtocolError("missing field 'connector'".to_string())))?;
+    let (mut columns, pk_column_ids, row_id_index) =
+        bind_pk_on_relation(columns, pk_names, ICEBERG_CONNECTOR != connector)?;
 
     debug_assert!(is_column_ids_dedup(&columns));
 

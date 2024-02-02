@@ -249,6 +249,18 @@ impl Parser {
             } else {
                 ConnectorSchema::native().into()
             })
+        } else if connector.contains("iceberg") {
+            let expected = ConnectorSchema::native();
+            if self.peek_source_schema_format() {
+                let schema = parse_source_schema(self)?.into_v2();
+                if schema != expected {
+                    return Err(ParserError::ParserError(format!(
+                        "Row format for iceberg connectors should be \
+                         either omitted or set to `{expected}`",
+                    )));
+                }
+            }
+            Ok(expected.into())
         } else {
             Ok(parse_source_schema(self)?)
         }

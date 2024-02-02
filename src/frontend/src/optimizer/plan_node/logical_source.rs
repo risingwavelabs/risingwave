@@ -24,7 +24,8 @@ use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, Schema, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_common::error::Result;
-use risingwave_connector::source::DataType;
+use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
+use risingwave_connector::source::{DataType, UPSTREAM_SOURCE_KEY};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 
@@ -544,6 +545,18 @@ impl ToStream for LogicalSource {
                     )
                     .into();
                 }
+            }
+        }
+        if let Some(source) = &self.core.catalog {
+            let connector = &source
+                .with_properties
+                .get(UPSTREAM_SOURCE_KEY)
+                .map(|s| s.to_lowercase())
+                .unwrap();
+            if ICEBERG_CONNECTOR == connector {
+                return Err(
+                    anyhow::anyhow!("Iceberg source is not supported in stream queries").into(),
+                );
             }
         }
         Ok(plan)
