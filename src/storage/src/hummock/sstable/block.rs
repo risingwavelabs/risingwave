@@ -214,22 +214,24 @@ impl Block {
             CompressionAlgorithm::Lz4 => {
                 let mut decoder = lz4::Decoder::new(compressed_data.reader())
                     .map_err(HummockError::decode_error)?;
-                let mut decoded = Vec::with_capacity(uncompressed_capacity);
+                let mut decoded = BytesMut::with_capacity(uncompressed_capacity);
+                unsafe { decoded.set_len(uncompressed_capacity) }
                 decoder
-                    .read_to_end(&mut decoded)
+                    .read_exact(&mut decoded)
                     .map_err(HummockError::decode_error)?;
                 debug_assert_eq!(decoded.capacity(), uncompressed_capacity);
-                Bytes::from(decoded)
+                decoded.freeze()
             }
             CompressionAlgorithm::Zstd => {
                 let mut decoder = zstd::Decoder::new(compressed_data.reader())
                     .map_err(HummockError::decode_error)?;
-                let mut decoded = Vec::with_capacity(uncompressed_capacity);
+                let mut decoded = BytesMut::with_capacity(uncompressed_capacity);
+                unsafe { decoded.set_len(uncompressed_capacity) }
                 decoder
-                    .read_to_end(&mut decoded)
+                    .read_exact(&mut decoded)
                     .map_err(HummockError::decode_error)?;
                 debug_assert_eq!(decoded.capacity(), uncompressed_capacity);
-                Bytes::from(decoded)
+                decoded.freeze()
             }
         };
 
@@ -460,13 +462,15 @@ pub struct BlockBuilder {
     // restart_points_type_index stores only the restart_point corresponding to each type change,
     // as an index, in order to reduce space usage
     restart_points_type_index: Vec<RestartPoint>,
+
+    options: BlockBuilderOptions,
 }
 
 impl BlockBuilder {
     pub fn new(options: BlockBuilderOptions) -> Self {
         Self {
-            // add more space to avoid re-allocate space.
-            buf: BytesMut::with_capacity(options.capacity + 256),
+            // add more space to avoid re-allocate space. (for restart_points and restart_points_type_index)
+            buf: BytesMut::with_capacity(Self::buf_reserve_size(&options)),
             restart_count: options.restart_interval,
             restart_points: Vec::with_capacity(
                 options.capacity / DEFAULT_ENTRY_SIZE / options.restart_interval + 1,
@@ -476,6 +480,7 @@ impl BlockBuilder {
             compression_algorithm: options.compression_algorithm,
             table_id: None,
             restart_points_type_index: Vec::default(),
+            options,
         }
     }
 
@@ -586,6 +591,7 @@ impl BlockBuilder {
 
     pub fn clear(&mut self) {
         self.buf.clear();
+        self.buf.reserve(Self::buf_reserve_size(&self.options));
         self.restart_points.clear();
         self.table_id = None;
         self.restart_points_type_index.clear();
@@ -761,6 +767,10 @@ impl BlockBuilder {
 
     pub fn table_id(&self) -> Option<u32> {
         self.table_id
+    }
+
+    fn buf_reserve_size(option: &BlockBuilderOptions) -> usize {
+        option.capacity + 1024 + 256
     }
 }
 
