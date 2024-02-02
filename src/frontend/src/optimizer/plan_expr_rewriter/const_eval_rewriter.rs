@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::RwError;
-
+use crate::error::RwError;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, Literal};
 
 pub(crate) struct ConstEvalRewriter {
