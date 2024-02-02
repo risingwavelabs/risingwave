@@ -18,6 +18,7 @@ use std::time::{Duration, SystemTime};
 
 use thiserror::Error;
 use thiserror_ext::Macro;
+
 /// Re-export `risingwave_error` for easy access.
 pub mod v2 {
     pub use risingwave_error::*;
@@ -223,7 +224,6 @@ impl ErrorSuppressor {
 }
 
 #[cfg(test)]
-#[cfg(any())]
 mod tests {
     use std::convert::Into;
     use std::result::Result::Err;
@@ -231,13 +231,10 @@ mod tests {
     use anyhow::anyhow;
 
     use super::*;
-    use crate::error::ErrorCode::Uncategorized;
 
-    #[test]
-    fn test_display_internal_error() {
-        let internal_error = ErrorCode::InternalError("some thing bad happened!".to_string());
-        println!("{:?}", RwError::from(internal_error));
-    }
+    #[derive(Error, Debug)]
+    #[error(transparent)]
+    struct MyError(#[from] anyhow::Error);
 
     #[test]
     fn test_ensure() {
@@ -247,37 +244,31 @@ mod tests {
             let err_msg = "a < 0";
             let error = (|| {
                 ensure!(a < 0);
-                Ok::<_, RwError>(())
+                Ok::<_, MyError>(())
             })()
             .unwrap_err();
 
-            assert_eq!(
-                RwError::from(Uncategorized(anyhow!(err_msg))).to_string(),
-                error.to_string(),
-            );
+            assert_eq!(MyError(anyhow!(err_msg)).to_string(), error.to_string(),);
         }
 
         {
             let err_msg = "error msg without args";
             let error = (|| {
                 ensure!(a < 0, "error msg without args");
-                Ok::<_, RwError>(())
+                Ok::<_, MyError>(())
             })()
             .unwrap_err();
-            assert_eq!(
-                RwError::from(Uncategorized(anyhow!(err_msg))).to_string(),
-                error.to_string()
-            );
+            assert_eq!(MyError(anyhow!(err_msg)).to_string(), error.to_string());
         }
 
         {
             let error = (|| {
                 ensure!(a < 0, "error msg with args: {}", "xx");
-                Ok::<_, RwError>(())
+                Ok::<_, MyError>(())
             })()
             .unwrap_err();
             assert_eq!(
-                RwError::from(Uncategorized(anyhow!("error msg with args: {}", "xx"))).to_string(),
+                MyError(anyhow!("error msg with args: {}", "xx")).to_string(),
                 error.to_string()
             );
         }
@@ -285,7 +276,7 @@ mod tests {
 
     #[test]
     fn test_ensure_eq() {
-        fn ensure_a_equals_b() -> Result<()> {
+        fn ensure_a_equals_b() -> Result<(), MyError> {
             let a = 1;
             let b = 2;
             ensure_eq!(a, b);
@@ -293,32 +284,5 @@ mod tests {
         }
         let err = ensure_a_equals_b().unwrap_err();
         assert_eq!(err.to_string(), "a == b assertion failed (a is 1, b is 2)");
-    }
-
-    #[test]
-    fn test_into() {
-        use tonic::{Code, Status};
-        fn check_grpc_error(ec: ErrorCode, grpc_code: Code) {
-            assert_eq!(Status::from(RwError::from(ec)).code(), grpc_code);
-        }
-
-        check_grpc_error(ErrorCode::TaskNotFound, Code::Internal);
-        check_grpc_error(ErrorCode::InternalError(String::new()), Code::Internal);
-        check_grpc_error(
-            ErrorCode::NotImplemented(not_implemented!("test")),
-            Code::Internal,
-        );
-    }
-
-    #[test]
-    #[ignore] // it's not a good practice to include error source in `Display`, see #13248
-    fn test_internal_sources() {
-        use anyhow::Context;
-
-        let res: Result<()> = Err(anyhow::anyhow!("inner"))
-            .context("outer")
-            .map_err(Into::into);
-
-        assert_eq!(res.unwrap_err().to_string(), "internal error: outer: inner");
     }
 }
