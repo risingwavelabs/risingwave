@@ -16,6 +16,7 @@ use core::mem;
 use core::time::Duration;
 use std::collections::HashMap;
 
+use anyhow::Context;
 use base64::engine::general_purpose;
 use base64::Engine;
 use bytes::{BufMut, Bytes, BytesMut};
@@ -196,12 +197,8 @@ impl InserterInnerBuilder {
                     ))
                 })?
                 .to_str()
-                .map_err(|err| {
-                    SinkError::DorisStarrocksConnect(anyhow::anyhow!(
-                        "Can't get doris BE url in header {:?}",
-                        err
-                    ))
-                })?
+                .context("Can't get doris BE url in header")
+                .map_err(SinkError::DorisStarrocksConnect)?
         } else {
             return Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
                 "Can't get doris BE url",

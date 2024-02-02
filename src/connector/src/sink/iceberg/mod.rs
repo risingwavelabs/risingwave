@@ -21,7 +21,7 @@ use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use arrow_schema::{
     DataType as ArrowDataType, Field as ArrowField, Fields, Schema as ArrowSchema, SchemaRef,
 };
@@ -384,14 +384,14 @@ impl IcebergConfig {
         let catalog = self
             .create_catalog()
             .await
-            .map_err(|e| anyhow!("Unable to load iceberg catalog: {e}"))?;
+            .context("Unable to load iceberg catalog")?;
 
         let table_id = TableIdentifier::new(
             vec![self.database_name.as_str()]
                 .into_iter()
                 .chain(self.table_name.split('.')),
         )
-        .map_err(|e| anyhow!("Unable to parse table name: {e}"))?;
+        .context("Unable to parse table name")?;
 
         catalog
             .load_table(&table_id)
