@@ -70,15 +70,15 @@ pub struct TelemetryReportBase {
     pub node_type: TelemetryNodeType,
 }
 
-impl Into<PbTelemetryReportBase> for TelemetryReportBase {
-    fn into(self) -> PbTelemetryReportBase {
+impl From<TelemetryReportBase> for PbTelemetryReportBase {
+    fn from(val: TelemetryReportBase) -> Self {
         PbTelemetryReportBase {
-            tracking_id: self.tracking_id,
-            session_id: self.session_id,
-            system_data: Some(self.system_data.into()),
-            up_time: self.up_time,
-            report_time: self.time_stamp,
-            node_type: from_telemetry_node_type(self.node_type) as i32,
+            tracking_id: val.tracking_id,
+            session_id: val.session_id,
+            system_data: Some(val.system_data.into()),
+            up_time: val.up_time,
+            report_time: val.time_stamp,
+            node_type: from_telemetry_node_type(val.node_type) as i32,
         }
     }
 }
@@ -182,9 +182,9 @@ fn from_telemetry_node_type(t: TelemetryNodeType) -> PbTelemetryNodeType {
     }
 }
 
-impl Into<PbTelemetryNodeType> for TelemetryNodeType {
-    fn into(self) -> PbTelemetryNodeType {
-        match self {
+impl From<TelemetryNodeType> for PbTelemetryNodeType {
+    fn from(val: TelemetryNodeType) -> Self {
+        match val {
             TelemetryNodeType::Meta => PbTelemetryNodeType::Meta,
             TelemetryNodeType::Compute => PbTelemetryNodeType::Compute,
             TelemetryNodeType::Frontend => PbTelemetryNodeType::Frontend,
@@ -193,39 +193,39 @@ impl Into<PbTelemetryNodeType> for TelemetryNodeType {
     }
 }
 
-impl Into<PbSystemCpu> for Cpu {
-    fn into(self) -> PbSystemCpu {
+impl From<Cpu> for PbSystemCpu {
+    fn from(val: Cpu) -> Self {
         PbSystemCpu {
-            available: self.available,
+            available: val.available,
         }
     }
 }
 
-impl Into<PbSystemMemory> for Memory {
-    fn into(self) -> PbSystemMemory {
+impl From<Memory> for PbSystemMemory {
+    fn from(val: Memory) -> Self {
         PbSystemMemory {
-            used: self.used as u64,
-            total: self.total as u64,
+            used: val.used as u64,
+            total: val.total as u64,
         }
     }
 }
 
-impl Into<PbSystemOs> for Os {
-    fn into(self) -> PbSystemOs {
+impl From<Os> for PbSystemOs {
+    fn from(val: Os) -> Self {
         PbSystemOs {
-            name: self.name,
-            kernel_version: self.kernel_version,
-            version: self.version,
+            name: val.name,
+            kernel_version: val.kernel_version,
+            version: val.version,
         }
     }
 }
 
-impl Into<PbSystemData> for SystemData {
-    fn into(self) -> PbSystemData {
+impl From<SystemData> for PbSystemData {
+    fn from(val: SystemData) -> Self {
         PbSystemData {
-            memory: Some(self.memory.into()),
-            os: Some(self.os.into()),
-            cpu: Some(self.cpu.into()),
+            memory: Some(val.memory.into()),
+            os: Some(val.os.into()),
+            cpu: Some(val.cpu.into()),
         }
     }
 }

@@ -3,18 +3,18 @@ syntax = "proto3";
 package telemetry;
 
 enum MetaBackend {
-  MetaBackendUnspecified = 0;
-  MetaBackendMemory = 1;
-  MetaBackendEtcd = 2;
-  MetaBackendRdb = 3;
+  META_BACKEND_UNSPECIFIED = 0;
+  META_BACKEND_MEMORY = 1;
+  META_BACKEND_ETCD = 2;
+  META_BACKEND_RDB = 3;
 }
 
 enum TelemetryNodeType {
-  TelemetryNodeTypeUnspecified = 0;
-  TelemetryNodeTypeMeta = 1;
-  TelemetryNodeTypeCompute = 2;
-  TelemetryNodeTypeFrontend = 3;
-  TelemetryNodeTypeCompactor = 4;
+  TELEMETRY_NODE_TYPE_UNSPECIFIED = 0;
+  TELEMETRY_NODE_TYPE_META = 1;
+  TELEMETRY_NODE_TYPE_COMPUTE = 2;
+  TELEMETRY_NODE_TYPE_FRONTEND = 3;
+  TELEMETRY_NODE_TYPE_COMPACTOR = 4;
 }
 
 message SystemMemory {
