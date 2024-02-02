@@ -920,7 +920,7 @@ impl GlobalBarrierManagerContext {
     /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
     /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
     /// will create or drop before this barrier flow through them.
-    async fn resolve_actor_info(&self) -> InflightActorInfo {
+    async fn resolve_actor_info(&self) -> MetaResult<InflightActorInfo> {
         let info = match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 let all_nodes = mgr
@@ -937,13 +937,13 @@ impl GlobalBarrierManagerContext {
                     .list_active_streaming_workers()
                     .await
                     .unwrap();
-                let all_actor_infos = mgr.catalog_controller.load_all_actors().await.unwrap();
+                let all_actor_infos = mgr.catalog_controller.load_all_actors().await?;
 
                 InflightActorInfo::resolve(all_nodes, all_actor_infos)
             }
         };
 
-        info
+        Ok(info)
     }
 
     pub async fn get_ddl_progress(&self) -> Vec<DdlProgress> {

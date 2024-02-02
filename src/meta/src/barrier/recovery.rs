@@ -372,7 +372,9 @@ impl GlobalBarrierManagerContext {
                             warn!(error = %err.as_report(), "scale actors failed");
                         })?;
 
-                        self.resolve_actor_info().await
+                        self.resolve_actor_info().await.inspect_err(|err| {
+                            warn!(error = %err.as_report(), "resolve actor info failed");
+                        })?
                     } else {
                         // Migrate actors in expired CN to newly joined one.
                         self.migrate_actors().await.inspect_err(|err| {
@@ -386,7 +388,9 @@ impl GlobalBarrierManagerContext {
                     })?;
 
                     if self.pre_apply_drop_cancel(scheduled_barriers).await? {
-                        info = self.resolve_actor_info().await;
+                        info = self.resolve_actor_info().await.inspect_err(|err| {
+                            warn!(error = %err.as_report(), "resolve actor info failed");
+                        })?;
                     }
 
                     // update and build all actors.
@@ -504,8 +508,7 @@ impl GlobalBarrierManagerContext {
             .collect();
         if expired_parallel_units.is_empty() {
             debug!("no expired parallel units, skipping.");
-            let info = self.resolve_actor_info().await;
-            return Ok(info);
+            return self.resolve_actor_info().await;
         }
 
         debug!("start migrate actors.");
@@ -555,15 +558,15 @@ impl GlobalBarrierManagerContext {
         mgr.catalog_controller.migrate_actors(plan).await?;
 
         debug!("migrate actors succeed.");
-        let info = self.resolve_actor_info().await;
-        Ok(info)
+
+        self.resolve_actor_info().await
     }
 
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
     async fn migrate_actors_v1(&self) -> MetaResult<InflightActorInfo> {
         let mgr = self.metadata_manager.as_v1_ref();
 
-        let info = self.resolve_actor_info().await;
+        let info = self.resolve_actor_info().await?;
 
         // 1. get expired workers.
         let expired_workers: HashSet<WorkerId> = info
@@ -587,8 +590,7 @@ impl GlobalBarrierManagerContext {
         migration_plan.delete(self.env.meta_store_checked()).await?;
         debug!("migrate actors succeed.");
 
-        let info = self.resolve_actor_info().await;
-        Ok(info)
+        self.resolve_actor_info().await
     }
 
     async fn scale_actors(&self) -> MetaResult<()> {
@@ -689,7 +691,7 @@ impl GlobalBarrierManagerContext {
     }
 
     async fn scale_actors_v1(&self) -> MetaResult<()> {
-        let info = self.resolve_actor_info().await;
+        let info = self.resolve_actor_info().await?;
 
         let mgr = self.metadata_manager.as_v1_ref();
         debug!("start resetting actors distribution");
