@@ -1701,16 +1701,20 @@ impl ScaleController {
             fragment_actor_id_map: &mut HashMap<FragmentId, HashSet<u32>>,
             table_fragments: &BTreeMap<TableId, TableFragments>,
         ) {
-            for (table_id, table_fragments) in table_fragments {
-                let mut actor_fragment_id_map_for_check = HashMap::new();
+            // This is only for assertion purposes and will be removed once the dispatcher_id is guaranteed to always correspond to the downstream fragment_id,
+            // such as through the foreign key constraints in the SQL backend.
+            let mut actor_fragment_id_map_for_check = HashMap::new();
+            for table_fragments in table_fragments.values() {
                 for (fragment_id, fragment) in &table_fragments.fragments {
                     for actor in &fragment.actors {
-                        actor_fragment_id_map_for_check
+                        debug_assert!(actor_fragment_id_map_for_check
                             .insert(actor.actor_id, *fragment_id)
-                            .expect("actor id should be unique");
+                            .is_none());
                     }
                 }
+            }
 
+            for (table_id, table_fragments) in table_fragments {
                 for (fragment_id, fragment) in &table_fragments.fragments {
                     for actor in &fragment.actors {
                         fragment_actor_id_map
@@ -1724,7 +1728,7 @@ impl ScaleController {
                                     .insert(actor.fragment_id as FragmentId);
 
                                 let downstream_actor_id =
-                                    dispatcher.downstream_actor_id.first().expect(
+                                    dispatcher.downstream_actor_id.iter().exactly_one().expect(
                                         "no shuffle should have exactly one downstream actor id",
                                     );
 
