@@ -14,19 +14,15 @@
 
 package com.risingwave.connector.source.common;
 
+// TODO
 public class MongoDbValidator extends DatabaseValidator {
 
     @Override
     void validateDbConfig() {}
 
     @Override
-    void validateUserPrivilege() {
-        // TBD
-
-    }
+    void validateUserPrivilege() {}
 
     @Override
-    void validateTable() {
-        // do nothing
-    }
+    void validateTable() {}
 }

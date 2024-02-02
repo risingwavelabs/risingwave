@@ -136,6 +136,7 @@ public class SourceValidateHandler {
             case MONGODB:
                 ensurePropNotBlank(props, DbzConnectorConfig.MongoDb.MONGO_URL);
                 ensurePropNotBlank(props, DbzConnectorConfig.MongoDb.MONGO_COLLECTION_NAME);
+                // TODO: validate mongodb connectivity and replica set config
                 break;
             default:
                 LOG.warn("Unknown source type");

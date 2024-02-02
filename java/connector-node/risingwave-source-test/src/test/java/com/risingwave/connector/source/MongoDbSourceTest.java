@@ -83,7 +83,6 @@ public class MongoDbSourceTest {
                         List<ConnectorServiceProto.CdcMessage> messages =
                                 eventStream.next().getEventsList();
                         for (ConnectorServiceProto.CdcMessage msg : messages) {
-                            System.out.println("recv msg: " + msg.getPayload());
                             if (!msg.getPayload().isBlank()) {
                                 count++;
                             }

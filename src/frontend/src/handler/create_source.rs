@@ -37,7 +37,7 @@ use risingwave_connector::schema::schema_registry::{
 use risingwave_connector::source::cdc::external::CdcTableType;
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CITUS_CDC_CONNECTOR,
-    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
@@ -932,6 +932,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 ),
                 CITUS_CDC_CONNECTOR => hashmap!(
                     Format::Debezium => vec![Encode::Json],
+                ),
+                MONGODB_CDC_CONNECTOR => hashmap!(
+                    Format::DebeziumMongo => vec![Encode::Json],
                 ),
                 NATS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json],

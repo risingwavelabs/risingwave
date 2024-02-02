@@ -117,7 +117,7 @@ impl CdcSplitTrait for MySqlCdcSplit {
 }
 
 impl PostgresCdcSplit {
-    pub fn new(split_id: u32, start_offset: Option<String>) -> Self {
+    pub fn new(split_id: u32, start_offset: Option<String>, server_addr: Option<String>) -> Self {
         let split = CdcSplitBase {
             split_id,
             start_offset,
@@ -125,18 +125,8 @@ impl PostgresCdcSplit {
         };
         Self {
             inner: split,
-            server_addr: None,
+            server_addr,
         }
-    }
-
-    pub fn new_with_server_addr(
-        split_id: u32,
-        start_offset: Option<String>,
-        server_addr: Option<String>,
-    ) -> Self {
-        let mut result = Self::new(split_id, start_offset);
-        result.server_addr = server_addr;
-        result
     }
 }
 
@@ -216,6 +206,7 @@ impl CdcSplitTrait for MongoDbCdcSplit {
     }
 }
 
+/// We use this struct to wrap the specific split, which act as an interface to other modules
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct DebeziumCdcSplit<T: CdcSourceTypeTrait> {
     pub mysql_split: Option<MySqlCdcSplit>,
@@ -282,12 +273,11 @@ impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
                 ret.mysql_split = Some(split);
             }
             CdcSourceType::Postgres => {
-                let split = PostgresCdcSplit::new(split_id, start_offset);
+                let split = PostgresCdcSplit::new(split_id, start_offset, None);
                 ret.postgres_split = Some(split);
             }
             CdcSourceType::Citus => {
-                let split =
-                    PostgresCdcSplit::new_with_server_addr(split_id, start_offset, server_addr);
+                let split = PostgresCdcSplit::new(split_id, start_offset, server_addr);
                 ret.citus_split = Some(split);
             }
             CdcSourceType::Mongodb => {
