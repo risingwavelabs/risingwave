@@ -375,15 +375,11 @@ impl GlobalBarrierManagerContext {
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
                     let mut info = if !self.env.opts.disable_automatic_parallelism_control {
-                        let info = self.resolve_actor_info().await;
-                        let scaled = self.scale_actors(&info).await.inspect_err(|err| {
+                        self.scale_actors().await.inspect_err(|err| {
                             warn!(error = %err.as_report(), "scale actors failed");
                         })?;
-                        if scaled {
-                            self.resolve_actor_info().await
-                        } else {
-                            info
-                        }
+
+                        self.resolve_actor_info().await
                     } else {
                         // Migrate actors in expired CN to newly joined one.
                         self.migrate_actors().await.inspect_err(|err| {
@@ -603,14 +599,14 @@ impl GlobalBarrierManagerContext {
         Ok(info)
     }
 
-    async fn scale_actors(&self, info: &InflightActorInfo) -> MetaResult<bool> {
+    async fn scale_actors(&self) -> MetaResult<()> {
         match &self.metadata_manager {
-            MetadataManager::V1(_) => self.scale_actors_v1(info).await,
-            MetadataManager::V2(_) => self.scale_actors_v2(info).await,
+            MetadataManager::V1(_) => self.scale_actors_v1().await,
+            MetadataManager::V2(_) => self.scale_actors_v2().await,
         }
     }
 
-    async fn scale_actors_v2(&self, _info: &InflightActorInfo) -> MetaResult<bool> {
+    async fn scale_actors_v2(&self) -> MetaResult<()> {
         let mgr = self.metadata_manager.as_v2_ref();
         debug!("start resetting actors distribution");
 
@@ -697,16 +693,18 @@ impl GlobalBarrierManagerContext {
         }
 
         debug!("scaling-in actors succeed.");
-        Ok(true)
+        Ok(())
     }
 
-    async fn scale_actors_v1(&self, info: &InflightActorInfo) -> MetaResult<bool> {
+    async fn scale_actors_v1(&self) -> MetaResult<()> {
+        let info = self.resolve_actor_info().await;
+
         let mgr = self.metadata_manager.as_v1_ref();
         debug!("start resetting actors distribution");
 
         if info.actor_location_map.is_empty() {
             debug!("empty cluster, skipping");
-            return Ok(true);
+            return Ok(());
         }
 
         let current_parallelism = info
@@ -828,7 +826,7 @@ impl GlobalBarrierManagerContext {
         }
 
         debug!("scaling-in actors succeed.");
-        Ok(true)
+        Ok(())
     }
 
     /// This function will generate a migration plan, which includes the mapping for all expired and
