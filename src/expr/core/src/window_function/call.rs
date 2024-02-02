@@ -75,7 +75,7 @@ impl Display for Frame {
 }
 
 impl Frame {
-    pub fn rows(start: FrameBound<usize>, end: FrameBound<usize>) -> Self {
+    pub fn rows(start: RowsFrameBound, end: RowsFrameBound) -> Self {
         Self {
             bounds: FrameBounds::Rows(RowsFrameBounds { start, end }),
             exclusion: FrameExclusion::default(),
@@ -83,8 +83,8 @@ impl Frame {
     }
 
     pub fn rows_with_exclusion(
-        start: FrameBound<usize>,
-        end: FrameBound<usize>,
+        start: RowsFrameBound,
+        end: RowsFrameBound,
         exclusion: FrameExclusion,
     ) -> Self {
         Self {
@@ -183,8 +183,8 @@ pub trait FrameBoundsImpl {
 #[derive(Display, Debug, Clone, Eq, PartialEq, Hash)]
 #[display("ROWS BETWEEN {start} AND {end}")]
 pub struct RowsFrameBounds {
-    pub start: FrameBound<usize>,
-    pub end: FrameBound<usize>,
+    pub start: RowsFrameBound,
+    pub end: RowsFrameBound,
 }
 
 impl RowsFrameBounds {
@@ -249,9 +249,10 @@ pub struct RangeFrameBounds {
     pub order_data_type: DataType,
     pub order_type: OrderType,
     pub offset_data_type: DataType,
-    pub start: FrameBound<RangeFrameOffset>,
-    pub end: FrameBound<RangeFrameOffset>,
+    pub start: RangeFrameBound,
+    pub end: RangeFrameBound,
 }
+
 impl RangeFrameBounds {
     fn from_protobuf(bounds: &PbRangeFrameBounds) -> Result<Self> {
         let order_data_type = DataType::from(bounds.get_order_data_type()?);
@@ -390,6 +391,9 @@ pub enum FrameBound<T> {
     UnboundedFollowing,
 }
 
+pub type RowsFrameBound = FrameBound<usize>;
+pub type RangeFrameBound = FrameBound<RangeFrameOffset>;
+
 impl<T> FrameBound<T> {
     fn offset_value(&self) -> Option<&T> {
         match self {
@@ -437,7 +441,7 @@ impl<T> FrameBound<T> {
     }
 }
 
-impl FrameBound<usize> {
+impl RowsFrameBound {
     fn from_protobuf_legacy(bound: &PbBound) -> Result<Self> {
         use risingwave_pb::expr::window_frame::bound::PbOffset;
 
@@ -447,14 +451,14 @@ impl FrameBound<usize> {
                 r#type: bound.get_type()? as _,
                 offset: Some(*offset),
             })?,
-            PbOffset::Datum(_) => bail!("offset of `FrameBound<usize>` must be `Integer`"),
+            PbOffset::Datum(_) => bail!("offset of `RowsFrameBound` must be `Integer`"),
         };
         Ok(bound)
     }
 
     fn from_protobuf(bound: &PbRowsFrameBound) -> Result<Self> {
         let bound = match bound.get_type()? {
-            PbBoundType::Unspecified => bail!("unspecified type of `FrameBound<usize>`"),
+            PbBoundType::Unspecified => bail!("unspecified type of `RowsFrameBound`"),
             PbBoundType::UnboundedPreceding => Self::UnboundedPreceding,
             PbBoundType::Preceding => Self::Preceding(*bound.get_offset()? as usize),
             PbBoundType::CurrentRow => Self::CurrentRow,
@@ -479,7 +483,7 @@ impl FrameBound<usize> {
     }
 }
 
-impl FrameBound<usize> {
+impl RowsFrameBound {
     /// Convert the bound to sized offset from current row. `None` if the bound is unbounded.
     pub fn to_offset(&self) -> Option<isize> {
         match self {
@@ -491,7 +495,7 @@ impl FrameBound<usize> {
     }
 }
 
-impl FrameBound<RangeFrameOffset> {
+impl RangeFrameBound {
     fn from_protobuf(
         bound: &PbRangeFrameBound,
         order_data_type: &DataType,
@@ -500,14 +504,14 @@ impl FrameBound<RangeFrameOffset> {
         use risingwave_pb::expr::expr_node::PbType as PbExprType;
 
         let bound = match bound.get_type()? {
-            PbBoundType::Unspecified => bail!("unspecified type of `FrameBound<RangeFrameOffset>`"),
+            PbBoundType::Unspecified => bail!("unspecified type of `RangeFrameBound`"),
             PbBoundType::UnboundedPreceding => Self::UnboundedPreceding,
             PbBoundType::CurrentRow => Self::CurrentRow,
             PbBoundType::UnboundedFollowing => Self::UnboundedFollowing,
             bound_type @ (PbBoundType::Preceding | PbBoundType::Following) => {
                 let offset_value = Datum::from_protobuf(bound.get_offset()?, offset_data_type)
                     .context("offset `Datum` is not decodable")?
-                    .context("offset of `FrameBound<RangeFrameOffset>` must be non-NULL")?;
+                    .context("offset of `RangeFrameBound` must be non-NULL")?;
                 let input_expr = InputRefExpression::new(order_data_type.clone(), 0);
                 let offset_expr =
                     LiteralExpression::new(offset_data_type.clone(), Some(offset_value.clone()));
@@ -557,7 +561,7 @@ impl FrameBound<RangeFrameOffset> {
     }
 }
 
-impl FrameBound<RangeFrameOffset> {
+impl RangeFrameBound {
     fn for_display(&self) -> FrameBound<String> {
         match self {
             UnboundedPreceding => UnboundedPreceding,
