@@ -23,7 +23,7 @@ use risingwave_storage::StateStore;
 use super::ExecutorBuilder;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::{BoxedExecutor, Executor, OverWindowExecutor, OverWindowExecutorArgs};
+use crate::executor::{BoxedExecutor, Execute, OverWindowExecutor, OverWindowExecutorArgs};
 use crate::task::ExecutorParams;
 
 pub struct OverWindowExecutorBuilder;

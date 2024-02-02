@@ -26,7 +26,7 @@ use risingwave_dml::dml_manager::DmlManagerRef;
 
 use super::error::StreamExecutorError;
 use super::{
-    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
+    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Execute, ExecutorInfo, Message,
     Mutation,
 };
 use crate::common::StreamChunkBuilder;
@@ -277,7 +277,7 @@ impl DmlExecutor {
     }
 }
 
-impl Executor for DmlExecutor {
+impl Execute for DmlExecutor {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }

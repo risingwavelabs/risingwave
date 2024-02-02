@@ -25,7 +25,7 @@ use risingwave_storage::StateStore;
 
 use crate::error::StreamResult;
 use crate::executor::{
-    BoxedExecutor, Executor, FlowControlExecutor, FsFetchExecutor, SourceStateTableHandler,
+    BoxedExecutor, Execute, FlowControlExecutor, FsFetchExecutor, SourceStateTableHandler,
     StreamSourceCore,
 };
 use crate::from_proto::ExecutorBuilder;

@@ -30,7 +30,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use super::CacheKey;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Execute,
     ExecutorInfo, Message, Watermark,
 };
 
@@ -77,7 +77,7 @@ pub struct TopNExecutorWrapper<E> {
     pub(super) inner: E,
 }
 
-impl<E> Executor for TopNExecutorWrapper<E>
+impl<E> Execute for TopNExecutorWrapper<E>
 where
     E: TopNExecutorBase,
 {

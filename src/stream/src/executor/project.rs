@@ -16,7 +16,6 @@ use std::fmt::{Debug, Formatter};
 
 use multimap::MultiMap;
 use risingwave_common::array::StreamChunk;
-
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -56,7 +55,7 @@ impl ProjectExecutor {
     pub fn new(
         ctx: ActorContextRef,
         info: ExecutorInfo,
-        input: Box<dyn Executor>,
+        input: Box<dyn Execute>,
         exprs: Vec<NonStrictExpression>,
         watermark_derivations: MultiMap<usize, usize>,
         nondecreasing_expr_indices: Vec<usize>,
@@ -86,7 +85,7 @@ impl Debug for ProjectExecutor {
     }
 }
 
-impl Executor for ProjectExecutor {
+impl Execute for ProjectExecutor {
     fn info(&self) -> &ExecutorInfo {
         &self.inner.info
     }

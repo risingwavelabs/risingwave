@@ -153,7 +153,7 @@ pub use wrapper::WrapperExecutor;
 
 use self::barrier_align::AlignedMessageStream;
 
-pub type BoxedExecutor = Box<dyn Executor>;
+pub type BoxedExecutor = Box<dyn Execute>;
 pub type MessageStreamItem = StreamExecutorResult<Message>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
@@ -178,7 +178,7 @@ pub struct ExecutorInfo {
 }
 
 /// `Executor` supports handling of control messages.
-pub trait Executor: Send + 'static {
+pub trait Execute: Send + 'static {
     fn info(&self) -> &ExecutorInfo;
 
     fn schema(&self) -> &Schema {

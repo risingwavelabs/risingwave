@@ -38,10 +38,7 @@ use super::aggregation::{
     OnlyOutputIfHasInput,
 };
 use super::sort_buffer::SortBuffer;
-use super::{
-    expect_first_barrier, ActorContextRef, ExecutorInfo, StreamExecutorResult,
-    Watermark,
-};
+use super::{expect_first_barrier, ActorContextRef, ExecutorInfo, StreamExecutorResult, Watermark};
 use crate::cache::{cache_may_stale, new_with_hasher, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
@@ -49,7 +46,7 @@ use crate::common::StreamChunkBuilder;
 use crate::error::StreamResult;
 use crate::executor::aggregation::AggGroup as GenericAggGroup;
 use crate::executor::error::StreamExecutorError;
-use crate::executor::{BoxedMessageStream, Executor, Message};
+use crate::executor::{BoxedMessageStream, Execute, Message};
 use crate::task::AtomicU64Ref;
 
 type AggGroup<S> = GenericAggGroup<S, OnlyOutputIfHasInput>;
@@ -74,7 +71,7 @@ type AggGroupCache<K, S> = ManagedLruCache<K, Option<BoxedAggGroup<S>>, Precompu
 ///   all modifications will be flushed to the storage backend. Meanwhile, the executor will go
 ///   through `group_change_set`, and produce a stream chunk based on the state changes.
 pub struct HashAggExecutor<K: HashKey, S: StateStore> {
-    input: Box<dyn Executor>,
+    input: Box<dyn Execute>,
     inner: ExecutorInner<K, S>,
 }
 
@@ -193,7 +190,7 @@ impl ExecutionStats {
     }
 }
 
-impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
+impl<K: HashKey, S: StateStore> Execute for HashAggExecutor<K, S> {
     fn info(&self) -> &ExecutorInfo {
         &self.inner.info
     }

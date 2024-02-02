@@ -36,9 +36,7 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::filter::FilterExecutor;
-use super::{
-    ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message, StreamExecutorResult,
-};
+use super::{ActorContextRef, BoxedExecutor, Execute, ExecutorInfo, Message, StreamExecutorResult};
 use crate::common::table::state_table::StateTable;
 use crate::executor::{expect_first_barrier, Watermark};
 use crate::task::ActorEvalErrorReport;
@@ -81,7 +79,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
     }
 }
 
-impl<S: StateStore> Executor for WatermarkFilterExecutor<S> {
+impl<S: StateStore> Execute for WatermarkFilterExecutor<S> {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }

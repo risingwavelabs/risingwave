@@ -20,7 +20,6 @@ use either::Either;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
-
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::SourceCtrlOpts;
@@ -193,7 +192,7 @@ impl<S: StateStore> FsListExecutor<S> {
     }
 }
 
-impl<S: StateStore> Executor for FsListExecutor<S> {
+impl<S: StateStore> Execute for FsListExecutor<S> {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }

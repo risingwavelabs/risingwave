@@ -12,11 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
-use super::{
-    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo,
-};
+use super::{ActorContextRef, BoxedExecutor, BoxedMessageStream, Execute, ExecutorInfo};
 
 /// No-op executor directly forwards the input stream. Currently used to break the multiple edges in
 /// the fragment graph.
@@ -36,7 +32,7 @@ impl NoOpExecutor {
     }
 }
 
-impl Executor for NoOpExecutor {
+impl Execute for NoOpExecutor {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }

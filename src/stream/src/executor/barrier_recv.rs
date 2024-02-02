@@ -18,7 +18,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{
-    ActorContext, ActorContextRef, Barrier, BoxedMessageStream, Executor, ExecutorInfo, Message,
+    ActorContext, ActorContextRef, Barrier, BoxedMessageStream, Execute, ExecutorInfo, Message,
     PkIndices, StreamExecutorError,
 };
 
@@ -58,7 +58,7 @@ impl BarrierRecvExecutor {
     }
 }
 
-impl Executor for BarrierRecvExecutor {
+impl Execute for BarrierRecvExecutor {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }

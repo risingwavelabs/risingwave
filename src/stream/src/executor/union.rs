@@ -21,7 +21,6 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use pin_project::pin_project;
 
-
 use super::watermark::BufferedWatermarks;
 use super::*;
 use crate::executor::{BoxedMessageStream, ExecutorInfo};
@@ -47,7 +46,7 @@ impl UnionExecutor {
     }
 }
 
-impl Executor for UnionExecutor {
+impl Execute for UnionExecutor {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }

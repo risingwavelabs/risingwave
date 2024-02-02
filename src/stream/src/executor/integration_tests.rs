@@ -35,7 +35,7 @@ use crate::executor::receiver::ReceiverExecutor;
 use crate::executor::test_utils::agg_executor::{
     generate_agg_schema, new_boxed_simple_agg_executor,
 };
-use crate::executor::{Executor, MergeExecutor, ProjectExecutor, StatelessSimpleAggExecutor};
+use crate::executor::{Execute, MergeExecutor, ProjectExecutor, StatelessSimpleAggExecutor};
 use crate::task::{LocalBarrierManager, SharedContext};
 
 /// This test creates a merger-dispatcher pair, and run a sum. Each chunk

@@ -20,10 +20,9 @@ use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 
-
 use super::error::StreamExecutorError;
 use super::{
-    expect_first_barrier, Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, MessageStream,
+    expect_first_barrier, Barrier, BoxedExecutor, Execute, ExecutorInfo, Message, MessageStream,
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
@@ -288,7 +287,7 @@ impl RearrangedChainExecutor {
     }
 }
 
-impl Executor for RearrangedChainExecutor {
+impl Execute for RearrangedChainExecutor {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }

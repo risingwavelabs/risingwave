@@ -20,7 +20,6 @@ use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayRef, Op, StreamChunk};
-
 use risingwave_common::estimate_size::collections::EstimatedVecDeque;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -39,7 +38,7 @@ use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Execute,
     ExecutorInfo, Message, StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::AtomicU64Ref;
@@ -95,7 +94,7 @@ type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): us
 /// - `WindowState` should output agg result for `curr output row`.
 /// - Recover: iterate through state table, push rows to `WindowState`, ignore ready windows.
 pub struct EowcOverWindowExecutor<S: StateStore> {
-    input: Box<dyn Executor>,
+    input: Box<dyn Execute>,
     inner: ExecutorInner<S>,
 }
 
@@ -117,7 +116,7 @@ struct ExecutionVars<S: StateStore> {
     _phantom: PhantomData<S>,
 }
 
-impl<S: StateStore> Executor for EowcOverWindowExecutor<S> {
+impl<S: StateStore> Execute for EowcOverWindowExecutor<S> {
     fn info(&self) -> &ExecutorInfo {
         &self.inner.info
     }

@@ -13,11 +13,10 @@
 // limitations under the License.
 
 use futures::StreamExt;
-
 use risingwave_common::metrics::LabelGuardedIntCounter;
 
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{BoxedMessageStream, Executor, ExecutorInfo};
+use crate::executor::{BoxedMessageStream, Execute, ExecutorInfo};
 use crate::task::{ActorId, FragmentId};
 
 #[derive(Default)]
@@ -31,7 +30,7 @@ impl DummyExecutor {
     }
 }
 
-impl Executor for DummyExecutor {
+impl Execute for DummyExecutor {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }

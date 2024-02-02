@@ -22,7 +22,6 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
-
 use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, DefaultOrd, ToOwnedDatum};
@@ -40,7 +39,7 @@ use super::managed_state::join::*;
 use super::monitor::StreamingMetrics;
 use super::watermark::*;
 use super::{
-    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message, Watermark,
+    ActorContextRef, BoxedExecutor, BoxedMessageStream, Execute, ExecutorInfo, Message, Watermark,
 };
 use crate::common::table::state_table::StateTable;
 use crate::common::JoinStreamChunkBuilder;
@@ -276,7 +275,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
     }
 }
 
-impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<K, S, T> {
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Execute for HashJoinExecutor<K, S, T> {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }

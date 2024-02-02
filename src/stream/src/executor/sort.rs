@@ -15,12 +15,11 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
-
 use risingwave_storage::StateStore;
 
 use super::sort_buffer::SortBuffer;
 use super::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Execute,
     ExecutorInfo, Message, StreamExecutorError, Watermark,
 };
 use crate::common::table::state_table::StateTable;
@@ -56,7 +55,7 @@ struct ExecutionVars<S: StateStore> {
     buffer_changed: bool,
 }
 
-impl<S: StateStore> Executor for SortExecutor<S> {
+impl<S: StateStore> Execute for SortExecutor<S> {
     fn info(&self) -> &ExecutorInfo {
         &self.inner.info
     }
@@ -173,7 +172,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
-    use crate::executor::{ActorContext, BoxedMessageStream, Executor};
+    use crate::executor::{ActorContext, BoxedMessageStream, Execute};
 
     async fn create_executor<S: StateStore>(
         sort_column_index: usize,

@@ -164,8 +164,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
 struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     ctx: ActorContextRef,
     info: ExecutorInfo,
-    source_l: Box<dyn Executor>,
-    source_r: Box<dyn Executor>,
+    source_l: BoxedExecutor,
+    source_r: BoxedExecutor,
     params_l: JoinParams,
     params_r: JoinParams,
     null_safe: Vec<bool>,

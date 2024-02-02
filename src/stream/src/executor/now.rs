@@ -18,7 +18,6 @@ use std::ops::Bound::Unbounded;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
-
 use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_storage::StateStore;
@@ -26,8 +25,8 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{
-    Barrier, BoxedMessageStream, Executor, ExecutorInfo, Message, Mutation,
-    StreamExecutorError, Watermark,
+    Barrier, BoxedMessageStream, Execute, ExecutorInfo, Message, Mutation, StreamExecutorError,
+    Watermark,
 };
 use crate::common::table::state_table::StateTable;
 
@@ -158,7 +157,7 @@ impl<S: StateStore> NowExecutor<S> {
     }
 }
 
-impl<S: StateStore> Executor for NowExecutor<S> {
+impl<S: StateStore> Execute for NowExecutor<S> {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }
@@ -181,7 +180,7 @@ mod tests {
     use crate::common::table::state_table::StateTable;
     use crate::executor::test_utils::StreamExecutorTestExt;
     use crate::executor::{
-        Barrier, BoxedMessageStream, Executor, ExecutorInfo, Mutation, StreamExecutorResult,
+        Barrier, BoxedMessageStream, Execute, ExecutorInfo, Mutation, StreamExecutorResult,
         Watermark,
     };
 

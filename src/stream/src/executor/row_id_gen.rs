@@ -19,15 +19,12 @@ use risingwave_common::array::{
     Array, ArrayBuilder, ArrayRef, Op, SerialArrayBuilder, StreamChunk,
 };
 use risingwave_common::buffer::Bitmap;
-
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::Serial;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_id::RowIdGenerator;
 
-use super::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo,
-};
+use super::{expect_first_barrier, ActorContextRef, BoxedExecutor, Execute, ExecutorInfo};
 use crate::executor::{Message, StreamExecutorError};
 
 /// [`RowIdGenExecutor`] generates row id for data, where the user has not specified a pk.
@@ -126,7 +123,7 @@ impl RowIdGenExecutor {
     }
 }
 
-impl Executor for RowIdGenExecutor {
+impl Execute for RowIdGenExecutor {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }
@@ -146,7 +143,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{ActorContext, Executor};
+    use crate::executor::{ActorContext, Execute};
 
     #[tokio::test]
     async fn test_row_id_gen_executor() {

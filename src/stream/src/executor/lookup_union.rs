@@ -19,7 +19,6 @@ use futures::{FutureExt, SinkExt, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 
-
 use super::error::StreamExecutorError;
 use super::*;
 use crate::executor::{BoxedMessageStream, ExecutorInfo};
@@ -54,7 +53,7 @@ impl LookupUnionExecutor {
 }
 
 #[async_trait]
-impl Executor for LookupUnionExecutor {
+impl Execute for LookupUnionExecutor {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }

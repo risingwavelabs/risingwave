@@ -26,7 +26,6 @@ use futures_async_stream::try_stream;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use lru::DefaultHasher;
 use risingwave_common::array::{Op, StreamChunk};
-
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -40,7 +39,7 @@ use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
 use super::{
-    Barrier, Executor, ExecutorInfo, Message, MessageStream, StreamExecutorError,
+    Barrier, Execute, ExecutorInfo, Message, MessageStream, StreamExecutorError,
     StreamExecutorResult,
 };
 use crate::cache::{cache_may_stale, new_with_hasher_in, ManagedLruCache};
@@ -280,7 +279,7 @@ async fn internal_messages_until_barrier(stream: impl MessageStream, expected_ba
 // any number of `InternalMessage::Chunk(left_chunk)` and followed by
 // `InternalMessage::Barrier(right_chunks, barrier)`.
 #[try_stream(ok = InternalMessage, error = StreamExecutorError)]
-async fn align_input(left: Box<dyn Executor>, right: Box<dyn Executor>) {
+async fn align_input(left: Box<dyn Execute>, right: Box<dyn Execute>) {
     let mut left = pin!(left.execute());
     let mut right = pin!(right.execute());
     // Keep producing intervals until stream exhaustion or errors.
@@ -488,7 +487,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
     }
 }
 
-impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Executor
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Execute
     for TemporalJoinExecutor<K, S, T>
 {
     fn info(&self) -> &ExecutorInfo {

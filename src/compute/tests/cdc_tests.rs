@@ -45,7 +45,7 @@ use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::test_utils::MockSource;
 use risingwave_stream::executor::{
     expect_first_barrier, ActorContext, AddMutation, Barrier, BoxedExecutor as StreamBoxedExecutor,
-    BoxedMessageStream, CdcBackfillExecutor, Executor, ExecutorInfo, ExternalStorageTable,
+    BoxedMessageStream, CdcBackfillExecutor, Execute, ExecutorInfo, ExternalStorageTable,
     MaterializeExecutor, Message, Mutation, PkIndices, PkIndicesRef, StreamExecutorError,
 };
 
@@ -129,7 +129,7 @@ impl MockOffsetGenExecutor {
     }
 }
 
-impl Executor for MockOffsetGenExecutor {
+impl Execute for MockOffsetGenExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

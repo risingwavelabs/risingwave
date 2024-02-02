@@ -24,7 +24,7 @@ use super::ActorContextRef;
 use crate::executor::exchange::input::new_input;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::utils::ActorInputMetrics;
-use crate::executor::{expect_first_barrier, BoxedMessageStream, Executor, ExecutorInfo, Message};
+use crate::executor::{expect_first_barrier, BoxedMessageStream, Execute, ExecutorInfo, Message};
 use crate::task::{FragmentId, SharedContext};
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
 /// there should be a `ReceiverExecutor` running in the background, so as to push
@@ -109,7 +109,7 @@ impl ReceiverExecutor {
     }
 }
 
-impl Executor for ReceiverExecutor {
+impl Execute for ReceiverExecutor {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }
@@ -223,7 +223,7 @@ mod tests {
     use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 
     use super::*;
-    use crate::executor::{ActorContext, Barrier, Executor, Mutation, UpdateMutation};
+    use crate::executor::{ActorContext, Barrier, Execute, Mutation, UpdateMutation};
     use crate::task::test_utils::helper_make_local_actor;
 
     #[tokio::test]

@@ -93,7 +93,7 @@ use self::top_n::*;
 use self::union::*;
 use self::watermark_filter::WatermarkFilterBuilder;
 use crate::error::StreamResult;
-use crate::executor::{BoxedExecutor, Executor, ExecutorInfo};
+use crate::executor::{BoxedExecutor, Execute, ExecutorInfo};
 use crate::from_proto::subscription::SubscriptionExecutorBuilder;
 use crate::from_proto::values::ValuesExecutorBuilder;
 use crate::task::ExecutorParams;

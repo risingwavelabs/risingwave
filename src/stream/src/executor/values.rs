@@ -18,14 +18,13 @@ use await_tree::InstrumentAwait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
-
 use risingwave_common::ensure;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::{
-    ActorContextRef, Barrier, BoxedMessageStream, Executor, ExecutorInfo, Message,
+    ActorContextRef, Barrier, BoxedMessageStream, Execute, ExecutorInfo, Message,
     StreamExecutorError,
 };
 use crate::task::CreateMviewProgress;
@@ -135,7 +134,7 @@ impl ValuesExecutor {
     }
 }
 
-impl Executor for ValuesExecutor {
+impl Execute for ValuesExecutor {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }
@@ -159,7 +158,7 @@ mod tests {
 
     use super::ValuesExecutor;
     use crate::executor::test_utils::StreamExecutorTestExt;
-    use crate::executor::{ActorContext, AddMutation, Barrier, Executor, ExecutorInfo, Mutation};
+    use crate::executor::{ActorContext, AddMutation, Barrier, Execute, ExecutorInfo, Mutation};
     use crate::task::{CreateMviewProgress, LocalBarrierManager};
 
     #[tokio::test]

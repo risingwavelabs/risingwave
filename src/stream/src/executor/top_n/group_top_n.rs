@@ -32,7 +32,7 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
+use crate::executor::{ActorContextRef, Execute, ExecutorInfo, PkIndices, Watermark};
 use crate::task::AtomicU64Ref;
 
 pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
@@ -41,7 +41,7 @@ pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        input: Box<dyn Executor>,
+        input: Box<dyn Execute>,
         ctx: ActorContextRef,
         info: ExecutorInfo,
         storage_key: Vec<ColumnOrder>,
@@ -395,7 +395,7 @@ mod tests {
         };
         let top_n_executor = Box::new(
             GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
-                source as Box<dyn Executor>,
+                source as Box<dyn Execute>,
                 ActorContext::for_test(0),
                 info,
                 storage_key(),
@@ -497,7 +497,7 @@ mod tests {
         };
         let top_n_executor = Box::new(
             GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
-                source as Box<dyn Executor>,
+                source as Box<dyn Execute>,
                 ActorContext::for_test(0),
                 info,
                 storage_key(),
@@ -592,7 +592,7 @@ mod tests {
         };
         let top_n_executor = Box::new(
             GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
-                source as Box<dyn Executor>,
+                source as Box<dyn Execute>,
                 ActorContext::for_test(0),
                 info,
                 storage_key(),

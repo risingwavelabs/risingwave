@@ -31,7 +31,7 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
+use crate::executor::{ActorContextRef, Execute, ExecutorInfo, PkIndices, Watermark};
 use crate::task::AtomicU64Ref;
 
 /// If the input is append-only, `AppendOnlyGroupTopNExecutor` does not need
@@ -45,7 +45,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        input: Box<dyn Executor>,
+        input: Box<dyn Execute>,
         ctx: ActorContextRef,
         info: ExecutorInfo,
         storage_key: Vec<ColumnOrder>,

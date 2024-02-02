@@ -16,7 +16,6 @@ use await_tree::InstrumentAwait;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
-
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -24,7 +23,7 @@ use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
-use super::{Executor, ExecutorInfo, Message};
+use super::{Execute, ExecutorInfo, Message};
 use crate::executor::BoxedMessageStream;
 
 pub struct BatchQueryExecutor<S: StateStore> {
@@ -73,7 +72,7 @@ where
     }
 }
 
-impl<S> Executor for BatchQueryExecutor<S>
+impl<S> Execute for BatchQueryExecutor<S>
 where
     S: StateStore,
 {

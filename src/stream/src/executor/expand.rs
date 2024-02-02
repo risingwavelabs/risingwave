@@ -18,7 +18,6 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Array, I64Array};
 
-
 use super::error::StreamExecutorError;
 use super::*;
 
@@ -31,7 +30,7 @@ pub struct ExpandExecutor {
 impl ExpandExecutor {
     pub fn new(
         info: ExecutorInfo,
-        input: Box<dyn Executor>,
+        input: Box<dyn Execute>,
         column_subsets: Vec<Vec<usize>>,
     ) -> Self {
         Self {
@@ -73,7 +72,7 @@ impl Debug for ExpandExecutor {
     }
 }
 
-impl Executor for ExpandExecutor {
+impl Execute for ExpandExecutor {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }
@@ -92,7 +91,7 @@ mod tests {
 
     use super::ExpandExecutor;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{Executor, ExecutorInfo, PkIndices};
+    use crate::executor::{Execute, ExecutorInfo, PkIndices};
 
     #[tokio::test]
     async fn test_expand() {

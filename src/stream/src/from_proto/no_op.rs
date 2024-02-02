@@ -17,7 +17,7 @@ use risingwave_storage::StateStore;
 
 use super::ExecutorBuilder;
 use crate::error::StreamResult;
-use crate::executor::{BoxedExecutor, Executor, NoOpExecutor};
+use crate::executor::{BoxedExecutor, Execute, NoOpExecutor};
 use crate::task::ExecutorParams;
 
 pub struct NoOpExecutorBuilder;

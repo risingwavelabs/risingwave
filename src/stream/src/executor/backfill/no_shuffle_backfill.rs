@@ -20,7 +20,6 @@ use futures::stream::select_with_strategy;
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
-
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::Datum;
@@ -39,7 +38,7 @@ use crate::executor::backfill::utils::{
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, Barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo,
+    expect_first_barrier, Barrier, BoxedExecutor, BoxedMessageStream, Execute, ExecutorInfo,
     Message, Mutation, StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::{ActorId, CreateMviewProgress};
@@ -739,7 +738,7 @@ where
     }
 }
 
-impl<S> Executor for BackfillExecutor<S>
+impl<S> Execute for BackfillExecutor<S>
 where
     S: StateStore,
 {

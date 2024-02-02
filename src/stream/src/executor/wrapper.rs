@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 
-
 use super::*;
 
 mod epoch_check;
@@ -88,7 +87,7 @@ impl WrapperExecutor {
     }
 }
 
-impl Executor for WrapperExecutor {
+impl Execute for WrapperExecutor {
     fn info(&self) -> &ExecutorInfo {
         self.input.info()
     }

@@ -14,11 +14,10 @@
 
 use async_trait::async_trait;
 use futures::StreamExt;
-
 use risingwave_common::types::DataType;
 use risingwave_storage::StateStore;
 
-use crate::executor::{Barrier, BoxedMessageStream, Executor};
+use crate::executor::{Barrier, BoxedMessageStream, Execute};
 
 mod cache;
 mod sides;
@@ -54,10 +53,10 @@ pub struct LookupExecutor<S: StateStore> {
     stream: StreamJoinSide,
 
     /// The executor for arrangement.
-    arrangement_executor: Option<Box<dyn Executor>>,
+    arrangement_executor: Option<Box<dyn Execute>>,
 
     /// The executor for stream.
-    stream_executor: Option<Box<dyn Executor>>,
+    stream_executor: Option<Box<dyn Execute>>,
 
     /// The last received barrier.
     last_barrier: Option<Barrier>,
@@ -83,7 +82,7 @@ pub struct LookupExecutor<S: StateStore> {
 }
 
 #[async_trait]
-impl<S: StateStore> Executor for LookupExecutor<S> {
+impl<S: StateStore> Execute for LookupExecutor<S> {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }

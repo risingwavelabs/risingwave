@@ -20,7 +20,6 @@ use anyhow::Context as _;
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
-
 use tokio::time::Instant;
 
 use super::error::StreamExecutorError;
@@ -245,7 +244,7 @@ impl MergeExecutor {
     }
 }
 
-impl Executor for MergeExecutor {
+impl Execute for MergeExecutor {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }
@@ -456,7 +455,7 @@ mod tests {
     use super::*;
     use crate::executor::exchange::input::RemoteInput;
     use crate::executor::exchange::permit::channel_for_test;
-    use crate::executor::{Barrier, Executor, Mutation};
+    use crate::executor::{Barrier, Execute, Mutation};
     use crate::task::test_utils::helper_make_local_actor;
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {

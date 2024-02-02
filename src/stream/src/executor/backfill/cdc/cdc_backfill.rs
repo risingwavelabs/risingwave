@@ -45,7 +45,7 @@ use crate::executor::backfill::utils::{
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Execute,
     ExecutorInfo, Message, StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::CreateMviewProgress;
@@ -589,7 +589,7 @@ fn get_rw_columns(schema: &Schema) -> Vec<SourceColumnDesc> {
         .collect_vec()
 }
 
-impl<S: StateStore> Executor for CdcBackfillExecutor<S> {
+impl<S: StateStore> Execute for CdcBackfillExecutor<S> {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }
@@ -611,7 +611,7 @@ mod tests {
 
     use crate::executor::backfill::cdc::cdc_backfill::transform_upstream;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::Executor;
+    use crate::executor::Execute;
 
     #[tokio::test]
     async fn test_transform_upstream_chunk() {

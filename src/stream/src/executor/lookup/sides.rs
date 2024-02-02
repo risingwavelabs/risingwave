@@ -28,7 +28,7 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
-use crate::executor::{Barrier, BoxedMessageStream, Executor, Message, MessageStream};
+use crate::executor::{Barrier, BoxedMessageStream, Execute, Message, MessageStream};
 
 /// Join side of Lookup Executor's stream
 pub(crate) struct StreamJoinSide {
@@ -212,8 +212,8 @@ pub async fn align_barrier(mut left: BoxedMessageStream, mut right: BoxedMessage
 /// * `[Msg`] Arrangement (batch)
 #[try_stream(ok = ArrangeMessage, error = StreamExecutorError)]
 pub async fn stream_lookup_arrange_prev_epoch(
-    stream: Box<dyn Executor>,
-    arrangement: Box<dyn Executor>,
+    stream: Box<dyn Execute>,
+    arrangement: Box<dyn Execute>,
 ) {
     let mut input = pin!(align_barrier(stream.execute(), arrangement.execute()));
     let mut arrange_buf = vec![];
@@ -296,8 +296,8 @@ pub async fn stream_lookup_arrange_prev_epoch(
 /// * Barrier (prev = `[2`], current = `[3`])
 #[try_stream(ok = ArrangeMessage, error = StreamExecutorError)]
 pub async fn stream_lookup_arrange_this_epoch(
-    stream: Box<dyn Executor>,
-    arrangement: Box<dyn Executor>,
+    stream: Box<dyn Execute>,
+    arrangement: Box<dyn Execute>,
 ) {
     let mut input = pin!(align_barrier(stream.execute(), arrangement.execute()));
     let mut stream_buf = vec![];

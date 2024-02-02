@@ -23,7 +23,7 @@ use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::ExprError;
 
 use super::error::StreamExecutorError;
-use super::{ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message};
+use super::{ActorContextRef, BoxedExecutor, Execute, ExecutorInfo, Message};
 use crate::common::StreamChunkBuilder;
 
 pub struct HopWindowExecutor {
@@ -68,7 +68,7 @@ impl HopWindowExecutor {
     }
 }
 
-impl Executor for HopWindowExecutor {
+impl Execute for HopWindowExecutor {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }
@@ -246,11 +246,11 @@ mod tests {
     use risingwave_expr::expr::NonStrictExpression;
 
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{ActorContext, Executor, ExecutorInfo, StreamChunk};
+    use crate::executor::{ActorContext, Execute, ExecutorInfo, StreamChunk};
 
     const CHUNK_SIZE: usize = 256;
 
-    fn create_executor(output_indices: Vec<usize>) -> Box<dyn Executor> {
+    fn create_executor(output_indices: Vec<usize>) -> Box<dyn Execute> {
         let field1 = Field::unnamed(DataType::Int64);
         let field2 = Field::unnamed(DataType::Int64);
         let field3 = Field::with_name(DataType::Timestamp, "created_at");

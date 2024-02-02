@@ -43,8 +43,8 @@ use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, AddMutation, BoxedExecutor,
-    BoxedMessageStream, Executor, ExecutorInfo, Message, Mutation,
-    StreamExecutorResult, UpdateMutation,
+    BoxedMessageStream, Execute, ExecutorInfo, Message, Mutation, StreamExecutorResult,
+    UpdateMutation,
 };
 use crate::task::{ActorId, AtomicU64Ref};
 
@@ -429,7 +429,7 @@ impl MaterializeBuffer {
         self.buffer
     }
 }
-impl<S: StateStore, SD: ValueRowSerde> Executor for MaterializeExecutor<S, SD> {
+impl<S: StateStore, SD: ValueRowSerde> Execute for MaterializeExecutor<S, SD> {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }

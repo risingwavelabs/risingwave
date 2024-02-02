@@ -62,7 +62,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::Executor;
+    use crate::executor::Execute;
 
     #[should_panic]
     #[tokio::test]

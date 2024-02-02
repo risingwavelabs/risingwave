@@ -38,7 +38,7 @@ pub struct FlowControlExecutor {
 
 impl FlowControlExecutor {
     pub fn new(
-        input: Box<dyn Executor>,
+        input: Box<dyn Execute>,
         actor_ctx: ActorContextRef,
         rate_limit: Option<u32>,
     ) -> Self {
@@ -130,7 +130,7 @@ impl Debug for FlowControlExecutor {
     }
 }
 
-impl Executor for FlowControlExecutor {
+impl Execute for FlowControlExecutor {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }

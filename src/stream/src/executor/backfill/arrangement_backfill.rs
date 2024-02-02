@@ -22,7 +22,6 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
-
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -40,7 +39,7 @@ use crate::executor::backfill::utils::{
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, Barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo,
+    expect_first_barrier, Barrier, BoxedExecutor, BoxedMessageStream, Execute, ExecutorInfo,
     Message, StreamExecutorError,
 };
 use crate::task::{ActorId, CreateMviewProgress};
@@ -631,7 +630,7 @@ where
     }
 }
 
-impl<S, SD> Executor for ArrangementBackfillExecutor<S, SD>
+impl<S, SD> Execute for ArrangementBackfillExecutor<S, SD>
 where
     S: StateStore,
     SD: ValueRowSerde,

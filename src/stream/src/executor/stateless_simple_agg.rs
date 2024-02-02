@@ -16,7 +16,6 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
-
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{
     build_retractable, AggCall, AggregateState, BoxedAggregateFunction,
@@ -30,12 +29,12 @@ use crate::error::StreamResult;
 pub struct StatelessSimpleAggExecutor {
     _ctx: ActorContextRef,
     pub(super) info: ExecutorInfo,
-    pub(super) input: Box<dyn Executor>,
+    pub(super) input: Box<dyn Execute>,
     pub(super) aggs: Vec<BoxedAggregateFunction>,
     pub(super) agg_calls: Vec<AggCall>,
 }
 
-impl Executor for StatelessSimpleAggExecutor {
+impl Execute for StatelessSimpleAggExecutor {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }
@@ -117,7 +116,7 @@ impl StatelessSimpleAggExecutor {
     pub fn new(
         ctx: ActorContextRef,
         info: ExecutorInfo,
-        input: Box<dyn Executor>,
+        input: Box<dyn Execute>,
         agg_calls: Vec<AggCall>,
     ) -> StreamResult<Self> {
         let aggs = agg_calls.iter().map(build_retractable).try_collect()?;
@@ -142,7 +141,7 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::agg_executor::generate_agg_schema;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{Executor, StatelessSimpleAggExecutor};
+    use crate::executor::{Execute, StatelessSimpleAggExecutor};
 
     #[tokio::test]
     async fn test_no_chunk() {

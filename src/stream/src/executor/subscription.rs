@@ -16,14 +16,13 @@ use core::time::Duration;
 
 use futures::prelude::stream::StreamExt;
 use futures_async_stream::try_stream;
-
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_storage::store::LocalStateStore;
 use tokio::time::Instant;
 
 use super::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Execute,
     ExecutorInfo, Message, StreamExecutorError, StreamExecutorResult,
 };
 use crate::common::log_store_impl::kv_log_store::ReaderTruncationOffsetType;
@@ -115,7 +114,7 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
         }
     }
 }
-impl<LS: LocalStateStore> Executor for SubscriptionExecutor<LS> {
+impl<LS: LocalStateStore> Execute for SubscriptionExecutor<LS> {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }

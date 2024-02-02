@@ -45,7 +45,7 @@ use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, Execute, ExecutorInfo, Message,
     StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::AtomicU64Ref;
@@ -56,7 +56,7 @@ use crate::task::AtomicU64Ref;
 /// - State table schema = output schema, state table pk = `partition key | order key | input pk`.
 /// - Output schema = input schema + window function results.
 pub struct OverWindowExecutor<S: StateStore> {
-    input: Box<dyn Executor>,
+    input: Box<dyn Execute>,
     inner: ExecutorInner<S>,
 }
 
@@ -97,7 +97,7 @@ struct ExecutionStats {
     cache_lookup: u64,
 }
 
-impl<S: StateStore> Executor for OverWindowExecutor<S> {
+impl<S: StateStore> Execute for OverWindowExecutor<S> {
     fn info(&self) -> &ExecutorInfo {
         &self.inner.info
     }

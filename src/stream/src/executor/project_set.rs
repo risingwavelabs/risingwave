@@ -20,7 +20,6 @@ use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
-
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -29,8 +28,7 @@ use risingwave_expr::table_function::ProjectSetSelectItem;
 
 use super::error::StreamExecutorError;
 use super::{
-    ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message,
-    StreamExecutorResult, Watermark,
+    ActorContextRef, BoxedExecutor, Execute, ExecutorInfo, Message, StreamExecutorResult, Watermark,
 };
 use crate::common::StreamChunkBuilder;
 
@@ -63,7 +61,7 @@ impl ProjectSetExecutor {
     pub fn new(
         ctx: ActorContextRef,
         info: ExecutorInfo,
-        input: Box<dyn Executor>,
+        input: Box<dyn Execute>,
         select_list: Vec<ProjectSetSelectItem>,
         chunk_size: usize,
         watermark_derivations: MultiMap<usize, usize>,
@@ -90,7 +88,7 @@ impl Debug for ProjectSetExecutor {
     }
 }
 
-impl Executor for ProjectSetExecutor {
+impl Execute for ProjectSetExecutor {
     fn info(&self) -> &ExecutorInfo {
         &self.inner.info
     }

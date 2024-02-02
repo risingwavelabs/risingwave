@@ -21,7 +21,7 @@ use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
 use super::{
-    Barrier, BoxedMessageStream, Executor, ExecutorInfo, Message, MessageStream, PkIndices,
+    Barrier, BoxedMessageStream, Execute, ExecutorInfo, Message, MessageStream, PkIndices,
     StreamChunk, StreamExecutorResult, Watermark,
 };
 
@@ -40,7 +40,7 @@ pub mod prelude {
     pub use crate::common::table::state_table::StateTable;
     pub use crate::executor::test_utils::expr::build_from_pretty;
     pub use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
-    pub use crate::executor::{ActorContext, BoxedMessageStream, Executor, PkIndices};
+    pub use crate::executor::{ActorContext, BoxedMessageStream, Execute, PkIndices};
 }
 
 pub struct MockSource {
@@ -179,7 +179,7 @@ impl MockSource {
     }
 }
 
-impl Executor for MockSource {
+impl Execute for MockSource {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }
@@ -298,14 +298,14 @@ pub mod agg_executor {
     };
     use crate::executor::aggregation::AggStateStorage;
     use crate::executor::{
-        ActorContext, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, HashAggExecutor,
+        ActorContext, ActorContextRef, BoxedExecutor, Execute, ExecutorInfo, HashAggExecutor,
         PkIndices, SimpleAggExecutor,
     };
 
-    /// Generate agg executor's schema from `input`, `agg_calls` and `group_key_indices`.
+    /// Generate aggExecuter's schema from `input`, `agg_calls` and `group_key_indices`.
     /// For [`crate::executor::HashAggExecutor`], the group key indices should be provided.
     pub fn generate_agg_schema(
-        input: &dyn Executor,
+        input: &dyn Execute,
         agg_calls: &[AggCall],
         group_key_indices: Option<&[usize]>,
     ) -> Schema {
@@ -334,7 +334,7 @@ pub mod agg_executor {
         agg_call: &AggCall,
         group_key_indices: &[usize],
         pk_indices: &[usize],
-        input_ref: &dyn Executor,
+        input_ref: &dyn Execute,
         is_append_only: bool,
     ) -> AggStateStorage<S> {
         match agg_call.kind {
@@ -405,7 +405,7 @@ pub mod agg_executor {
         table_id: TableId,
         agg_calls: &[AggCall],
         group_key_indices: &[usize],
-        input_ref: &dyn Executor,
+        input_ref: &dyn Execute,
     ) -> StateTable<S> {
         let input_fields = input_ref.schema().fields();
 
@@ -444,7 +444,7 @@ pub mod agg_executor {
     #[allow(clippy::too_many_arguments)]
     pub async fn new_boxed_hash_agg_executor<S: StateStore>(
         store: S,
-        input: Box<dyn Executor>,
+        input: Box<dyn Execute>,
         is_append_only: bool,
         agg_calls: Vec<AggCall>,
         row_count_index: usize,
@@ -453,7 +453,7 @@ pub mod agg_executor {
         extreme_cache_size: usize,
         emit_on_window_close: bool,
         executor_id: u64,
-    ) -> Box<dyn Executor> {
+    ) -> Box<dyn Execute> {
         let mut storages = Vec::with_capacity(agg_calls.iter().len());
         for (idx, agg_call) in agg_calls.iter().enumerate() {
             storages.push(
@@ -523,7 +523,7 @@ pub mod agg_executor {
         row_count_index: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-    ) -> Box<dyn Executor> {
+    ) -> Box<dyn Execute> {
         let storages = future::join_all(agg_calls.iter().enumerate().map(|(idx, agg_call)| {
             create_agg_state_storage(
                 store.clone(),

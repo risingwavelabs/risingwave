@@ -657,7 +657,7 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 }
 
-impl<S: StateStore> Executor for SourceExecutor<S> {
+impl<S: StateStore> Execute for SourceExecutor<S> {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }

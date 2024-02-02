@@ -57,7 +57,7 @@ use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
 use risingwave_stream::executor::source_executor::SourceExecutor;
 use risingwave_stream::executor::{
-    ActorContext, Barrier, Executor, ExecutorInfo, MaterializeExecutor, Message, PkIndices,
+    ActorContext, Barrier, Execute, ExecutorInfo, MaterializeExecutor, Message, PkIndices,
 };
 use tokio::sync::mpsc::unbounded_channel;
 

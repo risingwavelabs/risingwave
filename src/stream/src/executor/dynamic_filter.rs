@@ -20,7 +20,6 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, once, OwnedRow, OwnedRow as RowData, Row};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
@@ -38,9 +37,7 @@ use risingwave_storage::StateStore;
 use super::barrier_align::*;
 use super::error::StreamExecutorError;
 use super::monitor::StreamingMetrics;
-use super::{
-    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
-};
+use super::{ActorContextRef, BoxedExecutor, BoxedMessageStream, Execute, ExecutorInfo, Message};
 use crate::common::table::state_table::{StateTable, WatermarkCacheParameterizedStateTable};
 use crate::common::StreamChunkBuilder;
 use crate::executor::expect_first_barrier_from_aligned_stream;
@@ -490,7 +487,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
     }
 }
 
-impl<S: StateStore, const USE_WATERMARK_CACHE: bool> Executor
+impl<S: StateStore, const USE_WATERMARK_CACHE: bool> Execute
     for DynamicFilterExecutor<S, USE_WATERMARK_CACHE>
 {
     fn info(&self) -> &ExecutorInfo {

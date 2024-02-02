@@ -23,7 +23,7 @@ use super::{ManagedTopNState, TopNCache, TopNCacheTrait};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
+use crate::executor::{ActorContextRef, Execute, ExecutorInfo, PkIndices, Watermark};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
@@ -33,7 +33,7 @@ pub type TopNExecutor<S, const WITH_TIES: bool> =
 impl<S: StateStore, const WITH_TIES: bool> TopNExecutor<S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        input: Box<dyn Executor>,
+        input: Box<dyn Execute>,
         ctx: ActorContextRef,
         info: ExecutorInfo,
         storage_key: Vec<ColumnOrder>,
@@ -61,7 +61,7 @@ impl<S: StateStore> TopNExecutor<S, true> {
     #[allow(clippy::too_many_arguments)]
     #[cfg(test)]
     pub fn new_with_ties_for_test(
-        input: Box<dyn Executor>,
+        input: Box<dyn Execute>,
         ctx: ActorContextRef,
         info: ExecutorInfo,
         storage_key: Vec<ColumnOrder>,
@@ -302,7 +302,7 @@ mod tests {
             };
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
-                    source as Box<dyn Executor>,
+                    source as Box<dyn Execute>,
                     ActorContext::for_test(0),
                     info,
                     storage_key(),
@@ -403,7 +403,7 @@ mod tests {
             };
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
-                    source as Box<dyn Executor>,
+                    source as Box<dyn Execute>,
                     ActorContext::for_test(0),
                     info,
                     storage_key(),
@@ -516,7 +516,7 @@ mod tests {
             };
             let top_n_executor = Box::new(
                 TopNExecutor::<_, true>::new(
-                    source as Box<dyn Executor>,
+                    source as Box<dyn Execute>,
                     ActorContext::for_test(0),
                     info,
                     storage_key(),
@@ -628,7 +628,7 @@ mod tests {
             };
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
-                    source as Box<dyn Executor>,
+                    source as Box<dyn Execute>,
                     ActorContext::for_test(0),
                     info,
                     storage_key(),
@@ -860,7 +860,7 @@ mod tests {
             };
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
-                    source as Box<dyn Executor>,
+                    source as Box<dyn Execute>,
                     ActorContext::for_test(0),
                     info,
                     storage_key(),
@@ -944,7 +944,7 @@ mod tests {
             };
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
-                    source as Box<dyn Executor>,
+                    source as Box<dyn Execute>,
                     ActorContext::for_test(0),
                     info,
                     storage_key(),
@@ -1004,7 +1004,7 @@ mod tests {
             };
             let top_n_executor_after_recovery = Box::new(
                 TopNExecutor::<_, false>::new(
-                    source as Box<dyn Executor>,
+                    source as Box<dyn Execute>,
                     ActorContext::for_test(0),
                     info,
                     storage_key(),
@@ -1138,7 +1138,7 @@ mod tests {
             };
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties_for_test(
-                    source as Box<dyn Executor>,
+                    source as Box<dyn Execute>,
                     ActorContext::for_test(0),
                     info,
                     storage_key(),
@@ -1294,7 +1294,7 @@ mod tests {
             };
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties_for_test(
-                    source as Box<dyn Executor>,
+                    source as Box<dyn Execute>,
                     ActorContext::for_test(0),
                     info,
                     storage_key(),
@@ -1357,7 +1357,7 @@ mod tests {
             };
             let top_n_executor_after_recovery = Box::new(
                 TopNExecutor::new_with_ties_for_test(
-                    source as Box<dyn Executor>,
+                    source as Box<dyn Execute>,
                     ActorContext::for_test(0),
                     info,
                     storage_key(),

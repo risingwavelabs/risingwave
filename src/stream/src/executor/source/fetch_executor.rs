@@ -344,7 +344,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     }
 }
 
-impl<S: StateStore, Src: OpendalSource> Executor for FsFetchExecutor<S, Src> {
+impl<S: StateStore, Src: OpendalSource> Execute for FsFetchExecutor<S, Src> {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }

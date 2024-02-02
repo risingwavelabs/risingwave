@@ -24,7 +24,7 @@ use super::{ManagedTopNState, TopNCache, NO_GROUP_KEY};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
+use crate::executor::{ActorContextRef, Execute, ExecutorInfo, PkIndices, Watermark};
 
 /// If the input is append-only, `AppendOnlyGroupTopNExecutor` does not need
 /// to keep all the rows seen. As long as a record
@@ -38,7 +38,7 @@ pub type AppendOnlyTopNExecutor<S, const WITH_TIES: bool> =
 impl<S: StateStore, const WITH_TIES: bool> AppendOnlyTopNExecutor<S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        input: Box<dyn Executor>,
+        input: Box<dyn Execute>,
         ctx: ActorContextRef,
         info: ExecutorInfo,
         storage_key: Vec<ColumnOrder>,
@@ -170,7 +170,7 @@ mod tests {
     use super::AppendOnlyTopNExecutor;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{ActorContext, Barrier, Executor, ExecutorInfo, Message, PkIndices};
+    use crate::executor::{ActorContext, Barrier, Execute, ExecutorInfo, Message, PkIndices};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
         let chunk1 = StreamChunk::from_pretty(
@@ -258,7 +258,7 @@ mod tests {
         };
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::<_, false>::new(
-                source as Box<dyn Executor>,
+                source as Box<dyn Execute>,
                 ActorContext::for_test(0),
                 info,
                 storage_key,
@@ -345,7 +345,7 @@ mod tests {
         };
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::<_, false>::new(
-                source as Box<dyn Executor>,
+                source as Box<dyn Execute>,
                 ActorContext::for_test(0),
                 info,
                 storage_key(),

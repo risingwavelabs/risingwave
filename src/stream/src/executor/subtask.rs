@@ -20,7 +20,7 @@ use tokio::sync::mpsc::error::SendError;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::actor::spawn_blocking_drop_stream;
-use super::{BoxedExecutor, Executor, ExecutorInfo, Message, MessageStreamItem};
+use super::{BoxedExecutor, Execute, ExecutorInfo, Message, MessageStreamItem};
 use crate::task::ActorId;
 
 /// Handle used to drive the subtask.
@@ -34,7 +34,7 @@ pub struct SubtaskRxExecutor {
     rx: mpsc::Receiver<MessageStreamItem>,
 }
 
-impl Executor for SubtaskRxExecutor {
+impl Execute for SubtaskRxExecutor {
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }

@@ -30,8 +30,8 @@ use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::test_utils::*;
 use crate::executor::{
-    ActorContext, Barrier, BoxedMessageStream, Executor, ExecutorInfo, MaterializeExecutor,
-    Message, PkIndices,
+    ActorContext, Barrier, BoxedMessageStream, Execute, ExecutorInfo, MaterializeExecutor, Message,
+    PkIndices,
 };
 
 fn arrangement_col_descs() -> Vec<ColumnDesc> {
@@ -71,7 +71,7 @@ fn arrangement_col_arrange_rules_join_key() -> Vec<ColumnOrder> {
 async fn create_arrangement(
     table_id: TableId,
     memory_state_store: MemoryStateStore,
-) -> Box<dyn Executor + Send> {
+) -> Box<dyn Execute + Send> {
     // Two columns of int32 type, the second column is arrange key.
     let columns = arrangement_col_descs();
 
@@ -139,7 +139,7 @@ async fn create_arrangement(
 /// | b  |       |      | 2 -> 3  |
 /// | -  | 6     | 1    | 3       |
 /// | b  |       |      | 3 -> 4  |
-fn create_source() -> Box<dyn Executor + Send> {
+fn create_source() -> Box<dyn Execute + Send> {
     let columns = vec![
         ColumnDesc::new_atomic(DataType::Int64, "join_column", 1),
         ColumnDesc::new_atomic(DataType::Int64, "rowid_column", 2),

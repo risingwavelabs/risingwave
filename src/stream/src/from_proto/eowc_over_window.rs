@@ -21,9 +21,7 @@ use risingwave_storage::StateStore;
 use super::ExecutorBuilder;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::{
-    BoxedExecutor, EowcOverWindowExecutor, EowcOverWindowExecutorArgs, Executor,
-};
+use crate::executor::{BoxedExecutor, EowcOverWindowExecutor, EowcOverWindowExecutorArgs, Execute};
 use crate::task::ExecutorParams;
 
 pub struct EowcOverWindowExecutorBuilder;
