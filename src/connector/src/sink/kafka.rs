@@ -661,8 +661,6 @@ mod test {
             "properties.retry.max".to_string() => "20".to_string(),
             "properties.retry.interval".to_string() => "500ms".to_string(),
             // PrivateLink
-            "privatelink.targets".to_string() => "[{\"port\": 9292}]".to_string(),
-            "privatelink.endpoint".to_string() => "10.0.0.1".to_string(),
             "broker.rewrite.endpoints".to_string() => "{\"broker1\": \"10.0.0.1:8001\"}".to_string(),
         };
         let config = KafkaConfig::from_hashmap(properties).unwrap();
@@ -672,14 +670,6 @@ mod test {
         assert_eq!(config.retry_interval, Duration::from_millis(500));
 
         // PrivateLink fields
-        assert_eq!(
-            config.privatelink_common.private_link_endpoint,
-            Some("10.0.0.1".into())
-        );
-        assert_eq!(
-            config.privatelink_common.private_link_targets,
-            Some("[{\"port\": 9292}]".into())
-        );
         let hashmap: HashMap<String, String> = hashmap! {
             "broker1".to_string() => "10.0.0.1:8001".to_string()
         };

@@ -302,15 +302,9 @@ KafkaConfig:
     comments: The maximum number of unacknowledged requests the client will send on a single connection before blocking.
     required: false
     default: '5'
-  - name: privatelink.targets
-    field_type: String
-    required: false
-  - name: privatelink.endpoint
-    field_type: String
-    required: false
   - name: broker.rewrite.endpoints
     field_type: HashMap<String,String>
-    comments: This is generated from `private_link_targets` and `private_link_endpoint`, instead of given by users.
+    comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
     required: false
 KinesisSinkConfig:
   fields:

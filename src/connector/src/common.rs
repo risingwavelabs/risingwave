@@ -223,13 +223,7 @@ pub struct KafkaCommon {
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct KafkaPrivateLinkCommon {
-    // These two fields are only used in frontend to generate `broker_rewrite_map`
-    #[serde(rename = "privatelink.targets")]
-    pub private_link_targets: Option<String>,
-    #[serde(rename = "privatelink.endpoint")]
-    pub private_link_endpoint: Option<String>,
-
-    /// This is generated from `private_link_targets` and `private_link_endpoint`, instead of given by users.
+    /// This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
     #[serde(rename = "broker.rewrite.endpoints")]
     #[serde_as(as = "Option<JsonString>")]
     pub broker_rewrite_map: Option<HashMap<String, String>>,

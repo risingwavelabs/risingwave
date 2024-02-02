@@ -214,8 +214,6 @@ mod test {
             "properties.enable.auto.commit".to_string() => "true".to_string(),
             "properties.fetch.queue.backoff.ms".to_string() => "114514".to_string(),
             // PrivateLink
-            "privatelink.targets".to_string() => "[{\"port\": 9292}]".to_string(),
-            "privatelink.endpoint".to_string() => "10.0.0.1".to_string(),
             "broker.rewrite.endpoints".to_string() => "{\"broker1\": \"10.0.0.1:8001\"}".to_string(),
         };
 
@@ -255,15 +253,6 @@ mod test {
             props.rdkafka_properties_consumer.fetch_queue_backoff_ms,
             Some(114514)
         );
-        assert_eq!(
-            props.privatelink_common.private_link_endpoint,
-            Some("10.0.0.1".into())
-        );
-        assert_eq!(
-            props.privatelink_common.private_link_targets,
-            Some("[{\"port\": 9292}]".into())
-        );
-
         let hashmap: HashMap<String, String> = hashmap! {
             "broker1".to_string() => "10.0.0.1:8001".to_string()
         };
