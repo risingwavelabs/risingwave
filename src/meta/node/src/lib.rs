@@ -54,7 +54,7 @@ pub struct MetaNodeOpts {
     /// It will serve as a unique identifier in cluster
     /// membership and leader election. Must be specified for etcd backend.
     #[clap(long, env = "RW_ADVERTISE_ADDR")]
-    advertise_addr: String,
+    pub advertise_addr: String,
 
     #[clap(long, env = "RW_DASHBOARD_HOST")]
     dashboard_host: Option<String>,
@@ -147,7 +147,7 @@ pub struct MetaNodeOpts {
     /// Remote directory for storing data and metadata objects.
     #[clap(long, env = "RW_DATA_DIRECTORY")]
     #[override_opts(path = system.data_directory)]
-    data_directory: Option<String>,
+    pub data_directory: Option<String>,
 
     /// Whether config object storage bucket lifecycle to purge stale data.
     #[clap(long, env = "RW_DO_NOT_CONFIG_BUCKET_LIFECYCLE")]
@@ -168,6 +168,43 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_HEAP_PROFILING_DIR")]
     #[override_opts(path = server.heap_profiling.dir)]
     pub heap_profiling_dir: Option<String>,
+}
+
+impl MetaNodeOpts {
+    pub fn new_for_single_node() -> Self {
+        MetaNodeOpts {
+            vpc_id: None,
+            security_group_id: None,
+            listen_addr: "0.0.0.0:5690".to_string(),
+            advertise_addr: "0.0.0.0:5690".to_string(),
+            dashboard_host: Some("0.0.0.0:5691".to_string()),
+            prometheus_host: None,
+            etcd_endpoints: Default::default(),
+            etcd_auth: false,
+            etcd_username: Default::default(),
+            etcd_password: Default::default(),
+            sql_endpoint: None,
+            dashboard_ui_path: None,
+            prometheus_endpoint: None,
+            prometheus_selector: None,
+            connector_rpc_endpoint: None,
+            privatelink_endpoint_default_tags: None,
+            config_path: "".to_string(),
+            backend: None,
+            barrier_interval_ms: None,
+            sstable_size_mb: None,
+            block_size_kb: None,
+            bloom_false_positive: None,
+            // TODO: Update the state store
+            state_store: None,
+            // TODO: Update the data directory
+            data_directory: None,
+            do_not_config_object_storage_lifecycle: None,
+            backup_storage_url: None,
+            backup_storage_directory: None,
+            heap_profiling_dir: None,
+        }
+    }
 }
 
 impl risingwave_common::opts::Opts for MetaNodeOpts {

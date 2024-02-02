@@ -143,6 +143,22 @@ pub struct FrontendOpts {
     pub enable_barrier_read: Option<bool>,
 }
 
+impl FrontendOpts {
+    pub fn new_for_single_node() -> Self {
+        Self {
+            listen_addr: "0.0.0.0:4566".to_string(),
+            advertise_addr: Some("0.0.0.0:4566".to_string()),
+            port: None,
+            meta_addr: "http://0.0.0.0:5690".parse().unwrap(),
+            prometheus_listener_addr: "".to_string(),
+            health_check_listener_addr: "0.0.0.0:6786".to_string(),
+            config_path: "".to_string(),
+            metrics_level: None,
+            enable_barrier_read: None,
+        }
+    }
+}
+
 impl risingwave_common::opts::Opts for FrontendOpts {
     fn name() -> &'static str {
         "frontend"

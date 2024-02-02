@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::str::FromStr;
+
 use anyhow::Result;
 use clap::Parser;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
@@ -38,12 +40,71 @@ pub struct SingleNodeOpts {
     #[clap(long, env = "RW_SINGLE_NODE_CONFIG_PATH")]
     config_path: Option<String>,
 
-    #[clap(long, env = "RW_SINGLE_NODE_META_ADDR", default_value = "")]
+    /// The data directory used by meta store and object store.
+    #[clap(long, env = "RW_SINGLE_NODE_DATA_DIRECTORY", default_value = "")]
     data_directory: Option<String>,
+
+    /// The address of the meta node.
+    #[clap(long, env = "RW_SINGLE_NODE_META_ADDR", default_value = "")]
+    meta_addr: Option<String>,
+
+    /// The address of the compute node
+    #[clap(long, env = "RW_SINGLE_NODE_COMPUTE_ADDR", default_value = "")]
+    compute_addr: Option<String>,
+
+    /// The address of the frontend node
+    #[clap(long, env = "RW_SINGLE_NODE_FRONTEND_ADDR", default_value = "")]
+    frontend_addr: Option<String>,
+
+    /// The address of the compactor node
+    #[clap(long, env = "RW_SINGLE_NODE_COMPACTOR_ADDR", default_value = "")]
+    compactor_addr: Option<String>,
 }
 
 pub fn map_single_node_opts_to_standalone_opts(opts: &SingleNodeOpts) -> ParsedStandaloneOpts {
-    todo!()
+    let mut meta_opts = MetaNodeOpts::new_for_single_node();
+    let mut compute_opts = ComputeNodeOpts::new_for_single_node();
+    let mut frontend_opts = FrontendOpts::new_for_single_node();
+    let mut compactor_opts = CompactorOpts::new_for_single_node();
+    if let Some(prometheus_listener_addr) = &opts.prometheus_listener_addr {
+        meta_opts.prometheus_host = Some(prometheus_listener_addr.clone());
+        compute_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+        frontend_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+        compactor_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+    }
+    if let Some(config_path) = &opts.config_path {
+        meta_opts.config_path = config_path.clone();
+        compute_opts.config_path = config_path.clone();
+        frontend_opts.config_path = config_path.clone();
+        compactor_opts.config_path = config_path.clone();
+    }
+    // TODO(kwannoel): Also update state store URL
+    if let Some(data_directory) = &opts.data_directory {
+        meta_opts.data_directory = Some(data_directory.clone());
+    }
+    if let Some(meta_addr) = &opts.meta_addr {
+        meta_opts.listen_addr = meta_addr.clone();
+        meta_opts.advertise_addr = meta_addr.clone();
+
+        compute_opts.meta_address = meta_addr.parse().unwrap();
+        frontend_opts.meta_addr = meta_addr.parse().unwrap();
+        compactor_opts.meta_address = meta_addr.parse().unwrap();
+    }
+    if let Some(compute_addr) = &opts.compute_addr {
+        compute_opts.listen_addr = compute_addr.clone();
+    }
+    if let Some(frontend_addr) = &opts.frontend_addr {
+        frontend_opts.listen_addr = frontend_addr.clone();
+    }
+    if let Some(compactor_addr) = &opts.compactor_addr {
+        compactor_opts.listen_addr = compactor_addr.clone();
+    }
+    ParsedStandaloneOpts {
+        meta_opts: Some(meta_opts),
+        compute_opts: Some(compute_opts),
+        frontend_opts: Some(frontend_opts),
+        compactor_opts: Some(compactor_opts),
+    }
 }
 
 #[cfg(test)]
