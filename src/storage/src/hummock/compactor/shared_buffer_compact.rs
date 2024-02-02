@@ -360,6 +360,8 @@ pub async fn merge_imms_in_memory(
                 .map(|(epoch_with_gap, value)| (*epoch_with_gap, value.clone())),
         );
         mi.advance_peek_to_next_key();
+        // Since there is no blocking point in this method, but it is cpu intensive, we call this method
+        // to do cooperative scheduling
         tokio::task::consume_budget().await;
     }
 
