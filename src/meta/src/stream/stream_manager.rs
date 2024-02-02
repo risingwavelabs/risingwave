@@ -37,6 +37,12 @@ use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef = Arc<GlobalStreamManager>;
 
+pub struct CreateStreamingJobOption {
+
+    pub new_independent_compaction_group: bool,
+
+}
+
 /// [`CreateStreamingJobContext`] carries one-time infos for creating a streaming job.
 ///
 /// Note: for better readability, keep this struct complete and immutable once created.
@@ -69,7 +75,7 @@ pub struct CreateStreamingJobContext {
     /// Context provided for potential replace table, typically used when sinking into a table.
     pub replace_table_job_info: Option<(StreamingJob, ReplaceTableContext, TableFragments)>,
 
-    pub new_independent_compaction_group: bool,
+    pub option: CreateStreamingJobOption,
 }
 
 impl CreateStreamingJobContext {
@@ -408,7 +414,7 @@ impl GlobalStreamManager {
             create_type,
             ddl_type,
             replace_table_job_info,
-            new_independent_compaction_group,
+            option,
         }: CreateStreamingJobContext,
     ) -> MetaResult<()> {
         let mut replace_table_command = None;
@@ -420,7 +426,7 @@ impl GlobalStreamManager {
             .register_table_fragments(
                 mv_table_id,
                 internal_tables.keys().copied().collect(),
-                new_independent_compaction_group,
+                option,
             )
             .await?;
         debug_assert_eq!(

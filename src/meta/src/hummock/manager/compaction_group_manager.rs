@@ -56,6 +56,7 @@ use crate::model::{
     BTreeMapTransactionWrapper, MetadataModel, MetadataModelError, TableFragments, ValTransaction,
 };
 use crate::storage::MetaStore;
+use crate::stream::CreateStreamingJobOption;
 
 impl HummockManager {
     pub(super) async fn build_compaction_group_manager(
@@ -106,7 +107,7 @@ impl HummockManager {
         &self,
         mv_table: Option<u32>,
         mut internal_tables: Vec<u32>,
-        new_independent_compaction_group: bool,
+        create_stream_job_option: CreateStreamingJobOption,
     ) -> Result<Vec<StateTableId>> {
         let mut pairs = vec![];
         if let Some(mv_table) = mv_table {
@@ -116,7 +117,7 @@ impl HummockManager {
             // materialized_view
             pairs.push((
                 mv_table,
-                if new_independent_compaction_group {
+                if create_stream_job_option.new_independent_compaction_group {
                     CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
                 } else {
                     CompactionGroupId::from(StaticCompactionGroupId::MaterializedView)
@@ -127,7 +128,7 @@ impl HummockManager {
         for table_id in internal_tables {
             pairs.push((
                 table_id,
-                if new_independent_compaction_group {
+                if create_stream_job_option.new_independent_compaction_group {
                     CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
                 } else {
                     CompactionGroupId::from(StaticCompactionGroupId::StateDefault)
