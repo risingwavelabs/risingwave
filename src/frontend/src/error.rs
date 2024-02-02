@@ -1,6 +1,20 @@
+// Copyright 2024 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use risingwave_batch::error::BatchError;
 use risingwave_common::array::ArrayError;
-pub use risingwave_common::error::*;
+use risingwave_common::error::{BoxedError, NoFunction, NotImplemented};
 use risingwave_common::session_config::SessionConfigError;
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::sink::SinkError;
@@ -10,6 +24,13 @@ use risingwave_rpc_client::error::{RpcError, TonicStatusWrapper};
 use thiserror::Error;
 use thiserror_ext::Box;
 
+/// The error type for the frontend crate, acting as the top-level error type for the
+/// entire RisingWave project.
+// TODO(error-handling): this is migrated from the `common` crate, and there could
+// be some further refactoring to do:
+// - Some variants are never constructed.
+// - Some variants store a type-erased `BoxedError` to resolve the reverse dependency.
+//   It's not necessary anymore as the error type is now defined at the top-level.
 #[derive(Error, Debug, Box)]
 #[thiserror_ext(newtype(name = RwError, backtrace, report_debug))]
 pub enum ErrorCode {
@@ -144,6 +165,7 @@ pub enum ErrorCode {
     ),
 }
 
+/// The result type for the frontend crate.
 pub type Result<T> = std::result::Result<T, RwError>;
 
 impl From<TonicStatusWrapper> for RwError {
