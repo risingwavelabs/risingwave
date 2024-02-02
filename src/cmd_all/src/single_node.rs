@@ -54,9 +54,7 @@ pub static DEFAULT_SINGLE_NODE_STATE_STORE_URL: LazyLock<String> = LazyLock::new
 )]
 /// Here we define our own defaults for the single node mode.
 pub struct SingleNodeOpts {
-    /// The prometheus address used by the single-node cluster.
-    /// If you have a prometheus instance,
-    /// it will poll the metrics from this address.
+    /// The address prometheus polls metrics from.
     #[clap(long, env = "RW_SINGLE_NODE_PROMETHEUS_LISTENER_ADDR")]
     prometheus_listener_addr: Option<String>,
 
