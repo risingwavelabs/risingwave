@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, ensure, Context};
+use anyhow::{anyhow, Context};
 use arrow_array::{Int32Array, Int64Array, RecordBatch};
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -29,8 +29,8 @@ use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
 use risingwave_common::array::{DataChunk, StreamChunk};
-use risingwave_common::bail;
 use risingwave_common::catalog::ROWID_PREFIX;
+use risingwave_common::{bail, ensure};
 
 use crate::error::ConnectorError;
 use crate::parser::ParserConfig;

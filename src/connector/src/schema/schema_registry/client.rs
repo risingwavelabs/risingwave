@@ -68,12 +68,6 @@ pub struct ConcurrentRequestError {
     context: String,
 }
 
-impl From<ConcurrentRequestError> for risingwave_common::error::RwError {
-    fn from(value: ConcurrentRequestError) -> Self {
-        anyhow::anyhow!(value).into()
-    }
-}
-
 type SrResult<T> = Result<T, ConcurrentRequestError>;
 
 impl Client {

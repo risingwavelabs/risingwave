@@ -30,12 +30,6 @@ pub struct InvalidOptionError {
     // source: Option<risingwave_common::error::BoxedError>,
 }
 
-impl From<InvalidOptionError> for risingwave_common::error::RwError {
-    fn from(value: InvalidOptionError) -> Self {
-        anyhow::anyhow!(value).into()
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum SchemaFetchError {
     #[error(transparent)]
@@ -51,12 +45,6 @@ pub enum SchemaFetchError {
     #[error("{0}")] // source+{0} is effectively transparent but allows backtrace
     YetToMigrate(
         #[source]
-        #[backtrace]
-        risingwave_common::error::RwError,
-    ),
-    #[error(transparent)]
-    NewError(
-        #[from]
         #[backtrace]
         anyhow::Error,
     ),

@@ -12,32 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
-
-use crate::schema::InvalidOptionError;
-
-#[derive(Error, Debug)]
-#[error(transparent)]
-pub struct NewError(
-    #[from]
-    #[backtrace]
-    anyhow::Error,
-);
-
-impl From<InvalidOptionError> for NewError {
-    fn from(value: InvalidOptionError) -> Self {
-        Self(anyhow::anyhow!(value))
-    }
-}
-
-pub type NewResult<T> = Result<T, NewError>;
-
-impl From<NewError> for RwError {
-    fn from(s: NewError) -> Self {
-        ErrorCode::ConnectorError(Box::new(s)).into()
-    }
-}
 
 #[derive(Error, Debug)]
 pub enum ConnectorError {
@@ -83,10 +58,4 @@ pub enum ConnectorError {
         #[backtrace]
         anyhow::Error,
     ),
-}
-
-impl From<ConnectorError> for RwError {
-    fn from(s: ConnectorError) -> Self {
-        ErrorCode::ConnectorError(Box::new(s)).into()
-    }
 }

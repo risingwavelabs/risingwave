@@ -53,6 +53,8 @@ pub async fn fetch_descriptor(
     // and call this in both source and sink.
     // But right now this function calls into source parser for its schema loading functionality.
     // This reversed dependency will be fixed when we support schema registry.
-    let conf = ProtobufParserConfig::new(enc).await?;
+    let conf = ProtobufParserConfig::new(enc)
+        .await
+        .map_err(SchemaFetchError::YetToMigrate)?;
     Ok(conf.message_descriptor)
 }
