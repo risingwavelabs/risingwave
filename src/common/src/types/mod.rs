@@ -309,7 +309,7 @@ pub mod data_types {
     }
     pub use range_frame_numeric;
 
-    /// Integer [`DataType`](crate::types::DataType)s supported to be `offset` of `RANGE` frame.
+    /// Date/time [`DataType`](crate::types::DataType)s supported to be `offset` of `RANGE` frame.
     #[macro_export]
     macro_rules! range_frame_datetime {
         () => {
