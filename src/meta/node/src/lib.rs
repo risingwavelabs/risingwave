@@ -24,7 +24,9 @@ use clap::Parser;
 pub use error::{MetaError, MetaResult};
 use redact::Secret;
 use risingwave_common::config::OverrideConfig;
-use risingwave_common::single_process_config::DEFAULT_SINGLE_NODE_SQLITE_PATH;
+use risingwave_common::single_process_config::{
+    DEFAULT_SINGLE_NODE_SQL_ENDPOINT, DEFAULT_SINGLE_NODE_STATE_STORE_URL,
+};
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
@@ -184,10 +186,7 @@ impl MetaNodeOpts {
             etcd_auth: false,
             etcd_username: Default::default(),
             etcd_password: Default::default(),
-            sql_endpoint: Some(format!(
-                "sqlite://{}?mode=rwc",
-                *DEFAULT_SINGLE_NODE_SQLITE_PATH,
-            )),
+            sql_endpoint: Some(DEFAULT_SINGLE_NODE_SQL_ENDPOINT.clone()),
             dashboard_ui_path: None,
             prometheus_endpoint: None,
             prometheus_selector: None,
@@ -200,9 +199,9 @@ impl MetaNodeOpts {
             block_size_kb: None,
             bloom_false_positive: None,
             // TODO: Update the state store
-            state_store: None,
+            state_store: Some(DEFAULT_SINGLE_NODE_STATE_STORE_URL.clone()),
             // TODO: Update the data directory
-            data_directory: None,
+            data_directory: Some("hummock_001".to_string()),
             do_not_config_object_storage_lifecycle: None,
             backup_storage_url: None,
             backup_storage_directory: None,

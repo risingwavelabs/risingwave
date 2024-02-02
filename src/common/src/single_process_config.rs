@@ -25,5 +25,22 @@ pub static DEFAULT_DATA_DIRECTORY: LazyLock<String> = LazyLock::new(|| {
     home_path.to_string()
 });
 
-pub static DEFAULT_SINGLE_NODE_SQLITE_PATH: LazyLock<String> =
-    LazyLock::new(|| format!("{}/single_node.db", DEFAULT_DATA_DIRECTORY.clone()));
+pub static DEFAULT_SINGLE_NODE_SQLITE_PATH: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "{}/meta_store/single_node.db",
+        DEFAULT_DATA_DIRECTORY.clone()
+    )
+});
+
+pub static DEFAULT_SINGLE_NODE_SQL_ENDPOINT: LazyLock<String> =
+    LazyLock::new(|| format!("sqlite://{}?mode=rwc", *DEFAULT_SINGLE_NODE_SQLITE_PATH));
+
+pub static DEFAULT_SINGLE_NODE_STATE_STORE_PATH: LazyLock<String> =
+    LazyLock::new(|| format!("{}/state_store", DEFAULT_DATA_DIRECTORY.clone()));
+
+pub static DEFAULT_SINGLE_NODE_STATE_STORE_URL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "hummock+fs://{}",
+        DEFAULT_SINGLE_NODE_STATE_STORE_PATH.clone()
+    )
+});
