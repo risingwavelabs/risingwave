@@ -92,25 +92,6 @@ pub struct CompactorOpts {
     pub proxy_rpc_endpoint: String,
 }
 
-impl CompactorOpts {
-    pub fn new_for_single_node() -> Self {
-        Self {
-            listen_addr: "0.0.0.0:6660".to_string(),
-            advertise_addr: Some("0.0.0.0:6660".to_string()),
-            port: None,
-            prometheus_listener_addr: "0.0.0.0:1250".to_string(),
-            meta_address: "http://0.0.0.0:5690".parse().unwrap(),
-            compaction_worker_threads_number: None,
-            config_path: "".to_string(),
-            metrics_level: None,
-            async_stack_trace: None,
-            heap_profiling_dir: None,
-            compactor_mode: None,
-            proxy_rpc_endpoint: "".to_string(),
-        }
-    }
-}
-
 impl risingwave_common::opts::Opts for CompactorOpts {
     fn name() -> &'static str {
         "compactor"

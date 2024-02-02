@@ -24,9 +24,6 @@ use clap::Parser;
 pub use error::{MetaError, MetaResult};
 use redact::Secret;
 use risingwave_common::config::OverrideConfig;
-use risingwave_common::single_process_config::{
-    DEFAULT_SINGLE_NODE_SQL_ENDPOINT, DEFAULT_SINGLE_NODE_STATE_STORE_URL,
-};
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
@@ -42,10 +39,10 @@ use crate::manager::MetaOpts;
 #[command(version, about = "The central metadata management service")]
 pub struct MetaNodeOpts {
     #[clap(long, env = "RW_VPC_ID")]
-    vpc_id: Option<String>,
+    pub vpc_id: Option<String>,
 
     #[clap(long, env = "RW_VPC_SECURITY_GROUP_ID")]
-    security_group_id: Option<String>,
+    pub security_group_id: Option<String>,
 
     // TODO: use `SocketAddr`
     #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:5690")]
@@ -60,7 +57,7 @@ pub struct MetaNodeOpts {
     pub advertise_addr: String,
 
     #[clap(long, env = "RW_DASHBOARD_HOST")]
-    dashboard_host: Option<String>,
+    pub dashboard_host: Option<String>,
 
     /// We will start a http server at this address via `MetricsManager`.
     /// Then the prometheus instance will poll the metrics from this address.
@@ -68,38 +65,38 @@ pub struct MetaNodeOpts {
     pub prometheus_listener_addr: Option<String>,
 
     #[clap(long, env = "RW_ETCD_ENDPOINTS", default_value_t = String::from(""))]
-    etcd_endpoints: String,
+    pub etcd_endpoints: String,
 
     /// Enable authentication with etcd. By default disabled.
     #[clap(long, env = "RW_ETCD_AUTH")]
-    etcd_auth: bool,
+    pub etcd_auth: bool,
 
     /// Username of etcd, required when --etcd-auth is enabled.
     #[clap(long, env = "RW_ETCD_USERNAME", default_value = "")]
-    etcd_username: String,
+    pub etcd_username: String,
 
     /// Password of etcd, required when --etcd-auth is enabled.
     #[clap(long, env = "RW_ETCD_PASSWORD", default_value = "")]
-    etcd_password: Secret<String>,
+    pub etcd_password: Secret<String>,
 
     /// Endpoint of the SQL service, make it non-option when SQL service is required.
     #[clap(long, env = "RW_SQL_ENDPOINT")]
     pub sql_endpoint: Option<String>,
 
     #[clap(long, env = "RW_DASHBOARD_UI_PATH")]
-    dashboard_ui_path: Option<String>,
+    pub dashboard_ui_path: Option<String>,
 
     /// The HTTP REST-API address of the Prometheus instance associated to this cluster.
     /// This address is used to serve PromQL queries to Prometheus.
     /// It is also used by Grafana Dashboard Service to fetch metrics and visualize them.
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
-    prometheus_endpoint: Option<String>,
+    pub prometheus_endpoint: Option<String>,
 
     /// The additional selector used when querying Prometheus.
     ///
     /// The format is same as PromQL. Example: `instance="foo",namespace="bar"`
     #[clap(long, env = "RW_PROMETHEUS_SELECTOR")]
-    prometheus_selector: Option<String>,
+    pub prometheus_selector: Option<String>,
 
     /// Endpoint of the connector node, there will be a sidecar connector node
     /// colocated with Meta node in the cloud environment
@@ -120,27 +117,27 @@ pub struct MetaNodeOpts {
 
     #[clap(long, env = "RW_BACKEND", value_enum)]
     #[override_opts(path = meta.backend)]
-    backend: Option<MetaBackend>,
+    pub backend: Option<MetaBackend>,
 
     /// The interval of periodic barrier.
     #[clap(long, env = "RW_BARRIER_INTERVAL_MS")]
     #[override_opts(path = system.barrier_interval_ms)]
-    barrier_interval_ms: Option<u32>,
+    pub barrier_interval_ms: Option<u32>,
 
     /// Target size of the Sstable.
     #[clap(long, env = "RW_SSTABLE_SIZE_MB")]
     #[override_opts(path = system.sstable_size_mb)]
-    sstable_size_mb: Option<u32>,
+    pub sstable_size_mb: Option<u32>,
 
     /// Size of each block in bytes in SST.
     #[clap(long, env = "RW_BLOCK_SIZE_KB")]
     #[override_opts(path = system.block_size_kb)]
-    block_size_kb: Option<u32>,
+    pub block_size_kb: Option<u32>,
 
     /// False positive probability of bloom filter.
     #[clap(long, env = "RW_BLOOM_FALSE_POSITIVE")]
     #[override_opts(path = system.bloom_false_positive)]
-    bloom_false_positive: Option<f64>,
+    pub bloom_false_positive: Option<f64>,
 
     /// State store url
     #[clap(long, env = "RW_STATE_STORE")]
@@ -155,57 +152,22 @@ pub struct MetaNodeOpts {
     /// Whether config object storage bucket lifecycle to purge stale data.
     #[clap(long, env = "RW_DO_NOT_CONFIG_BUCKET_LIFECYCLE")]
     #[override_opts(path = meta.do_not_config_object_storage_lifecycle)]
-    do_not_config_object_storage_lifecycle: Option<bool>,
+    pub do_not_config_object_storage_lifecycle: Option<bool>,
 
     /// Remote storage url for storing snapshots.
     #[clap(long, env = "RW_BACKUP_STORAGE_URL")]
     #[override_opts(path = system.backup_storage_url)]
-    backup_storage_url: Option<String>,
+    pub backup_storage_url: Option<String>,
 
     /// Remote directory for storing snapshots.
     #[clap(long, env = "RW_BACKUP_STORAGE_DIRECTORY")]
     #[override_opts(path = system.backup_storage_directory)]
-    backup_storage_directory: Option<String>,
+    pub backup_storage_directory: Option<String>,
 
     /// Enable heap profile dump when memory usage is high.
     #[clap(long, env = "RW_HEAP_PROFILING_DIR")]
     #[override_opts(path = server.heap_profiling.dir)]
     pub heap_profiling_dir: Option<String>,
-}
-
-impl MetaNodeOpts {
-    pub fn new_for_single_node() -> Self {
-        MetaNodeOpts {
-            vpc_id: None,
-            security_group_id: None,
-            listen_addr: "0.0.0.0:5690".to_string(),
-            advertise_addr: "0.0.0.0:5690".to_string(),
-            dashboard_host: Some("0.0.0.0:5691".to_string()),
-            prometheus_listener_addr: Some("0.0.0.0:1250".to_string()),
-            etcd_endpoints: Default::default(),
-            etcd_auth: false,
-            etcd_username: Default::default(),
-            etcd_password: Default::default(),
-            sql_endpoint: Some(DEFAULT_SINGLE_NODE_SQL_ENDPOINT.clone()),
-            dashboard_ui_path: None,
-            prometheus_endpoint: None,
-            prometheus_selector: None,
-            connector_rpc_endpoint: None,
-            privatelink_endpoint_default_tags: None,
-            config_path: "".to_string(),
-            backend: Some(MetaBackend::Sql),
-            barrier_interval_ms: None,
-            sstable_size_mb: None,
-            block_size_kb: None,
-            bloom_false_positive: None,
-            state_store: Some(DEFAULT_SINGLE_NODE_STATE_STORE_URL.clone()),
-            data_directory: Some("hummock_001".to_string()),
-            do_not_config_object_storage_lifecycle: None,
-            backup_storage_url: None,
-            backup_storage_directory: None,
-            heap_profiling_dir: None,
-        }
-    }
 }
 
 impl risingwave_common::opts::Opts for MetaNodeOpts {

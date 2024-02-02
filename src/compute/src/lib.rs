@@ -39,7 +39,6 @@ use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use serde::{Deserialize, Serialize};
-use tonic::IntoStreamingRequest;
 
 /// If `total_memory_bytes` is not specified, the default memory limit will be set to
 /// the system memory limit multiplied by this proportion
@@ -134,28 +133,6 @@ pub struct ComputeNodeOpts {
     pub heap_profiling_dir: Option<String>,
 }
 
-impl ComputeNodeOpts {
-    pub fn new_for_single_node() -> Self {
-        Self {
-            listen_addr: "0.0.0.0:5688".to_string(),
-            advertise_addr: Some("0.0.0.0:5688".to_string()),
-            prometheus_listener_addr: "0.0.0.0:1250".to_string(),
-            meta_address: "http://0.0.0.0:5690".parse().unwrap(),
-            connector_rpc_endpoint: None,
-            connector_rpc_sink_payload_format: None,
-            config_path: "".to_string(),
-            total_memory_bytes: default_total_memory_bytes(),
-            parallelism: default_parallelism(),
-            role: Default::default(),
-            metrics_level: None,
-            data_file_cache_dir: None,
-            meta_file_cache_dir: None,
-            async_stack_trace: Some(AsyncStackTraceOption::ReleaseVerbose),
-            heap_profiling_dir: None,
-        }
-    }
-}
-
 impl risingwave_common::opts::Opts for ComputeNodeOpts {
     fn name() -> &'static str {
         "compute"
@@ -248,14 +225,14 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
     })
 }
 
-fn default_total_memory_bytes() -> usize {
+pub fn default_total_memory_bytes() -> usize {
     (system_memory_available_bytes() as f64 * DEFAULT_MEMORY_PROPORTION) as usize
 }
 
-fn default_parallelism() -> usize {
+pub fn default_parallelism() -> usize {
     total_cpu_available().ceil() as usize
 }
 
-fn default_role() -> Role {
+pub fn default_role() -> Role {
     Role::Both
 }
