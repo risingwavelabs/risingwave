@@ -5,6 +5,9 @@ name: Build with Latest Nightly Rust
 on:
   schedule:
     - cron: "0 0 * * *"
+  push:
+    branches:
+      - xxchan/latest-nightly-rust
   workflow_dispatch:
 
 jobs:
