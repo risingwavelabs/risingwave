@@ -88,9 +88,6 @@ message ExprNode {
     // Optimize case-when expression to constant lookup
     // when arms are in a large scale with simple form
     CONSTANT_LOOKUP = 624;
-    // Optimized in frontend
-    // should be invisible to backend
-    CONSTANT_CASE_WHEN_EVAL = 625;
     // ROUND(numeric, integer) -> numeric
     ROUND_DIGIT = 213;
     // ROUND(numeric) -> numeric
