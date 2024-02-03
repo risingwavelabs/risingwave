@@ -181,7 +181,7 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Mongodb> {
         vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
             self.source_id,
             None,
-            None
+            None,
         )]
     }
 }
