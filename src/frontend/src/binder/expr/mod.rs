@@ -469,6 +469,8 @@ impl Binder {
         Ok(func_call.into())
     }
 
+    /// The optimization check for the following case-when expression pattern
+    /// e.g., select case 1 when (...) then (...) else (...) end;
     fn check_constant_case_when_optimization(
         &mut self,
         conditions: Vec<Expr>,
