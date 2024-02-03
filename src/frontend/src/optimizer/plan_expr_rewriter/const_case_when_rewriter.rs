@@ -12,13 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::expr::{ExprImpl, ExprRewriter, FunctionCall};
+use risingwave_common::error::RwError;
 
-pub struct ConstCaseWhenRewriter {}
+use crate::expr::{ExprImpl, ExprRewriter, FunctionCall, ExprType};
+
+pub struct ConstCaseWhenRewriter {
+    pub error: Option<RwError>,
+}
 
 impl ExprRewriter for ConstCaseWhenRewriter {
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
-        println!("Current func_call: {:#?}", func_call);
-        todo!()
+        if func_call.func_type() != ExprType::ConstantLookup {
+            return func_call.into();
+        }
+        if func_call.inputs().len() != 1 {
+            // Normal constant lookup pass
+            return func_call.into();
+        }
+        func_call.inputs()[0].clone().into()
     }
 }

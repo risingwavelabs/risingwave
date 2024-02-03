@@ -602,7 +602,7 @@ impl Binder {
         );
 
         if constant_case_when_flag {
-            return Ok(FunctionCall::new(ExprType::ConstantCaseWhenEval, constant_case_when_eval_inputs)?.into());
+            return Ok(FunctionCall::new(ExprType::ConstantLookup, constant_case_when_eval_inputs)?.into());
         }
 
         // See if the case-when expression can be optimized
