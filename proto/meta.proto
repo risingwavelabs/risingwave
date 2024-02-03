@@ -469,7 +469,10 @@ message TableParallelism {
     uint32 parallelism = 1;
   }
 
+  // deprecated, treated as AdaptiveParallelism
   message AutoParallelism {}
+
+  message AdaptiveParallelism {}
 
   message CustomParallelism {}
 
@@ -477,6 +480,7 @@ message TableParallelism {
     FixedParallelism fixed = 1;
     AutoParallelism auto = 2;
     CustomParallelism custom = 3;
+    AdaptiveParallelism adaptive = 4;
   }
 }
 
@@ -551,6 +555,8 @@ message SystemParams {
   optional uint32 parallel_compact_size_mb = 11;
   optional uint32 max_concurrent_creating_streaming_jobs = 12;
   optional bool pause_on_next_bootstrap = 13;
+  optional string wasm_storage_url = 14;
+  optional bool enable_tracing = 15;
 }
 
 message GetSystemParamsRequest {}

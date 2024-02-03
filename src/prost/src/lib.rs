@@ -170,6 +170,26 @@ impl FromStr for crate::expr::table_function::PbType {
     }
 }
 
+impl stream_plan::MaterializeNode {
+    pub fn dist_key_indices(&self) -> Vec<u32> {
+        self.get_table()
+            .unwrap()
+            .distribution_key
+            .iter()
+            .map(|i| *i as u32)
+            .collect()
+    }
+
+    pub fn column_ids(&self) -> Vec<i32> {
+        self.get_table()
+            .unwrap()
+            .columns
+            .iter()
+            .map(|c| c.get_column_desc().unwrap().column_id)
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::data::{data_type, DataType};

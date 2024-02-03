@@ -18,6 +18,7 @@ normal = ["workspace-hack", "ctor"]
 [dependencies]
 aho-corasick = "1"
 anyhow = "1"
+arrow-schema = { workspace = true }
 async-trait = "0.1"
 auto_enums = "0.8"
 chrono = { version = "0.4", default-features = false, features = [
@@ -28,10 +29,13 @@ fancy-regex = "0.13"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
 hex = "0.4"
+icelake = { workspace = true }
 itertools = "0.12"
 jsonbb = "0.1.2"
+linkme = { version = "0.3", features = ["used_linker"] }
 md5 = "0.7"
 num-traits = "0.2"
+openssl = { version = "0.10", features = ["vendored"] }
 regex = "1"
 risingwave_common = { workspace = true }
 risingwave_expr = { workspace = true }

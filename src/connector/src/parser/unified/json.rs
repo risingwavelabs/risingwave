@@ -358,7 +358,7 @@ impl JsonParseOptions {
                     .as_bytes();
                 let decimal = BigInt::from_signed_bytes_be(value);
                 let negative = decimal.sign() == Sign::Minus;
-                let (lo, mid, hi) = extract_decimal(decimal.to_bytes_be().1);
+                let (lo, mid, hi) = extract_decimal(decimal.to_bytes_be().1)?;
                 let decimal =
                     rust_decimal::Decimal::from_parts(lo, mid, hi, negative, scale as u32);
                 ScalarImpl::Decimal(Decimal::Normalized(decimal))

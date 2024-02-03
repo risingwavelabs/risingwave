@@ -14,7 +14,6 @@
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_connector::source::{extract_source_struct, SourceEncode, SourceStruct};
@@ -59,19 +58,34 @@ pub async fn handle_alter_source_column(
         (db.id(), schema.id(), (**source).clone())
     };
 
+    if catalog.associated_table_id.is_some() {
+        Err(ErrorCode::NotSupported(
+            "alter table with connector with ALTER SOURCE statement".to_string(),
+            "try to use ALTER TABLE instead".to_string(),
+        ))?
+    };
+
     // Currently only allow source without schema registry
     let SourceStruct { encode, .. } = extract_source_struct(&catalog.info)?;
     match encode {
         SourceEncode::Avro | SourceEncode::Protobuf => {
-            bail_not_implemented!("Alter source with schema registry")
+            return Err(ErrorCode::NotSupported(
+                "alter source with schema registry".to_string(),
+                "try `ALTER SOURCE .. FORMAT .. ENCODE .. (...)` instead".to_string(),
+            )
+            .into());
         }
         SourceEncode::Json if catalog.info.use_schema_registry => {
-            bail_not_implemented!("Alter source with schema registry")
+            return Err(ErrorCode::NotSupported(
+                "alter source with schema registry".to_string(),
+                "try `ALTER SOURCE .. FORMAT .. ENCODE .. (...)` instead".to_string(),
+            )
+            .into());
         }
         SourceEncode::Invalid | SourceEncode::Native => {
             return Err(RwError::from(ErrorCode::NotSupported(
-                format!("Alter source with encode {:?}", encode),
-                "Alter source with encode JSON | BYTES | CSV".into(),
+                format!("alter source with encode {:?}", encode),
+                "alter source with encode JSON | BYTES | CSV".into(),
             )));
         }
         _ => {}

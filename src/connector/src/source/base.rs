@@ -40,6 +40,7 @@ use super::datagen::DatagenMeta;
 use super::filesystem::FsSplit;
 use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
+use super::kinesis::KinesisMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
 use super::{GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
@@ -171,6 +172,7 @@ impl SourceContext {
         source_ctrl_opts: SourceCtrlOpts,
         connector_client: Option<ConnectorClient>,
         connector_props: ConnectorProperties,
+        source_name: String,
     ) -> Self {
         Self {
             connector_client,
@@ -178,6 +180,7 @@ impl SourceContext {
                 actor_id,
                 source_id: table_id,
                 fragment_id,
+                source_name,
             },
             metrics,
             source_ctrl_opts,
@@ -195,6 +198,7 @@ impl SourceContext {
         connector_client: Option<ConnectorClient>,
         error_suppressor: Arc<Mutex<ErrorSuppressor>>,
         connector_props: ConnectorProperties,
+        source_name: String,
     ) -> Self {
         let mut ctx = Self::new(
             actor_id,
@@ -204,6 +208,7 @@ impl SourceContext {
             source_ctrl_opts,
             connector_client,
             connector_props,
+            source_name,
         );
         ctx.error_suppressor = Some(error_suppressor);
         ctx
@@ -234,12 +239,13 @@ impl SourceContext {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SourceInfo {
     pub actor_id: u32,
     pub source_id: TableId,
     // There should be a 1-1 mapping between `source_id` & `fragment_id`
     pub fragment_id: u32,
+    pub source_name: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -342,29 +348,9 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
 
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
 
-pub trait SourceWithStateStream =
-    Stream<Item = Result<StreamChunkWithState, RwError>> + Send + 'static;
-pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithState, RwError>>;
+pub trait ChunkSourceStream = Stream<Item = Result<StreamChunk, RwError>> + Send + 'static;
+pub type BoxChunkSourceStream = BoxStream<'static, Result<StreamChunk, RwError>>;
 pub type BoxTryStream<M> = BoxStream<'static, Result<M, RwError>>;
-
-/// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
-/// current design, one connector source can have multiple split reader. The keys are unique
-/// `split_id` and values are the latest offset for each split.
-#[derive(Clone, Debug, PartialEq)]
-pub struct StreamChunkWithState {
-    pub chunk: StreamChunk,
-    pub split_offset_mapping: Option<HashMap<SplitId, String>>,
-}
-
-/// The `split_offset_mapping` field is unused for the table source, so we implement `From` for it.
-impl From<StreamChunk> for StreamChunkWithState {
-    fn from(chunk: StreamChunk) -> Self {
-        Self {
-            chunk,
-            split_offset_mapping: None,
-        }
-    }
-}
 
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
 /// responsible for parsing, it is used to read messages from the outside and transform them into a
@@ -382,7 +368,7 @@ pub trait SplitReader: Sized + Send {
         columns: Option<Vec<Column>>,
     ) -> Result<Self>;
 
-    fn into_stream(self) -> BoxSourceWithStateStream;
+    fn into_stream(self) -> BoxChunkSourceStream;
 }
 
 for_all_sources!(impl_connector_properties);
@@ -597,6 +583,7 @@ pub struct SourceMessage {
 #[derive(Debug, Clone)]
 pub enum SourceMeta {
     Kafka(KafkaMeta),
+    Kinesis(KinesisMeta),
     Nexmark(NexmarkMeta),
     GooglePubsub(GooglePubsubMeta),
     Datagen(DatagenMeta),

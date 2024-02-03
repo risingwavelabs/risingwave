@@ -88,10 +88,9 @@ impl DdlServiceImpl {
         if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
             table.optional_associated_source_id
         {
-            let source = source.as_mut().unwrap();
-            source.id = source_id;
+            source.as_mut().unwrap().id = source_id;
             fill_table_stream_graph_info(
-                source,
+                &mut source,
                 &mut table,
                 TableJobType::General,
                 &mut fragment_graph,
@@ -842,9 +841,10 @@ impl DdlService for DdlServiceImpl {
 
         let table_id = req.get_table_id();
         let parallelism = req.get_parallelism()?.clone();
+        let deferred = req.get_deferred();
 
         self.ddl_controller
-            .alter_parallelism(table_id, parallelism)
+            .alter_parallelism(table_id, parallelism, deferred)
             .await?;
 
         Ok(Response::new(AlterParallelismResponse {}))

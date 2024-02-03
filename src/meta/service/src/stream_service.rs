@@ -17,9 +17,10 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::ThrottleConfig;
-use risingwave_meta_model_v2::SourceId;
+use risingwave_meta_model_v2::{SourceId, StreamingParallelism};
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
@@ -105,18 +106,15 @@ impl StreamManagerService for StreamServiceImpl {
         request: Request<ApplyThrottleRequest>,
     ) -> Result<Response<ApplyThrottleResponse>, Status> {
         let request = request.into_inner();
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            return Err(Status::unimplemented("not supported in v2"));
-        };
 
         let actor_to_apply = match request.kind() {
             ThrottleTarget::Source => {
-                mgr.fragment_manager
+                self.metadata_manager
                     .update_source_rate_limit_by_source_id(request.id as SourceId, request.rate)
                     .await?
             }
             ThrottleTarget::Mv => {
-                mgr.fragment_manager
+                self.metadata_manager
                     .update_mv_rate_limit_by_table_id(TableId::from(request.id), request.rate)
                     .await?
             }
@@ -283,11 +281,18 @@ impl StreamManagerService for StreamServiceImpl {
                 let job_states = mgr.catalog_controller.list_streaming_job_states().await?;
                 job_states
                     .into_iter()
-                    .map(|(table_id, state)| {
+                    .map(|(table_id, state, parallelism)| {
+                        let parallelism = match parallelism {
+                            StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
+                            StreamingParallelism::Fixed(n) => {
+                                model::TableParallelism::Fixed(n as _)
+                            }
+                        };
+
                         list_table_fragment_states_response::TableFragmentState {
                             table_id: table_id as _,
                             state: PbState::from(state) as _,
-                            parallelism: None, // TODO: support parallelism.
+                            parallelism: Some(parallelism.into()),
                         }
                     })
                     .collect_vec()

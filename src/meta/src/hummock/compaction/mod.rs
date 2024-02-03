@@ -17,23 +17,19 @@
 pub mod compaction_config;
 mod overlap_strategy;
 use risingwave_common::catalog::TableOption;
-use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
-use risingwave_pb::hummock::compact_task::{self, TaskStatus, TaskType};
+use risingwave_pb::hummock::compact_task::{self, TaskType};
 
 mod picker;
 pub mod selector;
-
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use picker::{LevelCompactionPicker, TierCompactionPicker};
-use risingwave_hummock_sdk::{
-    can_concat, CompactionGroupId, HummockCompactionTaskId, HummockEpoch,
-};
+use risingwave_hummock_sdk::{can_concat, CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactTask, CompactionConfig, KeyRange, LevelType};
+use risingwave_pb::hummock::{CompactTask, CompactionConfig, LevelType};
 pub use selector::CompactionSelector;
 
 use self::selector::LocalSelectorStatistic;
@@ -41,7 +37,9 @@ use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlap
 use crate::hummock::compaction::picker::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
+use crate::MetaOpts;
 
+#[derive(Clone)]
 pub struct CompactStatus {
     pub compaction_group_id: CompactionGroupId,
     pub level_handlers: Vec<LevelHandler>,
@@ -60,15 +58,6 @@ impl PartialEq for CompactStatus {
     fn eq(&self, other: &Self) -> bool {
         self.level_handlers.eq(&other.level_handlers)
             && self.compaction_group_id == other.compaction_group_id
-    }
-}
-
-impl Clone for CompactStatus {
-    fn clone(&self) -> Self {
-        Self {
-            compaction_group_id: self.compaction_group_id,
-            level_handlers: self.level_handlers.clone(),
-        }
     }
 }
 
@@ -107,51 +96,20 @@ impl CompactStatus {
         stats: &mut LocalSelectorStatistic,
         selector: &mut Box<dyn CompactionSelector>,
         table_id_to_options: HashMap<u32, TableOption>,
-    ) -> Option<CompactTask> {
+        developer_config: Arc<CompactionDeveloperConfig>,
+    ) -> Option<CompactionTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
-        let ret = selector.pick_compaction(
+        selector.pick_compaction(
             task_id,
             group,
             levels,
             &mut self.level_handlers,
             stats,
             table_id_to_options,
-        )?;
-        let target_level_id = ret.input.target_level;
-
-        let compression_algorithm = match ret.compression_algorithm.as_str() {
-            "Lz4" => 1,
-            "Zstd" => 2,
-            _ => 0,
-        };
-
-        let compact_task = CompactTask {
-            input_ssts: ret.input.input_levels,
-            splits: vec![KeyRange::inf()],
-            watermark: HummockEpoch::MAX,
-            sorted_output_ssts: vec![],
-            task_id,
-            target_level: target_level_id as u32,
-            // only gc delete keys in last level because there may be older version in more bottom
-            // level.
-            gc_delete_keys: target_level_id == self.level_handlers.len() - 1,
-            base_level: ret.base_level as u32,
-            task_status: TaskStatus::Pending as i32,
-            compaction_group_id: group.group_id,
-            existing_table_ids: vec![],
-            compression_algorithm,
-            target_file_size: ret.target_file_size,
-            compaction_filter_mask: 0,
-            table_options: BTreeMap::default(),
-            current_epoch_time: 0,
-            target_sub_level_id: ret.input.target_sub_level_id,
-            task_type: ret.compaction_task_type as i32,
-            table_vnode_partition: BTreeMap::default(),
-            ..Default::default()
-        };
-        Some(compact_task)
+            developer_config,
+        )
     }
 
     pub fn is_trivial_move_task(task: &CompactTask) -> bool {
@@ -250,5 +208,31 @@ pub fn get_compression_algorithm(
     } else {
         let idx = level - base_level + 1;
         compaction_config.compression_algorithm[idx].clone()
+    }
+}
+
+pub struct CompactionDeveloperConfig {
+    /// l0 picker whether to select trivial move task
+    pub enable_trivial_move: bool,
+
+    /// l0 multi level picker whether to check the overlap accuracy between sub levels
+    pub enable_check_task_level_overlap: bool,
+}
+
+impl CompactionDeveloperConfig {
+    pub fn new_from_meta_opts(opts: &MetaOpts) -> Self {
+        Self {
+            enable_trivial_move: opts.enable_trivial_move,
+            enable_check_task_level_overlap: opts.enable_check_task_level_overlap,
+        }
+    }
+}
+
+impl Default for CompactionDeveloperConfig {
+    fn default() -> Self {
+        Self {
+            enable_trivial_move: true,
+            enable_check_task_level_overlap: true,
+        }
     }
 }

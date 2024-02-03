@@ -24,9 +24,9 @@ use smallvec::SmallVec;
 use super::{WindowFuncCall, WindowFuncKind};
 use crate::{ExprError, Result};
 
-mod buffer;
-
 mod aggregate;
+mod buffer;
+mod range_utils;
 mod rank;
 
 /// Unique and ordered identifier for a row in internal states.
@@ -114,7 +114,9 @@ pub trait WindowState: EstimateSize {
     fn slide_no_output(&mut self) -> Result<StateEvictHint>;
 }
 
-pub fn create_window_state(call: &WindowFuncCall) -> Result<Box<dyn WindowState + Send + Sync>> {
+pub type BoxedWindowState = Box<dyn WindowState + Send + Sync>;
+
+pub fn create_window_state(call: &WindowFuncCall) -> Result<BoxedWindowState> {
     assert!(call.frame.bounds.validate().is_ok());
 
     use WindowFuncKind::*;
@@ -122,7 +124,7 @@ pub fn create_window_state(call: &WindowFuncCall) -> Result<Box<dyn WindowState 
         RowNumber => Box::new(rank::RankState::<rank::RowNumber>::new(call)),
         Rank => Box::new(rank::RankState::<rank::Rank>::new(call)),
         DenseRank => Box::new(rank::RankState::<rank::DenseRank>::new(call)),
-        Aggregate(_) => Box::new(aggregate::AggregateState::new(call)?),
+        Aggregate(_) => aggregate::new(call)?,
         kind => {
             return Err(ExprError::UnsupportedFunction(format!(
                 "{}({}) -> {}",

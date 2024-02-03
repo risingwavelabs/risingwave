@@ -1,22 +1,13 @@
 use sea_orm_migration::prelude::*;
 
+use crate::{assert_not_has_tables, drop_tables};
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        macro_rules! assert_not_has_tables {
-            ($manager:expr, $( $table:ident ),+) => {
-                $(
-                    assert!(
-                        !$manager
-                            .has_table($table::Table.to_string())
-                            .await?
-                    );
-                )+
-            };
-        }
         assert_not_has_tables!(
             manager,
             CompactionTask,
@@ -25,7 +16,8 @@ impl MigrationTrait for Migration {
             HummockPinnedVersion,
             HummockPinnedSnapshot,
             HummockVersionDelta,
-            HummockVersionStats
+            HummockVersionStats,
+            HummockSequence
         );
 
         manager
@@ -150,7 +142,7 @@ impl MigrationTrait for Migration {
                             .boolean()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(HummockVersionDelta::FullVersionDelta).binary())
+                    .col(ColumnDef::new(HummockVersionDelta::FullVersionDelta).json_binary())
                     .to_owned(),
             )
             .await?;
@@ -196,21 +188,6 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        macro_rules! drop_tables {
-            ($manager:expr, $( $table:ident ),+) => {
-                $(
-                    $manager
-                        .drop_table(
-                            Table::drop()
-                                .table($table::Table)
-                                .if_exists()
-                                .cascade()
-                                .to_owned(),
-                        )
-                        .await?;
-                )+
-            };
-        }
         drop_tables!(
             manager,
             CompactionTask,

@@ -82,7 +82,7 @@ pub fn run_test_inner(cases: &[&TestDescAndFn], hook: impl TestHook + 'static + 
     test_main(&args, cases, None)
 }
 
-thread_local!(static FS: RefCell<Option<fail::FailScenario<'static>>> = RefCell::new(None));
+thread_local!(static FS: RefCell<Option<fail::FailScenario<'static>>> = const { RefCell::new(None) });
 #[derive(Clone)]
 struct FailPointHook;
 

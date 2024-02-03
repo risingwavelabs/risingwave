@@ -17,16 +17,16 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
+use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
-    BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
-    StreamChunkWithState,
+    BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
 };
 use risingwave_connector::ConnectorParams;
-use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -92,7 +92,7 @@ impl<S: StateStore> SourceExecutor<S> {
         &self,
         source_desc: &SourceDesc,
         state: ConnectorState,
-    ) -> StreamExecutorResult<BoxSourceWithStateStream> {
+    ) -> StreamExecutorResult<BoxChunkSourceStream> {
         let column_ids = source_desc
             .columns
             .iter()
@@ -107,16 +107,21 @@ impl<S: StateStore> SourceExecutor<S> {
             self.connector_params.connector_client.clone(),
             self.actor_ctx.error_suppressor.clone(),
             source_desc.source.config.clone(),
+            self.stream_source_core
+                .as_ref()
+                .unwrap()
+                .source_name
+                .clone(),
         );
         source_desc
             .source
-            .stream_reader(state, column_ids, Arc::new(source_ctx))
+            .to_stream(state, column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)
     }
 
     #[inline]
-    fn get_metric_labels(&self) -> [String; 3] {
+    fn get_metric_labels(&self) -> [String; 4] {
         [
             self.stream_source_core
                 .as_ref()
@@ -129,13 +134,14 @@ impl<S: StateStore> SourceExecutor<S> {
                 .source_name
                 .clone(),
             self.actor_ctx.id.to_string(),
+            self.actor_ctx.fragment_id.to_string(),
         ]
     }
 
     async fn apply_split_change<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<Option<Vec<SplitImpl>>> {
         self.metrics
@@ -228,15 +234,16 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn rebuild_stream_reader_from_error<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         split_info: &mut [SplitImpl],
         e: StreamExecutorError,
     ) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
         tracing::warn!(
-            "stream source reader error, actor: {:?}, source: {:?}",
-            self.actor_ctx.id,
-            core.source_id,
+            error = ?e.as_report(),
+            actor_id = self.actor_ctx.id,
+            source_id = %core.source_id,
+            "stream source reader error",
         );
         GLOBAL_ERROR_METRICS.user_source_reader_error.report([
             "SourceReaderError".to_owned(),
@@ -272,7 +279,7 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn replace_stream_reader_with_target_state<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
         tracing::info!(
@@ -284,7 +291,8 @@ impl<S: StateStore> SourceExecutor<S> {
         // Replace the source reader with a new one of the new state.
         let reader = self
             .build_stream_source_reader(source_desc, Some(target_state.clone()))
-            .await?;
+            .await?
+            .map_err(StreamExecutorError::connector_error);
 
         stream.replace_data_stream(reader);
 
@@ -374,6 +382,11 @@ impl<S: StateStore> SourceExecutor<S> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
+        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
+        else {
+            unreachable!("Partition and offset columns must be set.");
+        };
+
         let mut boot_state = Vec::default();
         if let Some(mutation) = barrier.mutation.as_ref() {
             match mutation.as_ref() {
@@ -419,15 +432,14 @@ impl<S: StateStore> SourceExecutor<S> {
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
             .instrument_await("source_build_reader")
-            .await?;
+            .await?
+            .map_err(StreamExecutorError::connector_error);
 
         // Merge the chunks from source and the barriers into a single stream. We prioritize
         // barriers over source data chunks here.
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
-        let mut stream = StreamReaderWithPause::<true, StreamChunkWithState>::new(
-            barrier_stream,
-            source_chunk_reader,
-        );
+        let mut stream =
+            StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_chunk_reader);
 
         // If the first barrier requires us to pause on startup, pause the stream.
         if barrier.is_pause_on_startup() {
@@ -530,6 +542,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                             .source_id
                                             .to_string()
                                             .as_ref(),
+                                        self.actor_ctx.fragment_id.to_string().as_str(),
                                     ])
                                     .inc_by(metric_row_per_barrier);
                                 metric_row_per_barrier = 0;
@@ -543,10 +556,10 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
                         },
 
-                        Either::Right(StreamChunkWithState {
-                            chunk,
-                            split_offset_mapping,
-                        }) => {
+                        Either::Right(chunk) => {
+                            // TODO: confirm when split_offset_mapping is None
+                            let split_offset_mapping =
+                                get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx);
                             if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
                                 // Exceeds the max wait barrier time, the source will be paused.
                                 // Currently we can guarantee the
@@ -607,6 +620,12 @@ impl<S: StateStore> SourceExecutor<S> {
                                         .collect::<Vec<&str>>(),
                                 )
                                 .inc_by(chunk.cardinality() as u64);
+                            let chunk = prune_additional_cols(
+                                &chunk,
+                                split_idx,
+                                offset_idx,
+                                &source_desc.columns,
+                            );
                             yield Message::Chunk(chunk);
                             self.try_flush_data().await?;
                         }
@@ -693,9 +712,9 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_connector::source::datagen::DatagenSplit;
+    use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::PbRowFormatType;
-    use risingwave_source::connector_test_utils::create_source_desc_builder;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
     use tracing_test::traced_test;
@@ -748,7 +767,7 @@ mod tests {
         let system_params_manager = LocalSystemParamsManager::for_test();
 
         let executor = SourceExecutor::new(
-            ActorContext::create(0),
+            ActorContext::for_test(0),
             ExecutorInfo {
                 schema,
                 pk_indices,
@@ -842,7 +861,7 @@ mod tests {
         let system_params_manager = LocalSystemParamsManager::for_test();
 
         let executor = SourceExecutor::new(
-            ActorContext::create(0),
+            ActorContext::for_test(0),
             ExecutorInfo {
                 schema,
                 pk_indices,

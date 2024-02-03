@@ -111,7 +111,7 @@ impl CacheBase for LruCacheImpl {
                     .map(|block| (Arc::new(block), 1))
             })
             .await?;
-        Ok(entry.value().clone())
+        Ok((*entry).clone())
     }
 }
 

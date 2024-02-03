@@ -27,6 +27,7 @@ pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
 pub mod log_store;
+pub mod mock_coordination_client;
 pub mod nats;
 pub mod pulsar;
 pub mod redis;
@@ -59,12 +60,14 @@ use thiserror::Error;
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
+use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
 use crate::ConnectorParams;
 
+const BOUNDED_CHANNEL_SIZE: usize = 16;
 #[macro_export]
 macro_rules! for_all_sinks {
     ($macro:path $(, $arg:tt)*) => {
@@ -133,6 +136,7 @@ macro_rules! match_sink_name_str {
 
 pub const CONNECTOR_TYPE_KEY: &str = "connector";
 pub const SINK_TYPE_OPTION: &str = "type";
+pub const SINK_WITHOUT_BACKFILL: &str = "snapshot";
 pub const SINK_TYPE_APPEND_ONLY: &str = "append-only";
 pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
@@ -264,8 +268,36 @@ pub struct SinkWriterParam {
     pub connector_params: ConnectorParams,
     pub executor_id: u64,
     pub vnode_bitmap: Option<Bitmap>,
-    pub meta_client: Option<MetaClient>,
+    pub meta_client: Option<SinkMetaClient>,
     pub sink_metrics: SinkMetrics,
+    // The val has two effect:
+    // 1. Indicates that the sink will accpect the data chunk with extra partition value column.
+    // 2. The index of the extra partition value column.
+    // More detail of partition value column, see `PartitionComputeInfo`
+    pub extra_partition_col_idx: Option<usize>,
+}
+
+#[derive(Clone)]
+pub enum SinkMetaClient {
+    MetaClient(MetaClient),
+    MockMetaClient(MockMetaClient),
+}
+
+impl SinkMetaClient {
+    pub async fn sink_coordinate_client(&self) -> SinkCoordinationRpcClientEnum {
+        match self {
+            SinkMetaClient::MetaClient(meta_client) => {
+                SinkCoordinationRpcClientEnum::SinkCoordinationRpcClient(
+                    meta_client.sink_coordinate_client().await,
+                )
+            }
+            SinkMetaClient::MockMetaClient(mock_meta_client) => {
+                SinkCoordinationRpcClientEnum::MockSinkCoordinationRpcClient(
+                    mock_meta_client.sink_coordinate_client(),
+                )
+            }
+        }
+    }
 }
 
 impl SinkWriterParam {
@@ -276,6 +308,7 @@ impl SinkWriterParam {
             vnode_bitmap: Default::default(),
             meta_client: Default::default(),
             sink_metrics: SinkMetrics::for_test(),
+            extra_partition_col_idx: Default::default(),
         }
     }
 }

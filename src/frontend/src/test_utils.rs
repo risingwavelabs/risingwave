@@ -521,6 +521,11 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn alter_source_with_sr(&self, source: PbSource) -> Result<()> {
+        self.catalog.write().update_source(&source);
+        Ok(())
+    }
+
     async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()> {
         for database in self.catalog.read().iter_databases() {
             for schema in database.iter_schemas() {
@@ -593,6 +598,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         _table_id: u32,
         _parallelism: PbTableParallelism,
+        _deferred: bool,
     ) -> Result<()> {
         todo!()
     }
@@ -978,6 +984,19 @@ pub static PROTO_FILE_DATA: &str = r#"
       Country country = 3;
       int64 zipcode = 4;
       float rate = 5;
+    }
+    message TestRecordAlterType {
+        string id = 1;
+        Country country = 3;
+        int32 zipcode = 4;
+        float rate = 5;
+      }
+    message TestRecordExt {
+      int32 id = 1;
+      Country country = 3;
+      int64 zipcode = 4;
+      float rate = 5;
+      string name = 6;
     }
     message Country {
       string address = 1;

@@ -4,12 +4,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "build-static": "next build && next export",
+    "build-static": "next build",
     "gen-proto": "./scripts/generate_proto.sh",
     "lint": "prettier --check . && next lint",
     "format": "prettier --write . && next lint --fix",
     "mock-server": "node ./mock-server.js",
-    "postinstall": "npm run gen-proto"
+    "postinstall": "npm run gen-proto",
+    "clean": "rm -rf .next/ && rm -rf out/"
   },
   "dependencies": {
     "@chakra-ui/react": "^2.3.1",
@@ -32,7 +33,8 @@
     "fabric": "^5.2.1",
     "framer-motion": "^6.5.1",
     "lodash": "^4.17.21",
-    "next": "^13.5.4",
+    "next": "^14.1.0",
+    "nuqs": "^1.14.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-flow-renderer": "10.3.16",
@@ -46,12 +48,12 @@
     "@testing-library/jest-dom": "^5.16.2",
     "@testing-library/react": "^13.3.0",
     "@types/loadable__component": "^5.13.4",
-    "@types/node": "^18.7.14",
+    "@types/node": "20.11.0",
     "@types/styled-components": "^5.1.26",
     "@typescript-eslint/eslint-plugin": "^5.52.0",
     "cors": "^2.8.5",
     "eslint": "^8.45.0",
-    "eslint-config-next": "13.4.12",
+    "eslint-config-next": "^14.1.0",
     "eslint-config-prettier": "^8.8.0",
     "eslint-config-standard-with-typescript": "^37.0.0",
     "eslint-plugin-import": "^2.27.5",
@@ -61,7 +63,7 @@
     "express": "^4.18.1",
     "prettier": "^2.7.1",
     "prettier-plugin-organize-imports": "^3.1.1",
-    "typescript": "^5.1.6"
+    "typescript": "^5.3.3"
   },
   "overrides": {
     "react-json-view": {

@@ -12,23 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_pb::catalog::PbSource;
+use risingwave_meta_model_v2::SourceId;
+use risingwave_pb::catalog::{PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerType};
-use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
-use risingwave_pb::meta::table_fragments::Fragment;
-use risingwave_pb::stream_plan::PbStreamActor;
+use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, PbFragment};
+use risingwave_pb::stream_plan::{PbDispatchStrategy, PbStreamActor, StreamActor};
 
+use crate::barrier::Reschedule;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, WorkerExtraInfo};
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, StreamingClusterInfo, WorkerId,
 };
-use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments};
+use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
+use crate::stream::SplitAssignment;
 use crate::MetaResult;
 
 #[derive(Clone)]
@@ -71,6 +73,20 @@ impl MetadataManager {
             cluster_controller,
             catalog_controller,
         })
+    }
+
+    pub fn as_v1_ref(&self) -> &MetadataManagerV1 {
+        match self {
+            MetadataManager::V1(mgr) => mgr,
+            MetadataManager::V2(_) => panic!("expect v1, found v2"),
+        }
+    }
+
+    pub fn as_v2_ref(&self) -> &MetadataManagerV2 {
+        match self {
+            MetadataManager::V1(_) => panic!("expect v2, found v1"),
+            MetadataManager::V2(mgr) => mgr,
+        }
     }
 
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> MetaResult<Option<PbWorkerNode>> {
@@ -174,15 +190,91 @@ impl MetadataManager {
         }
     }
 
+    pub async fn pre_apply_reschedules(
+        &self,
+        created_actors: HashMap<FragmentId, HashMap<ActorId, (StreamActor, ActorStatus)>>,
+    ) -> HashMap<FragmentId, HashSet<ActorId>> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .pre_apply_reschedules(created_actors)
+                    .await
+            }
+
+            // V2 doesn't need to pre apply reschedules.
+            MetadataManager::V2(_) => HashMap::new(),
+        }
+    }
+
+    pub async fn post_apply_reschedules(
+        &self,
+        reschedules: HashMap<FragmentId, Reschedule>,
+        table_parallelism_assignment: HashMap<TableId, TableParallelism>,
+    ) -> MetaResult<()> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .post_apply_reschedules(reschedules, table_parallelism_assignment)
+                    .await
+            }
+            MetadataManager::V2(mgr) => {
+                // temp convert u32 to i32
+                let reschedules = reschedules.into_iter().map(|(k, v)| (k as _, v)).collect();
+
+                mgr.catalog_controller
+                    .post_apply_reschedules(reschedules, table_parallelism_assignment)
+                    .await
+            }
+        }
+    }
+
+    pub async fn running_fragment_parallelisms(
+        &self,
+        id_filter: Option<HashSet<FragmentId>>,
+    ) -> MetaResult<HashMap<FragmentId, usize>> {
+        match self {
+            MetadataManager::V1(mgr) => Ok(mgr
+                .fragment_manager
+                .running_fragment_parallelisms(id_filter)
+                .await
+                .into_iter()
+                .map(|(k, v)| (k as FragmentId, v))
+                .collect()),
+            MetadataManager::V2(mgr) => {
+                let id_filter = id_filter.map(|ids| ids.into_iter().map(|id| id as _).collect());
+                Ok(mgr
+                    .catalog_controller
+                    .running_fragment_parallelisms(id_filter)
+                    .await?
+                    .into_iter()
+                    .map(|(k, v)| (k as FragmentId, v))
+                    .collect())
+            }
+        }
+    }
+
+    /// Get and filter the "**root**" fragments of the specified relations.
+    /// The root fragment is the bottom-most fragment of its fragment graph, and can be a `MView` or a `Source`.
+    ///
+    /// ## What can be the root fragment
+    /// - For MV, it should have one `MView` fragment.
+    /// - For table, it should have one `MView` fragment and one or two `Source` fragments. `MView` should be the root.
+    /// - For source, it should have one `Source` fragment.
+    ///
+    /// In other words, it's the `MView` fragment if it exists, otherwise it's the `Source` fragment.
+    ///
+    /// ## What do we expect to get for different creating streaming job
+    /// - MV/Sink/Index should have MV upstream fragments for upstream MV/Tables, and Source upstream fragments for upstream backfill-able sources.
+    /// - CDC Table has a Source upstream fragment.
+    /// - Sources and other Tables shouldn't have an upstream fragment.
     pub async fn get_upstream_root_fragments(
         &self,
         upstream_table_ids: &HashSet<TableId>,
-        table_job_type: Option<TableJobType>,
     ) -> MetaResult<HashMap<TableId, Fragment>> {
         match self {
             MetadataManager::V1(mgr) => {
                 mgr.fragment_manager
-                    .get_upstream_root_fragments(upstream_table_ids, table_job_type)
+                    .get_upstream_root_fragments(upstream_table_ids)
                     .await
             }
             MetadataManager::V2(mgr) => {
@@ -193,7 +285,6 @@ impl MetadataManager {
                             .iter()
                             .map(|id| id.table_id as _)
                             .collect(),
-                        table_job_type,
                     )
                     .await?;
                 Ok(upstream_root_fragments
@@ -243,6 +334,59 @@ impl MetadataManager {
             MetadataManager::V2(mgr) => {
                 let table_ids = mgr.catalog_controller.get_created_table_ids().await?;
                 Ok(table_ids.into_iter().map(|id| id as u32).collect())
+            }
+        }
+    }
+
+    pub async fn get_table_catalog_by_ids(&self, ids: Vec<u32>) -> MetaResult<Vec<PbTable>> {
+        match &self {
+            MetadataManager::V1(mgr) => Ok(mgr.catalog_manager.get_tables(&ids).await),
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .get_table_by_ids(ids.into_iter().map(|id| id as _).collect())
+                    .await
+            }
+        }
+    }
+
+    pub async fn get_downstream_chain_fragments(
+        &self,
+        job_id: u32,
+    ) -> MetaResult<Vec<(PbDispatchStrategy, PbFragment)>> {
+        match &self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .get_downstream_fragments(job_id.into())
+                    .await
+            }
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .get_downstream_chain_fragments(job_id as _)
+                    .await
+            }
+        }
+    }
+
+    pub async fn get_worker_actor_ids(
+        &self,
+        job_ids: HashSet<TableId>,
+    ) -> MetaResult<BTreeMap<WorkerId, Vec<ActorId>>> {
+        match &self {
+            MetadataManager::V1(mgr) => mgr.fragment_manager.table_node_actors(&job_ids).await,
+            MetadataManager::V2(mgr) => {
+                let worker_actors = mgr
+                    .catalog_controller
+                    .get_worker_actor_ids(job_ids.into_iter().map(|id| id.table_id as _).collect())
+                    .await?;
+                Ok(worker_actors
+                    .into_iter()
+                    .map(|(id, actors)| {
+                        (
+                            id as WorkerId,
+                            actors.into_iter().map(|id| id as ActorId).collect(),
+                        )
+                    })
+                    .collect())
             }
         }
     }
@@ -353,6 +497,17 @@ impl MetadataManager {
         }
     }
 
+    pub async fn count_streaming_job(&self) -> MetaResult<usize> {
+        match self {
+            MetadataManager::V1(mgr) => Ok(mgr.fragment_manager.count_streaming_job().await),
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .list_streaming_job_states()
+                .await
+                .map(|x| x.len()),
+        }
+    }
+
     pub async fn drop_streaming_job_by_ids(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
         match self {
             MetadataManager::V1(mgr) => {
@@ -363,6 +518,72 @@ impl MetadataManager {
             MetadataManager::V2(_) => {
                 // Do nothing. Need to refine drop and cancel process.
                 Ok(())
+            }
+        }
+    }
+
+    pub async fn update_source_rate_limit_by_source_id(
+        &self,
+        source_id: SourceId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .update_source_rate_limit_by_source_id(source_id, rate_limit)
+                    .await
+            }
+            MetadataManager::V2(mgr) => {
+                let fragment_actors = mgr
+                    .catalog_controller
+                    .update_source_rate_limit_by_source_id(source_id as _, rate_limit)
+                    .await?;
+                Ok(fragment_actors
+                    .into_iter()
+                    .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
+                    .collect())
+            }
+        }
+    }
+
+    pub async fn update_mv_rate_limit_by_table_id(
+        &self,
+        table_id: TableId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .update_mv_rate_limit_by_table_id(table_id, rate_limit)
+                    .await
+            }
+            MetadataManager::V2(mgr) => {
+                let fragment_actors = mgr
+                    .catalog_controller
+                    .update_mv_rate_limit_by_job_id(table_id.table_id as _, rate_limit)
+                    .await?;
+                Ok(fragment_actors
+                    .into_iter()
+                    .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
+                    .collect())
+            }
+        }
+    }
+
+    pub async fn update_actor_splits_by_split_assignment(
+        &self,
+        split_assignment: &SplitAssignment,
+    ) -> MetaResult<()> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .update_actor_splits_by_split_assignment(split_assignment)
+                    .await
+            }
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .update_actor_splits(split_assignment)
+                    .await
             }
         }
     }

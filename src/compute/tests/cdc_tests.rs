@@ -163,7 +163,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let pk_indices = vec![0];
 
     let (mut tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
-    let _actor_ctx = ActorContext::create(0x3a3a3a);
+    let _actor_ctx = ActorContext::for_test(0x3a3a3a);
 
     // mock upstream offset (start from "1.binlog, pos=0") for ingested chunks
     let mock_offset_executor =
@@ -229,7 +229,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         identity: "CdcBackfillExecutor".to_string(),
     };
     let cdc_backfill = CdcBackfillExecutor::new(
-        ActorContext::create(actor_id),
+        ActorContext::for_test(actor_id),
         info,
         external_table,
         Box::new(mock_offset_executor),
@@ -238,6 +238,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         Arc::new(StreamingMetrics::unused()),
         state_table,
         4, // 4 rows in a snapshot chunk
+        false,
     );
 
     // Create a `MaterializeExecutor` to write the changes to storage.
