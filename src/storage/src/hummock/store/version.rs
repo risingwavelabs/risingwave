@@ -86,7 +86,7 @@ impl StagingSstableInfo {
         imm_size: usize,
     ) -> Self {
         // the epochs are sorted from higher epoch to lower epoch
-        assert!(epochs.is_sorted_by(|epoch1, epoch2| epoch2.partial_cmp(epoch1)));
+        assert!(epochs.is_sorted_by(|epoch1, epoch2| epoch2 <= epoch1));
         Self {
             sstable_infos,
             epochs,

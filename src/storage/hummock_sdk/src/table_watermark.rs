@@ -554,13 +554,8 @@ impl TableWatermarks {
         // epoch watermark are added from later epoch to earlier epoch.
         // reverse to ensure that earlier epochs are at the front
         result_epoch_watermark.reverse();
-        assert!(
-            result_epoch_watermark.is_sorted_by(|(first_epoch, _), (second_epoch, _)| {
-                let ret = first_epoch.cmp(second_epoch);
-                assert_ne!(ret, Ordering::Equal);
-                Some(ret)
-            })
-        );
+        assert!(result_epoch_watermark
+            .is_sorted_by(|(first_epoch, _), (second_epoch, _)| { first_epoch < second_epoch }));
         *self = TableWatermarks {
             watermarks: result_epoch_watermark,
             direction: self.direction,
