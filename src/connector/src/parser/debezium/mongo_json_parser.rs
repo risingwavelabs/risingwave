@@ -117,21 +117,6 @@ impl DebeziumMongoJsonParser {
             Some(data) => Some(self.payload_builder.generate_accessor(data).await?),
         };
 
-        // let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
-        //     .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-        //
-        // Event can be configured with and without the "payload" field present.
-        // See https://github.com/risingwavelabs/risingwave/issues/10178
-
-        // let payload = if let Some(payload) = event.get_mut("payload") {
-        //     std::mem::take(payload)
-        // } else {
-        //     event
-        // };
-        //
-        // let payload_accessor = JsonAccess::new_with_options(payload, &JsonParseOptions::DEBEZIUM);
-        // let row_op = DebeziumChangeEvent::with_value(MongoProjection::new(payload_accessor));
-
         let row_op = DebeziumChangeEvent::new_mongodb_event(key_accessor, payload_accessor);
         apply_row_operation_on_stream_chunk_writer(row_op, &mut writer).map_err(Into::into)
     }
