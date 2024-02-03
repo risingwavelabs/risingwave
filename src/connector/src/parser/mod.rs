@@ -50,6 +50,7 @@ use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
 use crate::common::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
+use crate::parser::simd_json_parser::DebeziumMongoJsonAccessBuilder;
 use crate::parser::unified::AccessError;
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
@@ -724,6 +725,7 @@ pub enum AccessBuilderImpl {
     Bytes(BytesAccessBuilder),
     DebeziumAvro(DebeziumAvroAccessBuilder),
     DebeziumJson(DebeziumJsonAccessBuilder),
+    DebeziumMongoJson(DebeziumMongoJsonAccessBuilder),
 }
 
 impl AccessBuilderImpl {
@@ -756,6 +758,7 @@ impl AccessBuilderImpl {
             Self::Bytes(builder) => builder.generate_accessor(payload).await?,
             Self::DebeziumAvro(builder) => builder.generate_accessor(payload).await?,
             Self::DebeziumJson(builder) => builder.generate_accessor(payload).await?,
+            Self::DebeziumMongoJson(builder) => builder.generate_accessor(payload).await?,
         };
         Ok(accessor)
     }
@@ -803,7 +806,9 @@ impl ByteStreamSourceParserImpl {
                 CsvParser::new(rw_columns, *config, source_ctx).map(Self::Csv)
             }
             (ProtocolProperties::DebeziumMongo, EncodingProperties::Json(_)) => {
-                DebeziumMongoJsonParser::new(rw_columns, source_ctx).map(Self::DebeziumMongoJson)
+                DebeziumMongoJsonParser::new(rw_columns, source_ctx)
+                    .await
+                    .map(Self::DebeziumMongoJson)
             }
             (ProtocolProperties::Canal, EncodingProperties::Json(config)) => {
                 CanalJsonParser::new(rw_columns, source_ctx, config).map(Self::CanalJson)
@@ -917,6 +922,7 @@ pub enum EncodingProperties {
     Protobuf(ProtobufProperties),
     Csv(CsvProperties),
     Json(JsonProperties),
+    MongoJson(JsonProperties),
     Bytes(BytesProperties),
     Native,
     #[default]

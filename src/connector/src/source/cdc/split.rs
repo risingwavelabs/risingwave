@@ -179,12 +179,6 @@ impl MongoDbCdcSplit {
         };
         Self { inner: split }
     }
-
-    // TODO: update offset for mongodb
-    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
-        self.inner.start_offset = Some(start_offset);
-        Ok(())
-    }
 }
 
 impl CdcSplitTrait for MongoDbCdcSplit {
@@ -200,8 +194,9 @@ impl CdcSplitTrait for MongoDbCdcSplit {
         self.inner.snapshot_done
     }
 
-    fn update_with_offset(&mut self, _start_offset: String) -> anyhow::Result<()> {
-        // TODO
+    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        // TODO: update snapshot_done for mongodb
+        self.inner.start_offset = Some(start_offset);
         Ok(())
     }
 }

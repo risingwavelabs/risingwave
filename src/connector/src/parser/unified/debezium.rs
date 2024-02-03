@@ -22,6 +22,7 @@ use crate::source::{ConnectorProperties, SourceColumnDesc};
 pub struct DebeziumChangeEvent<A> {
     value_accessor: Option<A>,
     key_accessor: Option<A>,
+    is_mongo: bool,
 }
 
 const BEFORE: &str = "before";
@@ -94,6 +95,16 @@ where
         Self {
             value_accessor,
             key_accessor,
+            is_mongo: false,
+        }
+    }
+
+    pub fn new_mongodb_event(key_accessor: Option<A>, value_accessor: Option<A>) -> Self {
+        assert!(key_accessor.is_some() || value_accessor.is_some());
+        Self {
+            value_accessor,
+            key_accessor,
+            is_mongo: true,
         }
     }
 
@@ -120,6 +131,16 @@ where
     fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult {
         match self.op()? {
             ChangeEventOperation::Delete => {
+                // For delete events of MongoDB, the "before" and "after" field both are null in the value,
+                // we need to extract the _id field from the key.
+                if self.is_mongo && desc.name == "_id" {
+                    return self
+                        .key_accessor
+                        .as_ref()
+                        .expect("key_accessor must be provided for delete operation")
+                        .access(&[&desc.name], Some(&desc.data_type));
+                }
+
                 if let Some(va) = self.value_accessor.as_ref() {
                     va.access(&[BEFORE, &desc.name], Some(&desc.data_type))
                 } else {
@@ -160,14 +181,16 @@ where
     }
 }
 
-pub struct MongoProjection<A> {
+pub struct MongoJsonAccess<A> {
     accessor: A,
 }
 
 pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> anyhow::Result<Datum> {
-    let id_field = bson_doc
-        .get("_id")
-        .ok_or_else(|| anyhow::format_err!("Debezuim Mongo requires document has a `_id` field"))?;
+    let id_field = if let Some(value) = bson_doc.get("_id") {
+        value
+    } else {
+        bson_doc
+    };
     let id: Datum = match id_type {
         DataType::Jsonb => ScalarImpl::Jsonb(id_field.clone().into()).into(),
         DataType::Varchar => match id_field {
@@ -201,13 +224,13 @@ pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> anyh
     };
     Ok(id)
 }
-impl<A> MongoProjection<A> {
+impl<A> MongoJsonAccess<A> {
     pub fn new(accessor: A) -> Self {
         Self { accessor }
     }
 }
 
-impl<A> Access for MongoProjection<A>
+impl<A> Access for MongoJsonAccess<A>
 where
     A: Access,
 {
@@ -228,6 +251,27 @@ where
                 }
             }
             ["after" | "before", "payload"] => self.access(&[path[0]], Some(&DataType::Jsonb)),
+            ["_id"] => {
+                let ret = self.accessor.access(path, type_expected);
+                // For a DELETE message, the "_id" field is not in the payload, and named as "id" in the key.
+                // e.g. {"schema":null,"payload":{"id":"{\"$oid\": \"65bc9fb6c485f419a7a877fe\"}"}}
+                if matches!(ret, Err(AccessError::Undefined { .. })) {
+                    let id_bson = self.accessor.access(&["id"], Some(&DataType::Jsonb))?;
+                    if let Some(ScalarImpl::Jsonb(bson_doc)) = id_bson {
+                        Ok(extract_bson_id(
+                            type_expected.unwrap_or(&DataType::Jsonb),
+                            &bson_doc.take(),
+                        )?)
+                    } else {
+                        unreachable!(
+                            "access result must match the type_expected. path: [\"id\"], id: {:?}, type_expected: {:?}",
+                            id_bson, type_expected
+                        )
+                    }
+                } else {
+                    ret
+                }
+            }
             _ => self.accessor.access(path, type_expected),
         }
     }
