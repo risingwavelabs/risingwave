@@ -221,7 +221,10 @@ where
                         &bson_doc.take(),
                     )?)
                 } else {
-                    unreachable!("the result of access must match the type_expected")
+                    unreachable!(
+                        "access result must match the type_expected. path: {:?}, payload: {:?}, type_expected: {:?}",
+                        path, payload, type_expected
+                    )
                 }
             }
             ["after" | "before", "payload"] => self.access(&[path[0]], Some(&DataType::Jsonb)),
