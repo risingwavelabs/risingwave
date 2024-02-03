@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{btree_map, BTreeMap, HashMap, HashSet};
 use std::mem::size_of;
@@ -93,7 +92,8 @@ impl TableWatermarksIndex {
         self.index.get(&vnode).and_then(|epoch_watermarks| {
             epoch_watermarks
                 .upper_bound(Included(&epoch))
-                .value()
+                .peek_next()
+                .map(|(_, v)| v)
                 .cloned()
         })
     }

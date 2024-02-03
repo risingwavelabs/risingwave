@@ -22,7 +22,6 @@
 #![feature(is_sorted)]
 #![feature(let_chains)]
 #![feature(btree_cursors)]
-#![feature(split_array)]
 
 mod key_cmp;
 use std::cmp::Ordering;
