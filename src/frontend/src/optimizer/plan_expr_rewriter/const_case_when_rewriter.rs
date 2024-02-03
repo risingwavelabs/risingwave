@@ -14,7 +14,7 @@
 
 use risingwave_common::error::RwError;
 
-use crate::expr::{ExprImpl, ExprRewriter, FunctionCall, ExprType};
+use crate::expr::{ExprImpl, ExprRewriter, ExprType, FunctionCall};
 
 pub struct ConstCaseWhenRewriter {
     pub error: Option<RwError>,

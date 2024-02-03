@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod const_case_when_rewriter;
 mod const_eval_rewriter;
 mod cse_rewriter;
-mod const_case_when_rewriter;
 
+pub(crate) use const_case_when_rewriter::ConstCaseWhenRewriter;
 pub(crate) use const_eval_rewriter::ConstEvalRewriter;
 pub(crate) use cse_rewriter::CseRewriter;
-pub(crate) use const_case_when_rewriter::ConstCaseWhenRewriter;

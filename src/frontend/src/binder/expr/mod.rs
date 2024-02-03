@@ -508,7 +508,10 @@ impl Binder {
         }
 
         // Otherwise this will eventually go through fallback arm
-        debug_assert!(constant_case_when_eval_inputs.is_empty(), "expect `inputs` to be empty");
+        debug_assert!(
+            constant_case_when_eval_inputs.is_empty(),
+            "expect `inputs` to be empty"
+        );
 
         let Some(fallback) = fallback else {
             return false;
@@ -602,7 +605,11 @@ impl Binder {
         );
 
         if constant_case_when_flag {
-            return Ok(FunctionCall::new(ExprType::ConstantLookup, constant_case_when_eval_inputs)?.into());
+            return Ok(FunctionCall::new(
+                ExprType::ConstantLookup,
+                constant_case_when_eval_inputs,
+            )?
+            .into());
         }
 
         // See if the case-when expression can be optimized
