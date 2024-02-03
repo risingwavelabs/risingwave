@@ -31,7 +31,7 @@ services:
     image: mongo:4.4
     container_name: mongodb
     ports:
-      - "7017:27017"
+      - "27017:27017"
     command: --replSet rs0 --oplogSize 128
     restart: always
     healthcheck:
