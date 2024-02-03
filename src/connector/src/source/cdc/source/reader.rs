@@ -78,7 +78,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
             && let Some(ref server_addr) = citus_split.server_addr
         {
             citus_server_addr = Some(server_addr.clone());
-            let host_addr = HostAddr::from_str(&server_addr)
+            let host_addr = HostAddr::from_str(server_addr)
                 .map_err(|err| anyhow!("invalid server address for cdc split. {}", err))?;
             properties.insert("hostname".to_string(), host_addr.host);
             properties.insert("port".to_string(), host_addr.port.to_string());

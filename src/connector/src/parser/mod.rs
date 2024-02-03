@@ -806,9 +806,7 @@ impl ByteStreamSourceParserImpl {
                 CsvParser::new(rw_columns, *config, source_ctx).map(Self::Csv)
             }
             (ProtocolProperties::DebeziumMongo, EncodingProperties::Json(_)) => {
-                DebeziumMongoJsonParser::new(rw_columns, source_ctx)
-                    .await
-                    .map(Self::DebeziumMongoJson)
+                DebeziumMongoJsonParser::new(rw_columns, source_ctx).map(Self::DebeziumMongoJson)
             }
             (ProtocolProperties::Canal, EncodingProperties::Json(config)) => {
                 CanalJsonParser::new(rw_columns, source_ctx, config).map(Self::CanalJson)

@@ -296,7 +296,7 @@ impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
     }
 
     pub fn start_offset(&self) -> &Option<String> {
-        dispatch_cdc_split!(&self, ref, {
+        dispatch_cdc_split!(self, ref, {
             Mysql,
             Postgres,
             Citus,

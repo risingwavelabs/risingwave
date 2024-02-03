@@ -38,7 +38,7 @@ pub struct DebeziumMongoJsonParser {
 }
 
 // key and payload in DEBEZIUM_MONGO format are accessed in different ways
-async fn build_accessor_builder(config: EncodingProperties) -> Result<AccessBuilderImpl> {
+fn build_accessor_builder(config: EncodingProperties) -> Result<AccessBuilderImpl> {
     match config {
         EncodingProperties::Json(_) => Ok(AccessBuilderImpl::DebeziumJson(
             DebeziumJsonAccessBuilder::new()?,
@@ -53,10 +53,7 @@ async fn build_accessor_builder(config: EncodingProperties) -> Result<AccessBuil
 }
 
 impl DebeziumMongoJsonParser {
-    pub async fn new(
-        rw_columns: Vec<SourceColumnDesc>,
-        source_ctx: SourceContextRef,
-    ) -> Result<Self> {
+    pub fn new(rw_columns: Vec<SourceColumnDesc>, source_ctx: SourceContextRef) -> Result<Self> {
         let id_column = rw_columns
             .iter()
             .find(|desc| {
@@ -90,11 +87,9 @@ impl DebeziumMongoJsonParser {
         }
 
         let key_builder =
-            build_accessor_builder(EncodingProperties::MongoJson(JsonProperties::default()))
-                .await?;
+            build_accessor_builder(EncodingProperties::MongoJson(JsonProperties::default()))?;
         let payload_builder =
-            build_accessor_builder(EncodingProperties::MongoJson(JsonProperties::default()))
-                .await?;
+            build_accessor_builder(EncodingProperties::MongoJson(JsonProperties::default()))?;
 
         Ok(Self {
             rw_columns,
@@ -212,12 +207,8 @@ mod tests {
             SourceColumnDesc::simple("_id", DataType::Varchar, ColumnId::from(0)),
             SourceColumnDesc::simple("payload", DataType::Jsonb, ColumnId::from(1)),
         ];
-        let mut parser = DebeziumMongoJsonParser::new(columns.clone(), Default::default())
-            .await
-            .unwrap();
-
+        let mut parser = DebeziumMongoJsonParser::new(columns.clone(), Default::default()).unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 3);
-
         let writer = builder.row_writer();
         parser
             .parse_inner(Some(key), Some(payload), writer)
@@ -251,9 +242,8 @@ mod tests {
             SourceColumnDesc::simple("payload", DataType::Jsonb, ColumnId::from(1)),
         ];
         for data in input {
-            let mut parser = DebeziumMongoJsonParser::new(columns.clone(), Default::default())
-                .await
-                .unwrap();
+            let mut parser =
+                DebeziumMongoJsonParser::new(columns.clone(), Default::default()).unwrap();
 
             let mut builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 3);
 

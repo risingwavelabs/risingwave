@@ -251,10 +251,11 @@ where
                 }
             }
             ["after" | "before", "payload"] => self.access(&[path[0]], Some(&DataType::Jsonb)),
+            // To handle a DELETE message, we need to extract the "_id" field from the message key, because it is not in the payload.
+            // In addition, the "_id" field is named as "id" in the key. An example of message key:
+            // {"schema":null,"payload":{"id":"{\"$oid\": \"65bc9fb6c485f419a7a877fe\"}"}}
             ["_id"] => {
                 let ret = self.accessor.access(path, type_expected);
-                // For a DELETE message, the "_id" field is not in the payload, and named as "id" in the key.
-                // e.g. {"schema":null,"payload":{"id":"{\"$oid\": \"65bc9fb6c485f419a7a877fe\"}"}}
                 if matches!(ret, Err(AccessError::Undefined { .. })) {
                     let id_bson = self.accessor.access(&["id"], Some(&DataType::Jsonb))?;
                     if let Some(ScalarImpl::Jsonb(bson_doc)) = id_bson {
