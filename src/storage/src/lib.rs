@@ -14,7 +14,6 @@
 
 #![feature(allocator_api)]
 #![feature(bound_as_ref)]
-#![feature(bound_map)]
 #![feature(custom_test_frameworks)]
 #![feature(extract_if)]
 #![feature(coroutines)]
