@@ -493,12 +493,6 @@ impl Binder {
             let Ok(operand) = self.bind_expr_inner(*operand) else {
                 return false;
             };
-            // This optimization should be done in subsequent optimization phase
-            // if the operand is const
-            // e.g., select case 1 when 1 then 114514 else 1919810 end;
-            if operand.is_const() {
-                return false;
-            }
             constant_lookup_inputs.push(operand);
         } else {
             return false;
@@ -512,7 +506,7 @@ impl Binder {
                 constant_lookup_inputs.push(input);
             } else {
                 // If at least one condition is not in the simple form / not constant,
-                // we can NOT do the subsequent optimization pass
+                // we can NOT do the subsequent optimization then
                 return false;
             }
 
@@ -544,7 +538,6 @@ impl Binder {
             .transpose()?;
 
         let mut constant_lookup_inputs = Vec::new();
-        let mut constant_case_when_eval_inputs = Vec::new();
 
         // See if the case-when expression can be optimized
         let optimize_flag = self.check_bind_case_optimization(
