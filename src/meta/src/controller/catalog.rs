@@ -1328,7 +1328,9 @@ impl CatalogController {
                     oid: Set(object_id),
                     schema_id: Set(Some(new_schema)),
                     ..Default::default()
-                }.update(&txn).await?;
+                }
+                .update(&txn)
+                .await?;
 
                 txn.commit().await?;
                 let version = self
@@ -1353,7 +1355,9 @@ impl CatalogController {
                     oid: Set(object_id),
                     schema_id: Set(Some(new_schema)),
                     ..Default::default()
-                }.update(&txn).await?;
+                }
+                .update(&txn)
+                .await?;
 
                 txn.commit().await?;
                 let version = self
