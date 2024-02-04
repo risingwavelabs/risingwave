@@ -86,6 +86,10 @@ pub fn gen_create_mv_plan(
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<(PlanRef, PbTable)> {
+    if session.config().create_compaction_group_for_mv() {
+        context.warn_to_user("The session varible CREATE_COMPACTION_GROUP_FOR_MV has been deprecated. It will not take effect.");
+    }
+
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
 
