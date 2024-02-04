@@ -204,7 +204,7 @@ pub async fn handle_create_sql_function(
                     }
                 }
                 Err(e) => return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "failed to conduct semantic check, please see if you are calling non-existence functions: {}",
+                    "failed to conduct semantic check, please see if you are calling non-existent functions: {}",
                     e.as_report()
                 ))
                 .into()),
