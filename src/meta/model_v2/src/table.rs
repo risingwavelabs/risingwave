@@ -24,7 +24,7 @@ use crate::{
     SourceId, TableId, TableVersion,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Debug, PartialEq, Copy, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum TableType {
     #[sea_orm(string_value = "TABLE")]

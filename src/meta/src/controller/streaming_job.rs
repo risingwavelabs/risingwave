@@ -38,7 +38,7 @@ use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableVersion
 use risingwave_pb::catalog::{PbCreateType, PbTable};
 use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
-    Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
+    Info as NotificationInfo, Operation as NotificationOperation, Operation,
 };
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::{
@@ -543,7 +543,7 @@ impl CatalogController {
 
         let table = table::ActiveModel::from(table).update(&txn).await?;
 
-        let old_fragment_mappings = get_fragment_mappings(&txn, job_id).await?;
+        // let old_fragment_mappings = get_fragment_mappings(&txn, job_id).await?;
         // 1. replace old fragments/actors with new ones.
         Fragment::delete_many()
             .filter(fragment::Column::JobId.eq(job_id))
@@ -701,8 +701,11 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        self.notify_fragment_mapping(NotificationOperation::Delete, old_fragment_mappings)
-            .await;
+        // FIXME: Do not notify frontend currently, because frontend nodes might refer to old table
+        // catalog and need to access the old fragment. Let frontend nodes delete the old fragment
+        // when they receive table catalog change.
+        // self.notify_fragment_mapping(NotificationOperation::Delete, old_fragment_mappings)
+        //     .await;
         self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
             .await;
         let version = self
@@ -1200,13 +1203,8 @@ impl CatalogController {
         }
 
         txn.commit().await?;
-
-        for mapping in fragment_mapping_to_notify {
-            self.env
-                .notification_manager()
-                .notify_frontend(Operation::Update, Info::ParallelUnitMapping(mapping))
-                .await;
-        }
+        self.notify_fragment_mapping(Operation::Update, fragment_mapping_to_notify)
+            .await;
 
         Ok(())
     }
