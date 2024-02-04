@@ -778,6 +778,12 @@ impl<T: PrimitiveArrayItemType> From<Vec<T>> for ScalarImpl {
     }
 }
 
+impl<T: PrimitiveArrayItemType> From<Vec<Option<T>>> for ScalarImpl {
+    fn from(v: Vec<Option<T>>) -> Self {
+        Self::List(v.into_iter().collect())
+    }
+}
+
 impl From<Vec<String>> for ScalarImpl {
     fn from(v: Vec<String>) -> Self {
         Self::List(v.iter().map(|s| s.as_str()).collect())

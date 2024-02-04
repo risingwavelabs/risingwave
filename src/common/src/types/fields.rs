@@ -105,8 +105,7 @@ mod tests {
             v7: Vec<u8>,
             v8: std::vec::Vec<i16>,
             v9: Option<Vec<i64>>,
-            // FIXME: `ToOwnedDatum` is not implemented for `Vec<Option<T>>`
-            // v10: std::option::Option<Vec<Option<f32>>>,
+            v10: std::option::Option<Vec<Option<F32>>>,
             v11: Timestamp,
             v14: Sub,
         }
@@ -123,7 +122,7 @@ mod tests {
                 ("v7", DataType::Bytea),
                 ("v8", DataType::List(Box::new(DataType::Int16))),
                 ("v9", DataType::List(Box::new(DataType::Int64))),
-                // ("v10", DataType::List(Box::new(DataType::Float32))),
+                ("v10", DataType::List(Box::new(DataType::Float32))),
                 ("v11", DataType::Timestamp),
                 (
                     "v14",
