@@ -607,6 +607,9 @@ impl Binder {
         );
 
         if constant_case_when_flag {
+            // Here we reuse the `ConstantLookup` as the `FunctionCall`
+            // to avoid creating a dummy `ConstCaseWhenEval` expression type
+            // since we do not need to go through backend
             return Ok(FunctionCall::new(
                 ExprType::ConstantLookup,
                 constant_case_when_eval_inputs,
