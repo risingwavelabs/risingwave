@@ -239,22 +239,12 @@ impl Binder {
                 }
 
                 if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
-                    self.set_udf_binding_flag();
                     let bind_result = self.bind_expr(expr);
 
                     // We should properly decrement global count after a successful binding
-                    // Since the subsequent `unset flag` operation relies on global counting
+                    // Since the subsequent probe operation in `bind_column` or
+                    // `bind_parameter` relies on global counting
                     self.udf_context.decr_global_count();
-
-                    // Only the top-most sql udf binding should unset the flag
-                    // Otherwise the subsequent binding may not be able to
-                    // find the corresponding context, consider the following example:
-                    // e.g., `select add_wrapper(a INT, b INT) returns int language sql as 'select add(a, b) + a';`
-                    // The inner `add` should not unset the flag, otherwise the `a` will be treated as
-                    // a normal column, which is then invalid in this context.
-                    if self.udf_context.global_count() == 0 {
-                        self.unset_udf_binding_flag();
-                    }
 
                     // Restore context information for subsequent binding
                     self.udf_context.update_context(stashed_udf_context);
