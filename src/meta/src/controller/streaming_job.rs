@@ -992,7 +992,7 @@ impl CatalogController {
                 );
 
                 let actor_upstreams = ActorUpstreamActors(actor_upstreams);
-                let parallel_unit_id = parallel_unit.unwrap().id;
+                let parallel_unit = parallel_unit.unwrap();
 
                 let splits = actor_splits
                     .get(&actor_id)
@@ -1003,7 +1003,8 @@ impl CatalogController {
                     fragment_id: Set(fragment_id as _),
                     status: Set(ActorStatus::Running),
                     splits: Set(splits.map(|splits| PbConnectorSplits { splits }.into())),
-                    parallel_unit_id: Set(parallel_unit_id as _),
+                    parallel_unit_id: Set(parallel_unit.id as _),
+                    worker_id: Set(parallel_unit.worker_node_id as _),
                     upstream_actor_ids: Set(actor_upstreams),
                     vnode_bitmap: Set(vnode_bitmap.map(|bitmap| bitmap.into())),
                     expr_context: Set(expr_context.unwrap().into()),
