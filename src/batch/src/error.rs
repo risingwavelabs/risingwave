@@ -109,6 +109,13 @@ pub enum BatchError {
         DmlError,
     ),
 
+    #[error(transparent)]
+    Iceberg(
+        #[from]
+        #[backtrace]
+        icelake::Error,
+    ),
+
     // Make the ref-counted type to be a variant for easier code structuring.
     // TODO(error-handling): replace with `thiserror_ext::Arc`
     #[error(transparent)]

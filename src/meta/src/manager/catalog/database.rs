@@ -83,15 +83,15 @@ pub struct DatabaseManager {
 
 impl DatabaseManager {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let databases = Database::list(env.meta_store()).await?;
-        let schemas = Schema::list(env.meta_store()).await?;
-        let sources = Source::list(env.meta_store()).await?;
-        let sinks = Sink::list(env.meta_store()).await?;
-        let tables = Table::list(env.meta_store()).await?;
-        let indexes = Index::list(env.meta_store()).await?;
-        let views = View::list(env.meta_store()).await?;
-        let functions = Function::list(env.meta_store()).await?;
-        let connections = Connection::list(env.meta_store()).await?;
+        let databases = Database::list(env.meta_store_checked()).await?;
+        let schemas = Schema::list(env.meta_store_checked()).await?;
+        let sources = Source::list(env.meta_store_checked()).await?;
+        let sinks = Sink::list(env.meta_store_checked()).await?;
+        let tables = Table::list(env.meta_store_checked()).await?;
+        let indexes = Index::list(env.meta_store_checked()).await?;
+        let views = View::list(env.meta_store_checked()).await?;
+        let functions = Function::list(env.meta_store_checked()).await?;
+        let connections = Connection::list(env.meta_store_checked()).await?;
 
         let mut relation_ref_count = HashMap::new();
 
@@ -444,7 +444,7 @@ impl DatabaseManager {
     }
 
     pub fn unmark_creating(&mut self, relation: &RelationKey) {
-        self.in_progress_creation_tracker.remove(&relation.clone());
+        self.in_progress_creation_tracker.remove(relation);
     }
 
     pub fn unmark_creating_streaming_job(&mut self, table_id: TableId) {

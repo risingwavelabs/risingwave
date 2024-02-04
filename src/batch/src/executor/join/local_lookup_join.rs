@@ -224,6 +224,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
 
         let exchange_node = NodeBody::Exchange(ExchangeNode {
             sources,
+            sequential: true,
             input_schema: self.inner_side_schema.to_prost(),
         });
 

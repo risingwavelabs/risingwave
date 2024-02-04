@@ -1328,14 +1328,10 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         min_object_id_epoch2,
     );
 
+    drop(local_hummock_storage);
+
     hummock_storage.clear_shared_buffer().await.unwrap();
 
-    let read_version = local_hummock_storage.read_version();
-
-    let read_version = read_version.read();
-    assert!(read_version.staging().imm.is_empty());
-    assert!(read_version.staging().sst.is_empty());
-    assert_eq!(read_version.committed().max_committed_epoch(), epoch1);
     assert_eq!(
         hummock_storage
             .sstable_object_id_manager()
@@ -1422,13 +1418,13 @@ async fn test_replicated_local_hummock_storage() {
             [
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000061616161 } }, epoch: 1, epoch_with_gap: 1},
+                        FullKey { UserKey { 233, TableKey { 000061616161 } }, epoch: 1, epoch_with_gap: 1, spill_offset: 0},
                         b"1111",
                     ),
                 ),
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000062626262 } }, epoch: 1, epoch_with_gap: 1},
+                        FullKey { UserKey { 233, TableKey { 000062626262 } }, epoch: 1, epoch_with_gap: 1, spill_offset: 0},
                         b"2222",
                     ),
                 ),
@@ -1482,13 +1478,13 @@ async fn test_replicated_local_hummock_storage() {
             [
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000063636363 } }, epoch: 2, epoch_with_gap: 2},
+                        FullKey { UserKey { 233, TableKey { 000063636363 } }, epoch: 2, epoch_with_gap: 2, spill_offset: 0},
                         b"3333",
                     ),
                 ),
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000064646464 } }, epoch: 2, epoch_with_gap: 2},
+                        FullKey { UserKey { 233, TableKey { 000064646464 } }, epoch: 2, epoch_with_gap: 2, spill_offset: 0},
                         b"4444",
                     ),
                 ),

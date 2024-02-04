@@ -122,6 +122,10 @@ pub struct Binder {
 
     /// The sql udf context that will be used during binding phase
     udf_context: UdfContext,
+
+    /// Udf binding flag, used to distinguish between
+    /// columns and named parameters during sql udf binding
+    udf_binding_flag: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -215,26 +219,29 @@ impl UdfContext {
         Ok(expr)
     }
 
-    /// TODO: add name related logic
-    /// NOTE: need to think of a way to prevent naming conflict
-    /// e.g., when existing column names conflict with parameter names in sql udf
     pub fn create_udf_context(
         args: &[FunctionArg],
-        _catalog: &Arc<FunctionCatalog>,
+        catalog: &Arc<FunctionCatalog>,
     ) -> Result<HashMap<String, AstExpr>> {
         let mut ret: HashMap<String, AstExpr> = HashMap::new();
         for (i, current_arg) in args.iter().enumerate() {
-            if let FunctionArg::Unnamed(arg) = current_arg {
-                let FunctionArgExpr::Expr(e) = arg else {
-                    return Err(ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into());
-                };
-                // if catalog.arg_names.is_some() {
-                //      todo!()
-                // }
-                ret.insert(format!("${}", i + 1), e.clone());
-                continue;
+            match current_arg {
+                FunctionArg::Unnamed(arg) => {
+                    let FunctionArgExpr::Expr(e) = arg else {
+                        return Err(
+                            ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into()
+                        );
+                    };
+                    if catalog.arg_names[i].is_empty() {
+                        ret.insert(format!("${}", i + 1), e.clone());
+                    } else {
+                        // The index mapping here is accurate
+                        // So that we could directly use the index
+                        ret.insert(catalog.arg_names[i].clone(), e.clone());
+                    }
+                }
+                _ => return Err(ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into()),
             }
-            return Err(ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into());
         }
         Ok(ret)
     }
@@ -340,6 +347,7 @@ impl Binder {
             included_relations: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
             udf_context: UdfContext::new(),
+            udf_binding_flag: false,
         }
     }
 
@@ -488,6 +496,14 @@ impl Binder {
 
     pub fn udf_context_mut(&mut self) -> &mut UdfContext {
         &mut self.udf_context
+    }
+
+    pub fn set_udf_binding_flag(&mut self) {
+        self.udf_binding_flag = true;
+    }
+
+    pub fn unset_udf_binding_flag(&mut self) {
+        self.udf_binding_flag = false;
     }
 }
 

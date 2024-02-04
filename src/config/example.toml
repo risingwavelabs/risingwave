@@ -25,8 +25,7 @@ enable_hummock_data_archive = false
 min_delta_log_num_for_hummock_version_checkpoint = 10
 max_heartbeat_interval_secs = 300
 disable_recovery = false
-enable_scale_in_when_recovery = false
-enable_automatic_parallelism_control = false
+disable_automatic_parallelism_control = false
 meta_leader_lease_secs = 30
 default_parallelism = "Full"
 enable_compaction_deterministic = false
@@ -70,6 +69,8 @@ enable_emergency_picker = true
 [meta.developer]
 meta_cached_traces_num = 256
 meta_cached_traces_memory_limit_bytes = 134217728
+meta_enable_trivial_move = true
+meta_enable_check_task_level_overlap = false
 
 [batch]
 enable_barrier_read = false
@@ -192,8 +193,6 @@ sstable_size_mb = 256
 parallel_compact_size_mb = 512
 block_size_kb = 64
 bloom_false_positive = 0.001
-backup_storage_url = "memory"
-backup_storage_directory = "backup"
 max_concurrent_creating_streaming_jobs = 1
 pause_on_next_bootstrap = false
 wasm_storage_url = "fs://.risingwave/data"

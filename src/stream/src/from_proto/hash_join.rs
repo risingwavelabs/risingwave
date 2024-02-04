@@ -27,7 +27,7 @@ use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::ActorContextRef;
+use crate::executor::{ActorContextRef, JoinType};
 use crate::task::AtomicU64Ref;
 
 pub struct HashJoinExecutorBuilder;

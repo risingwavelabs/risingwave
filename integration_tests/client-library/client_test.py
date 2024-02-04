@@ -25,7 +25,14 @@ def check_nodejs():
 
 
 def check_php():
-    subprocess.run(["docker", "compose", "exec", "php", "bash", "-c", "cd /php-client && phpunit tests/RWClientTest.php"], check=True)
+    subprocess.run(
+        ["docker", "compose", "exec", "php", "bash", "-c", "cd /php-client && phpunit tests/RWClientTest.php"],
+        check=True)
+
+
+def check_ruby():
+    subprocess.run(["docker", "compose", "exec", "ruby", "bash", "-c", "cd /ruby-client && ruby test/crud_test.rb"],
+                   check=True)
 
 
 subprocess.run(["docker", "compose", "up", "-d"], check=True)
@@ -33,7 +40,7 @@ sleep(10)
 
 failed_cases = []
 
-for client in ['go', 'python', 'java', 'nodejs', 'php']:
+for client in ['go', 'python', 'java', 'nodejs', 'php', 'ruby']:
     print(f"--- {client} client test")
     try:
         if client == 'go':
@@ -46,6 +53,8 @@ for client in ['go', 'python', 'java', 'nodejs', 'php']:
             check_nodejs()
         elif client == 'php':
             check_php()
+        elif client == 'ruby':
+            check_ruby()
     except Exception as e:
         print(e)
         failed_cases.append(f"{client} client failed")

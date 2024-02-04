@@ -19,7 +19,7 @@ RUN cd /risingwave/dashboard && npm i && npm run build-static && rm -rf node_mod
 
 FROM base AS rust-base
 
-RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip clang
+RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip
 
 SHELL ["/bin/bash", "-c"]
 
@@ -33,7 +33,8 @@ COPY rust-toolchain rust-toolchain
 RUN rustup self update \
   && rustup set profile minimal \
   && rustup show \
-  && rustup component add rustfmt
+  && rustup component add rustfmt \
+  && rustup target add wasm32-wasi
 
 RUN cargo install flamegraph
 # TODO: cargo-chef doesn't work well now, because we update Cargo.lock very often.

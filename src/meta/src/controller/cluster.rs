@@ -109,7 +109,11 @@ impl ClusterController {
         let meta_store = env
             .sql_meta_store()
             .expect("sql meta store is not initialized");
-        let inner = ClusterControllerInner::new(meta_store.conn).await?;
+        let inner = ClusterControllerInner::new(
+            meta_store.conn,
+            env.opts.disable_automatic_parallelism_control,
+        )
+        .await?;
         Ok(Self {
             env,
             max_heartbeat_interval,
@@ -460,13 +464,17 @@ pub struct ClusterControllerInner {
     /// Record for tracking available machine ids, one is available.
     available_transactional_ids: VecDeque<TransactionId>,
     worker_extra_info: HashMap<WorkerId, WorkerExtraInfo>,
+    disable_automatic_parallelism_control: bool,
 }
 
 impl ClusterControllerInner {
     pub const MAX_WORKER_REUSABLE_ID_BITS: usize = 10;
     pub const MAX_WORKER_REUSABLE_ID_COUNT: usize = 1 << Self::MAX_WORKER_REUSABLE_ID_BITS;
 
-    pub async fn new(db: DatabaseConnection) -> MetaResult<Self> {
+    pub async fn new(
+        db: DatabaseConnection,
+        disable_automatic_parallelism_control: bool,
+    ) -> MetaResult<Self> {
         let workers: Vec<(WorkerId, Option<TransactionId>)> = Worker::find()
             .select_only()
             .column(worker::Column::WorkerId)
@@ -492,6 +500,7 @@ impl ClusterControllerInner {
             db,
             available_transactional_ids,
             worker_extra_info,
+            disable_automatic_parallelism_control,
         })
     }
 
@@ -598,14 +607,25 @@ impl ClusterControllerInner {
 
                 match new_parallelism.cmp(&current_parallelism.len()) {
                     Ordering::Less => {
-                        // Warn and keep the original parallelism if the worker registered with a
-                        // smaller parallelism.
-                        tracing::warn!(
-                            "worker {} parallelism is less than current, current is {}, but received {}",
-                            worker.worker_id,
-                            current_parallelism.len(),
-                            new_parallelism
-                        );
+                        if !self.disable_automatic_parallelism_control {
+                            // Handing over to the subsequent recovery loop for a forced reschedule.
+                            tracing::info!(
+                                "worker {} parallelism reduced from {} to {}",
+                                worker.worker_id,
+                                current_parallelism.len(),
+                                new_parallelism
+                            );
+                            current_parallelism.truncate(new_parallelism);
+                        } else {
+                            // Warn and keep the original parallelism if the worker registered with a
+                            // smaller parallelism.
+                            tracing::warn!(
+                                "worker {} parallelism is less than current, current is {}, but received {}",
+                                worker.worker_id,
+                                current_parallelism.len(),
+                                new_parallelism
+                            );
+                        }
                     }
                     Ordering::Greater => {
                         tracing::info!(
