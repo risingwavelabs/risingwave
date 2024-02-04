@@ -225,13 +225,9 @@ pub struct MetaConfig {
     #[serde(default)]
     pub disable_recovery: bool,
 
-    /// Whether to enable scale-in when recovery.
+    /// Whether to disable adaptive-scaling feature.
     #[serde(default)]
-    pub enable_scale_in_when_recovery: bool,
-
-    /// Whether to enable auto-scaling feature.
-    #[serde(default)]
-    pub enable_automatic_parallelism_control: bool,
+    pub disable_automatic_parallelism_control: bool,
 
     #[serde(default = "default::meta::meta_leader_lease_secs")]
     pub meta_leader_lease_secs: u64,
@@ -970,10 +966,13 @@ impl SystemConfig {
         // Initialize backup_storage_url and backup_storage_directory if not set.
         if let Some(state_store) = &system_params.state_store
             && let Some(data_directory) = &system_params.data_directory
-            && let Some(hummock_state_store) = state_store.strip_prefix("hummock+")
         {
             if system_params.backup_storage_url.is_none() {
-                system_params.backup_storage_url = Some(hummock_state_store.to_owned());
+                if let Some(hummock_state_store) = state_store.strip_prefix("hummock+") {
+                    system_params.backup_storage_url = Some(hummock_state_store.to_owned());
+                } else {
+                    system_params.backup_storage_url = Some("memory".to_string());
+                }
                 tracing::info!("initialize backup_storage_url based on state_store");
             }
             if system_params.backup_storage_directory.is_none() {

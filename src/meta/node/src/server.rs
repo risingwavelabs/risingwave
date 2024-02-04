@@ -195,6 +195,7 @@ pub async fn rpc_serve(
                     Arc::new(SqlBackendElectionClient::new(id, MySqlDriver::new(conn)))
                 }
             };
+            election_client.init().await?;
 
             rpc_serve_with_store(
                 None,
@@ -706,7 +707,7 @@ pub async fn start_service_as_election_leader(
         sub_tasks.push(task);
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager));
 
-        if env.opts.enable_automatic_parallelism_control {
+        if !env.opts.disable_automatic_parallelism_control {
             sub_tasks.push(stream_manager.start_auto_parallelism_monitor());
         }
     }
