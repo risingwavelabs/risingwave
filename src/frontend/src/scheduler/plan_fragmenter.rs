@@ -28,6 +28,7 @@ use risingwave_common::catalog::TableDesc;
 use risingwave_common::error::RwError;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::scan_range::ScanRange;
+use risingwave_connector::source::iceberg::IcebergSplitEnumerator;
 use risingwave_connector::source::kafka::KafkaSplitEnumerator;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SplitEnumerator, SplitImpl,
@@ -270,25 +271,37 @@ impl SourceScanInfo {
                 unreachable!("Never call complete when SourceScanInfo is already complete")
             }
         };
-        let kafka_prop = match fetch_info.connector {
-            ConnectorProperties::Kafka(prop) => *prop,
-            _ => {
-                return Err(SchedulerError::Internal(anyhow!(
-                    "Unsupported to query directly from this source"
-                )))
+        match fetch_info.connector {
+            ConnectorProperties::Kafka(prop) => {
+                let mut kafka_enumerator =
+                    KafkaSplitEnumerator::new(*prop, SourceEnumeratorContext::default().into())
+                        .await?;
+                let split_info = kafka_enumerator
+                    .list_splits_batch(fetch_info.timebound.0, fetch_info.timebound.1)
+                    .await?
+                    .into_iter()
+                    .map(SplitImpl::Kafka)
+                    .collect_vec();
+                Ok(SourceScanInfo::Complete(split_info))
             }
-        };
-        let mut kafka_enumerator =
-            KafkaSplitEnumerator::new(kafka_prop, SourceEnumeratorContext::default().into())
-                .await?;
-        let split_info = kafka_enumerator
-            .list_splits_batch(fetch_info.timebound.0, fetch_info.timebound.1)
-            .await?
-            .into_iter()
-            .map(SplitImpl::Kafka)
-            .collect_vec();
+            ConnectorProperties::Iceberg(prop) => {
+                let iceberg_enumerator =
+                    IcebergSplitEnumerator::new(*prop, SourceEnumeratorContext::default().into())
+                        .await?;
 
-        Ok(SourceScanInfo::Complete(split_info))
+                let split_info = iceberg_enumerator
+                    .list_splits_batch()
+                    .await?
+                    .into_iter()
+                    .map(SplitImpl::Iceberg)
+                    .collect_vec();
+
+                Ok(SourceScanInfo::Complete(split_info))
+            }
+            _ => Err(SchedulerError::Internal(anyhow!(
+                "Unsupported to query directly from this source"
+            ))),
+        }
     }
 
     pub fn split_info(&self) -> SchedulerResult<&Vec<SplitImpl>> {

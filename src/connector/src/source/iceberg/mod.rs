@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
@@ -53,6 +54,22 @@ pub struct IcebergProperties {
     pub unknown_fields: HashMap<String, String>,
 }
 
+impl IcebergProperties {
+    pub fn to_iceberg_config(&self) -> IcebergConfig {
+        IcebergConfig {
+            database_name: self.database_name.clone(),
+            table_name: self.table_name.clone(),
+            catalog_type: Some(self.catalog_type.clone()),
+            path: self.warehouse_path.clone(),
+            endpoint: Some(self.endpoint.clone()),
+            access_key: self.access.clone(),
+            secret_key: self.secret.clone(),
+            region: Some(self.region_name.clone()),
+            ..Default::default()
+        }
+    }
+}
+
 impl SourceProperties for IcebergProperties {
     type Split = IcebergSplit;
     type SplitEnumerator = IcebergSplitEnumerator;
@@ -68,19 +85,23 @@ impl UnknownFields for IcebergProperties {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct IcebergSplit {}
+pub struct IcebergSplit {
+    pub split_id: i64,
+    pub snapshot_id: i64,
+    pub files: Vec<String>,
+}
 
 impl SplitMetaData for IcebergSplit {
     fn id(&self) -> SplitId {
-        unimplemented!()
+        self.split_id.to_string().into()
     }
 
-    fn restore_from_json(_value: JsonbVal) -> anyhow::Result<Self> {
-        unimplemented!()
+    fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
+        serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
     }
 
     fn encode_to_json(&self) -> JsonbVal {
-        unimplemented!()
+        serde_json::to_value(self.clone()).unwrap().into()
     }
 
     fn update_with_offset(&mut self, _start_offset: String) -> anyhow::Result<()> {
@@ -89,7 +110,9 @@ impl SplitMetaData for IcebergSplit {
 }
 
 #[derive(Debug, Clone)]
-pub struct IcebergSplitEnumerator {}
+pub struct IcebergSplitEnumerator {
+    config: IcebergConfig,
+}
 
 #[async_trait]
 impl SplitEnumerator for IcebergSplitEnumerator {
@@ -100,20 +123,10 @@ impl SplitEnumerator for IcebergSplitEnumerator {
         properties: Self::Properties,
         context: SourceEnumeratorContextRef,
     ) -> anyhow::Result<Self> {
+        let iceberg_config = properties.to_iceberg_config();
+        // check if the source schema matches the iceberg table schema
         match &context.info.source {
             Some(source) => {
-                let iceberg_config = IcebergConfig {
-                    database_name: properties.database_name,
-                    table_name: properties.table_name,
-                    catalog_type: Some(properties.catalog_type),
-                    path: properties.warehouse_path,
-                    endpoint: Some(properties.endpoint),
-                    access_key: properties.access,
-                    secret_key: properties.secret,
-                    region: Some(properties.region_name),
-                    ..Default::default()
-                };
-
                 let columns: Vec<ColumnCatalog> = source
                     .columns
                     .iter()
@@ -154,14 +167,49 @@ impl SplitEnumerator for IcebergSplitEnumerator {
                 let new_iceberg_schema = arrow_schema::Schema::new(new_iceberg_field);
 
                 crate::sink::iceberg::try_matches_arrow_schema(&schema, &new_iceberg_schema)?;
-                Ok(Self {})
             }
-            None => unreachable!(),
+            None => {}
         }
+        Ok(Self {
+            config: iceberg_config,
+        })
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<Self::Split>> {
+        // Iceberg source does not support streaming queries
         Ok(vec![])
+    }
+}
+
+impl IcebergSplitEnumerator {
+    pub async fn list_splits_batch(&self) -> anyhow::Result<Vec<IcebergSplit>> {
+        let table = self.config.load_table().await?;
+        let snapshot_id = table.current_table_metadata().current_snapshot_id.unwrap();
+        let files = table
+            .current_data_files()
+            .await?
+            .into_iter()
+            .map(|f| f.file_path)
+            .collect_vec();
+        let split_num = 12;
+        // evenly split the files into 12 splits
+        let split_size = files.len() / split_num;
+        let mut splits = vec![];
+        for i in 0..split_num {
+            let start = i * split_size;
+            let end = if i == split_num - 1 {
+                files.len()
+            } else {
+                (i + 1) * split_size
+            };
+            let split = IcebergSplit {
+                split_id: i as i64,
+                snapshot_id,
+                files: files[start..end].to_vec(),
+            };
+            splits.push(split);
+        }
+        Ok(splits)
     }
 }
 
