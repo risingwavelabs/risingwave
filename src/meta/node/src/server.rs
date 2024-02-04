@@ -174,9 +174,17 @@ pub async fn rpc_serve(
             )
         }
         MetaStoreBackend::Sql { endpoint } => {
+            let max_connection = if DbBackend::Sqlite.is_prefix_of(&endpoint) {
+                // Due to the fact that Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
+                // here we forcibly specify the number of connections as 1.
+                1
+            } else {
+                10
+            };
+
             let mut options = sea_orm::ConnectOptions::new(endpoint);
             options
-                .max_connections(20)
+                .max_connections(max_connection)
                 .connect_timeout(Duration::from_secs(10))
                 .idle_timeout(Duration::from_secs(30));
             let conn = sea_orm::Database::connect(options).await?;
@@ -685,7 +693,7 @@ pub async fn start_service_as_election_leader(
         ));
     }
     sub_tasks.push(HummockManager::hummock_timer_task(hummock_manager.clone()));
-    sub_tasks.push(HummockManager::compaction_event_loop(
+    sub_tasks.extend(HummockManager::compaction_event_loop(
         hummock_manager,
         compactor_streams_change_rx,
     ));

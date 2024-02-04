@@ -2642,6 +2642,24 @@ impl fmt::Display for FunctionDefinition {
     }
 }
 
+impl FunctionDefinition {
+    /// Returns the function definition as a string slice.
+    pub fn as_str(&self) -> &str {
+        match self {
+            FunctionDefinition::SingleQuotedDef(s) => s,
+            FunctionDefinition::DoubleDollarDef(s) => s,
+        }
+    }
+
+    /// Returns the function definition as a string.
+    pub fn into_string(self) -> String {
+        match self {
+            FunctionDefinition::SingleQuotedDef(s) => s,
+            FunctionDefinition::DoubleDollarDef(s) => s,
+        }
+    }
+}
+
 /// Return types of a function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

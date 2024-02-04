@@ -61,7 +61,7 @@ impl SplitReader for KafkaSplitReader {
         let mut config = ClientConfig::new();
 
         let bootstrap_servers = &properties.common.brokers;
-        let broker_rewrite_map = properties.common.broker_rewrite_map.clone();
+        let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
 
         // disable partition eof
         config.set("enable.partition.eof", "false");
