@@ -195,8 +195,30 @@ impl CdcSplitTrait for MongoDbCdcSplit {
     }
 
     fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
-        // TODO: update snapshot_done for mongodb
+        let mut snapshot_done = self.inner.snapshot_done;
+        // extract snapshot state from debezium offset
+        if !snapshot_done {
+            let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset).map_err(|e| {
+                anyhow!(
+                    start_offset,
+                    source_id = self.inner.split_id,
+                    "mongodb split: invalid debezium offset",
+                    e
+                )
+            })?;
+
+            // heartbeat event should not update the `snapshot_done` flag
+            if !dbz_offset.is_heartbeat {
+                snapshot_done = match dbz_offset.source_offset.snapshot {
+                    Some(val) => !val,
+                    None => true,
+                };
+            }
+        }
+
         self.inner.start_offset = Some(start_offset);
+        // if snapshot_done is already true, it will remain true
+        self.inner.snapshot_done = snapshot_done;
         Ok(())
     }
 }
