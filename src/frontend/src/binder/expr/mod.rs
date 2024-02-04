@@ -471,60 +471,6 @@ impl Binder {
         Ok(func_call.into())
     }
 
-    /// The optimization check for the following case-when expression pattern
-    /// e.g., select case 1 when (...) then (...) else (...) end;
-    fn check_constant_case_when_optimization(
-        &mut self,
-        conditions: Vec<Expr>,
-        results_expr: Vec<ExprImpl>,
-        operand: Option<Box<Expr>>,
-        fallback: Option<ExprImpl>,
-        constant_case_when_eval_inputs: &mut Vec<ExprImpl>,
-    ) -> bool {
-        // The operand value to be compared later
-        let operand_value;
-
-        if let Some(operand) = operand {
-            let Ok(operand) = self.bind_expr_inner(*operand) else {
-                return false;
-            };
-            if !operand.is_const() {
-                return false;
-            }
-            operand_value = operand;
-        } else {
-            return false;
-        }
-
-        for (condition, result) in zip_eq_fast(conditions, results_expr) {
-            if let Expr::Value(_) = condition.clone() {
-                let Ok(res) = self.bind_expr_inner(condition.clone()) else {
-                    return false;
-                };
-                // Found a match
-                if res == operand_value {
-                    constant_case_when_eval_inputs.push(result);
-                    return true;
-                }
-            } else {
-                return false;
-            }
-        }
-
-        // Otherwise this will eventually go through fallback arm
-        debug_assert!(
-            constant_case_when_eval_inputs.is_empty(),
-            "expect `inputs` to be empty"
-        );
-
-        let Some(fallback) = fallback else {
-            return false;
-        };
-
-        constant_case_when_eval_inputs.push(fallback);
-        true
-    }
-
     /// The helper function to check if the current case-when
     /// expression in `bind_case` could be optimized
     /// into `ConstantLookupExpression`
@@ -599,25 +545,6 @@ impl Binder {
 
         let mut constant_lookup_inputs = Vec::new();
         let mut constant_case_when_eval_inputs = Vec::new();
-
-        let constant_case_when_flag = self.check_constant_case_when_optimization(
-            conditions.clone(),
-            results_expr.clone(),
-            operand.clone(),
-            else_result_expr.clone(),
-            &mut constant_case_when_eval_inputs,
-        );
-
-        if constant_case_when_flag {
-            // Here we reuse the `ConstantLookup` as the `FunctionCall`
-            // to avoid creating a dummy `ConstCaseWhenEval` expression type
-            // since we do not need to go through backend
-            return Ok(FunctionCall::new(
-                ExprType::ConstantLookup,
-                constant_case_when_eval_inputs,
-            )?
-            .into());
-        }
 
         // See if the case-when expression can be optimized
         let optimize_flag = self.check_bind_case_optimization(
