@@ -219,8 +219,6 @@ pub async fn handle_create_sql_function(
             )
             .into());
         }
-
-        binder.unset_udf_binding_flag();
     }
 
     // Create the actual function, will be stored in function catalog
