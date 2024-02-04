@@ -41,8 +41,13 @@ source ci/scripts/common.sh
 unset RUSTC_WRAPPER # disable sccache
 
 echo "--- Install protoc3"
-curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/protoc-3.15.8-linux-${ARCH}.zip
-unzip -o protoc-3.15.8-linux-${ARCH}.zip -d protoc
+PROTOC_ARCH=${ARCH}
+if [ ${ARCH} == "aarch64" ]; then
+  # shellcheck disable=SC1068
+  PROTOC_ARCH="aarch_64"
+fi
+curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/protoc-3.15.8-linux-${PROTOC_ARCH}.zip
+unzip -o protoc-3.15.8-linux-${PROTOC_ARCH}.zip -d protoc
 mv ./protoc/bin/protoc /usr/local/bin/
 mv ./protoc/include/* /usr/local/include/
 
