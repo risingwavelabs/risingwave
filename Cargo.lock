@@ -8574,6 +8574,8 @@ name = "risingwave_batch"
 version = "1.7.0-alpha"
 dependencies = [
  "anyhow",
+ "arrow-array 50.0.0",
+ "arrow-schema 50.0.0",
  "assert_matches",
  "async-recursion",
  "async-trait",
@@ -8584,6 +8586,7 @@ dependencies = [
  "futures-util",
  "hashbrown 0.14.0",
  "hytra",
+ "icelake",
  "itertools 0.12.0",
  "madsim-tokio",
  "madsim-tonic",
