@@ -5,6 +5,7 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 source ci/scripts/pr.env.sh
+rustup default stable
 
 echo "--- Download artifacts"
 download-and-decompress-artifact risingwave_simulation .
