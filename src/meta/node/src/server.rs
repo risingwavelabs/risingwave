@@ -685,7 +685,7 @@ pub async fn start_service_as_election_leader(
         ));
     }
     sub_tasks.push(HummockManager::hummock_timer_task(hummock_manager.clone()));
-    sub_tasks.push(HummockManager::compaction_event_loop(
+    sub_tasks.extend(HummockManager::compaction_event_loop(
         hummock_manager,
         compactor_streams_change_rx,
     ));
