@@ -22,9 +22,9 @@ pub struct ConstCaseWhenRewriter {
 
 impl ExprRewriter for ConstCaseWhenRewriter {
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
-        if func_call.func_type() != ExprType::ConstantLookup ||
+        if func_call.func_type() != ExprType::ConstantLookup
             // Normal constant lookup pass
-            func_call.inputs().len() != 1
+            || func_call.inputs().len() != 1
         {
             return func_call.into();
         }
