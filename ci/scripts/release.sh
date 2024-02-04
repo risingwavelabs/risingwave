@@ -27,7 +27,7 @@ echo "--- Install dependencies for openssl"
 yum install -y perl-core
 
 echo "--- Install java and maven"
-yum install -y java-11-openjdk java-11-openjdk-devel wget python3 cyrus-sasl-devel
+yum install -y java-11-openjdk java-11-openjdk-devel wget python3 python3-devel cyrus-sasl-devel
 pip3 install toml-cli
 wget https://ci-deps-dist.s3.amazonaws.com/apache-maven-3.9.3-bin.tar.gz && tar -zxvf apache-maven-3.9.3-bin.tar.gz
 export PATH="${REPO_ROOT}/apache-maven-3.9.3/bin:$PATH"
