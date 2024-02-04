@@ -19,9 +19,13 @@ use std::sync::Arc;
 use anyhow::Context;
 use educe::Educe;
 use enum_as_inner::EnumAsInner;
+use futures_util::FutureExt;
 use parse_display::Display;
-use risingwave_common::types::{DataType, Datum, IsNegative, ScalarImpl, ScalarRefImpl, ToText};
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{
+    DataType, Datum, IsNegative, ScalarImpl, ScalarRefImpl, Sentinelled, ToOwnedDatum, ToText,
+};
+use risingwave_common::util::sort_util::{Direction, OrderType};
 use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
 use risingwave_common::{bail, must_match};
 use risingwave_pb::expr::window_frame::{
@@ -34,7 +38,8 @@ use FrameBound::{CurrentRow, Following, Preceding, UnboundedFollowing, Unbounded
 use super::WindowFuncKind;
 use crate::aggregate::AggArgs;
 use crate::expr::{
-    build_func, BoxedExpression, ExpressionBoxExt, InputRefExpression, LiteralExpression,
+    build_func, BoxedExpression, Expression, ExpressionBoxExt, InputRefExpression,
+    LiteralExpression,
 };
 use crate::Result;
 
@@ -296,11 +301,9 @@ pub struct RangeFrameOffset {
     /// The original offset value.
     offset: ScalarImpl,
     /// Built expression for `$0 + offset`.
-    #[expect(dead_code)]
     #[educe(PartialEq(ignore), Hash(ignore))]
     add_expr: Option<Arc<BoxedExpression>>,
     /// Built expression for `$0 - offset`.
-    #[expect(dead_code)]
     #[educe(PartialEq(ignore), Hash(ignore))]
     sub_expr: Option<Arc<BoxedExpression>>,
 }
@@ -312,6 +315,41 @@ impl RangeFrameOffset {
             add_expr: None,
             sub_expr: None,
         }
+    }
+
+    fn build_exprs(
+        &mut self,
+        order_data_type: &DataType,
+        offset_data_type: &DataType,
+    ) -> Result<()> {
+        use risingwave_pb::expr::expr_node::PbType as PbExprType;
+
+        let input_expr = InputRefExpression::new(order_data_type.clone(), 0);
+        let offset_expr =
+            LiteralExpression::new(offset_data_type.clone(), Some(self.offset.clone()));
+        self.add_expr = Some(Arc::new(build_func(
+            PbExprType::Add,
+            order_data_type.clone(),
+            vec![input_expr.clone().boxed(), offset_expr.clone().boxed()],
+        )?));
+        self.sub_expr = Some(Arc::new(build_func(
+            PbExprType::Subtract,
+            order_data_type.clone(),
+            vec![input_expr.boxed(), offset_expr.boxed()],
+        )?));
+        Ok(())
+    }
+
+    pub fn new_for_test(
+        offset: ScalarImpl,
+        order_data_type: &DataType,
+        offset_data_type: &DataType,
+    ) -> Self {
+        let mut offset = Self::new(offset);
+        offset
+            .build_exprs(order_data_type, offset_data_type)
+            .unwrap();
+        offset
     }
 }
 
@@ -379,6 +417,92 @@ impl FrameBoundsImpl for RangeFrameBounds {
     }
 }
 
+impl RangeFrameBounds {
+    /// Get the frame start for a given order column value.
+    ///
+    /// ## Examples
+    ///
+    /// For the following frames:
+    ///
+    /// ```sql
+    /// ORDER BY x ASC RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    /// ORDER BY x DESC RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    /// ```
+    ///
+    /// For any CURRENT ROW with any order value, the frame start is always the first-most row, which is
+    /// represented by [`Sentinelled::Smallest`].
+    ///
+    /// For the following frame:
+    ///
+    /// ```sql
+    /// ORDER BY x ASC RANGE BETWEEN 10 PRECEDING AND CURRENT ROW
+    /// ```
+    ///
+    /// For CURRENT ROW with order value `100`, the frame start is the **FIRST** row with order value `90`.
+    ///
+    /// For the following frame:
+    ///
+    /// ```sql
+    /// ORDER BY x DESC RANGE BETWEEN 10 PRECEDING AND CURRENT ROW
+    /// ```
+    ///
+    /// For CURRENT ROW with order value `100`, the frame start is the **FIRST** row with order value `110`.
+    pub fn frame_start_of(&self, order_value: impl ToOwnedDatum) -> Sentinelled<Datum> {
+        self.start.for_calc().bound_of(order_value, self.order_type)
+    }
+
+    /// Get the frame end for a given order column value. It's very similar to `frame_start_of`, just with
+    /// everything on the other direction.
+    pub fn frame_end_of(&self, order_value: impl ToOwnedDatum) -> Sentinelled<Datum> {
+        self.end.for_calc().bound_of(order_value, self.order_type)
+    }
+
+    /// Get the order value of the CURRENT ROW of the first frame that includes the given order value.
+    ///
+    /// ## Examples
+    ///
+    /// For the following frames:
+    ///
+    /// ```sql
+    /// ORDER BY x ASC RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    /// ORDER BY x DESC RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+    /// ```
+    ///
+    /// For any given order value, the first CURRENT ROW is always the first-most row, which is
+    /// represented by [`Sentinelled::Smallest`].
+    ///
+    /// For the following frame:
+    ///
+    /// ```sql
+    /// ORDER BY x ASC RANGE BETWEEN CURRENT ROW AND 10 FOLLOWING
+    /// ```
+    ///
+    /// For a given order value `100`, the first CURRENT ROW should have order value `90`.
+    ///
+    /// For the following frame:
+    ///
+    /// ```sql
+    /// ORDER BY x DESC RANGE BETWEEN CURRENT ROW AND 10 FOLLOWING
+    /// ```
+    ///
+    /// For a given order value `100`, the first CURRENT ROW should have order value `110`.
+    pub fn first_curr_of(&self, order_value: impl ToOwnedDatum) -> Sentinelled<Datum> {
+        self.end
+            .for_calc()
+            .reverse()
+            .bound_of(order_value, self.order_type)
+    }
+
+    /// Get the order value of the CURRENT ROW of the last frame that includes the given order value.
+    /// It's very similar to `first_curr_of`, just with everything on the other direction.
+    pub fn last_curr_of(&self, order_value: impl ToOwnedDatum) -> Sentinelled<Datum> {
+        self.start
+            .for_calc()
+            .reverse()
+            .bound_of(order_value, self.order_type)
+    }
+}
+
 #[derive(Display, Debug, Clone, Eq, PartialEq, Hash, EnumAsInner)]
 #[display(style = "TITLE CASE")]
 pub enum FrameBound<T> {
@@ -437,6 +561,21 @@ impl<T> FrameBound<T> {
             CurrentRow => CurrentRow,
             Following(offset) => Following(f(offset)),
             UnboundedFollowing => UnboundedFollowing,
+        }
+    }
+}
+
+impl<T> FrameBound<T>
+where
+    T: Copy,
+{
+    fn reverse(self) -> FrameBound<T> {
+        match self {
+            UnboundedPreceding => UnboundedFollowing,
+            Preceding(offset) => Following(offset),
+            CurrentRow => CurrentRow,
+            Following(offset) => Preceding(offset),
+            UnboundedFollowing => UnboundedPreceding,
         }
     }
 }
@@ -501,8 +640,6 @@ impl RangeFrameBound {
         order_data_type: &DataType,
         offset_data_type: &DataType,
     ) -> Result<Self> {
-        use risingwave_pb::expr::expr_node::PbType as PbExprType;
-
         let bound = match bound.get_type()? {
             PbBoundType::Unspecified => bail!("unspecified type of `RangeFrameBound`"),
             PbBoundType::UnboundedPreceding => Self::UnboundedPreceding,
@@ -512,24 +649,8 @@ impl RangeFrameBound {
                 let offset_value = Datum::from_protobuf(bound.get_offset()?, offset_data_type)
                     .context("offset `Datum` is not decodable")?
                     .context("offset of `RangeFrameBound` must be non-NULL")?;
-                let input_expr = InputRefExpression::new(order_data_type.clone(), 0);
-                let offset_expr =
-                    LiteralExpression::new(offset_data_type.clone(), Some(offset_value.clone()));
-                let add_expr = build_func(
-                    PbExprType::Add,
-                    order_data_type.clone(),
-                    vec![input_expr.clone().boxed(), offset_expr.clone().boxed()],
-                )?;
-                let sub_expr = build_func(
-                    PbExprType::Subtract,
-                    order_data_type.clone(),
-                    vec![input_expr.boxed(), offset_expr.boxed()],
-                )?;
-                let offset = RangeFrameOffset {
-                    offset: offset_value,
-                    add_expr: Some(Arc::new(add_expr)),
-                    sub_expr: Some(Arc::new(sub_expr)),
-                };
+                let mut offset = RangeFrameOffset::new(offset_value);
+                offset.build_exprs(order_data_type, offset_data_type)?;
                 if bound_type == PbBoundType::Preceding {
                     Self::Preceding(offset)
                 } else {
@@ -570,6 +691,58 @@ impl RangeFrameBound {
             Following(offset) => Following(offset.as_scalar_ref_impl().to_text()),
             UnboundedFollowing => UnboundedFollowing,
         }
+    }
+
+    fn for_calc(&self) -> FrameBound<RangeFrameOffsetRef<'_>> {
+        match self {
+            UnboundedPreceding => UnboundedPreceding,
+            Preceding(offset) => Preceding(RangeFrameOffsetRef {
+                add_expr: offset.add_expr.as_ref().unwrap().as_ref(),
+                sub_expr: offset.sub_expr.as_ref().unwrap().as_ref(),
+            }),
+            CurrentRow => CurrentRow,
+            Following(offset) => Following(RangeFrameOffsetRef {
+                add_expr: offset.add_expr.as_ref().unwrap().as_ref(),
+                sub_expr: offset.sub_expr.as_ref().unwrap().as_ref(),
+            }),
+            UnboundedFollowing => UnboundedFollowing,
+        }
+    }
+}
+
+#[derive(Debug, Educe)]
+#[educe(Clone, Copy)]
+pub struct RangeFrameOffsetRef<'a> {
+    /// Built expression for `$0 + offset`.
+    add_expr: &'a dyn Expression,
+    /// Built expression for `$0 - offset`.
+    sub_expr: &'a dyn Expression,
+}
+
+impl FrameBound<RangeFrameOffsetRef<'_>> {
+    fn bound_of(self, order_value: impl ToOwnedDatum, order_type: OrderType) -> Sentinelled<Datum> {
+        let expr = match (self, order_type.direction()) {
+            (UnboundedPreceding, _) => return Sentinelled::Smallest,
+            (UnboundedFollowing, _) => return Sentinelled::Largest,
+            (CurrentRow, _) => return Sentinelled::Normal(order_value.to_owned_datum()),
+            (Preceding(offset), Direction::Ascending)
+            | (Following(offset), Direction::Descending) => {
+                // should SUBTRACT the offset
+                offset.sub_expr
+            }
+            (Following(offset), Direction::Ascending)
+            | (Preceding(offset), Direction::Descending) => {
+                // should ADD the offset
+                offset.add_expr
+            }
+        };
+        let row = OwnedRow::new(vec![order_value.to_owned_datum()]);
+        Sentinelled::Normal(
+            expr.eval_row(&row)
+                .now_or_never()
+                .expect("frame bound calculation should finish immediately")
+                .expect("just simple calculation, should succeed"), // TODO(rc): handle overflow
+        )
     }
 }
 

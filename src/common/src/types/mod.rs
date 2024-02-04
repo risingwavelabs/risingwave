@@ -600,6 +600,27 @@ pub trait ToOwnedDatum {
     fn to_owned_datum(self) -> Datum;
 }
 
+impl ToOwnedDatum for Datum {
+    #[inline(always)]
+    fn to_owned_datum(self) -> Datum {
+        self
+    }
+}
+
+impl ToOwnedDatum for &Datum {
+    #[inline(always)]
+    fn to_owned_datum(self) -> Datum {
+        self.clone()
+    }
+}
+
+impl ToOwnedDatum for Option<&ScalarImpl> {
+    #[inline(always)]
+    fn to_owned_datum(self) -> Datum {
+        self.cloned()
+    }
+}
+
 impl ToOwnedDatum for DatumRef<'_> {
     #[inline(always)]
     fn to_owned_datum(self) -> Datum {
