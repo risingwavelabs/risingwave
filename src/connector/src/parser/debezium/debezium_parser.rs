@@ -109,7 +109,7 @@ impl DebeziumParser {
             Err(err) => {
                 // Only try to access transaction control message if the row operation access failed
                 // to make it a fast path.
-                if let Ok(transaction_control) =
+                if let Some(transaction_control) =
                     row_op.transaction_control(&self.source_ctx.connector_props)
                 {
                     Ok(ParseResult::TransactionControl(transaction_control))

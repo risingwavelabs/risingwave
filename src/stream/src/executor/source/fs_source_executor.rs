@@ -107,6 +107,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             None,
             self.actor_ctx.error_suppressor.clone(),
             source_desc.source.config.clone(),
+            self.stream_source_core.source_name.clone(),
         );
         source_desc
             .source
@@ -402,6 +403,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             .with_label_values(&[
                                 self.actor_ctx.id.to_string().as_str(),
                                 self.stream_source_core.source_id.to_string().as_ref(),
+                                self.actor_ctx.fragment_id.to_string().as_str(),
                             ])
                             .inc_by(metric_row_per_barrier);
                         metric_row_per_barrier = 0;
@@ -456,6 +458,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             self.stream_source_core.source_id.to_string().as_ref(),
                             self.stream_source_core.source_name.as_ref(),
                             self.actor_ctx.id.to_string().as_str(),
+                            self.actor_ctx.fragment_id.to_string().as_str(),
                         ])
                         .inc_by(chunk.cardinality() as u64);
 
