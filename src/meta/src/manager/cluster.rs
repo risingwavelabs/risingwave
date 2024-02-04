@@ -112,6 +112,7 @@ impl ClusterManager {
         let mut core = self.core.write().await;
 
         if let Some(worker) = core.get_worker_by_host_mut(host_address.clone()) {
+            tracing::info!("worker {} re-joined the cluster", worker.worker_id());
             worker.update_resource(Some(resource));
             worker.update_started_at(timestamp_now_sec());
             if let Some(property) = &mut property {
@@ -149,7 +150,7 @@ impl ClusterManager {
                     new_worker.worker_node.parallel_units.extend(parallel_units);
                 }
                 Ordering::Greater => {
-                    if self.env.opts.enable_scale_in_when_recovery {
+                    if !self.env.opts.disable_automatic_parallelism_control {
                         // Handing over to the subsequent recovery loop for a forced reschedule.
                         tracing::info!(
                             "worker {} parallelism reduced from {} to {}",
@@ -186,7 +187,7 @@ impl ClusterManager {
             }
 
             new_worker.update_expire_at(self.max_heartbeat_interval);
-            new_worker.insert(self.env.meta_store()).await?;
+            new_worker.insert(self.env.meta_store_checked()).await?;
             *worker = new_worker;
             return Ok(worker.to_protobuf());
         }
@@ -230,18 +231,31 @@ impl ClusterManager {
         worker.update_started_at(timestamp_now_sec());
         worker.update_resource(Some(resource));
         // Persist worker node.
-        worker.insert(self.env.meta_store()).await?;
+        worker.insert(self.env.meta_store_checked()).await?;
         // Update core.
         core.add_worker_node(worker);
+
+        tracing::info!(
+            "new worker {} from {}:{} joined cluster",
+            worker_id,
+            host_address.get_host(),
+            host_address.get_port()
+        );
+
         Ok(worker_node)
     }
 
     pub async fn activate_worker_node(&self, host_address: HostAddress) -> MetaResult<()> {
         let mut core = self.core.write().await;
         let mut worker = core.get_worker_by_host_checked(host_address.clone())?;
+
+        let worker_id = worker.worker_id();
+
+        tracing::info!("worker {} activating", worker_id);
+
         if worker.worker_node.state != State::Running as i32 {
             worker.worker_node.state = State::Running as i32;
-            worker.insert(self.env.meta_store()).await?;
+            worker.insert(self.env.meta_store_checked()).await?;
             core.update_worker_node(worker.clone());
         }
 
@@ -257,6 +271,8 @@ impl ClusterManager {
             .notification_manager()
             .notify_local_subscribers(LocalNotification::WorkerNodeActivated(worker.worker_node))
             .await;
+
+        tracing::info!("worker {} activated", worker_id);
 
         Ok(())
     }
@@ -292,7 +308,7 @@ impl ClusterManager {
             }
         }
 
-        self.env.meta_store().txn(txn).await?;
+        self.env.meta_store_checked().txn(txn).await?;
 
         for var_txn in var_txns {
             var_txn.commit();
@@ -308,7 +324,7 @@ impl ClusterManager {
         let worker_node = worker.to_protobuf();
 
         // Persist deletion.
-        Worker::delete(self.env.meta_store(), &host_address).await?;
+        Worker::delete(self.env.meta_store_checked(), &host_address).await?;
 
         // Update core.
         core.delete_worker_node(worker);
@@ -536,7 +552,7 @@ impl ClusterManagerCore {
     pub const MAX_WORKER_REUSABLE_ID_COUNT: usize = 1 << Self::MAX_WORKER_REUSABLE_ID_BITS;
 
     async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let meta_store = env.meta_store();
+        let meta_store = env.meta_store_checked();
         let mut workers = Worker::list(meta_store).await?;
 
         let used_transactional_ids: HashSet<_> = workers
@@ -790,8 +806,11 @@ mod tests {
     async fn test_cluster_manager() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
 
-        let cluster_manager =
-            Arc::new(ClusterManager::new(env, Duration::new(0, 0)).await.unwrap());
+        let cluster_manager = Arc::new(
+            ClusterManager::new(env.clone(), Duration::new(0, 0))
+                .await
+                .unwrap(),
+        );
 
         let mut worker_nodes = Vec::new();
         let worker_count = 5usize;
@@ -878,8 +897,15 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(worker_node.parallel_units.len(), fake_parallelism + 4);
-        assert_cluster_manager(&cluster_manager, parallel_count + 4).await;
+
+        if !env.opts.disable_automatic_parallelism_control {
+            assert_eq!(worker_node.parallel_units.len(), fake_parallelism - 2);
+            assert_cluster_manager(&cluster_manager, parallel_count - 2).await;
+        } else {
+            // compatibility mode
+            assert_eq!(worker_node.parallel_units.len(), fake_parallelism + 4);
+            assert_cluster_manager(&cluster_manager, parallel_count + 4).await;
+        }
 
         let worker_to_delete_count = 4usize;
         for i in 0..worker_to_delete_count {

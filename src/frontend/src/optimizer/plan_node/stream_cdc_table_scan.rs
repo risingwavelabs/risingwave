@@ -199,7 +199,6 @@ impl StreamCdcTableScan {
             node_body: Some(PbNodeBody::CdcFilter(CdcFilterNode {
                 search_condition: Some(filter_expr.to_expr_proto()),
                 upstream_source_id,
-                upstream_column_ids: vec![], // not used,
             })),
         };
 
@@ -256,6 +255,7 @@ impl StreamCdcTableScan {
             state_table: Some(catalog),
             cdc_table_desc: Some(self.core.cdc_table_desc.to_protobuf()),
             rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+            disable_backfill: self.core.disable_backfill,
         });
 
         // plan: merge -> filter -> exchange(simple) -> stream_scan
