@@ -279,7 +279,7 @@ impl<'a> IndicesDisplay<'a> {
     }
 }
 
-pub(crate) fn sum_affected_row(dml: PlanRef) -> error::Result<PlanRef> {
+pub(crate) fn sum_affected_row(dml: PlanRef) -> Result<PlanRef> {
     let dml = RequiredDist::single().enforce_if_not_satisfies(dml, &Order::any())?;
     // Accumulate the affected rows.
     let sum_agg = PlanAggCall {
@@ -316,12 +316,12 @@ macro_rules! plan_node_name {
     };
 }
 pub(crate) use plan_node_name;
-use risingwave_common::error;
 use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::AggKind;
 
 use super::generic::{self, GenericPlanRef};
 use super::pretty_config;
+use crate::error::Result;
 use crate::expr::InputRef;
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};

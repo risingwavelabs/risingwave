@@ -8625,6 +8625,7 @@ dependencies = [
 name = "risingwave_bench"
 version = "1.7.0-alpha"
 dependencies = [
+ "anyhow",
  "async-trait",
  "aws-config",
  "aws-sdk-s3",
@@ -8691,6 +8692,7 @@ dependencies = [
  "console",
  "const-str",
  "expect-test",
+ "home",
  "madsim-tokio",
  "prometheus",
  "risingwave_cmd",
@@ -8841,6 +8843,7 @@ name = "risingwave_common_proc_macro"
 version = "1.7.0-alpha"
 dependencies = [
  "bae",
+ "itertools 0.12.0",
  "proc-macro-error 1.0.4",
  "proc-macro2",
  "quote",
@@ -9288,6 +9291,7 @@ dependencies = [
  "madsim-tonic",
  "maplit",
  "md5",
+ "memcomparable",
  "num-integer",
  "parking_lot 0.12.1",
  "parse-display",

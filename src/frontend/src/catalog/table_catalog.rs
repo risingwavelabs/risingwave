@@ -19,7 +19,6 @@ use itertools::Itertools;
 use risingwave_common::catalog::{
     ColumnCatalog, ConflictBehavior, TableDesc, TableId, TableVersionId,
 };
-use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
@@ -28,6 +27,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 
 use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId, SinkId};
+use crate::error::{ErrorCode, RwError};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
 use crate::user::UserId;
@@ -683,7 +683,7 @@ mod tests {
                             type_name: ".test.Country".to_string(),
                             description: None,
                             generated_or_default_column: None,
-                            additional_columns: AdditionalColumn { column_type: None },
+                            additional_column: AdditionalColumn { column_type: None },
                             version: ColumnDescVersion::Pr13707,
                         },
                         is_hidden: false

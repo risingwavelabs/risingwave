@@ -19,13 +19,13 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
-use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
 use super::RwPgResponse;
 use crate::binder::{Binder, Relation};
 use crate::catalog::CatalogError;
+use crate::error::Result;
 use crate::handler::util::col_descs_to_rows;
 use crate::handler::HandlerArgs;
 
