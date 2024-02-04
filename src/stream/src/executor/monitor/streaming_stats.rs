@@ -179,6 +179,8 @@ pub struct StreamingMetrics {
     pub lru_evicted_watermark_time_ms: LabelGuardedIntGaugeVec<3>,
     pub jemalloc_allocated_bytes: IntGauge,
     pub jemalloc_active_bytes: IntGauge,
+    pub jemalloc_resident_bytes: IntGauge,
+    pub jemalloc_metadata_bytes: IntGauge,
     pub jvm_allocated_bytes: IntGauge,
     pub jvm_active_bytes: IntGauge,
 
@@ -965,6 +967,20 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let jemalloc_resident_bytes = register_int_gauge_with_registry!(
+            "jemalloc_resident_bytes",
+            "The active memory jemalloc, got from jemalloc_ctl",
+            registry
+        )
+        .unwrap();
+
+        let jemalloc_metadata_bytes = register_int_gauge_with_registry!(
+            "jemalloc_metadata_bytes",
+            "The active memory jemalloc, got from jemalloc_ctl",
+            registry
+        )
+        .unwrap();
+
         let jvm_allocated_bytes = register_int_gauge_with_registry!(
             "jvm_allocated_bytes",
             "The allocated jvm memory",
@@ -1139,6 +1155,8 @@ impl StreamingMetrics {
             lru_evicted_watermark_time_ms,
             jemalloc_allocated_bytes,
             jemalloc_active_bytes,
+            jemalloc_resident_bytes,
+            jemalloc_metadata_bytes,
             jvm_allocated_bytes,
             jvm_active_bytes,
             materialize_cache_hit_count,
