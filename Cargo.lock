@@ -9966,6 +9966,7 @@ dependencies = [
  "auto_enums",
  "await-tree",
  "bytes",
+ "cfg-if",
  "criterion",
  "delta_btree_map",
  "educe 0.5.7",
@@ -10204,9 +10205,9 @@ dependencies = [
 
 [[package]]
 name = "rust_decimal"
-version = "1.33.0"
+version = "1.34.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "076ba1058b036d3ca8bcafb1d54d0b0572e99d7ecd3e4222723e18ca8e9ca9a8"
+checksum = "755392e1a2f77afd95580d3f0d0e94ac83eeeb7167552c9b5bca549e61a94d83"
 dependencies = [
  "arrayvec",
  "borsh",
