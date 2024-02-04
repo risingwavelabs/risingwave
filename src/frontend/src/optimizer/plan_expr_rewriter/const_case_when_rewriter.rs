@@ -29,6 +29,6 @@ impl ExprRewriter for ConstCaseWhenRewriter {
             // Normal constant lookup pass
             return func_call.into();
         }
-        func_call.inputs()[0].clone().into()
+        func_call.inputs()[0].clone()
     }
 }
