@@ -355,7 +355,6 @@ impl Binder {
             included_relations: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
             udf_context: UdfContext::new(),
-            udf_binding_flag: false,
         }
     }
 
