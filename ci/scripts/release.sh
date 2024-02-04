@@ -94,7 +94,13 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
   dnf install -y gh
 
   echo "--- Release create"
-  gh release create "${BUILDKITE_TAG}" --notes "release ${BUILDKITE_TAG}" -d -p
+  response=$(gh api repos/risingwavelabs/risingwave/releases/tags/${BUILDKITE_TAG} 2>&1)
+  if [[ $response == *"Not Found"* ]]; then
+    echo "Tag ${BUILDKITE_TAG} does not exist. Creating release..."
+    gh release create "${BUILDKITE_TAG}" --notes "release ${BUILDKITE_TAG}" -d -p
+  else
+    echo "Tag ${BUILDKITE_TAG} already exists. Skipping release creation."
+  fi
 
   echo "--- Release upload risingwave asset"
   tar -czvf risingwave-"${BUILDKITE_TAG}"-${ARCH}-unknown-linux.tar.gz risingwave
