@@ -229,7 +229,6 @@ impl FrontendObserverNode {
                     let Some(relation) = relation.relation_info.as_ref() else {
                         continue;
                     };
-                    println!("heiheihei: {:?}", relation);
                     match relation {
                         RelationInfo::Table(table) => match resp.operation() {
                             Operation::Add => catalog_guard.create_table(table),
