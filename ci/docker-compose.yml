@@ -116,7 +116,7 @@ services:
     volumes:
       - ..:/risingwave
 
-  release-env:
+  release-env-x86:
     # build binaries on a earlier Linux distribution (therefore with earlier version GLIBC)
     # See https://github.com/risingwavelabs/risingwave/issues/4556 for more details.
     #
@@ -128,6 +128,12 @@ services:
     #
     # manylinux2014: CentOS 7 (EOL 2024-06-30), GLIBC 2.17
     image: quay.io/pypa/manylinux2014_x86_64
+    working_dir: /mnt
+    volumes:
+      - ..:/mnt
+
+  release-env-arm:
+    image: quay.io/pypa/manylinux2014_aarch64
     working_dir: /mnt
     volumes:
       - ..:/mnt
