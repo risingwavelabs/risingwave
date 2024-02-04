@@ -200,10 +200,10 @@ impl CdcSplitTrait for MongoDbCdcSplit {
         if !snapshot_done {
             let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset).map_err(|e| {
                 anyhow!(
+                    "invalid mongodb offset: {}, error: {}, split: {}",
                     start_offset,
-                    source_id = self.inner.split_id,
-                    "mongodb split: invalid debezium offset",
-                    e
+                    e,
+                    self.inner.split_id
                 )
             })?;
 

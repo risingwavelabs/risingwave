@@ -188,8 +188,11 @@ public class DbzCdcEventConsumer
                                         .setKey(new String(key, StandardCharsets.UTF_8))
                                         .setSourceTsMs(sourceTsMs)
                                         .build();
-                        LOG.info(
-                                "key => {}, payload => {}", message.getKey(), message.getPayload());
+                        LOG.debug(
+                                "offset => {}, key => {}, payload => {}",
+                                message.getOffset(),
+                                message.getKey(),
+                                message.getPayload());
                         respBuilder.addEvents(message);
                         break;
                     }
@@ -201,6 +204,7 @@ public class DbzCdcEventConsumer
             committer.markProcessed(event);
         }
 
+        LOG.debug("recv {} events", respBuilder.getEventsCount());
         // skip empty batch
         if (respBuilder.getEventsCount() > 0) {
             respBuilder.setSourceId(sourceId);
