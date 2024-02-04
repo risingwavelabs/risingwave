@@ -87,7 +87,7 @@ pub fn gen_create_mv_plan(
     emit_mode: Option<EmitMode>,
 ) -> Result<(PlanRef, PbTable)> {
     if session.config().create_compaction_group_for_mv() {
-        context.warn_to_user("The session varible CREATE_COMPACTION_GROUP_FOR_MV has been deprecated. It will not take effect.");
+        context.warn_to_user("The session variable CREATE_COMPACTION_GROUP_FOR_MV has been deprecated. It will not take effect.");
     }
 
     let db_name = session.database();
