@@ -21,6 +21,16 @@ from v_a natural join v_c;
 
 query i
 select
+    id, out1, out10, out11
+from v_a_d
+except
+select
+    id, out1, out10, out11
+from v_a natural join v_d;
+----
+
+query i
+select
     id, out3, out4, out7, out8, out9
 from v_b_c
 except
@@ -31,10 +41,40 @@ from v_b natural join v_c;
 
 query i
 select
+    id, out3, out4, out10, out11
+from v_b_d
+except
+select
+    id, out3, out4, out10, out11
+from v_b natural join v_d;
+----
+
+query i
+select
+    id, out7, out8, out9, out10, out11
+from v_c_d
+except
+select
+    id, out7, out8, out9, out10, out11
+from v_c natural join v_d;
+----
+
+query i
+select
     id, out1, out2, out3, out4, out5, out6, out7, out8, out9
 from v_a_b_c
 except
 select
     id, out1, out2, out3, out4, out5, out6, out7, out8, out9
 from v_a natural join v_b natural join v_c;
+----
+
+query i
+select
+    id, out1, out2, out3, out4, out5, out6, out7, out8, out9, out10, out11
+from v_a_b_c_d
+except
+select
+    id, out1, out2, out3, out4, out5, out6, out7, out8, out9, out10, out11
+from v_a natural join v_b natural join v_c natural join v_d;
 ----

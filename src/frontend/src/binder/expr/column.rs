@@ -45,7 +45,7 @@ impl Binder {
         // to the name of the defined sql udf parameters stored in `udf_context`.
         // If so, we will treat this bind as an special bind, the actual expression
         // stored in `udf_context` will then be bound instead of binding the non-existing column.
-        if self.udf_binding_flag {
+        if self.udf_context.global_count() != 0 {
             if let Some(expr) = self.udf_context.get_expr(&column_name) {
                 return Ok(expr.clone());
             } else {

@@ -12,6 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+cfg_if::cfg_if! {
+    if #[cfg(test)] {
+        use risingwave_common::catalog::{DatabaseId, SchemaId};
+        use risingwave_pb::catalog::table::TableType;
+        use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
+        use risingwave_pb::data::data_type::TypeName;
+        use risingwave_pb::data::DataType;
+        use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc};
+    }
+}
+
 use std::collections::HashSet;
 use std::ops::{Bound, Deref};
 use std::sync::Arc;
@@ -19,6 +30,7 @@ use std::sync::Arc;
 use futures::{pin_mut, StreamExt};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{DatabaseId, SchemaId};
+use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRef, ScalarRefImpl};
@@ -26,12 +38,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::key::next_key;
-use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::PbTable;
-use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
-use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::DataType;
-use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
@@ -129,10 +136,10 @@ impl<S: StateStore> SourceStateTableHandler<S> {
 
     /// set all complete
     /// can only used by `FsSourceExecutor`
-    pub(crate) async fn set_all_complete<SS>(&mut self, states: Vec<SS>) -> StreamExecutorResult<()>
-    where
-        SS: SplitMetaData,
-    {
+    pub(crate) async fn set_all_complete(
+        &mut self,
+        states: Vec<SplitImpl>,
+    ) -> StreamExecutorResult<()> {
         if states.is_empty() {
             // TODO should be a clear Error Code
             bail!("states require not null");
@@ -169,11 +176,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         Ok(())
     }
 
-    /// This function provides the ability to persist the source state
-    /// and needs to be invoked by the ``SourceReader`` to call it,
-    /// and will return the error when the dependent ``StateStore`` handles the error.
-    /// The caller should ensure that the passed parameters are not empty.
-    pub async fn take_snapshot<SS>(&mut self, states: Vec<SS>) -> StreamExecutorResult<()>
+    pub async fn set_states<SS>(&mut self, states: Vec<SS>) -> StreamExecutorResult<()>
     where
         SS: SplitMetaData,
     {
@@ -189,10 +192,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         Ok(())
     }
 
-    pub async fn trim_state<SS>(&mut self, to_trim: &[SS]) -> StreamExecutorResult<()>
-    where
-        SS: SplitMetaData,
-    {
+    pub async fn trim_state(&mut self, to_trim: &[SplitImpl]) -> StreamExecutorResult<()> {
         for split in to_trim {
             tracing::info!("trimming source state for split {}", split.id());
             self.delete(split.id()).await?;
@@ -217,8 +217,9 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     }
 }
 
-// align with schema defined in `LogicalSource::infer_internal_table_catalog`. The function is used
-// for test purpose and should not be used in production.
+/// align with schema defined in `LogicalSource::infer_internal_table_catalog`. The function is used
+/// for test purpose and should not be used in production.
+#[cfg(test)]
 pub fn default_source_internal_table(id: u32) -> PbTable {
     let make_column = |column_type: TypeName, column_id: i32| -> ColumnCatalog {
         ColumnCatalog {
@@ -314,7 +315,7 @@ pub(crate) mod tests {
 
         state_table_handler.init_epoch(epoch_1);
         state_table_handler
-            .take_snapshot(vec![split_impl.clone()])
+            .set_states(vec![split_impl.clone()])
             .await?;
         state_table_handler.state_store.commit(epoch_2).await?;
 
