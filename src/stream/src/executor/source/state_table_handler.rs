@@ -29,8 +29,6 @@ use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{DatabaseId, SchemaId};
-use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRef, ScalarRefImpl};
