@@ -15,7 +15,6 @@
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
-use crate::parser::unified::uncategorized;
 use crate::parser::TransactionControl;
 use crate::source::{ConnectorProperties, SourceColumnDesc};
 
