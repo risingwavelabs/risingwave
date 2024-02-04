@@ -23,7 +23,7 @@ services:
       service: prometheus-0
   citus-master:
     container_name: citus-master
-    image: "citusdata/citus:10.2.5"
+    image: "citusdata/citus:12.1"
     ports: ["6666:5432"]
     labels: ["com.citusdata.role=Master"]
     environment: &CITUS_ENV
@@ -37,7 +37,7 @@ services:
   citus-worker-1:
     container_name: citus-worker-1
     ports: ["6667:5432"]
-    image: "citusdata/citus:10.2.5"
+    image: "citusdata/citus:12.1"
     labels: ["com.citusdata.role=Worker"]
     depends_on: [citus-manager]
     environment: *CITUS_ENV
@@ -48,7 +48,7 @@ services:
   citus-worker-2:
     container_name: citus-worker-2
     ports: ["6668:5432"]
-    image: "citusdata/citus:10.2.5"
+    image: "citusdata/citus:12.1"
     labels: ["com.citusdata.role=Worker"]
     depends_on: [citus-manager]
     environment: *CITUS_ENV
@@ -66,7 +66,7 @@ services:
     environment: *CITUS_ENV
   citus-prepare:
     container_name: citus_prepare
-    image: "citusdata/citus:10.2.5"
+    image: "citusdata/citus:12.1"
     depends_on:
       - citus-master
       - citus-manager
