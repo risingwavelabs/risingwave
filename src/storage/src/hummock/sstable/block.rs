@@ -216,13 +216,11 @@ impl Block {
                     .map_err(HummockError::decode_error)?;
                 let mut decoded = BytesMut::with_capacity(uncompressed_capacity);
                 unsafe { decoded.set_len(uncompressed_capacity) }
-                let actual_size = decoder
-                    .read(&mut decoded)
+                decoder
+                    .read_exact(&mut decoded)
                     .map_err(HummockError::decode_error)?;
-                unsafe {
-                    decoded.set_len(actual_size);
-                }
-                debug_assert_eq!(decoded.capacity(), uncompressed_capacity);
+
+                assert_eq!(uncompressed_capacity, decoded.len());
                 decoded.freeze()
             }
             CompressionAlgorithm::Zstd => {
@@ -230,13 +228,11 @@ impl Block {
                     .map_err(HummockError::decode_error)?;
                 let mut decoded = BytesMut::with_capacity(uncompressed_capacity);
                 unsafe { decoded.set_len(uncompressed_capacity) }
-                let actual_size = decoder
-                    .read(&mut decoded)
+                decoder
+                    .read_exact(&mut decoded)
                     .map_err(HummockError::decode_error)?;
-                unsafe {
-                    decoded.set_len(actual_size);
-                }
-                debug_assert_eq!(decoded.capacity(), uncompressed_capacity);
+
+                assert_eq!(uncompressed_capacity, decoded.len());
                 decoded.freeze()
             }
         };
@@ -682,6 +678,7 @@ impl BlockBuilder {
                 self.compression_algorithm,
                 std::mem::take(&mut self.compress_buf),
             );
+
             &mut self.compress_buf
         } else {
             &mut self.buf
