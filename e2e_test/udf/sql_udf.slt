@@ -1,11 +1,11 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
-###########################################################
-# Basic tests for sql udf with unnamed / named parameters #
-###########################################################
+#############################################################
+# Basic tests for sql udf with [unnamed / named] parameters #
+#############################################################
 
-# Create an unnamed function with double dollar as clause
+# Create a sql udf function with unnamed parameters with double dollar as clause
 statement ok
 create function add(INT, INT) returns int language sql as $$select $1 + $2$$;
 
@@ -14,7 +14,7 @@ select add(1, -1);
 ----
 0
 
-# Create an unnamed function with single quote as clause
+# Create a sql udf function with unnamed parameters with single quote as clause
 statement ok
 create function sub(INT, INT) returns int language sql as 'select $1 - $2';
 
@@ -23,7 +23,7 @@ select sub(1, 1);
 ----
 0
 
-# Create an unnamed function that calls other pre-defined sql udfs
+# Create a sql udf function with unamed parameters that calls other pre-defined sql udfs
 statement ok
 create function add_sub_binding() returns int language sql as 'select add(1, 1) + sub(2, 2)';
 
@@ -38,7 +38,7 @@ select add(1, -1), sub(1, 1), add_sub_binding();
 ----
 0 0 2
 
-# Create a named sql udf with single quote as clause
+# Create a sql udf with named parameters with single quote as clause
 statement ok
 create function add_named(a INT, b INT) returns int language sql as 'select a + b';
 
@@ -47,7 +47,7 @@ select add_named(1, -1);
 ----
 0
 
-# Create another named sql udf with double dollar as clause
+# Create another sql udf with named parameters with double dollar as clause
 statement ok
 create function sub_named(a INT, b INT) returns int language sql as $$select a - b$$;
 
@@ -65,7 +65,7 @@ select add_sub_mix(1, 2, 3);
 ----
 2
 
-# Call unnamed sql udf inside named sql udf
+# Call sql udf with unnamed parameters inside sql udf with named parameters
 statement ok
 create function add_named_wrapper(a INT, b INT) returns int language sql as 'select add(a, b)';
 
@@ -74,7 +74,7 @@ select add_named_wrapper(1, -1);
 ----
 0
 
-# Create an unnamed function with return expression
+# Create a sql udf with unnamed parameters with return expression
 statement ok
 create function add_return(INT, INT) returns int language sql return $1 + $2;
 
@@ -221,7 +221,7 @@ select corner_case(1, 2, 3);
 ----
 $1 + a + $3
 
-# Create an unnamed function that calls built-in functions
+# Create a sql udf with unnamed parameters that calls built-in functions
 # Note that double dollar signs should be used otherwise the parsing will fail, as illutrates below
 statement ok
 create function call_regexp_replace() returns varchar language sql as $$select regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')$$;
@@ -313,7 +313,7 @@ create function fib(INT) returns int
 statement error failed to conduct semantic check, please see if you are calling non-existent functions
 create function non_exist(INT) returns int language sql as 'select yo(114514)';
 
-# Try to create an unnamed sql udf whose return type mismatches with the sql body definition
+# Try to create an sql udf with unnamed parameters whose return type mismatches with the sql body definition
 statement error return type mismatch detected
 create function type_mismatch(INT) returns varchar language sql as 'select $1 + 114514 + $1';
 
