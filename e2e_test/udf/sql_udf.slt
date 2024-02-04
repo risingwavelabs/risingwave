@@ -209,8 +209,13 @@ select add_named(a, b) from t3 order by a asc;
 ################################
 
 # Mixed parameter with calling inner sql udfs
-# statement ok
-# create function add_sub_mix_wrapper(INT, a INT, INT) returns int language sql as 'select add($1, a) + a + sub(a, $3)';
+statement ok
+create function add_sub_mix_wrapper(INT, a INT, INT) returns int language sql as 'select add($1, a) + a + sub(a, $3)';
+
+query I
+select add_sub_mix_wrapper(1, 2, 3);
+----
+4
 
 # Named sql udf with corner case
 statement ok
@@ -403,6 +408,9 @@ drop function add_named_wrapper;
 
 statement ok
 drop function type_match;
+
+statement ok
+drop function add_sub_mix_wrapper;
 
 statement ok
 drop table t1;

@@ -240,12 +240,16 @@ impl Binder {
                 }
 
                 if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
-                    self.set_udf_binding_flag();
                     let bind_result = self.bind_expr(expr);
-                    self.unset_udf_binding_flag();
+
+                    // We should properly decrement global count after a successful binding
+                    // Since the subsequent probe operation in `bind_column` or
+                    // `bind_parameter` relies on global counting
+                    self.udf_context.decr_global_count();
 
                     // Restore context information for subsequent binding
                     self.udf_context.update_context(stashed_udf_context);
+
                     return bind_result;
                 } else {
                     return Err(ErrorCode::InvalidInputSyntax(
