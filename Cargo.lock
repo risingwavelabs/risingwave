@@ -642,9 +642,9 @@ dependencies = [
 
 [[package]]
 name = "arrow-udf-wasm"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70b965912f2c5514ce243a384e9b4e61544932acd28f126ad1adb13da04fa247"
+checksum = "3ccaec984501c42dab31a0363e4c8b11e1dc2d870d7e3af6868b8ffbd704ce0a"
 dependencies = [
  "anyhow",
  "arrow-array 50.0.0",

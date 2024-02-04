@@ -199,7 +199,7 @@ pub async fn handle_create_function(
             body = Some(function_body.clone());
 
             let wasm_binary =
-                tokio::task::spawn_blocking(move || arrow_udf_wasm::build("", &script))
+                tokio::task::spawn_blocking(move || arrow_udf_wasm::build::build("", &script))
                     .await?
                     .context("failed to build rust function")?;
 
