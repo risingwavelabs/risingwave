@@ -106,6 +106,8 @@ pub struct FrontendOpts {
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_addr: MetaAddressStrategy,
 
+    /// We will start a http server at this address via `MetricsManager`.
+    /// Then the prometheus instance will poll the metrics from this address.
     #[clap(
         long,
         env = "RW_PROMETHEUS_LISTENER_ADDR",

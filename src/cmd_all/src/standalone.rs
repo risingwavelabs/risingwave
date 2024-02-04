@@ -141,7 +141,7 @@ pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts 
             compactor_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
         }
         if let Some(meta_opts) = meta_opts.as_mut() {
-            meta_opts.prometheus_host = Some(prometheus_listener_addr.clone());
+            meta_opts.prometheus_listener_addr = Some(prometheus_listener_addr.clone());
         }
     }
 
@@ -246,6 +246,7 @@ mod test {
 
         // Test parsing into node-level opts.
         let actual = parse_standalone_opt_args(&opts);
+
         check(
             actual,
             expect![[r#"
@@ -257,7 +258,7 @@ mod test {
                             listen_addr: "127.0.0.1:8001",
                             advertise_addr: "127.0.0.1:9999",
                             dashboard_host: None,
-                            prometheus_host: Some(
+                            prometheus_listener_addr: Some(
                                 "127.0.0.1:1234",
                             ),
                             etcd_endpoints: "",
