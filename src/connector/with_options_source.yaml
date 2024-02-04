@@ -61,9 +61,6 @@ KafkaProperties:
     field_type: String
     required: true
     alias: kafka.brokers
-  - name: broker.rewrite.endpoints
-    field_type: HashMap<String,String>
-    required: false
   - name: topic
     field_type: String
     required: true
@@ -168,6 +165,10 @@ KafkaProperties:
   - name: properties.enable.auto.commit
     field_type: bool
     comments: 'Automatically and periodically commit offsets in the background.  Note: setting this to false does not prevent the consumer from fetching previously committed start offsets.  To circumvent this behaviour set specific start offsets per partition in the call to assign().  default: true'
+    required: false
+  - name: broker.rewrite.endpoints
+    field_type: HashMap<String,String>
+    comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
     required: false
 KinesisProperties:
   fields:
