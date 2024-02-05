@@ -488,7 +488,7 @@ export default function Streaming() {
             </Select>
           </FormControl>
           <FormControl>
-            <FormLabel>Back Pressure</FormLabel>
+            <FormLabel>Back Pressure Algorithm</FormLabel>
             <Select
               value={backPressureAlgo ?? undefined}
               onChange={(event) => {
