@@ -40,7 +40,7 @@ use risingwave_connector::source::cdc::external::{
 use risingwave_storage::table::{collect_data_chunk_with_builder, KeyedRow};
 use risingwave_storage::StateStore;
 
-use crate::common::table::state_table::StateTableInner;
+use crate::common::table::state_table::{StateTable, StateTableInner};
 use crate::executor::{
     Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
 };
@@ -728,11 +728,11 @@ where
 /// TODO(kwannoel): we should check committed state to be all `finished` in the tests.
 /// TODO(kwannoel): Instead of persisting state per vnode each time,
 /// we can optimize by persisting state for a subset of vnodes which were updated.
-pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
+pub(crate) async fn persist_state_per_vnode<S: StateStore>(
     epoch: EpochPair,
-    table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
+    table: &mut StateTable<S>,
     backfill_state: &mut BackfillState,
-    #[cfg(debug_assertions)] state_len: usize,
+    _state_len: usize,
     vnodes: impl Iterator<Item = VirtualNode>,
     actor_id: u32,
 ) -> StreamExecutorResult<()> {
@@ -760,8 +760,8 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
                         // value segment (without vnode) should be used for comparison
                         assert_eq!(inner, &encoded_prev_state[1..]);
                         assert_ne!(inner, &encoded_current_state[1..]);
-                        assert_eq!(old_row.len(), state_len - 1);
-                        assert_eq!(encoded_current_state.len(), state_len);
+                        assert_eq!(old_row.len(), _state_len - 1);
+                        assert_eq!(encoded_current_state.len(), _state_len);
                     }
                     None => {
                         panic!("row {:#?} not found", pk);
@@ -788,7 +788,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
                 let pk: &[Datum; 1] = &[Some(vnode.to_scalar().into())];
                 let row = table.get_row(pk).await?;
                 assert!(row.is_none(), "row {:#?}", row);
-                assert_eq!(encoded_current_state.len(), state_len);
+                assert_eq!(encoded_current_state.len(), _state_len);
             }
             if vnode == VirtualNode::from_scalar(0) {
                 tracing::trace!(

@@ -30,7 +30,7 @@ use risingwave_pb::stream_service::{
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{oneshot, Mutex, RwLock};
-use tracing::Instrument;
+use tracing::{warn, Instrument};
 use uuid::Uuid;
 
 use super::{Locations, RescheduleOptions, ScaleController, ScaleControllerRef, TableResizePolicy};
@@ -317,6 +317,7 @@ impl GlobalStreamManager {
                                         )
                                     })
                                     .collect_vec();
+                                warn!(?node_actors, "cancelling actors");
                                 let futures = node_actors.into_iter().map(|(node, actor_ids)| {
                                     let request_id = Uuid::new_v4().to_string();
                                     async move {

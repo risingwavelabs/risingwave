@@ -108,6 +108,7 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<DropActorsResponse>, Status> {
         let req = request.into_inner();
         let actors = req.actor_ids;
+        warn!(?actors, "handle drop actor request");
         self.mgr.drop_actors(&actors)?;
         Ok(Response::new(DropActorsResponse {
             request_id: req.request_id,

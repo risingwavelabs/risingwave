@@ -260,6 +260,7 @@ impl LocalStreamManager {
 
     /// Drop the resources of the given actors.
     pub fn drop_actors(&self, actors: &[ActorId]) -> StreamResult<()> {
+        warn!(?actors, "drop actors");
         self.context.drop_actors(actors);
         let mut core = self.core.lock();
         for &id in actors {
@@ -719,24 +720,6 @@ impl LocalStreamManagerCore {
             }
         }
     }
-
-    pub fn take_all_handles(&mut self) -> StreamResult<HashMap<ActorId, ActorHandle>> {
-        Ok(std::mem::take(&mut self.handles))
-    }
-
-    pub fn remove_actor_handles(
-        &mut self,
-        actor_ids: &[ActorId],
-    ) -> StreamResult<Vec<ActorHandle>> {
-        actor_ids
-            .iter()
-            .map(|actor_id| {
-                self.handles
-                    .remove(actor_id)
-                    .ok_or_else(|| anyhow!("No such actor with actor id:{}", actor_id).into())
-            })
-            .try_collect()
-    }
 }
 
 impl LocalStreamManager {
@@ -767,6 +750,8 @@ impl LocalStreamManagerCore {
             .remove(&actor_id)
             .inspect(|handle| handle.abort());
         self.actors.remove(&actor_id);
+
+        error!(actor_id, "remove running actor");
 
         // Task should have already stopped when this method is invoked. There might be some
         // clean-up work left (like dropping in-memory data structures), but we don't have to wait

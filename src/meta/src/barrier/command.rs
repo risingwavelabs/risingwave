@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::default::Default;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
@@ -36,6 +37,7 @@ use risingwave_pb::stream_plan::{
 };
 use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
 use thiserror_ext::AsReport;
+use tracing::warn;
 use uuid::Uuid;
 
 use super::info::{ActorDesc, CommandActorChanges, InflightActorInfo};
@@ -740,6 +742,7 @@ impl CommandContext {
 
     /// Clean up actors in CNs if needed, used by drop, cancel and reschedule commands.
     async fn clean_up(&self, actors: Vec<ActorId>) -> MetaResult<()> {
+        warn!(?actors, "{:?}", anyhow!("clean up").as_report());
         let futures = self.info.node_map.values().map(|node| {
             let request_id = Uuid::new_v4().to_string();
             let actor_ids = actors.clone();
