@@ -341,7 +341,6 @@ fn recursive_parse_json(
     serde_json::Value::Object(ret)
 }
 
-// TODO(eh): should use `AccessError`
 pub fn from_protobuf_value(
     field_desc: &FieldDescriptor,
     value: &Value,

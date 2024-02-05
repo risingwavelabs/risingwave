@@ -21,7 +21,7 @@ pub use avro::AvroParserConfig;
 pub use canal::*;
 use csv_parser::CsvParser;
 pub use debezium::*;
-use futures::{Future, TryFutureExt, TryStreamExt};
+use futures::{Future, TryFutureExt};
 use futures_async_stream::try_stream;
 pub use json_parser::*;
 pub use protobuf::*;
@@ -572,15 +572,13 @@ impl<P: ByteStreamSourceParser> P {
 
         // The parser stream will be long-lived. We use `instrument_with` here to create
         // a new span for the polling of each chunk.
-        into_chunk_stream(self, data_stream)
-            .instrument_with(move || {
-                tracing::info_span!(
-                    "source_parse_chunk",
-                    actor_id = source_info.actor_id,
-                    source_id = source_info.source_id.table_id()
-                )
-            })
-            .map_err(Into::into) // TODO(eh): remove this
+        into_chunk_stream(self, data_stream).instrument_with(move || {
+            tracing::info_span!(
+                "source_parse_chunk",
+                actor_id = source_info.actor_id,
+                source_id = source_info.source_id.table_id()
+            )
+        })
     }
 }
 
@@ -730,7 +728,6 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 }
 
 pub trait AccessBuilder {
-    // TODO(eh)
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>>;
 }
 
