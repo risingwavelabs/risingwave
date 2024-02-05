@@ -32,9 +32,8 @@ use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 use crate::session::SessionImpl;
 
 mod options {
-    use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 
-    pub const RETENTION_SECONDS: &str = PROPERTIES_RETENTION_SECOND_KEY;
+    pub const RETENTION_SECONDS: &str = "retention_seconds";
 }
 
 /// Options or properties extracted from the `WITH` clause of DDLs.

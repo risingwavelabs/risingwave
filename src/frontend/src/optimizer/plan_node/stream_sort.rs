@@ -76,8 +76,7 @@ impl StreamEowcSort {
         // The sort state table has the same schema as the input.
 
         let in_fields = self.input.schema().fields();
-        let mut tbl_builder =
-            TableCatalogBuilder::new(self.ctx().with_options().internal_table_subset());
+        let mut tbl_builder = TableCatalogBuilder::default();
         for field in in_fields {
             tbl_builder.add_column(field);
         }

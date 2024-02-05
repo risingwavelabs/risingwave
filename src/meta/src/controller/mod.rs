@@ -106,7 +106,6 @@ impl From<ObjectModel<table::Model>> for PbTable {
             stream_key: value.0.stream_key.0,
             append_only: value.0.append_only,
             owner: value.1.owner_id as _,
-            properties: value.0.properties.0,
             fragment_id: value.0.fragment_id.unwrap_or_default() as u32,
             vnode_col_index: value.0.vnode_col_index.map(|index| index as _),
             row_id_index: value.0.row_id_index.map(|index| index as _),
@@ -139,6 +138,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             incoming_sinks: vec![],
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
+            retention_seconds: value.0.retention_seconds.map(|id| id as u32),
         }
     }
 }

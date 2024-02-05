@@ -290,7 +290,7 @@ pub(crate) mod tests {
             compact_task.table_options = BTreeMap::from([(
                 0,
                 TableOption {
-                    retention_seconds: 64,
+                    retention_seconds: Some(64),
                 },
             )]);
             compact_task.current_epoch_time = 0;
@@ -961,7 +961,7 @@ pub(crate) mod tests {
         compact_task.table_options = BTreeMap::from_iter([(
             existing_table_id,
             TableOption {
-                retention_seconds: retention_seconds_expire_second,
+                retention_seconds: Some(retention_seconds_expire_second),
             },
         )]);
         compact_task.current_epoch_time = epoch;

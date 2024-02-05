@@ -114,8 +114,7 @@ impl<I: stream::StreamPlanRef> Join<I> {
         pk_indices.extend(deduped_input_pk_indices.clone());
 
         // Build internal table
-        let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
+        let mut internal_table_catalog_builder = TableCatalogBuilder::default();
         let internal_columns_fields = schema.fields().to_vec();
 
         internal_columns_fields.iter().for_each(|field| {
@@ -126,8 +125,7 @@ impl<I: stream::StreamPlanRef> Join<I> {
         });
 
         // Build degree table.
-        let mut degree_table_catalog_builder =
-            TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
+        let mut degree_table_catalog_builder = TableCatalogBuilder::default();
 
         let degree_column_field = Field::with_name(DataType::Int64, "_degree");
 

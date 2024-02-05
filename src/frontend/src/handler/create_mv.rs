@@ -86,6 +86,10 @@ pub fn gen_create_mv_plan(
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<(PlanRef, PbTable)> {
+    if session.config().create_compaction_group_for_mv() {
+        context.warn_to_user("The session variable CREATE_COMPACTION_GROUP_FOR_MV has been deprecated. It will not take effect.");
+    }
+
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
 
@@ -119,12 +123,7 @@ pub fn gen_create_mv_plan(
     let materialize =
         plan_root.gen_materialize_plan(table_name, definition, emit_on_window_close)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
-    if session.config().create_compaction_group_for_mv() {
-        table.properties.insert(
-            String::from("independent_compaction_group"),
-            String::from("1"),
-        );
-    }
+
     let plan: PlanRef = materialize.into();
     let dependent_relations =
         RelationCollectorVisitor::collect_with(dependent_relations, plan.clone());

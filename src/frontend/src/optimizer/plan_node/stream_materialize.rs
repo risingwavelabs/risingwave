@@ -205,7 +205,7 @@ impl StreamMaterialize {
 
         let value_indices = (0..columns.len()).collect_vec();
         let distribution_key = input.distribution().dist_column_indices().to_vec();
-        let properties = input.ctx().with_options().internal_table_subset(); // TODO: remove this
+        let _properties = input.ctx().with_options().internal_table_subset(); // TODO: remove this
         let append_only = input.append_only();
         let watermark_columns = input.watermark_columns().clone();
 
@@ -233,7 +233,6 @@ impl StreamMaterialize {
             table_type,
             append_only,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            properties,
             fragment_id: OBJECT_ID_PLACEHOLDER,
             dml_fragment_id: None,
             vnode_col_index: None,
@@ -254,6 +253,8 @@ impl StreamMaterialize {
             incoming_sinks: vec![],
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/14791
+            retention_seconds: None,
         })
     }
 

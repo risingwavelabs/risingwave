@@ -27,14 +27,13 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use crate::catalog::table_catalog::{CreateType, TableType};
 use crate::catalog::{ColumnId, TableCatalog, TableId};
 use crate::optimizer::property::{Cardinality, Order, RequiredDist};
-use crate::utils::{Condition, IndexSet, WithOptions};
+use crate::utils::{Condition, IndexSet};
 
 #[derive(Default)]
 pub struct TableCatalogBuilder {
     /// All columns in this table
     columns: Vec<ColumnCatalog>,
     pk: Vec<ColumnOrder>,
-    properties: WithOptions,
     value_indices: Option<Vec<usize>>,
     vnode_col_idx: Option<usize>,
     column_names: HashMap<String, i32>,
@@ -46,14 +45,6 @@ pub struct TableCatalogBuilder {
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
 /// Be careful of the order of add column.
 impl TableCatalogBuilder {
-    // TODO: Add more fields if internal table is more configurable.
-    pub fn new(properties: WithOptions) -> Self {
-        Self {
-            properties,
-            ..Default::default()
-        }
-    }
-
     /// Add a column from Field info, return the column index of the table
     pub fn add_column(&mut self, field: &Field) -> usize {
         let column_idx = self.columns.len();
@@ -159,7 +150,6 @@ impl TableCatalogBuilder {
             table_type: TableType::Internal,
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            properties: self.properties,
             fragment_id: OBJECT_ID_PLACEHOLDER,
             dml_fragment_id: None,
             vnode_col_index: self.vnode_col_idx,
@@ -184,6 +174,7 @@ impl TableCatalogBuilder {
             incoming_sinks: vec![],
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
+            retention_seconds: None,
         }
     }
 
