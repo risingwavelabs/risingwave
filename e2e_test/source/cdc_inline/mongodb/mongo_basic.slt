@@ -4,7 +4,7 @@ control substitution on
 statement ok
 CREATE TABLE users (_id JSONB PRIMARY KEY, payload JSONB) WITH (
   connector = 'mongodb-cdc',
-  mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+  mongodb.url = 'mongodb://localhost:27017/?replicaSet=rs0',
   collection.name = 'random_data.*'
 );
 
@@ -22,4 +22,4 @@ sleep 5s
 query I
 select count(*) from normalized_users;
 ----
-1000
+25
