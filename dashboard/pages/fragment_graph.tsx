@@ -473,7 +473,7 @@ export default function Streaming() {
             </VStack>
           </FormControl>
           <FormControl>
-            <FormLabel>Data Source</FormLabel>
+            <FormLabel>Back Pressure Data Source</FormLabel>
             <Select
               value={backPressureDataSourceAlgo}
               onChange={(event) =>
