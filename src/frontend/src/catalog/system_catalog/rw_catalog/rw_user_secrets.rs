@@ -16,11 +16,11 @@ use std::sync::LazyLock;
 
 use itertools::Itertools;
 use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::error::{ErrorCode, Result};
 use crate::user::user_authentication::encrypted_raw_password;
 
 /// `rw_user_secret` stores all user encrypted passwords in the database, which is only readable by
