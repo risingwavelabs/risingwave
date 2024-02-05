@@ -21,7 +21,7 @@ db = client[mongo_db_name]
 fake = Faker()
 collection = db["users"]
 
-for _ in range(1000):
+for _ in range(25):
     user_data = {
         "name": fake.name(),
         "address": fake.address(),
