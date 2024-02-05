@@ -69,9 +69,9 @@ dpkg -i libssl1.1_1.1.1f-1ubuntu2_amd64.deb
 dpkg -i mongodb-org-shell_4.4.28_amd64.deb
 
 echo '> ping mongodb'
-echo 'db.runCommand({ping: 1})' | mongo
+echo 'db.runCommand({ping: 1})' | mongo mongodb://mongodb:27017
 echo '> rs config'
-echo 'rs.conf()' | mongo
+echo 'rs.conf()' | mongo mongodb://mongodb:27017
 echo '> run test..'
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/mongodb/**/*.slt'
 
