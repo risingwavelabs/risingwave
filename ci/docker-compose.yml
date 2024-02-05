@@ -77,6 +77,9 @@ services:
       - db
       - message_queue
       - schemaregistry
+      - mongodb
+      - mongodb-setup
+      - mongo_data_generator
     volumes:
       - ..:/risingwave
 
@@ -213,9 +216,8 @@ services:
 
   mongodb:
     image: mongo:4.4
-    container_name: mongodb
     ports:
-      - "27017:27017"
+      - "27017"
     command: --replSet rs0 --oplogSize 128
     restart: always
     healthcheck:

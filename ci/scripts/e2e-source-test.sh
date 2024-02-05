@@ -61,6 +61,20 @@ echo "--- starting risingwave cluster"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-1cn-1fe-with-recovery
 
+echo "--- mongodb cdc test"
+# install the mongo shell
+wget http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb
+wget https://repo.mongodb.org/apt/ubuntu/dists/focal/mongodb-org/4.4/multiverse/binary-amd64/mongodb-org-shell_4.4.28_amd64.deb
+dpkg -i libssl1.1_1.1.1f-1ubuntu2_amd64.deb
+dpkg -i mongodb-org-shell_4.4.28_amd64.deb
+
+echo '> ping mongodb'
+echo 'db.runCommand({ping: 1})' | mongo
+echo '> rs config'
+echo 'rs.conf()' | mongo
+echo '> run test..'
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/mongodb/**/*.slt'
+
 echo "--- inline cdc test"
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc_inline/**/*.slt'
