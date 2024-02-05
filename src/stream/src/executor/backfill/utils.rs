@@ -27,7 +27,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -785,6 +785,17 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
                     ?encoded_prev_state,
                     ?encoded_current_state,
                     "update vnode",
+                );
+                let expected_row = [
+                    Some(0_i16.into()),
+                    Some(ScalarImpl::Serial(196285274622263379.into())),
+                    Some(ScalarImpl::Bool(false)),
+                    Some(ScalarImpl::Int64(84)),
+                ];
+                assert!(
+                    Row::eq(&&encoded_current_state[..], &expected_row),
+                    "expected={:#?}",
+                    expected_row
                 );
             }
 
