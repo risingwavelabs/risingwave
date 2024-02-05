@@ -708,7 +708,9 @@ pub(crate) async fn bind_source_pk(
         .collect_vec();
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
-        (Format::Native, Encode::Native) | (Format::None, Encode::None) | (Format::Plain, _) => sql_defined_pk_names,
+        (Format::Native, Encode::Native) | (Format::None, Encode::None) | (Format::Plain, _) => {
+            sql_defined_pk_names
+        }
 
         // For all Upsert formats, we only accept one and only key column as primary key.
         // Additional KEY columns must be set in this case and must be primary key.

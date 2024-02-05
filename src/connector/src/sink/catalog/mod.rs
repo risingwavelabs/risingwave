@@ -205,7 +205,12 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             F::Plain => SinkFormat::AppendOnly,
             F::Upsert => SinkFormat::Upsert,
             F::Debezium => SinkFormat::Debezium,
-            f @ (F::Unspecified | F::Native | F::DebeziumMongo | F::Maxwell | F::Canal | F::None) => {
+            f @ (F::Unspecified
+            | F::Native
+            | F::DebeziumMongo
+            | F::Maxwell
+            | F::Canal
+            | F::None) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink format unsupported: {}",
                     f.as_str_name()
