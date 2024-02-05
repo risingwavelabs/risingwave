@@ -23,6 +23,7 @@ use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::{RpcError, TonicStatusWrapper};
 use thiserror::Error;
 use thiserror_ext::Box;
+use tokio::task::JoinError;
 
 /// The error type for the frontend crate, acting as the top-level error type for the
 /// entire RisingWave project.
@@ -220,5 +221,11 @@ impl From<PbFieldNotFound> for RwError {
 impl From<BatchError> for RwError {
     fn from(s: BatchError) -> Self {
         ErrorCode::BatchError(Box::new(s)).into()
+    }
+}
+
+impl From<JoinError> for RwError {
+    fn from(join_error: JoinError) -> Self {
+        ErrorCode::Uncategorized(join_error.into()).into()
     }
 }
