@@ -8692,6 +8692,7 @@ dependencies = [
  "console",
  "const-str",
  "expect-test",
+ "home",
  "madsim-tokio",
  "prometheus",
  "risingwave_cmd",
