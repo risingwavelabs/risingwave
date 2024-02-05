@@ -188,8 +188,8 @@ const backPressureAlgos: BackPressureAlgo[] = [
   "p99",
 ]
 
-type BackPressureDataSourceAlgo = "Embedded" | "Prometheus"
-const backPressureDataSourceAlgos: BackPressureDataSourceAlgo[] = [
+type BackPressureDataSource = "Embedded" | "Prometheus"
+const backPressureDataSources: BackPressureDataSourceAlgo[] = [
   "Embedded",
   "Prometheus",
 ]
