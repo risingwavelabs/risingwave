@@ -13705,6 +13705,7 @@ name = "workspace-hack"
 version = "1.7.0-alpha"
 dependencies = [
  "ahash 0.8.6",
+ "aho-corasick",
  "allocator-api2",
  "anyhow",
  "async-std",
@@ -13768,6 +13769,7 @@ dependencies = [
  "madsim-rdkafka",
  "madsim-tokio",
  "md-5",
+ "memchr",
  "mio",
  "nom",
  "num-bigint",
