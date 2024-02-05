@@ -248,6 +248,10 @@ async fn test_ddl_cancel() -> Result<()> {
     Ok(())
 }
 
+/// When cancelling a stream job under high latency,
+/// the cancel should take a long time to take effect.
+/// If we trigger a recovery however, the cancel should take effect immediately,
+/// since cancel will immediately drop the table fragment.
 async fn test_high_barrier_latency_cancel(config: Configuration) -> Result<()> {
     init_logger();
     let mut cluster = Cluster::start(config).await?;
