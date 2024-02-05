@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -59,10 +58,4 @@ pub enum ConnectorError {
         #[backtrace]
         anyhow::Error,
     ),
-}
-
-impl From<ConnectorError> for RwError {
-    fn from(s: ConnectorError) -> Self {
-        ErrorCode::ConnectorError(Box::new(s)).into()
-    }
 }

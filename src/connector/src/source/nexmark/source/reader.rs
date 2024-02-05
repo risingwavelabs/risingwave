@@ -14,7 +14,6 @@
 
 use std::time::Duration;
 
-use anyhow::Result;
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -23,7 +22,6 @@ use nexmark::event::EventType;
 use nexmark::EventGenerator;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::error::RwError;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -66,7 +64,7 @@ impl SplitReader for NexmarkSplitReader {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         tracing::debug!("Splits for nexmark found! {:?}", splits);
         assert!(splits.len() == 1);
         // TODO: currently, assume there's only one split in one reader
@@ -165,7 +163,7 @@ impl NexmarkSplitReader {
         }
     }
 
-    #[try_stream(boxed, ok = StreamChunk, error = RwError)]
+    #[try_stream(boxed, ok = StreamChunk, error = anyhow::Error)]
     async fn into_native_stream(mut self) {
         let start_time = Instant::now();
         let start_offset = self.generator.global_offset();
@@ -210,14 +208,12 @@ impl NexmarkSplitReader {
 
 #[cfg(test)]
 mod tests {
-    use anyhow::Result;
-
     use super::*;
     use crate::source::nexmark::{NexmarkProperties, NexmarkSplitEnumerator};
     use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 
     #[tokio::test]
-    async fn test_nexmark_split_reader() -> Result<()> {
+    async fn test_nexmark_split_reader() -> anyhow::Result<()> {
         let props = NexmarkProperties {
             split_num: 2,
             min_event_gap_in_ns: 0,
@@ -251,7 +247,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_nexmark_event_num() -> Result<()> {
+    async fn test_nexmark_event_num() -> anyhow::Result<()> {
         let max_chunk_size = 32;
         let event_num = max_chunk_size * 128 + 1;
         let props = NexmarkProperties {

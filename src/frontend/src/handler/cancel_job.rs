@@ -16,11 +16,11 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_pb::meta::cancel_creating_jobs_request::{CreatingJobIds, PbJobs};
 use risingwave_sqlparser::ast::JobIdents;
 
+use crate::error::Result;
 use crate::handler::{HandlerArgs, RwPgResponse};
 
 pub(super) async fn handle_cancel(

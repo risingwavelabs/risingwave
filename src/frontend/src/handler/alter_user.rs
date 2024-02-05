@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::ErrorCode::{InternalError, PermissionDenied};
-use risingwave_common::error::Result;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::UserInfo;
 use risingwave_sqlparser::ast::{AlterUserStatement, ObjectName, UserOption, UserOptions};
@@ -22,6 +20,8 @@ use risingwave_sqlparser::ast::{AlterUserStatement, ObjectName, UserOption, User
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
+use crate::error::ErrorCode::{InternalError, PermissionDenied};
+use crate::error::Result;
 use crate::handler::HandlerArgs;
 use crate::user::user_authentication::encrypted_password;
 use crate::user::user_catalog::UserCatalog;

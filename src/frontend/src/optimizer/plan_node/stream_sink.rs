@@ -24,7 +24,6 @@ use risingwave_common::catalog::{ColumnCatalog, Field, TableId};
 use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
 };
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -46,6 +45,7 @@ use super::generic::{self, GenericPlanRef};
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill, IndicesDisplay, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject};
+use crate::error::{ErrorCode, Result};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
