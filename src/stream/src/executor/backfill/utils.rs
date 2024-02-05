@@ -771,7 +771,12 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
             if vnode == VirtualNode::from_scalar(0)
                 && actor_id == 176007
                 && table.table_id() == 177014
+                // This is the epoch where we see the issue.
+                && epoch.curr == 3066966724575232
             {
+                // Missing row:
+                // encoded_prev_state=   [Some(Int16(0)), Some(Serial(Serial(196285274622263378))), Some(Bool(false)), Some(Int64(83))]
+                // encoded_current_state=[Some(Int16(0)), Some(Serial(Serial(196285274622263379))), Some(Bool(false)), Some(Int64(84))]
                 tracing::trace!(
                     ?epoch,
                     actor_id,
@@ -796,13 +801,6 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
                 assert!(row.is_none(), "row {:#?}", row);
                 assert_eq!(encoded_current_state.len(), state_len);
             }
-            if vnode == VirtualNode::from_scalar(0) {
-                tracing::trace!(
-                    "insert vnode: vnode=0, actor_id={}, table_id={}",
-                    actor_id,
-                    table.table_id()
-                );
-            }
 
             table.write_record(Record::Insert {
                 new_row: &encoded_current_state[..],
@@ -812,12 +810,15 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
         backfill_state.mark_committed(vnode);
     }
     if has_progress {
-        tracing::trace!(
-            "committing on epoch, {:#?}, actor_id={}, table_id={}",
-            epoch,
-            actor_id,
-            table.table_id()
-        );
+        if epoch.curr == 3066966724575232 || epoch.prev == 3066966724575232 {
+            tracing::trace!(
+                "committing on epoch, {:#?}, actor_id={}, table_id={}",
+                epoch,
+                actor_id,
+                table.table_id()
+            );
+        }
+
         table.commit(epoch).await?;
     } else {
         table.commit_no_data_expected(epoch);
