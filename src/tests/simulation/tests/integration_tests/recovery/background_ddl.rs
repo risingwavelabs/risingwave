@@ -405,7 +405,8 @@ async fn test_high_barrier_latency_cancel_arrangement_backfill() -> Result<()> {
         // Wait until at least 10% of records are ingested.
         let progress = session
             .run("select progress from rw_catalog.rw_ddl_progress;")
-            .await.unwrap();
+            .await
+            .unwrap();
         tracing::info!(progress, "get progress before cancel stream job");
         let progress = progress.replace('%', "");
         let progress = progress.parse::<f64>().unwrap();
