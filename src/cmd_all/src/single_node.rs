@@ -100,7 +100,7 @@ pub fn map_single_node_opts_to_standalone_opts(opts: &SingleNodeOpts) -> ParsedS
     let mut frontend_opts = SingleNodeOpts::default_frontend_opts();
     let mut compactor_opts = SingleNodeOpts::default_compactor_opts();
     if let Some(prometheus_listener_addr) = &opts.prometheus_listener_addr {
-        meta_opts.prometheus_listener_addr = Some(prometheus_listener_addr.clone());
+        meta_opts.prometheus_host = Some(prometheus_listener_addr.clone());
         compute_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
         frontend_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
         compactor_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
@@ -164,7 +164,7 @@ impl SingleNodeOpts {
             listen_addr: "0.0.0.0:5690".to_string(),
             advertise_addr: "0.0.0.0:5690".to_string(),
             dashboard_host: Some("0.0.0.0:5691".to_string()),
-            prometheus_listener_addr: Some("0.0.0.0:1250".to_string()),
+            prometheus_host: Some("0.0.0.0:1250".to_string()),
             etcd_endpoints: Default::default(),
             etcd_auth: false,
             etcd_username: Default::default(),
