@@ -255,6 +255,7 @@ impl DdlController {
         object_type: ObjectType,
         object_id: ObjectId,
         drop_mode: DropMode,
+        target_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<NotificationVersion> {
         let mgr = self.metadata_manager.as_v2_ref();
         let (release_ctx, version) = match object_type {
@@ -279,6 +280,96 @@ impl DdlController {
                     .await?
             }
         };
+
+        if let Some(replace_table_info) = target_replace_info {
+            let stream_ctx =
+                StreamContext::from_protobuf(replace_table_info.fragment_graph.get_ctx().unwrap());
+
+            let ReplaceTableInfo {
+                mut streaming_job,
+                fragment_graph,
+                ..
+            } = replace_table_info;
+
+            let sink_id = streaming_job.id();
+
+            // let StreamingJobId::Sink(sink_id) = job_id else {
+            //     panic!("additional replace table event only occurs when dropping sink into table")
+            // };
+
+            let fragment_graph =
+                StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job).await?;
+            streaming_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+            streaming_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
+            let streaming_job = streaming_job;
+
+            let table = streaming_job.table().unwrap();
+
+            tracing::debug!(id = streaming_job.id(), "replacing table for dropped sink");
+            let dummy_id = mgr
+                .catalog_controller
+                .create_job_catalog_for_replace(
+                    &streaming_job,
+                    &stream_ctx,
+                    table.get_version()?,
+                    &fragment_graph.default_parallelism(),
+                )
+                .await? as u32;
+
+            let (ctx, table_fragments) = self
+                .inject_replace_table_job_for_table_sink(
+                    dummy_id,
+                    &self.metadata_manager,
+                    stream_ctx,
+                    None,
+                    None,
+                    Some(sink_id),
+                    &streaming_job,
+                    fragment_graph,
+                )
+                .await?;
+
+            let result: MetaResult<Vec<PbMergeUpdate>> = try {
+                let merge_updates = ctx.merge_updates.clone();
+
+                mgr.catalog_controller
+                    .prepare_streaming_job(table_fragments.to_protobuf(), &streaming_job, true)
+                    .await?;
+
+                self.stream_manager
+                    .replace_table(table_fragments, ctx)
+                    .await?;
+                merge_updates
+            };
+
+            let _ = match result {
+                Ok(merge_updates) => {
+                    let version = mgr
+                        .catalog_controller
+                        .finish_replace_streaming_job(
+                            dummy_id as _,
+                            streaming_job,
+                            merge_updates,
+                            None,
+                            None,
+                            None,
+                        )
+                        .await?;
+                    Ok(version)
+                }
+                Err(err) => {
+                    // tracing::error!(id = job_id, error = ?err.as_report(), "failed to replace table");
+                    let _ = mgr
+                        .catalog_controller
+                        .try_abort_replacing_streaming_job(dummy_id as _)
+                        .await
+                        .inspect_err(|err| {
+                            // tracing::error!(id = job_id, error = ?err.as_report(), "failed to abort replacing table");
+                        });
+                    Err(err)
+                }
+            }?;
+        }
 
         let ReleaseContext {
             state_table_ids,

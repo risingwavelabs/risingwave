@@ -60,6 +60,7 @@ impl ObserverState for FrontendObserverNode {
             | Info::RelationGroup(_)
             | Info::Function(_)
             | Info::Connection(_) => {
+                println!("resp {:#?}", resp);
                 self.handle_catalog_notification(resp);
             }
             Info::Node(node) => {

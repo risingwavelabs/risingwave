@@ -220,10 +220,8 @@ impl WorkerNodeManager {
 
     pub fn remove_streaming_fragment_mapping(&self, fragment_id: &FragmentId) {
         let mut guard = self.inner.write().unwrap();
-        guard
-            .streaming_fragment_vnode_mapping
-            .remove(fragment_id)
-            .unwrap();
+        guard.streaming_fragment_vnode_mapping.remove(fragment_id);
+        // todo
     }
 
     /// Returns fragment's vnode mapping for serving.
