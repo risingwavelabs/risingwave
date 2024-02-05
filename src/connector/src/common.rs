@@ -17,15 +17,14 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::time::Duration;
 
-use anyhow::{anyhow, Ok};
+use anyhow::{anyhow, Context, Ok};
 use async_nats::jetstream::consumer::DeliverPolicy;
 use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
 use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
-use risingwave_common::error::ErrorCode::InvalidParameterValue;
-use risingwave_common::error::{anyhow_error, RwError};
+use risingwave_common::bail;
 use serde_derive::Deserialize;
 use serde_with::json::JsonString;
 use serde_with::{serde_as, DisplayFromStr};
@@ -41,7 +40,7 @@ use crate::source::nats::source::NatsOffset;
 // The file describes the common abstractions for each connector and can be used in both source and
 // sink.
 
-pub const BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
+pub const PRIVATE_LINK_BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
 pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
 
 #[derive(Debug, Clone, Deserialize)]
@@ -148,10 +147,6 @@ pub struct KafkaCommon {
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
 
-    #[serde(rename = "broker.rewrite.endpoints")]
-    #[serde_as(as = "Option<JsonString>")]
-    pub broker_rewrite_map: Option<HashMap<String, String>>,
-
     #[serde(rename = "topic", alias = "kafka.topic")]
     pub topic: String,
 
@@ -222,6 +217,15 @@ pub struct KafkaCommon {
     /// Configurations for SASL/OAUTHBEARER.
     #[serde(rename = "properties.sasl.oauthbearer.config")]
     sasl_oathbearer_config: Option<String>,
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
+pub struct KafkaPrivateLinkCommon {
+    /// This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
+    #[serde(rename = "broker.rewrite.endpoints")]
+    #[serde_as(as = "Option<JsonString>")]
+    pub broker_rewrite_map: Option<HashMap<String, String>>,
 }
 
 const fn default_kafka_sync_call_timeout() -> Duration {
@@ -395,10 +399,7 @@ impl PulsarCommon {
                 }
                 "file" => {}
                 _ => {
-                    return Err(RwError::from(InvalidParameterValue(String::from(
-                        "invalid credentials_url, only file url and s3 url are supported",
-                    )))
-                    .into());
+                    bail!("invalid credentials_url, only file url and s3 url are supported",);
                 }
             }
 
@@ -541,9 +542,7 @@ impl NatsCommon {
                     connect_options =
                         connect_options.user_and_password(v_user.into(), v_password.into())
                 } else {
-                    return Err(anyhow_error!(
-                        "nats connect mode is user_and_password, but user or password is empty"
-                    ));
+                    bail!("nats connect mode is user_and_password, but user or password is empty");
                 }
             }
 
@@ -553,16 +552,12 @@ impl NatsCommon {
                         .credentials(&self.create_credential(v_nkey, v_jwt)?)
                         .expect("failed to parse static creds")
                 } else {
-                    return Err(anyhow_error!(
-                        "nats connect mode is credential, but nkey or jwt is empty"
-                    ));
+                    bail!("nats connect mode is credential, but nkey or jwt is empty");
                 }
             }
             "plain" => {}
             _ => {
-                return Err(anyhow_error!(
-                    "nats connect mode only accept user_and_password/credential/plain"
-                ));
+                bail!("nats connect mode only accept user_and_password/credential/plain");
             }
         };
 
@@ -575,7 +570,8 @@ impl NatsCommon {
                     .collect::<Result<Vec<async_nats::ServerAddr>, _>>()?,
             )
             .await
-            .map_err(|e| SinkError::Nats(anyhow_error!("build nats client error: {:?}", e)))?;
+            .context("build nats client error")
+            .map_err(SinkError::Nats)?;
         Ok(client)
     }
 

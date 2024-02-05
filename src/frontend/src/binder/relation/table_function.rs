@@ -19,7 +19,6 @@ use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     Field, Schema, PG_CATALOG_SCHEMA_NAME, RW_INTERNAL_TABLE_FUNCTION_NAME,
 };
-use risingwave_common::error::ErrorCode;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Function, FunctionArg, ObjectName, TableAlias};
 
@@ -29,6 +28,7 @@ use crate::binder::bind_context::Clause;
 use crate::catalog::system_catalog::pg_catalog::{
     PG_GET_KEYWORDS_FUNC_NAME, PG_KEYWORDS_TABLE_NAME,
 };
+use crate::error::ErrorCode;
 use crate::expr::{Expr, ExprImpl};
 
 impl Binder {

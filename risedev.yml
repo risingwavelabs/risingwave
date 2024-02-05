@@ -862,11 +862,6 @@ profile:
       - use: etcd
       - use: minio
 
-  ci-delete-range-test:
-    config-path: src/config/ci-delete-range-test.toml
-    steps:
-      - use: minio
-
   ci-iceberg-test:
     config-path: src/config/ci-iceberg-test.toml
     steps:

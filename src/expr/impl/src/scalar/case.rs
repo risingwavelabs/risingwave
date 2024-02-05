@@ -133,6 +133,35 @@ impl ConstantLookupExpression {
             operand,
         }
     }
+
+    /// Evaluate the fallback arm with the given input
+    async fn eval_fallback(&self, input: &OwnedRow) -> Result<Datum> {
+        let Some(ref fallback) = self.fallback else {
+            return Ok(None);
+        };
+        let Ok(res) = fallback.eval_row(input).await else {
+            bail!("failed to evaluate the input for fallback arm");
+        };
+        Ok(res)
+    }
+
+    /// The actual lookup & evaluation logic
+    /// used in both `eval_row` & `eval`
+    async fn lookup(&self, datum: Datum, input: &OwnedRow) -> Result<Datum> {
+        if datum.is_none() {
+            return self.eval_fallback(input).await;
+        }
+
+        if let Some(expr) = self.arms.get(datum.as_ref().unwrap()) {
+            let Ok(res) = expr.eval_row(input).await else {
+                bail!("failed to evaluate the input for normal arm");
+            };
+            Ok(res)
+        } else {
+            // Fallback arm goes here
+            self.eval_fallback(input).await
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -162,16 +191,11 @@ impl Expression for ConstantLookupExpression {
             // rather than from `eval_result`
             let owned_row = row.into_owned_row();
 
-            if let Some(expr) = self.arms.get(datum.as_ref().unwrap()) {
-                builder.append(expr.eval_row(&owned_row).await.unwrap().as_ref());
+            // Lookup and evaluate the current input datum
+            if let Ok(datum) = self.lookup(datum, &owned_row).await {
+                builder.append(datum.as_ref());
             } else {
-                // Otherwise this should goes to the fallback arm
-                // The fallback arm should also be const
-                if let Some(ref fallback) = self.fallback {
-                    builder.append(fallback.eval_row(&owned_row).await.unwrap().as_ref());
-                } else {
-                    builder.append_null();
-                }
+                bail!("failed to lookup and evaluate the expression in `eval`");
             }
         }
 
@@ -180,15 +204,7 @@ impl Expression for ConstantLookupExpression {
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let datum = self.operand.eval_row(input).await?;
-
-        if let Some(expr) = self.arms.get(datum.as_ref().unwrap()) {
-            expr.eval_row(input).await
-        } else {
-            let Some(ref expr) = self.fallback else {
-                return Ok(None);
-            };
-            expr.eval_row(input).await
-        }
+        self.lookup(datum, input).await
     }
 }
 

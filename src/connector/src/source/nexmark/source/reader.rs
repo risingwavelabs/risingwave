@@ -14,7 +14,6 @@
 
 use std::time::Duration;
 
-use anyhow::Result;
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -23,7 +22,6 @@ use nexmark::event::EventType;
 use nexmark::EventGenerator;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::error::RwError;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -66,7 +64,7 @@ impl SplitReader for NexmarkSplitReader {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         tracing::debug!("Splits for nexmark found! {:?}", splits);
         assert!(splits.len() == 1);
         // TODO: currently, assume there's only one split in one reader
@@ -109,7 +107,9 @@ impl SplitReader for NexmarkSplitReader {
 
     fn into_stream(self) -> BoxChunkSourceStream {
         let actor_id = self.source_ctx.source_info.actor_id.to_string();
+        let fragment_id = self.source_ctx.source_info.fragment_id.to_string();
         let source_id = self.source_ctx.source_info.source_id.to_string();
+        let source_name = self.source_ctx.source_info.source_name.to_string();
         let split_id = self.split_id.clone();
         let metrics = self.source_ctx.metrics.clone();
 
@@ -120,11 +120,23 @@ impl SplitReader for NexmarkSplitReader {
                 .inspect_ok(move |chunk: &StreamChunk| {
                     metrics
                         .partition_input_count
-                        .with_label_values(&[&actor_id, &source_id, &split_id])
+                        .with_label_values(&[
+                            &actor_id,
+                            &source_id,
+                            &split_id,
+                            &source_name,
+                            &fragment_id,
+                        ])
                         .inc_by(chunk.cardinality() as u64);
                     metrics
                         .partition_input_bytes
-                        .with_label_values(&[&actor_id, &source_id, &split_id])
+                        .with_label_values(&[
+                            &actor_id,
+                            &source_id,
+                            &split_id,
+                            &source_name,
+                            &fragment_id,
+                        ])
                         .inc_by(chunk.estimated_size() as u64);
                 }),
             BUFFER_SIZE,
@@ -151,7 +163,7 @@ impl NexmarkSplitReader {
         }
     }
 
-    #[try_stream(boxed, ok = StreamChunk, error = RwError)]
+    #[try_stream(boxed, ok = StreamChunk, error = anyhow::Error)]
     async fn into_native_stream(mut self) {
         let start_time = Instant::now();
         let start_offset = self.generator.global_offset();
@@ -196,14 +208,12 @@ impl NexmarkSplitReader {
 
 #[cfg(test)]
 mod tests {
-    use anyhow::Result;
-
     use super::*;
     use crate::source::nexmark::{NexmarkProperties, NexmarkSplitEnumerator};
     use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 
     #[tokio::test]
-    async fn test_nexmark_split_reader() -> Result<()> {
+    async fn test_nexmark_split_reader() -> anyhow::Result<()> {
         let props = NexmarkProperties {
             split_num: 2,
             min_event_gap_in_ns: 0,
@@ -237,7 +247,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_nexmark_event_num() -> Result<()> {
+    async fn test_nexmark_event_num() -> anyhow::Result<()> {
         let max_chunk_size = 32;
         let event_num = max_chunk_size * 128 + 1;
         let props = NexmarkProperties {

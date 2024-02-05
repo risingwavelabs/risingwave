@@ -14,13 +14,13 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
 use risingwave_pb::meta::event_log::Event;
 use serde_json::json;
 
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::error::Result;
 
 pub const RW_EVENT_LOGS: BuiltinTable = BuiltinTable {
     name: "rw_event_logs",

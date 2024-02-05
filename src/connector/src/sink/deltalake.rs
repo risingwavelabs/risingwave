@@ -28,7 +28,6 @@ use deltalake::DeltaTable;
 use risingwave_common::array::{to_deltalake_record_batch_with_schema, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::anyhow_error;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
@@ -268,7 +267,7 @@ impl Sink for DeltaLakeSink {
                 .await,
             self.param.clone(),
             writer_param.vnode_bitmap.ok_or_else(|| {
-                SinkError::Remote(anyhow_error!(
+                SinkError::Remote(anyhow!(
                     "sink needs coordination should not have singleton input"
                 ))
             })?,

@@ -44,6 +44,7 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::over_window::over_partition::AffectedRange;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message,
     StreamExecutorError, StreamExecutorResult,
@@ -181,7 +182,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         let order_key_data_types = args
             .order_key_indices
             .iter()
-            .map(|i| input_schema.fields()[*i].data_type.clone())
+            .map(|i| input_schema[*i].data_type())
             .collect();
 
         let state_key_to_table_sub_pk_proj = RowConverter::calc_state_key_to_table_sub_pk_proj(
@@ -491,7 +492,13 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
         let mut accessed_range: Option<RangeInclusive<StateKey>> = None;
 
-        for (first_frame_start, first_curr_key, last_curr_key, last_frame_end) in affected_ranges {
+        for AffectedRange {
+            first_frame_start,
+            first_curr_key,
+            last_curr_key,
+            last_frame_end,
+        } in affected_ranges
+        {
             assert!(first_frame_start <= first_curr_key);
             assert!(first_curr_key <= last_curr_key);
             assert!(last_curr_key <= last_frame_end);

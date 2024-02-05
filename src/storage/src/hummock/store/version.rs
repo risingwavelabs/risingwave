@@ -40,6 +40,7 @@ use tracing::Instrument;
 
 use super::StagingDataIterator;
 use crate::error::StorageResult;
+use crate::hummock::event_handler::HummockReadVersionRef;
 use crate::hummock::iterator::{
     ConcatIterator, ForwardMergeRangeIterator, HummockIteratorUnion, MergeIterator,
     SkipWatermarkIterator, UserIterator,
@@ -117,7 +118,7 @@ impl StagingSstableInfo {
 #[derive(Clone)]
 pub enum StagingData {
     ImmMem(ImmutableMemtable),
-    MergedImmMem(ImmutableMemtable),
+    MergedImmMem(ImmutableMemtable, Vec<ImmId>),
     Sst(StagingSstableInfo),
 }
 
@@ -244,6 +245,10 @@ impl HummockReadVersion {
         Self::new_with_replication_option(table_id, committed_version, false)
     }
 
+    pub fn table_id(&self) -> TableId {
+        self.table_id
+    }
+
     /// Updates the read version with `VersionUpdate`.
     /// There will be three data types to be processed
     /// `VersionUpdate::Staging`
@@ -266,8 +271,8 @@ impl HummockReadVersion {
 
                     self.staging.imm.push_front(imm)
                 }
-                StagingData::MergedImmMem(merged_imm) => {
-                    self.add_merged_imm(merged_imm);
+                StagingData::MergedImmMem(merged_imm, imm_ids) => {
+                    self.add_merged_imm(merged_imm, imm_ids);
                 }
                 StagingData::Sst(staging_sst) => {
                     // The following properties must be ensured:
@@ -405,19 +410,11 @@ impl HummockReadVersion {
         }
     }
 
-    pub fn clear_uncommitted(&mut self) {
-        self.staging.imm.clear();
-        self.staging.sst.clear();
-        self.table_watermarks = self
-            .committed
-            .table_watermark_index()
-            .get(&self.table_id)
-            .cloned()
-    }
-
-    pub fn add_merged_imm(&mut self, merged_imm: ImmutableMemtable) {
-        assert!(merged_imm.get_imm_ids().iter().rev().is_sorted());
-        let min_imm_id = *merged_imm.get_imm_ids().last().expect("non-empty");
+    /// `imm_ids` is the list of imm ids that are merged into this batch
+    /// This field is immutable. Larger imm id at the front.
+    pub fn add_merged_imm(&mut self, merged_imm: ImmutableMemtable, imm_ids: Vec<ImmId>) {
+        assert!(imm_ids.iter().rev().is_sorted());
+        let min_imm_id = *imm_ids.last().expect("non-empty");
 
         let back = self.staging.imm.back().expect("should not be empty");
 
@@ -451,9 +448,7 @@ impl HummockReadVersion {
 
                         unreachable!(
                             "must have break in equal: {:?} {:?} {:?}",
-                            remaining_staging_imm_ids,
-                            earlier_imm_ids,
-                            merged_imm.get_imm_ids()
+                            remaining_staging_imm_ids, earlier_imm_ids, imm_ids
                         )
                     }
                 }
@@ -471,13 +466,13 @@ impl HummockReadVersion {
                         .map(|imm| imm.batch_id())
                         .collect_vec()
                 },
-                merged_imm.get_imm_ids()
+                imm_ids
             );
             None
         };
 
         // iter from smaller imm and take the older imm at the back.
-        for imm_id in merged_imm.get_imm_ids().iter().rev() {
+        for imm_id in imm_ids.iter().rev() {
             let imm = self.staging.imm.pop_back().expect("should exist");
             assert_eq!(
                 imm.batch_id(),
@@ -490,7 +485,7 @@ impl HummockReadVersion {
                         .map(|imm| imm.batch_id())
                         .collect_vec()
                 },
-                merged_imm.get_imm_ids(),
+                imm_ids,
                 imm_id,
             );
         }
@@ -510,7 +505,7 @@ pub fn read_filter_for_batch(
     epoch: HummockEpoch, // for check
     table_id: TableId,
     mut key_range: TableKeyRange,
-    read_version_vec: Vec<Arc<RwLock<HummockReadVersion>>>,
+    read_version_vec: Vec<HummockReadVersionRef>,
 ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
     assert!(!read_version_vec.is_empty());
     let mut staging_vec = Vec::with_capacity(read_version_vec.len());

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
-use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::MaxOneRowNode;
 
@@ -23,6 +22,7 @@ use super::utils::Distill;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
+use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
 

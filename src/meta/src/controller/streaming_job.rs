@@ -12,41 +12,54 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::num::NonZeroUsize;
 
 use itertools::Itertools;
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
+use risingwave_meta_model_v2::actor_dispatcher::DispatcherType;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::{
-    Actor, ActorDispatcher, Fragment, Index, Object, ObjectDependency, Source, Table,
+    Actor, ActorDispatcher, Fragment, Index, Object, ObjectDependency, Source,
+    StreamingJob as StreamingJobModel, Table,
 };
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
     streaming_job, table, ActorId, ActorUpstreamActors, CreateType, DatabaseId, ExprNodeArray,
-    FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId, StreamNode, TableId,
-    TableVersion, UserId,
+    FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId, StreamNode,
+    StreamingParallelism, TableId, TableVersion, UserId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableVersion};
 use risingwave_pb::catalog::{PbCreateType, PbTable};
 use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
-    Info as NotificationInfo, Operation as NotificationOperation,
+    Info as NotificationInfo, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::{PbRelation, PbRelationGroup, PbTableFragments};
+use risingwave_pb::meta::table_fragments::PbActorStatus;
+use risingwave_pb::meta::{
+    FragmentParallelUnitMapping, PbRelation, PbRelationGroup, PbTableFragments,
+};
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
-use risingwave_pb::stream_plan::{PbDispatcher, PbFragmentTypeFlag};
+use risingwave_pb::stream_plan::{
+    PbDispatcher, PbDispatcherType, PbFragmentTypeFlag, PbStreamActor,
+};
 use sea_orm::sea_query::SimpleExpr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
-    ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect, TransactionTrait,
+    JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
+    TransactionTrait,
 };
 
+use crate::barrier::Reschedule;
 use crate::controller::catalog::CatalogController;
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
@@ -55,7 +68,7 @@ use crate::controller::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, SinkId, StreamingJob};
-use crate::model::StreamContext;
+use crate::model::{StreamContext, TableParallelism};
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
@@ -68,6 +81,7 @@ impl CatalogController {
         schema_id: Option<SchemaId>,
         create_type: PbCreateType,
         ctx: &StreamContext,
+        streaming_parallelism: StreamingParallelism,
     ) -> MetaResult<ObjectId> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job = streaming_job::ActiveModel {
@@ -75,6 +89,7 @@ impl CatalogController {
             job_status: Set(JobStatus::Initial),
             create_type: Set(create_type.into()),
             timezone: Set(ctx.timezone.clone()),
+            parallelism: Set(streaming_parallelism),
         };
         job.insert(txn).await?;
 
@@ -85,10 +100,16 @@ impl CatalogController {
         &self,
         streaming_job: &mut StreamingJob,
         ctx: &StreamContext,
+        parallelism: &Option<Parallelism>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let create_type = streaming_job.create_type();
+
+        let streaming_parallelism = match parallelism {
+            None => StreamingParallelism::Adaptive,
+            Some(n) => StreamingParallelism::Fixed(n.parallelism as _),
+        };
 
         ensure_user_id(streaming_job.owner() as _, &txn).await?;
         ensure_object_id(ObjectType::Database, streaming_job.database_id() as _, &txn).await?;
@@ -111,6 +132,7 @@ impl CatalogController {
                     Some(table.schema_id as _),
                     create_type,
                     ctx,
+                    streaming_parallelism,
                 )
                 .await?;
                 table.id = job_id as _;
@@ -126,6 +148,7 @@ impl CatalogController {
                     Some(sink.schema_id as _),
                     create_type,
                     ctx,
+                    streaming_parallelism,
                 )
                 .await?;
                 sink.id = job_id as _;
@@ -141,6 +164,7 @@ impl CatalogController {
                     Some(table.schema_id as _),
                     create_type,
                     ctx,
+                    streaming_parallelism,
                 )
                 .await?;
                 table.id = job_id as _;
@@ -175,6 +199,7 @@ impl CatalogController {
                     Some(index.schema_id as _),
                     create_type,
                     ctx,
+                    streaming_parallelism,
                 )
                 .await?;
                 // to be compatible with old implementation.
@@ -204,6 +229,7 @@ impl CatalogController {
                     Some(src.schema_id as _),
                     create_type,
                     ctx,
+                    streaming_parallelism,
                 )
                 .await?;
                 src.id = job_id as _;
@@ -272,21 +298,15 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        // Add fragments, actors and actor dispatchers.
-        for (fragment, actors, actor_dispatchers) in fragment_actors {
+        // Add fragments.
+        let (fragments, actor_with_dispatchers): (Vec<_>, Vec<_>) = fragment_actors
+            .into_iter()
+            .map(|(fragment, actors, actor_dispatchers)| (fragment, (actors, actor_dispatchers)))
+            .unzip();
+        for fragment in fragments {
             let fragment = fragment.into_active_model();
             let fragment = fragment.insert(&txn).await?;
-            for actor in actors {
-                let actor = actor.into_active_model();
-                actor.insert(&txn).await?;
-            }
-            for (_, actor_dispatchers) in actor_dispatchers {
-                for actor_dispatcher in actor_dispatchers {
-                    let mut actor_dispatcher = actor_dispatcher.into_active_model();
-                    actor_dispatcher.id = NotSet;
-                    actor_dispatcher.insert(&txn).await?;
-                }
-            }
+
             // Update fragment id for all state tables.
             if !for_replace {
                 for state_table_id in fragment.state_table_ids.into_inner() {
@@ -297,6 +317,21 @@ impl CatalogController {
                     }
                     .update(&txn)
                     .await?;
+                }
+            }
+        }
+
+        // Add actors and actor dispatchers.
+        for (actors, actor_dispatchers) in actor_with_dispatchers {
+            for actor in actors {
+                let actor = actor.into_active_model();
+                actor.insert(&txn).await?;
+            }
+            for (_, actor_dispatchers) in actor_dispatchers {
+                for actor_dispatcher in actor_dispatchers {
+                    let mut actor_dispatcher = actor_dispatcher.into_active_model();
+                    actor_dispatcher.id = NotSet;
+                    actor_dispatcher.insert(&txn).await?;
                 }
             }
         }
@@ -446,6 +481,7 @@ impl CatalogController {
         streaming_job: &StreamingJob,
         ctx: &StreamContext,
         version: &PbTableVersion,
+        default_parallelism: &Option<NonZeroUsize>,
     ) -> MetaResult<ObjectId> {
         let id = streaming_job.id();
         let inner = self.inner.write().await;
@@ -464,6 +500,11 @@ impl CatalogController {
             return Err(MetaError::permission_denied("table version is stale"));
         }
 
+        let parallelism = match default_parallelism {
+            None => StreamingParallelism::Adaptive,
+            Some(n) => StreamingParallelism::Fixed(n.get() as _),
+        };
+
         // 2. create streaming object for new replace table.
         let obj_id = Self::create_streaming_job_obj(
             &txn,
@@ -473,6 +514,7 @@ impl CatalogController {
             Some(streaming_job.schema_id() as _),
             PbCreateType::Foreground,
             ctx,
+            parallelism,
         )
         .await?;
 
@@ -510,6 +552,7 @@ impl CatalogController {
 
         let table = table::ActiveModel::from(table).update(&txn).await?;
 
+        // let old_fragment_mappings = get_fragment_mappings(&txn, job_id).await?;
         // 1. replace old fragments/actors with new ones.
         Fragment::delete_many()
             .filter(fragment::Column::JobId.eq(job_id))
@@ -667,6 +710,11 @@ impl CatalogController {
 
         txn.commit().await?;
 
+        // FIXME: Do not notify frontend currently, because frontend nodes might refer to old table
+        // catalog and need to access the old fragment. Let frontend nodes delete the old fragment
+        // when they receive table catalog change.
+        // self.notify_fragment_mapping(NotificationOperation::Delete, old_fragment_mappings)
+        //     .await;
         self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
             .await;
         let version = self
@@ -830,5 +878,343 @@ impl CatalogController {
         txn.commit().await?;
 
         Ok(fragment_actors)
+    }
+
+    pub async fn post_apply_reschedules(
+        &self,
+        reschedules: HashMap<FragmentId, Reschedule>,
+        table_parallelism_assignment: HashMap<
+            risingwave_common::catalog::TableId,
+            TableParallelism,
+        >,
+    ) -> MetaResult<()> {
+        fn update_actors(
+            actors: &mut Vec<ActorId>,
+            to_remove: &HashSet<ActorId>,
+            to_create: &Vec<ActorId>,
+        ) {
+            let actor_id_set: HashSet<_> = actors.iter().copied().collect();
+            for actor_id in to_create {
+                debug_assert!(!actor_id_set.contains(actor_id));
+            }
+            for actor_id in to_remove {
+                debug_assert!(actor_id_set.contains(actor_id));
+            }
+
+            actors.retain(|actor_id| !to_remove.contains(actor_id));
+            actors.extend_from_slice(to_create);
+        }
+
+        let new_created_actors: HashSet<_> = reschedules
+            .values()
+            .flat_map(|reschedule| {
+                reschedule
+                    .added_actors
+                    .values()
+                    .flatten()
+                    .map(|actor_id| *actor_id as ActorId)
+            })
+            .collect();
+
+        let inner = self.inner.write().await;
+
+        let txn = inner.db.begin().await?;
+
+        let mut fragment_mapping_to_notify = vec![];
+
+        // for assert only
+        let mut assert_dispatcher_update_checker = HashSet::new();
+
+        for (
+            fragment_id,
+            Reschedule {
+                added_actors,
+                removed_actors,
+                vnode_bitmap_updates,
+                actor_splits,
+                injectable: _,
+                newly_created_actors,
+                upstream_fragment_dispatcher_ids,
+                upstream_dispatcher_mapping,
+                downstream_fragment_ids,
+            },
+        ) in reschedules
+        {
+            // drop removed actors
+            Actor::delete_many()
+                .filter(
+                    actor::Column::ActorId
+                        .is_in(removed_actors.iter().map(|id| *id as ActorId).collect_vec()),
+                )
+                .exec(&txn)
+                .await?;
+
+            // newly created actor
+            let mut new_actors = vec![];
+            let mut new_actor_dispatchers = vec![];
+
+            for (
+                PbStreamActor {
+                    actor_id,
+                    fragment_id,
+                    mut nodes,
+                    dispatcher,
+                    upstream_actor_id,
+                    vnode_bitmap,
+                    expr_context,
+                    ..
+                },
+                // actor_status
+                PbActorStatus {
+                    parallel_unit,
+                    state: _,
+                },
+            ) in newly_created_actors
+            {
+                let mut actor_upstreams = BTreeMap::<FragmentId, BTreeSet<ActorId>>::new();
+
+                if let Some(nodes) = &mut nodes {
+                    visit_stream_node(nodes, |node| {
+                        if let PbNodeBody::Merge(node) = node {
+                            actor_upstreams
+                                .entry(node.upstream_fragment_id as FragmentId)
+                                .or_default()
+                                .extend(node.upstream_actor_id.iter().map(|id| *id as ActorId));
+                        }
+                    });
+                }
+
+                let actor_upstreams: BTreeMap<FragmentId, Vec<ActorId>> = actor_upstreams
+                    .into_iter()
+                    .map(|(k, v)| (k, v.into_iter().collect()))
+                    .collect();
+
+                debug_assert_eq!(
+                    actor_upstreams
+                        .values()
+                        .flatten()
+                        .cloned()
+                        .sorted()
+                        .collect_vec(),
+                    upstream_actor_id
+                        .iter()
+                        .map(|actor_id| *actor_id as i32)
+                        .sorted()
+                        .collect_vec()
+                );
+
+                let actor_upstreams = ActorUpstreamActors(actor_upstreams);
+                let parallel_unit = parallel_unit.unwrap();
+
+                let splits = actor_splits
+                    .get(&actor_id)
+                    .map(|splits| splits.iter().map(PbConnectorSplit::from).collect_vec());
+
+                new_actors.push(actor::ActiveModel {
+                    actor_id: Set(actor_id as _),
+                    fragment_id: Set(fragment_id as _),
+                    status: Set(ActorStatus::Running),
+                    splits: Set(splits.map(|splits| PbConnectorSplits { splits }.into())),
+                    parallel_unit_id: Set(parallel_unit.id as _),
+                    worker_id: Set(parallel_unit.worker_node_id as _),
+                    upstream_actor_ids: Set(actor_upstreams),
+                    vnode_bitmap: Set(vnode_bitmap.map(|bitmap| bitmap.into())),
+                    expr_context: Set(expr_context.unwrap().into()),
+                });
+
+                for PbDispatcher {
+                    r#type: dispatcher_type,
+                    dist_key_indices,
+                    output_indices,
+                    hash_mapping,
+                    dispatcher_id,
+                    downstream_actor_id,
+                } in dispatcher
+                {
+                    new_actor_dispatchers.push(actor_dispatcher::ActiveModel {
+                        id: Default::default(),
+                        actor_id: Set(actor_id as _),
+                        dispatcher_type: Set(PbDispatcherType::try_from(dispatcher_type)
+                            .unwrap()
+                            .into()),
+                        dist_key_indices: Set(dist_key_indices.into()),
+                        output_indices: Set(output_indices.into()),
+                        hash_mapping: Set(hash_mapping.map(|mapping| mapping.into())),
+                        dispatcher_id: Set(dispatcher_id as _),
+                        downstream_actor_ids: Set(downstream_actor_id.into()),
+                    })
+                }
+            }
+
+            if !new_actors.is_empty() {
+                Actor::insert_many(new_actors).exec(&txn).await?;
+            }
+
+            if !new_actor_dispatchers.is_empty() {
+                ActorDispatcher::insert_many(new_actor_dispatchers)
+                    .exec(&txn)
+                    .await?;
+            }
+
+            // actor update
+            for (actor_id, bitmap) in vnode_bitmap_updates {
+                let actor = Actor::find_by_id(actor_id as ActorId)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("actor", actor_id))?;
+
+                let mut actor = actor.into_active_model();
+                actor.vnode_bitmap = Set(Some(bitmap.to_protobuf().into()));
+                actor.update(&txn).await?;
+            }
+
+            // fragment update
+            let fragment = Fragment::find_by_id(fragment_id)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
+
+            let fragment_actors = fragment.find_related(Actor).all(&txn).await?;
+
+            let mut actor_to_parallel_unit = HashMap::with_capacity(fragment_actors.len());
+            let mut actor_to_vnode_bitmap = HashMap::with_capacity(fragment_actors.len());
+            for actor in &fragment_actors {
+                actor_to_parallel_unit.insert(actor.actor_id as u32, actor.parallel_unit_id as _);
+                if let Some(vnode_bitmap) = &actor.vnode_bitmap {
+                    let bitmap = Bitmap::from(vnode_bitmap.inner_ref());
+                    actor_to_vnode_bitmap.insert(actor.actor_id as u32, bitmap);
+                }
+            }
+
+            let vnode_mapping = if actor_to_vnode_bitmap.is_empty() {
+                let parallel_unit = *actor_to_parallel_unit.values().exactly_one().unwrap();
+                ParallelUnitMapping::new_single(parallel_unit as ParallelUnitId)
+            } else {
+                // Generate the parallel unit mapping from the fragment's actor bitmaps.
+                assert_eq!(actor_to_vnode_bitmap.len(), actor_to_parallel_unit.len());
+                ActorMapping::from_bitmaps(&actor_to_vnode_bitmap)
+                    .to_parallel_unit(&actor_to_parallel_unit)
+            }
+            .to_protobuf();
+
+            let mut fragment = fragment.into_active_model();
+            fragment.vnode_mapping = Set(vnode_mapping.clone().into());
+            fragment.update(&txn).await?;
+
+            fragment_mapping_to_notify.push(FragmentParallelUnitMapping {
+                fragment_id: fragment_id as u32,
+                mapping: Some(vnode_mapping),
+            });
+
+            // for downstream and upstream
+            let removed_actor_ids: HashSet<_> = removed_actors
+                .iter()
+                .map(|actor_id| *actor_id as ActorId)
+                .collect();
+
+            let added_actor_ids = added_actors
+                .values()
+                .flatten()
+                .map(|actor_id| *actor_id as ActorId)
+                .collect_vec();
+
+            // first step, upstream fragment
+            for (upstream_fragment_id, dispatcher_id) in upstream_fragment_dispatcher_ids {
+                let upstream_fragment = Fragment::find_by_id(upstream_fragment_id as FragmentId)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
+
+                let all_dispatchers = actor_dispatcher::Entity::find()
+                    .join(JoinType::InnerJoin, actor_dispatcher::Relation::Actor.def())
+                    .filter(actor::Column::FragmentId.eq(upstream_fragment.fragment_id))
+                    .filter(actor_dispatcher::Column::DispatcherId.eq(dispatcher_id as i32))
+                    .all(&txn)
+                    .await?;
+
+                for dispatcher in all_dispatchers {
+                    debug_assert!(assert_dispatcher_update_checker.insert(dispatcher.id));
+                    if new_created_actors.contains(&dispatcher.actor_id) {
+                        continue;
+                    }
+
+                    let mut dispatcher = dispatcher.into_active_model();
+
+                    if dispatcher.dispatcher_type.as_ref() == &DispatcherType::Hash {
+                        dispatcher.hash_mapping =
+                            Set(upstream_dispatcher_mapping.as_ref().map(|m| {
+                                risingwave_meta_model_v2::ActorMapping::from(m.to_protobuf())
+                            }));
+                    } else {
+                        debug_assert!(upstream_dispatcher_mapping.is_none());
+                    }
+
+                    let mut new_downstream_actor_ids =
+                        dispatcher.downstream_actor_ids.as_ref().inner_ref().clone();
+
+                    update_actors(
+                        new_downstream_actor_ids.as_mut(),
+                        &removed_actor_ids,
+                        &added_actor_ids,
+                    );
+
+                    dispatcher.downstream_actor_ids = Set(new_downstream_actor_ids.into());
+                    dispatcher.update(&txn).await?;
+                }
+            }
+
+            // second step, downstream fragment
+            for downstream_fragment_id in downstream_fragment_ids {
+                let actors = Actor::find()
+                    .filter(actor::Column::FragmentId.eq(downstream_fragment_id as FragmentId))
+                    .all(&txn)
+                    .await?;
+
+                for actor in actors {
+                    if new_created_actors.contains(&actor.actor_id) {
+                        continue;
+                    }
+
+                    let mut actor = actor.into_active_model();
+
+                    let mut new_upstream_actor_ids =
+                        actor.upstream_actor_ids.as_ref().inner_ref().clone();
+
+                    update_actors(
+                        new_upstream_actor_ids.get_mut(&fragment_id).unwrap(),
+                        &removed_actor_ids,
+                        &added_actor_ids,
+                    );
+
+                    actor.upstream_actor_ids = Set(new_upstream_actor_ids.into());
+
+                    actor.update(&txn).await?;
+                }
+            }
+        }
+
+        for (table_id, parallelism) in table_parallelism_assignment {
+            let mut streaming_job = StreamingJobModel::find_by_id(table_id.table_id() as ObjectId)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?
+                .into_active_model();
+
+            streaming_job.parallelism = Set(match parallelism {
+                TableParallelism::Adaptive => StreamingParallelism::Adaptive,
+                TableParallelism::Fixed(n) => StreamingParallelism::Fixed(n as _),
+                TableParallelism::Custom => {
+                    unreachable!("sql backend doesn't support custom parallelism")
+                }
+            });
+
+            streaming_job.update(&txn).await?;
+        }
+
+        txn.commit().await?;
+        self.notify_fragment_mapping(Operation::Update, fragment_mapping_to_notify)
+            .await;
+
+        Ok(())
     }
 }

@@ -328,6 +328,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(StreamingJob::JobStatus).string().not_null())
                     .col(ColumnDef::new(StreamingJob::CreateType).string().not_null())
                     .col(ColumnDef::new(StreamingJob::Timezone).string())
+                    .col(ColumnDef::new(StreamingJob::Parallelism).json().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_streaming_job_object_id")
@@ -389,6 +390,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Actor::Status).string().not_null())
                     .col(ColumnDef::new(Actor::Splits).json())
                     .col(ColumnDef::new(Actor::ParallelUnitId).integer().not_null())
+                    .col(ColumnDef::new(Actor::WorkerId).integer().not_null())
                     .col(ColumnDef::new(Actor::UpstreamActorIds).json())
                     .col(ColumnDef::new(Actor::VnodeBitmap).json())
                     .col(ColumnDef::new(Actor::ExprContext).json().not_null())
@@ -965,6 +967,7 @@ enum Actor {
     Status,
     Splits,
     ParallelUnitId,
+    WorkerId,
     UpstreamActorIds,
     VnodeBitmap,
     ExprContext,
@@ -991,6 +994,7 @@ enum StreamingJob {
     JobStatus,
     Timezone,
     CreateType,
+    Parallelism,
 }
 
 #[derive(DeriveIden)]

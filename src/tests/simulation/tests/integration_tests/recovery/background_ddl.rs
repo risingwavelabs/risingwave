@@ -14,8 +14,7 @@
 
 use std::time::Duration;
 
-use anyhow::Result;
-use risingwave_common::error::anyhow_error;
+use anyhow::{anyhow, Result};
 use risingwave_simulation::cluster::{Cluster, Configuration, Session};
 use tokio::time::sleep;
 
@@ -49,7 +48,7 @@ async fn cancel_stream_jobs(session: &mut Session) -> Result<Vec<u32>> {
         .split('\n')
         .map(|s| {
             s.parse::<u32>()
-                .map_err(|_e| anyhow_error!("failed to parse {}", s))
+                .map_err(|_e| anyhow!("failed to parse {}", s))
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(ids)
