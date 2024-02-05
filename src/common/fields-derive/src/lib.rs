@@ -14,9 +14,9 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Data, DeriveInput, Field, Result};
+use syn::{Data, DeriveInput, Result};
 
-#[proc_macro_derive(Fields)]
+#[proc_macro_derive(Fields, attributes(primary_key))]
 pub fn fields(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
     inner(tokens.into()).into()
 }
@@ -31,49 +31,105 @@ fn inner(tokens: TokenStream) -> TokenStream {
 fn gen(tokens: TokenStream) -> Result<TokenStream> {
     let input: DeriveInput = syn::parse2(tokens)?;
 
-    let DeriveInput {
-        attrs: _attrs,
-        vis: _vis,
-        ident,
-        generics,
-        data,
-    } = input;
-    if !generics.params.is_empty() {
+    let ident = &input.ident;
+    if !input.generics.params.is_empty() {
         return Err(syn::Error::new_spanned(
-            generics,
+            input.generics,
             "generics are not supported",
         ));
     }
 
-    let Data::Struct(r#struct) = data else {
-        return Err(syn::Error::new_spanned(ident, "only structs are supported"));
+    let Data::Struct(struct_) = &input.data else {
+        return Err(syn::Error::new_spanned(
+            input.ident,
+            "only structs are supported",
+        ));
     };
 
-    let fields_rs = r#struct.fields;
-    let fields_rw: Vec<TokenStream> = fields_rs
-        .into_iter()
-        .map(|field_rs| {
-            let Field {
-                // We can support #[field(ignore)] or other useful attributes here.
-                attrs: _attrs,
-                ident: name,
-                ty,
-                ..
-            } = field_rs;
-            let name = name.map_or("".to_string(), |name| name.to_string());
+    let fields_rw: Vec<TokenStream> = struct_
+        .fields
+        .iter()
+        .map(|field| {
+            let mut name = field.ident.as_ref().expect("field no name").to_string();
+            // strip leading `r#`
+            if name.starts_with("r#") {
+                name = name[2..].to_string();
+            }
+            let ty = &field.ty;
             quote! {
                 (#name, <#ty as ::risingwave_common::types::WithDataType>::default_data_type())
             }
         })
         .collect();
+    let names = struct_
+        .fields
+        .iter()
+        .map(|field| field.ident.as_ref().expect("field no name"))
+        .collect::<Vec<_>>();
+    let primary_key = get_primary_key(&input).map(|indices| {
+        quote! {
+            fn primary_key() -> &'static [usize] {
+                &[#(#indices),*]
+            }
+        }
+    });
 
     Ok(quote! {
         impl ::risingwave_common::types::Fields for #ident {
             fn fields() -> Vec<(&'static str, ::risingwave_common::types::DataType)> {
                 vec![#(#fields_rw),*]
             }
+            fn into_owned_row(self) -> ::risingwave_common::row::OwnedRow {
+                ::risingwave_common::row::OwnedRow::new(vec![#(
+                    ::risingwave_common::types::ToOwnedDatum::to_owned_datum(self.#names)
+                ),*])
+            }
+            #primary_key
+        }
+        impl From<#ident> for ::risingwave_common::types::ScalarImpl {
+            fn from(v: #ident) -> Self {
+                ::risingwave_common::types::StructValue::new(vec![#(
+                    ::risingwave_common::types::ToOwnedDatum::to_owned_datum(v.#names)
+                ),*]).into()
+            }
         }
     })
+}
+
+/// Get primary key indices from `#[primary_key]` attribute.
+fn get_primary_key(input: &syn::DeriveInput) -> Option<Vec<usize>> {
+    let syn::Data::Struct(struct_) = &input.data else {
+        return None;
+    };
+    // find `#[primary_key(k1, k2, ...)]` on struct
+    let composite = input.attrs.iter().find_map(|attr| match &attr.meta {
+        syn::Meta::List(list) if list.path.is_ident("primary_key") => Some(&list.tokens),
+        _ => None,
+    });
+    if let Some(keys) = composite {
+        let index = |name: &str| {
+            struct_
+                .fields
+                .iter()
+                .position(|f| f.ident.as_ref().map_or(false, |i| i == name))
+                .expect("primary key not found")
+        };
+        return Some(
+            keys.to_string()
+                .split(',')
+                .map(|s| index(s.trim()))
+                .collect(),
+        );
+    }
+    // find `#[primary_key]` on fields
+    for (i, field) in struct_.fields.iter().enumerate() {
+        for attr in &field.attrs {
+            if matches!(&attr.meta, syn::Meta::Path(path) if path.is_ident("primary_key")) {
+                return Some(vec![i]);
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -91,11 +147,13 @@ mod tests {
     fn test_gen() {
         let code = indoc! {r#"
             #[derive(Fields)]
+            #[primary_key(v2, v1)]
             struct Data {
                 v1: i16,
                 v2: std::primitive::i32,
                 v3: bool,
                 v4: Serial,
+                r#type: i32,
             }
         "#};
 
