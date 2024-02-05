@@ -317,6 +317,7 @@ pub(crate) async fn bind_columns_from_source(
 
     let columns = match (&source_schema.format, &source_schema.row_encode) {
         (Format::Native, Encode::Native)
+        | (Format::None, Encode::None)
         | (Format::Plain, Encode::Bytes)
         | (Format::DebeziumMongo, Encode::Json) => None,
         (Format::Plain, Encode::Protobuf) => {
@@ -707,7 +708,7 @@ pub(crate) async fn bind_source_pk(
         .collect_vec();
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
-        (Format::Native, Encode::Native) | (Format::Plain, _) => sql_defined_pk_names,
+        (Format::Native, Encode::Native) | (Format::None, Encode::None) | (Format::Plain, _) => sql_defined_pk_names,
 
         // For all Upsert formats, we only accept one and only key column as primary key.
         // Additional KEY columns must be set in this case and must be primary key.
@@ -980,7 +981,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Json],
                 ),
                 ICEBERG_CONNECTOR => hashmap!(
-                    Format::Native => vec![Encode::Native],
+                    Format::None => vec![Encode::None],
                 )
         ))
     });
@@ -1314,6 +1315,7 @@ fn format_to_prost(format: &Format) -> FormatType {
         Format::DebeziumMongo => FormatType::DebeziumMongo,
         Format::Maxwell => FormatType::Maxwell,
         Format::Canal => FormatType::Canal,
+        Format::None => FormatType::None,
     }
 }
 fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
@@ -1325,6 +1327,7 @@ fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
         Encode::Csv => EncodeType::Csv,
         Encode::Bytes => EncodeType::Bytes,
         Encode::Template => EncodeType::Template,
+        Encode::None => EncodeType::None,
     }
 }
 

@@ -42,6 +42,7 @@ fn format_type_to_format(from: FormatType) -> Option<Format> {
         FormatType::Canal => Format::Canal,
         FormatType::Upsert => Format::Upsert,
         FormatType::Plain => Format::Plain,
+        FormatType::None => Format::None,
     })
 }
 
@@ -55,6 +56,7 @@ fn encode_type_to_encode(from: EncodeType) -> Option<Encode> {
         EncodeType::Json => Encode::Json,
         EncodeType::Bytes => Encode::Bytes,
         EncodeType::Template => Encode::Template,
+        EncodeType::None => Encode::None,
     })
 }
 

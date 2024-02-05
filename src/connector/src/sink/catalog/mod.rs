@@ -205,7 +205,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             F::Plain => SinkFormat::AppendOnly,
             F::Upsert => SinkFormat::Upsert,
             F::Debezium => SinkFormat::Debezium,
-            f @ (F::Unspecified | F::Native | F::DebeziumMongo | F::Maxwell | F::Canal) => {
+            f @ (F::Unspecified | F::Native | F::DebeziumMongo | F::Maxwell | F::Canal | F::None) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink format unsupported: {}",
                     f.as_str_name()
@@ -217,7 +217,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             E::Protobuf => SinkEncode::Protobuf,
             E::Template => SinkEncode::Template,
             E::Avro => SinkEncode::Avro,
-            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes) => {
+            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes | E::None) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink encode unsupported: {}",
                     e.as_str_name()

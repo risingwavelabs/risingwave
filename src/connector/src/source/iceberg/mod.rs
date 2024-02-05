@@ -39,9 +39,9 @@ pub struct IcebergProperties {
     #[serde(rename = "s3.endpoint", default)]
     pub endpoint: String,
     #[serde(rename = "s3.access.key", default)]
-    pub access: String,
+    pub s3_access: String,
     #[serde(rename = "s3.secret.key", default)]
-    pub secret: String,
+    pub s3_secret: String,
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: String,
     #[serde(rename = "database.name")]
@@ -108,8 +108,8 @@ impl SplitEnumerator for IcebergSplitEnumerator {
                     catalog_type: Some(properties.catalog_type),
                     path: properties.warehouse_path,
                     endpoint: Some(properties.endpoint),
-                    access_key: properties.access,
-                    secret_key: properties.secret,
+                    access_key: properties.s3_access,
+                    secret_key: properties.s3_secret,
                     region: Some(properties.region_name),
                     ..Default::default()
                 };
