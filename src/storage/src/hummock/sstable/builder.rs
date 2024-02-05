@@ -361,7 +361,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             if !self.block_builder.is_empty() {
                 self.build_block().await?;
             }
-        } else if is_new_user_key && is_block_full && could_switch_block {
+        } else if is_block_full && could_switch_block {
             self.build_block().await?;
         }
         self.last_table_stats.total_key_count += 1;
@@ -707,6 +707,15 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 data_len, block_meta.offset
             )
         });
+
+        if data_len as usize > self.options.capacity * 2 {
+            tracing::warn!(
+                "WARN unexpected block size {} table {:?}",
+                data_len,
+                self.block_builder.table_id()
+            );
+        }
+
         self.block_builder.clear();
         Ok(())
     }
