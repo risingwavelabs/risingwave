@@ -768,11 +768,17 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
                     }
                 }
             }
-            if vnode == VirtualNode::from_scalar(0) {
+            if vnode == VirtualNode::from_scalar(0)
+                && actor_id == 176007
+                && table.table_id() == 177014
+            {
                 tracing::trace!(
-                    "update vnode: vnode=0, actor_id={}, table_id={}",
+                    ?epoch,
                     actor_id,
-                    table.table_id()
+                    table_id = table.table_id(),
+                    ?encoded_prev_state,
+                    ?encoded_current_state,
+                    "update vnode",
                 );
             }
 
