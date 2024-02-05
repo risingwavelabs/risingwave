@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{Ok, Result};
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use opendal::Operator;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::error::RwError;
 use tokio::io::BufReader;
 use tokio_util::io::{ReaderStream, StreamReader};
 
@@ -52,7 +50,7 @@ impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         let connector = Src::new_enumerator(properties)?;
         let opendal_reader = OpendalReader {
             connector,
@@ -69,7 +67,7 @@ impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
 }
 
 impl<Src: OpendalSource> OpendalReader<Src> {
-    #[try_stream(boxed, ok = StreamChunk, error = RwError)]
+    #[try_stream(boxed, ok = StreamChunk, error = anyhow::Error)]
     async fn into_chunk_stream(self) {
         for split in self.splits {
             let actor_id = self.source_ctx.source_info.actor_id.to_string();

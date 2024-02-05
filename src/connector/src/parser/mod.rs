@@ -26,9 +26,8 @@ use futures_async_stream::try_stream;
 pub use json_parser::*;
 pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
+use risingwave_common::bail;
 use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{Datum, Scalar, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -536,7 +535,7 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> impl Future<Output = Result<()>> + Send + 'a;
+    ) -> impl Future<Output = anyhow::Result<()>> + Send + 'a;
 
     /// Parse one record from the given `payload`, either write rows to the `writer` or interpret it
     /// as a transaction control message.
@@ -550,7 +549,7 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> impl Future<Output = Result<ParseResult>> + Send + 'a {
+    ) -> impl Future<Output = anyhow::Result<ParseResult>> + Send + 'a {
         self.parse_one(key, payload, writer)
             .map_ok(|_| ParseResult::Rows)
     }
@@ -589,7 +588,7 @@ const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
 
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
-#[try_stream(ok = StreamChunk, error = RwError)]
+#[try_stream(ok = StreamChunk, error = anyhow::Error)]
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
     let columns = parser.columns().to_vec();
 
@@ -686,7 +685,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                                 "failed to parse message, skipping"
                             );
                         }
-                        parser.source_ctx().report_user_source_error(error);
+                        parser.source_ctx().report_user_source_error(&*error);
                     }
                 }
 
@@ -729,7 +728,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 }
 
 pub trait AccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>>;
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>>;
 }
 
 #[derive(Debug)]
@@ -749,7 +748,7 @@ pub enum AccessBuilderImpl {
 }
 
 impl AccessBuilderImpl {
-    pub async fn new_default(config: EncodingProperties, kv: EncodingType) -> Result<Self> {
+    pub async fn new_default(config: EncodingProperties, kv: EncodingType) -> anyhow::Result<Self> {
         let accessor = match config {
             EncodingProperties::Avro(_) => {
                 let config = AvroParserConfig::new(config).await?;
@@ -770,7 +769,10 @@ impl AccessBuilderImpl {
         Ok(accessor)
     }
 
-    pub async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+    pub async fn generate_accessor(
+        &mut self,
+        payload: Vec<u8>,
+    ) -> anyhow::Result<AccessImpl<'_, '_>> {
         let accessor = match self {
             Self::Avro(builder) => builder.generate_accessor(payload).await?,
             Self::Protobuf(builder) => builder.generate_accessor(payload).await?,
@@ -816,7 +818,10 @@ impl ByteStreamSourceParserImpl {
 }
 
 impl ByteStreamSourceParserImpl {
-    pub async fn create(parser_config: ParserConfig, source_ctx: SourceContextRef) -> Result<Self> {
+    pub async fn create(
+        parser_config: ParserConfig,
+        source_ctx: SourceContextRef,
+    ) -> anyhow::Result<Self> {
         let CommonParserConfig { rw_columns } = parser_config.common;
         let protocol = &parser_config.specific.protocol_config;
         let encode = &parser_config.specific.encoding_config;
@@ -960,7 +965,10 @@ pub enum ProtocolProperties {
 
 impl SpecificParserConfig {
     // The validity of (format, encode) is ensured by `extract_format_encode`
-    pub fn new(info: &StreamSourceInfo, with_properties: &HashMap<String, String>) -> Result<Self> {
+    pub fn new(
+        info: &StreamSourceInfo,
+        with_properties: &HashMap<String, String>,
+    ) -> anyhow::Result<Self> {
         let source_struct = extract_source_struct(info)?;
         let format = source_struct.format;
         let encode = source_struct.encode;
@@ -1016,9 +1024,7 @@ impl SpecificParserConfig {
             (SourceFormat::Plain, SourceEncode::Protobuf)
             | (SourceFormat::Upsert, SourceEncode::Protobuf) => {
                 if info.row_schema_location.is_empty() {
-                    return Err(
-                        ProtocolError("protobuf file location not provided".to_string()).into(),
-                    );
+                    bail!("protobuf file location not provided");
                 }
                 let mut config = ProtobufProperties {
                     message_name: info.proto_message_name.clone(),
@@ -1081,10 +1087,7 @@ impl SpecificParserConfig {
             }
             (SourceFormat::Native, SourceEncode::Native) => EncodingProperties::Native,
             (format, encode) => {
-                return Err(RwError::from(ProtocolError(format!(
-                    "Unsupported format {:?} encode {:?}",
-                    format, encode
-                ))));
+                bail!("Unsupported format {:?} encode {:?}", format, encode);
             }
         };
         Ok(Self {

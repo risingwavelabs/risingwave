@@ -26,7 +26,7 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorSuppressor, RwError};
+use risingwave_common::error::ErrorSuppressor;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
@@ -34,6 +34,7 @@ use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
+use thiserror_ext::AsReport;
 
 use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
@@ -214,11 +215,11 @@ impl SourceContext {
         ctx
     }
 
-    pub(crate) fn report_user_source_error(&self, e: RwError) {
+    pub(crate) fn report_user_source_error(&self, e: &(impl AsReport + ?Sized)) {
         if self.source_info.fragment_id == u32::MAX {
             return;
         }
-        let mut err_str = e.inner().to_string();
+        let mut err_str = e.to_report_string();
         if let Some(suppressor) = &self.error_suppressor
             && suppressor.lock().suppress_error(&err_str)
         {
@@ -346,11 +347,11 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
     Ok(SourceStruct::new(format, encode))
 }
 
-pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
+pub type BoxSourceStream = BoxStream<'static, anyhow::Result<Vec<SourceMessage>>>;
 
-pub trait ChunkSourceStream = Stream<Item = Result<StreamChunk, RwError>> + Send + 'static;
-pub type BoxChunkSourceStream = BoxStream<'static, Result<StreamChunk, RwError>>;
-pub type BoxTryStream<M> = BoxStream<'static, Result<M, RwError>>;
+pub trait ChunkSourceStream = Stream<Item = anyhow::Result<StreamChunk>> + Send + 'static;
+pub type BoxChunkSourceStream = BoxStream<'static, anyhow::Result<StreamChunk>>;
+pub type BoxTryStream<M> = BoxStream<'static, anyhow::Result<M>>;
 
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
 /// responsible for parsing, it is used to read messages from the outside and transform them into a
@@ -366,7 +367,7 @@ pub trait SplitReader: Sized + Send {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         columns: Option<Vec<Column>>,
-    ) -> Result<Self>;
+    ) -> anyhow::Result<Self>;
 
     fn into_stream(self) -> BoxChunkSourceStream;
 }

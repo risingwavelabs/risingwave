@@ -14,16 +14,15 @@
 
 use std::sync::Arc;
 
+use anyhow::Context;
 use itertools::Itertools;
 use prost_reflect::{
     Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor,
     ReflectMessage, Value,
 };
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
-use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Datum, Decimal, JsonbVal, ScalarImpl, F32, F64};
+use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 use thiserror::Error;
 use thiserror_ext::{AsReport, Macro};
@@ -48,7 +47,7 @@ pub struct ProtobufAccessBuilder {
 
 impl AccessBuilder for ProtobufAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>> {
         let payload = if self.confluent_wire_type {
             resolve_pb_header(&payload)?
         } else {
@@ -56,7 +55,7 @@ impl AccessBuilder for ProtobufAccessBuilder {
         };
 
         let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
-            .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
+            .context("failed to parse message")?;
 
         Ok(AccessImpl::Protobuf(ProtobufAccess::new(
             message,
@@ -66,7 +65,7 @@ impl AccessBuilder for ProtobufAccessBuilder {
 }
 
 impl ProtobufAccessBuilder {
-    pub fn new(config: ProtobufParserConfig) -> Result<Self> {
+    pub fn new(config: ProtobufParserConfig) -> anyhow::Result<Self> {
         let ProtobufParserConfig {
             confluent_wire_type,
             message_descriptor,
@@ -90,17 +89,15 @@ pub struct ProtobufParserConfig {
 }
 
 impl ProtobufParserConfig {
-    pub async fn new(encoding_properties: EncodingProperties) -> Result<Self> {
+    pub async fn new(encoding_properties: EncodingProperties) -> anyhow::Result<Self> {
         let protobuf_config = try_match_expand!(encoding_properties, EncodingProperties::Protobuf)?;
         let location = &protobuf_config.row_schema_location;
         let message_name = &protobuf_config.message_name;
         let url = handle_sr_list(location.as_str())?;
 
-        if let Some(name) = protobuf_config.key_message_name {
+        if protobuf_config.key_message_name.is_some() {
             // https://docs.confluent.io/platform/7.5/control-center/topics/schema.html#c3-schemas-best-practices-key-value-pairs
-            return Err(RwError::from(ProtocolError(format!(
-                "key.message = {name} not used. Protobuf key unsupported."
-            ))));
+            bail!("protobuf key is not supported");
         }
         let schema_bytes = if protobuf_config.use_schema_registry {
             let schema_value = get_subject_by_strategy(
@@ -118,18 +115,14 @@ impl ProtobufParserConfig {
             bytes_from_url(url, protobuf_config.aws_auth_props.as_ref()).await?
         };
 
-        let pool = DescriptorPool::decode(schema_bytes.as_slice()).map_err(|e| {
-            ProtocolError(format!(
-                "cannot build descriptor pool from schema: {}, error: {}",
-                location, e
-            ))
-        })?;
+        let pool = DescriptorPool::decode(schema_bytes.as_slice())
+            .with_context(|| format!("cannot build descriptor pool from schema `{}`", location))?;
 
-        let message_descriptor = pool.get_message_by_name(message_name).ok_or_else(|| {
-            ProtocolError(format!(
-                "Cannot find message {} in schema: {}.\nDescriptor pool is {:?}",
-                message_name, location, pool
-            ))
+        let message_descriptor = pool.get_message_by_name(message_name).with_context(|| {
+            format!(
+                "cannot find message `{}` in schema `{}`",
+                message_name, location,
+            )
         })?;
 
         Ok(Self {
@@ -140,7 +133,7 @@ impl ProtobufParserConfig {
     }
 
     /// Maps the protobuf schema to relational schema.
-    pub fn map_to_columns(&self) -> Result<Vec<ColumnDesc>> {
+    pub fn map_to_columns(&self) -> anyhow::Result<Vec<ColumnDesc>> {
         let mut columns = Vec::with_capacity(self.message_descriptor.fields().len());
         let mut index = 0;
         let mut parse_trace: Vec<String> = vec![];
@@ -160,16 +153,15 @@ impl ProtobufParserConfig {
         field_descriptor: &FieldDescriptor,
         index: &mut i32,
         parse_trace: &mut Vec<String>,
-    ) -> Result<ColumnDesc> {
-        let field_type =
-            protobuf_type_mapping(field_descriptor, parse_trace).map_err(RwError::uncategorized)?;
+    ) -> anyhow::Result<ColumnDesc> {
+        let field_type = protobuf_type_mapping(field_descriptor, parse_trace)?;
         if let Kind::Message(m) = field_descriptor.kind() {
             let field_descs = if let DataType::List { .. } = field_type {
                 vec![]
             } else {
                 m.fields()
                     .map(|f| Self::pb_field_to_col_desc(&f, index, parse_trace))
-                    .collect::<Result<Vec<_>>>()?
+                    .try_collect()?
             };
             *index += 1;
             Ok(ColumnDesc {
@@ -533,7 +525,7 @@ fn protobuf_type_mapping(
 /// Wire format for Confluent pb header is:
 /// | 0          | 1-4        | 5-x             | x+1-end
 /// | magic-byte | schema-id  | message-indexes | protobuf-payload
-pub(crate) fn resolve_pb_header(payload: &[u8]) -> Result<&[u8]> {
+pub(crate) fn resolve_pb_header(payload: &[u8]) -> anyhow::Result<&[u8]> {
     // there's a message index array at the front of payload
     // if it is the first message in proto def, the array is just and `0`
     // TODO: support parsing more complex index array
@@ -544,9 +536,7 @@ pub(crate) fn resolve_pb_header(payload: &[u8]) -> Result<&[u8]> {
     match remained.first() {
         Some(0) => Ok(&remained[1..]),
         Some(i) => Ok(&remained[(*i as usize)..]),
-        None => Err(RwError::from(ProtocolError(
-            "The proto payload is empty".to_owned(),
-        ))),
+        None => bail!("The proto payload is empty"),
     }
 }
 
@@ -585,7 +575,7 @@ mod test {
     static PRE_GEN_PROTO_DATA: &[u8] = b"\x08\x7b\x12\x0c\x74\x65\x73\x74\x20\x61\x64\x64\x72\x65\x73\x73\x1a\x09\x74\x65\x73\x74\x20\x63\x69\x74\x79\x20\xc8\x03\x2d\x19\x04\x9e\x3f\x32\x0a\x32\x30\x32\x31\x2d\x30\x31\x2d\x30\x31";
 
     #[tokio::test]
-    async fn test_simple_schema() -> Result<()> {
+    async fn test_simple_schema() -> anyhow::Result<()> {
         let location = schema_dir() + "/simple-schema";
         println!("location: {}", location);
         let message_name = "test.TestRecord";
@@ -630,7 +620,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_complex_schema() -> Result<()> {
+    async fn test_complex_schema() -> anyhow::Result<()> {
         let location = schema_dir() + "/complex-schema";
         let message_name = "test.User";
 
@@ -922,7 +912,7 @@ mod test {
     static ANY_GEN_PROTO_DATA: &[u8] = b"\x08\xb9\x60\x12\x32\x0a\x24\x74\x79\x70\x65\x2e\x67\x6f\x6f\x67\x6c\x65\x61\x70\x69\x73\x2e\x63\x6f\x6d\x2f\x74\x65\x73\x74\x2e\x53\x74\x72\x69\x6e\x67\x56\x61\x6c\x75\x65\x12\x0a\x0a\x08\x4a\x6f\x68\x6e\x20\x44\x6f\x65";
 
     #[tokio::test]
-    async fn test_any_schema() -> Result<()> {
+    async fn test_any_schema() -> anyhow::Result<()> {
         let conf = create_recursive_pb_parser_config("/any-schema.pb", "test.TestAny").await;
 
         println!("Current conf: {:#?}", conf);
@@ -983,7 +973,7 @@ mod test {
     static ANY_GEN_PROTO_DATA_1: &[u8] = b"\x08\xb9\x60\x12\x2b\x0a\x23\x74\x79\x70\x65\x2e\x67\x6f\x6f\x67\x6c\x65\x61\x70\x69\x73\x2e\x63\x6f\x6d\x2f\x74\x65\x73\x74\x2e\x49\x6e\x74\x33\x32\x56\x61\x6c\x75\x65\x12\x04\x08\xd2\xfe\x06";
 
     #[tokio::test]
-    async fn test_any_schema_1() -> Result<()> {
+    async fn test_any_schema_1() -> anyhow::Result<()> {
         let conf = create_recursive_pb_parser_config("/any-schema.pb", "test.TestAny").await;
 
         println!("Current conf: {:#?}", conf);
@@ -1052,7 +1042,7 @@ mod test {
     static ANY_RECURSIVE_GEN_PROTO_DATA: &[u8] = b"\x08\xb9\x60\x12\x84\x01\x0a\x21\x74\x79\x70\x65\x2e\x67\x6f\x6f\x67\x6c\x65\x61\x70\x69\x73\x2e\x63\x6f\x6d\x2f\x74\x65\x73\x74\x2e\x41\x6e\x79\x56\x61\x6c\x75\x65\x12\x5f\x0a\x30\x0a\x24\x74\x79\x70\x65\x2e\x67\x6f\x6f\x67\x6c\x65\x61\x70\x69\x73\x2e\x63\x6f\x6d\x2f\x74\x65\x73\x74\x2e\x53\x74\x72\x69\x6e\x67\x56\x61\x6c\x75\x65\x12\x08\x0a\x06\x31\x31\x34\x35\x31\x34\x12\x2b\x0a\x23\x74\x79\x70\x65\x2e\x67\x6f\x6f\x67\x6c\x65\x61\x70\x69\x73\x2e\x63\x6f\x6d\x2f\x74\x65\x73\x74\x2e\x49\x6e\x74\x33\x32\x56\x61\x6c\x75\x65\x12\x04\x08\xd2\xfe\x06";
 
     #[tokio::test]
-    async fn test_any_recursive() -> Result<()> {
+    async fn test_any_recursive() -> anyhow::Result<()> {
         let conf = create_recursive_pb_parser_config("/any-schema.pb", "test.TestAny").await;
 
         println!("Current conf: {:#?}", conf);

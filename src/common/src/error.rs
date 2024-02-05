@@ -39,6 +39,7 @@ const ERROR_SUPPRESSOR_RESET_DURATION: Duration = Duration::from_millis(60 * 60 
 pub trait Error = std::error::Error + Send + Sync + 'static;
 pub type BoxedError = Box<dyn Error>;
 
+#[doc(hidden)] // Used by macros only.
 pub use anyhow::anyhow as anyhow_error;
 
 #[derive(Debug, Clone, Copy, Default)]
