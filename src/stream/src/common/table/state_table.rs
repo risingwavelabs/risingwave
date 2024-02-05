@@ -906,11 +906,24 @@ where
             Row::eq(&old_pk, new_pk),
             "pk should not change: {old_pk:?} vs {new_pk:?}",
         );
+        let expected_row = [
+            Some(0_i16.into()),
+            Some(ScalarImpl::Serial(196285274622263379.into())),
+            Some(ScalarImpl::Bool(false)),
+            Some(ScalarImpl::Int64(84)),
+        ];
+
+        let should_print = Row::eq(&new_value, expected_row);
 
         let new_key_bytes =
             serialize_pk_with_vnode(new_pk, &self.pk_serde, self.compute_vnode_by_pk(new_pk));
         let old_value_bytes = self.serialize_value(old_value);
         let new_value_bytes = self.serialize_value(new_value);
+
+        if should_print {
+            println!("new_key_bytes: {:?}", new_key_bytes);
+            println!("new_value_bytes: {:?}", new_value_bytes);
+        }
 
         self.update_inner(new_key_bytes, Some(old_value_bytes), new_value_bytes);
     }

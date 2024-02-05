@@ -776,6 +776,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
             {
                 // Missing row:
                 // encoded_prev_state=   [Some(Int16(0)), Some(Serial(Serial(196285274622263378))), Some(Bool(false)), Some(Int64(83))]
+                // this is the missing record, later when we try to get it, it is missing.
                 // encoded_current_state=[Some(Int16(0)), Some(Serial(Serial(196285274622263379))), Some(Bool(false)), Some(Int64(84))]
                 tracing::trace!(
                     ?epoch,
