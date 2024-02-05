@@ -17,7 +17,7 @@ else
   echo
   echo "Unsupported OS or Architecture: ${OS}-${ARCH}"
   echo
-  echo "Supported OSes: Linux"
+  echo "Supported OSes: Linux, macOS"
   echo "Supported architectures: x86_64"
   echo
   echo "Please open an issue at <https://github.com/risingwavelabs/risingwave/issues/new/choose>,"
