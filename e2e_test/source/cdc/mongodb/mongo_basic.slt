@@ -1,0 +1,25 @@
+# CDC source basic test
+control substitution on
+
+statement ok
+CREATE TABLE users (_id JSONB PRIMARY KEY, payload JSONB) WITH (
+  connector = 'mongodb-cdc',
+  mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+  collection.name = 'random_data.*'
+);
+
+statement ok
+CREATE MATERIALIZED VIEW normalized_users AS
+SELECT
+    payload ->> 'name' as name,
+    payload ->> 'email' as email,
+    payload ->> 'address' as address
+FROM
+    users;
+
+sleep 5s;
+
+query I
+select count(*) from normalized_users;
+----
+1000
