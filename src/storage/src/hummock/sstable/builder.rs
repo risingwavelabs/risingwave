@@ -240,7 +240,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.add(full_key, value).await
     }
 
-    /// only for test
     pub fn current_block_size(&self) -> usize {
         self.block_builder.approximate_len()
     }
@@ -344,6 +343,12 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             || !user_key(&self.raw_key).eq(user_key(&self.last_full_key));
         let table_id = full_key.user_key.table_id.table_id();
         let is_new_table = self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id;
+        let current_block_size = self.current_block_size();
+        let is_block_full = current_block_size >= self.options.block_capacity
+            || (current_block_size > self.options.block_capacity / 4 * 3
+                && current_block_size + self.raw_value.len() + self.raw_key.len()
+                    > self.options.block_capacity);
+
         if is_new_table {
             assert!(
                 could_switch_block,
@@ -356,10 +361,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             if !self.block_builder.is_empty() {
                 self.build_block().await?;
             }
-        } else if is_new_user_key
-            && self.block_builder.approximate_len() >= self.options.block_capacity
-            && could_switch_block
-        {
+        } else if is_new_user_key && is_block_full && could_switch_block {
             self.build_block().await?;
         }
         self.last_table_stats.total_key_count += 1;
