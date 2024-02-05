@@ -557,10 +557,12 @@ impl HummockEventHandler {
             ));
         }
 
-        debug!(
-            "update to hummock version: {}, epoch: {}",
-            new_pinned_version.id(),
-            new_pinned_version.max_committed_epoch()
+        info!(
+            new_version_id = new_pinned_version.id(),
+            new_mce = new_pinned_version.max_committed_epoch(),
+            prev_version_id = pinned_version.id(),
+            prev_mce = pinned_version.max_committed_epoch(),
+            "update  hummock version"
         );
 
         self.uploader.update_pinned_version(new_pinned_version);
@@ -644,6 +646,9 @@ impl HummockEventHandler {
             }
 
             HummockEvent::ImmToUploader(imm) => {
+                if imm.table_id.table_id == 338022 {
+                    warn!(epochs = ?imm.epochs(), instance_id = imm.instance_id, imm_id = imm.batch_id(), "write imm");
+                }
                 assert!(
                     self.local_read_version_mapping
                         .contains_key(&imm.instance_id),
@@ -659,6 +664,7 @@ impl HummockEventHandler {
                 epoch,
                 is_checkpoint,
             } => {
+                info!(epoch, is_checkpoint, "seal epoch");
                 self.uploader.seal_epoch(epoch);
 
                 if is_checkpoint {
@@ -675,6 +681,9 @@ impl HummockEventHandler {
                 table_id,
                 instance_id,
             } => {
+                if table_id.table_id == 338022 {
+                    warn!(epoch, instance_id, "local seal epoch");
+                }
                 assert!(
                     self.local_read_version_mapping
                         .contains_key(&instance_id),
@@ -710,6 +719,12 @@ impl HummockEventHandler {
 
                 let instance_id = self.generate_instance_id();
 
+                if table_id.table_id == 338022 {
+                    warn!(
+                        mce = pinned_version.max_committed_epoch(),
+                        instance_id, "read version register"
+                    );
+                }
                 debug!(
                     "new read version registered: table_id: {}, instance_id: {}",
                     table_id, instance_id
@@ -748,6 +763,9 @@ impl HummockEventHandler {
                 table_id,
                 instance_id,
             } => {
+                if table_id.table_id == 338022 {
+                    warn!(instance_id, "read version deregister");
+                }
                 debug!(
                     "read version deregister: table_id: {}, instance_id: {}",
                     table_id, instance_id

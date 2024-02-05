@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
+use itertools::Itertools;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{is_empty_key_range, TableKey, TableKeyRange};
@@ -116,6 +117,16 @@ impl LocalHummockStorage {
             table_key_range,
             &self.read_version,
         )?;
+
+        if read_options.table_id.table_id == 338022 {
+            warn!(
+                imms = ?read_snapshot.0.iter().map(|imm| imm.batch_id()).collect_vec(),
+                ssts = ?read_snapshot.1.iter().map(|sst| sst.sst_id).collect_vec(),
+                mce = read_snapshot.2.max_committed_epoch(),
+                version_id = read_snapshot.2.id(),
+                "get value"
+            );
+        }
 
         if is_empty_key_range(&table_key_range) {
             return Ok(None);
@@ -269,6 +280,9 @@ impl LocalStateStore for LocalHummockStorage {
         new_val: Bytes,
         old_val: Option<Bytes>,
     ) -> StorageResult<()> {
+        if self.table_id.table_id == 338022 {
+            warn!(?key, epoch = self.epoch.unwrap(), "insert value");
+        }
         match old_val {
             None => self.mem_table.insert(key, new_val)?,
             Some(old_val) => self.mem_table.update(key, old_val, new_val)?,
@@ -278,6 +292,9 @@ impl LocalStateStore for LocalHummockStorage {
     }
 
     fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
+        if self.table_id.table_id == 338022 {
+            warn!(?key, epoch = self.epoch.unwrap(), "delete value");
+        }
         self.mem_table.delete(key, old_val)?;
 
         Ok(())
@@ -490,6 +507,15 @@ impl LocalHummockStorage {
             self.spill_offset += 1;
             let imm_size = imm.size();
             self.update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
+
+            if self.table_id.table_id == 338022 {
+                warn!(
+                    imm = imm.batch_id(),
+                    instance_id,
+                    epoch = self.epoch.unwrap(),
+                    "flush value"
+                );
+            }
 
             // insert imm to uploader
             if !self.is_replicated {
