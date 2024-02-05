@@ -318,7 +318,7 @@ impl SourceStreamChunkRowWriter<'_> {
         mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output>,
     ) -> AccessResult<()> {
         let mut wrapped_f = |desc: &SourceColumnDesc| {
-            match (&desc.column_type, &desc.additional_column_type.column_type) {
+            match (&desc.column_type, &desc.additional_column.column_type) {
                 (&SourceColumnType::Offset | &SourceColumnType::RowId, _) => {
                     // SourceColumnType is for CDC source only.
                     Ok(A::output_for(

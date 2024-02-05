@@ -139,7 +139,7 @@ impl SourceDescBuilder {
 
         // Check if partition/file/offset columns are included explicitly.
         for col in &self.columns {
-            match col.column_desc.as_ref().unwrap().get_additional_columns() {
+            match col.column_desc.as_ref().unwrap().get_additional_column() {
                 Ok(AdditionalColumn {
                     column_type: Some(ColumnType::Partition(_) | ColumnType::Filename(_)),
                 }) => {
