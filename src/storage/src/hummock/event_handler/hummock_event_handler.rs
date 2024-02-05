@@ -22,6 +22,7 @@ use await_tree::InstrumentAwait;
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use prometheus::core::{AtomicU64, GenericGauge};
+// use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::stream_plan::StreamActor;
 use thiserror_ext::AsReport;
@@ -110,6 +111,17 @@ pub struct BufferTracker {
     global_buffer: Arc<MemoryLimiter>,
     global_upload_task_size: GenericGauge<AtomicU64>,
 }
+
+// pub static VERSION_STORE: LazyLock<Mutex<HashMap<u64, HummockVersion>>> =
+//     LazyLock::new(|| Mutex::new(HashMap::new()));
+//
+// fn store_version(version: HummockVersion) {
+//     VERSION_STORE.lock().insert(version.id, version);
+// }
+//
+// pub fn get_version(id: u64) -> HummockVersion {
+//     VERSION_STORE.lock().get(&id).unwrap().clone()
+// }
 
 impl BufferTracker {
     pub fn from_storage_opts(
@@ -494,6 +506,10 @@ impl HummockEventHandler {
             .map(Arc::new)
             .unwrap_or_else(|| self.pinned_version.load().clone());
 
+        if pinned_version.id() == 48311 {
+            warn!(?version_payload, "update on target version");
+        }
+
         let mut sst_delta_infos = vec![];
         let newly_pinned_version = match version_payload {
             HummockVersionUpdate::VersionDeltas(version_deltas) => {
@@ -564,6 +580,8 @@ impl HummockEventHandler {
             prev_mce = pinned_version.max_committed_epoch(),
             "update  hummock version"
         );
+
+        // store_version(new_pinned_version.version().clone());
 
         self.uploader.update_pinned_version(new_pinned_version);
     }

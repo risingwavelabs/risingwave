@@ -14,25 +14,30 @@
 
 use std::future::Future;
 use std::ops::Bound;
+// use std::ops::Bound::Unbounded;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
+// use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{is_empty_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 use tokio::sync::mpsc;
+// use tokio::sync::mpsc::unbounded_channel;
 use tracing::{warn, Instrument};
 
 use super::version::{StagingData, VersionUpdate};
 use crate::error::StorageResult;
+// use crate::hummock::event_handler::hummock_event_handler::get_version;
 use crate::hummock::event_handler::{HummockEvent, HummockReadVersionRef, LocalInstanceGuard};
 use crate::hummock::iterator::{
     ConcatIteratorInner, Forward, HummockIteratorUnion, MergeIterator, SkipWatermarkIterator,
     UserIterator,
 };
+// use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
 };
@@ -126,9 +131,84 @@ impl LocalHummockStorage {
                 version_id = read_snapshot.2.id(),
                 "get value"
             );
+
+            // if read_snapshot.2.id() == 48312 {
+            //     let prev_version = get_version(48311);
+            //
+            //     let origin_return = self
+            //         .hummock_version_reader
+            //         .get(
+            //             table_key.clone(),
+            //             epoch,
+            //             read_options.clone(),
+            //             read_snapshot.clone(),
+            //         )
+            //         .await
+            //         .inspect_err(|_| warn!("get error when making original request"))?;
+            //
+            //     let origin_scan = self
+            //         .hummock_version_reader
+            //         .iter(
+            //             (Unbounded, Unbounded),
+            //             epoch,
+            //             read_options.clone(),
+            //             read_snapshot.clone(),
+            //         )
+            //         .await
+            //         .inspect_err(|_| warn!("get error when create iter on original version"))?
+            //         .try_collect::<Vec<_>>()
+            //         .await
+            //         .inspect_err(|_| warn!("get error when scan on original version"))?;
+            //
+            //     let read_snapshot = (
+            //         read_snapshot.0,
+            //         read_snapshot.1,
+            //         PinnedVersion::new(prev_version, unbounded_channel().0),
+            //         read_snapshot.3,
+            //     );
+            //
+            //     let new_return = self
+            //         .hummock_version_reader
+            //         .get(
+            //             table_key.clone(),
+            //             epoch,
+            //             read_options.clone(),
+            //             read_snapshot.clone(),
+            //         )
+            //         .await
+            //         .inspect_err(|_| warn!("get error when making new request"))?;
+            //
+            //     let new_scan = self
+            //         .hummock_version_reader
+            //         .iter(
+            //             (Unbounded, Unbounded),
+            //             epoch,
+            //             read_options.clone(),
+            //             read_snapshot.clone(),
+            //         )
+            //         .await
+            //         .inspect_err(|_| warn!("get error when create iter on new version"))?
+            //         .try_collect::<Vec<_>>()
+            //         .await
+            //         .inspect_err(|_| warn!("get error when scan on new version"))?;
+            //
+            //     warn!(?origin_return, ?new_return, "compare result");
+            //     warn!(
+            //         ?origin_scan,
+            //         ?new_scan,
+            //         eq = origin_scan == new_scan,
+            //         "compare scan"
+            //     );
+            //
+            //     return Ok(origin_return);
+            // }
         }
 
         if is_empty_key_range(&table_key_range) {
+            warn!(
+                "return None with empty range of table watermark: {:?}",
+                table_key_range
+            );
             return Ok(None);
         }
 
