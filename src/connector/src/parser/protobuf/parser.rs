@@ -180,7 +180,7 @@ impl ProtobufParserConfig {
                 type_name: m.full_name().to_string(),
                 generated_or_default_column: None,
                 description: None,
-                additional_columns: Some(AdditionalColumn { column_type: None }),
+                additional_column: Some(AdditionalColumn { column_type: None }),
                 version: ColumnDescVersion::Pr13707 as i32,
             })
         } else {
@@ -189,7 +189,7 @@ impl ProtobufParserConfig {
                 column_id: *index,
                 name: field_descriptor.name().to_string(),
                 column_type: Some(field_type.to_protobuf()),
-                additional_columns: Some(AdditionalColumn { column_type: None }),
+                additional_column: Some(AdditionalColumn { column_type: None }),
                 version: ColumnDescVersion::Pr13707 as i32,
                 ..Default::default()
             })

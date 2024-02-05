@@ -54,7 +54,7 @@ async fn build_accessor_builder(
 pub fn get_key_column_name(columns: &[SourceColumnDesc]) -> Option<String> {
     columns.iter().find_map(|column| {
         if matches!(
-            column.additional_column_type.column_type,
+            column.additional_column.column_type,
             Some(AdditionalColumnType::Key(_))
         ) {
             Some(column.name.clone())
