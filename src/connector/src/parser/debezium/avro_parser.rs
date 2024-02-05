@@ -17,8 +17,6 @@ use std::sync::Arc;
 
 use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Schema};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::catalog::PbSchemaRegistryNameStrategy;
 use risingwave_pb::plan_common::ColumnDesc;
@@ -50,13 +48,10 @@ pub struct DebeziumAvroAccessBuilder {
 
 // TODO: reduce encodingtype match
 impl AccessBuilder for DebeziumAvroAccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>> {
         let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
         let schema = self.schema_resolver.get(schema_id).await?;
-        self.value = Some(
-            from_avro_datum(schema.as_ref(), &mut raw_payload, None)
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?,
-        );
+        self.value = Some(from_avro_datum(schema.as_ref(), &mut raw_payload, None)?);
         self.key_schema = match self.encoding_type {
             EncodingType::Key => Some(schema),
             EncodingType::Value => None,
@@ -72,19 +67,19 @@ impl AccessBuilder for DebeziumAvroAccessBuilder {
 }
 
 impl DebeziumAvroAccessBuilder {
-    pub fn new(config: DebeziumAvroParserConfig, encoding_type: EncodingType) -> Result<Self> {
+    pub fn new(
+        config: DebeziumAvroParserConfig,
+        encoding_type: EncodingType,
+    ) -> anyhow::Result<Self> {
         let DebeziumAvroParserConfig {
             outer_schema,
             schema_resolver,
             ..
         } = config;
 
-        let resolver = apache_avro::schema::ResolvedSchema::try_from(&*outer_schema)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        let resolver = apache_avro::schema::ResolvedSchema::try_from(&*outer_schema)?;
         // todo: to_resolved may cause stackoverflow if there's a loop in the schema
-        let schema = resolver
-            .to_resolved(&outer_schema)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        let schema = resolver.to_resolved(&outer_schema)?;
         Ok(Self {
             schema,
             schema_resolver,
@@ -104,7 +99,7 @@ pub struct DebeziumAvroParserConfig {
 }
 
 impl DebeziumAvroParserConfig {
-    pub async fn new(encoding_config: EncodingProperties) -> Result<Self> {
+    pub async fn new(encoding_config: EncodingProperties) -> anyhow::Result<Self> {
         let avro_config = try_match_expand!(encoding_config, EncodingProperties::Avro)?;
         let schema_location = &avro_config.row_schema_location;
         let client_config = &avro_config.client_config;
@@ -353,7 +348,7 @@ mod tests {
 
     #[ignore]
     #[tokio::test]
-    async fn test_debezium_avro_parser() -> Result<()> {
+    async fn test_debezium_avro_parser() -> anyhow::Result<()> {
         let props = convert_args!(hashmap!(
             "kafka.topic" => "dbserver1.inventory.customers"
         ));

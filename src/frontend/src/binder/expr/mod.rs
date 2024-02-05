@@ -703,7 +703,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         type_name: "".to_string(),
         generated_or_default_column: None,
         description: None,
-        additional_columns: AdditionalColumn { column_type: None },
+        additional_column: AdditionalColumn { column_type: None },
         version: ColumnDescVersion::Pr13707,
     })
 }

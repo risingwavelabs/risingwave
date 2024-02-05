@@ -8841,6 +8841,7 @@ name = "risingwave_common_proc_macro"
 version = "1.7.0-alpha"
 dependencies = [
  "bae",
+ "itertools 0.12.0",
  "proc-macro-error 1.0.4",
  "proc-macro2",
  "quote",
