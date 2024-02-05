@@ -616,12 +616,12 @@ where
             }
             let range_bounds = range_bounds.unwrap();
 
-            tracing::trace!(
-                vnode = ?vnode,
-                current_pos = ?current_pos,
-                range_bounds = ?range_bounds,
-                "iter_with_vnode_and_output_indices"
-            );
+            // tracing::trace!(
+            //     vnode = ?vnode,
+            //     current_pos = ?current_pos,
+            //     range_bounds = ?range_bounds,
+            //     "iter_with_vnode_and_output_indices"
+            // );
             let vnode_row_iter = upstream_table
                 .iter_with_vnode_and_output_indices(
                     vnode,
