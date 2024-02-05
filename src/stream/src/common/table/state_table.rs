@@ -921,8 +921,8 @@ where
         let new_value_bytes = self.serialize_value(new_value);
 
         if should_print {
-            println!("new_key_bytes: {:?}", new_key_bytes);
-            println!("new_value_bytes: {:?}", new_value_bytes);
+            tracing::info!("new_key_bytes: {:?}", new_key_bytes);
+            tracing::info!("new_value_bytes: {:?}", new_value_bytes);
         }
 
         self.update_inner(new_key_bytes, Some(old_value_bytes), new_value_bytes);
