@@ -375,7 +375,7 @@ async fn test_high_barrier_latency_cancel_arrangement_backfill() -> Result<()> {
         cluster
             .kill_nodes_and_restart(["compute-1", "compute-2", "compute-3"], 2)
             .await;
-        sleep(Duration::from_secs(3)).await;
+        sleep(Duration::from_secs(2)).await;
 
         tracing::debug!("killed cn, waiting recovery");
 
@@ -400,9 +400,25 @@ async fn test_high_barrier_latency_cancel_arrangement_backfill() -> Result<()> {
 
     tracing::info!("restarted cn: trigger stream job recovery");
 
+    // Make sure there's some progress first.
+    loop {
+        // Wait until at least 10% of records are ingested.
+        let progress = session
+            .run("select progress from rw_catalog.rw_ddl_progress;")
+            .await.unwrap();
+        tracing::info!(progress, "get progress before cancel stream job");
+        let progress = progress.replace('%', "");
+        let progress = progress.parse::<f64>().unwrap();
+        if progress > 0.01 {
+            break;
+        } else {
+            sleep(Duration::from_micros(1)).await;
+        }
+    }
     // Loop in case the cancel gets dropped after
     // cn kill, before it drops the table fragment.
-    for _ in 0..5 {
+    for iteration in 0..5 {
+        tracing::info!(iteration, "cancelling stream job");
         let mut session2 = cluster.start_session();
         let handle = tokio::spawn(async move {
             let result = cancel_stream_jobs(&mut session2).await;
