@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 package telemetry;
+
 option go_package = "risingwavelabs.com/risingwave/proto/telemetry";
 
 enum MetaBackend {
