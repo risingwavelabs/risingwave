@@ -298,21 +298,15 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        // Add fragments, actors and actor dispatchers.
-        for (fragment, actors, actor_dispatchers) in fragment_actors {
+        // Add fragments.
+        let (fragments, actor_with_dispatchers): (Vec<_>, Vec<_>) = fragment_actors
+            .into_iter()
+            .map(|(fragment, actors, actor_dispatchers)| (fragment, (actors, actor_dispatchers)))
+            .unzip();
+        for fragment in fragments {
             let fragment = fragment.into_active_model();
             let fragment = fragment.insert(&txn).await?;
-            for actor in actors {
-                let actor = actor.into_active_model();
-                actor.insert(&txn).await?;
-            }
-            for (_, actor_dispatchers) in actor_dispatchers {
-                for actor_dispatcher in actor_dispatchers {
-                    let mut actor_dispatcher = actor_dispatcher.into_active_model();
-                    actor_dispatcher.id = NotSet;
-                    actor_dispatcher.insert(&txn).await?;
-                }
-            }
+
             // Update fragment id for all state tables.
             if !for_replace {
                 for state_table_id in fragment.state_table_ids.into_inner() {
@@ -323,6 +317,21 @@ impl CatalogController {
                     }
                     .update(&txn)
                     .await?;
+                }
+            }
+        }
+
+        // Add actors and actor dispatchers.
+        for (actors, actor_dispatchers) in actor_with_dispatchers {
+            for actor in actors {
+                let actor = actor.into_active_model();
+                actor.insert(&txn).await?;
+            }
+            for (_, actor_dispatchers) in actor_dispatchers {
+                for actor_dispatcher in actor_dispatchers {
+                    let mut actor_dispatcher = actor_dispatcher.into_active_model();
+                    actor_dispatcher.id = NotSet;
+                    actor_dispatcher.insert(&txn).await?;
                 }
             }
         }
