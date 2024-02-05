@@ -694,7 +694,7 @@ mod tests {
                             type_name: ".test.Country".to_string(),
                             description: None,
                             generated_or_default_column: None,
-                            additional_columns: AdditionalColumn { column_type: None },
+                            additional_column: AdditionalColumn { column_type: None },
                             version: ColumnDescVersion::Pr13707,
                         },
                         is_hidden: false

@@ -567,7 +567,7 @@ mod tests {
                     column_type: SourceColumnType::Normal,
                     is_pk: false,
                     is_hidden_addition_col: false,
-                    additional_column_type: AdditionalColumn { column_type: None },
+                    additional_column: AdditionalColumn { column_type: None },
                 },
                 SourceColumnDesc::simple("o_enum", DataType::Varchar, ColumnId::from(8)),
                 SourceColumnDesc::simple("o_char", DataType::Varchar, ColumnId::from(9)),

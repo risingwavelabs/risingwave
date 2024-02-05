@@ -685,7 +685,7 @@ pub(crate) async fn bind_source_pk(
         // return the key column names if exists
         columns.iter().find_map(|catalog| {
             if matches!(
-                catalog.column_desc.additional_columns.column_type,
+                catalog.column_desc.additional_column.column_type,
                 Some(AdditionalColumnType::Key(_))
             ) {
                 Some(catalog.name().to_string())
@@ -697,7 +697,7 @@ pub(crate) async fn bind_source_pk(
     let additional_column_names = columns
         .iter()
         .filter_map(|col| {
-            if col.column_desc.additional_columns.column_type.is_some() {
+            if col.column_desc.additional_column.column_type.is_some() {
                 Some(col.name().to_string())
             } else {
                 None
@@ -848,7 +848,7 @@ fn check_and_add_timestamp_column(
     if is_kafka_connector(with_properties) {
         if columns.iter().any(|col| {
             matches!(
-                col.column_desc.additional_columns.column_type,
+                col.column_desc.additional_column.column_type,
                 Some(AdditionalColumnType::Timestamp(_))
             )
         }) {
