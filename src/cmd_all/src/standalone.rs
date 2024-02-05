@@ -25,6 +25,11 @@ use tokio::signal;
 use crate::common::osstrs;
 
 #[derive(Eq, PartialOrd, PartialEq, Debug, Clone, Parser)]
+#[command(
+    version,
+    about = "The Standalone mode allows users to start multiple services in one process, it exposes node-level options for each service",
+    hide = true
+)]
 pub struct StandaloneOpts {
     /// Compute node options
     /// If missing, compute node won't start
@@ -161,6 +166,9 @@ pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts 
     }
 }
 
+/// For `standalone` mode, we can configure and start multiple services in one process.
+/// `standalone` mode is meant to be used by our cloud service and docker,
+/// where we can configure and start multiple services in one process.
 pub async fn standalone(
     ParsedStandaloneOpts {
         meta_opts,

@@ -18,7 +18,6 @@ use anyhow::anyhow;
 use async_nats::jetstream::context::Context;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::anyhow_error;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -111,7 +110,7 @@ impl Sink for NatsSink {
         match self.config.common.build_client().await {
             Ok(_client) => {}
             Err(error) => {
-                return Err(SinkError::Nats(anyhow_error!(
+                return Err(SinkError::Nats(anyhow!(
                     "validate nats sink error: {:?}",
                     error
                 )));
@@ -135,7 +134,7 @@ impl NatsSinkWriter {
             .common
             .build_context()
             .await
-            .map_err(|e| SinkError::Nats(anyhow_error!("nats sink error: {:?}", e)))?;
+            .map_err(|e| SinkError::Nats(anyhow!("nats sink error: {:?}", e)))?;
         Ok::<_, SinkError>(Self {
             config: config.clone(),
             context,
@@ -160,13 +159,13 @@ impl NatsSinkWriter {
                     self.context
                         .publish(self.config.common.subject.clone(), item.into())
                         .await
-                        .map_err(|e| SinkError::Nats(anyhow_error!("nats sink error: {:?}", e)))?;
+                        .map_err(|e| SinkError::Nats(anyhow!("nats sink error: {:?}", e)))?;
                 }
                 Ok::<_, SinkError>(())
             },
         )
         .await
-        .map_err(|e| SinkError::Nats(anyhow_error!("nats sink error: {:?}", e)))
+        .map_err(|e| SinkError::Nats(anyhow!("nats sink error: {:?}", e)))
     }
 }
 

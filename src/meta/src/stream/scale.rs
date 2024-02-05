@@ -36,7 +36,7 @@ use risingwave_pb::meta::get_reschedule_plan_request::{Policy, StableResizePolic
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
-use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
+use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment, State};
 use risingwave_pb::meta::FragmentParallelUnitMappings;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatcherType, FragmentTypeFlag, StreamActor, StreamNode};
@@ -1732,16 +1732,21 @@ impl ScaleController {
                                         "no shuffle should have exactly one downstream actor id",
                                     );
 
-                                let downstream_fragment_id = actor_fragment_id_map_for_check
-                                    .get(downstream_actor_id)
-                                    .unwrap();
-
-                                // dispatcher_id of dispatcher should be exactly same as downstream fragment id
-                                // but we need to check it to make sure
-                                debug_assert_eq!(
-                                    *downstream_fragment_id,
-                                    dispatcher.dispatcher_id as FragmentId
-                                );
+                                if let Some(downstream_fragment_id) =
+                                    actor_fragment_id_map_for_check.get(downstream_actor_id)
+                                {
+                                    // dispatcher_id of dispatcher should be exactly same as downstream fragment id
+                                    // but we need to check it to make sure
+                                    debug_assert_eq!(
+                                        *downstream_fragment_id,
+                                        dispatcher.dispatcher_id as FragmentId
+                                    );
+                                } else {
+                                    tracing::warn!(
+                                        "downstream actor id {} not found in fragment_actor_id_map",
+                                        downstream_actor_id
+                                    );
+                                }
 
                                 no_shuffle_target_fragment_ids
                                     .insert(dispatcher.dispatcher_id as FragmentId);
@@ -2523,6 +2528,7 @@ impl GlobalStreamManager {
                     guard
                         .table_fragments()
                         .iter()
+                        .filter(|&(_, table)| matches!(table.state(), State::Created))
                         .map(|(table_id, table)| (table_id.table_id, table.assigned_parallelism))
                         .collect()
                 };
@@ -2569,7 +2575,7 @@ impl GlobalStreamManager {
                 let table_parallelisms: HashMap<_, _> = {
                     let streaming_parallelisms = mgr
                         .catalog_controller
-                        .get_all_streaming_parallelisms()
+                        .get_all_created_streaming_parallelisms()
                         .await?;
 
                     streaming_parallelisms

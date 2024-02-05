@@ -198,7 +198,7 @@ impl CommonSplitReader for KafkaSplitReader {
         // ingest kafka message header can be expensive, do it only when required
         let require_message_header = self.parser_config.common.rw_columns.iter().any(|col_desc| {
             matches!(
-                col_desc.additional_column_type.column_type,
+                col_desc.additional_column.column_type,
                 Some(AdditionalColumnType::Headers(_) | AdditionalColumnType::HeaderInner(_))
             )
         });

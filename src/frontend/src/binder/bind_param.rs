@@ -15,11 +15,12 @@
 use bytes::Bytes;
 use pgwire::types::{Format, FormatIterator};
 use risingwave_common::bail;
-use risingwave_common::error::{BoxedError, ErrorCode, Result};
+use risingwave_common::error::BoxedError;
 use risingwave_common::types::{Datum, ScalarImpl};
 
 use super::statement::RewriteExprsRecursive;
 use super::BoundStatement;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, Literal};
 
 /// Rewrites parameter expressions to literals.
