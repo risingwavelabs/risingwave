@@ -22,13 +22,13 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::meta::table_fragments::actor_status::ActorState;
+
 use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
-use risingwave_pb::PbFieldNotFound;
+
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
