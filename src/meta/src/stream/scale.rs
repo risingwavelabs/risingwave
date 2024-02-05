@@ -36,7 +36,7 @@ use risingwave_pb::meta::get_reschedule_plan_request::{Policy, StableResizePolic
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
-use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
+use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment, State};
 use risingwave_pb::meta::FragmentParallelUnitMappings;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatcherType, FragmentTypeFlag, StreamActor, StreamNode};
@@ -2528,6 +2528,7 @@ impl GlobalStreamManager {
                     guard
                         .table_fragments()
                         .iter()
+                        .filter(|&(_, table)| matches!(table.state(), State::Created))
                         .map(|(table_id, table)| (table_id.table_id, table.assigned_parallelism))
                         .collect()
                 };
@@ -2574,7 +2575,7 @@ impl GlobalStreamManager {
                 let table_parallelisms: HashMap<_, _> = {
                     let streaming_parallelisms = mgr
                         .catalog_controller
-                        .get_all_streaming_parallelisms()
+                        .get_all_created_streaming_parallelisms()
                         .await?;
 
                     streaming_parallelisms
