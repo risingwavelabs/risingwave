@@ -17,7 +17,7 @@ SELECT
 FROM
     users;
 
-sleep 5s;
+sleep 5s
 
 query I
 select count(*) from normalized_users;
