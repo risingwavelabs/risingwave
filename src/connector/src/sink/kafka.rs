@@ -29,6 +29,7 @@ use risingwave_common::catalog::Schema;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use strum_macros::{Display, EnumString};
+use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
@@ -478,10 +479,10 @@ impl<'w> KafkaPayloadWriter<'w> {
                 // We can retry for another round after sleeping for sometime
                 Err((e, rec)) => {
                     tracing::warn!(
-                        "producing message (key {:?}) to topic {} failed, err {:?}.",
+                        error = %e.as_report(),
+                        "producing message (key {:?}) to topic {} failed",
                         rec.key.map(|k| k.to_bytes()),
                         rec.topic,
-                        e
                     );
                     record = rec;
                     match e {

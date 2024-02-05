@@ -14,10 +14,11 @@
 
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::{Stream, StreamExt, TryStreamExt};
 use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
+use thiserror_ext::AsReport;
 
 use super::generator::DatagenEventGenerator;
 use crate::parser::{EncodingProperties, ParserConfig, ProtocolProperties};
@@ -209,9 +210,9 @@ fn generator_from_data_type(
                 Ok(seed) => seed ^ split_index,
                 Err(e) => {
                     tracing::warn!(
-                        "cannot parse {:?} to u64 due to {:?}, will use {:?} as random seed",
+                        error = %e.as_report(),
+                        "cannot parse {:?} to u64, will use {:?} as random seed",
                         seed,
-                        e,
                         split_index
                     );
                     split_index
@@ -230,11 +231,10 @@ fn generator_from_data_type(
                 .map(|s| s.to_lowercase());
             let basetime = match fields_option_map.get(format!("fields.{}.basetime", name).as_str())
             {
-                Some(base) => {
-                    Some(chrono::DateTime::parse_from_rfc3339(base).map_err(|e| {
-                        anyhow!("cannot parse {:?} to rfc3339 due to {:?}", base, e)
-                    })?)
-                }
+                Some(base) => Some(
+                    chrono::DateTime::parse_from_rfc3339(base)
+                        .with_context(|| format!("cannot parse `{base}` to rfc3339"))?,
+                ),
                 None => None,
             };
 

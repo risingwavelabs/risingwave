@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, bail};
+use anyhow::{bail, Context};
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
 use google_cloud_pubsub::client::{Client, ClientConfig};
@@ -49,13 +49,13 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         let config = ClientConfig::default().with_auth().await?;
         let client = Client::new(config)
             .await
-            .map_err(|e| anyhow!("error initializing pubsub client: {:?}", e))?;
+            .context("error initializing pubsub client")?;
 
         let sub = client.subscription(&subscription);
         if !sub
             .exists(None)
             .await
-            .map_err(|e| anyhow!("error checking subscription validity: {:?}", e))?
+            .context("error checking subscription validity")?
         {
             bail!("subscription {} does not exist", &subscription)
         }
@@ -76,7 +76,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
             (Some(start_offset), None) => {
                 let ts = start_offset
                     .parse::<i64>()
-                    .map_err(|e| anyhow!("error parsing start_offset: {:?}", e))
+                    .context("error parsing start_offset")
                     .map(|nanos| Utc.timestamp_nanos(nanos).into())?;
                 Some(SeekTo::Timestamp(ts))
             }
@@ -89,7 +89,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         if let Some(seek_to) = seek_to {
             sub.seek(seek_to, None)
                 .await
-                .map_err(|e| anyhow!("error seeking subscription: {:?}", e))?;
+                .context("error seeking subscription")?;
         }
 
         Ok(Self {
