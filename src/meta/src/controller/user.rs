@@ -37,7 +37,7 @@ use crate::controller::utils::{
     extract_grant_obj_id, get_referring_privileges_cascade, get_user_privilege,
     list_user_info_by_ids, PartialUserPrivilege,
 };
-use crate::manager::NotificationVersion;
+use crate::manager::{NotificationVersion, IGNORED_NOTIFICATION_VERSION};
 use crate::{MetaError, MetaResult};
 
 impl CatalogController {
@@ -402,9 +402,8 @@ impl CatalogController {
             );
         }
         if root_user_privileges.is_empty() {
-            return Err(MetaError::invalid_parameter(
-                "no privilege to revoke".to_string(),
-            ));
+            tracing::warn!("no privilege to revoke, ignore it");
+            return Ok(IGNORED_NOTIFICATION_VERSION);
         }
 
         // check if the user granted any privileges to other users.
