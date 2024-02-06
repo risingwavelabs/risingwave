@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::common::PbWorkerNode;
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::PausedReason;
 
 use crate::barrier::info::InflightActorInfo;
@@ -70,7 +70,7 @@ impl BarrierManagerState {
     }
 
     // TODO: optimize it as incremental updates.
-    pub fn resolve_worker_nodes(&mut self, nodes: Vec<PbWorkerNode>) {
+    pub fn resolve_worker_nodes(&mut self, nodes: impl IntoIterator<Item = WorkerNode>) {
         self.inflight_actor_infos.resolve_worker_nodes(nodes);
     }
 
