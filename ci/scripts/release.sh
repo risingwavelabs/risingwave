@@ -94,7 +94,9 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
   dnf install -y gh
 
   echo "--- Release create"
+  set +e
   response=$(gh api repos/risingwavelabs/risingwave/releases/tags/${BUILDKITE_TAG} 2>&1)
+  set -euo pipefail
   if [[ $response == *"Not Found"* ]]; then
     echo "Tag ${BUILDKITE_TAG} does not exist. Creating release..."
     gh release create "${BUILDKITE_TAG}" --notes "release ${BUILDKITE_TAG}" -d -p
