@@ -2,18 +2,33 @@
 
 OS=$(uname -s)
 ARCH=$(uname -m)
-VERSION=$(curl -s https://api.github.com/repos/risingwavelabs/risingwave/releases/latest | grep '.tag_name' | sed -E -n 's/.*(v[0-9]+.[0-9]+.[0-9])\",/\1/p')
+
+VERSION="v1.7.0-single-node"
+# TODO(kwannoel): re-enable it once we have stable release in latest for single node mode.
+#VERSION=$(curl -s https://api.github.com/repos/risingwavelabs/risingwave/releases/latest \
+# | grep '.tag_name' \
+# | sed -E -n 's/.*(v[0-9]+.[0-9]+.[0-9])\",/\1/p')
 BASE_URL="https://github.com/risingwavelabs/risingwave/releases/download"
 
-# TODO(kwannoel): Add support for other OS and architectures.
-if [[ "${OS}" == "Linux" && "${ARCH}" == "x86_64" || "${ARCH}" == "amd64" ]]; then
-  BASE_ARCHIVE_NAME="risingwave-${VERSION}-x86_64-unknown-linux-all-in-one"
-  ARCHIVE_NAME="${BASE_ARCHIVE_NAME}.tar.gz"
-  URL="${BASE_URL}/${VERSION}/${ARCHIVE_NAME}"
-  USE_BREW=0
-elif [[ "${OS}" == "Darwin" ]] && [[ "${ARCH}" == "x86_64" || "${ARCH}" == "amd64" || "${ARCH}" == "aarch64" || "${ARCH}" == "arm64" ]]; then
-  USE_BREW=1
-else
+if [ "${OS}" = "Linux" ]; then
+  if [ "${ARCH}" = "x86_64" ] || [ "${ARCH}" = "amd64" ]; then
+    BASE_ARCHIVE_NAME="risingwave-${VERSION}-x86_64-unknown-linux-all-in-one"
+    ARCHIVE_NAME="${BASE_ARCHIVE_NAME}.tar.gz"
+    URL="${BASE_URL}/${VERSION}/${ARCHIVE_NAME}"
+    USE_BREW=0
+  elif [ "${ARCH}" = "arm64" ] || [ "${ARCH}" = "aarch64" ]; then
+    BASE_ARCHIVE_NAME="risingwave-${VERSION}-aarch64-unknown-linux-all-in-one"
+    ARCHIVE_NAME="${BASE_ARCHIVE_NAME}.tar.gz"
+    URL="${BASE_URL}/${VERSION}/${ARCHIVE_NAME}"
+    USE_BREW=0
+  fi
+elif [ "${OS}" = "Darwin" ]; then
+  if [ "${ARCH}" = "x86_64" ] || [ "${ARCH}" = "amd64" ] || [ "${ARCH}" = "aarch64" ] || [ "${ARCH}" = "arm64" ]; then
+     USE_BREW=1
+  fi
+fi
+
+if [ -z "$USE_BREW" ]; then
   echo
   echo "Unsupported OS or Architecture: ${OS}-${ARCH}"
   echo
@@ -32,10 +47,10 @@ mkdir -p "${HOME}/.risingwave/data/state_store"
 mkdir -p "${HOME}/.risingwave/data/meta_store"
 
 ############# BREW INSTALL
-if [[ "${USE_BREW}" -eq 1 ]]; then
+if [ "${USE_BREW}" -eq 1 ]; then
   echo "Installing RisingWave using Homebrew."
   brew tap risingwavelabs/risingwave
-  brew install risingwave
+  brew install risingwave@${VERSION}
   echo "Successfully installed RisingWave using Homebrew."
   echo
   echo "You can run it as:"
