@@ -29,6 +29,7 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
+use risingwave_meta::barrier::StreamRpcManager;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
 use risingwave_meta::manager::MetadataManager;
@@ -173,9 +174,17 @@ pub async fn rpc_serve(
             )
         }
         MetaStoreBackend::Sql { endpoint } => {
+            let max_connection = if DbBackend::Sqlite.is_prefix_of(&endpoint) {
+                // Due to the fact that Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
+                // here we forcibly specify the number of connections as 1.
+                1
+            } else {
+                10
+            };
+
             let mut options = sea_orm::ConnectOptions::new(endpoint);
             options
-                .max_connections(20)
+                .max_connections(max_connection)
                 .connect_timeout(Duration::from_secs(10))
                 .idle_timeout(Duration::from_secs(30));
             let conn = sea_orm::Database::connect(options).await?;
@@ -195,6 +204,7 @@ pub async fn rpc_serve(
                     Arc::new(SqlBackendElectionClient::new(id, MySqlDriver::new(conn)))
                 }
             };
+            election_client.init().await?;
 
             rpc_serve_with_store(
                 None,
@@ -525,6 +535,8 @@ pub async fn start_service_as_election_leader(
     let (sink_manager, shutdown_handle) = SinkCoordinatorManager::start_worker();
     let mut sub_tasks = vec![shutdown_handle];
 
+    let stream_rpc_manager = StreamRpcManager::new(env.clone());
+
     let barrier_manager = GlobalBarrierManager::new(
         scheduled_barriers,
         env.clone(),
@@ -533,6 +545,7 @@ pub async fn start_service_as_election_leader(
         source_manager.clone(),
         sink_manager.clone(),
         meta_metrics.clone(),
+        stream_rpc_manager.clone(),
     );
 
     {
@@ -549,6 +562,7 @@ pub async fn start_service_as_election_leader(
             barrier_scheduler.clone(),
             source_manager.clone(),
             hummock_manager.clone(),
+            stream_rpc_manager,
         )
         .unwrap(),
     );
@@ -679,7 +693,7 @@ pub async fn start_service_as_election_leader(
         ));
     }
     sub_tasks.push(HummockManager::hummock_timer_task(hummock_manager.clone()));
-    sub_tasks.push(HummockManager::compaction_event_loop(
+    sub_tasks.extend(HummockManager::compaction_event_loop(
         hummock_manager,
         compactor_streams_change_rx,
     ));
@@ -706,7 +720,7 @@ pub async fn start_service_as_election_leader(
         sub_tasks.push(task);
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager));
 
-        if env.opts.enable_automatic_parallelism_control {
+        if !env.opts.disable_automatic_parallelism_control {
             sub_tasks.push(stream_manager.start_auto_parallelism_monitor());
         }
     }

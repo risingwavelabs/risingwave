@@ -21,8 +21,9 @@ use icelake::types::Transform;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, Field, TableId};
-use risingwave_common::constants::log_store::v1::{KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::constants::log_store::v2::{
+    KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
+};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -37,12 +38,14 @@ use risingwave_connector::sink::{
 };
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::SinkLogStoreType;
 
 use super::derive::{derive_columns, derive_pk};
 use super::generic::{self, GenericPlanRef};
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill, IndicesDisplay, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject};
+use crate::error::{ErrorCode, Result};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
@@ -167,11 +170,16 @@ pub struct StreamSink {
     pub base: PlanBase<Stream>,
     input: PlanRef,
     sink_desc: SinkDesc,
+    default_log_store_type: SinkLogStoreType,
 }
 
 impl StreamSink {
     #[must_use]
-    pub fn new(input: PlanRef, sink_desc: SinkDesc) -> Self {
+    pub fn new(
+        input: PlanRef,
+        sink_desc: SinkDesc,
+        default_log_store_type: SinkLogStoreType,
+    ) -> Self {
         let base = input
             .plan_base()
             .into_stream()
@@ -181,6 +189,7 @@ impl StreamSink {
             base,
             input,
             sink_desc,
+            default_log_store_type,
         }
     }
 
@@ -224,7 +233,7 @@ impl StreamSink {
             |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)));
 
         // check and ensure that the sink connector is specified and supported
-        match sink.properties.get(CONNECTOR_TYPE_KEY) {
+        let default_sink_decouple = match sink.properties.get(CONNECTOR_TYPE_KEY) {
             Some(connector) => {
                 match_sink_name_str!(
                     connector.to_lowercase().as_str(),
@@ -234,20 +243,26 @@ impl StreamSink {
                         if connector == TABLE_SINK && sink.target_table.is_none() {
                             unsupported_sink(TABLE_SINK)
                         } else {
-                            Ok(())
+                            Ok(SinkType::default_sink_decouple(&sink))
                         }
                     },
                     |other: &str| unsupported_sink(other)
-                )?;
+                )?
             }
             None => {
                 return Err(
                     SinkError::Config(anyhow!("connector not specified when create sink")).into(),
                 );
             }
-        }
+        };
 
-        Ok(Self::new(input, sink))
+        let default_log_store_type = if default_sink_decouple {
+            SinkLogStoreType::KvLogStore
+        } else {
+            SinkLogStoreType::InMemoryLogStore
+        };
+
+        Ok(Self::new(input, sink, default_log_store_type))
     }
 
     fn derive_iceberg_sink_distribution(
@@ -495,8 +510,7 @@ impl StreamSink {
     /// The table schema is: | epoch | seq id | row op | sink columns |
     /// Pk is: | epoch | seq id |
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
-        let mut table_catalog_builder =
-            TableCatalogBuilder::new(self.input.ctx().with_options().internal_table_subset());
+        let mut table_catalog_builder = TableCatalogBuilder::default();
 
         let mut value_indices = Vec::with_capacity(
             KV_LOG_STORE_PREDEFINED_COLUMNS.len() + self.sink_desc.columns.len(),
@@ -507,13 +521,27 @@ impl StreamSink {
             value_indices.push(indice);
         }
 
+        table_catalog_builder.set_vnode_col_idx(VNODE_COLUMN_INDEX);
+
         for (i, ordering) in PK_ORDERING.iter().enumerate() {
             table_catalog_builder.add_order_column(i, *ordering);
         }
 
         let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
 
-        let payload_indices = table_catalog_builder.extend_columns(&self.sink_desc().columns);
+        let payload_indices = table_catalog_builder.extend_columns(
+            &self
+                .sink_desc()
+                .columns
+                .iter()
+                .map(|column| {
+                    // make payload hidden column visible in kv log store batch query
+                    let mut column = column.clone();
+                    column.is_hidden = false;
+                    column
+                })
+                .collect_vec(),
+        );
 
         value_indices.extend(payload_indices);
         table_catalog_builder.set_value_indices(value_indices);
@@ -537,7 +565,7 @@ impl PlanTreeNodeUnary for StreamSink {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.sink_desc.clone())
+        Self::new(input, self.sink_desc.clone(), self.default_log_store_type)
         // TODO(nanderstabel): Add assertions (assert_eq!)
     }
 }
@@ -591,24 +619,7 @@ impl StreamNode for StreamSink {
             sink_desc: Some(self.sink_desc.to_proto()),
             table: Some(table.to_internal_table_prost()),
             log_store_type: match self.base.ctx().session_ctx().config().sink_decouple() {
-                SinkDecouple::Default => {
-                    let enable_sink_decouple =
-                        match_sink_name_str!(
-                        self.sink_desc.properties.get(CONNECTOR_TYPE_KEY).expect(
-                            "have checked connector is contained when create the `StreamSink`"
-                        ).to_lowercase().as_str(),
-                        SinkTypeName,
-                        SinkTypeName::default_sink_decouple(&self.sink_desc),
-                        |_unsupported| unreachable!(
-                            "have checked connector is supported when create the `StreamSink`"
-                        )
-                    );
-                    if enable_sink_decouple {
-                        SinkLogStoreType::KvLogStore as i32
-                    } else {
-                        SinkLogStoreType::InMemoryLogStore as i32
-                    }
-                }
+                SinkDecouple::Default => self.default_log_store_type as i32,
                 SinkDecouple::Enable => SinkLogStoreType::KvLogStore as i32,
                 SinkDecouple::Disable => SinkLogStoreType::InMemoryLogStore as i32,
             },

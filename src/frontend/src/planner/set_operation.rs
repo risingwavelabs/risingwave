@@ -11,9 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use risingwave_common::error::Result;
-
 use crate::binder::{BoundSetExpr, BoundSetOperation};
+use crate::error::Result;
 use crate::optimizer::plan_node::{LogicalExcept, LogicalIntersect, LogicalUnion};
 use crate::planner::Planner;
 use crate::PlanRef;

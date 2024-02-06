@@ -16,7 +16,7 @@ create index i_b1 on b(b1);
 statement ok
 create materialized view mv1 as select * from a join b on a.a1 = b.b1;
 
-statement error other relation\(s\) depend on it
+statement error Permission denied
 drop index i_a1;
 
 statement ok
@@ -25,7 +25,7 @@ drop materialized view mv1;
 statement ok
 create materialized view mv2 as with ctx as (select a1 from a) select b1 from b;
 
-statement error other relation\(s\) depend on it
+statement error Permission denied
 drop table a;
 
 statement ok
@@ -48,13 +48,13 @@ create view v2 as select * from v;
 statement ok
 create materialized view mv3 as select * from v2;
 
-statement error other relation\(s\) depend on it
+statement error Permission denied
 drop source src;
 
-statement error other relation\(s\) depend on it
+statement error Permission denied
 drop view v;
 
-statement error other relation\(s\) depend on it
+statement error Permission denied
 drop view v2;
 
 statement ok

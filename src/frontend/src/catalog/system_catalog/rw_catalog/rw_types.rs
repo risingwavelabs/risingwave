@@ -16,12 +16,12 @@ use std::sync::LazyLock;
 
 use itertools::Itertools;
 use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
 use risingwave_common::for_all_base_types;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::error::Result;
 
 macro_rules! impl_pg_type_data {
     ($( { $enum:ident | $oid:literal | $oid_array:literal | $name:ident | $input:ident | $len:literal } )*) => {

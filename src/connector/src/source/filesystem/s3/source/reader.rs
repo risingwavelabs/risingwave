@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::pin::pin;
 
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use aws_sdk_s3::client as s3_client;
 use aws_sdk_s3::operation::get_object::GetObjectError;
@@ -26,7 +26,6 @@ use aws_smithy_types::byte_stream::ByteStream;
 use futures_async_stream::try_stream;
 use io::StreamReader;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::error::RwError;
 use tokio::io::BufReader;
 use tokio_util::io;
 use tokio_util::io::ReaderStream;
@@ -39,9 +38,7 @@ use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::nd_streaming;
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::s3::S3Properties;
-use crate::source::{
-    self, BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta,
-};
+use crate::source::{BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta};
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
@@ -187,7 +184,7 @@ impl SplitReader for S3FileReader {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         let config = AwsAuthProps::from(&props);
 
         let sdk_config = config.build_config().await?;
@@ -213,7 +210,7 @@ impl SplitReader for S3FileReader {
 }
 
 impl S3FileReader {
-    #[try_stream(boxed, ok = StreamChunk, error = RwError)]
+    #[try_stream(boxed, ok = StreamChunk, error = anyhow::Error)]
     async fn into_chunk_stream(self) {
         for split in self.splits {
             let actor_id = self.source_ctx.source_info.actor_id.to_string();

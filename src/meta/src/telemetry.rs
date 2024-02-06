@@ -38,6 +38,7 @@ pub struct MetaTelemetryReport {
     #[serde(flatten)]
     base: TelemetryReportBase,
     node_count: NodeCount,
+    streaming_job_count: u64,
     // At this point, it will always be etcd, but we will enable telemetry when using memory.
     meta_backend: MetaBackend,
 }
@@ -91,6 +92,12 @@ impl TelemetryReportCreator for MetaReportCreator {
             .await
             .map_err(|err| err.as_report().to_string())?;
 
+        let streaming_job_count = self
+            .metadata_manager
+            .count_streaming_job()
+            .await
+            .map_err(|err| err.as_report().to_string())? as u64;
+
         Ok(MetaTelemetryReport {
             base: TelemetryReportBase {
                 tracking_id,
@@ -106,6 +113,7 @@ impl TelemetryReportCreator for MetaReportCreator {
                 frontend_count: *node_map.get(&WorkerType::Frontend).unwrap_or(&0),
                 compactor_count: *node_map.get(&WorkerType::Compactor).unwrap_or(&0),
             },
+            streaming_job_count,
             meta_backend: self.meta_backend,
         })
     }

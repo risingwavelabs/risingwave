@@ -41,6 +41,7 @@ RUN curl -sSL https://install.python-poetry.org | python3 -
 
 # add required rustup components
 RUN rustup component add rustfmt llvm-tools-preview clippy
+RUN rustup target add wasm32-wasi
 
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 

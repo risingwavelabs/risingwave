@@ -357,7 +357,7 @@ pub async fn compact(
     let has_ttl = compact_task
         .table_options
         .iter()
-        .any(|(_, table_option)| table_option.retention_seconds > 0);
+        .any(|(_, table_option)| table_option.retention_seconds.is_some_and(|ttl| ttl > 0));
     let mut task_status = TaskStatus::Success;
     // skip sst related to non-existent able_id to reduce io
     let sstable_infos = compact_task

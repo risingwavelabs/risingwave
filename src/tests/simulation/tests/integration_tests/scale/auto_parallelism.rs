@@ -32,7 +32,6 @@ async fn test_passive_online_and_offline() -> Result<()> {
     let config = Configuration::for_auto_parallelism(
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE,
         true,
-        true,
     );
     let mut cluster = Cluster::start(config.clone()).await?;
     let mut session = cluster.start_session();
@@ -215,7 +214,6 @@ async fn test_passive_online_and_offline() -> Result<()> {
 async fn test_active_online() -> Result<()> {
     let config = Configuration::for_auto_parallelism(
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE,
-        false,
         true,
     );
     let mut cluster = Cluster::start(config.clone()).await?;
@@ -302,7 +300,6 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 ) -> Result<()> {
     let config = Configuration::for_auto_parallelism(
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE,
-        true,
         enable_auto_parallelism_control,
     );
     let mut cluster = Cluster::start(config.clone()).await?;
@@ -490,7 +487,6 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 async fn test_compatibility_with_low_level() -> Result<()> {
     let config = Configuration::for_auto_parallelism(
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE,
-        false,
         true,
     );
     let mut cluster = Cluster::start(config.clone()).await?;
@@ -632,7 +628,6 @@ async fn test_compatibility_with_low_level() -> Result<()> {
 async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<()> {
     let config = Configuration::for_auto_parallelism(
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE,
-        false,
         true,
     );
     let mut cluster = Cluster::start(config.clone()).await?;

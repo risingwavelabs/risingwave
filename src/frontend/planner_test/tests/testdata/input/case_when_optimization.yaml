@@ -115,3 +115,91 @@
   expected_outputs:
   - logical_plan
   - batch_plan
+- id: then_arm_could_be_expression_pattern
+  before:
+  - create_table
+  sql: |
+    SELECT
+      CASE c1
+        WHEN 1 THEN c1 + 1
+        WHEN 2 THEN c2 + 1
+        WHEN 3 THEN c3 + 1
+        WHEN 4 THEN c1 + 2
+        WHEN 5 THEN c2 + 2
+        WHEN 6 THEN c3 + 2
+        WHEN 7 THEN c1 + 3
+        WHEN 8 THEN c2 + 3
+        WHEN 9 THEN c3 + 3
+        WHEN 10 THEN c1 + c2 + 1
+        WHEN 11 THEN c2 + c3 + 2
+        WHEN 12 THEN c3 + c1 + 2
+        WHEN 13 THEN c1 + c3
+        WHEN 14 THEN c2 + c2
+        WHEN 15 THEN c3 + c1
+        WHEN 16 THEN c1 + c2 + 2
+        WHEN 17 THEN c2 + c3 + 2
+        WHEN 18 THEN c3 + c1 + 2
+        WHEN 19 THEN c1 + c2 + c3 + 1
+        WHEN 20 THEN c2 + c3 + c1 + 1
+        WHEN 21 THEN c3 + c1 + c2 + 1
+        WHEN 22 THEN c1 + c2 + c3 + c1
+        WHEN 23 THEN c2 + c3 + c1 + c2
+        WHEN 24 THEN c3 + c1 + c2 + c3
+        WHEN 25 THEN c1 + 1
+        WHEN 26 THEN c2 + 1
+        WHEN 27 THEN c3 + 1
+        WHEN 28 THEN c1 + 2
+        WHEN 29 THEN c2 + 2
+        WHEN 30 THEN c3 + 2
+        WHEN 31 THEN c1 + 1030
+      ELSE
+        114514 + c1 + c2 + c3 + 1919810
+      END
+    FROM t1;
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+- id: use_with_built_in_functions_pattern
+  before:
+  - create_table
+  sql: |
+    SELECT
+      CASE c1
+        WHEN 1 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 2 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 3 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 4 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 5 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 6 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 7 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 8 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 9 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 10 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 11 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 12 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 13 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 14 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 15 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 16 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 17 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 18 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 19 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 20 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 21 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 22 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 23 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 24 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 25 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 26 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 27 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 28 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 29 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 30 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 31 THEN '😡😡😡这是爱情😭😭😭'
+      ELSE
+        '❤️‍🔥❤️‍🔥❤️‍🔥❤️‍🔥❤️‍🔥❤️‍🔥'
+      END
+    FROM t1;
+  expected_outputs:
+  - logical_plan
+  - batch_plan

@@ -17,10 +17,10 @@ use std::sync::LazyLock;
 
 use itertools::Itertools as _;
 use parse_display::Display;
-use risingwave_common::error::ErrorCode;
 use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_common::util::iter_util::ZipEqFast;
 
+use crate::error::ErrorCode;
 use crate::expr::{Expr as _, ExprImpl, InputRef, Literal};
 
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.

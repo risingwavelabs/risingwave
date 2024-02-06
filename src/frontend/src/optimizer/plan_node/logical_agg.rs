@@ -14,7 +14,6 @@
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common::{bail_not_implemented, not_implemented};
@@ -28,6 +27,7 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamSimpleAgg,
     StreamStatelessSimpleAgg, ToBatch, ToStream,
 };
+use crate::error::{ErrorCode, Result};
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
     OrderBy, WindowFunction,

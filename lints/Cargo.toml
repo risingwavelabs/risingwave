@@ -22,6 +22,7 @@ itertools = "0.12"
 dylint_testing = "2.6.0"
 
 # UI test dependencies
+anyhow = "1"
 tracing = "0.1"
 
 [package.metadata.rust-analyzer]
