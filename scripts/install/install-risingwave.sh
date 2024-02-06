@@ -58,7 +58,7 @@ if [ "${USE_BREW}" -eq 1 ]; then
   echo "Successfully installed RisingWave@${VERSION} using Homebrew."
   echo
   echo "You can run it as:"
-  echo "  risingwave standalone"
+  echo "  risingwave"
   exit 0
 fi
 
