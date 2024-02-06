@@ -517,6 +517,11 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
     }
 
     async fn flush(&mut self) -> StorageResult<usize> {
+        let should_log = if let Some(epoch) = self.epoch {
+            epoch == 3066966724575232
+        } else {
+            false
+        };
         let buffer = self.mem_table.drain().into_parts();
         let mut kv_pairs = Vec::with_capacity(buffer.len());
         for (key, key_op) in buffer {
@@ -567,6 +572,20 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                             &self.op_consistency_level,
                         )
                         .await?;
+                    }
+                    if should_log
+                        && key == TableKey(hex::decode("0000008000").unwrap().into())
+                        && new_value
+                            == Bytes::from_static(
+                                b"\x01S\0\x80\xd4jX\xb9\x02\x01\0\x01T\0\0\0\0\0\0\0",
+                            )
+                    {
+                        tracing::info!(
+                            "memtable flush update: {:?}, old_value: {:?}, new_value: {:?}",
+                            key,
+                            old_value,
+                            new_value
+                        );
                     }
                     kv_pairs.push((key, StorageValue::new_put(new_value)));
                 }
