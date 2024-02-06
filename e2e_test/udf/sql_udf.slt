@@ -274,9 +274,9 @@ select type_match(114514);
 ----
 $1 + 114514 + $1
 
-#################################################################################
-# Invalid definition (and maybe not yet supported features 🤪) / use case tests #
-#################################################################################
+##################################################
+# Invalid definition tests when creating sql udf #
+##################################################
 
 # Named sql udf with invalid parameter in body definition
 # Will be rejected at creation time
@@ -306,14 +306,6 @@ create function fib(INT) returns int
       else fib($1 - 1) + fib($1 - 2)
       end;';
 
-# The execution will eventually exceed the pre-defined max stack depth
-# statement error function fib calling stack depth limit exceeded
-# select fib(100);
-
-# Currently create a materialized view with a recursive sql udf will be rejected
-# statement error function fib calling stack depth limit exceeded
-# create materialized view foo_mv as select fib(100);
-
 # Calling a non-existent function
 statement error failed to conduct semantic check, please see if you are calling non-existent functions
 create function non_exist(INT) returns int language sql as 'select yo(114514)';
@@ -325,6 +317,20 @@ create function type_mismatch(INT) returns varchar language sql as 'select $1 + 
 # Invalid function body syntax
 statement error Expected an expression:, found: EOF at the end
 create function add_error(INT, INT) returns int language sql as $$select $1 + $2 +$$;
+
+######################################################################
+# Not yet supported features 🤪 (and potential basic use case tests) #
+######################################################################
+
+# 1. Recursion Support for SQL UDF
+
+# The execution will eventually exceed the pre-defined max stack depth
+# statement error function fib calling stack depth limit exceeded
+# select fib(100);
+
+# Currently create a materialized view with a recursive sql udf will be rejected
+# statement error function fib calling stack depth limit exceeded
+# create materialized view foo_mv as select fib(100);
 
 # Rejected deep calling stack
 # statement error function recursive calling stack depth limit exceeded
@@ -341,6 +347,46 @@ create function add_error(INT, INT) returns int language sql as $$select $1 + $2
 # Recursive sql udf with materialized view
 # statement error function fib calling stack depth limit exceeded
 # create materialized view bar_mv as select fib(c1) from t1;
+
+# 2. Select from table inside SQL UDF (potential concerns: naming conflict)
+
+# statement ok
+# create function from_table_single_row() returns int language sql as 'select c1 from t1';
+
+# Should add parser support
+# statement ok
+# create function from_table_multiple_rows() returns setof int language sql as 'select c1 from t1';
+
+# P.S. postgres shadows the `c1` parameter by the actual column `c1` to resolve the naming conflict
+# statement ok
+# create function from_table_conflict(c1 INT) returns int language sql as 'select c1 from t1';
+
+# 3. Output multiple columns / expressions from a single SQL UDF
+
+# Parser support is needed
+# statement ok
+# create function out_parameters(out a INT, out b INT) language sql as 'select 1919810, 114514';
+
+# statement ok
+# create function multiple_cols() returns setof record as 'select c1, c2, c3 from t2' language sql;
+
+# query III
+# select * from multiple_cols() as t(c1 INT, c2 FLOAT, c3 INT);
+
+# 4. Polymorphic arguments
+
+# statement ok
+# create function is_greater(anyelement, anyelement) returns boolean language sql as 'select $1 > $2';
+
+# query I
+# select is_greater(1, 2);
+# ----
+# f
+
+# query I
+# select is_greater(3.14, 2.95);
+# ----
+# t
 
 ##################################################
 # Clean up the funtions / mock tables at the end #
