@@ -301,8 +301,7 @@ impl GlobalBarrierManagerContext {
         &self,
         scheduled_barriers: &ScheduledBarriers,
     ) -> MetaResult<bool> {
-        let (dropped_actors, cancelled) =
-            scheduled_barriers.pre_apply_drop_cancel_scheduled().await;
+        let (dropped_actors, cancelled) = scheduled_barriers.pre_apply_drop_cancel_scheduled();
         let applied = !dropped_actors.is_empty() || !cancelled.is_empty();
         if !cancelled.is_empty() {
             match &self.metadata_manager {
@@ -337,9 +336,7 @@ impl GlobalBarrierManagerContext {
         scheduled_barriers: &ScheduledBarriers,
     ) -> BarrierManagerState {
         // Mark blocked and abort buffered schedules, they might be dirty already.
-        scheduled_barriers
-            .abort_and_mark_blocked("cluster is under recovering")
-            .await;
+        scheduled_barriers.abort_and_mark_blocked("cluster is under recovering");
 
         tracing::info!("recovery start!");
         self.clean_dirty_streaming_jobs()
@@ -437,8 +434,12 @@ impl GlobalBarrierManagerContext {
                             command_ctx.wait_epoch_commit(mce).await?;
                         }
                     };
-                    let await_barrier_complete = self.inject_barrier(command_ctx.clone()).await;
-                    let res = match await_barrier_complete.await.result {
+
+                    let res = match self
+                        .inject_barrier(command_ctx.clone(), None, None)
+                        .await
+                        .result
+                    {
                         Ok(response) => {
                             if let Err(err) = command_ctx.post_collect().await {
                                 warn!(error = %err.as_report(), "post_collect failed");
@@ -467,7 +468,7 @@ impl GlobalBarrierManagerContext {
         .expect("Retry until recovery success.");
 
         recovery_timer.observe_duration();
-        scheduled_barriers.mark_ready().await;
+        scheduled_barriers.mark_ready();
 
         tracing::info!(
             epoch = state.in_flight_prev_epoch().value().0,

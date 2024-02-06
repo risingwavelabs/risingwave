@@ -35,6 +35,7 @@ use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::StreamClient;
 use rw_futures_util::pending_on_none;
 use tokio::sync::oneshot;
+use tracing::Instrument;
 use uuid::Uuid;
 
 use super::command::CommandContext;
@@ -47,6 +48,8 @@ pub(super) struct BarrierRpcManager {
 
     /// Futures that await on the completion of barrier.
     injected_in_progress_barrier: FuturesUnordered<BarrierCompletionFuture>,
+
+    prev_injecting_barrier: Option<oneshot::Receiver<()>>,
 }
 
 impl BarrierRpcManager {
@@ -54,15 +57,24 @@ impl BarrierRpcManager {
         Self {
             context,
             injected_in_progress_barrier: FuturesUnordered::new(),
+            prev_injecting_barrier: None,
         }
     }
 
     pub(super) fn clear(&mut self) {
         self.injected_in_progress_barrier = FuturesUnordered::new();
+        self.prev_injecting_barrier = None;
     }
 
-    pub(super) async fn inject_barrier(&mut self, command_context: Arc<CommandContext>) {
-        let await_complete_future = self.context.inject_barrier(command_context).await;
+    pub(super) fn inject_barrier(&mut self, command_context: Arc<CommandContext>) {
+        // this is to notify that the barrier has been injected so that the next
+        // barrier can be injected to avoid out of order barrier injection.
+        // TODO: can be removed when bidi-stream control in implemented.
+        let (inject_tx, inject_rx) = oneshot::channel();
+        let prev_inject_rx = self.prev_injecting_barrier.replace(inject_rx);
+        let await_complete_future =
+            self.context
+                .inject_barrier(command_context, Some(inject_tx), prev_inject_rx);
         self.injected_in_progress_barrier
             .push(await_complete_future);
     }
@@ -76,35 +88,49 @@ pub(super) type BarrierCompletionFuture = impl Future<Output = BarrierCompletion
 
 impl GlobalBarrierManagerContext {
     /// Inject a barrier to all CNs and spawn a task to collect it
-    pub(super) async fn inject_barrier(
+    pub(super) fn inject_barrier(
         &self,
         command_context: Arc<CommandContext>,
+        inject_tx: Option<oneshot::Sender<()>>,
+        prev_inject_rx: Option<oneshot::Receiver<()>>,
     ) -> BarrierCompletionFuture {
         let (tx, rx) = oneshot::channel();
         let prev_epoch = command_context.prev_epoch.value().0;
-        let result = self
-            .stream_rpc_manager
-            .inject_barrier(command_context.clone())
-            .await;
-        match result {
-            Ok(node_need_collect) => {
-                // todo: the collect handler should be abort when recovery.
-                tokio::spawn({
-                    let stream_rpc_manager = self.stream_rpc_manager.clone();
-                    async move {
-                        stream_rpc_manager
-                            .collect_barrier(node_need_collect, command_context, tx)
-                            .await
+        let stream_rpc_manager = self.stream_rpc_manager.clone();
+        // todo: the collect handler should be abort when recovery.
+        let _join_handle = tokio::spawn(async move {
+            let span = command_context.span.clone();
+            if let Some(prev_inject_rx) = prev_inject_rx {
+                if prev_inject_rx.await.is_err() {
+                    let _ = tx.send(BarrierCompletion {
+                        prev_epoch,
+                        result: Err(anyhow!("prev barrier failed to be injected").into()),
+                    });
+                    return;
+                }
+            }
+            let result = stream_rpc_manager
+                .inject_barrier(command_context.clone())
+                .instrument(span.clone())
+                .await;
+            match result {
+                Ok(node_need_collect) => {
+                    if let Some(inject_tx) = inject_tx {
+                        let _ = inject_tx.send(());
                     }
-                });
+                    stream_rpc_manager
+                        .collect_barrier(node_need_collect, command_context, tx)
+                        .instrument(span.clone())
+                        .await;
+                }
+                Err(e) => {
+                    let _ = tx.send(BarrierCompletion {
+                        prev_epoch,
+                        result: Err(e),
+                    });
+                }
             }
-            Err(e) => {
-                let _ = tx.send(BarrierCompletion {
-                    prev_epoch,
-                    result: Err(e),
-                });
-            }
-        }
+        });
         rx.map(move |result| match result {
             Ok(completion) => completion,
             Err(_e) => BarrierCompletion {
