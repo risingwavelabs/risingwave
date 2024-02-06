@@ -9549,6 +9549,7 @@ dependencies = [
 name = "risingwave_meta_model_v2"
 version = "1.7.0-alpha"
 dependencies = [
+ "prost 0.12.1",
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",

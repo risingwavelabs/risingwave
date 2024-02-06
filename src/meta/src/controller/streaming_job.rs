@@ -22,6 +22,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::actor_dispatcher::DispatcherType;
+use risingwave_meta_model_v2::fragment::StreamNode;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::{
     Actor, ActorDispatcher, Fragment, Index, Object, ObjectDependency, Sink, Source,
@@ -30,8 +31,8 @@ use risingwave_meta_model_v2::prelude::{
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
     streaming_job, table, ActorId, ActorUpstreamActors, CreateType, DatabaseId, ExprNodeArray,
-    FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId, StreamNode,
-    StreamingParallelism, TableId, TableVersion, UserId,
+    FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId, StreamingParallelism,
+    TableId, TableVersion, UserId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableVersion};
@@ -648,8 +649,9 @@ impl CatalogController {
                     .into_tuple::<(FragmentId, StreamNode, I32Array)>()
                     .one(&txn)
                     .await?
+                    .map(|(id, node, upstream)| (id, node.to_protobuf(), upstream))
                     .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
-            visit_stream_node(&mut stream_node.0, |body| {
+            visit_stream_node(&mut stream_node, |body| {
                 if let PbNodeBody::Merge(m) = body
                     && let Some((new_fragment_id, new_actor_ids)) =
                         fragment_replace_map.get(&m.upstream_fragment_id)
@@ -665,7 +667,7 @@ impl CatalogController {
             }
             fragment::ActiveModel {
                 fragment_id: Set(fragment_id),
-                stream_node: Set(stream_node),
+                stream_node: Set(StreamNode::from_protobuf(&stream_node)),
                 upstream_fragment_id: Set(upstream_fragment_id),
                 ..Default::default()
             }
@@ -789,7 +791,7 @@ impl CatalogController {
             )));
         }
 
-        let mut fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+        let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
             .select_only()
             .columns([
                 fragment::Column::FragmentId,
@@ -800,11 +802,15 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
+        let mut fragments = fragments
+            .into_iter()
+            .map(|(id, mask, stream_node)| (id, mask, stream_node.to_protobuf()))
+            .collect_vec();
 
         fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
             let mut found = false;
             if *fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0 {
-                visit_stream_node(&mut stream_node.0, |node| {
+                visit_stream_node(stream_node, |node| {
                     if let PbNodeBody::Source(node) = node {
                         if let Some(node_inner) = &mut node.source_inner
                             && node_inner.source_id == source_id as u32
@@ -826,7 +832,7 @@ impl CatalogController {
         for (id, _, stream_node) in fragments {
             fragment::ActiveModel {
                 fragment_id: Set(id),
-                stream_node: Set(stream_node),
+                stream_node: Set(StreamNode::from_protobuf(&stream_node)),
                 ..Default::default()
             }
             .update(&txn)
@@ -849,7 +855,7 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let mut fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+        let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
             .select_only()
             .columns([
                 fragment::Column::FragmentId,
@@ -860,11 +866,15 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
+        let mut fragments = fragments
+            .into_iter()
+            .map(|(id, mask, stream_node)| (id, mask, stream_node.to_protobuf()))
+            .collect_vec();
 
         fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
             let mut found = false;
             if *fragment_type_mask & PbFragmentTypeFlag::StreamScan as i32 != 0 {
-                visit_stream_node(&mut stream_node.0, |node| {
+                visit_stream_node(stream_node, |node| {
                     if let PbNodeBody::StreamScan(node) = node {
                         node.rate_limit = rate_limit;
                         found = true;
@@ -883,7 +893,7 @@ impl CatalogController {
         for (id, _, stream_node) in fragments {
             fragment::ActiveModel {
                 fragment_id: Set(id),
-                stream_node: Set(stream_node),
+                stream_node: Set(StreamNode::from_protobuf(&stream_node)),
                 ..Default::default()
             }
             .update(&txn)
