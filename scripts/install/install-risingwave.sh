@@ -52,10 +52,10 @@ mkdir -p "${HOME}/.risingwave/data/meta_store"
 
 ############# BREW INSTALL
 if [ "${USE_BREW}" -eq 1 ]; then
-  echo "Installing RisingWave using Homebrew."
+  echo "Installing RisingWave@{$VERSION} using Homebrew."
   brew tap risingwavelabs/risingwave
   brew install risingwave@${VERSION}
-  echo "Successfully installed RisingWave using Homebrew."
+  echo "Successfully installed RisingWave@{$VERSION} using Homebrew."
   echo
   echo "You can run it as:"
   echo "  risingwave standalone"
@@ -64,7 +64,7 @@ fi
 
 ############# BINARY INSTALL
 echo
-echo "Downloading ${URL} into ${PWD}."
+echo "Downloading RisingWave@{$VERSION} from ${URL} into ${PWD}."
 echo
 curl -L "${URL}" | tar -zx || exit 1
 chmod +x risingwave
