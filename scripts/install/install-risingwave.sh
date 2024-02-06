@@ -70,4 +70,5 @@ curl -L "${URL}" | tar -zx || exit 1
 chmod +x risingwave
 echo
 echo "Successfully downloaded the RisingWave binary, you can run it as:"
-echo "  ./risingwave standalone"
+echo "  ./risingwave"
+echo
