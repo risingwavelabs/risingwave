@@ -29,7 +29,7 @@ use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::row::Row as _;
-use risingwave_common::types::{DataType, ScalarRefImpl, Timestamptz};
+use risingwave_common::types::{write_date_time_tz, DataType, ScalarRefImpl, Timestamptz};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_sqlparser::ast::{display_comma_separated, CompatibleSourceSchema, ConnectorSchema};
@@ -139,10 +139,9 @@ fn timestamptz_to_string_with_session_data(
     let tz = d.into_timestamptz();
     let time_zone = Timestamptz::lookup_time_zone(&session_data.timezone).unwrap();
     let instant_local = tz.to_datetime_in_zone(time_zone);
-    instant_local
-        .format("%Y-%m-%d %H:%M:%S%.f%:z")
-        .to_string()
-        .into()
+    let mut result_string = String::new();
+    write_date_time_tz(instant_local, &mut result_string).unwrap();
+    result_string.into()
 }
 
 fn to_pg_rows(
