@@ -81,7 +81,7 @@ impl ScaleService for ScaleServiceImpl {
         &self,
         _: Request<GetClusterInfoRequest>,
     ) -> Result<Response<GetClusterInfoResponse>, Status> {
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
         let table_fragments = match &self.metadata_manager {
             MetadataManager::V1(mgr) => mgr
@@ -148,7 +148,7 @@ impl ScaleService for ScaleServiceImpl {
             resolve_no_shuffle_upstream,
         } = request.into_inner();
 
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.write().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_write_guard().await;
 
         let current_revision = self.get_revision().await;
 
@@ -238,7 +238,12 @@ impl ScaleService for ScaleServiceImpl {
 
         let req = request.into_inner();
 
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let _reschedule_job_lock = self
+            .stream_manager
+            .scale_controller
+            .reschedule_lock
+            .read()
+            .await;
 
         let current_revision = self.get_revision().await;
 

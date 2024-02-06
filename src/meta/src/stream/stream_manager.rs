@@ -29,7 +29,7 @@ use risingwave_pb::stream_service::{
 };
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
-use tokio::sync::{oneshot, Mutex, RwLock};
+use tokio::sync::{oneshot, Mutex};
 use tracing::Instrument;
 use uuid::Uuid;
 
@@ -199,8 +199,6 @@ pub struct GlobalStreamManager {
 
     hummock_manager: HummockManagerRef,
 
-    pub reschedule_lock: RwLock<()>,
-
     pub(crate) scale_controller: ScaleControllerRef,
 }
 
@@ -225,7 +223,6 @@ impl GlobalStreamManager {
             source_manager,
             hummock_manager,
             creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
-            reschedule_lock: RwLock::new(()),
             scale_controller,
         })
     }
@@ -678,7 +675,7 @@ impl GlobalStreamManager {
             return vec![];
         }
 
-        let _reschedule_job_lock = self.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.reschedule_lock_read_guard().await;
         let (receivers, recovered_job_ids) = self.creating_job_info.cancel_jobs(table_ids).await;
 
         let futures = receivers.into_iter().map(|(id, receiver)| async move {
@@ -737,7 +734,7 @@ impl GlobalStreamManager {
         parallelism: TableParallelism,
         deferred: bool,
     ) -> MetaResult<()> {
-        let _reschedule_job_lock = self.reschedule_lock.write().await;
+        let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
         let worker_nodes = self
             .metadata_manager

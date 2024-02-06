@@ -44,8 +44,8 @@ use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, UpdateActorsRequest,
 };
 use thiserror_ext::AsReport;
-use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
+use tokio::sync::{oneshot, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 use uuid::Uuid;
@@ -377,6 +377,8 @@ pub struct ScaleController {
     pub source_manager: SourceManagerRef,
 
     pub env: MetaSrvEnv,
+
+    pub reschedule_lock: RwLock<()>,
 }
 
 impl ScaleController {
@@ -389,6 +391,7 @@ impl ScaleController {
             metadata_manager: metadata_manager.clone(),
             source_manager,
             env,
+            reschedule_lock: RwLock::new(()),
         }
     }
 
@@ -2470,6 +2473,14 @@ pub struct TableResizePolicy {
 }
 
 impl GlobalStreamManager {
+    pub async fn reschedule_lock_read_guard(&self) -> RwLockReadGuard<'_, ()> {
+        self.scale_controller.reschedule_lock.read().await
+    }
+
+    pub async fn reschedule_lock_write_guard(&self) -> RwLockWriteGuard<'_, ()> {
+        self.scale_controller.reschedule_lock.write().await
+    }
+
     pub async fn reschedule_actors(
         &self,
         reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
@@ -2548,7 +2559,7 @@ impl GlobalStreamManager {
     async fn trigger_parallelism_control(&self) -> MetaResult<()> {
         println!("trigger parallelism ctrl");
 
-        let _reschedule_job_lock = self.reschedule_lock.write().await;
+        let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
