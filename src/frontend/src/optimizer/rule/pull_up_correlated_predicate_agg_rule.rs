@@ -144,7 +144,10 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
         let new_bottom_proj: PlanRef = LogicalProject::new(filter, bottom_proj_exprs).into();
 
         // If there is a count aggregate, bail out and leave for general subquery unnesting to deal.
-        if agg_calls.iter().any(|agg_call| agg_call.agg_kind == AggKind::Count) {
+        if agg_calls
+            .iter()
+            .any(|agg_call| agg_call.agg_kind == AggKind::Count)
+        {
             return None;
         };
 
