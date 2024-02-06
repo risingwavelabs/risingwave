@@ -118,7 +118,7 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
 
   echo "--- Release upload risingwave-all-in-one asset"
   tar -czvf risingwave-"${BUILDKITE_TAG}"-${ARCH}-unknown-linux-all-in-one.tar.gz risingwave libs
-  gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-{ARCH}-unknown-linux-all-in-one.tar.gz
+  gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-${ARCH}-unknown-linux-all-in-one.tar.gz
 fi
 
 
