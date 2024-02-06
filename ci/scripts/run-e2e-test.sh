@@ -43,7 +43,7 @@ cluster_start() {
     cargo make pre-start-dev
     start_single_node "$PREFIX_LOG"/single-node.log &
     # Give it a while to make sure the single-node is ready.
-    sleep 1
+    sleep 3
   else
     cargo make ci-start "$mode"
   fi
