@@ -73,7 +73,7 @@ use crate::handler::create_table::{
     ensure_table_constraints_supported, ColumnIdGenerator,
 };
 use crate::handler::util::{
-    get_connector, is_cdc_connector, is_kafka_connector, SourceSchemaCompatExt,
+    connector_need_pk, get_connector, is_cdc_connector, is_kafka_connector, SourceSchemaCompatExt,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
@@ -1220,10 +1220,8 @@ pub async fn handle_create_source(
         )
         .into());
     }
-    let connector = get_connector(&with_properties)
-        .ok_or_else(|| RwError::from(ProtocolError("missing field 'connector'".to_string())))?;
     let (mut columns, pk_column_ids, row_id_index) =
-        bind_pk_on_relation(columns, pk_names, ICEBERG_CONNECTOR != connector)?;
+        bind_pk_on_relation(columns, pk_names, connector_need_pk(&with_properties))?;
 
     debug_assert!(is_column_ids_dedup(&columns));
 

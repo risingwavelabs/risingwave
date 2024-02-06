@@ -63,7 +63,7 @@ use crate::handler::create_source::{
     bind_all_columns, bind_columns_from_source, bind_source_pk, bind_source_watermark,
     check_source_schema, handle_addition_columns, validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
-use crate::handler::util::get_connector;
+use crate::handler::util::{get_connector, is_iceberg_connector};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
@@ -516,9 +516,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
 
-    let connector = get_connector(&with_properties)
-        .ok_or_else(|| RwError::from(ProtocolError("missing field 'connector'".to_string())))?;
-    if connector == ICEBERG_CONNECTOR {
+    if is_iceberg_connector(&with_properties) {
         return Err(
             ErrorCode::BindError("can't create table with iceberg connector".to_string()).into(),
         );

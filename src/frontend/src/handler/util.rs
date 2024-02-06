@@ -31,6 +31,7 @@ use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl, Timestamptz};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_sqlparser::ast::{display_comma_separated, CompatibleSourceSchema, ConnectorSchema};
 
@@ -241,6 +242,11 @@ pub fn to_pg_field(f: &Field) -> PgFieldDescriptor {
     )
 }
 
+pub fn connector_need_pk(with_properties: &HashMap<String, String>) -> bool {
+    // Currently only iceberg connector doesn't need primary key
+    !is_iceberg_connector(with_properties)
+}
+
 #[inline(always)]
 pub fn get_connector(with_properties: &HashMap<String, String>) -> Option<String> {
     with_properties
@@ -263,6 +269,14 @@ pub fn is_cdc_connector(with_properties: &HashMap<String, String>) -> bool {
         return false;
     };
     connector.contains("-cdc")
+}
+
+#[inline(always)]
+pub fn is_iceberg_connector(with_properties: &HashMap<String, String>) -> bool {
+    let Some(connector) = get_connector(with_properties) else {
+        return false;
+    };
+    connector == ICEBERG_CONNECTOR
 }
 
 #[easy_ext::ext(SourceSchemaCompatExt)]
