@@ -12,50 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use thiserror::Error;
+use risingwave_common::error::v2::def_anyhow_newtype;
 
-#[derive(Error, Debug)]
-pub enum ConnectorError {
-    #[error("Parse error: {0}")]
-    Parse(&'static str),
-
-    #[error("Invalid parameter {name}: {reason}")]
-    InvalidParam { name: &'static str, reason: String },
-
-    #[error("Kafka error: {0}")]
-    Kafka(#[from] rdkafka::error::KafkaError),
-
-    #[error("Config error: {0}")]
-    Config(
-        #[source]
-        #[backtrace]
-        anyhow::Error,
-    ),
-
-    #[error("Connection error: {0}")]
-    Connection(
-        #[source]
-        #[backtrace]
-        anyhow::Error,
-    ),
-
-    #[error("MySQL error: {0}")]
-    MySql(#[from] mysql_async::Error),
-
-    #[error("Postgres error: {0}")]
-    Postgres(#[from] tokio_postgres::Error),
-
-    #[error("Pulsar error: {0}")]
-    Pulsar(
-        #[source]
-        #[backtrace]
-        anyhow::Error,
-    ),
-
-    #[error(transparent)]
-    Internal(
-        #[from]
-        #[backtrace]
-        anyhow::Error,
-    ),
+def_anyhow_newtype! {
+    /// The error type for the `connector` crate.
+    ///
+    /// We use [`anyhow::Error`] under the hood as the connector has to deal with
+    /// various kinds of errors from different external crates. It acts more like an
+    /// application and callers may not expect to handle it in a fine-grained way.
+    pub ConnectorError;
 }
