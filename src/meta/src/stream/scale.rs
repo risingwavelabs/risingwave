@@ -2510,7 +2510,7 @@ impl GlobalStreamManager {
     ) -> MetaResult<()> {
         let mut table_parallelism = table_parallelism;
         println!(
-            "reschedule actors impl calledl {:?} {:?} {:?}",
+            "reschedule actors impl called {:?} {:?} {:?}",
             reschedules, options, table_parallelism
         );
 
@@ -2557,9 +2557,10 @@ impl GlobalStreamManager {
     }
 
     async fn trigger_parallelism_control(&self) -> MetaResult<()> {
-        println!("trigger parallelism ctrl");
+        println!("trigger parallelism ctrl try locking");
+        let _reschedule_job_lock = self.scale_controller.reschedule_lock.write().await;
 
-        let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
+        println!("trigger parallelism ctrl");
 
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
@@ -2713,6 +2714,8 @@ impl GlobalStreamManager {
                 }
 
                 _ = ticker.tick(), if changed => {
+
+                    println!("ticker ticked");
                     let include_workers = worker_cache.keys().copied().collect_vec();
 
                     if include_workers.is_empty() {
@@ -2721,6 +2724,7 @@ impl GlobalStreamManager {
                         continue;
                     }
 
+                    println!("before trigger");
                     match self.trigger_parallelism_control().await {
                         Ok(_) => {
                             changed = false;

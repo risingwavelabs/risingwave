@@ -602,7 +602,9 @@ impl GlobalBarrierManagerContext {
     }
 
     async fn scale_actors(&self) -> MetaResult<()> {
+        println!("scale actor try locking");
         let _guard = self.scale_controller.reschedule_lock.write().await;
+        println!("locked");
         match &self.metadata_manager {
             MetadataManager::V1(_) => self.scale_actors_v1().await,
             MetadataManager::V2(_) => self.scale_actors_v2().await,

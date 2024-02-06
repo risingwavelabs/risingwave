@@ -240,9 +240,7 @@ impl ScaleService for ScaleServiceImpl {
 
         let _reschedule_job_lock = self
             .stream_manager
-            .scale_controller
-            .reschedule_lock
-            .read()
+            .reschedule_lock_read_guard()
             .await;
 
         let current_revision = self.get_revision().await;
