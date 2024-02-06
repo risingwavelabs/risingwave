@@ -10,7 +10,7 @@ export PREFIX_LOG=$RW_PREFIX/log
 # .risingwave/log/risedev.log, after calling ./risedev d full.
 # It is expected that minio, etcd will be started after this is called.
 start_single_node() {
-  RUST_BACKTRACE=1 "$PREFIX_BIN"/risingwave
+  RUST_BACKTRACE=1 "$PREFIX_BIN"/risingwave >"$1" 2>&1
 }
 
 stop_single_node() {
