@@ -35,33 +35,33 @@ GcsProperties:
     default: Default::default
 IcebergProperties:
   fields:
-    - name: catalog.type
-      field_type: String
-      required: true
-    - name: s3.region
-      field_type: String
-      required: true
-    - name: s3.endpoint
-      field_type: String
-      required: false
-      default: Default::default
-    - name: s3.access.key
-      field_type: String
-      required: false
-      default: Default::default
-    - name: s3.secret.key
-      field_type: String
-      required: false
-      default: Default::default
-    - name: warehouse.path
-      field_type: String
-      required: true
-    - name: database.name
-      field_type: String
-      required: true
-    - name: table.name
-      field_type: String
-      required: true
+  - name: catalog.type
+    field_type: String
+    required: true
+  - name: s3.region
+    field_type: String
+    required: true
+  - name: s3.endpoint
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.access.key
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.secret.key
+    field_type: String
+    required: false
+    default: Default::default
+  - name: warehouse.path
+    field_type: String
+    required: true
+  - name: database.name
+    field_type: String
+    required: true
+  - name: table.name
+    field_type: String
+    required: true
 KafkaProperties:
   fields:
   - name: bytes.per.second
