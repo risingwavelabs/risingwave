@@ -3,14 +3,14 @@
 set -euo pipefail
 
 export RW_PREFIX=$PWD/.risingwave
-export PREFIX_BIN=$RW_PREFIX/bin
+export PREFIX_BIN=./target/debug
 export PREFIX_LOG=$RW_PREFIX/log
 
 # You can fill up this section by consulting
 # .risingwave/log/risedev.log, after calling ./risedev d full.
 # It is expected that minio, etcd will be started after this is called.
 start_single_node() {
-  RUST_BACKTRACE=1 "$PREFIX_BIN"/risingwave/risingwave
+  RUST_BACKTRACE=1 "$PREFIX_BIN"/risingwave
 }
 
 stop_single_node() {
