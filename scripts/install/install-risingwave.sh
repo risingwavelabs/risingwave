@@ -1,7 +1,11 @@
 #!/bin/sh -e
 
-OS=$(uname -s)
-ARCH=$(uname -m)
+if [ -z "${OS}" ]; then
+  OS=$(uname -s)
+fi
+if [ -z "${ARCH}" ]; then
+  ARCH=$(uname -m)
+fi
 
 VERSION="v1.7.0-single-node"
 # TODO(kwannoel): re-enable it once we have stable release in latest for single node mode.
