@@ -179,9 +179,8 @@ function buildFragmentDependencyAsEdges(
 
 const SIDEBAR_WIDTH = 200
 
-type BackPressureAlgo = "disable" | "p50" | "p90" | "p95" | "p99"
+type BackPressureAlgo = "p50" | "p90" | "p95" | "p99"
 const backPressureAlgos: BackPressureAlgo[] = [
-  "disable",
   "p50",
   "p90",
   "p95",
@@ -212,7 +211,7 @@ export default function Streaming() {
   const { response: actorBackPressures } = useFetch(
     getActorBackPressures,
     INTERVAL,
-    backPressureAlgo !== null
+    backPressureDataSourceAlgo === "Prometheus" && backPressureAlgo !== null
   )
 
   const fragmentDependencyCallback = useCallback(() => {
@@ -350,7 +349,7 @@ export default function Streaming() {
     if (
       (actorBackPressures &&
         backPressureAlgo &&
-        backPressureAlgo !== "disable") ||
+        backPressureAlgo) ||
       backPressuresMetricsWithoutPromtheus
     ) {
       let map = new Map()
@@ -496,6 +495,7 @@ export default function Streaming() {
                   setBackPressureAlgo(event.target.value as BackPressureAlgo);
                 }}
               >
+                <option value="" disabled selected hidden>Please select</option>
                 {backPressureAlgoOptions.map((algo) => (
                   <option value={algo} key={algo}>
                     {algo}
