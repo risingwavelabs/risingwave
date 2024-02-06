@@ -462,7 +462,7 @@ impl GlobalBarrierManager {
             .await
             .pause_on_next_bootstrap();
         if paused {
-            tracing::warn!(
+            warn!(
                 "The cluster will bootstrap with all data sources paused as specified by the system parameter `{}`. \
                  It will now be reset to `false`. \
                  To resume the data sources, either restart the cluster again or use `risectl meta resume`.",
@@ -729,7 +729,7 @@ impl GlobalBarrierManager {
             // back to frontend
             fail_point!("inject_barrier_err_success");
             let fail_node = self.checkpoint_control.barrier_failed();
-            tracing::warn!(%prev_epoch, error = %err.as_report(), "Failed to complete epoch");
+            warn!(%prev_epoch, error = %err.as_report(), "Failed to complete epoch");
             self.failure_recovery(err, fail_node).await;
             return;
         }
@@ -754,7 +754,7 @@ impl GlobalBarrierManager {
                 .drain(index..)
                 .chain(self.checkpoint_control.barrier_failed().into_iter())
                 .collect_vec();
-            tracing::warn!(%prev_epoch, error = %err.as_report(), "Failed to commit epoch");
+            warn!(%prev_epoch, error = %err.as_report(), "Failed to commit epoch");
             self.failure_recovery(err, fail_nodes).await;
         }
     }
