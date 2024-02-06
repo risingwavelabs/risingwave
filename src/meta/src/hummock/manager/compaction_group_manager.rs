@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use function_name::named;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -279,6 +280,12 @@ impl HummockManager {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
         let current_version = &versioning.current_version;
+        warn!(
+            ?table_ids,
+            mce = current_version.max_committed_epoch,
+            stack_trace = ?anyhow!("unregister").as_report(),
+            "unregister table ids"
+        );
         let mut new_version_delta = create_trx_wrapper!(
             self.sql_meta_store(),
             BTreeMapEntryTransactionWrapper,

@@ -531,6 +531,10 @@ impl HummockEventHandler {
 
         let new_pinned_version = pinned_version.new_pin_version(newly_pinned_version);
 
+        if pinned_version.id() == 48311 {
+            warn!(prev_version = ?pinned_version.version(), new_version = ?new_pinned_version.version(), "apply update on target version");
+        }
+
         self.refiller
             .start_cache_refill(sst_delta_infos, pinned_version, new_pinned_version);
     }
