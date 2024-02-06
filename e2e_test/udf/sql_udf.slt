@@ -415,7 +415,7 @@ create function add_error(INT, INT) returns int language sql as $$select $1 + $2
 
 # query III
 # select * from multiple_cols() as t(c1 INT, c2 FLOAT, c3 INT);
-----
+# ----
 # corresponding results
 # may need to order the sequence
 
