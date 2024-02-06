@@ -124,7 +124,44 @@
 - id: then_arm_could_be_expression_pattern
   before:
   - create_table
-  sql: "SELECT \n  CASE c1\n    WHEN 1 THEN c1 + 1\n    WHEN 2 THEN c2 + 1\n    WHEN 3 THEN c3 + 1\n    WHEN 4 THEN c1 + 2\n    WHEN 5 THEN c2 + 2\n    WHEN 6 THEN c3 + 2\n    WHEN 7 THEN c1 + 3\n    WHEN 8 THEN c2 + 3\n    WHEN 9 THEN c3 + 3\n    WHEN 10 THEN c1 + c2 + 1\n    WHEN 11 THEN c2 + c3 + 2\n    WHEN 12 THEN c3 + c1 + 2\n    WHEN 13 THEN c1 + c3\n    WHEN 14 THEN c2 + c2\n    WHEN 15 THEN c3 + c1\n    WHEN 16 THEN c1 + c2 + 2\n    WHEN 17 THEN c2 + c3 + 2\n    WHEN 18 THEN c3 + c1 + 2\n    WHEN 19 THEN c1 + c2 + c3 + 1\n    WHEN 20 THEN c2 + c3 + c1 + 1\n    WHEN 21 THEN c3 + c1 + c2 + 1\n    WHEN 22 THEN c1 + c2 + c3 + c1\n    WHEN 23 THEN c2 + c3 + c1 + c2\n    WHEN 24 THEN c3 + c1 + c2 + c3\n    WHEN 25 THEN c1 + 1\n    WHEN 26 THEN c2 + 1\n    WHEN 27 THEN c3 + 1\n    WHEN 28 THEN c1 + 2\n    WHEN 29 THEN c2 + 2\n    WHEN 30 THEN c3 + 2\n    WHEN 31 THEN c1 + 1030\n  ELSE\n    114514 + c1 + c2 + c3 + 1919810\n  END\nFROM t1;\n"
+  sql: |
+    SELECT
+      CASE c1
+        WHEN 1 THEN c1 + 1
+        WHEN 2 THEN c2 + 1
+        WHEN 3 THEN c3 + 1
+        WHEN 4 THEN c1 + 2
+        WHEN 5 THEN c2 + 2
+        WHEN 6 THEN c3 + 2
+        WHEN 7 THEN c1 + 3
+        WHEN 8 THEN c2 + 3
+        WHEN 9 THEN c3 + 3
+        WHEN 10 THEN c1 + c2 + 1
+        WHEN 11 THEN c2 + c3 + 2
+        WHEN 12 THEN c3 + c1 + 2
+        WHEN 13 THEN c1 + c3
+        WHEN 14 THEN c2 + c2
+        WHEN 15 THEN c3 + c1
+        WHEN 16 THEN c1 + c2 + 2
+        WHEN 17 THEN c2 + c3 + 2
+        WHEN 18 THEN c3 + c1 + 2
+        WHEN 19 THEN c1 + c2 + c3 + 1
+        WHEN 20 THEN c2 + c3 + c1 + 1
+        WHEN 21 THEN c3 + c1 + c2 + 1
+        WHEN 22 THEN c1 + c2 + c3 + c1
+        WHEN 23 THEN c2 + c3 + c1 + c2
+        WHEN 24 THEN c3 + c1 + c2 + c3
+        WHEN 25 THEN c1 + 1
+        WHEN 26 THEN c2 + 1
+        WHEN 27 THEN c3 + 1
+        WHEN 28 THEN c1 + 2
+        WHEN 29 THEN c2 + 2
+        WHEN 30 THEN c3 + 2
+        WHEN 31 THEN c1 + 1030
+      ELSE
+        114514 + c1 + c2 + c3 + 1919810
+      END
+    FROM t1;
   logical_plan: |-
     LogicalProject { exprs: [ConstantLookup(t1.c1, 1:Int32, (t1.c1 + 1:Int32), 2:Int32, (t1.c2 + 1:Int32), 3:Int32, (t1.c3 + 1:Int32), 4:Int32, (t1.c1 + 2:Int32), 5:Int32, (t1.c2 + 2:Int32), 6:Int32, (t1.c3 + 2:Int32), 7:Int32, (t1.c1 + 3:Int32), 8:Int32, (t1.c2 + 3:Int32), 9:Int32, (t1.c3 + 3:Int32), 10:Int32, ((t1.c1 + t1.c2) + 1:Int32), 11:Int32, ((t1.c2 + t1.c3) + 2:Int32), 12:Int32, ((t1.c3 + t1.c1) + 2:Int32), 13:Int32, (t1.c1 + t1.c3), 14:Int32, (t1.c2 + t1.c2), 15:Int32, (t1.c3 + t1.c1), 16:Int32, ((t1.c1 + t1.c2) + 2:Int32), 17:Int32, ((t1.c2 + t1.c3) + 2:Int32), 18:Int32, ((t1.c3 + t1.c1) + 2:Int32), 19:Int32, (((t1.c1 + t1.c2) + t1.c3) + 1:Int32), 20:Int32, (((t1.c2 + t1.c3) + t1.c1) + 1:Int32), 21:Int32, (((t1.c3 + t1.c1) + t1.c2) + 1:Int32), 22:Int32, (((t1.c1 + t1.c2) + t1.c3) + t1.c1), 23:Int32, (((t1.c2 + t1.c3) + t1.c1) + t1.c2), 24:Int32, (((t1.c3 + t1.c1) + t1.c2) + t1.c3), 25:Int32, (t1.c1 + 1:Int32), 26:Int32, (t1.c2 + 1:Int32), 27:Int32, (t1.c3 + 1:Int32), 28:Int32, (t1.c1 + 2:Int32), 29:Int32, (t1.c2 + 2:Int32), 30:Int32, (t1.c3 + 2:Int32), 31:Int32, (t1.c1 + 1030:Int32), ((((114514:Int32 + t1.c1) + t1.c2) + t1.c3) + 1919810:Int32)) as $expr1] }
     └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id] }
