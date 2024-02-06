@@ -250,6 +250,8 @@ impl SourceManagerCore {
             }
         }
 
+        println!("init actor splits {:?}", actor_splits);
+
         Self {
             metadata_manager,
             managed_sources,
@@ -671,6 +673,11 @@ impl SourceManager {
         curr_actor_ids: &[ActorId],
     ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
         let core = self.core.lock().await;
+
+        println!("prev actors ids {:?}", prev_actor_ids);
+        println!("curr actors ids {:?}", curr_actor_ids);
+
+        println!("actor splits {:?}", core.actor_splits);
 
         let prev_splits = prev_actor_ids
             .iter()

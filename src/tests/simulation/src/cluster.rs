@@ -695,6 +695,8 @@ impl Cluster {
             }
         }
 
+        println!("killing {:?}, waiting {}", nodes, opts.restart_delay_secs);
+
         self.kill_nodes(nodes, opts.restart_delay_secs).await
     }
 
@@ -721,8 +723,9 @@ impl Cluster {
                 // max_heartbeat_interval_secs = 15
                 t += Duration::from_secs(restart_delay_secs as u64);
             }
+            println!("sleeping {}", t.as_secs_f32());
             tokio::time::sleep(t).await;
-            tracing::info!("restart {name}");
+            println!("restart {name}");
             Handle::current().restart(name);
         }))
         .await;

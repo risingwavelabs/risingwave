@@ -754,6 +754,7 @@ impl ScaleController {
         HashMap<FragmentId, Reschedule>,
         HashMap<FragmentId, HashSet<ActorId>>,
     )> {
+        println!("inner prepare reschedule");
         let ctx = self
             .build_reschedule_context(&mut reschedules, options, table_parallelisms)
             .await?;
@@ -762,6 +763,9 @@ impl ScaleController {
 
         let (fragment_actors_to_remove, fragment_actors_to_create) =
             self.arrange_reschedules(&reschedules, &ctx).await?;
+
+        println!("frag to rem {:?}", fragment_actors_to_remove);
+        println!("frag to add {:?}", fragment_actors_to_create);
 
         let mut fragment_actor_bitmap = HashMap::new();
         for fragment_id in reschedules.keys() {
@@ -2494,13 +2498,20 @@ impl GlobalStreamManager {
         table_parallelism: Option<HashMap<TableId, TableParallelism>>,
     ) -> MetaResult<()> {
         let mut table_parallelism = table_parallelism;
+        println!(
+            "reschedule actors impl calledl {:?} {:?} {:?}",
+            reschedules, options, table_parallelism
+        );
 
         let (reschedule_fragment, applied_reschedules) = self
             .scale_controller
             .prepare_reschedule_command(reschedules, options, table_parallelism.as_mut())
             .await?;
 
-        tracing::debug!("reschedule plan: {:?}", reschedule_fragment);
+        println!(
+            "reschedule actors impl reschedule plan: {:?}",
+            reschedule_fragment
+        );
 
         let command = Command::RescheduleFragment {
             reschedules: reschedule_fragment,
@@ -2535,6 +2546,8 @@ impl GlobalStreamManager {
     }
 
     async fn trigger_parallelism_control(&self) -> MetaResult<()> {
+        println!("trigger parallelism ctrl");
+
         let _reschedule_job_lock = self.reschedule_lock.write().await;
 
         match &self.metadata_manager {
@@ -2713,6 +2726,7 @@ impl GlobalStreamManager {
 
                     match notification {
                         LocalNotification::WorkerNodeActivated(worker) => {
+                            println!("worker activated {:?}", worker);
                             let prev_worker = worker_cache.insert(worker.id, worker.clone());
 
                             if let Some(prev_worker) = prev_worker && prev_worker.parallel_units != worker.parallel_units {
@@ -2725,6 +2739,7 @@ impl GlobalStreamManager {
                         // Since our logic for handling passive scale-in is within the barrier manager,
                         // there’s not much we can do here. All we can do is proactively remove the entries from our cache.
                         LocalNotification::WorkerNodeDeleted(worker) => {
+                            println!("worker deleted {:?}", worker);
                             match worker_cache.remove(&worker.id) {
                                 Some(prev_worker) => {
                                     tracing::info!(worker = prev_worker.id, "worker removed from stream manager cache");

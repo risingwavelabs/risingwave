@@ -36,16 +36,19 @@ async fn nexmark_recovery_common(create: &str, select: &str, drop: &str) -> Resu
     cluster.run(drop).await?;
     sleep(Duration::from_secs(5)).await;
 
+    println!("running {}", create);
     cluster.run(create).await?;
 
     // kill nodes and trigger recovery
     for _ in 0..5 {
         sleep(Duration::from_secs(2)).await;
+        println!("kill nodes");
         cluster.kill_node(&KillOpts::ALL).await;
     }
     // wait enough time to make sure the stream is end
     sleep(Duration::from_secs(60)).await;
 
+    println!("run select {}", select);
     cluster.run(select).await?.assert_result_eq(&expected);
 
     Ok(())

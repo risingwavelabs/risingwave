@@ -669,8 +669,10 @@ impl GlobalBarrierManagerContext {
 
         // skip reschedule if no reschedule is generated.
         let reschedule_fragment = if plan.is_empty() {
+            println!("v2 empty plan gened");
             HashMap::new()
         } else {
+            println!("v2 prepare");
             let (reschedule_fragment, _) = self
                 .scale_controller
                 .prepare_reschedule_command(
@@ -684,6 +686,8 @@ impl GlobalBarrierManagerContext {
 
             reschedule_fragment
         };
+
+        println!("v2 prepare done");
 
         // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
         debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
@@ -706,13 +710,18 @@ impl GlobalBarrierManagerContext {
     }
 
     async fn scale_actors_v1(&self) -> MetaResult<()> {
+        println!(
+            "running scaling actor v1 from {}",
+            self.env.opts.advertise_addr
+        );
+
         let info = self.resolve_actor_info().await?;
 
         let mgr = self.metadata_manager.as_v1_ref();
-        debug!("start resetting actors distribution");
+        println!("start resetting actors distribution");
 
         if info.actor_location_map.is_empty() {
-            debug!("empty cluster, skipping");
+            println!("empty cluster, skipping");
             return Ok(());
         }
 
@@ -794,6 +803,8 @@ impl GlobalBarrierManagerContext {
             })
             .await?;
 
+        println!("reschedule plan gen {:?}", plan);
+
         let table_parallelisms: HashMap<_, _> = table_parallelisms
             .into_iter()
             .map(|(table_id, parallelism)| {
@@ -804,10 +815,14 @@ impl GlobalBarrierManagerContext {
 
         let mut compared_table_parallelisms = table_parallelisms.clone();
 
+        let addr = self.env.opts.advertise_addr.clone();
+
         // skip reschedule if no reschedule is generated.
         let (reschedule_fragment, applied_reschedules) = if plan.is_empty() {
+            println!("empty plan gened {}", addr);
             (HashMap::new(), HashMap::new())
         } else {
+            println!("running prepare from {}", addr);
             self.scale_controller
                 .prepare_reschedule_command(
                     plan,
@@ -816,8 +831,11 @@ impl GlobalBarrierManagerContext {
                     },
                     Some(&mut compared_table_parallelisms),
                 )
-                .await?
+                .await
+                .context("v1 prepare failed")?
         };
+
+        println!("run prepare done");
 
         // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
         debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
@@ -839,7 +857,7 @@ impl GlobalBarrierManagerContext {
             return Err(e);
         }
 
-        debug!("scaling-in actors succeed.");
+        println!("scaling-in actors succeed.");
         Ok(())
     }
 
@@ -884,12 +902,12 @@ impl GlobalBarrierManagerContext {
 
         if to_migrate_parallel_units.is_empty() {
             // all expired parallel units are already in migration plan.
-            debug!("all expired parallel units are already in migration plan.");
+            println!("all expired parallel units are already in migration plan.");
             return Ok(cached_plan);
         }
         let mut to_migrate_parallel_units =
             to_migrate_parallel_units.into_iter().rev().collect_vec();
-        debug!(
+        println!(
             "got to migrate parallel units {:#?}",
             to_migrate_parallel_units
         );
@@ -904,10 +922,10 @@ impl GlobalBarrierManagerContext {
             new_parallel_units.retain(|pu| !inuse_parallel_units.contains(&pu.id));
 
             if !new_parallel_units.is_empty() {
-                debug!("new parallel units found: {:#?}", new_parallel_units);
+                println!("new parallel units found: {:#?}", new_parallel_units);
                 for target_parallel_unit in new_parallel_units {
                     if let Some(from) = to_migrate_parallel_units.pop() {
-                        debug!(
+                        println!(
                             "plan to migrate from parallel unit {} to {}",
                             from, target_parallel_unit.id
                         );
