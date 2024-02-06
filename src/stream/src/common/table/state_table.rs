@@ -921,10 +921,13 @@ where
         let new_value_bytes = self.serialize_value(new_value);
 
         if should_print {
-            // risingwave_stream::common::table::state_table: new_key_bytes: TableKey { 0000008000 }
+            // risingwave_stream::common::table::state_table: new_key_bytes: TableKey { 00 00 00 80 00 }
             // risingwave_stream::common::table::state_table: new_value_bytes: b"\x01S\0\x80\xd4jX\xb9\x02\x01\0\x01T\0\0\0\0\0\0\0"
-            tracing::info!("new_key_bytes: {:?}", new_key_bytes);
-            tracing::info!("new_value_bytes: {:?}", new_value_bytes);
+            assert_eq!(new_key_bytes, TableKey(Bytes::from_static(b"\0\0\0\x80\0")));
+            assert_eq!(
+                new_value_bytes,
+                Bytes::from_static(b"\x01S\0\x80\xd4jX\xb9\x02\x01\0\x01T\0\0\0\0\0\0\0",)
+            );
         }
 
         self.update_inner(new_key_bytes, Some(old_value_bytes), new_value_bytes);

@@ -518,7 +518,8 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
 
     async fn flush(&mut self) -> StorageResult<usize> {
         let should_log = if let Some(epoch) = self.epoch {
-            epoch == 3066966724575232
+            // prev
+            epoch == 3066966659039232 || epoch == 3066966724575232 // curr
         } else {
             false
         };
@@ -581,10 +582,11 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                             )
                     {
                         tracing::info!(
-                            "memtable flush update: {:?}, old_value: {:?}, new_value: {:?}",
+                            "memtable flush update: {:?}, old_value: {:?}, new_value: {:?}, epoch: {:?}",
                             key,
                             old_value,
-                            new_value
+                            new_value,
+                            &self.epoch
                         );
                     }
                     kv_pairs.push((key, StorageValue::new_put(new_value)));
