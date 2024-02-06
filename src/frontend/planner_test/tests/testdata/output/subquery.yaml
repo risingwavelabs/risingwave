@@ -804,28 +804,42 @@
     select * from integers where 2 in (select count(distinct k) + count(distinct v) from rows where correlated_col = integers.correlated_col);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: LeftSemi, predicate: integers.correlated_col = rows.correlated_col_expanded AND 2:Int64 = $expr1, output: [integers.i, integers.correlated_col] }
+    └─BatchHashJoin { type: LeftSemi, predicate: integers.correlated_col IS NOT DISTINCT FROM integers.correlated_col_expanded AND 2:Int64 = $expr1, output: [integers.i, integers.correlated_col] }
       ├─BatchExchange { order: [], dist: HashShard(integers.correlated_col) }
       │ └─BatchProject { exprs: [integers.i, integers.correlated_col, 2:Int64] }
       │   └─BatchScan { table: integers, columns: [integers.i, integers.correlated_col], distribution: SomeShard }
-      └─BatchProject { exprs: [(count(rows.k_expanded) filter((flag = 0:Int64)) + count(rows.v_expanded) filter((flag = 1:Int64))) as $expr1, rows.correlated_col_expanded] }
-        └─BatchHashAgg { group_key: [rows.correlated_col_expanded], aggs: [count(rows.k_expanded) filter((flag = 0:Int64)), count(rows.v_expanded) filter((flag = 1:Int64))] }
-          └─BatchExchange { order: [], dist: HashShard(rows.correlated_col_expanded) }
-            └─BatchHashAgg { group_key: [rows.k_expanded, rows.v_expanded, rows.correlated_col_expanded, flag], aggs: [] }
-              └─BatchExchange { order: [], dist: HashShard(rows.k_expanded, rows.v_expanded, rows.correlated_col_expanded, flag) }
-                └─BatchExpand { column_subsets: [[rows.k, rows.correlated_col], [rows.v, rows.correlated_col]] }
-                  └─BatchScan { table: rows, columns: [rows.k, rows.v, rows.correlated_col], distribution: SomeShard }
+      └─BatchProject { exprs: [integers.correlated_col_expanded, (count(rows.k_expanded) filter((flag = 0:Int64)) + count(rows.v_expanded) filter((flag = 1:Int64))) as $expr1] }
+        └─BatchHashAgg { group_key: [integers.correlated_col_expanded], aggs: [count(rows.k_expanded) filter((flag = 0:Int64)), count(rows.v_expanded) filter((flag = 1:Int64))] }
+          └─BatchExchange { order: [], dist: HashShard(integers.correlated_col_expanded) }
+            └─BatchHashAgg { group_key: [integers.correlated_col_expanded, rows.k_expanded, rows.v_expanded, flag], aggs: [] }
+              └─BatchExchange { order: [], dist: HashShard(integers.correlated_col_expanded, rows.k_expanded, rows.v_expanded, flag) }
+                └─BatchExpand { column_subsets: [[integers.correlated_col, rows.k], [integers.correlated_col, rows.v]] }
+                  └─BatchHashJoin { type: LeftOuter, predicate: integers.correlated_col IS NOT DISTINCT FROM rows.correlated_col, output: [integers.correlated_col, rows.k, rows.v, 1:Int32] }
+                    ├─BatchHashAgg { group_key: [integers.correlated_col], aggs: [] }
+                    │ └─BatchExchange { order: [], dist: HashShard(integers.correlated_col) }
+                    │   └─BatchScan { table: integers, columns: [integers.correlated_col], distribution: SomeShard }
+                    └─BatchExchange { order: [], dist: HashShard(rows.correlated_col) }
+                      └─BatchProject { exprs: [rows.correlated_col, rows.k, rows.v, 1:Int32] }
+                        └─BatchFilter { predicate: IsNotNull(rows.correlated_col) }
+                          └─BatchScan { table: rows, columns: [rows.k, rows.v, rows.correlated_col], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [i, correlated_col, integers._row_id(hidden), 2:Int64(hidden)], stream_key: [integers._row_id, correlated_col, 2:Int64], pk_columns: [integers._row_id, correlated_col, 2:Int64], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(integers.correlated_col, integers._row_id, 2:Int64) }
-      └─StreamHashJoin { type: LeftSemi, predicate: integers.correlated_col = rows.correlated_col AND 2:Int64 = $expr1, output: [integers.i, integers.correlated_col, integers._row_id, 2:Int64] }
+      └─StreamHashJoin { type: LeftSemi, predicate: integers.correlated_col IS NOT DISTINCT FROM integers.correlated_col AND 2:Int64 = $expr1, output: [integers.i, integers.correlated_col, integers._row_id, 2:Int64] }
         ├─StreamExchange { dist: HashShard(integers.correlated_col) }
         │ └─StreamProject { exprs: [integers.i, integers.correlated_col, 2:Int64, integers._row_id] }
         │   └─StreamTableScan { table: integers, columns: [integers.i, integers.correlated_col, integers._row_id], pk: [integers._row_id], dist: UpstreamHashShard(integers._row_id) }
-        └─StreamProject { exprs: [(count(distinct rows.k) + count(distinct rows.v)) as $expr1, rows.correlated_col] }
-          └─StreamHashAgg { group_key: [rows.correlated_col], aggs: [count(distinct rows.k), count(distinct rows.v), count] }
-            └─StreamExchange { dist: HashShard(rows.correlated_col) }
-              └─StreamTableScan { table: rows, columns: [rows.k, rows.v, rows.correlated_col, rows._row_id], pk: [rows._row_id], dist: UpstreamHashShard(rows._row_id) }
+        └─StreamProject { exprs: [integers.correlated_col, (count(distinct rows.k) + count(distinct rows.v)) as $expr1] }
+          └─StreamHashAgg { group_key: [integers.correlated_col], aggs: [count(distinct rows.k), count(distinct rows.v), count] }
+            └─StreamHashJoin { type: LeftOuter, predicate: integers.correlated_col IS NOT DISTINCT FROM rows.correlated_col, output: [integers.correlated_col, rows.k, rows.v, rows._row_id] }
+              ├─StreamProject { exprs: [integers.correlated_col] }
+              │ └─StreamHashAgg { group_key: [integers.correlated_col], aggs: [count] }
+              │   └─StreamExchange { dist: HashShard(integers.correlated_col) }
+              │     └─StreamTableScan { table: integers, columns: [integers.correlated_col, integers._row_id], pk: [integers._row_id], dist: UpstreamHashShard(integers._row_id) }
+              └─StreamExchange { dist: HashShard(rows.correlated_col) }
+                └─StreamProject { exprs: [rows.correlated_col, rows.k, rows.v, rows._row_id] }
+                  └─StreamFilter { predicate: IsNotNull(rows.correlated_col) }
+                    └─StreamTableScan { table: rows, columns: [rows.k, rows.v, rows.correlated_col, rows._row_id], pk: [rows._row_id], dist: UpstreamHashShard(rows._row_id) }
 - name: test hop window subquery 1
   sql: |
     create table t1 (k int primary key, ts timestamp);

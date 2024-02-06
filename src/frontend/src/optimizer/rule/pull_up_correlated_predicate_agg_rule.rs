@@ -15,6 +15,7 @@
 use itertools::{Either, Itertools};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_expr::aggregate::AggKind;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
@@ -142,9 +143,14 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
 
         let new_bottom_proj: PlanRef = LogicalProject::new(filter, bottom_proj_exprs).into();
 
+        // If there is a count aggregate, bail out and leave for general subquery unnesting to deal.
+        if agg_calls.iter().any(|agg_call| agg_call.agg_kind == AggKind::Count) {
+            return None;
+        };
+
         // New agg with group key extracted from the cor_eq_exprs.
         let new_agg = Agg::new(
-            agg_calls, // TODO: use count0 to replace count.
+            agg_calls,
             IndexSet::from_iter(
                 new_bottom_proj.schema().len() - cor_eq_exprs_len..new_bottom_proj.schema().len(),
             ),

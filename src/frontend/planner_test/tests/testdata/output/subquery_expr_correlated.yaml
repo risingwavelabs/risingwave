@@ -112,11 +112,15 @@
               └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) }
                 └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
   optimized_logical_plan_for_batch: |-
-    LogicalJoin { type: Inner, on: (t1.y = t2.y) AND ($expr1 > count), output: [t1.x, t1.y] }
+    LogicalJoin { type: Inner, on: IsNotDistinctFrom(t1.y, t1.y) AND ($expr1 > count(1:Int32)), output: [t1.x, t1.y] }
     ├─LogicalProject { exprs: [t1.x, t1.y, t1.x::Int64 as $expr1] }
     │ └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
-    └─LogicalAgg { group_key: [t2.y], aggs: [count] }
-      └─LogicalScan { table: t2, columns: [t2.y] }
+    └─LogicalAgg { group_key: [t1.y], aggs: [count(1:Int32)] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.y, t2.y), output: [t1.y, 1:Int32] }
+        ├─LogicalAgg { group_key: [t1.y], aggs: [] }
+        │ └─LogicalScan { table: t1, columns: [t1.y] }
+        └─LogicalProject { exprs: [t2.y, 1:Int32] }
+          └─LogicalScan { table: t2, columns: [t2.y], predicate: IsNotNull(t2.y) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -132,12 +136,16 @@
               └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) }
                 └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
   optimized_logical_plan_for_batch: |-
-    LogicalJoin { type: Inner, on: (t1.y = t2.y) AND ($expr1 > $expr2), output: [t1.x, t1.y] }
+    LogicalJoin { type: Inner, on: IsNotDistinctFrom(t1.y, t1.y) AND ($expr1 > $expr2), output: [t1.x, t1.y] }
     ├─LogicalProject { exprs: [t1.x, t1.y, t1.x::Int64 as $expr1] }
     │ └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
-    └─LogicalProject { exprs: [(count + count) as $expr2, t2.y] }
-      └─LogicalAgg { group_key: [t2.y], aggs: [count] }
-        └─LogicalScan { table: t2, columns: [t2.y] }
+    └─LogicalProject { exprs: [t1.y, (count(1:Int32) + count(1:Int32)) as $expr2] }
+      └─LogicalAgg { group_key: [t1.y], aggs: [count(1:Int32)] }
+        └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.y, t2.y), output: [t1.y, 1:Int32] }
+          ├─LogicalAgg { group_key: [t1.y], aggs: [] }
+          │ └─LogicalScan { table: t1, columns: [t1.y] }
+          └─LogicalProject { exprs: [t2.y, 1:Int32] }
+            └─LogicalScan { table: t2, columns: [t2.y], predicate: IsNotNull(t2.y) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -450,13 +458,19 @@
                     └─LogicalScan { table: c, columns: [c.c1, c.c2, c.c3, c._row_id] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count] }
-    └─LogicalJoin { type: Inner, on: (b.b2 = c.c2) AND (a.a3 = c.c3), output: [] }
+    └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.a3, internal_last_seen_value(a.a3)) AND IsNotDistinctFrom(b.b2, b.b2), output: [] }
       ├─LogicalJoin { type: Inner, on: (a.a3 = b.b2), output: all }
       │ ├─LogicalScan { table: a, columns: [a.a3] }
       │ └─LogicalScan { table: b, columns: [b.b2] }
-      └─LogicalFilter { predicate: (3:Int32 = count) }
-        └─LogicalAgg { group_key: [c.c2, c.c3], aggs: [count] }
-          └─LogicalScan { table: c, columns: [c.c2, c.c3], predicate: (c.c3 = c.c2) }
+      └─LogicalFilter { predicate: (3:Int32 = count(1:Int32)) }
+        └─LogicalAgg { group_key: [internal_last_seen_value(a.a3), b.b2], aggs: [count(1:Int32)] }
+          └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(internal_last_seen_value(a.a3), c.c3) AND IsNotDistinctFrom(b.b2, c.c2), output: [internal_last_seen_value(a.a3), b.b2, 1:Int32] }
+            ├─LogicalAgg { group_key: [b.b2], aggs: [internal_last_seen_value(a.a3)] }
+            │ └─LogicalJoin { type: Inner, on: (a.a3 = b.b2), output: all }
+            │   ├─LogicalScan { table: a, columns: [a.a3] }
+            │   └─LogicalScan { table: b, columns: [b.b2] }
+            └─LogicalProject { exprs: [c.c3, c.c2, 1:Int32] }
+              └─LogicalScan { table: c, columns: [c.c2, c.c3], predicate: (c.c3 = c.c2) AND IsNotNull(c.c3) AND IsNotNull(c.c2) }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);
@@ -481,11 +495,15 @@
     select count(*) from a where a.x=3 and a.y = (select count(*) from b where b.z = a.z);
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count] }
-    └─LogicalJoin { type: Inner, on: (a.z = b.z) AND ($expr1 = count), output: [] }
+    └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.z, a.z) AND ($expr1 = count(1:Int32)), output: [] }
       ├─LogicalProject { exprs: [a.z, a.y::Int64 as $expr1] }
       │ └─LogicalScan { table: a, output_columns: [a.y, a.z], required_columns: [a.y, a.z, a.x], predicate: (a.x = 3:Int32) }
-      └─LogicalAgg { group_key: [b.z], aggs: [count] }
-        └─LogicalScan { table: b, columns: [b.z] }
+      └─LogicalAgg { group_key: [a.z], aggs: [count(1:Int32)] }
+        └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.z, b.z), output: [a.z, 1:Int32] }
+          ├─LogicalAgg { group_key: [a.z], aggs: [] }
+          │ └─LogicalScan { table: a, output_columns: [a.z], required_columns: [a.z, a.x], predicate: (a.x = 3:Int32) }
+          └─LogicalProject { exprs: [b.z, 1:Int32] }
+            └─LogicalScan { table: b, columns: [b.z], predicate: IsNotNull(b.z) }
 - sql: |
     create table a(x int, y varchar, z int);
     create table b(x varchar, y int, z int);
@@ -503,23 +521,31 @@
     select count(*) from a where a.y = (select count(distinct x) from b where b.z = a.z);
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count] }
-    └─LogicalJoin { type: Inner, on: (a.z = b.z) AND ($expr1 = count(b.x)), output: [] }
+    └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.z, a.z) AND ($expr1 = count(b.x)), output: [] }
       ├─LogicalProject { exprs: [a.z, a.y::Int64 as $expr1] }
       │ └─LogicalScan { table: a, columns: [a.y, a.z] }
-      └─LogicalAgg { group_key: [b.z], aggs: [count(b.x)] }
-        └─LogicalAgg { group_key: [b.x, b.z], aggs: [] }
-          └─LogicalScan { table: b, columns: [b.x, b.z] }
+      └─LogicalAgg { group_key: [a.z], aggs: [count(b.x)] }
+        └─LogicalAgg { group_key: [a.z, b.x], aggs: [] }
+          └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.z, b.z), output: [a.z, b.x] }
+            ├─LogicalAgg { group_key: [a.z], aggs: [] }
+            │ └─LogicalScan { table: a, columns: [a.z] }
+            └─LogicalProject { exprs: [b.z, b.x] }
+              └─LogicalScan { table: b, columns: [b.x, b.z], predicate: IsNotNull(b.z) }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);
     select count(*) from a where a.y = (select count(x) filter(where x < 100) from b where b.z = a.z);
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count] }
-    └─LogicalJoin { type: Inner, on: (a.z = b.z) AND ($expr1 = count(b.x) filter((b.x < 100:Int32))), output: [] }
+    └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.z, a.z) AND ($expr1 = count(b.x) filter((b.x < 100:Int32))), output: [] }
       ├─LogicalProject { exprs: [a.z, a.y::Int64 as $expr1] }
       │ └─LogicalScan { table: a, columns: [a.y, a.z] }
-      └─LogicalAgg { group_key: [b.z], aggs: [count(b.x) filter((b.x < 100:Int32))] }
-        └─LogicalScan { table: b, columns: [b.x, b.z] }
+      └─LogicalAgg { group_key: [a.z], aggs: [count(b.x) filter((b.x < 100:Int32))] }
+        └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.z, b.z), output: [a.z, b.x] }
+          ├─LogicalAgg { group_key: [a.z], aggs: [] }
+          │ └─LogicalScan { table: a, columns: [a.z] }
+          └─LogicalProject { exprs: [b.z, b.x] }
+            └─LogicalScan { table: b, columns: [b.x, b.z], predicate: IsNotNull(b.z) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
