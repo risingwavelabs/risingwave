@@ -115,7 +115,7 @@ rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 rustc-hash = { version = "1" }
 rustix = { version = "0.38", features = ["fs", "net"] }
 scopeguard = { version = "1" }
-sea-orm = { version = "0.12", features = ["runtime-tokio-native-tls", "sqlx-mysql", "sqlx-postgres", "sqlx-sqlite"] }
+sea-orm = { version = "0.12.14", features = ["runtime-tokio-native-tls", "sqlx-mysql", "sqlx-postgres", "sqlx-sqlite"] }
 sea-query = { version = "0.30", default-features = false, features = ["backend-mysql", "backend-postgres", "backend-sqlite", "derive", "hashable-value", "postgres-array", "thread-safe", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 sea-query-binder = { version = "0.5", default-features = false, features = ["postgres-array", "runtime-tokio-native-tls", "sqlx-mysql", "sqlx-postgres", "sqlx-sqlite", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }

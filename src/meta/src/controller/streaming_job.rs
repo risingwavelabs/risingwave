@@ -24,7 +24,7 @@ use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::actor_dispatcher::DispatcherType;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::{
-    Actor, ActorDispatcher, Fragment, Index, Object, ObjectDependency, Source,
+    Actor, ActorDispatcher, Fragment, Index, Object, ObjectDependency, Sink, Source,
     StreamingJob as StreamingJobModel, Table,
 };
 use risingwave_meta_model_v2::{
@@ -137,7 +137,7 @@ impl CatalogController {
                 .await?;
                 table.id = job_id as _;
                 let table: table::ActiveModel = table.clone().into();
-                table.insert(&txn).await?;
+                Table::insert(table).exec(&txn).await?;
             }
             StreamingJob::Sink(sink, _) => {
                 let job_id = Self::create_streaming_job_obj(
@@ -153,7 +153,7 @@ impl CatalogController {
                 .await?;
                 sink.id = job_id as _;
                 let sink: sink::ActiveModel = sink.clone().into();
-                sink.insert(&txn).await?;
+                Sink::insert(sink).exec(&txn).await?;
             }
             StreamingJob::Table(src, table, _) => {
                 let job_id = Self::create_streaming_job_obj(
@@ -184,10 +184,10 @@ impl CatalogController {
                         PbOptionalAssociatedSourceId::AssociatedSourceId(src_obj.oid as _),
                     );
                     let source: source::ActiveModel = src.clone().into();
-                    source.insert(&txn).await?;
+                    Source::insert(source).exec(&txn).await?;
                 }
                 let table: table::ActiveModel = table.clone().into();
-                table.insert(&txn).await?;
+                Table::insert(table).exec(&txn).await?;
             }
             StreamingJob::Index(index, table) => {
                 ensure_object_id(ObjectType::Table, index.primary_table_id as _, &txn).await?;
@@ -207,18 +207,18 @@ impl CatalogController {
                 index.index_table_id = job_id as _;
                 table.id = job_id as _;
 
-                object_dependency::ActiveModel {
+                ObjectDependency::insert(object_dependency::ActiveModel {
                     oid: Set(index.primary_table_id as _),
                     used_by: Set(table.id as _),
                     ..Default::default()
-                }
-                .insert(&txn)
+                })
+                .exec(&txn)
                 .await?;
 
                 let table: table::ActiveModel = table.clone().into();
-                table.insert(&txn).await?;
+                Table::insert(table).exec(&txn).await?;
                 let index: index::ActiveModel = index.clone().into();
-                index.insert(&txn).await?;
+                Index::insert(index).exec(&txn).await?;
             }
             StreamingJob::Source(src) => {
                 let job_id = Self::create_streaming_job_obj(
@@ -234,7 +234,7 @@ impl CatalogController {
                 .await?;
                 src.id = job_id as _;
                 let source: source::ActiveModel = src.clone().into();
-                source.insert(&txn).await?;
+                Source::insert(source).exec(&txn).await?;
             }
         }
 
@@ -280,7 +280,7 @@ impl CatalogController {
             table.table_id = Set(table_id as _);
             table.belongs_to_job_id = Set(Some(job_id as _));
             table.fragment_id = NotSet;
-            table.insert(&txn).await?;
+            Table::insert(table).exec(&txn).await?;
         }
         txn.commit().await?;
 
@@ -304,15 +304,31 @@ impl CatalogController {
             .map(|(fragment, actors, actor_dispatchers)| (fragment, (actors, actor_dispatchers)))
             .unzip();
         for fragment in fragments {
+            // let x = serde_json::to_value(&fragment.stream_node).unwrap();
+            // let y: StreamNode = serde_json::from_value(x).unwrap();
+            // println!("heiheihei: {:?}", y);
+
+            let fragment_id = fragment.fragment_id;
+            let state_table_ids = fragment.state_table_ids.inner_ref().clone();
             let fragment = fragment.into_active_model();
-            let fragment = fragment.insert(&txn).await?;
+
+            Fragment::insert(fragment).exec(&txn).await?;
+
+            // PANIC: stack overflow.
+            // let stream_node: StreamNode = Fragment::find_by_id(fragment_id)
+            //     .select_only()
+            //     .column(fragment::Column::StreamNode)
+            //     .into_tuple()
+            //     .one(&txn)
+            //     .await?
+            //     .unwrap();
 
             // Update fragment id for all state tables.
             if !for_replace {
-                for state_table_id in fragment.state_table_ids.into_inner() {
+                for state_table_id in state_table_ids {
                     table::ActiveModel {
                         table_id: Set(state_table_id as _),
-                        fragment_id: Set(Some(fragment.fragment_id as _)),
+                        fragment_id: Set(Some(fragment_id)),
                         ..Default::default()
                     }
                     .update(&txn)
@@ -325,13 +341,13 @@ impl CatalogController {
         for (actors, actor_dispatchers) in actor_with_dispatchers {
             for actor in actors {
                 let actor = actor.into_active_model();
-                actor.insert(&txn).await?;
+                Actor::insert(actor).exec(&txn).await?;
             }
             for (_, actor_dispatchers) in actor_dispatchers {
                 for actor_dispatcher in actor_dispatchers {
                     let mut actor_dispatcher = actor_dispatcher.into_active_model();
                     actor_dispatcher.id = NotSet;
-                    actor_dispatcher.insert(&txn).await?;
+                    ActorDispatcher::insert(actor_dispatcher).exec(&txn).await?;
                 }
             }
         }
