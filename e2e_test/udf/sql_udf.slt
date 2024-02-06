@@ -350,8 +350,23 @@ create function add_error(INT, INT) returns int language sql as $$select $1 + $2
 
 # 2. Select from table inside SQL UDF (potential concerns: naming conflict)
 
+# statment ok
+# create funciton from_table_single_row() returns int language sql as 'select c1 from t1';
+
+# Do NOT need explicit `select ... from ...`
+# query I
+# select from_table_single_row();
+# ----
+# 1
+
 # statement ok
-# create function from_table_single_row() returns int language sql as 'select c1 from t1';
+# create function from_table_single_row_1() returns int language sql as 'select c1 from t1 order by c1 desc';
+
+# Need explict `select ... from ...`
+# query I
+# select * from from_table_single_row_1();
+# ----
+# 5
 
 # Should add parser support
 # statement ok
@@ -365,7 +380,35 @@ create function add_error(INT, INT) returns int language sql as $$select $1 + $2
 
 # Parser support is needed
 # statement ok
-# create function out_parameters(out a INT, out b INT) language sql as 'select 1919810, 114514';
+# create function out_parameters_without_name(out INT, out INT) language sql as 'select 1919810, 114514';
+
+# query II
+# select out_parameters_without_name();
+# ----
+# 1919810 114514
+
+# query II
+# select * out_parameters_without_name();
+# ----
+# 1919810 114514
+
+# statement error non-existent column
+# select a, b from out_parameters_without_name();
+# ----
+# 1919810 114514
+
+# statement ok
+# create function out_parameters_with_name(out a INT, out b INT) language sql as 'select 1919810, 114514';
+
+# query II
+# select out_parameters_with_name();
+# ----
+# 1919810 114514
+
+# query II
+# select a, b from out_parameters_with_name();
+# ----
+# 1919810 114514
 
 # statement ok
 # create function multiple_cols() returns setof record as 'select c1, c2, c3 from t2' language sql;
@@ -387,6 +430,30 @@ create function add_error(INT, INT) returns int language sql as $$select $1 + $2
 # select is_greater(3.14, 2.95);
 # ----
 # t
+
+# 5. Overloading functions
+
+# statement ok
+# create function overload(c1 INT) returns int language sql as 'select c1';
+
+# statement ok
+# create function overload(c1 VARCHAR) returns varchar language sql as 'select c1';
+
+# query I
+# select overload(114514), overload('114514');
+# ----
+# 114514 114514
+
+# statement error naming conflict with first overload
+# create function overload(c1 INT, out VARCHAR)
+
+# This definition will cause ambiguity with the second overload during runtime if `c2` is not specified
+# statement ok
+# create function overload(c1 VARCHAR, c2 VARCHAR default '114514', out VARCHAR, out VARCHAR) language sql as 'select c1, c2';
+
+# statement error can not choose a best candidate function, need explicit type cast
+# query TT
+# select overload('114514');
 
 ##################################################
 # Clean up the funtions / mock tables at the end #
