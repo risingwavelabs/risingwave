@@ -189,7 +189,7 @@ const backPressureAlgos: BackPressureAlgo[] = [
 ]
 
 type BackPressureDataSource = "Embedded" | "Prometheus"
-const backPressureDataSources: BackPressureDataSourceAlgo[] = [
+const backPressureDataSources: BackPressureDataSource[] = [
   "Embedded",
   "Prometheus",
 ]
@@ -480,29 +480,30 @@ export default function Streaming() {
                 setBackPressureDataSourceAlgo(event.target.value)
               }
             >
-              {backPressureDataSourceAlgos.map((algo) => (
+              {backPressureDataSources.map((algo) => (
                 <option value={algo} key={algo}>
                   {algo}
                 </option>
               ))}
             </Select>
           </FormControl>
-          <FormControl>
-            <FormLabel>Back Pressure Algorithm</FormLabel>
-            <Select
-              value={backPressureAlgo ?? undefined}
-              onChange={(event) => {
-                setBackPressureAlgo(event.target.value as BackPressureAlgo)
-              }}
-              disabled={backPressureAlgoOptions.length === 0}
-            >
-              {backPressureAlgoOptions.map((algo) => (
-                <option value={algo} key={algo}>
-                  {algo}
-                </option>
-              ))}
-            </Select>
-          </FormControl>
+          {backPressureAlgoOptions.length > 0 && (
+            <FormControl>
+              <FormLabel>Back Pressure Algorithm</FormLabel>
+              <Select
+                value={backPressureAlgo ?? undefined}
+                onChange={(event) => {
+                  setBackPressureAlgo(event.target.value as BackPressureAlgo);
+                }}
+              >
+                {backPressureAlgoOptions.map((algo) => (
+                  <option value={algo} key={algo}>
+                    {algo}
+                  </option>
+                ))}
+              </Select>
+            </FormControl>
+          )}
           <Flex height="full" width="full" flexDirection="column">
             <Text fontWeight="semibold">Fragments</Text>
             {fragmentDependencyDag && (

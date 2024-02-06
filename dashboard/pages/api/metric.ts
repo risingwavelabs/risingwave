@@ -56,9 +56,10 @@ function convertToMapAndAgg(
   const map = new Map<string, number>()
   for (const item of back_pressures) {
     const key = `${item.fragmentId}-${item.downstreamFragmentId}`
-    if (map_value.has(key)) {
-      map_value.set(key, map_value.get(key) + item.value)
-      map_number.set(key, map_number.get(key) + 1)
+    if (map_value.has(key) && map_number.has(key)) {
+      // add || tp avoid NaN and pass check
+      map_value.set(key, (map_value.get(key) || 0) + item.value)
+      map_number.set(key, (map_number.get(key) || 0) + 1)
     } else {
       map_value.set(key, item.value)
       map_number.set(key, 1)
@@ -66,7 +67,8 @@ function convertToMapAndAgg(
   }
 
   for (const [key, value] of map_value) {
-    map.set(key, value / map_number.get(key))
+    // add || 1 to avoid NaN and pass check
+    map.set(key, value / (map_number.get(key) || 1))
   }
   return map
 }
@@ -123,7 +125,7 @@ export function calculateBPRate(
     if (map_old.has(key)) {
       result.set(
         key,
-        (value - map_old.get(key)) / ((INTERVAL / 1000) * 1000000000)
+        (value - (map_old.get(key) || 0)) / ((INTERVAL / 1000) * 1000000000)
       )
     } else {
       result.set(key, 0)
