@@ -214,26 +214,22 @@ impl Block {
             CompressionAlgorithm::Lz4 => {
                 let mut decoder = lz4::Decoder::new(compressed_data.reader())
                     .map_err(HummockError::decode_error)?;
-                let mut decoded = BytesMut::with_capacity(uncompressed_capacity);
-                unsafe { decoded.set_len(uncompressed_capacity) }
-                decoder
-                    .read_exact(&mut decoded)
+                let mut decoded = Vec::with_capacity(uncompressed_capacity);
+                let read_size = decoder
+                    .read_to_end(&mut decoded)
                     .map_err(HummockError::decode_error)?;
-
-                assert_eq!(uncompressed_capacity, decoded.len());
-                decoded.freeze()
+                assert_eq!(read_size, uncompressed_capacity);
+                Bytes::from(decoded)
             }
             CompressionAlgorithm::Zstd => {
                 let mut decoder = zstd::Decoder::new(compressed_data.reader())
                     .map_err(HummockError::decode_error)?;
-                let mut decoded = BytesMut::with_capacity(uncompressed_capacity);
-                unsafe { decoded.set_len(uncompressed_capacity) }
-                decoder
-                    .read_exact(&mut decoded)
+                let mut decoded = Vec::with_capacity(uncompressed_capacity);
+                let read_size = decoder
+                    .read_to_end(&mut decoded)
                     .map_err(HummockError::decode_error)?;
-
-                assert_eq!(uncompressed_capacity, decoded.len());
-                decoded.freeze()
+                assert_eq!(read_size, uncompressed_capacity);
+                Bytes::from(decoded)
             }
         };
 
