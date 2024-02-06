@@ -22,3 +22,5 @@ def_anyhow_newtype! {
     /// application and callers may not expect to handle it in a fine-grained way.
     pub ConnectorError;
 }
+
+pub type ConnectorResult<T> = std::result::Result<T, ConnectorError>;
