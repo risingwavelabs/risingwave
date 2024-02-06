@@ -26,7 +26,7 @@ if [[ $mode == "standalone" ]]; then
   source ci/scripts/standalone-utils.sh
 fi
 
-if [[ $mode == "single-node"]]; then
+if [[ $mode == "single-node" ]]; then
   source ci/scripts/single-node-utils.sh
 fi
 
