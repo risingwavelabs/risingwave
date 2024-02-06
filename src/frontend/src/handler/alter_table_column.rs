@@ -74,7 +74,11 @@ pub async fn handle_alter_table_column(
 
     if let Some(source_schema) = &source_schema {
         if schema_has_schema_registry(source_schema) {
-            bail_not_implemented!("Alter table with source having schema registry");
+            return Err(ErrorCode::NotSupported(
+                "alter table with schema registry".to_string(),
+                "try `ALTER TABLE .. FORMAT .. ENCODE .. (...)` instead".to_string(),
+            )
+            .into());
         }
     }
 

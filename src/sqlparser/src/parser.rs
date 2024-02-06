@@ -3067,6 +3067,9 @@ impl Parser {
                 );
             };
             AlterTableOperation::AlterColumn { column_name, op }
+        } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
+            let connector_schema = self.parse_schema()?.unwrap();
+            AlterTableOperation::FormatEncode { connector_schema }
         } else {
             return self.expected(
                 "ADD or RENAME or OWNER TO or SET or DROP after ALTER TABLE",

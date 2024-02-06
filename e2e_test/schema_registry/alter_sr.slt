@@ -72,3 +72,60 @@ DROP MATERIALIZED VIEW mv_more_fields;
 
 statement ok
 DROP SOURCE src_user;
+
+statement ok
+CREATE TABLE t_user WITH (
+    connector = 'kafka',
+    topic = 'sr_pb_test',
+    properties.bootstrap.server = 'message_queue:29092',
+    scan.startup.mode = 'earliest'
+)
+FORMAT PLAIN ENCODE PROTOBUF(
+    schema.registry = 'http://message_queue:8081',
+    message = 'test.User'
+);
+
+statement ok
+ALTER TABLE t_user FORMAT PLAIN ENCODE PROTOBUF(
+    schema.registry = 'http://message_queue:8081',
+    message = 'test.UserWithMoreFields'
+);
+
+statement ok
+ALTER TABLE t_user FORMAT PLAIN ENCODE PROTOBUF(
+    schema.registry = 'http://message_queue:8081',
+    message = 'test.User'
+);
+
+statement ok
+CREATE MATERIALIZED VIEW t_user_ds_1 AS SELECT t_user.city FROM t_user;
+
+statement error
+ALTER TABLE t_user FORMAT PLAIN ENCODE PROTOBUF(
+    schema.registry = 'http://message_queue:8081',
+    message = 'test.UserWithNewType'
+);
+
+statement ok
+ALTER TABLE t_user FORMAT PLAIN ENCODE PROTOBUF(
+    schema.registry = 'http://message_queue:8081',
+    message = 'test.UserWithMoreFields'
+);
+
+statement ok
+CREATE MATERIALIZED VIEW t_user_ds_2 AS SELECT t_user.age FROM t_user;
+
+statement ok
+ALTER TABLE t_user FORMAT PLAIN ENCODE PROTOBUF(
+    schema.registry = 'http://message_queue:8081',
+    message = 'test.User'
+);
+
+statement ok
+DROP MATERIALIZED VIEW t_user_ds_2;
+
+statement ok
+DROP MATERIALIZED VIEW t_user_ds_1;
+
+statement ok
+DROP TABLE t_user;

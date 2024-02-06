@@ -43,6 +43,7 @@ mod alter_source_column;
 mod alter_source_with_sr;
 mod alter_system;
 mod alter_table_column;
+mod alter_table_with_sr;
 pub mod alter_user;
 pub mod cancel_job;
 mod comment;
@@ -555,6 +556,13 @@ pub async fn handle(
                 None,
             )
             .await
+        }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::FormatEncode { connector_schema },
+        } => {
+            alter_table_with_sr::handle_alter_table_with_sr(handler_args, name, connector_schema)
+                .await
         }
         Statement::AlterIndex {
             name,
