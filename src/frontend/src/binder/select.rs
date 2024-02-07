@@ -17,7 +17,6 @@ use std::fmt::Debug;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{
@@ -29,6 +28,7 @@ use super::statement::RewriteExprsRecursive;
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CorrelatedId, Depth, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::utils::group_by::GroupBy;
 

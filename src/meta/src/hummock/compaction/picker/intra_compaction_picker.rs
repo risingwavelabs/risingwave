@@ -108,78 +108,11 @@ impl IntraCompactionPicker {
         partition_count: u32,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        if partition_count == 0 {
-            return None;
-        }
-        for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type() != LevelType::Nonoverlapping
-                || level.vnode_partition_count == partition_count
-            {
-                continue;
-            }
-
-            let max_compaction_bytes = std::cmp::max(
-                self.config.max_bytes_for_level_base,
-                self.config.sub_level_max_compaction_bytes
-                    * (self.config.level0_sub_level_compact_level_count as u64),
-            );
-
-            let mut select_input_size = 0;
-
-            let mut select_level_inputs = vec![];
-            let mut total_file_count = 0;
-            let mut wait_enough = false;
-            for next_level in l0.sub_levels.iter().skip(idx) {
-                if select_input_size > max_compaction_bytes
-                    || total_file_count > self.config.level0_max_compact_file_number
-                    || (next_level.vnode_partition_count == partition_count
-                        && select_level_inputs.len() > 1)
-                {
-                    wait_enough = true;
-                    break;
-                }
-
-                if level_handler.is_level_pending_compact(next_level) {
-                    break;
-                }
-
-                select_input_size += next_level.total_file_size;
-                total_file_count += next_level.table_infos.len() as u64;
-
-                select_level_inputs.push(InputLevel {
-                    level_idx: 0,
-                    level_type: next_level.level_type,
-                    table_infos: next_level.table_infos.clone(),
-                });
-            }
-            if !select_level_inputs.is_empty() {
-                let vnode_partition_count =
-                    if select_input_size > self.config.sub_level_max_compaction_bytes / 2 {
-                        partition_count
-                    } else {
-                        0
-                    };
-                let result = CompactionInput {
-                    input_levels: select_level_inputs,
-                    target_sub_level_id: level.sub_level_id,
-                    select_input_size,
-                    total_file_count,
-                    vnode_partition_count,
-                    ..Default::default()
-                };
-                if wait_enough
-                    || self.compaction_task_validator.valid_compact_task(
-                        &result,
-                        ValidationRuleType::Intra,
-                        stats,
-                    )
-                {
-                    return Some(result);
-                }
-            }
-        }
-
-        None
+        let picker = WholeLevelCompactionPicker::new(
+            self.config.clone(),
+            self.compaction_task_validator.clone(),
+        );
+        picker.pick_whole_level(l0, level_handler, partition_count, stats)
     }
 
     fn pick_l0_intra(
@@ -374,6 +307,104 @@ impl IntraCompactionPicker {
                 ..Default::default()
             });
         }
+        None
+    }
+}
+
+pub struct WholeLevelCompactionPicker {
+    config: Arc<CompactionConfig>,
+    compaction_task_validator: Arc<CompactionTaskValidator>,
+}
+
+impl WholeLevelCompactionPicker {
+    pub fn new(
+        config: Arc<CompactionConfig>,
+        compaction_task_validator: Arc<CompactionTaskValidator>,
+    ) -> Self {
+        Self {
+            config,
+            compaction_task_validator,
+        }
+    }
+
+    pub fn pick_whole_level(
+        &self,
+        l0: &OverlappingLevel,
+        level_handler: &LevelHandler,
+        partition_count: u32,
+        stats: &mut LocalPickerStatistic,
+    ) -> Option<CompactionInput> {
+        if partition_count == 0 {
+            return None;
+        }
+        for (idx, level) in l0.sub_levels.iter().enumerate() {
+            if level.level_type() != LevelType::Nonoverlapping
+                || level.vnode_partition_count == partition_count
+            {
+                continue;
+            }
+
+            let max_compaction_bytes = std::cmp::max(
+                self.config.max_bytes_for_level_base,
+                self.config.sub_level_max_compaction_bytes
+                    * (self.config.level0_sub_level_compact_level_count as u64),
+            );
+
+            let mut select_input_size = 0;
+
+            let mut select_level_inputs = vec![];
+            let mut total_file_count = 0;
+            let mut wait_enough = false;
+            for next_level in l0.sub_levels.iter().skip(idx) {
+                if select_input_size > max_compaction_bytes
+                    || total_file_count > self.config.level0_max_compact_file_number
+                    || (next_level.vnode_partition_count == partition_count
+                        && select_level_inputs.len() > 1)
+                {
+                    wait_enough = true;
+                    break;
+                }
+
+                if level_handler.is_level_pending_compact(next_level) {
+                    break;
+                }
+
+                select_input_size += next_level.total_file_size;
+                total_file_count += next_level.table_infos.len() as u64;
+
+                select_level_inputs.push(InputLevel {
+                    level_idx: 0,
+                    level_type: next_level.level_type,
+                    table_infos: next_level.table_infos.clone(),
+                });
+            }
+            if !select_level_inputs.is_empty() {
+                let vnode_partition_count =
+                    if select_input_size > self.config.sub_level_max_compaction_bytes / 2 {
+                        partition_count
+                    } else {
+                        0
+                    };
+                let result = CompactionInput {
+                    input_levels: select_level_inputs,
+                    target_sub_level_id: level.sub_level_id,
+                    select_input_size,
+                    total_file_count,
+                    vnode_partition_count,
+                    ..Default::default()
+                };
+                if wait_enough
+                    || self.compaction_task_validator.valid_compact_task(
+                        &result,
+                        ValidationRuleType::Intra,
+                        stats,
+                    )
+                {
+                    return Some(result);
+                }
+            }
+        }
+
         None
     }
 }

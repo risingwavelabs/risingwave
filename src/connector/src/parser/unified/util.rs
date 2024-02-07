@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, RwError};
-
-use super::{Access, AccessError, AccessResult, ChangeEvent};
+use super::{Access, AccessResult, ChangeEvent};
 use crate::parser::unified::ChangeEventOperation;
 use crate::parser::SourceStreamChunkRowWriter;
 use crate::source::SourceColumnDesc;
@@ -44,10 +42,4 @@ pub fn apply_row_accessor_on_stream_chunk_writer(
     writer: &mut SourceStreamChunkRowWriter<'_>,
 ) -> AccessResult<()> {
     writer.insert(|column| accessor.access(&[&column.name], Some(&column.data_type)))
-}
-
-impl From<AccessError> for RwError {
-    fn from(val: AccessError) -> Self {
-        ErrorCode::InternalError(format!("AccessError: {:?}", val)).into()
-    }
 }

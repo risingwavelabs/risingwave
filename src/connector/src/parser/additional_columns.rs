@@ -15,8 +15,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
+use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
-use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType as PbDataType;
@@ -86,7 +86,7 @@ pub fn build_additional_column_catalog(
     inner_field_name: Option<&str>,
     data_type: Option<&str>,
     reject_unknown_connector: bool,
-) -> Result<ColumnCatalog> {
+) -> anyhow::Result<ColumnCatalog> {
     let compatible_columns = match (
         COMPATIBLE_ADDITIONAL_COLUMNS.get(connector_name),
         reject_unknown_connector,
@@ -94,19 +94,18 @@ pub fn build_additional_column_catalog(
         (Some(compat_cols), _) => compat_cols,
         (None, false) => &COMMON_COMPATIBLE_ADDITIONAL_COLUMNS,
         (None, true) => {
-            return Err(format!(
+            bail!(
                 "additional column is not supported for connector {}, acceptable connectors: {:?}",
                 connector_name,
                 COMPATIBLE_ADDITIONAL_COLUMNS.keys(),
-            )
-            .into())
+            );
         }
     };
     if !compatible_columns.contains(additional_col_type) {
-        return Err(format!(
+        bail!(
             "additional column type {} is not supported for connector {}, acceptable column types: {:?}",
             additional_col_type, connector_name, compatible_columns
-        ).into());
+        );
     }
 
     let column_name = column_alias.unwrap_or_else(|| {

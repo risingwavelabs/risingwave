@@ -17,7 +17,7 @@ mod postgres;
 
 use std::collections::HashMap;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
@@ -191,19 +191,18 @@ pub struct DebeziumSourceOffset {
 
 impl MySqlOffset {
     pub fn parse_debezium_offset(offset: &str) -> ConnectorResult<Self> {
-        let dbz_offset: DebeziumOffset = serde_json::from_str(offset).map_err(|e| {
-            ConnectorError::Internal(anyhow!("invalid upstream offset: {}, error: {}", offset, e))
-        })?;
+        let dbz_offset: DebeziumOffset = serde_json::from_str(offset)
+            .with_context(|| format!("invalid upstream offset: {}", offset))?;
 
         Ok(Self {
             filename: dbz_offset
                 .source_offset
                 .file
-                .ok_or_else(|| anyhow!("binlog file not found in offset"))?,
+                .context("binlog file not found in offset")?,
             position: dbz_offset
                 .source_offset
                 .pos
-                .ok_or_else(|| anyhow!("binlog position not found in offset"))?,
+                .context("binlog position not found in offset")?,
         })
     }
 }
@@ -268,7 +267,8 @@ impl ExternalTableReader for MySqlExternalTableReader {
         let row = rs
             .iter_mut()
             .exactly_one()
-            .map_err(|e| ConnectorError::Internal(anyhow!("read binlog error: {}", e)))?;
+            .ok()
+            .context("expect exactly one row when reading binlog offset")?;
 
         Ok(CdcOffset::MySql(MySqlOffset {
             filename: row.take("File").unwrap(),
@@ -296,9 +296,7 @@ impl MySqlExternalTableReader {
         let config = serde_json::from_value::<ExternalTableConfig>(
             serde_json::to_value(with_properties).unwrap(),
         )
-        .map_err(|e| {
-            ConnectorError::Config(anyhow!("fail to extract mysql connector properties: {}", e))
-        })?;
+        .context("failed to extract mysql connector properties")?;
 
         let database_url = format!(
             "mysql://{}:{}@{}:{}/{}",

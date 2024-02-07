@@ -22,7 +22,6 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::{PbIndex, PbStreamJobStatus, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
@@ -33,6 +32,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
@@ -210,15 +210,8 @@ pub(crate) fn gen_create_index_plan(
     let index_table = materialize.table();
     let mut index_table_prost = index_table.to_prost(index_schema_id, index_database_id);
     {
-        use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
-        let retention_second_string_key = PROPERTIES_RETENTION_SECOND_KEY.to_string();
-
         // Inherit table properties
-        table.properties.get(&retention_second_string_key).map(|v| {
-            index_table_prost
-                .properties
-                .insert(retention_second_string_key, v.clone())
-        });
+        index_table_prost.retention_seconds = table.retention_seconds;
     }
 
     index_table_prost.owner = session.user_id();

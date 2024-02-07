@@ -42,7 +42,6 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{load_config, BatchConfig, MetaConfig, MetricLevel};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -79,6 +78,7 @@ use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{
     check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId,
 };
+use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
 };

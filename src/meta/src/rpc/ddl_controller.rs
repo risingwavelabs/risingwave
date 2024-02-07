@@ -74,8 +74,8 @@ use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
     validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
-    CreateStreamingJobContext, GlobalStreamManagerRef, ReplaceTableContext, SourceManagerRef,
-    StreamFragmentGraph,
+    CreateStreamingJobContext, CreateStreamingJobOption, GlobalStreamManagerRef,
+    ReplaceTableContext, SourceManagerRef, StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -1414,12 +1414,15 @@ impl DdlController {
             internal_tables,
             building_locations,
             existing_locations,
-            table_properties: stream_job.properties(),
             definition: stream_job.definition(),
             mv_table_id: stream_job.mv_table(),
             create_type: stream_job.create_type(),
             ddl_type: stream_job.into(),
             replace_table_job_info,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/14793
+            option: CreateStreamingJobOption {
+                new_independent_compaction_group: false,
+            },
         };
 
         // 4. Mark tables as creating, including internal tables and the table of the stream job.
@@ -1823,7 +1826,6 @@ impl DdlController {
             dispatchers,
             building_locations,
             existing_locations,
-            table_properties: stream_job.properties(),
         };
 
         Ok((ctx, table_fragments))

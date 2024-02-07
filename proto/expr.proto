@@ -421,9 +421,11 @@ message AggCall {
 message WindowFrame {
   enum Type {
     TYPE_UNSPECIFIED = 0;
-    // RANGE = 1;
-    TYPE_ROWS = 2;
-    // GROUPS = 3;
+
+    TYPE_ROWS_LEGACY = 2 [deprecated = true]; // Deprecated since we introduced `RANGE` frame.
+
+    TYPE_ROWS = 5;
+    TYPE_RANGE = 10;
   }
   enum BoundType {
     BOUND_TYPE_UNSPECIFIED = 0;
@@ -433,7 +435,9 @@ message WindowFrame {
     BOUND_TYPE_FOLLOWING = 4;
     BOUND_TYPE_UNBOUNDED_FOLLOWING = 5;
   }
+  // Deprecated since we introduced `RANGE` frame.
   message Bound {
+    option deprecated = true;
     BoundType type = 1;
     oneof offset {
       uint64 integer = 2;
@@ -447,11 +451,38 @@ message WindowFrame {
     // EXCLUSION_TIES = 3;
     EXCLUSION_NO_OTHERS = 4;
   }
+  message RowsFrameBounds {
+    RowsFrameBound start = 1;
+    RowsFrameBound end = 2;
+  }
+  message RowsFrameBound {
+    BoundType type = 1;
+    optional uint64 offset = 3;
+  }
+  message RangeFrameBounds {
+    RangeFrameBound start = 1;
+    RangeFrameBound end = 2;
+
+    data.DataType order_data_type = 10;
+    common.OrderType order_type = 15;
+    data.DataType offset_data_type = 20;
+  }
+  message RangeFrameBound {
+    BoundType type = 1;
+    optional data.Datum offset = 3;
+  }
 
   Type type = 1;
-  Bound start = 2;
-  Bound end = 3;
+
+  Bound start = 2 [deprecated = true]; // Deprecated since we introduced `RANGE` frame.
+  Bound end = 3 [deprecated = true]; // Deprecated since we introduced `RANGE` frame.
+
   Exclusion exclusion = 4;
+
+  oneof bounds {
+    RowsFrameBounds rows = 10;
+    RangeFrameBounds range = 15;
+  }
 }
 
 message WindowFunction {

@@ -14,12 +14,12 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::{get_acl_items, BuiltinTable, SysCatalogReaderImpl};
+use crate::error::Result;
 
 pub const RW_VIEWS: BuiltinTable = BuiltinTable {
     name: "rw_views",

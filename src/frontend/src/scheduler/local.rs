@@ -28,7 +28,6 @@ use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::{ShutdownToken, TaskId};
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
-use risingwave_common::error::RwError;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tracing::{InstrumentStream, TracingContext};
@@ -47,6 +46,7 @@ use tracing::debug;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStage, QueryStageRef};
 use crate::catalog::{FragmentId, TableId};
+use crate::error::RwError;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;

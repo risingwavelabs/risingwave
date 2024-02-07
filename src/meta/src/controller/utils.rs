@@ -23,12 +23,11 @@ use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
-    object_dependency, schema, sink, source, table, user, user_privilege, view, worker_property,
-    ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId,
-    PrivilegeId, SchemaId, SourceId, StreamNode, UserId, WorkerId,
+    object_dependency, schema, sink, source, table, user, user_privilege, view, ActorId,
+    DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, PrivilegeId,
+    SchemaId, SourceId, StreamNode, UserId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
-use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::meta::PbFragmentParallelUnitMapping;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
@@ -611,40 +610,6 @@ pub fn extract_grant_obj_id(object: &PbObject) -> ObjectId {
         | PbObject::FunctionId(id) => *id as _,
         _ => unreachable!("invalid object type: {:?}", object),
     }
-}
-
-// todo: deprecate parallel units and avoid this query.
-pub async fn get_parallel_unit_mapping<C>(db: &C) -> MetaResult<HashMap<u32, PbParallelUnit>>
-where
-    C: ConnectionTrait,
-{
-    let parallel_units: Vec<(WorkerId, I32Array)> = WorkerProperty::find()
-        .select_only()
-        .columns([
-            worker_property::Column::WorkerId,
-            worker_property::Column::ParallelUnitIds,
-        ])
-        .into_tuple()
-        .all(db)
-        .await?;
-    let parallel_units_map = parallel_units
-        .into_iter()
-        .flat_map(|(worker_id, parallel_unit_ids)| {
-            parallel_unit_ids
-                .into_inner()
-                .into_iter()
-                .map(move |parallel_unit_id| {
-                    (
-                        parallel_unit_id as _,
-                        PbParallelUnit {
-                            id: parallel_unit_id as _,
-                            worker_node_id: worker_id as _,
-                        },
-                    )
-                })
-        })
-        .collect();
-    Ok(parallel_units_map)
 }
 
 pub async fn get_actor_dispatchers<C>(

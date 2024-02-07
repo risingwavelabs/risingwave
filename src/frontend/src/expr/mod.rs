@@ -17,12 +17,13 @@ use fixedbitset::FixedBitSet;
 use futures::FutureExt;
 use paste::paste;
 use risingwave_common::array::ListValue;
-use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::types::{DataType, Datum, JsonbVal, Scalar};
 use risingwave_expr::aggregate::AggKind;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
+
+use crate::error::{ErrorCode, Result as RwResult};
 
 mod agg_call;
 mod correlated_input_ref;

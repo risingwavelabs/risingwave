@@ -188,7 +188,9 @@ pub async fn handle_create_sql_function(
                 arg_names.clone(),
             ));
 
-        binder.set_udf_binding_flag();
+        // Need to set the initial global count to 1
+        // otherwise the context will not be probed during the semantic check
+        binder.udf_context_mut().incr_global_count();
 
         if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
             match binder.bind_expr(expr) {
@@ -204,7 +206,7 @@ pub async fn handle_create_sql_function(
                     }
                 }
                 Err(e) => return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "failed to conduct semantic check, please see if you are calling non-existence functions: {}",
+                    "failed to conduct semantic check, please see if you are calling non-existence functions or parameters\ndetailed error message: {}",
                     e.as_report()
                 ))
                 .into()),
@@ -217,8 +219,6 @@ pub async fn handle_create_sql_function(
             )
             .into());
         }
-
-        binder.unset_udf_binding_flag();
     }
 
     // Create the actual function, will be stored in function catalog

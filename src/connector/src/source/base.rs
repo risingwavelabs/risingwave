@@ -26,7 +26,7 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorSuppressor, RwError};
+use risingwave_common::error::ErrorSuppressor;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
@@ -34,6 +34,7 @@ use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
+use thiserror_ext::AsReport;
 
 use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
@@ -84,8 +85,8 @@ pub trait UnknownFields {
 
 impl<P: DeserializeOwned + UnknownFields> TryFromHashmap for P {
     fn try_from_hashmap(props: HashMap<String, String>, deny_unknown_fields: bool) -> Result<Self> {
-        let json_value = serde_json::to_value(props).map_err(|e| anyhow!(e))?;
-        let res = serde_json::from_value::<P>(json_value).map_err(|e| anyhow!(e.to_string()))?;
+        let json_value = serde_json::to_value(props)?;
+        let res = serde_json::from_value::<P>(json_value)?;
 
         if !deny_unknown_fields || res.unknown_fields().is_empty() {
             Ok(res)
@@ -214,11 +215,11 @@ impl SourceContext {
         ctx
     }
 
-    pub(crate) fn report_user_source_error(&self, e: RwError) {
+    pub(crate) fn report_user_source_error(&self, e: &(impl AsReport + ?Sized)) {
         if self.source_info.fragment_id == u32::MAX {
             return;
         }
-        let mut err_str = e.inner().to_string();
+        let mut err_str = e.to_report_string();
         if let Some(suppressor) = &self.error_suppressor
             && suppressor.lock().suppress_error(&err_str)
         {
@@ -309,8 +310,8 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
         };
         return Ok(SourceStruct::new(format, encode));
     }
-    let source_format = info.get_format().map_err(|e| anyhow!("{e:?}"))?;
-    let source_encode = info.get_row_encode().map_err(|e| anyhow!("{e:?}"))?;
+    let source_format = info.get_format()?;
+    let source_encode = info.get_row_encode()?;
     let (format, encode) = match (source_format, source_encode) {
         (PbFormatType::Plain, PbEncodeType::Json) => (SourceFormat::Plain, SourceEncode::Json),
         (PbFormatType::Plain, PbEncodeType::Protobuf) => {
@@ -346,11 +347,11 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
     Ok(SourceStruct::new(format, encode))
 }
 
-pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
+pub type BoxSourceStream = BoxStream<'static, anyhow::Result<Vec<SourceMessage>>>;
 
-pub trait ChunkSourceStream = Stream<Item = Result<StreamChunk, RwError>> + Send + 'static;
-pub type BoxChunkSourceStream = BoxStream<'static, Result<StreamChunk, RwError>>;
-pub type BoxTryStream<M> = BoxStream<'static, Result<M, RwError>>;
+pub trait ChunkSourceStream = Stream<Item = anyhow::Result<StreamChunk>> + Send + 'static;
+pub type BoxChunkSourceStream = BoxStream<'static, anyhow::Result<StreamChunk>>;
+pub type BoxTryStream<M> = BoxStream<'static, anyhow::Result<M>>;
 
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
 /// responsible for parsing, it is used to read messages from the outside and transform them into a
@@ -366,7 +367,7 @@ pub trait SplitReader: Sized + Send {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         columns: Option<Vec<Column>>,
-    ) -> Result<Self>;
+    ) -> anyhow::Result<Self>;
 
     fn into_stream(self) -> BoxChunkSourceStream;
 }
@@ -718,8 +719,11 @@ mod tests {
 
         let props = ConnectorProperties::extract(props, true).unwrap();
         if let ConnectorProperties::Kafka(k) = props {
-            assert!(k.common.broker_rewrite_map.is_some());
-            println!("{:?}", k.common.broker_rewrite_map);
+            let hashmap: HashMap<String, String> = hashmap! {
+                "b-1:9092".to_string() => "dns-1".to_string(),
+                "b-2:9092".to_string() => "dns-2".to_string(),
+            };
+            assert_eq!(k.privatelink_common.broker_rewrite_map, Some(hashmap));
         } else {
             panic!("extract kafka config failed");
         }
