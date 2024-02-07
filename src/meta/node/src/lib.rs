@@ -201,30 +201,25 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_listener_addr.map(|x| x.parse().unwrap());
-        // let backend = match config.meta.backend {
-        //     MetaBackend::Etcd => MetaStoreBackend::Etcd {
-        //         endpoints: opts
-        //             .etcd_endpoints
-        //             .split(',')
-        //             .map(|x| x.to_string())
-        //             .collect(),
-        //         credentials: match opts.etcd_auth {
-        //             true => Some((
-        //                 opts.etcd_username,
-        //                 opts.etcd_password.expose_secret().to_string(),
-        //             )),
-        //             false => None,
-        //         },
-        //     },
-        //     MetaBackend::Mem => MetaStoreBackend::Mem,
-        //     MetaBackend::Sql => MetaStoreBackend::Sql {
-        //         endpoint: opts.sql_endpoint.expect("sql endpoint is required"),
-        //     },
-        // };
-        //
-
-        let backend = MetaStoreBackend::Sql {
-            endpoint: "postgres://shanicky@localhost:5432/postgres".to_string(),
+        let backend = match config.meta.backend {
+            MetaBackend::Etcd => MetaStoreBackend::Etcd {
+                endpoints: opts
+                    .etcd_endpoints
+                    .split(',')
+                    .map(|x| x.to_string())
+                    .collect(),
+                credentials: match opts.etcd_auth {
+                    true => Some((
+                        opts.etcd_username,
+                        opts.etcd_password.expose_secret().to_string(),
+                    )),
+                    false => None,
+                },
+            },
+            MetaBackend::Mem => MetaStoreBackend::Mem,
+            MetaBackend::Sql => MetaStoreBackend::Sql {
+                endpoint: opts.sql_endpoint.expect("sql endpoint is required"),
+            },
         };
 
         validate_config(&config);
