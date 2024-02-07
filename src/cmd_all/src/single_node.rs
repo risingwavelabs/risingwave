@@ -56,6 +56,8 @@ pub static DEFAULT_SINGLE_NODE_STATE_STORE_URL: LazyLock<String> = LazyLock::new
     about = "[default] The Single Node mode. Start all services in one process, with process-level options. This will be executed if no subcommand is specified"
 )]
 /// Here we define our own defaults for the single node mode.
+// TODO(kwannoel): Support user supplied profiles.
+// Perhaps https://docs.rs/clap-serde-derive/0.2.1/clap_serde_derive/?
 pub struct SingleNodeOpts {
     /// The address prometheus polls metrics from.
     #[clap(long, env = "RW_SINGLE_NODE_PROMETHEUS_LISTENER_ADDR")]
@@ -88,6 +90,18 @@ pub struct SingleNodeOpts {
     /// Extra options for meta node.
     #[clap(long, env = "RW_SINGLE_NODE_META_EXTRA_OPTS")]
     meta_extra_opts: Option<String>,
+
+    /// Extra options for compute node.
+    #[clap(long, env = "RW_SINGLE_NODE_COMPUTE_EXTRA_OPTS")]
+    compute_extra_opts: Option<String>,
+
+    /// Extra options for frontend node.
+    #[clap(long, env = "RW_SINGLE_NODE_FRONTEND_EXTRA_OPTS")]
+    frontend_extra_opts: Option<String>,
+
+    /// Extra options for compactor node.
+    #[clap(long, env = "RW_SINGLE_NODE_COMPACTOR_EXTRA_OPTS")]
+    compactor_extra_opts: Option<String>,
 }
 
 pub fn make_single_node_sql_endpoint(store_directory: &String) -> String {
@@ -146,13 +160,20 @@ pub fn parse_single_node_opts(opts: &SingleNodeOpts) -> Result<ParsedSingleNodeO
     }
 
     // Override with node-level extra options
-    if let Some(meta_extra_opts) = &opts.meta_extra_opts {
-        let meta_extra_opts = split(meta_extra_opts)?;
-        // This hack is required, because `update_from` treats arg[0] as the command name.
-        let prefix = "".to_string();
-        let meta_extra_opts = iter::once(&prefix).chain(meta_extra_opts.iter());
-        meta_opts.update_from(meta_extra_opts);
+    fn update_extra_opts(opts: &mut impl Parser, extra_opts: &Option<String>) -> Result<()> {
+        if let Some(extra_opts) = extra_opts {
+            let extra_opts = split(extra_opts)?;
+            // This hack is required, because `update_from` treats arg[0] as the command name.
+            let prefix = "".to_string();
+            let extra_opts = iter::once(&prefix).chain(extra_opts.iter());
+            opts.update_from(extra_opts);
+        }
+        Ok(())
     }
+    update_extra_opts(&mut meta_opts, &opts.meta_extra_opts)?;
+    update_extra_opts(&mut compute_opts, &opts.compute_extra_opts)?;
+    update_extra_opts(&mut frontend_opts, &opts.frontend_extra_opts)?;
+    update_extra_opts(&mut compactor_opts, &opts.compactor_extra_opts)?;
 
     Ok(ParsedSingleNodeOpts {
         meta_opts: Some(meta_opts),
@@ -362,14 +383,11 @@ mod test {
         expect.assert_eq(&actual);
     }
 
-    // #[test]
-    // fn test_parse_profile_opts() {
-    // }
-
     #[test]
     fn test_parse_extra_opts() {
         let raw_opts = "
---meta-extra-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\"
+--meta-extra-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\"\
+--compute-extra-opts=--listen-addr 127.0.0.1:8888 --total-memory-bytes 123 --parallelism 10
 ";
         let actual = SingleNodeOpts::parse_from(raw_opts.lines());
         check(
