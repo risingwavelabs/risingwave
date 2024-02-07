@@ -290,7 +290,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let stream_chunk2 = create_stream_chunk(chunk2_datums, &chunk_schema);
 
     // The first barrier
-    let mut curr_epoch = EpochWithGap::new_without_offset(11);
+    let mut curr_epoch = EpochWithGap::new_for_test(11);
     let mut splits = HashMap::new();
     splits.insert(
         actor_id,

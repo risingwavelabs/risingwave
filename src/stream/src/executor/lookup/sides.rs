@@ -445,7 +445,7 @@ mod tests {
         // Simulate recovery test
         drop(tx_r);
 
-        tx_l.push_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test(), false);
+        tx_l.push_barrier(EpochWithGap::new_for_test(1).as_u64_for_test(), false);
 
         tx_l.push_chunk(chunk_l1);
 

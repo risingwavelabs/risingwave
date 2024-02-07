@@ -495,7 +495,7 @@ mod tests {
                 for epoch in epochs {
                     if epoch % 20 == 0 {
                         tx.send(Message::Chunk(build_test_chunk(
-                            EpochWithGap::new_without_offset(epoch).as_u64_for_test(),
+                            EpochWithGap::new_for_test(epoch).as_u64_for_test(),
                         )))
                         .await
                         .unwrap();
@@ -509,17 +509,15 @@ mod tests {
                         .unwrap();
                     }
                     tx.send(Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(epoch).as_u64_for_test(),
+                        EpochWithGap::new_for_test(epoch).as_u64_for_test(),
                     )))
                     .await
                     .unwrap();
                     sleep(Duration::from_millis(1)).await;
                 }
                 tx.send(Message::Barrier(
-                    Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(1000).as_u64_for_test(),
-                    )
-                    .with_mutation(Mutation::Stop(HashSet::default())),
+                    Barrier::new_test_barrier(EpochWithGap::new_for_test(1000).as_u64_for_test())
+                        .with_mutation(Mutation::Stop(HashSet::default())),
                 ))
                 .await
                 .unwrap();
@@ -533,7 +531,7 @@ mod tests {
             if epoch % 20 == 0 {
                 for _ in 0..CHANNEL_NUMBER {
                     assert_matches!(merger.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
-                        assert_eq!(chunk.ops().len() as u64, EpochWithGap::new_without_offset(epoch).as_u64_for_test());
+                        assert_eq!(chunk.ops().len() as u64, EpochWithGap::new_for_test(epoch).as_u64_for_test());
                     });
                 }
             } else if epoch as usize / 20 >= CHANNEL_NUMBER - 1 {
@@ -545,7 +543,7 @@ mod tests {
             }
             // expect a barrier
             assert_matches!(merger.next().await.unwrap().unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_,..}) => {
-                assert_eq!(barrier_epoch.curr, EpochWithGap::new_without_offset(epoch).as_u64_for_test());
+                assert_eq!(barrier_epoch.curr, EpochWithGap::new_for_test(epoch).as_u64_for_test());
             });
         }
         assert_matches!(
@@ -653,7 +651,7 @@ mod tests {
             }
         };
 
-        let b1 = Barrier::new_test_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test())
+        let b1 = Barrier::new_test_barrier(EpochWithGap::new_for_test(1).as_u64_for_test())
             .with_mutation(Mutation::Update(UpdateMutation {
                 dispatchers: Default::default(),
                 merges: merge_updates,
@@ -713,7 +711,7 @@ mod tests {
             .unwrap();
             // send barrier
             let barrier =
-                Barrier::new_test_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test());
+                Barrier::new_test_barrier(EpochWithGap::new_for_test(1).as_u64_for_test());
             tx.send(Ok(GetStreamResponse {
                 message: Some(StreamMessage {
                     stream_message: Some(
@@ -778,7 +776,7 @@ mod tests {
             assert!(visibility.is_empty());
         });
         assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
-            assert_eq!(barrier_epoch.curr, EpochWithGap::new_without_offset(1).as_u64_for_test());
+            assert_eq!(barrier_epoch.curr, EpochWithGap::new_for_test(1).as_u64_for_test());
         });
         assert!(rpc_called.load(Ordering::SeqCst));
 

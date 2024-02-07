@@ -270,7 +270,7 @@ mod tests {
         ))
         .execute();
 
-        tx.push_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test(), false);
+        tx.push_barrier(EpochWithGap::new_for_test(1).as_u64_for_test(), false);
         dedup_executor.next().await.unwrap().unwrap();
 
         let chunk = StreamChunk::from_pretty(
@@ -291,7 +291,7 @@ mod tests {
             )
         );
 
-        tx.push_barrier(EpochWithGap::new_without_offset(2).as_u64_for_test(), false);
+        tx.push_barrier(EpochWithGap::new_for_test(2).as_u64_for_test(), false);
         dedup_executor.next().await.unwrap().unwrap();
 
         let chunk = StreamChunk::from_pretty(

@@ -920,10 +920,7 @@ pub(super) mod tests {
                 let v = test_value_of(idx);
                 builder
                     .add(
-                        FullKey::from_user_key(
-                            k,
-                            EpochWithGap::new_without_offset(1).as_u64_for_test(),
-                        ),
+                        FullKey::from_user_key(k, EpochWithGap::new_for_test(1).as_u64_for_test()),
                         HummockValue::put(v.as_ref()),
                     )
                     .await

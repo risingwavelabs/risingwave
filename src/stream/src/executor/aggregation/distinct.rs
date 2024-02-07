@@ -383,8 +383,7 @@ mod tests {
         ];
 
         let store = MemoryStateStore::new();
-        let mut epoch =
-            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
+        let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
         let mut dedup_tables = infer_dedup_tables(&agg_calls, &[], store).await;
         dedup_tables
             .values_mut()
@@ -564,8 +563,7 @@ mod tests {
         let group_key = GroupKey::new(OwnedRow::new(vec![Some(100.into())]), None);
 
         let store = MemoryStateStore::new();
-        let mut epoch =
-            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
+        let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
         let mut dedup_tables = infer_dedup_tables(&agg_calls, &group_key_types, store).await;
         dedup_tables
             .values_mut()

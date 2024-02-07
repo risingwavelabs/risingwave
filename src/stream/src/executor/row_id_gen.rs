@@ -182,7 +182,7 @@ mod tests {
         let mut row_id_gen_executor = row_id_gen_executor.execute();
 
         // Init barrier
-        tx.push_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test(), false);
+        tx.push_barrier(EpochWithGap::new_for_test(1).as_u64_for_test(), false);
         row_id_gen_executor.next().await.unwrap().unwrap();
 
         // Insert operation

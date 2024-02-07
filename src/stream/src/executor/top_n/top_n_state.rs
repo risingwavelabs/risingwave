@@ -350,7 +350,7 @@ mod tests {
             )
             .await;
             tb.init_epoch(EpochPair::new_test_epoch(
-                EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                EpochWithGap::new_for_test(1).as_u64_for_test(),
             ));
             tb
         };
@@ -432,7 +432,7 @@ mod tests {
             )
             .await;
             tb.init_epoch(EpochPair::new_test_epoch(
-                EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                EpochWithGap::new_for_test(1).as_u64_for_test(),
             ));
             tb
         };
@@ -481,7 +481,7 @@ mod tests {
             )
             .await;
             tb.init_epoch(EpochPair::new_test_epoch(
-                EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                EpochWithGap::new_for_test(1).as_u64_for_test(),
             ));
             tb
         };

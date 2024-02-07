@@ -630,15 +630,15 @@ mod tests {
             PkIndices::new(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                    EpochWithGap::new_for_test(1).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk1),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                    EpochWithGap::new_for_test(2).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk2),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(3).as_u64_for_test(),
+                    EpochWithGap::new_for_test(3).as_u64_for_test(),
                 )),
             ],
         );
@@ -744,15 +744,15 @@ mod tests {
             PkIndices::new(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                    EpochWithGap::new_for_test(1).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk1),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                    EpochWithGap::new_for_test(2).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk2),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(3).as_u64_for_test(),
+                    EpochWithGap::new_for_test(3).as_u64_for_test(),
                 )),
             ],
         );
@@ -846,16 +846,16 @@ mod tests {
             PkIndices::new(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                    EpochWithGap::new_for_test(1).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk1),
                 Message::Chunk(chunk2),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                    EpochWithGap::new_for_test(2).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk3),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(3).as_u64_for_test(),
+                    EpochWithGap::new_for_test(3).as_u64_for_test(),
                 )),
             ],
         );
@@ -984,19 +984,19 @@ mod tests {
             PkIndices::new(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                    EpochWithGap::new_for_test(1).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk1),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                    EpochWithGap::new_for_test(2).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk2),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(3).as_u64_for_test(),
+                    EpochWithGap::new_for_test(3).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk3),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(4).as_u64_for_test(),
+                    EpochWithGap::new_for_test(4).as_u64_for_test(),
                 )),
             ],
         );
@@ -1176,16 +1176,16 @@ mod tests {
             PkIndices::new(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                    EpochWithGap::new_for_test(1).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk1),
                 Message::Chunk(chunk2),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                    EpochWithGap::new_for_test(2).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk3),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(3).as_u64_for_test(),
+                    EpochWithGap::new_for_test(3).as_u64_for_test(),
                 )),
             ],
         );
@@ -1293,11 +1293,11 @@ mod tests {
             PkIndices::new(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                    EpochWithGap::new_for_test(1).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk1),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                    EpochWithGap::new_for_test(2).as_u64_for_test(),
                 )),
             ],
         );
@@ -1416,19 +1416,19 @@ mod tests {
             PkIndices::new(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                    EpochWithGap::new_for_test(1).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk1),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                    EpochWithGap::new_for_test(2).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk2),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(3).as_u64_for_test(),
+                    EpochWithGap::new_for_test(3).as_u64_for_test(),
                 )),
                 Message::Chunk(chunk3),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(4).as_u64_for_test(),
+                    EpochWithGap::new_for_test(4).as_u64_for_test(),
                 )),
             ],
         );
@@ -1624,11 +1624,11 @@ mod tests {
 
         let chunks = gen_fuzz_data(N, 128);
         let messages = iter::once(Message::Barrier(Barrier::new_test_barrier(
-            EpochWithGap::new_without_offset(1).as_u64_for_test(),
+            EpochWithGap::new_for_test(1).as_u64_for_test(),
         )))
         .chain(chunks.into_iter().map(Message::Chunk))
         .chain(iter::once(Message::Barrier(Barrier::new_test_barrier(
-            EpochWithGap::new_without_offset(2).as_u64_for_test(),
+            EpochWithGap::new_for_test(2).as_u64_for_test(),
         ))))
         .collect();
         // Prepare stream executors.

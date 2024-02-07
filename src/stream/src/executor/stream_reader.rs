@@ -199,7 +199,7 @@ mod tests {
         // Write a barrier, and we should receive it.
         barrier_tx
             .send(Barrier::new_test_barrier(
-                EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                EpochWithGap::new_for_test(1).as_u64_for_test(),
             ))
             .unwrap();
         assert_matches!(next!().unwrap(), Either::Left(_));
@@ -210,7 +210,7 @@ mod tests {
         // Write a barrier.
         barrier_tx
             .send(Barrier::new_test_barrier(
-                EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                EpochWithGap::new_for_test(2).as_u64_for_test(),
             ))
             .unwrap();
         // Then write a chunk.

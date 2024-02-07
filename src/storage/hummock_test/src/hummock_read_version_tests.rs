@@ -43,7 +43,7 @@ async fn test_read_version_basic() {
     let (pinned_version, _, _) =
         prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
 
-    let mut epoch = EpochWithGap::new_without_offset(1);
+    let mut epoch = EpochWithGap::new_for_test(1);
     let table_id = 0;
     let mut read_version = HummockReadVersion::new(TableId::from(table_id), pinned_version);
 
@@ -109,7 +109,7 @@ async fn test_read_version_basic() {
 
         let repeat_num = epoch.as_u64_for_test() / 65536;
         for e in 1..repeat_num {
-            let epoch = EpochWithGap::new_without_offset(e);
+            let epoch = EpochWithGap::new_for_test(e);
             let key = iterator_test_table_key_of((epoch.as_u64_for_test() / 65536) as usize);
             let key_range = map_table_key_range((
                 Bound::Included(Bytes::from(key.to_vec())),
@@ -161,11 +161,11 @@ async fn test_read_version_basic() {
                     key_range: Some(KeyRange {
                         left: key_with_epoch(
                             iterator_test_user_key_of(1).encode(),
-                            EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                            EpochWithGap::new_for_test(1).as_u64_for_test(),
                         ),
                         right: key_with_epoch(
                             iterator_test_user_key_of(2).encode(),
-                            EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                            EpochWithGap::new_for_test(2).as_u64_for_test(),
                         ),
                         right_exclusive: false,
                     }),
@@ -183,11 +183,11 @@ async fn test_read_version_basic() {
                     key_range: Some(KeyRange {
                         left: key_with_epoch(
                             iterator_test_user_key_of(3).encode(),
-                            EpochWithGap::new_without_offset(3).as_u64_for_test(),
+                            EpochWithGap::new_for_test(3).as_u64_for_test(),
                         ),
                         right: key_with_epoch(
                             iterator_test_user_key_of(3).encode(),
-                            EpochWithGap::new_without_offset(3).as_u64_for_test(),
+                            EpochWithGap::new_for_test(3).as_u64_for_test(),
                         ),
                         right_exclusive: false,
                     }),
@@ -247,7 +247,7 @@ async fn test_read_version_basic() {
         assert_eq!(1, staging_imm.len());
 
         assert_eq!(
-            EpochWithGap::new_without_offset(4).as_u64_for_test(),
+            EpochWithGap::new_for_test(4).as_u64_for_test(),
             staging_imm[0].min_epoch()
         );
 
@@ -275,7 +275,7 @@ async fn test_read_version_basic() {
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
         assert_eq!(
-            EpochWithGap::new_without_offset(4).as_u64_for_test(),
+            EpochWithGap::new_for_test(4).as_u64_for_test(),
             staging_imm[0].min_epoch()
         );
 
@@ -293,7 +293,7 @@ async fn test_read_filter_basic() {
     let (pinned_version, _, _) =
         prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
 
-    let epoch = EpochWithGap::new_without_offset(1);
+    let epoch = EpochWithGap::new_for_test(1);
     let table_id = 0;
     let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
         TableId::from(table_id),

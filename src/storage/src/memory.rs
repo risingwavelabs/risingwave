@@ -765,7 +765,7 @@ mod tests {
                 ],
                 vec![],
                 WriteOptions {
-                    epoch: EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                    epoch: EpochWithGap::new_for_test(1).as_u64_for_test(),
                     table_id: Default::default(),
                 },
             )
@@ -823,7 +823,7 @@ mod tests {
                         Bound::Included(TableKey(Bytes::from("a"))),
                         Bound::Included(TableKey(Bytes::from("b"))),
                     ),
-                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                    EpochWithGap::new_for_test(1).as_u64_for_test(),
                     TableId::default(),
                     None,
                 )
@@ -832,7 +832,7 @@ mod tests {
                 FullKey::for_test(
                     Default::default(),
                     b"a".to_vec(),
-                    EpochWithGap::new_without_offset(1).as_u64_for_test()
+                    EpochWithGap::new_for_test(1).as_u64_for_test()
                 )
                 .encode()
                 .into(),
@@ -872,7 +872,7 @@ mod tests {
             state_store
                 .get(
                     TableKey(Bytes::copy_from_slice(b"a")),
-                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                    EpochWithGap::new_for_test(1).as_u64_for_test(),
                     ReadOptions::default(),
                 )
                 .await
@@ -883,7 +883,7 @@ mod tests {
             state_store
                 .get(
                     TableKey(Bytes::from("b")),
-                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                    EpochWithGap::new_for_test(1).as_u64_for_test(),
                     ReadOptions::default(),
                 )
                 .await
@@ -894,7 +894,7 @@ mod tests {
             state_store
                 .get(
                     TableKey(Bytes::from("c")),
-                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                    EpochWithGap::new_for_test(1).as_u64_for_test(),
                     ReadOptions::default()
                 )
                 .await

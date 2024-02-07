@@ -227,7 +227,7 @@ mod tests {
 
         // Init barrier
         let first_message =
-            Barrier::new_test_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test())
+            Barrier::new_test_barrier(EpochWithGap::new_for_test(1).as_u64_for_test())
                 .with_mutation(Mutation::Add(AddMutation {
                     adds: Default::default(),
                     added_actors: maplit::hashset! {actor_id},
@@ -270,7 +270,7 @@ mod tests {
 
         // ValueExecutor should simply forward following barriers
         tx.send(Barrier::new_test_barrier(
-            EpochWithGap::new_without_offset(2).as_u64_for_test(),
+            EpochWithGap::new_for_test(2).as_u64_for_test(),
         ))
         .unwrap();
 
@@ -280,7 +280,7 @@ mod tests {
         ));
 
         tx.send(Barrier::new_test_barrier(
-            EpochWithGap::new_without_offset(3).as_u64_for_test(),
+            EpochWithGap::new_for_test(3).as_u64_for_test(),
         ))
         .unwrap();
 

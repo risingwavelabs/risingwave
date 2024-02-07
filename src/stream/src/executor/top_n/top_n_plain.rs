@@ -276,23 +276,23 @@ mod tests {
                 pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                        EpochWithGap::new_for_test(1).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                        EpochWithGap::new_for_test(2).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(3).as_u64_for_test(),
+                        EpochWithGap::new_for_test(3).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[2])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(4).as_u64_for_test(),
+                        EpochWithGap::new_for_test(4).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[3])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(5).as_u64_for_test(),
+                        EpochWithGap::new_for_test(5).as_u64_for_test(),
                     )),
                 ],
             ))
@@ -766,14 +766,14 @@ mod tests {
                 pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                        EpochWithGap::new_for_test(1).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
                     Message::Chunk(std::mem::take(&mut chunks[2])),
                     Message::Chunk(std::mem::take(&mut chunks[3])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                        EpochWithGap::new_for_test(2).as_u64_for_test(),
                     )),
                 ],
             ))
@@ -803,12 +803,12 @@ mod tests {
                 pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                        EpochWithGap::new_for_test(1).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                        EpochWithGap::new_for_test(2).as_u64_for_test(),
                     )),
                 ],
             ))
@@ -840,12 +840,12 @@ mod tests {
                 pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(3).as_u64_for_test(),
+                        EpochWithGap::new_for_test(3).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(4).as_u64_for_test(),
+                        EpochWithGap::new_for_test(4).as_u64_for_test(),
                     )),
                 ],
             ))
@@ -1128,14 +1128,14 @@ mod tests {
                 pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                        EpochWithGap::new_for_test(1).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
                     Message::Chunk(std::mem::take(&mut chunks[2])),
                     Message::Chunk(std::mem::take(&mut chunks[3])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                        EpochWithGap::new_for_test(2).as_u64_for_test(),
                     )),
                 ],
             ))
@@ -1273,12 +1273,12 @@ mod tests {
                 pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                        EpochWithGap::new_for_test(1).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                        EpochWithGap::new_for_test(2).as_u64_for_test(),
                     )),
                 ],
             ))
@@ -1306,12 +1306,12 @@ mod tests {
                 pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(3).as_u64_for_test(),
+                        EpochWithGap::new_for_test(3).as_u64_for_test(),
                     )),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
                     Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(4).as_u64_for_test(),
+                        EpochWithGap::new_for_test(4).as_u64_for_test(),
                     )),
                 ],
             ))

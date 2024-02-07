@@ -386,8 +386,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch =
-            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
+        let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
         table.init_epoch(epoch);
 
         {
@@ -487,8 +486,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch =
-            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
+        let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
         table.init_epoch(epoch);
 
         {
@@ -585,8 +583,7 @@ mod tests {
         )
         .await;
 
-        let mut epoch =
-            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
+        let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
         table_1.init_epoch(epoch);
         table_2.init_epoch(epoch);
 
@@ -708,8 +705,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch =
-            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
+        let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
         table.init_epoch(epoch);
 
         {
@@ -792,8 +788,7 @@ mod tests {
         )
         .await;
 
-        let mut epoch =
-            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
+        let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
         table.init_epoch(epoch);
 
         let order_columns = vec![
@@ -915,8 +910,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch =
-            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
+        let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
         table.init_epoch(epoch);
 
         {
@@ -1029,8 +1023,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch =
-            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
+        let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
         table.init_epoch(epoch);
 
         {
@@ -1115,8 +1108,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch =
-            EpochPair::new_test_epoch(EpochWithGap::new_without_offset(1).as_u64_for_test());
+        let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
         table.init_epoch(epoch);
         {
             let chunk = create_chunk(

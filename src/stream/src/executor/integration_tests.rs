@@ -196,7 +196,7 @@ async fn test_merger_sum_aggr() {
     );
     handles.push(tokio::spawn(actor.run()));
 
-    let mut epoch = EpochWithGap::new_without_offset(1);
+    let mut epoch = EpochWithGap::new_for_test(1);
     input
         .send(Message::Barrier(Barrier::new_test_barrier(
             epoch.as_u64_for_test(),

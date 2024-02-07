@@ -929,7 +929,7 @@ mod tests {
 
     #[test]
     fn test_encode_decode() {
-        let epoch = EpochWithGap::new_without_offset(1);
+        let epoch = EpochWithGap::new_for_test(1);
         let table_key = b"abc".to_vec();
         let key = FullKey::for_test(TableId::new(0), &table_key[..], 0);
         let buf = key.encode();
@@ -949,8 +949,8 @@ mod tests {
 
     #[test]
     fn test_key_cmp() {
-        let epoch = EpochWithGap::new_without_offset(1);
-        let epoch2 = EpochWithGap::new_without_offset(2);
+        let epoch = EpochWithGap::new_for_test(1);
+        let epoch2 = EpochWithGap::new_for_test(2);
         // 1 compared with 256 under little-endian encoding would return wrong result.
         let key1 = FullKey::for_test(TableId::new(0), b"0".to_vec(), epoch.as_u64_for_test());
         let key2 = FullKey::for_test(TableId::new(1), b"0".to_vec(), epoch.as_u64_for_test());

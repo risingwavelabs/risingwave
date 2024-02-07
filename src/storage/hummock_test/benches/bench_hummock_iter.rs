@@ -82,7 +82,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             .await
     });
 
-    let epoch = EpochWithGap::new_without_offset(100);
+    let epoch = EpochWithGap::new_for_test(100);
     runtime
         .block_on(hummock_storage.init_for_test(epoch.as_u64_for_test()))
         .unwrap();

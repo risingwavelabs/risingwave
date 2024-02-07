@@ -364,7 +364,7 @@ mod tests {
         );
 
         // The first barrier
-        tx.push_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test(), false);
+        tx.push_barrier(EpochWithGap::new_for_test(1).as_u64_for_test(), false);
         let msg = dml_executor.next().await.unwrap().unwrap();
         assert!(matches!(msg, Message::Barrier(_)));
 
@@ -388,7 +388,7 @@ mod tests {
         tokio::spawn(async move {
             write_handle.end().await.unwrap();
             // a barrier to trigger batch group flush
-            tx.push_barrier(EpochWithGap::new_without_offset(2).as_u64_for_test(), false);
+            tx.push_barrier(EpochWithGap::new_for_test(2).as_u64_for_test(), false);
         });
 
         // Consume the 1st message from upstream executor

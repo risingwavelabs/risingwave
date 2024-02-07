@@ -102,24 +102,24 @@ mod tests {
 
         barrier_tx
             .send(Barrier::new_test_barrier(
-                EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                EpochWithGap::new_for_test(1).as_u64_for_test(),
             ))
             .unwrap();
         barrier_tx
             .send(Barrier::new_test_barrier(
-                EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                EpochWithGap::new_for_test(2).as_u64_for_test(),
             ))
             .unwrap();
 
         let barrier_1 = stream.next_unwrap_ready_barrier().unwrap();
         assert_eq!(
             barrier_1.epoch.curr,
-            EpochWithGap::new_without_offset(1).as_u64_for_test()
+            EpochWithGap::new_for_test(1).as_u64_for_test()
         );
         let barrier_2 = stream.next_unwrap_ready_barrier().unwrap();
         assert_eq!(
             barrier_2.epoch.curr,
-            EpochWithGap::new_without_offset(2).as_u64_for_test()
+            EpochWithGap::new_for_test(2).as_u64_for_test()
         );
 
         stream.next_unwrap_pending();

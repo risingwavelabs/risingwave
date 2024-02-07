@@ -29,7 +29,7 @@ mod key_cmp;
 use std::cmp::Ordering;
 
 pub use key_cmp::*;
-use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
+use risingwave_common::util::epoch::{EPOCH_INC_MIN_STEP_FOR_TEST, EPOCH_SPILL_TIME_MASK};
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
@@ -330,17 +330,21 @@ impl EpochWithGap {
 impl EpochWithGap {
     const EPOCH_PHYSICAL_SHIFT_BITS: u8 = 16;
 
-    pub fn new_without_offset(epoch: u64) -> Self {
-        EpochWithGap::new(epoch * (1 << 16), 0)
+    // The function `new_for_test` returns an `EpochWithGap` that is only used in unit testing.
+    // It has an offset of 0, and the u64 value stored in `EpochWithGap` will shift the passed random epoch by 16 bits,
+    // ensuring that the lower 16 bits are set to 0.
+    pub fn new_for_test(epoch: u64) -> Self {
+        const EPOCH_PHYSICAL_SHIFT_BITS: u8 = 16;
+        EpochWithGap::new(epoch << EPOCH_PHYSICAL_SHIFT_BITS, 0)
     }
 
     pub fn inc(&mut self) {
-        self.0 += 1 << Self::EPOCH_PHYSICAL_SHIFT_BITS;
+        self.0 += EPOCH_INC_MIN_STEP_FOR_TEST;
     }
 
     pub fn sub(&mut self) {
-        if self.0 > (1 << Self::EPOCH_PHYSICAL_SHIFT_BITS) {
-            self.0 -= 1 << Self::EPOCH_PHYSICAL_SHIFT_BITS;
+        if self.0 >= EPOCH_INC_MIN_STEP_FOR_TEST {
+            self.0 -= EPOCH_INC_MIN_STEP_FOR_TEST;
         }
     }
 
@@ -350,10 +354,10 @@ impl EpochWithGap {
     }
 
     pub fn next_epoch(&self) -> EpochWithGap {
-        EpochWithGap::new(self.0 + (1 << Self::EPOCH_PHYSICAL_SHIFT_BITS), 0)
+        EpochWithGap::new(self.0 + EPOCH_INC_MIN_STEP_FOR_TEST, 0)
     }
 
     pub fn prev_epoch(&self) -> EpochWithGap {
-        EpochWithGap::new(self.0 - (1 << Self::EPOCH_PHYSICAL_SHIFT_BITS), 0)
+        EpochWithGap::new(self.0 - EPOCH_INC_MIN_STEP_FOR_TEST, 0)
     }
 }

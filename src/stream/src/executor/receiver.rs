@@ -339,7 +339,7 @@ mod tests {
             }
         };
 
-        let b1 = Barrier::new_test_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test())
+        let b1 = Barrier::new_test_barrier(EpochWithGap::new_for_test(1).as_u64_for_test())
             .with_mutation(Mutation::Update(UpdateMutation {
                 dispatchers: Default::default(),
                 merges: merge_updates,

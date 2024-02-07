@@ -796,7 +796,7 @@ mod tests {
         let data_chunk = builder.consume_all().unwrap();
         let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
 
-        let mut epoch = EpochWithGap::new_without_offset(233);
+        let mut epoch = EpochWithGap::new_for_test(233);
 
         let mut serialized_keys = vec![];
         let mut seq_id = 1;

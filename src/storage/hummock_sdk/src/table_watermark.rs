@@ -618,7 +618,7 @@ mod tests {
 
     #[test]
     fn test_apply_new_table_watermark() {
-        let epoch1 = EpochWithGap::new_without_offset(1);
+        let epoch1 = EpochWithGap::new_for_test(1);
         let direction = WatermarkDirection::Ascending;
         let watermark1 = Bytes::from("watermark1");
         let watermark2 = Bytes::from("watermark2");
@@ -686,7 +686,7 @@ mod tests {
 
     #[test]
     fn test_clear_stale_epoch_watmermark() {
-        let epoch1 = EpochWithGap::new_without_offset(1);
+        let epoch1 = EpochWithGap::new_for_test(1);
         let direction = WatermarkDirection::Ascending;
         let watermark1 = Bytes::from("watermark1");
         let watermark2 = Bytes::from("watermark2");

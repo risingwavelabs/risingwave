@@ -840,7 +840,7 @@ mod tests {
         FullKey::for_test(
             TableId::new(table_id),
             table_key,
-            EpochWithGap::new_without_offset(epoch).as_u64_for_test(),
+            EpochWithGap::new_for_test(epoch).as_u64_for_test(),
         )
     }
 

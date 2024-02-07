@@ -264,7 +264,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let val1 = Bytes::from(b"1"[..].repeat(1 << 10)); // 1024 Byte value
 
     local
-        .init_for_test(EpochWithGap::new_without_offset(100).as_u64_for_test())
+        .init_for_test(EpochWithGap::new_for_test(100).as_u64_for_test())
         .await
         .unwrap();
     let mut start_key = b"aaa".to_vec();
@@ -301,13 +301,13 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .unwrap();
     local.flush(Vec::new()).await.unwrap();
     local.seal_current_epoch(
-        EpochWithGap::new_without_offset(101).as_u64_for_test(),
+        EpochWithGap::new_for_test(101).as_u64_for_test(),
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
     );
     flush_and_commit(
         &hummock_meta_client,
         &storage,
-        EpochWithGap::new_without_offset(100).as_u64_for_test(),
+        EpochWithGap::new_for_test(100).as_u64_for_test(),
     )
     .await;
     compact_once(
@@ -340,13 +340,13 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .await
         .unwrap();
     local.seal_current_epoch(
-        EpochWithGap::new_without_offset(102).as_u64_for_test(),
+        EpochWithGap::new_for_test(102).as_u64_for_test(),
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
     );
     flush_and_commit(
         &hummock_meta_client,
         &storage,
-        EpochWithGap::new_without_offset(101).as_u64_for_test(),
+        EpochWithGap::new_for_test(101).as_u64_for_test(),
     )
     .await;
     compact_once(
@@ -379,13 +379,13 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .await
         .unwrap();
     local.seal_current_epoch(
-        EpochWithGap::new_without_offset(103).as_u64_for_test(),
+        EpochWithGap::new_for_test(103).as_u64_for_test(),
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
     );
     flush_and_commit(
         &hummock_meta_client,
         &storage,
-        EpochWithGap::new_without_offset(102).as_u64_for_test(),
+        EpochWithGap::new_for_test(102).as_u64_for_test(),
     )
     .await;
     // move this two file to the same level.
@@ -419,7 +419,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     flush_and_commit(
         &hummock_meta_client,
         &storage,
-        EpochWithGap::new_without_offset(103).as_u64_for_test(),
+        EpochWithGap::new_for_test(103).as_u64_for_test(),
     )
     .await;
     // move this two file to the same level.
@@ -457,7 +457,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let get_result = storage
         .get(
             gen_key_from_bytes(VirtualNode::ZERO, b"hhh"),
-            EpochWithGap::new_without_offset(120).as_u64_for_test(),
+            EpochWithGap::new_for_test(120).as_u64_for_test(),
             read_options.clone(),
         )
         .await
@@ -466,7 +466,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let get_result = storage
         .get(
             gen_key_from_bytes(VirtualNode::ZERO, b"ggg"),
-            EpochWithGap::new_without_offset(120).as_u64_for_test(),
+            EpochWithGap::new_for_test(120).as_u64_for_test(),
             read_options.clone(),
         )
         .await
@@ -475,7 +475,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let get_result = storage
         .get(
             gen_key_from_bytes(VirtualNode::ZERO, b"aaa"),
-            EpochWithGap::new_without_offset(120).as_u64_for_test(),
+            EpochWithGap::new_for_test(120).as_u64_for_test(),
             read_options.clone(),
         )
         .await
@@ -484,7 +484,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let get_result = storage
         .get(
             gen_key_from_bytes(VirtualNode::ZERO, b"aab"),
-            EpochWithGap::new_without_offset(120).as_u64_for_test(),
+            EpochWithGap::new_for_test(120).as_u64_for_test(),
             read_options.clone(),
         )
         .await
@@ -501,7 +501,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let get_result = storage
         .get(
             gen_key_from_bytes(VirtualNode::ZERO, b"kkk"),
-            EpochWithGap::new_without_offset(120).as_u64_for_test(),
+            EpochWithGap::new_for_test(120).as_u64_for_test(),
             read_options.clone(),
         )
         .await

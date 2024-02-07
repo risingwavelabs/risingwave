@@ -833,8 +833,7 @@ mod tests {
             read_options.clone(),
         )];
 
-        let min_epoch =
-            EpochWithGap::new_without_offset((TEST_KEYS_COUNT / 5) as u64).as_u64_for_test();
+        let min_epoch = EpochWithGap::new_for_test((TEST_KEYS_COUNT / 5) as u64).as_u64_for_test();
         let mi = UnorderedMergeIteratorInner::new(iters);
         let mut ui =
             UserIterator::for_test_with_epoch(mi, (Unbounded, Unbounded), u64::MAX, min_epoch);
@@ -876,7 +875,7 @@ mod tests {
         let mut ui: UserIterator<_> = UserIterator::new(
             mi,
             (Unbounded, Unbounded),
-            EpochWithGap::new_without_offset(150).as_u64_for_test(),
+            EpochWithGap::new_for_test(150).as_u64_for_test(),
             0,
             None,
             del_iter,
@@ -911,7 +910,7 @@ mod tests {
         let mut ui: UserIterator<_> = UserIterator::new(
             mi,
             (Unbounded, Unbounded),
-            EpochWithGap::new_without_offset(300).as_u64_for_test(),
+            EpochWithGap::new_for_test(300).as_u64_for_test(),
             0,
             None,
             del_iter,

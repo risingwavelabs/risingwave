@@ -938,13 +938,13 @@ mod tests {
                 TableId::new(1),
                 b"abc".to_vec(),
                 b"cde".to_vec(),
-                EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                EpochWithGap::new_for_test(1).as_u64_for_test(),
             ),
             DeleteRangeTombstone::new_for_test(
                 TableId::new(2),
                 b"abc".to_vec(),
                 b"def".to_vec(),
-                EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                EpochWithGap::new_for_test(1).as_u64_for_test(),
             ),
         ];
         let mut sstable_info_1 = gen_test_sstable_impl::<Bytes, Xor16FilterBuilder>(

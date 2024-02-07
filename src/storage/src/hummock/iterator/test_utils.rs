@@ -93,7 +93,7 @@ pub fn iterator_test_key_of(idx: usize) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: iterator_test_user_key_of(idx),
         epoch_with_gap: EpochWithGap::new_from_epoch(
-            EpochWithGap::new_without_offset(233).as_u64_for_test(),
+            EpochWithGap::new_for_test(233).as_u64_for_test(),
         ),
     }
 }
@@ -113,11 +113,8 @@ pub fn iterator_test_key_of_epoch(idx: usize, epoch: HummockEpoch) -> FullKey<Ve
 
 /// Generates keys like `{table_id=0}key_test_00002` with epoch `epoch` .
 pub fn iterator_test_bytes_key_of_epoch(idx: usize, epoch: HummockEpoch) -> FullKey<Bytes> {
-    iterator_test_key_of_epoch(
-        idx,
-        EpochWithGap::new_without_offset(epoch).as_u64_for_test(),
-    )
-    .into_bytes()
+    iterator_test_key_of_epoch(idx, EpochWithGap::new_for_test(epoch).as_u64_for_test())
+        .into_bytes()
 }
 
 /// The value of an index, like `value_test_00002` without value meta
@@ -195,7 +192,7 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
             (
                 iterator_test_key_of_epoch(
                     kv.0,
-                    EpochWithGap::new_without_offset(kv.1).as_u64_for_test(),
+                    EpochWithGap::new_for_test(kv.1).as_u64_for_test(),
                 ),
                 kv.2,
             )
@@ -221,7 +218,7 @@ pub async fn gen_iterator_test_sstable_with_range_tombstones_for_test(
                 false,
                 iterator_test_table_key_of(end),
                 false,
-                EpochWithGap::new_without_offset(epoch).as_u64_for_test(),
+                EpochWithGap::new_for_test(epoch).as_u64_for_test(),
             )
         })
         .collect_vec();
@@ -232,7 +229,7 @@ pub async fn gen_iterator_test_sstable_with_range_tombstones_for_test(
             (
                 iterator_test_key_of_epoch(
                     kv.0,
-                    EpochWithGap::new_without_offset(kv.1).as_u64_for_test(),
+                    EpochWithGap::new_for_test(kv.1).as_u64_for_test(),
                 ),
                 kv.2,
             )
@@ -282,7 +279,7 @@ pub async fn gen_iterator_test_sstable_with_incr_epoch(
             (
                 iterator_test_key_of_epoch(
                     idx_mapping(i),
-                    EpochWithGap::new_without_offset(epoch_base + i as u64).as_u64_for_test(),
+                    EpochWithGap::new_for_test(epoch_base + i as u64).as_u64_for_test(),
                 ),
                 HummockValue::put(iterator_test_value_of(idx_mapping(i))),
             )

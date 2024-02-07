@@ -179,22 +179,22 @@ mod tests {
         let streams = vec![
             try_stream! {
                 yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
-                yield Message::Barrier(Barrier::new_test_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test()));
+                yield Message::Barrier(Barrier::new_test_barrier(EpochWithGap::new_for_test(1).as_u64_for_test()));
                 yield Message::Chunk(StreamChunk::from_pretty("I\n + 2"));
-                yield Message::Barrier(Barrier::new_test_barrier(EpochWithGap::new_without_offset(2).as_u64_for_test()));
-                yield Message::Barrier(Barrier::new_test_barrier(EpochWithGap::new_without_offset(3).as_u64_for_test()));
+                yield Message::Barrier(Barrier::new_test_barrier(EpochWithGap::new_for_test(2).as_u64_for_test()));
+                yield Message::Barrier(Barrier::new_test_barrier(EpochWithGap::new_for_test(3).as_u64_for_test()));
                 yield Message::Watermark(Watermark::new(0, DataType::Int64, ScalarImpl::Int64(4)));
-                yield Message::Barrier(Barrier::new_test_barrier(EpochWithGap::new_without_offset(4).as_u64_for_test()));
+                yield Message::Barrier(Barrier::new_test_barrier(EpochWithGap::new_for_test(4).as_u64_for_test()));
             }
             .boxed(),
             try_stream! {
                 yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
-                yield Message::Barrier(Barrier::new_test_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test()));
-                yield Message::Barrier(Barrier::new_test_barrier(EpochWithGap::new_without_offset(2).as_u64_for_test()));
+                yield Message::Barrier(Barrier::new_test_barrier(EpochWithGap::new_for_test(1).as_u64_for_test()));
+                yield Message::Barrier(Barrier::new_test_barrier(EpochWithGap::new_for_test(2).as_u64_for_test()));
                 yield Message::Chunk(StreamChunk::from_pretty("I\n + 3"));
-                yield Message::Barrier(Barrier::new_test_barrier(EpochWithGap::new_without_offset(3).as_u64_for_test()));
+                yield Message::Barrier(Barrier::new_test_barrier(EpochWithGap::new_for_test(3).as_u64_for_test()));
                 yield Message::Watermark(Watermark::new(0, DataType::Int64, ScalarImpl::Int64(5)));
-                yield Message::Barrier(Barrier::new_test_barrier(EpochWithGap::new_without_offset(4).as_u64_for_test()));
+                yield Message::Barrier(Barrier::new_test_barrier(EpochWithGap::new_for_test(4).as_u64_for_test()));
             }
             .boxed(),
         ];
@@ -205,19 +205,19 @@ mod tests {
             Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
             Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
             Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                EpochWithGap::new_for_test(1).as_u64_for_test(),
             )),
             Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
             Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                EpochWithGap::new_for_test(2).as_u64_for_test(),
             )),
             Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
             Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_without_offset(3).as_u64_for_test(),
+                EpochWithGap::new_for_test(3).as_u64_for_test(),
             )),
             Message::Watermark(Watermark::new(0, DataType::Int64, ScalarImpl::Int64(4))),
             Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_without_offset(4).as_u64_for_test(),
+                EpochWithGap::new_for_test(4).as_u64_for_test(),
             )),
         ];
         for _ in 0..result.len() {

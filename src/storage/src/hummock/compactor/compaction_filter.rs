@@ -138,7 +138,7 @@ mod tests {
             FullKey::new(
                 TableId::new(1),
                 TableKey(vec![]),
-                EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                EpochWithGap::new_for_test(1).as_u64_for_test(),
             )
             .to_ref(),
         );

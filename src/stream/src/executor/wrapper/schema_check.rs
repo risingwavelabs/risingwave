@@ -81,7 +81,7 @@ mod tests {
             +  10  14.0
             +   4 300.0",
         ));
-        tx.push_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test(), false);
+        tx.push_barrier(EpochWithGap::new_for_test(1).as_u64_for_test(), false);
 
         let checked = schema_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
@@ -107,7 +107,7 @@ mod tests {
             +  10  14
             +   4 300",
         ));
-        tx.push_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test(), false);
+        tx.push_barrier(EpochWithGap::new_for_test(1).as_u64_for_test(), false);
 
         let checked = schema_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);

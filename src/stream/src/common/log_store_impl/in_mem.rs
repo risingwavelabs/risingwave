@@ -134,10 +134,10 @@ impl LogReader for BoundedInMemLogStoreReader {
         assert_eq!(self.epoch_progress, UNINITIALIZED);
         self.epoch_progress = LogReaderEpochProgress::Consuming(epoch);
         self.latest_offset = TruncateOffset::Barrier {
-            epoch: epoch - EpochWithGap::new_without_offset(1).as_u64_for_test(),
+            epoch: epoch - EpochWithGap::new_for_test(1).as_u64_for_test(),
         };
         self.truncate_offset = TruncateOffset::Barrier {
-            epoch: epoch - EpochWithGap::new_without_offset(1).as_u64_for_test(),
+            epoch: epoch - EpochWithGap::new_for_test(1).as_u64_for_test(),
         };
         Ok(())
     }
@@ -336,9 +336,9 @@ mod tests {
         let factory = BoundedInMemLogStoreFactory::new(4);
         let (mut reader, mut writer) = factory.build().await;
 
-        let init_epoch = EpochWithGap::new_without_offset(1).as_u64_for_test();
-        let epoch1 = EpochWithGap::new_without_offset(2).as_u64_for_test();
-        let epoch2 = EpochWithGap::new_without_offset(3).as_u64_for_test();
+        let init_epoch = EpochWithGap::new_for_test(1).as_u64_for_test();
+        let epoch1 = EpochWithGap::new_for_test(2).as_u64_for_test();
+        let epoch2 = EpochWithGap::new_for_test(3).as_u64_for_test();
 
         let ops = vec![Op::Insert, Op::Delete, Op::UpdateInsert, Op::UpdateDelete];
         let mut builder = StreamChunkBuilder::new(10000, vec![DataType::Int64, DataType::Varchar]);

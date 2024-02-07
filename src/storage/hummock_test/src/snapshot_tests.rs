@@ -110,7 +110,7 @@ async fn test_snapshot_inner(
         .new_local(NewLocalOptions::for_test(Default::default()))
         .await;
 
-    let epoch1 = EpochWithGap::new_without_offset(1);
+    let epoch1 = EpochWithGap::new_for_test(1);
     local.init_for_test(epoch1.as_u64_for_test()).await.unwrap();
     local
         .ingest_batch(
@@ -258,7 +258,7 @@ async fn test_snapshot_range_scan_inner(
     enable_sync: bool,
     enable_commit: bool,
 ) {
-    let epoch = EpochWithGap::new_without_offset(1);
+    let epoch = EpochWithGap::new_for_test(1);
     let mut local = hummock_storage
         .new_local(NewLocalOptions::for_test(Default::default()))
         .await;

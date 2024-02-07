@@ -122,6 +122,11 @@ pub const EPOCH_SPILL_TIME_MASK: u64 = (1 << EPOCH_AVAILABLE_BITS) - 1;
 const EPOCH_MASK: u64 = !EPOCH_SPILL_TIME_MASK;
 pub const MAX_EPOCH: u64 = u64::MAX & EPOCH_MASK;
 
+// EPOCH_INC_MIN_STEP_FOR_TEST is the minimum increment step for epoch in unit tests.
+// We need to keep the lower 16 bits of the epoch unchanged during each increment,
+// and only increase the upper 48 bits.
+pub const EPOCH_INC_MIN_STEP_FOR_TEST: u64 = 1 << EPOCH_PHYSICAL_SHIFT_BITS;
+
 pub fn is_max_epoch(epoch: u64) -> bool {
     // Since we have write `MAX_EPOCH` as max epoch to sstable in some previous version,
     // it means that there may be two value in our system which represent infinite. We must check
@@ -152,7 +157,7 @@ impl EpochPair {
 
     pub fn inc(&mut self) {
         self.prev = self.curr;
-        self.curr += 1 << 16;
+        self.curr += EPOCH_INC_MIN_STEP_FOR_TEST;
     }
 
     pub fn inc_for_test(&mut self, inc_by: u64) {
@@ -162,8 +167,8 @@ impl EpochPair {
     }
 
     pub fn new_test_epoch(curr: u64) -> Self {
-        assert!(curr > 65535);
-        Self::new(curr, curr - 65536)
+        assert!(curr >= EPOCH_INC_MIN_STEP_FOR_TEST);
+        Self::new(curr, curr - EPOCH_INC_MIN_STEP_FOR_TEST)
     }
 }
 

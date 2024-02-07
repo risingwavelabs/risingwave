@@ -305,7 +305,7 @@ async fn run_compare_result(
     test_delete_ratio: u32,
 ) -> Result<(), String> {
     let init_epoch =
-        EpochWithGap::new_without_offset(hummock.get_pinned_version().max_committed_epoch() + 1)
+        EpochWithGap::new_for_test(hummock.get_pinned_version().max_committed_epoch() + 1)
             .as_u64_for_test();
 
     let mut normal = NormalState::new(hummock, 1, init_epoch).await;
@@ -321,7 +321,7 @@ async fn run_compare_result(
     let mut rng = StdRng::seed_from_u64(seed);
     let mut overlap_ranges = vec![];
     for epoch_idx in 0..test_count {
-        let epoch = EpochWithGap::new_without_offset(init_epoch / 65536 + epoch_idx);
+        let epoch = EpochWithGap::new_for_test(init_epoch / 65536 + epoch_idx);
         for idx in 0..1000 {
             let op = rng.next_u32() % 50;
             let key_number = rng.next_u64() % test_range;

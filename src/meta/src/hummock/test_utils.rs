@@ -56,7 +56,7 @@ pub async fn add_test_tables(
 ) -> Vec<Vec<SstableInfo>> {
     // Increase version by 2.
 
-    let mut epoch = EpochWithGap::new_without_offset(1);
+    let mut epoch = EpochWithGap::new_for_test(1);
     let sstable_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables = generate_test_sstables_with_table_id(epoch, 1, sstable_ids);
     register_sstable_infos_to_compaction_group(
@@ -403,7 +403,7 @@ pub async fn add_ssts(
 ) -> Vec<SstableInfo> {
     let table_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables =
-        generate_test_sstables_with_table_id(EpochWithGap::new_without_offset(epoch), 1, table_ids);
+        generate_test_sstables_with_table_id(EpochWithGap::new_for_test(epoch), 1, table_ids);
     let ssts = to_local_sstable_info(&test_tables);
     let sst_to_worker = ssts
         .iter()

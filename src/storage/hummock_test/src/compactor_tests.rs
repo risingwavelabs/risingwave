@@ -282,7 +282,7 @@ pub(crate) mod tests {
             &key,
             10,
             (1..SST_COUNT + 1)
-                .map(|v| EpochWithGap::new_without_offset(v * 1000))
+                .map(|v| EpochWithGap::new_for_test(v * 1000))
                 .collect_vec(),
         )
         .await;
@@ -447,7 +447,7 @@ pub(crate) mod tests {
             &key,
             1 << 20,
             (1..SST_COUNT + 1)
-                .map(EpochWithGap::new_without_offset)
+                .map(EpochWithGap::new_for_test)
                 .collect_vec(),
         )
         .await;
@@ -509,7 +509,7 @@ pub(crate) mod tests {
         }
         // 5. storage get back the correct kv after compaction
         storage.wait_version(version).await;
-        let get_epoch = EpochWithGap::new_without_offset(SST_COUNT + 1);
+        let get_epoch = EpochWithGap::new_for_test(SST_COUNT + 1);
         let get_val = storage
             .get(
                 TableKey(key.clone()),
@@ -546,7 +546,7 @@ pub(crate) mod tests {
         keys_per_epoch: usize,
     ) {
         let kv_count: u16 = 128;
-        let mut epoch = EpochWithGap::new_without_offset(1);
+        let mut epoch = EpochWithGap::new_for_test(1);
         let mut local = storage
             .new_local(NewLocalOptions::for_test(existing_table_id.into()))
             .await;
@@ -728,7 +728,7 @@ pub(crate) mod tests {
         let drop_table_id = 1;
         let existing_table_ids = 2;
         let kv_count: usize = 128;
-        let mut epoch: EpochWithGap = EpochWithGap::new_without_offset(1);
+        let mut epoch: EpochWithGap = EpochWithGap::new_for_test(1);
         register_table_ids_to_compaction_group(
             &hummock_manager_ref,
             &[drop_table_id, existing_table_ids],
@@ -1321,7 +1321,7 @@ pub(crate) mod tests {
         let mut local = storage
             .new_local(NewLocalOptions::for_test(existing_table_id.into()))
             .await;
-        let epoch = EpochWithGap::new_without_offset(130);
+        let epoch = EpochWithGap::new_for_test(130);
         local.init_for_test(epoch.as_u64_for_test()).await.unwrap();
         let prefix_key_range = |k: u16| {
             let key = k.to_be_bytes();
@@ -1587,23 +1587,23 @@ pub(crate) mod tests {
         );
         let mut data1 = Vec::with_capacity(KEY_COUNT / 2);
         let mut data = Vec::with_capacity(KEY_COUNT);
-        let mut last_epoch = EpochWithGap::new_without_offset(400).as_u64_for_test();
+        let mut last_epoch = EpochWithGap::new_for_test(400).as_u64_for_test();
         for _ in 0..KEY_COUNT {
             let rand_v = rng.next_u32() % 100;
             let (k, epoch) = if rand_v == 0 {
                 (
                     last_k + 2000,
-                    EpochWithGap::new_without_offset(400).as_u64_for_test(),
+                    EpochWithGap::new_for_test(400).as_u64_for_test(),
                 )
             } else if rand_v < 5 {
                 (
                     last_k,
-                    last_epoch - EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                    last_epoch - EpochWithGap::new_for_test(1).as_u64_for_test(),
                 )
             } else {
                 (
                     last_k + 1,
-                    EpochWithGap::new_without_offset(400).as_u64_for_test(),
+                    EpochWithGap::new_for_test(400).as_u64_for_test(),
                 )
             };
             let key = k.to_be_bytes().to_vec();
@@ -1626,8 +1626,8 @@ pub(crate) mod tests {
         let mut data = Vec::with_capacity(KEY_COUNT);
         let mut last_k: u64 = 0;
         let max_epoch = std::cmp::min(
-            EpochWithGap::new_without_offset(300).as_u64_for_test(),
-            last_epoch - EpochWithGap::new_without_offset(1).as_u64_for_test(),
+            EpochWithGap::new_for_test(300).as_u64_for_test(),
+            last_epoch - EpochWithGap::new_for_test(1).as_u64_for_test(),
         );
         last_epoch = max_epoch;
 
@@ -1638,7 +1638,7 @@ pub(crate) mod tests {
             } else if rand_v < 5 {
                 (
                     last_k,
-                    last_epoch - EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                    last_epoch - EpochWithGap::new_for_test(1).as_u64_for_test(),
                 )
             } else {
                 (last_k + 1, max_epoch)
@@ -1667,7 +1667,7 @@ pub(crate) mod tests {
                 .as_secs(),
         );
         let mut data1 = Vec::with_capacity(KEY_COUNT / 2);
-        let epoch1 = EpochWithGap::new_without_offset(400);
+        let epoch1 = EpochWithGap::new_for_test(400);
         for start_idx in 0..3 {
             let base = start_idx * KEY_COUNT;
             for k in 0..KEY_COUNT / 3 {
@@ -1684,7 +1684,7 @@ pub(crate) mod tests {
         }
 
         let mut data2 = Vec::with_capacity(KEY_COUNT);
-        let epoch2 = EpochWithGap::new_without_offset(300);
+        let epoch2 = EpochWithGap::new_for_test(300);
         for k in 0..KEY_COUNT * 4 {
             let key = k.to_be_bytes().to_vec();
             let key = FullKey::new(TableId::new(1), TableKey(key), epoch2.as_u64_for_test());
@@ -1746,7 +1746,7 @@ pub(crate) mod tests {
                 None,
             );
             let mut last_k: u64 = 1;
-            let init_epoch = EpochWithGap::new_without_offset(100 * object_id).as_u64_for_test();
+            let init_epoch = EpochWithGap::new_for_test(100 * object_id).as_u64_for_test();
             let mut last_epoch = init_epoch;
 
             for idx in 0..KEY_COUNT {

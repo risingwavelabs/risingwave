@@ -765,7 +765,7 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let init_barrier =
-            Barrier::new_test_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test())
+            Barrier::new_test_barrier(EpochWithGap::new_for_test(1).as_u64_for_test())
                 .with_mutation(Mutation::Add(AddMutation {
                     adds: HashMap::new(),
                     added_actors: HashSet::new(),
@@ -861,7 +861,7 @@ mod tests {
         let mut handler = Box::new(executor).execute();
 
         let init_barrier =
-            Barrier::new_test_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test())
+            Barrier::new_test_barrier(EpochWithGap::new_for_test(1).as_u64_for_test())
                 .with_mutation(Mutation::Add(AddMutation {
                     adds: HashMap::new(),
                     added_actors: HashSet::new(),
@@ -910,7 +910,7 @@ mod tests {
         ];
 
         let change_split_mutation =
-            Barrier::new_test_barrier(EpochWithGap::new_without_offset(2).as_u64_for_test())
+            Barrier::new_test_barrier(EpochWithGap::new_for_test(2).as_u64_for_test())
                 .with_mutation(Mutation::SourceChangeSplit(hashmap! {
                     ActorId::default() => new_assignment.clone()
                 }));
@@ -926,7 +926,7 @@ mod tests {
         .await;
         // there must exist state for new add partition
         source_state_handler.init_epoch(EpochPair::new_test_epoch(
-            EpochWithGap::new_without_offset(2).as_u64_for_test(),
+            EpochWithGap::new_for_test(2).as_u64_for_test(),
         ));
         source_state_handler
             .get(new_assignment[1].id())
@@ -938,14 +938,12 @@ mod tests {
 
         let _ = ready_chunks.next().await.unwrap();
 
-        let barrier =
-            Barrier::new_test_barrier(EpochWithGap::new_without_offset(3).as_u64_for_test())
-                .with_mutation(Mutation::Pause);
+        let barrier = Barrier::new_test_barrier(EpochWithGap::new_for_test(3).as_u64_for_test())
+            .with_mutation(Mutation::Pause);
         barrier_tx.send(barrier).unwrap();
 
-        let barrier =
-            Barrier::new_test_barrier(EpochWithGap::new_without_offset(4).as_u64_for_test())
-                .with_mutation(Mutation::Resume);
+        let barrier = Barrier::new_test_barrier(EpochWithGap::new_for_test(4).as_u64_for_test())
+            .with_mutation(Mutation::Resume);
         barrier_tx.send(barrier).unwrap();
 
         // receive all
@@ -955,7 +953,7 @@ mod tests {
         let new_assignment = vec![prev_assignment[2].clone()];
 
         let drop_split_mutation =
-            Barrier::new_test_barrier(EpochWithGap::new_without_offset(5).as_u64_for_test())
+            Barrier::new_test_barrier(EpochWithGap::new_for_test(5).as_u64_for_test())
                 .with_mutation(Mutation::SourceChangeSplit(hashmap! {
                     ActorId::default() => new_assignment.clone()
                 }));
@@ -971,7 +969,7 @@ mod tests {
         .await;
 
         source_state_handler.init_epoch(EpochPair::new_test_epoch(
-            5 * EpochWithGap::new_without_offset(1).as_u64_for_test(),
+            5 * EpochWithGap::new_for_test(1).as_u64_for_test(),
         ));
 
         assert!(source_state_handler

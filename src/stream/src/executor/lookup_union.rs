@@ -161,15 +161,15 @@ mod tests {
             vec![
                 Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                    EpochWithGap::new_for_test(1).as_u64_for_test(),
                 )),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                    EpochWithGap::new_for_test(2).as_u64_for_test(),
                 )),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(3).as_u64_for_test(),
+                    EpochWithGap::new_for_test(3).as_u64_for_test(),
                 )),
             ],
         )
@@ -180,11 +180,11 @@ mod tests {
             vec![
                 Message::Chunk(StreamChunk::from_pretty("I\n + 11")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                    EpochWithGap::new_for_test(1).as_u64_for_test(),
                 )),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 12")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                    EpochWithGap::new_for_test(2).as_u64_for_test(),
                 )),
             ],
         )
@@ -195,11 +195,11 @@ mod tests {
             vec![
                 Message::Chunk(StreamChunk::from_pretty("I\n + 21")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                    EpochWithGap::new_for_test(1).as_u64_for_test(),
                 )),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 22")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                    EpochWithGap::new_for_test(2).as_u64_for_test(),
                 )),
             ],
         )
@@ -224,17 +224,17 @@ mod tests {
                 Message::Chunk(StreamChunk::from_pretty("I\n + 11")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(1).as_u64_for_test()
+                    EpochWithGap::new_for_test(1).as_u64_for_test()
                 )),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 22")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 12")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(2).as_u64_for_test()
+                    EpochWithGap::new_for_test(2).as_u64_for_test()
                 )),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
                 Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_without_offset(3).as_u64_for_test()
+                    EpochWithGap::new_for_test(3).as_u64_for_test()
                 )),
             ]
         );

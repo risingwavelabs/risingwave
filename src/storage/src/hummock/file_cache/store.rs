@@ -701,7 +701,7 @@ mod tests {
             construct_full_key_struct_for_test(
                 0,
                 b"k1",
-                EpochWithGap::new_without_offset(1).as_u64_for_test(),
+                EpochWithGap::new_for_test(1).as_u64_for_test(),
             ),
             b"v01",
         );
@@ -709,7 +709,7 @@ mod tests {
             construct_full_key_struct_for_test(
                 0,
                 b"k2",
-                EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                EpochWithGap::new_for_test(2).as_u64_for_test(),
             ),
             b"v02",
         );
@@ -717,7 +717,7 @@ mod tests {
             construct_full_key_struct_for_test(
                 0,
                 b"k3",
-                EpochWithGap::new_without_offset(3).as_u64_for_test(),
+                EpochWithGap::new_for_test(3).as_u64_for_test(),
             ),
             b"v03",
         );
@@ -725,7 +725,7 @@ mod tests {
             construct_full_key_struct_for_test(
                 0,
                 b"k4",
-                EpochWithGap::new_without_offset(4).as_u64_for_test(),
+                EpochWithGap::new_for_test(4).as_u64_for_test(),
             ),
             b"v04",
         );

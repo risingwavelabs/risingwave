@@ -128,7 +128,7 @@ async fn test_basic_inner(
     let mut local = hummock_storage.new_local(Default::default()).await;
 
     // epoch 0 is reserved by storage service
-    let epoch1 = EpochWithGap::new_without_offset(1);
+    let epoch1 = EpochWithGap::new_for_test(1);
     local.init_for_test(epoch1.as_u64_for_test()).await.unwrap();
 
     // try to write an empty batch, and hummock should write nothing
@@ -419,9 +419,8 @@ async fn test_state_store_sync_inner(
     hummock_storage: impl HummockStateStoreTestTrait,
     _meta_client: Arc<MockHummockMetaClient>,
 ) {
-    let mut epoch = EpochWithGap::new_without_offset(
-        hummock_storage.get_pinned_version().max_committed_epoch() + 1,
-    );
+    let mut epoch =
+        EpochWithGap::new_for_test(hummock_storage.get_pinned_version().max_committed_epoch() + 1);
 
     // ingest 16B batch
     let mut batch1 = vec![
@@ -573,7 +572,7 @@ async fn test_reload_storage() {
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
     // epoch 0 is reserved by storage service
-    let epoch1 = EpochWithGap::new_without_offset(1);
+    let epoch1 = EpochWithGap::new_for_test(1);
 
     // Un-comment it when the unit test is re-enabled.
     // // Write the first batch.
@@ -739,7 +738,7 @@ async fn test_write_anytime_inner(
 ) {
     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
 
-    let epoch1 = EpochWithGap::new_without_offset(initial_epoch + 1);
+    let epoch1 = EpochWithGap::new_for_test(initial_epoch + 1);
 
     let assert_old_value = |epoch: u64| {
         let hummock_storage = &hummock_storage;
@@ -1043,7 +1042,7 @@ async fn test_delete_get_inner(
     meta_client: Arc<MockHummockMetaClient>,
 ) {
     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
-    let epoch1 = EpochWithGap::new_without_offset(initial_epoch + 1);
+    let epoch1 = EpochWithGap::new_for_test(initial_epoch + 1);
     let batch1 = vec![
         (
             gen_key_from_str(VirtualNode::ZERO, "aa"),
@@ -1136,7 +1135,7 @@ async fn test_multiple_epoch_sync_inner(
     meta_client: Arc<MockHummockMetaClient>,
 ) {
     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
-    let epoch1 = EpochWithGap::new_without_offset(initial_epoch + 1);
+    let epoch1 = EpochWithGap::new_for_test(initial_epoch + 1);
     let batch1 = vec![
         (
             gen_key_from_str(VirtualNode::ZERO, "aa"),
@@ -1301,7 +1300,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         .await;
 
     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
-    let epoch1 = EpochWithGap::new_without_offset(initial_epoch + 1);
+    let epoch1 = EpochWithGap::new_for_test(initial_epoch + 1);
     local_hummock_storage
         .init_for_test(epoch1.as_u64_for_test())
         .await
@@ -1447,7 +1446,7 @@ async fn test_replicated_local_hummock_storage() {
         .committed()
         .max_committed_epoch();
 
-    let epoch1 = EpochWithGap::new_without_offset(epoch0 + 1);
+    let epoch1 = EpochWithGap::new_for_test(epoch0 + 1);
 
     local_hummock_storage
         .init_for_test(epoch1.as_u64_for_test())

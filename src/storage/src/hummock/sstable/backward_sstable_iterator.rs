@@ -245,7 +245,7 @@ mod tests {
                 format!("key_zzzz_{:05}", 0).as_bytes(),
             ]
             .concat(),
-            EpochWithGap::new_without_offset(1).as_u64_for_test(),
+            EpochWithGap::new_for_test(1).as_u64_for_test(),
         );
         sstable_iter.seek(largest_key.to_ref()).await.unwrap();
         let key = sstable_iter.key();
@@ -259,7 +259,7 @@ mod tests {
                 format!("key_aaaa_{:05}", 0).as_bytes(),
             ]
             .concat(),
-            EpochWithGap::new_without_offset(1).as_u64_for_test(),
+            EpochWithGap::new_for_test(1).as_u64_for_test(),
         );
         sstable_iter.seek(smallest_key.to_ref()).await.unwrap();
         assert!(!sstable_iter.is_valid());

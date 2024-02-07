@@ -107,15 +107,15 @@ async fn create_arrangement(
         vec![0],
         vec![
             Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                EpochWithGap::new_for_test(2).as_u64_for_test(),
             )),
             Message::Chunk(chunk1),
             Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_without_offset(3).as_u64_for_test(),
+                EpochWithGap::new_for_test(3).as_u64_for_test(),
             )),
             Message::Chunk(chunk2),
             Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_without_offset(4).as_u64_for_test(),
+                EpochWithGap::new_for_test(4).as_u64_for_test(),
             )),
         ],
     );
@@ -175,15 +175,15 @@ fn create_source() -> Box<dyn Executor + Send> {
         PkIndices::new(),
         vec![
             Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_without_offset(2).as_u64_for_test(),
+                EpochWithGap::new_for_test(2).as_u64_for_test(),
             )),
             Message::Chunk(chunk1),
             Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_without_offset(3).as_u64_for_test(),
+                EpochWithGap::new_for_test(3).as_u64_for_test(),
             )),
             Message::Chunk(chunk2),
             Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_without_offset(4).as_u64_for_test(),
+                EpochWithGap::new_for_test(4).as_u64_for_test(),
             )),
         ],
     );

@@ -92,10 +92,10 @@ async fn test_update_pinned_version() {
     let initial_max_commit_epoch = pinned_version.max_committed_epoch();
 
     let epochs: Vec<TestEpoch> = vec![
-        EpochWithGap::new_without_offset(initial_max_commit_epoch+1),
-        EpochWithGap::new_without_offset(initial_max_commit_epoch+2),
-        EpochWithGap::new_without_offset(initial_max_commit_epoch+3),
-        EpochWithGap::new_without_offset(initial_max_commit_epoch+4)
+        EpochWithGap::new_for_test(initial_max_commit_epoch+1),
+        EpochWithGap::new_for_test(initial_max_commit_epoch+2),
+        EpochWithGap::new_for_test(initial_max_commit_epoch+3),
+        EpochWithGap::new_for_test(initial_max_commit_epoch+4)
     ];
     let batches: Vec<Vec<(Bytes, StorageValue)>> =
         epochs.iter().map(|e| gen_dummy_batch(*e)).collect();

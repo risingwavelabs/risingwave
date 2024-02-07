@@ -133,7 +133,7 @@ impl CompactionDeleteRangeIterator {
         {
             self.inner.next().await?;
         }
-        Ok(self.earliest_delete_since(EpochWithGap::new_without_offset(epoch).as_u64_for_test()))
+        Ok(self.earliest_delete_since(EpochWithGap::new_for_test(epoch).as_u64_for_test()))
     }
 
     pub fn key(&self) -> PointRange<&[u8]> {
@@ -339,25 +339,25 @@ mod tests {
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbb").as_ref(), 11)
                 .await
                 .unwrap(),
-            EpochWithGap::new_without_offset(12).as_u64_for_test()
+            EpochWithGap::new_for_test(12).as_u64_for_test()
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbb").as_ref(), 8)
                 .await
                 .unwrap(),
-            EpochWithGap::new_without_offset(9).as_u64_for_test()
+            EpochWithGap::new_for_test(9).as_u64_for_test()
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbbaaa").as_ref(), 8)
                 .await
                 .unwrap(),
-            EpochWithGap::new_without_offset(9).as_u64_for_test()
+            EpochWithGap::new_for_test(9).as_u64_for_test()
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbbccd").as_ref(), 8)
                 .await
                 .unwrap(),
-            EpochWithGap::new_without_offset(9).as_u64_for_test()
+            EpochWithGap::new_for_test(9).as_u64_for_test()
         );
 
         assert_eq!(
@@ -383,13 +383,13 @@ mod tests {
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"eeeeee").as_ref(), 8)
                 .await
                 .unwrap(),
-            EpochWithGap::new_without_offset(8).as_u64_for_test()
+            EpochWithGap::new_for_test(8).as_u64_for_test()
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"gggggg").as_ref(), 8)
                 .await
                 .unwrap(),
-            EpochWithGap::new_without_offset(9).as_u64_for_test()
+            EpochWithGap::new_for_test(9).as_u64_for_test()
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"hhhhhh").as_ref(), 6)
@@ -401,7 +401,7 @@ mod tests {
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"iiiiii").as_ref(), 6)
                 .await
                 .unwrap(),
-            EpochWithGap::new_without_offset(7).as_u64_for_test()
+            EpochWithGap::new_for_test(7).as_u64_for_test()
         );
     }
 
@@ -495,22 +495,22 @@ mod tests {
             sstable.value(),
             iterator_test_user_key_of(0).as_ref(),
         );
-        assert_eq!(ret, EpochWithGap::new_without_offset(300).as_u64_for_test());
+        assert_eq!(ret, EpochWithGap::new_for_test(300).as_u64_for_test());
         let ret = get_min_delete_range_epoch_from_sstable(
             sstable.value(),
             iterator_test_user_key_of(1).as_ref(),
         );
-        assert_eq!(ret, EpochWithGap::new_without_offset(150).as_u64_for_test());
+        assert_eq!(ret, EpochWithGap::new_for_test(150).as_u64_for_test());
         let ret = get_min_delete_range_epoch_from_sstable(
             sstable.value(),
             iterator_test_user_key_of(3).as_ref(),
         );
-        assert_eq!(ret, EpochWithGap::new_without_offset(50).as_u64_for_test());
+        assert_eq!(ret, EpochWithGap::new_for_test(50).as_u64_for_test());
         let ret = get_min_delete_range_epoch_from_sstable(
             sstable.value(),
             iterator_test_user_key_of(6).as_ref(),
         );
-        assert_eq!(ret, EpochWithGap::new_without_offset(150).as_u64_for_test());
+        assert_eq!(ret, EpochWithGap::new_for_test(150).as_u64_for_test());
         let ret = get_min_delete_range_epoch_from_sstable(
             sstable.value(),
             iterator_test_user_key_of(8).as_ref(),

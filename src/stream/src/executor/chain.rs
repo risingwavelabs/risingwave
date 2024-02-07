@@ -165,20 +165,18 @@ mod test {
             PkIndices::new(),
             vec![
                 Message::Barrier(
-                    Barrier::new_test_barrier(
-                        EpochWithGap::new_without_offset(1).as_u64_for_test(),
-                    )
-                    .with_mutation(Mutation::Add(AddMutation {
-                        adds: maplit::hashmap! {
-                            0 => vec![Dispatcher {
-                                downstream_actor_id: vec![actor_id],
-                                ..Default::default()
-                            }],
-                        },
-                        added_actors: maplit::hashset! { actor_id },
-                        splits: Default::default(),
-                        pause: false,
-                    })),
+                    Barrier::new_test_barrier(EpochWithGap::new_for_test(1).as_u64_for_test())
+                        .with_mutation(Mutation::Add(AddMutation {
+                            adds: maplit::hashmap! {
+                                0 => vec![Dispatcher {
+                                    downstream_actor_id: vec![actor_id],
+                                    ..Default::default()
+                                }],
+                            },
+                            added_actors: maplit::hashset! { actor_id },
+                            splits: Default::default(),
+                            pause: false,
+                        })),
                 ),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 4")),

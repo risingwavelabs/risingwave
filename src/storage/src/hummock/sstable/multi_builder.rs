@@ -481,8 +481,7 @@ mod tests {
                 .add_full_key_for_test(
                     FullKey::from_user_key(
                         test_user_key_of(i).as_ref(),
-                        EpochWithGap::new_without_offset((table_capacity - i) as u64)
-                            .as_u64_for_test(),
+                        EpochWithGap::new_for_test((table_capacity - i) as u64).as_u64_for_test(),
                     ),
                     HummockValue::put(b"value"),
                     true,
@@ -503,7 +502,7 @@ mod tests {
             mock_sstable_store(),
             opts,
         ));
-        let mut epoch = EpochWithGap::new_without_offset(100);
+        let mut epoch = EpochWithGap::new_for_test(100);
 
         macro_rules! add {
             () => {
@@ -596,7 +595,7 @@ mod tests {
         let full_key = FullKey::for_test(
             table_id,
             [VirtualNode::ZERO.to_be_bytes().as_slice(), b"k"].concat(),
-            EpochWithGap::new_without_offset(1).as_u64_for_test(),
+            EpochWithGap::new_for_test(1).as_u64_for_test(),
         );
         let target_extended_user_key = PointRange::from_user_key(full_key.user_key.as_ref(), false);
         while del_iter.is_valid() && del_iter.key().as_ref().le(&target_extended_user_key) {
@@ -736,7 +735,7 @@ mod tests {
             .await
             .unwrap();
         let v = vec![5u8; 220];
-        let epoch = EpochWithGap::new_without_offset(12).as_u64_for_test();
+        let epoch = EpochWithGap::new_for_test(12).as_u64_for_test();
         builder
             .add_full_key(
                 FullKey::from_user_key(UserKey::for_test(table_id, b"bbbb"), epoch),
@@ -759,7 +758,7 @@ mod tests {
                     UserKey::for_test(table_id, b"eeee".to_vec()),
                     false,
                 ),
-                new_epoch: EpochWithGap::new_without_offset(11).as_u64_for_test(),
+                new_epoch: EpochWithGap::new_for_test(11).as_u64_for_test(),
             })
             .await
             .unwrap();
@@ -769,7 +768,7 @@ mod tests {
                     UserKey::for_test(table_id, b"ffff".to_vec()),
                     false,
                 ),
-                new_epoch: EpochWithGap::new_without_offset(10).as_u64_for_test(),
+                new_epoch: EpochWithGap::new_for_test(10).as_u64_for_test(),
             })
             .await
             .unwrap();

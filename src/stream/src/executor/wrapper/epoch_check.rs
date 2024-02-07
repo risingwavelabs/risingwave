@@ -86,51 +86,39 @@ mod tests {
     #[tokio::test]
     async fn test_epoch_ok() {
         let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
-        tx.push_barrier(EpochWithGap::new_without_offset(1).as_u64_for_test(), false);
+        tx.push_barrier(EpochWithGap::new_for_test(1).as_u64_for_test(), false);
         tx.push_chunk(StreamChunk::default());
-        tx.push_barrier(EpochWithGap::new_without_offset(2).as_u64_for_test(), false);
-        tx.push_barrier(EpochWithGap::new_without_offset(3).as_u64_for_test(), false);
-        tx.push_barrier(EpochWithGap::new_without_offset(4).as_u64_for_test(), false);
+        tx.push_barrier(EpochWithGap::new_for_test(2).as_u64_for_test(), false);
+        tx.push_barrier(EpochWithGap::new_for_test(3).as_u64_for_test(), false);
+        tx.push_barrier(EpochWithGap::new_for_test(4).as_u64_for_test(), false);
 
         let checked = epoch_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
 
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == EpochWithGap::new_without_offset(1).as_u64_for_test());
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == EpochWithGap::new_for_test(1).as_u64_for_test());
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Chunk(_));
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == EpochWithGap::new_without_offset(2).as_u64_for_test());
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == EpochWithGap::new_without_offset(3).as_u64_for_test());
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == EpochWithGap::new_without_offset(4).as_u64_for_test());
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == EpochWithGap::new_for_test(2).as_u64_for_test());
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == EpochWithGap::new_for_test(3).as_u64_for_test());
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == EpochWithGap::new_for_test(4).as_u64_for_test());
     }
 
     #[should_panic]
     #[tokio::test]
     async fn test_epoch_bad() {
         let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
-        tx.push_barrier(
-            EpochWithGap::new_without_offset(100).as_u64_for_test(),
-            false,
-        );
+        tx.push_barrier(EpochWithGap::new_for_test(100).as_u64_for_test(), false);
         tx.push_chunk(StreamChunk::default());
-        tx.push_barrier(
-            EpochWithGap::new_without_offset(514).as_u64_for_test(),
-            false,
-        );
-        tx.push_barrier(
-            EpochWithGap::new_without_offset(514).as_u64_for_test(),
-            false,
-        );
-        tx.push_barrier(
-            EpochWithGap::new_without_offset(114).as_u64_for_test(),
-            false,
-        );
+        tx.push_barrier(EpochWithGap::new_for_test(514).as_u64_for_test(), false);
+        tx.push_barrier(EpochWithGap::new_for_test(514).as_u64_for_test(), false);
+        tx.push_barrier(EpochWithGap::new_for_test(114).as_u64_for_test(), false);
 
         let checked = epoch_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
 
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == EpochWithGap::new_without_offset(100).as_u64_for_test());
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == EpochWithGap::new_for_test(100).as_u64_for_test());
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Chunk(_));
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == EpochWithGap::new_without_offset(514).as_u64_for_test());
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == EpochWithGap::new_without_offset(514).as_u64_for_test());
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == EpochWithGap::new_for_test(514).as_u64_for_test());
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == EpochWithGap::new_for_test(514).as_u64_for_test());
 
         checked.next().await.unwrap().unwrap(); // should panic
     }
@@ -140,10 +128,7 @@ mod tests {
     async fn test_epoch_first_not_barrier() {
         let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
         tx.push_chunk(StreamChunk::default());
-        tx.push_barrier(
-            EpochWithGap::new_without_offset(114).as_u64_for_test(),
-            false,
-        );
+        tx.push_barrier(EpochWithGap::new_for_test(114).as_u64_for_test(), false);
 
         let checked = epoch_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);

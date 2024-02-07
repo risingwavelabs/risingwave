@@ -99,7 +99,7 @@ async fn test_storage_basic() {
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
     // epoch 0 is reserved by storage service
-    let epoch1 = EpochWithGap::new_without_offset(1);
+    let epoch1 = EpochWithGap::new_for_test(1);
     hummock_storage
         .init_for_test(epoch1.as_u64_for_test())
         .await
@@ -464,7 +464,7 @@ async fn test_state_store_sync() {
     let read_version = hummock_storage.read_version();
 
     let base_epoch = read_version.read().committed().max_committed_epoch();
-    let epoch1 = EpochWithGap::new_without_offset(base_epoch + 1);
+    let epoch1 = EpochWithGap::new_for_test(base_epoch + 1);
     hummock_storage
         .init_for_test(epoch1.as_u64_for_test())
         .await
@@ -806,7 +806,7 @@ async fn test_delete_get() {
         .committed()
         .max_committed_epoch();
 
-    let epoch1 = EpochWithGap::new_without_offset(initial_epoch + 1);
+    let epoch1 = EpochWithGap::new_for_test(initial_epoch + 1);
 
     hummock_storage
         .init_for_test(epoch1.as_u64_for_test())
@@ -910,7 +910,7 @@ async fn test_multiple_epoch_sync() {
         .committed()
         .max_committed_epoch();
 
-    let epoch1 = EpochWithGap::new_without_offset(initial_epoch + 1);
+    let epoch1 = EpochWithGap::new_for_test(initial_epoch + 1);
     hummock_storage
         .init_for_test(epoch1.as_u64_for_test())
         .await

@@ -261,7 +261,7 @@ mod tests {
         concat_iterator.next().await.unwrap();
         assert_eq!(
             concat_iterator.current_epoch(),
-            EpochWithGap::new_without_offset(10).as_u64_for_test()
+            EpochWithGap::new_for_test(10).as_u64_for_test()
         );
         assert_eq!(
             concat_iterator.next_extended_user_key().left_user_key,
@@ -270,7 +270,7 @@ mod tests {
         concat_iterator.next().await.unwrap();
         assert_eq!(
             concat_iterator.current_epoch(),
-            EpochWithGap::new_without_offset(10).as_u64_for_test()
+            EpochWithGap::new_for_test(10).as_u64_for_test()
         );
         assert_eq!(
             concat_iterator.next_extended_user_key().left_user_key,
@@ -279,7 +279,7 @@ mod tests {
         concat_iterator.next().await.unwrap();
         assert_eq!(
             concat_iterator.current_epoch(),
-            EpochWithGap::new_without_offset(12).as_u64_for_test()
+            EpochWithGap::new_for_test(12).as_u64_for_test()
         );
         assert_eq!(
             concat_iterator.next_extended_user_key().left_user_key,

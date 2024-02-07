@@ -640,14 +640,14 @@ mod tests {
     #[tokio::test]
     async fn test_future_delivery_manager_compress_chunk() {
         let mut manager = DeliveryFutureManager::new(10);
-        let epoch1 = EpochWithGap::new_without_offset(233);
+        let epoch1 = EpochWithGap::new_for_test(233);
         let chunk_id1 = 1;
         let chunk_id2 = chunk_id1 + 1;
         let chunk_id3 = chunk_id2 + 1;
         let (tx1_1, rx1_1) = oneshot::channel();
         let (tx1_2, rx1_2) = oneshot::channel();
         let (tx1_3, rx1_3) = oneshot::channel();
-        let epoch2 = EpochWithGap::new_without_offset(234);
+        let epoch2 = EpochWithGap::new_for_test(234);
         let (tx2_1, rx2_1) = oneshot::channel();
         assert!(!manager
             .start_write_chunk(epoch1.as_u64_for_test(), chunk_id1)

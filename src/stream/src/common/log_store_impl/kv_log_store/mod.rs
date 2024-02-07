@@ -328,7 +328,7 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        let epoch1 = EpochWithGap::new_without_offset(
+        let epoch1 = EpochWithGap::new_for_test(
             test_env
                 .storage
                 .get_pinned_version()
@@ -434,7 +434,7 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        let epoch1 = EpochWithGap::new_without_offset(
+        let epoch1 = EpochWithGap::new_for_test(
             test_env
                 .storage
                 .get_pinned_version()
@@ -448,7 +448,7 @@ mod tests {
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
-        let epoch2 = EpochWithGap::new_without_offset(
+        let epoch2 = EpochWithGap::new_for_test(
             test_env
                 .storage
                 .get_pinned_version()
@@ -459,7 +459,7 @@ mod tests {
         .as_u64_for_test();
         writer.flush_current_epoch(epoch2, false).await.unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
-        let epoch3 = EpochWithGap::new_without_offset(
+        let epoch3 = EpochWithGap::new_for_test(
             test_env
                 .storage
                 .get_pinned_version()
@@ -623,7 +623,7 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        let epoch1 = EpochWithGap::new_without_offset(
+        let epoch1 = EpochWithGap::new_for_test(
             test_env
                 .storage
                 .get_pinned_version()
@@ -638,7 +638,7 @@ mod tests {
             .unwrap();
         writer.write_chunk(stream_chunk1_1.clone()).await.unwrap();
         writer.write_chunk(stream_chunk1_2.clone()).await.unwrap();
-        let epoch2 = EpochWithGap::new_without_offset(
+        let epoch2 = EpochWithGap::new_for_test(
             test_env
                 .storage
                 .get_pinned_version()
@@ -712,7 +712,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let epoch3 = EpochWithGap::new_without_offset(
+        let epoch3 = EpochWithGap::new_for_test(
             test_env
                 .storage
                 .get_pinned_version()
@@ -854,7 +854,7 @@ mod tests {
         let (mut reader1, mut writer1) = factory1.build().await;
         let (mut reader2, mut writer2) = factory2.build().await;
 
-        let epoch1 = EpochWithGap::new_without_offset(
+        let epoch1 = EpochWithGap::new_for_test(
             test_env
                 .storage
                 .get_pinned_version()
@@ -876,7 +876,7 @@ mod tests {
         let [chunk1_1, chunk1_2] = gen_multi_vnode_stream_chunks::<2>(0, 100);
         writer1.write_chunk(chunk1_1.clone()).await.unwrap();
         writer2.write_chunk(chunk1_2.clone()).await.unwrap();
-        let epoch2 = EpochWithGap::new_without_offset(
+        let epoch2 = EpochWithGap::new_for_test(
             test_env
                 .storage
                 .get_pinned_version()
@@ -942,7 +942,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        let epoch3 = EpochWithGap::new_without_offset(
+        let epoch3 = EpochWithGap::new_for_test(
             test_env
                 .storage
                 .get_pinned_version()
@@ -1051,7 +1051,7 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        let epoch1 = EpochWithGap::new_without_offset(
+        let epoch1 = EpochWithGap::new_for_test(
             test_env
                 .storage
                 .get_pinned_version()
@@ -1065,7 +1065,7 @@ mod tests {
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
-        let epoch2 = EpochWithGap::new_without_offset(
+        let epoch2 = EpochWithGap::new_for_test(
             test_env
                 .storage
                 .get_pinned_version()
@@ -1196,7 +1196,7 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        let epoch1 = EpochWithGap::new_without_offset(
+        let epoch1 = EpochWithGap::new_for_test(
             test_env
                 .storage
                 .get_pinned_version()
@@ -1210,7 +1210,7 @@ mod tests {
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
-        let epoch2 = EpochWithGap::new_without_offset(
+        let epoch2 = EpochWithGap::new_for_test(
             test_env
                 .storage
                 .get_pinned_version()
@@ -1221,7 +1221,7 @@ mod tests {
         .as_u64_for_test();
         writer.flush_current_epoch(epoch2, true).await.unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
-        let epoch3 = EpochWithGap::new_without_offset(
+        let epoch3 = EpochWithGap::new_for_test(
             test_env
                 .storage
                 .get_pinned_version()
@@ -1317,7 +1317,7 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        let epoch4 = EpochWithGap::new_without_offset(
+        let epoch4 = EpochWithGap::new_for_test(
             test_env
                 .storage
                 .get_pinned_version()

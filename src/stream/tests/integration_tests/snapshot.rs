@@ -206,10 +206,7 @@ where
     for mut event in inputs {
         match &mut event {
             SnapshotEvent::Barrier(epoch) => {
-                tx.push_barrier(
-                    EpochWithGap::new_without_offset(*epoch).as_u64_for_test(),
-                    false,
-                );
+                tx.push_barrier(EpochWithGap::new_for_test(*epoch).as_u64_for_test(), false);
             }
             SnapshotEvent::Noop => unreachable!(),
             SnapshotEvent::Recovery => {
