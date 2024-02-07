@@ -33,7 +33,7 @@ use tokio::sync::{oneshot, Mutex};
 use tracing::Instrument;
 use uuid::Uuid;
 
-use super::{Locations, RescheduleOptions, ScaleController, ScaleControllerRef, TableResizePolicy};
+use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
@@ -209,13 +209,8 @@ impl GlobalStreamManager {
         barrier_scheduler: BarrierScheduler,
         source_manager: SourceManagerRef,
         hummock_manager: HummockManagerRef,
+        scale_controller: ScaleControllerRef,
     ) -> MetaResult<Self> {
-        let scale_controller = Arc::new(ScaleController::new(
-            &metadata_manager,
-            source_manager.clone(),
-            env.clone(),
-        ));
-
         Ok(Self {
             env,
             metadata_manager,
@@ -832,7 +827,7 @@ mod tests {
     use crate::model::{ActorId, FragmentId};
     use crate::rpc::ddl_controller::DropMode;
     use crate::rpc::metrics::MetaMetrics;
-    use crate::stream::SourceManager;
+    use crate::stream::{ScaleController, SourceManager};
     use crate::MetaOpts;
 
     struct FakeFragmentState {
@@ -1030,6 +1025,12 @@ mod tests {
 
             let (sink_manager, _) = SinkCoordinatorManager::start_worker();
 
+            let scale_controller = Arc::new(ScaleController::new(
+                &metadata_manager,
+                source_manager.clone(),
+                env.clone(),
+            ));
+
             let barrier_manager = GlobalBarrierManager::new(
                 scheduled_barriers,
                 env.clone(),
@@ -1038,6 +1039,7 @@ mod tests {
                 source_manager.clone(),
                 sink_manager,
                 meta_metrics.clone(),
+                scale_controller.clone(),
             );
 
             let stream_manager = GlobalStreamManager::new(
@@ -1046,6 +1048,7 @@ mod tests {
                 barrier_scheduler.clone(),
                 source_manager.clone(),
                 hummock_manager,
+                scale_controller.clone(),
             )?;
 
             let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager);
