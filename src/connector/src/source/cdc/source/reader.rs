@@ -30,7 +30,7 @@ use risingwave_pb::connector_service::{
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 
-use crate::error::{ConnectorError, ConnectorResult as Result};
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::cdc::{CdcProperties, CdcSourceType, CdcSourceTypeTrait, DebeziumCdcSplit};
@@ -68,7 +68,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self> {
+    ) -> ConnectorResult<Self> {
         assert_eq!(splits.len(), 1);
         let split = splits.into_iter().next().unwrap();
         let split_id = split.id();

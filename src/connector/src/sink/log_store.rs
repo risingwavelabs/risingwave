@@ -19,7 +19,6 @@ use std::future::{poll_fn, Future};
 use std::sync::Arc;
 use std::task::Poll;
 
-use anyhow::anyhow;
 use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;

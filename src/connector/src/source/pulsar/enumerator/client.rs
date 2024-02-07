@@ -47,7 +47,7 @@ impl SplitEnumerator for PulsarSplitEnumerator {
     async fn new(
         properties: PulsarProperties,
         _context: SourceEnumeratorContextRef,
-    ) -> Result<PulsarSplitEnumerator> {
+    ) -> ConnectorResult<PulsarSplitEnumerator> {
         let pulsar = properties
             .common
             .build_client(&properties.oauth, &properties.aws_auth_props)

@@ -15,7 +15,6 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
 
-use anyhow::anyhow;
 use aws_sdk_s3::types::Object;
 use risingwave_common::types::{JsonbVal, Timestamptz};
 use serde::{Deserialize, Serialize};

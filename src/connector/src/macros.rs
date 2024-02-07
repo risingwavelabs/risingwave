@@ -168,7 +168,7 @@ macro_rules! impl_split {
 
         $(
             impl TryFrom<SplitImpl> for $split {
-                type Error = crate::error::ConnectorError;
+                type Error = $crate::error::ConnectorError;
 
                 fn try_from(split: SplitImpl) -> std::result::Result<Self, Self::Error> {
                     match split {

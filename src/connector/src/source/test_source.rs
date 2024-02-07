@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
-use anyhow::anyhow;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use risingwave_common::bail;

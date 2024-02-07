@@ -14,7 +14,7 @@
 
 use std::marker::PhantomData;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
