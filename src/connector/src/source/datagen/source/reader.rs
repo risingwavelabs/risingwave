@@ -14,13 +14,14 @@
 
 use std::collections::HashMap;
 
-use anyhow::{Context, Result};
+use anyhow::Context;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt, TryStreamExt};
 use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use thiserror_ext::AsReport;
 
 use super::generator::DatagenEventGenerator;
+use crate::error::{ConnectorResult, ConnectorResult as Result};
 use crate::parser::{EncodingProperties, ParserConfig, ProtocolProperties};
 use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
@@ -183,7 +184,7 @@ impl SplitReader for DatagenSplitReader {
 }
 
 impl CommonSplitReader for DatagenSplitReader {
-    fn into_data_stream(self) -> impl Stream<Item = Result<Vec<SourceMessage>, anyhow::Error>> {
+    fn into_data_stream(self) -> impl Stream<Item = ConnectorResult<Vec<SourceMessage>>> {
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;
         spawn_data_generation_stream(self.generator.into_msg_stream(), BUFFER_SIZE)
@@ -253,6 +254,7 @@ fn generator_from_data_type(
                     random_seed,
                 )
             }
+            .map_err(Into::into)
         }
         DataType::Varchar => {
             let length_key = format!("fields.{}.length", name);
@@ -280,7 +282,7 @@ fn generator_from_data_type(
                     Ok((field_name.to_string(), gen))
                 })
                 .collect::<Result<_>>()?;
-            FieldGeneratorImpl::with_struct_fields(struct_fields)
+            FieldGeneratorImpl::with_struct_fields(struct_fields).map_err(Into::into)
         }
         DataType::List(datatype) => {
             let length_key = format!("fields.{}.length", name);
@@ -293,7 +295,7 @@ fn generator_from_data_type(
                 split_num,
                 offset,
             )?;
-            FieldGeneratorImpl::with_list(generator, length_value)
+            FieldGeneratorImpl::with_list(generator, length_value).map_err(Into::into)
         }
         _ => {
             let kind_key = format!("fields.{}.kind", name);
@@ -312,12 +314,14 @@ fn generator_from_data_type(
                     split_num,
                     offset,
                 )
+                .map_err(Into::into)
             } else {
                 let min_key = format!("fields.{}.min", name);
                 let max_key = format!("fields.{}.max", name);
                 let min_value = fields_option_map.get(&min_key).map(|s| s.to_string());
                 let max_value = fields_option_map.get(&max_key).map(|s| s.to_string());
                 FieldGeneratorImpl::with_number_random(data_type, min_value, max_value, random_seed)
+                    .map_err(Into::into)
             }
         }
     }

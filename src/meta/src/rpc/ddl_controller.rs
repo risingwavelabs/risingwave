@@ -31,6 +31,7 @@ use risingwave_common::util::stream_graph_visitor::{
 };
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::dispatch_source_prop;
+use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::cdc::CdcSourceType;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
@@ -804,7 +805,7 @@ impl DdlController {
     pub(crate) async fn validate_cdc_table(
         table: &Table,
         table_fragments: &TableFragments,
-    ) -> anyhow::Result<()> {
+    ) -> MetaResult<()> {
         let stream_scan_fragment = table_fragments
             .fragments
             .values()
@@ -820,7 +821,7 @@ impl DdlController {
 
         async fn new_enumerator_for_validate<P: SourceProperties>(
             source_props: P,
-        ) -> Result<P::SplitEnumerator, anyhow::Error> {
+        ) -> Result<P::SplitEnumerator, ConnectorError> {
             P::SplitEnumerator::new(source_props, SourceEnumeratorContext::default().into()).await
         }
 

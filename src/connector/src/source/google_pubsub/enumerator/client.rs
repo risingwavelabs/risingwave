@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{bail, Context};
+use anyhow::Context;
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
 use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::subscription::{SeekTo, SubscriptionConfig};
+use risingwave_common::bail;
 
+use crate::error::ConnectorResult;
 use crate::source::base::SplitEnumerator;
 use crate::source::google_pubsub::split::PubsubSplit;
 use crate::source::google_pubsub::PubsubProperties;
@@ -36,7 +38,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
     async fn new(
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<PubsubSplitEnumerator> {
+    ) -> ConnectorResult<PubsubSplitEnumerator> {
         let subscription = properties.subscription.to_owned();
 
         if properties.credentials.is_none() && properties.emulator_host.is_none() {
@@ -98,7 +100,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<PubsubSplit>> {
+    async fn list_splits(&mut self) -> ConnectorResult<Vec<PubsubSplit>> {
         tracing::debug!("enumerating pubsub splits");
         let splits: Vec<PubsubSplit> = (0..self.split_count)
             .map(|i| PubsubSplit {

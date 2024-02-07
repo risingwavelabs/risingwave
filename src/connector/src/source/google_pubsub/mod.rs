@@ -101,9 +101,8 @@ impl PubsubProperties {
 
 #[cfg(test)]
 mod tests {
-    use anyhow::Result;
-
     use super::*;
+    use crate::error::ConnectorResult as Result;
 
     const EMULATOR_HOST: &str = "localhost:8081";
     const CREDENTIALS: &str = "{}";

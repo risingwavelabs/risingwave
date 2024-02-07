@@ -61,6 +61,7 @@ pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
 use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
+use crate::error::ConnectorError;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
@@ -531,6 +532,12 @@ pub enum SinkError {
         #[source]
         #[backtrace]
         anyhow::Error,
+    ),
+    #[error(transparent)]
+    Connector(
+        #[from]
+        #[backtrace]
+        ConnectorError,
     ),
 }
 

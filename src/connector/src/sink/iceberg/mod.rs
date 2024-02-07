@@ -59,6 +59,7 @@ use super::{
     Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::deserialize_bool_from_string;
+use crate::error::{ConnectorErrorContext, ConnectorResult};
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
@@ -350,16 +351,19 @@ impl IcebergConfig {
         Ok((base_catalog_config, java_catalog_configs))
     }
 
-    async fn create_catalog(&self) -> anyhow::Result<CatalogRef> {
+    async fn create_catalog(&self) -> ConnectorResult<CatalogRef> {
         match self.catalog_type() {
             "storage" | "rest" => {
                 let iceberg_configs = self.build_iceberg_configs()?;
-                let catalog = load_catalog(&iceberg_configs)
-                    .await
-                    .map_err(|e| anyhow!(e))?;
+                let catalog = load_catalog(&iceberg_configs).await?;
                 Ok(catalog)
             }
-            catalog_type if catalog_type == "hive" || catalog_type == "sql" || catalog_type == "glue" || catalog_type == "dynamodb" => {
+            catalog_type
+                if catalog_type == "hive"
+                    || catalog_type == "sql"
+                    || catalog_type == "glue"
+                    || catalog_type == "dynamodb" =>
+            {
                 // Create java catalog
                 let (base_catalog_config, java_catalog_props) = self.build_jni_catalog_configs()?;
                 let catalog_impl = match catalog_type {
@@ -370,19 +374,24 @@ impl IcebergConfig {
                     _ => unreachable!(),
                 };
 
-                jni_catalog::JniCatalog::build(base_catalog_config, "risingwave", catalog_impl, java_catalog_props)
+                jni_catalog::JniCatalog::build(
+                    base_catalog_config,
+                    "risingwave",
+                    catalog_impl,
+                    java_catalog_props,
+                )
             }
-            "mock" => Ok(Arc::new(MockCatalog{})),
+            "mock" => Ok(Arc::new(MockCatalog {})),
             _ => {
-                Err(anyhow!(
-                "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `sql`, `glue`, `dynamodb`",
-                self.catalog_type()
-            ))
+                bail!(
+                    "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `sql`, `glue`, `dynamodb`",
+                    self.catalog_type()
+                )
             }
         }
     }
 
-    pub async fn load_table(&self) -> anyhow::Result<Table> {
+    pub async fn load_table(&self) -> ConnectorResult<Table> {
         let catalog = self
             .create_catalog()
             .await
@@ -395,10 +404,7 @@ impl IcebergConfig {
         )
         .context("Unable to parse table name")?;
 
-        catalog
-            .load_table(&table_id)
-            .await
-            .map_err(|err| anyhow!(err))
+        catalog.load_table(&table_id).await.map_err(Into::into)
     }
 }
 
@@ -428,7 +434,11 @@ impl Debug for IcebergSink {
 
 impl IcebergSink {
     async fn create_and_validate_table(&self) -> Result<Table> {
-        let table = self.config.load_table().await.map_err(SinkError::Iceberg)?;
+        let table = self
+            .config
+            .load_table()
+            .await
+            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
         let sink_schema = self.param.schema();
         let iceberg_schema = table
@@ -825,7 +835,7 @@ impl WriteResult {
                     .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
                     .unwrap();
             } else {
-                return Err(anyhow!("icberg sink metadata should have data_files object").into());
+                bail!("icberg sink metadata should have data_files object");
             }
             if let serde_json::Value::Array(values) = values
                 .remove(DELETE_FILES)
@@ -837,14 +847,14 @@ impl WriteResult {
                     .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
                     .context("Failed to parse data file from json")?;
             } else {
-                return Err(anyhow!("icberg sink metadata should have data_files object").into());
+                bail!("icberg sink metadata should have data_files object");
             }
             Ok(Self {
                 data_files,
                 delete_files,
             })
         } else {
-            Err(anyhow!("Can't create iceberg sink write result from empty data!").into())
+            bail!("Can't create iceberg sink write result from empty data!")
         }
     }
 }

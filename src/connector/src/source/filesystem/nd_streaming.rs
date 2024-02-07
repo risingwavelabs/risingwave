@@ -26,7 +26,7 @@ pub fn need_nd_streaming(encode_config: &EncodingProperties) -> bool {
         || matches!(encode_config, EncodingProperties::Csv(_))
 }
 
-#[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+#[try_stream(boxed, ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
 /// This function splits a byte stream by the newline separator "(\r)\n" into a message stream.
 /// It can be difficult to split and compute offsets correctly when the bytes are received in
 /// chunks.  There are two cases to consider:
@@ -108,7 +108,7 @@ pub async fn split_stream(data_stream: BoxSourceStream) {
                         last_message = msgs.pop();
                     }
                 }
-                Err(e) => return Err(anyhow!(e)),
+                Err(e) => return Err(e.into()),
             }
 
             line_cnt += 1;

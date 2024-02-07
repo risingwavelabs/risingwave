@@ -30,13 +30,13 @@ impl SplitEnumerator for DatagenSplitEnumerator {
     async fn new(
         properties: DatagenProperties,
         _context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<DatagenSplitEnumerator> {
+    ) -> crate::error::ConnectorResult<DatagenSplitEnumerator> {
         let split_num = properties.split_num.unwrap_or_else(|| "1".to_string());
         let split_num = split_num.parse::<i32>()?;
         Ok(Self { split_num })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<DatagenSplit>> {
+    async fn list_splits(&mut self) -> crate::error::ConnectorResult<Vec<DatagenSplit>> {
         let mut splits = vec![];
         for i in 0..self.split_num {
             splits.push(DatagenSplit {

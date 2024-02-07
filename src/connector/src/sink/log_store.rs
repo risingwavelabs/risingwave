@@ -22,6 +22,7 @@ use std::task::Poll;
 use anyhow::anyhow;
 use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
+use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
 
@@ -62,13 +63,13 @@ impl TruncateOffset {
         }
     }
 
-    pub fn check_next_offset(&self, next_offset: TruncateOffset) -> anyhow::Result<()> {
+    pub fn check_next_offset(&self, next_offset: TruncateOffset) -> LogStoreResult<()> {
         if *self >= next_offset {
-            Err(anyhow!(
+            bail!(
                 "next offset {:?} should be later than current offset {:?}",
                 next_offset,
                 self
-            ))
+            )
         } else {
             Ok(())
         }
@@ -81,22 +82,22 @@ impl TruncateOffset {
                 ..
             } => {
                 if epoch != *offset_epoch {
-                    return Err(anyhow!(
+                    bail!(
                         "new item epoch {} not match current chunk offset epoch {}",
                         epoch,
                         offset_epoch
-                    ));
+                    );
                 }
             }
             TruncateOffset::Barrier {
                 epoch: offset_epoch,
             } => {
                 if epoch <= *offset_epoch {
-                    return Err(anyhow!(
+                    bail!(
                         "new item epoch {} not exceed barrier offset epoch {}",
                         epoch,
                         offset_epoch
-                    ));
+                    );
                 }
             }
         }
@@ -534,6 +535,7 @@ mod tests {
     use tokio::sync::oneshot;
     use tokio::sync::oneshot::Receiver;
 
+    use super::LogStoreResult;
     use crate::sink::log_store::{DeliveryFutureManager, TruncateOffset};
 
     #[test]
@@ -587,7 +589,7 @@ mod tests {
     }
 
     type TestFuture = impl TryFuture<Ok = (), Error = anyhow::Error> + Unpin + 'static;
-    fn to_test_future(rx: Receiver<anyhow::Result<()>>) -> TestFuture {
+    fn to_test_future(rx: Receiver<LogStoreResult<()>>) -> TestFuture {
         async move { rx.await.unwrap() }.boxed()
     }
 

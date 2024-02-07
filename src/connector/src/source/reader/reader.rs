@@ -26,6 +26,7 @@ use risingwave_common::catalog::ColumnId;
 use rw_futures_util::select_all;
 
 use crate::dispatch_source_prop;
+use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use crate::source::filesystem::opendal_source::{
@@ -51,7 +52,7 @@ impl SourceReader {
         columns: Vec<SourceColumnDesc>,
         connector_message_buffer_size: usize,
         parser_config: SpecificParserConfig,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let config = ConnectorProperties::extract(properties, false)?;
 
         Ok(Self {
@@ -65,7 +66,7 @@ impl SourceReader {
     fn get_target_columns(
         &self,
         column_ids: Vec<ColumnId>,
-    ) -> anyhow::Result<Vec<SourceColumnDesc>> {
+    ) -> ConnectorResult<Vec<SourceColumnDesc>> {
         column_ids
             .iter()
             .map(|id| {
@@ -78,9 +79,10 @@ impl SourceReader {
                     .cloned()
             })
             .try_collect()
+            .map_err(Into::into)
     }
 
-    pub fn get_source_list(&self) -> anyhow::Result<BoxTryStream<FsPageItem>> {
+    pub fn get_source_list(&self) -> ConnectorResult<BoxTryStream<FsPageItem>> {
         let config = self.config.clone();
         match config {
             ConnectorProperties::Gcs(prop) => {
@@ -107,7 +109,7 @@ impl SourceReader {
         state: ConnectorState,
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
-    ) -> anyhow::Result<BoxChunkSourceStream> {
+    ) -> ConnectorResult<BoxChunkSourceStream> {
         let Some(splits) = state else {
             return Ok(pending().boxed());
         };
@@ -165,7 +167,7 @@ impl SourceReader {
     }
 }
 
-#[try_stream(boxed, ok = FsPageItem, error = anyhow::Error)]
+#[try_stream(boxed, ok = FsPageItem, error = crate::error::ConnectorError)]
 async fn build_opendal_fs_list_stream<Src: OpendalSource>(lister: OpendalEnumerator<Src>) {
     let matcher = lister.get_matcher();
     let mut object_metadata_iter = lister.list().await?;

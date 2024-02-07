@@ -20,10 +20,11 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_connector::dispatch_source_prop;
+use risingwave_connector::error::{ConnectorErrorContext, ConnectorResult};
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SourceProperties,
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
@@ -81,12 +82,12 @@ struct ConnectorSourceWorker<P: SourceProperties> {
     source_is_up: LabelGuardedIntGauge<2>,
 }
 
-fn extract_prop_from_existing_source(source: &Source) -> anyhow::Result<ConnectorProperties> {
+fn extract_prop_from_existing_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
     let mut properties = ConnectorProperties::extract(source.with_properties.clone(), false)?;
     properties.init_from_pb_source(source);
     Ok(properties)
 }
-fn extract_prop_from_new_source(source: &Source) -> anyhow::Result<ConnectorProperties> {
+fn extract_prop_from_new_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
     let mut properties = ConnectorProperties::extract(source.with_properties.clone(), true)?;
     properties.init_from_pb_source(source);
     Ok(properties)
@@ -96,7 +97,7 @@ const DEFAULT_SOURCE_WORKER_TICK_INTERVAL: Duration = Duration::from_secs(30);
 
 impl<P: SourceProperties> ConnectorSourceWorker<P> {
     /// Recreate the `SplitEnumerator` to establish a new connection to the external source service.
-    async fn refresh(&mut self) -> anyhow::Result<()> {
+    async fn refresh(&mut self) -> MetaResult<()> {
         let enumerator = P::SplitEnumerator::new(
             self.connector_properties.clone(),
             Arc::new(SourceEnumeratorContext {
@@ -124,7 +125,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
         period: Duration,
         splits: Arc<Mutex<SharedSplitMap>>,
         metrics: Arc<MetaMetrics>,
-    ) -> anyhow::Result<Self> {
+    ) -> MetaResult<Self> {
         let enumerator = P::SplitEnumerator::new(
             connector_properties.clone(),
             Arc::new(SourceEnumeratorContext {
@@ -711,7 +712,7 @@ impl SourceManager {
             let handle = core
                 .managed_sources
                 .get(&source_id)
-                .ok_or_else(|| anyhow!("could not found source {}", source_id))?;
+                .with_context(|| format!("could not find source {}", source_id))?;
 
             if handle.splits.lock().await.splits.is_none() {
                 // force refresh source
@@ -758,7 +759,7 @@ impl SourceManager {
     }
 
     /// register connector worker for source.
-    pub async fn register_source(&self, source: &Source) -> anyhow::Result<()> {
+    pub async fn register_source(&self, source: &Source) -> MetaResult<()> {
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {
             tracing::warn!("source {} already registered", source.get_id());
@@ -852,7 +853,7 @@ impl SourceManager {
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
         metrics: Arc<MetaMetrics>,
-    ) -> anyhow::Result<()> {
+    ) -> MetaResult<()> {
         tracing::info!("spawning new watcher for source {}", source.id);
 
         let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
@@ -879,11 +880,12 @@ impl SourceManager {
             // in kafka
             tokio::time::timeout(Self::DEFAULT_SOURCE_TICK_TIMEOUT, worker.tick())
                 .await
-                .map_err(|_e| {
-                    anyhow!(
-                        "failed to fetch meta info for source {}, error: timeout {}",
+                .ok()
+                .with_context(|| {
+                    format!(
+                        "failed to fetch meta info for source {}, timeout {:?}",
                         source.id,
-                        Self::DEFAULT_SOURCE_TICK_TIMEOUT.as_secs()
+                        Self::DEFAULT_SOURCE_TICK_TIMEOUT
                     )
                 })??;
 
@@ -984,8 +986,8 @@ pub fn build_actor_split_impls(
 mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
 
-    use anyhow::anyhow;
     use risingwave_common::types::JsonbVal;
+    use risingwave_connector::error::ConnectorResult;
     use risingwave_connector::source::{SplitId, SplitMetaData};
     use serde::{Deserialize, Serialize};
 
@@ -1006,11 +1008,11 @@ mod tests {
             serde_json::to_value(*self).unwrap().into()
         }
 
-        fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
-            serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+        fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
+            serde_json::from_value(value.take()).map_err(Into::into)
         }
 
-        fn update_with_offset(&mut self, _start_offset: String) -> anyhow::Result<()> {
+        fn update_with_offset(&mut self, _start_offset: String) -> ConnectorResult<()> {
             Ok(())
         }
     }

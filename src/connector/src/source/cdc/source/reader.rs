@@ -14,11 +14,12 @@
 
 use std::str::FromStr;
 
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prost::Message;
+use risingwave_common::bail;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::jvm_runtime::JVM;
@@ -29,6 +30,7 @@ use risingwave_pb::connector_service::{
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 
+use crate::error::{ConnectorError, ConnectorResult as Result};
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::cdc::{CdcProperties, CdcSourceType, CdcSourceTypeTrait, DebeziumCdcSplit};
@@ -107,7 +109,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         };
 
         std::thread::spawn(move || {
-            let result: anyhow::Result<_> = try {
+            let result: ConnectorResult<_> = try {
                 let env = jvm.attach_current_thread()?;
                 let get_event_stream_request_bytes =
                     env.byte_array_from_slice(&Message::encode_to_vec(&get_event_stream_request))?;
@@ -154,7 +156,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                 }
             };
             if !inited {
-                return Err(anyhow!("failed to start cdc connector"));
+                bail!("failed to start cdc connector");
             }
         }
         tracing::info!(?source_id, "cdc connector started");
@@ -196,7 +198,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
 }
 
 impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
-    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    #[try_stream(ok = Vec<SourceMessage>, error = ConnectorError)]
     async fn into_data_stream(self) {
         let source_type = T::source_type();
         let mut rx = self.rx;
@@ -225,6 +227,6 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
             }
         }
 
-        Err(anyhow!("all senders are dropped"))?;
+        bail!("all senders are dropped");
     }
 }

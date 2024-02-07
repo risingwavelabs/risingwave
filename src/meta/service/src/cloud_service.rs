@@ -18,6 +18,7 @@ use std::sync::LazyLock;
 use async_trait::async_trait;
 use regex::Regex;
 use risingwave_connector::dispatch_source_prop;
+use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::kafka::private_link::insert_privatelink_broker_rewrite_map;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
@@ -157,7 +158,7 @@ impl CloudService for CloudServiceImpl {
 
         async fn new_enumerator<P: SourceProperties>(
             props: P,
-        ) -> Result<P::SplitEnumerator, anyhow::Error> {
+        ) -> ConnectorResult<P::SplitEnumerator> {
             P::SplitEnumerator::new(props, SourceEnumeratorContext::default().into()).await
         }
 

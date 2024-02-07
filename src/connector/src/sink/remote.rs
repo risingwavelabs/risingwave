@@ -26,6 +26,7 @@ use itertools::Itertools;
 use jni::JavaVM;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::types::DataType;
 use risingwave_jni_core::jvm_runtime::JVM;
@@ -56,9 +57,10 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
 use super::elasticsearch::{StreamChunkConverter, ES_OPTION_DELIMITER};
+use crate::error::ConnectorResult;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::coordinate::CoordinatedSinkWriter;
-use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
+use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{
     DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkCommitCoordinator, SinkError,
@@ -157,14 +159,12 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
     }
 }
 
-async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> anyhow::Result<()> {
+async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorResult<()> {
     if sink_name == ElasticSearchSink::SINK_NAME
         && param.downstream_pk.len() > 1
         && param.properties.get(ES_OPTION_DELIMITER).is_none()
     {
-        return Err(anyhow!(
-            "Es sink only support single pk or pk with delimiter option"
-        ));
+        bail!("Es sink only support single pk or pk with delimiter option");
     }
     // FIXME: support struct and array in stream sink
     param.columns.iter().map(|col| {
@@ -236,12 +236,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> anyhow::Res
 
         validate_sink_response.error.map_or_else(
             || Ok(()), // If there is no error message, return Ok here.
-            |err| {
-                Err(anyhow!(format!(
-                    "sink cannot pass validation: {}",
-                    err.error_message
-                )))
-            },
+            |err| bail!("sink cannot pass validation: {}", err.error_message),
         )
     })
     .await
@@ -338,12 +333,11 @@ impl LogSinker for RemoteLogSinker {
                     anyhow!("get unsent offset {:?} in response", persisted_offset)
                 })?;
                 if sent_offset != persisted_offset {
-                    return Err(anyhow!(
+                    bail!(
                         "new response offset {:?} not match the buffer offset {:?}",
                         persisted_offset,
                         sent_offset
-                    )
-                    .into());
+                    );
                 }
 
                 if let (TruncateOffset::Barrier { .. }, Some(start_time)) =
@@ -366,13 +360,13 @@ impl LogSinker for RemoteLogSinker {
             loop {
                 let either_result: futures::future::Either<
                     Option<SinkWriterStreamResponse>,
-                    anyhow::Result<(u64, LogStoreReadItem)>,
+                    LogStoreResult<(u64, LogStoreReadItem)>,
                 > = drop_either_future(
                     select(pin!(response_rx.recv()), pin!(log_reader.next_item())).await,
                 );
                 match either_result {
                     futures::future::Either::Left(opt) => {
-                        let response = opt.ok_or_else(|| anyhow!("end of response stream"))?;
+                        let response = opt.context("end of response stream")?;
                         match response {
                             SinkWriterStreamResponse {
                                 response:
@@ -569,7 +563,7 @@ impl CoordinatedRemoteSinkWriter {
     }
 
     fn for_test(
-        response_receiver: Receiver<anyhow::Result<SinkWriterStreamResponse>>,
+        response_receiver: Receiver<ConnectorResult<SinkWriterStreamResponse>>,
         request_sender: Sender<JniSinkWriterStreamRequest>,
     ) -> CoordinatedRemoteSinkWriter {
         let properties = HashMap::from([("output.path".to_string(), "/tmp/rw".to_string())]);

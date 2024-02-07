@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::error::v2::def_anyhow_newtype;
+use risingwave_rpc_client::error::RpcError;
 
 def_anyhow_newtype! {
     pub ConnectorError,
@@ -22,4 +23,10 @@ def_anyhow_newtype! {
     tokio_postgres::Error => "Postgres error",
 }
 
-pub type ConnectorResult<T> = Result<T, ConnectorError>;
+pub type ConnectorResult<T, E = ConnectorError> = std::result::Result<T, E>;
+
+impl From<ConnectorError> for RpcError {
+    fn from(value: ConnectorError) -> Self {
+        RpcError::Internal(value.0)
+    }
+}

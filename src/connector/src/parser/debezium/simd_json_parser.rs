@@ -17,6 +17,7 @@ use std::fmt::Debug;
 use simd_json::prelude::MutableObject;
 use simd_json::BorrowedValue;
 
+use crate::error::ConnectorResult;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::AccessImpl;
 use crate::parser::AccessBuilder;
@@ -27,14 +28,14 @@ pub struct DebeziumJsonAccessBuilder {
 }
 
 impl DebeziumJsonAccessBuilder {
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new() -> ConnectorResult<Self> {
         Ok(Self { value: None })
     }
 }
 
 impl AccessBuilder for DebeziumJsonAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
         self.value = Some(payload);
         let mut event: BorrowedValue<'_> =
             simd_json::to_borrowed_value(self.value.as_mut().unwrap())?;

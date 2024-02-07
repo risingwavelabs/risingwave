@@ -18,6 +18,7 @@ use risingwave_common::bail;
 use simd_json::prelude::{MutableObject, ValueAsScalar, ValueObjectAccess};
 use simd_json::BorrowedValue;
 
+use crate::error::ConnectorResult;
 use crate::only_parse_payload;
 use crate::parser::canal::operators::*;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
@@ -44,7 +45,7 @@ impl CanalJsonParser {
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
         config: &JsonProperties,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         Ok(Self {
             rw_columns,
             source_ctx,
@@ -57,7 +58,7 @@ impl CanalJsonParser {
         &self,
         mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> anyhow::Result<()> {
+    ) -> ConnectorResult<()> {
         let mut event: BorrowedValue<'_> =
             simd_json::to_borrowed_value(&mut payload[self.payload_start_idx..])?;
 
@@ -123,7 +124,7 @@ impl ByteStreamSourceParser for CanalJsonParser {
         _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> anyhow::Result<()> {
+    ) -> ConnectorResult<()> {
         only_parse_payload!(self, payload, writer)
     }
 }

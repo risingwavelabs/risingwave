@@ -48,6 +48,7 @@ use self::unified::{AccessImpl, AccessResult};
 use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
 use crate::common::AwsAuthProps;
+use crate::error::ConnectorResult;
 use crate::parser::maxwell::MaxwellParser;
 use crate::parser::util::{
     extract_header_inner_from_meta, extract_headers_from_meta, extreact_timestamp_from_meta,
@@ -536,7 +537,7 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> impl Future<Output = anyhow::Result<()>> + Send + 'a;
+    ) -> impl Future<Output = ConnectorResult<()>> + Send + 'a;
 
     /// Parse one record from the given `payload`, either write rows to the `writer` or interpret it
     /// as a transaction control message.
@@ -550,7 +551,7 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> impl Future<Output = anyhow::Result<ParseResult>> + Send + 'a {
+    ) -> impl Future<Output = ConnectorResult<ParseResult>> + Send + 'a {
         self.parse_one(key, payload, writer)
             .map_ok(|_| ParseResult::Rows)
     }
@@ -610,7 +611,7 @@ const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
 
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
-#[try_stream(ok = StreamChunk, error = anyhow::Error)]
+#[try_stream(ok = StreamChunk, error = crate::error::ConnectorError)]
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
     let columns = parser.columns().to_vec();
 
@@ -707,7 +708,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                                 "failed to parse message, skipping"
                             );
                         }
-                        parser.source_ctx().report_user_source_error(&*error);
+                        parser.source_ctx().report_user_source_error(&**error);
                     }
                 }
 
@@ -750,7 +751,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 }
 
 pub trait AccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>>;
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>>;
 }
 
 #[derive(Debug)]
@@ -770,7 +771,10 @@ pub enum AccessBuilderImpl {
 }
 
 impl AccessBuilderImpl {
-    pub async fn new_default(config: EncodingProperties, kv: EncodingType) -> anyhow::Result<Self> {
+    pub async fn new_default(
+        config: EncodingProperties,
+        kv: EncodingType,
+    ) -> ConnectorResult<Self> {
         let accessor = match config {
             EncodingProperties::Avro(_) => {
                 let config = AvroParserConfig::new(config).await?;
@@ -794,7 +798,7 @@ impl AccessBuilderImpl {
     pub async fn generate_accessor(
         &mut self,
         payload: Vec<u8>,
-    ) -> anyhow::Result<AccessImpl<'_, '_>> {
+    ) -> ConnectorResult<AccessImpl<'_, '_>> {
         let accessor = match self {
             Self::Avro(builder) => builder.generate_accessor(payload).await?,
             Self::Protobuf(builder) => builder.generate_accessor(payload).await?,
@@ -843,7 +847,7 @@ impl ByteStreamSourceParserImpl {
     pub async fn create(
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let CommonParserConfig { rw_columns } = parser_config.common;
         let protocol = &parser_config.specific.protocol_config;
         let encode = &parser_config.specific.encoding_config;
@@ -990,7 +994,7 @@ impl SpecificParserConfig {
     pub fn new(
         info: &StreamSourceInfo,
         with_properties: &HashMap<String, String>,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let source_struct = extract_source_struct(info)?;
         let format = source_struct.format;
         let encode = source_struct.encode;

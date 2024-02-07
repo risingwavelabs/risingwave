@@ -21,6 +21,7 @@ use risingwave_common::types::{JsonbVal, Timestamptz};
 use serde::{Deserialize, Serialize};
 
 use super::opendal_source::OpendalSource;
+use crate::error::ConnectorResult;
 use crate::source::{SplitId, SplitMetaData};
 
 ///  [`FsSplit`] Describes a file or a split of a file. A file is a generic concept,
@@ -47,15 +48,15 @@ impl SplitMetaData for FsSplit {
         self.name.as_str().into()
     }
 
-    fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
-        serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+    fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
+        serde_json::from_value(value.take()).map_err(Into::into)
     }
 
     fn encode_to_json(&self) -> JsonbVal {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
         let offset = start_offset.parse().unwrap();
         self.offset = offset;
         Ok(())
@@ -98,15 +99,15 @@ impl<Src: OpendalSource> SplitMetaData for OpendalFsSplit<Src> {
         self.name.as_str().into()
     }
 
-    fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
-        serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+    fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
+        serde_json::from_value(value.take()).map_err(Into::into)
     }
 
     fn encode_to_json(&self) -> JsonbVal {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
         let offset = start_offset.parse().unwrap();
         self.offset = offset;
         Ok(())
