@@ -44,7 +44,7 @@ use crate::utils::{Condition, IndexSet};
 /// After:
 ///
 /// ```text
-///     LogicalApply [yyy = xxx]
+///     LogicalJoin [yyy = xxx]
 ///    /            \
 ///  LHS          Project
 ///                 |
@@ -144,6 +144,7 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
         let new_bottom_proj: PlanRef = LogicalProject::new(filter, bottom_proj_exprs).into();
 
         // If there is a count aggregate, bail out and leave for general subquery unnesting to deal.
+        // When group by is empty, count would return 0 instead of null.
         if agg_calls
             .iter()
             .any(|agg_call| agg_call.agg_kind == AggKind::Count)
