@@ -91,18 +91,18 @@ echo
 echo "  ./risingwave"
 echo
 echo
-echo "In a separate terminal, you can attach a psql client to the standalone server using:"
+echo "In a separate terminal, you can connect a psql client to the standalone server using:"
 echo
 echo "  psql -h localhost -p 4566 -d dev -U root"
 echo
 echo
-echo "To start a fresh cluster, you can just delete the data directories:"
+echo "To start a fresh cluster, you can just delete the data directory contents:"
 echo
-echo "  rm -r ~/.risingwave/state_store"
-echo "  rm -r ~/.risingwave/meta_store"
+echo "  rm -r ~/.risingwave/state_store/*"
+echo "  rm -r ~/.risingwave/meta_store/*"
 echo
 echo
-echo "To view available options, run:"
+echo "To view other available options, run:"
 echo
 echo "  ./risingwave single-node --help"
 echo
