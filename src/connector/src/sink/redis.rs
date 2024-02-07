@@ -63,7 +63,7 @@ impl RedisConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<RedisConfig>(serde_json::to_value(properties).unwrap())
-                .map_err(|e| SinkError::Config(anyhow!("{:?}", e)))?;
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
         Ok(config)
     }
 }
