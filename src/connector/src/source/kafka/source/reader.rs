@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::mem::swap;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -98,7 +98,7 @@ impl SplitReader for KafkaSplitReader {
             .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(client_ctx)
             .await
-            .map_err(|e| anyhow!("failed to create kafka consumer: {}", e))?;
+            .context("failed to create kafka consumer")?;
 
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 

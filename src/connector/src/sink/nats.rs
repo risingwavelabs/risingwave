@@ -14,7 +14,7 @@
 use core::fmt::Debug;
 use std::collections::HashMap;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context as _};
 use async_nats::jetstream::context::Context;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
@@ -159,13 +159,15 @@ impl NatsSinkWriter {
                     self.context
                         .publish(self.config.common.subject.clone(), item.into())
                         .await
-                        .map_err(|e| SinkError::Nats(anyhow!("nats sink error: {:?}", e)))?;
+                        .context("nats sink error")
+                        .map_err(SinkError::Nats)?;
                 }
                 Ok::<_, SinkError>(())
             },
         )
         .await
-        .map_err(|e| SinkError::Nats(anyhow!("nats sink error: {:?}", e)))
+        .context("nats sink error")
+        .map_err(SinkError::Nats)
     }
 }
 
