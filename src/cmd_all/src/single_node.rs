@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter;
 use std::sync::LazyLock;
 
 use anyhow::Result;
@@ -23,6 +24,7 @@ use risingwave_compactor::CompactorOpts;
 use risingwave_compute::{default_parallelism, default_total_memory_bytes, ComputeNodeOpts};
 use risingwave_frontend::FrontendOpts;
 use risingwave_meta_node::MetaNodeOpts;
+use shell_words::split;
 use tokio::signal;
 
 pub static DEFAULT_STORE_DIRECTORY: LazyLock<String> = LazyLock::new(|| {
@@ -85,7 +87,7 @@ pub struct SingleNodeOpts {
 
     /// Extra options for meta node.
     #[clap(long, env = "RW_SINGLE_NODE_META_EXTRA_OPTS")]
-    meta_node_extra_opts: Option<String>,
+    meta_extra_opts: Option<String>,
 }
 
 pub fn make_single_node_sql_endpoint(store_directory: &String) -> String {
@@ -99,7 +101,7 @@ pub fn make_single_node_state_store_url(store_directory: &String) -> String {
     format!("hummock+fs://{}/state_store", store_directory)
 }
 
-pub fn parse_single_node_opts(opts: &SingleNodeOpts) -> ParsedSingleNodeOpts {
+pub fn parse_single_node_opts(opts: &SingleNodeOpts) -> Result<ParsedSingleNodeOpts> {
     // Get default options
     let mut meta_opts = SingleNodeOpts::default_meta_opts();
     let mut compute_opts = SingleNodeOpts::default_compute_opts();
@@ -129,9 +131,9 @@ pub fn parse_single_node_opts(opts: &SingleNodeOpts) -> ParsedSingleNodeOpts {
         meta_opts.listen_addr = meta_addr.clone();
         meta_opts.advertise_addr = meta_addr.clone();
 
-        compute_opts.meta_address = meta_addr.parse().unwrap();
-        frontend_opts.meta_addr = meta_addr.parse().unwrap();
-        compactor_opts.meta_address = meta_addr.parse().unwrap();
+        compute_opts.meta_address = meta_addr.parse()?;
+        frontend_opts.meta_addr = meta_addr.parse()?;
+        compactor_opts.meta_address = meta_addr.parse()?;
     }
     if let Some(compute_addr) = &opts.compute_addr {
         compute_opts.listen_addr = compute_addr.clone();
@@ -144,17 +146,20 @@ pub fn parse_single_node_opts(opts: &SingleNodeOpts) -> ParsedSingleNodeOpts {
     }
 
     // Override with node-level extra options
-    if let Some(meta_node_extra_opts) = &opts.meta_node_extra_opts {
-        let meta_node_extra_opts = meta_node_extra_opts.split_whitespace();
-        meta_opts.update_from(meta_node_extra_opts);
+    if let Some(meta_extra_opts) = &opts.meta_extra_opts {
+        let meta_extra_opts = split(meta_extra_opts)?;
+        // This hack is required, because `update_from` treats arg[0] as the command name.
+        let prefix = "".to_string();
+        let meta_extra_opts = iter::once(&prefix).chain(meta_extra_opts.iter());
+        meta_opts.update_from(meta_extra_opts);
     }
 
-    ParsedSingleNodeOpts {
+    Ok(ParsedSingleNodeOpts {
         meta_opts: Some(meta_opts),
         compute_opts: Some(compute_opts),
         frontend_opts: Some(frontend_opts),
         compactor_opts: Some(compactor_opts),
-    }
+    })
 }
 
 // Defaults
@@ -284,9 +289,17 @@ impl risingwave_common::opts::Opts for ParsedSingleNodeOpts {
     }
 }
 
-/// For `single_node` mode, we can configure and start multiple services in one process.
-/// `single_node` mode is meant to be used by our cloud service and docker,
-/// where we can configure and start multiple services in one process.
+/// This mode will eventually unify `playground`, `standalone` and `single_node` modes.
+/// It will provide the following options:
+/// 1. Profile-level options. Provides a set of node level options for a specific profile.
+///    `playground`: Provide a set of options for a playground profile, uses in-memory store.
+///    `single-node`: Provide a set of options for a single node profile, uses persistent local store.
+///    `standalone`: No profile created for it. In this mode, most options are configured manually.
+///                  The equivalent options will be the node level "extra-options".
+/// 2. Process level options. These options will be mapped to each node's options.
+///    They override profile-level options.
+/// 3. Node level extra options: These have the highest precedence.
+///    They override profile and process level options.
 pub async fn single_node(
     ParsedSingleNodeOpts {
         meta_opts,
@@ -334,4 +347,165 @@ pub async fn single_node(
     tracing::info!("Ctrl+C received, now exiting");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use std::fmt::Debug;
+
+    use expect_test::{expect, Expect};
+
+    use super::*;
+
+    fn check(actual: impl Debug, expect: Expect) {
+        let actual = format!("{:#?}", actual);
+        expect.assert_eq(&actual);
+    }
+
+    // #[test]
+    // fn test_parse_profile_opts() {
+    // }
+
+    #[test]
+    fn test_parse_extra_opts() {
+        let raw_opts = "
+--meta-extra-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\"
+";
+        let actual = SingleNodeOpts::parse_from(raw_opts.lines());
+        check(
+            &actual,
+            expect![[r#"
+            SingleNodeOpts {
+                prometheus_listener_addr: None,
+                config_path: None,
+                store_directory: None,
+                meta_addr: None,
+                compute_addr: None,
+                frontend_addr: None,
+                compactor_addr: None,
+                meta_extra_opts: Some(
+                    "--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\"",
+                ),
+            }"#]],
+        );
+        let actual_parsed = parse_single_node_opts(&actual).unwrap();
+        check(
+            actual_parsed,
+            expect![[r#"
+            ParsedSingleNodeOpts {
+                meta_opts: Some(
+                    MetaNodeOpts {
+                        vpc_id: None,
+                        security_group_id: None,
+                        listen_addr: "127.0.0.1:5690",
+                        advertise_addr: "127.0.0.1:9999",
+                        dashboard_host: Some(
+                            "0.0.0.0:5691",
+                        ),
+                        prometheus_listener_addr: Some(
+                            "0.0.0.0:1250",
+                        ),
+                        etcd_endpoints: "",
+                        etcd_auth: false,
+                        etcd_username: "",
+                        etcd_password: [REDACTED alloc::string::String],
+                        sql_endpoint: Some(
+                            "sqlite:///Users/noelkwan/.risingwave/meta_store/single_node.db?mode=rwc",
+                        ),
+                        dashboard_ui_path: None,
+                        prometheus_endpoint: None,
+                        prometheus_selector: None,
+                        connector_rpc_endpoint: None,
+                        privatelink_endpoint_default_tags: None,
+                        config_path: "",
+                        backend: Some(
+                            Sql,
+                        ),
+                        barrier_interval_ms: None,
+                        sstable_size_mb: None,
+                        block_size_kb: None,
+                        bloom_false_positive: None,
+                        state_store: Some(
+                            "hummock+fs:///Users/noelkwan/.risingwave/state_store",
+                        ),
+                        data_directory: Some(
+                            "some path with spaces",
+                        ),
+                        do_not_config_object_storage_lifecycle: None,
+                        backup_storage_url: None,
+                        backup_storage_directory: None,
+                        heap_profiling_dir: None,
+                    },
+                ),
+                compute_opts: Some(
+                    ComputeNodeOpts {
+                        listen_addr: "0.0.0.0:5688",
+                        advertise_addr: Some(
+                            "0.0.0.0:5688",
+                        ),
+                        prometheus_listener_addr: "0.0.0.0:1250",
+                        meta_address: List(
+                            [
+                                http://0.0.0.0:5690/,
+                            ],
+                        ),
+                        connector_rpc_endpoint: None,
+                        connector_rpc_sink_payload_format: None,
+                        config_path: "",
+                        total_memory_bytes: 24051816857,
+                        parallelism: 10,
+                        role: Both,
+                        metrics_level: None,
+                        data_file_cache_dir: None,
+                        meta_file_cache_dir: None,
+                        async_stack_trace: Some(
+                            ReleaseVerbose,
+                        ),
+                        heap_profiling_dir: None,
+                    },
+                ),
+                frontend_opts: Some(
+                    FrontendOpts {
+                        listen_addr: "0.0.0.0:4566",
+                        advertise_addr: Some(
+                            "0.0.0.0:4566",
+                        ),
+                        port: None,
+                        meta_addr: List(
+                            [
+                                http://0.0.0.0:5690/,
+                            ],
+                        ),
+                        prometheus_listener_addr: "0.0.0.0:1250",
+                        health_check_listener_addr: "0.0.0.0:6786",
+                        config_path: "",
+                        metrics_level: None,
+                        enable_barrier_read: None,
+                    },
+                ),
+                compactor_opts: Some(
+                    CompactorOpts {
+                        listen_addr: "0.0.0.0:6660",
+                        advertise_addr: Some(
+                            "0.0.0.0:6660",
+                        ),
+                        port: None,
+                        prometheus_listener_addr: "0.0.0.0:1250",
+                        meta_address: List(
+                            [
+                                http://0.0.0.0:5690/,
+                            ],
+                        ),
+                        compaction_worker_threads_number: None,
+                        config_path: "",
+                        metrics_level: None,
+                        async_stack_trace: None,
+                        heap_profiling_dir: None,
+                        compactor_mode: None,
+                        proxy_rpc_endpoint: "",
+                    },
+                ),
+            }"#]],
+        );
+    }
 }
