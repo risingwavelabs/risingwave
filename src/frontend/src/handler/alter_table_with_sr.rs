@@ -17,7 +17,6 @@ use std::sync::Arc;
 use anyhow::Context;
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_sqlparser::ast::{ConnectorSchema, ObjectName, Statement};
@@ -25,6 +24,7 @@ use risingwave_sqlparser::parser::Parser;
 
 use super::alter_table_column::{fetch_table_catalog_for_alter, schema_has_schema_registry};
 use super::{HandlerArgs, RwPgResponse};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::alter_source_with_sr::{
     check_format_encode, fetch_source_catalog_with_db_schema_id,
 };
