@@ -6,8 +6,8 @@ fi
 if [ -z "${ARCH}" ]; then
   ARCH=$(uname -m)
 fi
-STATE_STORE_PATH="${HOME}/.risingwave/data/state_store"
-META_STORE_PATH="${HOME}/.risingwave/data/meta_store"
+STATE_STORE_PATH="${HOME}/.risingwave/state_store"
+META_STORE_PATH="${HOME}/.risingwave/meta_store"
 
 VERSION="v1.7.0-single-node-2"
 # TODO(kwannoel): re-enable it once we have stable release in latest for single node mode.
