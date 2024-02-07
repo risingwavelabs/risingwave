@@ -35,6 +35,7 @@ use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
 };
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriterParam};
+use crate::utils::DeserializeFromMap;
 
 pub const REDIS_SINK: &str = "redis";
 pub const KEY_FORMAT: &str = "key_format";
@@ -61,9 +62,8 @@ pub struct RedisConfig {
 
 impl RedisConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
-        let config =
-            serde_json::from_value::<RedisConfig>(serde_json::to_value(properties).unwrap())
-                .map_err(|e| SinkError::Config(anyhow!("{:?}", e)))?;
+        let config = RedisConfig::deserialize_from_map(&properties)
+            .map_err(|e| SinkError::Config(anyhow!("{:?}", e)))?;
         Ok(config)
     }
 }

@@ -38,6 +38,7 @@ use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
 };
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriterParam};
+use crate::utils::DeserializeFromMap;
 
 pub const KINESIS_SINK: &str = "kinesis";
 
@@ -136,9 +137,8 @@ pub struct KinesisSinkConfig {
 
 impl KinesisSinkConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
-        let config =
-            serde_json::from_value::<KinesisSinkConfig>(serde_json::to_value(properties).unwrap())
-                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        let config = KinesisSinkConfig::deserialize_from_map(&properties)
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
         Ok(config)
     }
 }

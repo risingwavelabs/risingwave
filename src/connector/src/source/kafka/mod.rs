@@ -194,6 +194,7 @@ mod test {
     use maplit::hashmap;
 
     use super::*;
+    use crate::utils::DeserializeFromMap;
 
     #[test]
     fn test_parse_config_consumer_common() {
@@ -217,8 +218,7 @@ mod test {
             "broker.rewrite.endpoints".to_string() => "{\"broker1\": \"10.0.0.1:8001\"}".to_string(),
         };
 
-        let props: KafkaProperties =
-            serde_json::from_value(serde_json::to_value(config).unwrap()).unwrap();
+        let props = KafkaProperties::deserialize_from_map(&config).unwrap();
 
         assert_eq!(props.scan_startup_mode, Some("earliest".to_string()));
         assert_eq!(
