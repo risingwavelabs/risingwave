@@ -61,6 +61,10 @@ if [ "${USE_BREW}" -eq 1 ]; then
   echo
   echo "You can run it as:"
   echo "  risingwave"
+  echo
+  echo "In a separate terminal, you can attach a psql client to the standalone server using:"
+  echo "  psql -h localhost -p 4566 -d dev -U root"
+  echo
   exit 0
 fi
 
@@ -73,4 +77,11 @@ chmod +x risingwave
 echo
 echo "Successfully downloaded the RisingWave binary, you can run it as:"
 echo "  ./risingwave"
+echo
+echo "In a separate terminal, you can attach a psql client to the standalone server using:"
+echo "  psql -h localhost -p 4566 -d dev -U root"
+echo
+echo "To start a fresh cluster, you can just delete the data directories:"
+echo "  rm -r ~/.risingwave/state_store"
+echo "  rm -r ~/.risingwave/meta_store"
 echo
