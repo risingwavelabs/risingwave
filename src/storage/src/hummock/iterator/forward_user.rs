@@ -248,9 +248,18 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             if self.full_key_tracker.observe(full_key).is_none() {
                 if let Err((current_epoch, last_epoch)) = self.full_key_tracker.last_check_ret {
                     let debug_info = self.iterator.debug_print();
+                    let max_committed_epoch = match self._version {
+                        Some(v) => {
+                            v.version().max_committed_epoch
+                        },
+                        None => 0,
+                    };
                     panic!(
-                        "key {:?} epoch {:?} >= prev epoch {:?},sst info: {:?}",
-                        full_key.user_key, current_epoch, last_epoch, debug_info
+                        "key {:?} epoch {:?} >= prev epoch {:?}, committed_epoch: {:?}, read epoch: {:?},debug info: {:?}",
+                        full_key.user_key, current_epoch, last_epoch, ,
+                        max_committed_epoch,
+                        self.read_epoch,
+                        debug_info
                     );
                 }
                 self.stats.skip_multi_version_key_count += 1;

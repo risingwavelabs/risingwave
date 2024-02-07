@@ -20,7 +20,6 @@ use futures::FutureExt;
 use risingwave_hummock_sdk::key::FullKey;
 
 use super::Forward;
-use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
 use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatchIterator, SharedBufferVersionedEntry,
