@@ -64,36 +64,43 @@ ALTER TABLE t_user FORMAT PLAIN ENCODE PROTOBUF(
     message = 'test.UserWithMoreFields'
 );
 
+# It's ok to drop columns which are not referenced by downstream tasks
 statement ok
 ALTER TABLE t_user FORMAT PLAIN ENCODE PROTOBUF(
     schema.registry = 'http://message_queue:8081',
     message = 'test.User'
 );
 
+# Reference `city`, whose type will be altered in the next statement
 statement ok
 CREATE MATERIALIZED VIEW t_user_ds_1 AS SELECT t_user.city FROM t_user;
 
+# It's not ok to alter the type of columns which are referenced by downstream tasks
 statement error unable to drop the column due to being referenced by downstream materialized views or sinks
 ALTER TABLE t_user FORMAT PLAIN ENCODE PROTOBUF(
     schema.registry = 'http://message_queue:8081',
     message = 'test.UserWithNewType'
 );
 
+# It's always ok to add more columns
 statement ok
 ALTER TABLE t_user FORMAT PLAIN ENCODE PROTOBUF(
     schema.registry = 'http://message_queue:8081',
     message = 'test.UserWithMoreFields'
 );
 
+# Reference `age`, a new added column
 statement ok
 CREATE MATERIALIZED VIEW t_user_ds_2 AS SELECT t_user.age FROM t_user;
 
+# It's not ok to drop columns which are referenced by downstream tasks
 statement error unable to drop the column due to being referenced by downstream materialized views or sinks
 ALTER TABLE t_user FORMAT PLAIN ENCODE PROTOBUF(
     schema.registry = 'http://message_queue:8081',
     message = 'test.User'
 );
 
+# Push more events with extended fields
 system ok
 python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test" 5 user_with_more_fields
 
