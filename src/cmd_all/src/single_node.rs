@@ -342,15 +342,15 @@ pub async fn single_node(
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
     if let Some(opts) = compute_opts {
-        tracing::info!("starting compute-node thread with cli args: {:?}", opts);
+        tracing::info!(?opts, "starting compute-node service");
         let _compute_handle = tokio::spawn(async move { risingwave_compute::start(opts).await });
     }
     if let Some(opts) = frontend_opts {
-        tracing::info!("starting frontend-node thread with cli args: {:?}", opts);
+        tracing::info!(?opts, "starting frontend-node service");
         let _frontend_handle = tokio::spawn(async move { risingwave_frontend::start(opts).await });
     }
     if let Some(opts) = compactor_opts {
-        tracing::info!("starting compactor-node thread with cli args: {:?}", opts);
+        tracing::info!(?opts, "starting compactor-node service");
         let _compactor_handle =
             tokio::spawn(async move { risingwave_compactor::start(opts).await });
     }
