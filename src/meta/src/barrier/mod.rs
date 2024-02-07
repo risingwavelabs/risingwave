@@ -401,8 +401,7 @@ impl GlobalBarrierManager {
         );
         let checkpoint_control = CheckpointControl::new(metrics.clone());
 
-        let active_streaming_nodes =
-            ActiveStreamingWorkerNodes::uninitialized(metadata_manager.clone());
+        let active_streaming_nodes = ActiveStreamingWorkerNodes::uninitialized();
 
         let tracker = CreateMviewProgressTracker::new();
 
@@ -608,7 +607,8 @@ impl GlobalBarrierManager {
 
                     info!(?changed_worker, "worker changed");
 
-                    // TODO: may apply the changed worker to state
+                    self.state
+                        .resolve_worker_nodes(self.active_streaming_nodes.current().values().cloned());
                 }
 
                 // Checkpoint frequency changes.
@@ -661,8 +661,6 @@ impl GlobalBarrierManager {
             span,
         } = self.scheduled_barriers.pop_or_default().await;
 
-        self.state
-            .resolve_worker_nodes(self.active_streaming_nodes.current().values().cloned());
         let info = self.state.apply_command(&command);
 
         let (prev_epoch, curr_epoch) = self.state.next_epoch_pair();

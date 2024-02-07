@@ -65,13 +65,11 @@ pub(crate) enum ActiveStreamingWorkerChange {
 pub struct ActiveStreamingWorkerNodes {
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     rx: UnboundedReceiver<LocalNotification>,
-    _meta_manager: MetadataManager,
 }
 
 impl ActiveStreamingWorkerNodes {
-    pub(crate) fn uninitialized(meta_manager: MetadataManager) -> Self {
+    pub(crate) fn uninitialized() -> Self {
         Self {
-            _meta_manager: meta_manager,
             worker_nodes: Default::default(),
             rx: unbounded_channel().1,
         }
@@ -85,7 +83,6 @@ impl ActiveStreamingWorkerNodes {
         Ok(Self {
             worker_nodes: nodes.into_iter().map(|node| (node.id, node)).collect(),
             rx,
-            _meta_manager: meta_manager,
         })
     }
 
