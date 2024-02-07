@@ -632,6 +632,7 @@ impl GlobalBarrierManagerContext {
     }
 
     async fn scale_actors(&self, all_nodes: Vec<WorkerNode>) -> MetaResult<()> {
+        let _guard = self.scale_controller.reschedule_lock.write().await;
         match &self.metadata_manager {
             MetadataManager::V1(_) => self.scale_actors_v1(all_nodes).await,
             MetadataManager::V2(_) => self.scale_actors_v2(all_nodes).await,
