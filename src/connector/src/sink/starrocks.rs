@@ -127,7 +127,7 @@ impl StarrocksSink {
         starrocks_columns_desc: HashMap<String, String>,
     ) -> Result<()> {
         let rw_fields_name = self.schema.fields();
-        if rw_fields_name.len().gt(&starrocks_columns_desc.len()) {
+        if rw_fields_name.len() > starrocks_columns_desc.len() {
             return Err(SinkError::Starrocks("The length of the RisingWave column must be equal or less to the length of the starrocks column".to_string()));
         }
 
