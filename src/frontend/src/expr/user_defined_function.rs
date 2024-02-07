@@ -35,7 +35,7 @@ impl UserDefinedFunction {
     pub(super) fn from_expr_proto(
         udf: &risingwave_pb::expr::UserDefinedFunction,
         return_type: DataType,
-    ) -> risingwave_common::error::Result<Self> {
+    ) -> crate::error::Result<Self> {
         let args: Vec<_> = udf
             .get_children()
             .iter()

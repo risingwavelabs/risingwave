@@ -15,7 +15,6 @@
 use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::TableOption;
-use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
@@ -86,7 +85,7 @@ impl TtlReclaimCompactionPicker {
         for table_id in table_id_in_sst {
             match self.table_id_to_ttl.get(&table_id) {
                 Some(ttl_second_u32) => {
-                    assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_RETENTION_SECOND);
+                    assert!(*ttl_second_u32 > 0);
                     // default to zero.
                     let ttl_mill = *ttl_second_u32 as u64 * 1000;
                     let min_epoch = expire_epoch.subtract_ms(ttl_mill);

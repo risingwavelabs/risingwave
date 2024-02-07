@@ -62,7 +62,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let common_props = &properties.common;
 
         let broker_address = common_props.brokers.clone();
-        let broker_rewrite_map = common_props.broker_rewrite_map.clone();
+        let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
         let topic = common_props.topic.clone();
         config.set("bootstrap.servers", &broker_address);
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);

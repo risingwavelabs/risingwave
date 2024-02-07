@@ -17,10 +17,13 @@ use std::ops::Range;
 
 use educe::Educe;
 use risingwave_common::array::Op;
+use risingwave_common::types::Sentinelled;
+use risingwave_common::util::memcmp_encoding;
 
 use super::range_utils::range_except;
+use super::StateKey;
 use crate::window_function::state::range_utils::range_diff;
-use crate::window_function::{FrameExclusion, RowsFrameBounds};
+use crate::window_function::{FrameExclusion, RangeFrameBounds, RowsFrameBounds};
 
 /// A common sliding window buffer.
 pub(super) struct WindowBuffer<W: WindowImpl> {
@@ -329,6 +332,106 @@ impl<K: Ord, V: Clone> WindowImpl for RowsWindow<K, V> {
         } else {
             // unbounded end
             *buffer_ref.right_excl_idx = buffer_ref.buffer.len();
+        }
+    }
+}
+
+/// The sliding window implementation for `RANGE` frames.
+pub(super) struct RangeWindow<V: Clone> {
+    frame_bounds: RangeFrameBounds,
+    _phantom: std::marker::PhantomData<V>,
+}
+
+impl<V: Clone> RangeWindow<V> {
+    pub fn new(frame_bounds: RangeFrameBounds) -> Self {
+        Self {
+            frame_bounds,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<V: Clone> WindowImpl for RangeWindow<V> {
+    type Key = StateKey;
+    type Value = V;
+
+    fn preceding_saturated(&self, buffer_ref: BufferRef<'_, Self::Key, Self::Value>) -> bool {
+        buffer_ref.curr_idx < buffer_ref.buffer.len() && {
+            // XXX(rc): It seems that preceding saturation is not important, may remove later.
+            true
+        }
+    }
+
+    fn following_saturated(&self, buffer_ref: BufferRef<'_, Self::Key, Self::Value>) -> bool {
+        buffer_ref.curr_idx < buffer_ref.buffer.len()
+            && {
+                // Left OK? (note that `left_idx` can be greater than `right_idx`)
+                // The following line checks whether the left value is the last one in the buffer.
+                // Here we adopt a conservative approach, which means we assume the next future value
+                // is likely to be the same as the last value in the current window, in which case
+                // we can't say the current window is saturated.
+                buffer_ref.left_idx < buffer_ref.buffer.len() /* non-zero */ - 1
+            }
+            && {
+                // Right OK? Ditto.
+                buffer_ref.right_excl_idx < buffer_ref.buffer.len()
+            }
+    }
+
+    fn recalculate_left_right(&self, buffer_ref: BufferRefMut<'_, Self::Key, Self::Value>) {
+        if buffer_ref.buffer.is_empty() {
+            *buffer_ref.left_idx = 0;
+            *buffer_ref.right_excl_idx = 0;
+        }
+
+        let Some(entry) = buffer_ref.buffer.get(*buffer_ref.curr_idx) else {
+            // If the current index has been moved to a future position, we can't touch anything
+            // because the next coming key may equal to the previous one which means the left and
+            // right indices will be the same.
+            return;
+        };
+        let curr_key = &entry.key;
+
+        let curr_order_value = memcmp_encoding::decode_value(
+            &self.frame_bounds.order_data_type,
+            &curr_key.order_key,
+            self.frame_bounds.order_type,
+        )
+        .expect("no reason to fail here because we just encoded it in memory");
+
+        match self.frame_bounds.frame_start_of(&curr_order_value) {
+            Sentinelled::Smallest => {
+                // unbounded frame start
+                assert_eq!(
+                    *buffer_ref.left_idx, 0,
+                    "for unbounded start, left index should always be 0"
+                );
+            }
+            Sentinelled::Normal(value) => {
+                // bounded, find the start position
+                let value_enc = memcmp_encoding::encode_value(value, self.frame_bounds.order_type)
+                    .expect("no reason to fail here");
+                *buffer_ref.left_idx = buffer_ref
+                    .buffer
+                    .partition_point(|elem| elem.key.order_key < value_enc);
+            }
+            Sentinelled::Largest => unreachable!("frame start never be UNBOUNDED FOLLOWING"),
+        }
+
+        match self.frame_bounds.frame_end_of(curr_order_value) {
+            Sentinelled::Largest => {
+                // unbounded frame end
+                *buffer_ref.right_excl_idx = buffer_ref.buffer.len();
+            }
+            Sentinelled::Normal(value) => {
+                // bounded, find the end position
+                let value_enc = memcmp_encoding::encode_value(value, self.frame_bounds.order_type)
+                    .expect("no reason to fail here");
+                *buffer_ref.right_excl_idx = buffer_ref
+                    .buffer
+                    .partition_point(|elem| elem.key.order_key <= value_enc);
+            }
+            Sentinelled::Smallest => unreachable!("frame end never be UNBOUNDED PRECEDING"),
         }
     }
 }

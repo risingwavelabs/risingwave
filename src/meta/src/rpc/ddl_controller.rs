@@ -74,8 +74,8 @@ use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
     validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
-    CreateStreamingJobContext, GlobalStreamManagerRef, ReplaceTableContext, SourceManagerRef,
-    StreamFragmentGraph,
+    CreateStreamingJobContext, CreateStreamingJobOption, GlobalStreamManagerRef,
+    ReplaceTableContext, SourceManagerRef, StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -654,7 +654,7 @@ impl DdlController {
             .acquire()
             .await
             .unwrap();
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
         let stream_ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
 
@@ -1154,7 +1154,7 @@ impl DdlController {
         target_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<NotificationVersion> {
         let mgr = self.metadata_manager.as_v1_ref();
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
         let (mut version, streaming_job_ids) = match job_id {
             StreamingJobId::MaterializedView(table_id) => {
                 mgr.catalog_manager
@@ -1414,12 +1414,15 @@ impl DdlController {
             internal_tables,
             building_locations,
             existing_locations,
-            table_properties: stream_job.properties(),
             definition: stream_job.definition(),
             mv_table_id: stream_job.mv_table(),
             create_type: stream_job.create_type(),
             ddl_type: stream_job.into(),
             replace_table_job_info,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/14793
+            option: CreateStreamingJobOption {
+                new_independent_compaction_group: false,
+            },
         };
 
         // 4. Mark tables as creating, including internal tables and the table of the stream job.
@@ -1644,7 +1647,7 @@ impl DdlController {
                 .replace_table_v2(stream_job, fragment_graph, table_col_index_mapping)
                 .await;
         };
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
         let stream_ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
 
         let fragment_graph = self
@@ -1823,7 +1826,6 @@ impl DdlController {
             dispatchers,
             building_locations,
             existing_locations,
-            table_properties: stream_job.properties(),
         };
 
         Ok((ctx, table_fragments))

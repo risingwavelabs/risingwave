@@ -14,12 +14,12 @@
 
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
 use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_expr::window_function::{Frame, WindowFuncKind};
 
 use super::{Expr, ExprImpl, OrderBy, RwResult};
+use crate::error::{ErrorCode, RwError};
 
 /// A window function performs a calculation across a set of table rows that are somehow related to
 /// the current row, according to the window spec `OVER (PARTITION BY .. ORDER BY ..)`.

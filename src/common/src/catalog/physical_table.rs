@@ -22,8 +22,6 @@ use risingwave_pb::common::PbColumnOrder;
 use risingwave_pb::plan_common::StorageTableDesc;
 
 use super::{ColumnDesc, ColumnId, TableId};
-use crate::catalog::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
-use crate::catalog::TableOption;
 use crate::util::sort_util::ColumnOrder;
 
 /// Includes necessary information for compute node to access data of the table.
@@ -49,7 +47,8 @@ pub struct TableDesc {
     /// Whether the table source is append-only
     pub append_only: bool,
 
-    pub retention_seconds: u32,
+    // TTL of the record in the table, to ensure the consistency with other tables in the streaming plan, it only applies to append-only tables.
+    pub retention_seconds: Option<u32>,
 
     pub value_indices: Vec<usize>,
 
@@ -143,7 +142,6 @@ impl TableDesc {
     }
 
     pub fn from_pb_table(table: &Table) -> Self {
-        let table_options = TableOption::build_table_option(&table.properties);
         Self {
             table_id: TableId::new(table.id),
             pk: table.pk.iter().map(ColumnOrder::from_protobuf).collect(),
@@ -156,9 +154,7 @@ impl TableDesc {
             stream_key: table.stream_key.iter().map(|i| *i as _).collect(),
             vnode_col_index: table.vnode_col_index.map(|i| i as _),
             append_only: table.append_only,
-            retention_seconds: table_options
-                .retention_seconds
-                .unwrap_or(TABLE_OPTION_DUMMY_RETENTION_SECOND),
+            retention_seconds: table.retention_seconds,
             value_indices: table.value_indices.iter().map(|i| *i as _).collect(),
             read_prefix_len_hint: table.read_prefix_len_hint as _,
             watermark_columns: table.watermark_indices.iter().map(|i| *i as _).collect(),

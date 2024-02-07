@@ -22,7 +22,6 @@ use chrono::Datelike;
 use itertools::Itertools;
 use num_bigint::{BigInt, Sign};
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::error::Result as RwResult;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{
     DataType, Date, Datum, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
@@ -334,7 +333,7 @@ pub(crate) fn avro_decimal_to_rust_decimal(
     avro_decimal: AvroDecimal,
     _precision: usize,
     scale: usize,
-) -> RwResult<rust_decimal::Decimal> {
+) -> AccessResult<rust_decimal::Decimal> {
     let negative = !avro_decimal.is_positive();
     let bytes = avro_decimal.to_vec_unsigned();
 
@@ -430,7 +429,6 @@ pub(crate) fn unix_epoch_days() -> i32 {
 #[cfg(test)]
 mod tests {
     use apache_avro::Decimal as AvroDecimal;
-    use risingwave_common::error::{ErrorCode, RwError};
     use risingwave_common::types::{Decimal, Timestamptz};
 
     use super::*;
@@ -483,13 +481,13 @@ mod tests {
         value: Value,
         value_schema: &Schema,
         shape: &DataType,
-    ) -> RwResult<Datum> {
+    ) -> anyhow::Result<Datum> {
         AvroParseOptions {
             schema: Some(value_schema),
             relax_numeric: true,
         }
         .parse(&value, Some(shape))
-        .map_err(|err| RwError::from(ErrorCode::InternalError(format!("{:?}", err))))
+        .map_err(Into::into)
     }
 
     #[test]
