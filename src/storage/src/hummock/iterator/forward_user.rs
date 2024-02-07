@@ -249,14 +249,12 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                 if let Err((current_epoch, last_epoch)) = self.full_key_tracker.last_check_ret {
                     let debug_info = self.iterator.debug_print();
                     let max_committed_epoch = match self._version {
-                        Some(v) => {
-                            v.version().max_committed_epoch
-                        },
+                        Some(v) => v.version().max_committed_epoch,
                         None => 0,
                     };
                     panic!(
                         "key {:?} epoch {:?} >= prev epoch {:?}, committed_epoch: {:?}, read epoch: {:?},debug info: {:?}",
-                        full_key.user_key, current_epoch, last_epoch, ,
+                        full_key.user_key, current_epoch, last_epoch,
                         max_committed_epoch,
                         self.read_epoch,
                         debug_info

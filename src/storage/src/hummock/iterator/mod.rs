@@ -306,7 +306,7 @@ impl<I: HummockIterator> HummockIterator for Box<I> {
     }
 
     fn debug_print(&self) -> String {
-        (*self).deref().debug_print();
+        (*self).deref().debug_print()
     }
 }
 
