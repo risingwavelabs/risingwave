@@ -28,7 +28,6 @@ use futures::stream::{self, StreamExt};
 use futures::{future, Future, FutureExt};
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
-use risingwave_common::error::RwError;
 use tokio::join;
 use tokio::sync::RwLock;
 use tracing::debug;
@@ -233,7 +232,7 @@ async fn multi_part_upload(
             let part_t = Instant::now();
             let result = a.send().await.unwrap();
             let part_ttl = part_t.elapsed();
-            Ok::<_, RwError>((result, part_ttl))
+            Ok::<_, anyhow::Error>((result, part_ttl))
         })
         .collect_vec();
     let ttfb = t.elapsed();
@@ -318,7 +317,7 @@ async fn multi_part_get(
         .into_iter()
         .map(create_part_get)
         .map(|resp| async move {
-            let result: Result<(usize, Duration), RwError> = Ok((
+            let result: anyhow::Result<(usize, Duration)> = Ok((
                 resp.await
                     .unwrap()
                     .body
@@ -381,7 +380,7 @@ async fn run_case(
     cfg: Arc<Config>,
     client: Arc<Client>,
     objs: Arc<RwLock<ObjPool>>,
-) -> Result<(), RwError> {
+) -> anyhow::Result<()> {
     let (name, analysis) = match case.clone() {
         Case::Put {
             name,

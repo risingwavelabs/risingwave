@@ -103,7 +103,6 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
                 metrics: self.metrics.source_enumerator_metrics.clone(),
                 info: SourceEnumeratorInfo {
                     source_id: self.source_id,
-                    source: None,
                 },
                 connector_client: self.connector_client.clone(),
             }),
@@ -132,7 +131,6 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
                 metrics: metrics.source_enumerator_metrics.clone(),
                 info: SourceEnumeratorInfo {
                     source_id: source.id,
-                    source: Some(source.clone()),
                 },
                 connector_client: connector_client.clone(),
             }),

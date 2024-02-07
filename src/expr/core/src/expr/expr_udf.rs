@@ -194,7 +194,7 @@ impl Build for UserDefinedFunction {
 
         let identifier = udf.get_identifier()?;
         let imp = match udf.language.as_str() {
-            "wasm" => {
+            "wasm" | "rust" => {
                 let link = udf.get_link()?;
                 // Use `block_in_place` as an escape hatch to run async code here in sync context.
                 // Calling `block_on` directly will panic.

@@ -51,12 +51,6 @@ pub enum WireFormatError {
     NoSchemaId,
 }
 
-impl From<WireFormatError> for risingwave_common::error::RwError {
-    fn from(value: WireFormatError) -> Self {
-        anyhow::anyhow!(value).into()
-    }
-}
-
 /// extract the magic number and `schema_id` at the front of payload
 ///
 /// 0 -> magic number

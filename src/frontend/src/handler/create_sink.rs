@@ -23,7 +23,6 @@ use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_common::{bail, catalog};
@@ -49,6 +48,7 @@ use super::create_source::UPSTREAM_SOURCE_KEY;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
@@ -693,7 +693,7 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         F::Plain => SinkFormat::AppendOnly,
         F::Upsert => SinkFormat::Upsert,
         F::Debezium => SinkFormat::Debezium,
-        f @ (F::Native | F::DebeziumMongo | F::Maxwell | F::Canal) => {
+        f @ (F::Native | F::DebeziumMongo | F::Maxwell | F::Canal | F::None) => {
             return Err(ErrorCode::BindError(format!("sink format unsupported: {f}")).into());
         }
     };
@@ -702,7 +702,7 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         E::Protobuf => SinkEncode::Protobuf,
         E::Avro => SinkEncode::Avro,
         E::Template => SinkEncode::Template,
-        e @ (E::Native | E::Csv | E::Bytes) => {
+        e @ (E::Native | E::Csv | E::Bytes | E::None) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into());
         }
     };

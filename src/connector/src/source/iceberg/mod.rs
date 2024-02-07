@@ -17,10 +17,8 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
-use simd_json::prelude::ArrayTrait;
 
 use crate::parser::ParserConfig;
 use crate::sink::iceberg::IcebergConfig;
@@ -40,9 +38,9 @@ pub struct IcebergProperties {
     #[serde(rename = "s3.endpoint", default)]
     pub endpoint: String,
     #[serde(rename = "s3.access.key", default)]
-    pub access: String,
+    pub s3_access: String,
     #[serde(rename = "s3.secret.key", default)]
-    pub secret: String,
+    pub s3_secret: String,
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: String,
     #[serde(rename = "database.name")]
@@ -62,8 +60,8 @@ impl IcebergProperties {
             catalog_type: Some(self.catalog_type.clone()),
             path: self.warehouse_path.clone(),
             endpoint: Some(self.endpoint.clone()),
-            access_key: self.access.clone(),
-            secret_key: self.secret.clone(),
+            access_key: self.s3_access.clone(),
+            secret_key: self.s3_secret.clone(),
             region: Some(self.region_name.clone()),
             ..Default::default()
         }
@@ -121,55 +119,9 @@ impl SplitEnumerator for IcebergSplitEnumerator {
 
     async fn new(
         properties: Self::Properties,
-        context: SourceEnumeratorContextRef,
+        _context: SourceEnumeratorContextRef,
     ) -> anyhow::Result<Self> {
         let iceberg_config = properties.to_iceberg_config();
-        // check if the source schema matches the iceberg table schema
-        match &context.info.source {
-            Some(source) => {
-                let columns: Vec<ColumnCatalog> = source
-                    .columns
-                    .iter()
-                    .cloned()
-                    .map(ColumnCatalog::from)
-                    .collect_vec();
-
-                let schema = Schema {
-                    fields: columns
-                        .iter()
-                        .map(|c| Field::from(&c.column_desc))
-                        .collect(),
-                };
-
-                let table = iceberg_config.load_table().await?;
-
-                let iceberg_schema: arrow_schema::Schema = table
-                    .current_table_metadata()
-                    .current_schema()?
-                    .clone()
-                    .try_into()?;
-
-                for f1 in schema.fields() {
-                    if !iceberg_schema.fields.iter().any(|f2| f2.name() == &f1.name) {
-                        return Err(anyhow::anyhow!(format!(
-                            "Column {} not found in iceberg table",
-                            f1.name
-                        )));
-                    }
-                }
-
-                let new_iceberg_field = iceberg_schema
-                    .fields
-                    .iter()
-                    .filter(|f1| schema.fields.iter().any(|f2| f1.name() == &f2.name))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let new_iceberg_schema = arrow_schema::Schema::new(new_iceberg_field);
-
-                crate::sink::iceberg::try_matches_arrow_schema(&schema, &new_iceberg_schema)?;
-            }
-            None => {}
-        }
         Ok(Self {
             config: iceberg_config,
         })

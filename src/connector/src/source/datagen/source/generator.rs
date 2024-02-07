@@ -13,11 +13,9 @@
 // limitations under the License.
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::Result;
 use futures_async_stream::try_stream;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::error::RwError;
 use risingwave_common::field_generator::FieldGeneratorImpl;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -61,7 +59,7 @@ impl DatagenEventGenerator {
         split_id: SplitId,
         split_num: u64,
         split_index: u64,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         let partition_rows_per_second = if rows_per_second % split_num > split_index {
             rows_per_second / split_num + 1
         } else {
@@ -158,7 +156,7 @@ impl DatagenEventGenerator {
         }
     }
 
-    #[try_stream(ok = StreamChunk, error = RwError)]
+    #[try_stream(ok = StreamChunk, error = anyhow::Error)]
     pub async fn into_native_stream(mut self) {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         const MAX_ROWS_PER_YIELD: u64 = 1024;

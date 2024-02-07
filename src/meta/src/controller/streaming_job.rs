@@ -38,7 +38,7 @@ use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableVersion
 use risingwave_pb::catalog::{PbCreateType, PbTable};
 use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
-    Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
+    Info as NotificationInfo, Operation as NotificationOperation, Operation,
 };
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::{
@@ -298,21 +298,15 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        // Add fragments, actors and actor dispatchers.
-        for (fragment, actors, actor_dispatchers) in fragment_actors {
+        // Add fragments.
+        let (fragments, actor_with_dispatchers): (Vec<_>, Vec<_>) = fragment_actors
+            .into_iter()
+            .map(|(fragment, actors, actor_dispatchers)| (fragment, (actors, actor_dispatchers)))
+            .unzip();
+        for fragment in fragments {
             let fragment = fragment.into_active_model();
             let fragment = fragment.insert(&txn).await?;
-            for actor in actors {
-                let actor = actor.into_active_model();
-                actor.insert(&txn).await?;
-            }
-            for (_, actor_dispatchers) in actor_dispatchers {
-                for actor_dispatcher in actor_dispatchers {
-                    let mut actor_dispatcher = actor_dispatcher.into_active_model();
-                    actor_dispatcher.id = NotSet;
-                    actor_dispatcher.insert(&txn).await?;
-                }
-            }
+
             // Update fragment id for all state tables.
             if !for_replace {
                 for state_table_id in fragment.state_table_ids.into_inner() {
@@ -323,6 +317,21 @@ impl CatalogController {
                     }
                     .update(&txn)
                     .await?;
+                }
+            }
+        }
+
+        // Add actors and actor dispatchers.
+        for (actors, actor_dispatchers) in actor_with_dispatchers {
+            for actor in actors {
+                let actor = actor.into_active_model();
+                actor.insert(&txn).await?;
+            }
+            for (_, actor_dispatchers) in actor_dispatchers {
+                for actor_dispatcher in actor_dispatchers {
+                    let mut actor_dispatcher = actor_dispatcher.into_active_model();
+                    actor_dispatcher.id = NotSet;
+                    actor_dispatcher.insert(&txn).await?;
                 }
             }
         }
@@ -543,7 +552,7 @@ impl CatalogController {
 
         let table = table::ActiveModel::from(table).update(&txn).await?;
 
-        let old_fragment_mappings = get_fragment_mappings(&txn, job_id).await?;
+        // let old_fragment_mappings = get_fragment_mappings(&txn, job_id).await?;
         // 1. replace old fragments/actors with new ones.
         Fragment::delete_many()
             .filter(fragment::Column::JobId.eq(job_id))
@@ -701,8 +710,11 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        self.notify_fragment_mapping(NotificationOperation::Delete, old_fragment_mappings)
-            .await;
+        // FIXME: Do not notify frontend currently, because frontend nodes might refer to old table
+        // catalog and need to access the old fragment. Let frontend nodes delete the old fragment
+        // when they receive table catalog change.
+        // self.notify_fragment_mapping(NotificationOperation::Delete, old_fragment_mappings)
+        //     .await;
         self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
             .await;
         let version = self
@@ -1200,13 +1212,8 @@ impl CatalogController {
         }
 
         txn.commit().await?;
-
-        for mapping in fragment_mapping_to_notify {
-            self.env
-                .notification_manager()
-                .notify_frontend(Operation::Update, Info::ParallelUnitMapping(mapping))
-                .await;
-        }
+        self.notify_fragment_mapping(Operation::Update, fragment_mapping_to_notify)
+            .await;
 
         Ok(())
     }

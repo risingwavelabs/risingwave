@@ -94,6 +94,7 @@ pub struct CreateSourceStatement {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Format {
     Native,
+    None,          // Keyword::NONE
     Debezium,      // Keyword::DEBEZIUM
     DebeziumMongo, // Keyword::DEBEZIUM_MONGO
     Maxwell,       // Keyword::MAXWELL
@@ -116,6 +117,7 @@ impl fmt::Display for Format {
                 Format::Canal => "CANAL",
                 Format::Upsert => "UPSERT",
                 Format::Plain => "PLAIN",
+                Format::None => "NONE",
             }
         )
     }
@@ -149,6 +151,7 @@ pub enum Encode {
     Protobuf, // Keyword::PROTOBUF
     Json,     // Keyword::JSON
     Bytes,    // Keyword::BYTES
+    None,     // Keyword::None
     Native,
     Template,
 }
@@ -167,6 +170,7 @@ impl fmt::Display for Encode {
                 Encode::Bytes => "BYTES",
                 Encode::Native => "NATIVE",
                 Encode::Template => "TEMPLATE",
+                Encode::None => "NONE",
             }
         )
     }
@@ -250,7 +254,7 @@ impl Parser {
                 ConnectorSchema::native().into()
             })
         } else if connector.contains("iceberg") {
-            let expected = ConnectorSchema::native();
+            let expected = ConnectorSchema::none();
             if self.peek_source_schema_format() {
                 let schema = parse_source_schema(self)?.into_v2();
                 if schema != expected {
@@ -312,6 +316,16 @@ impl ConnectorSchema {
         ConnectorSchema {
             format: Format::Native,
             row_encode: Encode::Native,
+            row_options: Vec::new(),
+        }
+    }
+
+    /// Create a new source schema with `None` format and encoding.
+    /// Used for self-explanatory source like iceberg.
+    pub const fn none() -> Self {
+        ConnectorSchema {
+            format: Format::None,
+            row_encode: Encode::None,
             row_options: Vec::new(),
         }
     }
