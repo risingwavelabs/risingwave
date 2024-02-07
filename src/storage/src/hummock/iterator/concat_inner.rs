@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Greater, Less};
-use std::ops::Add;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;

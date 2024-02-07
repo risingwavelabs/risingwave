@@ -14,7 +14,7 @@
 
 use std::collections::binary_heap::PeekMut;
 use std::collections::{BinaryHeap, LinkedList};
-use std::ops::{Add, Deref, DerefMut};
+use std::ops::{Deref, DerefMut};
 
 use futures::FutureExt;
 use risingwave_hummock_sdk::key::FullKey;
