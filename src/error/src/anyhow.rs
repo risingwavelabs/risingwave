@@ -51,6 +51,13 @@ macro_rules! def_anyhow_newtype {
     ($(#[$attr:meta])* $vis:vis $name:ident $(;)?) => {
         $(#[$attr])* $vis struct $name(::anyhow::Error);
 
+        impl $name {
+            /// Unwrap the newtype to get the inner [`anyhow::Error`].
+            pub fn into_inner(self) -> ::anyhow::Error {
+                self.0
+            }
+        }
+
         impl std::ops::Deref for $name {
             type Target = ::anyhow::Error;
 
@@ -83,6 +90,33 @@ macro_rules! def_anyhow_newtype {
         impl From<$name> for Box<dyn std::error::Error + Send + Sync + 'static> {
             fn from(value: $name) -> Self {
                 value.0.into()
+            }
+        }
+
+        paste::paste! {
+            /// Provides the `context` method for `Result` of [`ConnectorError`].
+            ///
+            /// This trait is the supplement of the [`anyhow::Context`] trait as it cannot be
+            /// implemented for types outside of the crate.
+            #[easy_ext::ext([< $name Context >])]
+            $vis impl<T> Result<T, ConnectorError> {
+                /// Wrap the error value with additional context.
+                fn context<C>(self, context: C) -> Result<T, ::anyhow::Error>
+                where
+                    C: std::fmt::Display + Send + Sync + 'static,
+                {
+                    ::anyhow::Context::context(self.map_err(|error| error.0), context)
+                }
+
+                /// Wrap the error value with additional context that is evaluated lazily
+                /// only once an error does occur.
+                fn with_context<C, F>(self, context: F) -> Result<T, ::anyhow::Error>
+                where
+                    C: std::fmt::Display + Send + Sync + 'static,
+                    F: FnOnce() -> C,
+                {
+                    ::anyhow::Context::with_context(self.map_err(|error| error.0), context)
+                }
             }
         }
     };
