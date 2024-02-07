@@ -393,137 +393,142 @@ mod test {
         check(
             &actual,
             expect![[r#"
-            SingleNodeOpts {
-                prometheus_listener_addr: None,
-                config_path: None,
-                store_directory: None,
-                meta_addr: None,
-                compute_addr: None,
-                frontend_addr: None,
-                compactor_addr: None,
-                meta_extra_opts: Some(
-                    "--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\"",
-                ),
-            }"#]],
+                SingleNodeOpts {
+                    prometheus_listener_addr: None,
+                    config_path: None,
+                    store_directory: None,
+                    meta_addr: None,
+                    compute_addr: None,
+                    frontend_addr: None,
+                    compactor_addr: None,
+                    meta_extra_opts: Some(
+                        "--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\"",
+                    ),
+                    compute_extra_opts: Some(
+                        "--listen-addr 127.0.0.1:8888 --total-memory-bytes 123 --parallelism 10",
+                    ),
+                    frontend_extra_opts: None,
+                    compactor_extra_opts: None,
+                }"#]],
         );
         let actual_parsed = parse_single_node_opts(&actual).unwrap();
         check(
             actual_parsed,
             expect![[r#"
-            ParsedSingleNodeOpts {
-                meta_opts: Some(
-                    MetaNodeOpts {
-                        vpc_id: None,
-                        security_group_id: None,
-                        listen_addr: "127.0.0.1:5690",
-                        advertise_addr: "127.0.0.1:9999",
-                        dashboard_host: Some(
-                            "0.0.0.0:5691",
-                        ),
-                        prometheus_listener_addr: Some(
-                            "0.0.0.0:1250",
-                        ),
-                        etcd_endpoints: "",
-                        etcd_auth: false,
-                        etcd_username: "",
-                        etcd_password: [REDACTED alloc::string::String],
-                        sql_endpoint: Some(
-                            "sqlite:///Users/noelkwan/.risingwave/meta_store/single_node.db?mode=rwc",
-                        ),
-                        dashboard_ui_path: None,
-                        prometheus_endpoint: None,
-                        prometheus_selector: None,
-                        connector_rpc_endpoint: None,
-                        privatelink_endpoint_default_tags: None,
-                        config_path: "",
-                        backend: Some(
-                            Sql,
-                        ),
-                        barrier_interval_ms: None,
-                        sstable_size_mb: None,
-                        block_size_kb: None,
-                        bloom_false_positive: None,
-                        state_store: Some(
-                            "hummock+fs:///Users/noelkwan/.risingwave/state_store",
-                        ),
-                        data_directory: Some(
-                            "some path with spaces",
-                        ),
-                        do_not_config_object_storage_lifecycle: None,
-                        backup_storage_url: None,
-                        backup_storage_directory: None,
-                        heap_profiling_dir: None,
-                    },
-                ),
-                compute_opts: Some(
-                    ComputeNodeOpts {
-                        listen_addr: "0.0.0.0:5688",
-                        advertise_addr: Some(
-                            "0.0.0.0:5688",
-                        ),
-                        prometheus_listener_addr: "0.0.0.0:1250",
-                        meta_address: List(
-                            [
-                                http://0.0.0.0:5690/,
-                            ],
-                        ),
-                        connector_rpc_endpoint: None,
-                        connector_rpc_sink_payload_format: None,
-                        config_path: "",
-                        total_memory_bytes: 24051816857,
-                        parallelism: 10,
-                        role: Both,
-                        metrics_level: None,
-                        data_file_cache_dir: None,
-                        meta_file_cache_dir: None,
-                        async_stack_trace: Some(
-                            ReleaseVerbose,
-                        ),
-                        heap_profiling_dir: None,
-                    },
-                ),
-                frontend_opts: Some(
-                    FrontendOpts {
-                        listen_addr: "0.0.0.0:4566",
-                        advertise_addr: Some(
-                            "0.0.0.0:4566",
-                        ),
-                        port: None,
-                        meta_addr: List(
-                            [
-                                http://0.0.0.0:5690/,
-                            ],
-                        ),
-                        prometheus_listener_addr: "0.0.0.0:1250",
-                        health_check_listener_addr: "0.0.0.0:6786",
-                        config_path: "",
-                        metrics_level: None,
-                        enable_barrier_read: None,
-                    },
-                ),
-                compactor_opts: Some(
-                    CompactorOpts {
-                        listen_addr: "0.0.0.0:6660",
-                        advertise_addr: Some(
-                            "0.0.0.0:6660",
-                        ),
-                        port: None,
-                        prometheus_listener_addr: "0.0.0.0:1250",
-                        meta_address: List(
-                            [
-                                http://0.0.0.0:5690/,
-                            ],
-                        ),
-                        compaction_worker_threads_number: None,
-                        config_path: "",
-                        metrics_level: None,
-                        async_stack_trace: None,
-                        heap_profiling_dir: None,
-                        compactor_mode: None,
-                        proxy_rpc_endpoint: "",
-                    },
-                ),
-            }"#]],
+                ParsedSingleNodeOpts {
+                    meta_opts: Some(
+                        MetaNodeOpts {
+                            vpc_id: None,
+                            security_group_id: None,
+                            listen_addr: "127.0.0.1:5690",
+                            advertise_addr: "127.0.0.1:9999",
+                            dashboard_host: Some(
+                                "0.0.0.0:5691",
+                            ),
+                            prometheus_listener_addr: Some(
+                                "0.0.0.0:1250",
+                            ),
+                            etcd_endpoints: "",
+                            etcd_auth: false,
+                            etcd_username: "",
+                            etcd_password: [REDACTED alloc::string::String],
+                            sql_endpoint: Some(
+                                "sqlite:///Users/noelkwan/.risingwave/meta_store/single_node.db?mode=rwc",
+                            ),
+                            dashboard_ui_path: None,
+                            prometheus_endpoint: None,
+                            prometheus_selector: None,
+                            connector_rpc_endpoint: None,
+                            privatelink_endpoint_default_tags: None,
+                            config_path: "",
+                            backend: Some(
+                                Sql,
+                            ),
+                            barrier_interval_ms: None,
+                            sstable_size_mb: None,
+                            block_size_kb: None,
+                            bloom_false_positive: None,
+                            state_store: Some(
+                                "hummock+fs:///Users/noelkwan/.risingwave/state_store",
+                            ),
+                            data_directory: Some(
+                                "some path with spaces",
+                            ),
+                            do_not_config_object_storage_lifecycle: None,
+                            backup_storage_url: None,
+                            backup_storage_directory: None,
+                            heap_profiling_dir: None,
+                        },
+                    ),
+                    compute_opts: Some(
+                        ComputeNodeOpts {
+                            listen_addr: "127.0.0.1:8888",
+                            advertise_addr: Some(
+                                "0.0.0.0:5688",
+                            ),
+                            prometheus_listener_addr: "127.0.0.1:1222",
+                            meta_address: List(
+                                [
+                                    http://127.0.0.1:5690/,
+                                ],
+                            ),
+                            connector_rpc_endpoint: None,
+                            connector_rpc_sink_payload_format: None,
+                            config_path: "",
+                            total_memory_bytes: 123,
+                            parallelism: 10,
+                            role: Both,
+                            metrics_level: None,
+                            data_file_cache_dir: None,
+                            meta_file_cache_dir: None,
+                            async_stack_trace: Some(
+                                ReleaseVerbose,
+                            ),
+                            heap_profiling_dir: None,
+                        },
+                    ),
+                    frontend_opts: Some(
+                        FrontendOpts {
+                            listen_addr: "0.0.0.0:4566",
+                            advertise_addr: Some(
+                                "0.0.0.0:4566",
+                            ),
+                            port: None,
+                            meta_addr: List(
+                                [
+                                    http://0.0.0.0:5690/,
+                                ],
+                            ),
+                            prometheus_listener_addr: "0.0.0.0:1250",
+                            health_check_listener_addr: "0.0.0.0:6786",
+                            config_path: "",
+                            metrics_level: None,
+                            enable_barrier_read: None,
+                        },
+                    ),
+                    compactor_opts: Some(
+                        CompactorOpts {
+                            listen_addr: "0.0.0.0:6660",
+                            advertise_addr: Some(
+                                "0.0.0.0:6660",
+                            ),
+                            port: None,
+                            prometheus_listener_addr: "0.0.0.0:1250",
+                            meta_address: List(
+                                [
+                                    http://0.0.0.0:5690/,
+                                ],
+                            ),
+                            compaction_worker_threads_number: None,
+                            config_path: "",
+                            metrics_level: None,
+                            async_stack_trace: None,
+                            heap_profiling_dir: None,
+                            compactor_mode: None,
+                            proxy_rpc_endpoint: "",
+                        },
+                    ),
+                }"#]],
         );
     }
 }
