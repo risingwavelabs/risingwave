@@ -49,8 +49,10 @@ fi
 
 ############# Setup data directories
 echo "Setting up data directories."
+set +x
 mkdir -p "${HOME}/.risingwave/data/state_store"
 mkdir -p "${HOME}/.risingwave/data/meta_store"
+set -x
 
 ############# BREW INSTALL
 if [ "${USE_BREW}" -eq 1 ]; then
