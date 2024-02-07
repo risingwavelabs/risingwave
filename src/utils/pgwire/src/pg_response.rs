@@ -337,6 +337,7 @@ impl StatementType {
                 | StatementType::DELETE_RETURNING
                 | StatementType::UPDATE_RETURNING
                 | StatementType::CANCEL_COMMAND
+                | StatementType::FETCH
         )
     }
 

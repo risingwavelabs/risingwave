@@ -35,7 +35,6 @@ pub async fn handle_fetch_cursor(
         Binder::resolve_schema_qualified_name(db_name, stmt.cursor_name.clone())?;
     let cursor_manager = session.get_cursor_manager();
     let mut cursor_manager = cursor_manager.lock().await;
-    println!("????");
     match cursor_manager
         .get_row_with_cursor(cursor_name.clone())
         .await?
