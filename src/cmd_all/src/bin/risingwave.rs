@@ -192,7 +192,10 @@ fn main() -> Result<()> {
 
     let matches = match command.try_get_matches() {
         Ok(m) => m,
-        Err(e) if e.kind() == ErrorKind::MissingSubcommand => {
+        Err(e)
+            if e.kind() == ErrorKind::MissingSubcommand
+                || e.kind() == ErrorKind::UnknownArgument =>
+        {
             // `$ ./risingwave`
             // NOTE(kwannoel): This is a hack to make `risingwave`
             // work as an alias of `risingwave single-process`.
@@ -240,7 +243,12 @@ fn standalone(opts: StandaloneOpts) {
 /// We will start a standalone instance, with all nodes in the same process.
 fn single_node(opts: SingleNodeOpts) {
     opts.create_store_directories().unwrap();
+    let dump_opts = opts.dump_opts;
     let opts = risingwave_cmd_all::normalize_single_node_opts(&opts).unwrap();
+    if dump_opts {
+        println!("{:#?}", opts);
+        return;
+    }
     let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
         .with_target("risingwave_storage", Level::WARN)
         .with_thread_name(true);

@@ -102,6 +102,10 @@ pub struct SingleNodeOpts {
     /// Extra options for compactor node.
     #[clap(long, env = "RW_SINGLE_NODE_COMPACTOR_EXTRA_OPTS")]
     compactor_extra_opts: Option<String>,
+
+    /// Dump options for debugging.
+    #[clap(long, hide = true)]
+    pub dump_opts: bool,
 }
 
 pub fn make_single_node_sql_endpoint(store_directory: &String) -> String {
