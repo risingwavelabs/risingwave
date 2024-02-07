@@ -296,10 +296,10 @@ where
         let mut ret = "MergeIterator: [ ".to_string();
         for node in &self.heap {
             if node.iter.is_valid() {
-                ret.add(&node.iter.debug_print());
+                ret += &node.iter.debug_print();
             }
         }
-        ret.add("],");
+        ret += "],";
         ret
     }
 }

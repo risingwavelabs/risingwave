@@ -248,7 +248,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             if self.full_key_tracker.observe(full_key).is_none() {
                 if let Err((current_epoch, last_epoch)) = self.full_key_tracker.last_check_ret {
                     let debug_info = self.iterator.debug_print();
-                    let max_committed_epoch = match self._version {
+                    let max_committed_epoch = match self._version.as_ref() {
                         Some(v) => v.version().max_committed_epoch,
                         None => 0,
                     };
