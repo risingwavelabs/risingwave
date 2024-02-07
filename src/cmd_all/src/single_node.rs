@@ -386,7 +386,9 @@ mod test {
     #[test]
     fn test_parse_extra_opts() {
         let raw_opts = "
---meta-extra-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --state-store hummock+fs:///root/.risingwave/state_store
+--meta-extra-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" \
+--state-store hummock+fs:///root/.risingwave/state_store \
+--sql-endpoint sqlite:///root/.risingwave/meta_store/single_node.db?mode=rwc
 --compute-extra-opts=--listen-addr 127.0.0.1:8888 --total-memory-bytes 123 --parallelism 10
 ";
         let actual = SingleNodeOpts::parse_from(raw_opts.lines());
@@ -402,7 +404,7 @@ mod test {
                     frontend_addr: None,
                     compactor_addr: None,
                     meta_extra_opts: Some(
-                        "--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --state-store hummock+fs:///root/.risingwave/state_store",
+                        "--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --state-store hummock+fs:///root/.risingwave/state_store --sql-endpoint sqlite:///root/.risingwave/meta_store/single_node.db?mode=rwc",
                     ),
                     compute_extra_opts: Some(
                         "--listen-addr 127.0.0.1:8888 --total-memory-bytes 123 --parallelism 10",
@@ -433,7 +435,7 @@ mod test {
                             etcd_username: "",
                             etcd_password: [REDACTED alloc::string::String],
                             sql_endpoint: Some(
-                                "sqlite:///Users/noelkwan/.risingwave/meta_store/single_node.db?mode=rwc",
+                                "sqlite:///root/.risingwave/meta_store/single_node.db?mode=rwc",
                             ),
                             dashboard_ui_path: None,
                             prometheus_endpoint: None,
