@@ -13,12 +13,11 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use risingwave_common::catalog;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::TableParallelism;
-use risingwave_meta::stream::{ScaleController, ScaleControllerRef, TableRevision};
+use risingwave_meta::stream::{ScaleControllerRef, TableRevision};
 use risingwave_meta_model_v2::FragmentId;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
@@ -49,14 +48,8 @@ impl ScaleServiceImpl {
         source_manager: SourceManagerRef,
         stream_manager: GlobalStreamManagerRef,
         barrier_manager: BarrierManagerRef,
+        scale_controller: ScaleControllerRef,
     ) -> Self {
-        let scale_controller = Arc::new(ScaleController::new(
-            &metadata_manager,
-            source_manager.clone(),
-            stream_manager.stream_rpc_manager.clone(),
-            stream_manager.env.clone(),
-        ));
-
         Self {
             metadata_manager,
             source_manager,
@@ -82,7 +75,7 @@ impl ScaleService for ScaleServiceImpl {
         &self,
         _: Request<GetClusterInfoRequest>,
     ) -> Result<Response<GetClusterInfoResponse>, Status> {
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
         let table_fragments = match &self.metadata_manager {
             MetadataManager::V1(mgr) => mgr
@@ -149,7 +142,7 @@ impl ScaleService for ScaleServiceImpl {
             resolve_no_shuffle_upstream,
         } = request.into_inner();
 
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.write().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_write_guard().await;
 
         let current_revision = self.get_revision().await;
 
@@ -239,7 +232,7 @@ impl ScaleService for ScaleServiceImpl {
 
         let req = request.into_inner();
 
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
         let current_revision = self.get_revision().await;
 
