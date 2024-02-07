@@ -115,7 +115,7 @@ pub fn make_single_node_state_store_url(store_directory: &String) -> String {
     format!("hummock+fs://{}/state_store", store_directory)
 }
 
-pub fn parse_single_node_opts(opts: &SingleNodeOpts) -> Result<ParsedSingleNodeOpts> {
+pub fn normalize_single_node_opts(opts: &SingleNodeOpts) -> Result<NormalizedSingleNodeOpts> {
     // Get default options
     let mut meta_opts = SingleNodeOpts::default_meta_opts();
     let mut compute_opts = SingleNodeOpts::default_compute_opts();
@@ -175,7 +175,7 @@ pub fn parse_single_node_opts(opts: &SingleNodeOpts) -> Result<ParsedSingleNodeO
     update_extra_opts(&mut frontend_opts, &opts.frontend_extra_opts)?;
     update_extra_opts(&mut compactor_opts, &opts.compactor_extra_opts)?;
 
-    Ok(ParsedSingleNodeOpts {
+    Ok(NormalizedSingleNodeOpts {
         meta_opts: Some(meta_opts),
         compute_opts: Some(compute_opts),
         frontend_opts: Some(frontend_opts),
@@ -283,14 +283,14 @@ impl SingleNodeOpts {
 }
 
 #[derive(Debug)]
-pub struct ParsedSingleNodeOpts {
+pub struct NormalizedSingleNodeOpts {
     pub meta_opts: Option<MetaNodeOpts>,
     pub compute_opts: Option<ComputeNodeOpts>,
     pub frontend_opts: Option<FrontendOpts>,
     pub compactor_opts: Option<CompactorOpts>,
 }
 
-impl risingwave_common::opts::Opts for ParsedSingleNodeOpts {
+impl risingwave_common::opts::Opts for NormalizedSingleNodeOpts {
     fn name() -> &'static str {
         "single_node"
     }
@@ -322,12 +322,12 @@ impl risingwave_common::opts::Opts for ParsedSingleNodeOpts {
 /// 3. Node level extra options: These have the highest precedence.
 ///    They override profile and process level options.
 pub async fn single_node(
-    ParsedSingleNodeOpts {
+    NormalizedSingleNodeOpts {
         meta_opts,
         compute_opts,
         frontend_opts,
         compactor_opts,
-    }: ParsedSingleNodeOpts,
+    }: NormalizedSingleNodeOpts,
 ) -> Result<()> {
     tracing::info!("launching Risingwave in single_node mode");
 
@@ -413,11 +413,11 @@ mod test {
                     compactor_extra_opts: None,
                 }"#]],
         );
-        let actual_parsed = parse_single_node_opts(&actual).unwrap();
+        let actual_parsed = normalize_single_node_opts(&actual).unwrap();
         check(
             actual_parsed,
             expect![[r#"
-                ParsedSingleNodeOpts {
+                NormalizedSingleNodeOpts {
                     meta_opts: Some(
                         MetaNodeOpts {
                             vpc_id: None,
