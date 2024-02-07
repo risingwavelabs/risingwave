@@ -21,5 +21,4 @@
 #![feature(register_tool)]
 #![register_tool(rw)]
 
-pub mod anyhow;
 pub mod tonic;

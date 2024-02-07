@@ -12,15 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::v2::def_anyhow_newtype;
+use thiserror::Error;
 
-def_anyhow_newtype! {
-    /// The error type for the `connector` crate.
-    ///
-    /// We use [`anyhow::Error`] under the hood as the connector has to deal with
-    /// various kinds of errors from different external crates. It acts more like an
-    /// application and callers may not expect to handle it in a fine-grained way.
-    pub ConnectorError;
+#[derive(Error, Debug)]
+pub enum ConnectorError {
+    #[error("MySQL error: {0}")]
+    MySql(
+        #[from]
+        #[backtrace]
+        mysql_async::Error,
+    ),
+
+    #[error("Postgres error: {0}")]
+    Postgres(#[from] tokio_postgres::Error),
+
+    #[error(transparent)]
+    Uncategorized(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
-pub type ConnectorResult<T> = std::result::Result<T, ConnectorError>;
+pub type ConnectorResult<T> = Result<T, ConnectorError>;
