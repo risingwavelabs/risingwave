@@ -483,6 +483,9 @@ StarrocksConfig:
     field_type: String
     comments: The StarRocks table you want to sink data to.
     required: true
+  - name: starrocks.partial_update
+    field_type: String
+    required: false
   - name: r#type
     field_type: String
     required: true
