@@ -17,6 +17,8 @@ start_single_node() {
 
 stop_single_node() {
   pkill risingwave
+  rm -rf "$HOME/.risingwave/state_store"
+  rm -rf "$HOME/.risingwave/meta_store"
 }
 
 wait_single_node() {
