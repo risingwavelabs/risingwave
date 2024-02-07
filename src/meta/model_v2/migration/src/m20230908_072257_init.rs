@@ -361,7 +361,7 @@ impl MigrationTrait for Migration {
                             .string()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(Fragment::StreamNode).json().not_null())
+                    .col(ColumnDef::new(Fragment::StreamNode).binary().not_null())
                     .col(ColumnDef::new(Fragment::VnodeMapping).json().not_null())
                     .col(ColumnDef::new(Fragment::StateTableIds).json())
                     .col(ColumnDef::new(Fragment::UpstreamFragmentId).json())
