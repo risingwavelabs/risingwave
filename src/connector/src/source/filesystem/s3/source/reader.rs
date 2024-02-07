@@ -85,11 +85,7 @@ impl S3FileReader {
                 return Ok(());
             }
             Err(e) => {
-                return Err(anyhow!(
-                    "S3 GetObject from {} error: {}",
-                    bucket_name,
-                    e.to_string()
-                ));
+                return Err(anyhow!(e).context(format!("S3 GetObject from {bucket_name} error")));
             }
         };
 
