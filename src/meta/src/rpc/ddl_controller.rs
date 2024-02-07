@@ -53,7 +53,6 @@ use risingwave_pb::ddl_service::{
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
@@ -71,7 +70,7 @@ use crate::manager::{
     NotificationVersion, RelationIdEnum, SchemaId, SinkId, SourceId, StreamingClusterInfo,
     StreamingJob, TableId, UserId, ViewId, IGNORED_NOTIFICATION_VERSION,
 };
-use crate::model::{FragmentId, MetadataModel, StreamContext, TableFragments, TableParallelism};
+use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
     validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
@@ -390,8 +389,13 @@ impl DdlController {
                     .await
             }
             MetadataManager::V2(_) => {
-                self.drop_object(ObjectType::Database, database_id as _, DropMode::Cascade, None)
-                    .await
+                self.drop_object(
+                    ObjectType::Database,
+                    database_id as _,
+                    DropMode::Cascade,
+                    None,
+                )
+                .await
             }
         }
     }
@@ -1125,7 +1129,7 @@ impl DdlController {
                 self.drop_streaming_job_v1(job_id, drop_mode, target_replace_info)
                     .await
             }
-            MetadataManager::V2(mgr) => {
+            MetadataManager::V2(_) => {
                 let (object_id, object_type) = match job_id {
                     StreamingJobId::MaterializedView(id) => (id as _, ObjectType::Table),
                     StreamingJobId::Sink(id) => (id as _, ObjectType::Sink),
@@ -1133,9 +1137,11 @@ impl DdlController {
                     StreamingJobId::Index(idx) => (idx as _, ObjectType::Index),
                 };
 
-                Ok(self
+                let version = self
                     .drop_object(object_type, object_id, drop_mode, target_replace_info)
-                    .await?)
+                    .await?;
+
+                Ok(version)
             }
         }
     }

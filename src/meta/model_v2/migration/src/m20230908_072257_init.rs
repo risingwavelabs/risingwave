@@ -629,6 +629,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Sink::DbName).string().not_null())
                     .col(ColumnDef::new(Sink::SinkFromName).string().not_null())
                     .col(ColumnDef::new(Sink::SinkFormatDesc).json())
+                    .col(ColumnDef::new(Sink::TargetTable).integer())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_sink_object_id")
@@ -642,6 +643,13 @@ impl MigrationTrait for Migration {
                             .name("FK_sink_connection_id")
                             .from(Sink::Table, Sink::ConnectionId)
                             .to(Connection::Table, Connection::ConnectionId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_sink_target_table_id")
+                            .from(Sink::Table, Sink::TargetTable)
+                            .to(Table::Table, Table::TableId)
                             .to_owned(),
                     )
                     .to_owned(),
@@ -1071,6 +1079,7 @@ enum Sink {
     DbName,
     SinkFromName,
     SinkFormatDesc,
+    TargetTable,
 }
 
 #[derive(DeriveIden)]

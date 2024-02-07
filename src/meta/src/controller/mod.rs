@@ -203,8 +203,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             sink_from_name: value.0.sink_from_name,
             stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
             format_desc: value.0.sink_format_desc.map(|desc| desc.0),
-            // todo: fix this for model v2
-            target_table: None,
+            target_table: value.0.target_table.map(|id| id as _),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
         }

@@ -175,7 +175,7 @@ impl LocalQueryExecution {
 
         // box is necessary, otherwise the size of `exec` will double each time it is nested.
         let exec = async move { CATALOG_READER::scope(catalog_reader, exec).await }.boxed();
-//        let exec = async move { USER_INFO_READER::scope(user_info_reader, exec).await }.boxed();
+        //        let exec = async move { USER_INFO_READER::scope(user_info_reader, exec).await }.boxed();
         let exec = async move { DB_NAME::scope(db_name, exec).await }.boxed();
         let exec = async move { SEARCH_PATH::scope(search_path, exec).await }.boxed();
         let exec = async move { AUTH_CONTEXT::scope(auth_context, exec).await }.boxed();

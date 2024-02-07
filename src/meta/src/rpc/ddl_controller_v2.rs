@@ -26,8 +26,7 @@ use thiserror_ext::AsReport;
 
 use crate::controller::catalog::ReleaseContext;
 use crate::manager::{
-    MetadataManager, MetadataManagerV2, NotificationVersion, StreamingJob,
-    IGNORED_NOTIFICATION_VERSION,
+    MetadataManagerV2, NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{MetadataModel, StreamContext};
 use crate::rpc::ddl_controller::{
@@ -258,7 +257,7 @@ impl DdlController {
         target_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<NotificationVersion> {
         let mgr = self.metadata_manager.as_v2_ref();
-        let (release_ctx, version) = match object_type {
+        let (release_ctx, mut version) = match object_type {
             ObjectType::Database => mgr.catalog_controller.drop_database(object_id).await?,
             ObjectType::Schema => {
                 return mgr
@@ -291,11 +290,11 @@ impl DdlController {
                 ..
             } = replace_table_info;
 
-            let sink_id = streaming_job.id();
-
-            // let StreamingJobId::Sink(sink_id) = job_id else {
-            //     panic!("additional replace table event only occurs when dropping sink into table")
-            // };
+            let sink_id = if let ObjectType::Sink = object_type {
+                object_id as _
+            } else {
+                panic!("additional replace table event only occurs when dropping sink into table")
+            };
 
             let fragment_graph =
                 StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job).await?;
@@ -339,10 +338,11 @@ impl DdlController {
                 self.stream_manager
                     .replace_table(table_fragments, ctx)
                     .await?;
+
                 merge_updates
             };
 
-            let _ = match result {
+            version = match result {
                 Ok(merge_updates) => {
                     let version = mgr
                         .catalog_controller
@@ -352,19 +352,19 @@ impl DdlController {
                             merge_updates,
                             None,
                             None,
-                            None,
+                            Some(sink_id),
                         )
                         .await?;
                     Ok(version)
                 }
                 Err(err) => {
-                    // tracing::error!(id = job_id, error = ?err.as_report(), "failed to replace table");
+                    tracing::error!(id = object_id, error = ?err.as_report(), "failed to replace table");
                     let _ = mgr
                         .catalog_controller
                         .try_abort_replacing_streaming_job(dummy_id as _)
                         .await
                         .inspect_err(|err| {
-                            // tracing::error!(id = job_id, error = ?err.as_report(), "failed to abort replacing table");
+                            tracing::error!(id = object_id, error = ?err.as_report(), "failed to abort replacing table");
                         });
                     Err(err)
                 }
