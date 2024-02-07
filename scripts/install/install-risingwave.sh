@@ -48,7 +48,9 @@ if [ -z "$USE_BREW" ]; then
 fi
 
 ############# Setup data directories
+echo
 echo "Setting up data directories."
+echo
 set +x
 mkdir -p "${HOME}/.risingwave/data/state_store"
 mkdir -p "${HOME}/.risingwave/data/meta_store"
@@ -69,6 +71,12 @@ if [ "${USE_BREW}" -eq 1 ]; then
   echo "In a separate terminal, you can attach a psql client to the standalone server using:"
   echo
   echo "  psql -h localhost -p 4566 -d dev -U root"
+  echo
+  echo
+  echo "To start a fresh cluster, you can just delete the data directory contents:"
+  echo
+  echo "  rm -r ~/.risingwave/state_store/*"
+  echo "  rm -r ~/.risingwave/meta_store/*"
   echo
   echo
   echo "To view available options, run:"
