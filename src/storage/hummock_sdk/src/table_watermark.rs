@@ -596,6 +596,7 @@ mod tests {
     use risingwave_common::buffer::{Bitmap, BitmapBuilder};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::{EPOCH_INC_MIN_STEP_FOR_TEST, EPOCH_PHYSICAL_SHIFT_BITS};
 
     use crate::key::{
         is_empty_key_range, map_table_key_range, prefix_slice_with_vnode,
@@ -887,9 +888,9 @@ mod tests {
         assert_eq!(result, expected);
     }
 
-    const COMMITTED_EPOCH: u64 = 65536;
-    const EPOCH1: u64 = COMMITTED_EPOCH + 65536;
-    const EPOCH2: u64 = EPOCH1 + 65536;
+    const COMMITTED_EPOCH: u64 = 1 << EPOCH_PHYSICAL_SHIFT_BITS;
+    const EPOCH1: u64 = COMMITTED_EPOCH + EPOCH_INC_MIN_STEP_FOR_TEST;
+    const EPOCH2: u64 = EPOCH1 + EPOCH_INC_MIN_STEP_FOR_TEST;
     const TEST_SINGLE_VNODE: VirtualNode = VirtualNode::from_index(1);
 
     fn build_watermark_range(

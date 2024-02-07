@@ -19,6 +19,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::EPOCH_INC_MIN_STEP_FOR_TEST;
 use risingwave_hummock_sdk::key::{key_with_epoch, map_table_key_range};
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -49,7 +50,7 @@ async fn test_read_version_basic() {
 
     {
         // single imm
-        let kv_pairs = gen_dummy_batch(epoch.as_u64_for_test() / 65536);
+        let kv_pairs = gen_dummy_batch(epoch.as_u64_for_test() / EPOCH_INC_MIN_STEP_FOR_TEST);
         let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
         let size = SharedBufferBatch::measure_batch_size(&sorted_items);
         let imm = SharedBufferBatch::build_shared_buffer_batch(
@@ -65,7 +66,9 @@ async fn test_read_version_basic() {
 
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
-        let key = iterator_test_table_key_of((epoch.as_u64_for_test() / 65536) as usize);
+        let key = iterator_test_table_key_of(
+            (epoch.as_u64_for_test() / EPOCH_INC_MIN_STEP_FOR_TEST) as usize,
+        );
         let key_range = map_table_key_range((
             Bound::Included(Bytes::from(key.to_vec())),
             Bound::Included(Bytes::from(key.to_vec())),
@@ -90,7 +93,7 @@ async fn test_read_version_basic() {
         // several epoch
         for _ in 0..5 {
             epoch.inc();
-            let kv_pairs = gen_dummy_batch(epoch.as_u64_for_test() / 65536);
+            let kv_pairs = gen_dummy_batch(epoch.as_u64_for_test() / EPOCH_INC_MIN_STEP_FOR_TEST);
             let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
             let size = SharedBufferBatch::measure_batch_size(&sorted_items);
             let imm = SharedBufferBatch::build_shared_buffer_batch(
@@ -107,10 +110,12 @@ async fn test_read_version_basic() {
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
         }
 
-        let repeat_num = epoch.as_u64_for_test() / 65536;
+        let repeat_num = epoch.as_u64_for_test() / EPOCH_INC_MIN_STEP_FOR_TEST;
         for e in 1..repeat_num {
             let epoch = EpochWithGap::new_for_test(e);
-            let key = iterator_test_table_key_of((epoch.as_u64_for_test() / 65536) as usize);
+            let key = iterator_test_table_key_of(
+                (epoch.as_u64_for_test() / EPOCH_INC_MIN_STEP_FOR_TEST) as usize,
+            );
             let key_range = map_table_key_range((
                 Bound::Included(Bytes::from(key.to_vec())),
                 Bound::Included(Bytes::from(key.to_vec())),

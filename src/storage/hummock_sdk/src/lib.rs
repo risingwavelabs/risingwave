@@ -328,8 +328,6 @@ impl EpochWithGap {
 }
 
 impl EpochWithGap {
-    const EPOCH_PHYSICAL_SHIFT_BITS: u8 = 16;
-
     // The function `new_for_test` returns an `EpochWithGap` that is only used in unit testing.
     // It has an offset of 0, and the u64 value stored in `EpochWithGap` will shift the passed random epoch by 16 bits,
     // ensuring that the lower 16 bits are set to 0.

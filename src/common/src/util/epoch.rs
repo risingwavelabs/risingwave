@@ -32,7 +32,7 @@ pub struct Epoch(pub u64);
 /// `INVALID_EPOCH` defines the invalid epoch value.
 pub const INVALID_EPOCH: u64 = 0;
 
-const EPOCH_PHYSICAL_SHIFT_BITS: u8 = 16;
+pub const EPOCH_PHYSICAL_SHIFT_BITS: u8 = 16;
 
 impl Epoch {
     pub fn now() -> Self {

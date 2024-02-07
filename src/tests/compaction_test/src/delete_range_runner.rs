@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::ops::{Bound, RangeBounds};
+use risingwave_common::util::epoch::EPOCH_INC_MIN_STEP_FOR_TEST;
 use std::pin::{pin, Pin};
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
@@ -321,7 +322,8 @@ async fn run_compare_result(
     let mut rng = StdRng::seed_from_u64(seed);
     let mut overlap_ranges = vec![];
     for epoch_idx in 0..test_count {
-        let epoch = EpochWithGap::new_for_test(init_epoch / 65536 + epoch_idx);
+        let epoch =
+            EpochWithGap::new_for_test(init_epoch / EPOCH_INC_MIN_STEP_FOR_TEST + epoch_idx);
         for idx in 0..1000 {
             let op = rng.next_u32() % 50;
             let key_number = rng.next_u64() % test_range;
@@ -387,7 +389,7 @@ async fn run_compare_result(
             .commit_epoch(epoch.as_u64_for_test(), ret.uncommitted_ssts)
             .await
             .map_err(|e| format!("{:?}", e))?;
-        if (epoch.as_u64_for_test() / 65536) % 200 == 0 {
+        if (epoch.as_u64_for_test() / EPOCH_INC_MIN_STEP_FOR_TEST) % 200 == 0 {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }

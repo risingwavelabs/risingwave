@@ -896,6 +896,7 @@ mod tests {
     use std::ops::Bound::{Excluded, Included};
 
     use risingwave_common::must_match;
+    use risingwave_common::util::epoch::{EPOCH_INC_MIN_STEP_FOR_TEST, EPOCH_PHYSICAL_SHIFT_BITS};
     use risingwave_hummock_sdk::key::map_table_key_range;
 
     use super::*;
@@ -1151,7 +1152,7 @@ mod tests {
 
         // BACKWARD: Seek to 2nd key with old epoch, expect first two item to return
         let mut iter = shared_buffer_batch.clone().into_backward_iter();
-        iter.seek(iterator_test_key_of_epoch(2, epoch - 65536).to_ref())
+        iter.seek(iterator_test_key_of_epoch(2, epoch - EPOCH_INC_MIN_STEP_FOR_TEST).to_ref())
             .await
             .unwrap();
         for item in shared_buffer_items[0..=1].iter().rev() {
@@ -1226,7 +1227,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shared_buffer_batch_range_existx() {
-        let epoch = 65536;
+        let epoch = 1 << EPOCH_PHYSICAL_SHIFT_BITS;
         let shared_buffer_items = vec![
             (Vec::from("a_1"), HummockValue::put(Bytes::from("value1"))),
             (Vec::from("a_3"), HummockValue::put(Bytes::from("value2"))),
@@ -1396,7 +1397,10 @@ mod tests {
                 }
                 iter.next().await.unwrap();
             }
-            assert_eq!(output, batch_items[(snapshot_epoch / 65536) as usize - 1]);
+            assert_eq!(
+                output,
+                batch_items[(snapshot_epoch / EPOCH_INC_MIN_STEP_FOR_TEST) as usize - 1]
+            );
         }
 
         // Forward and Backward iterator

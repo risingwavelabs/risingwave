@@ -15,7 +15,7 @@
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::epoch::{EpochPair, EPOCH_PHYSICAL_SHIFT_BITS};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
 use risingwave_stream::common::table::state_table::StateTable;
@@ -64,7 +64,7 @@ async fn test_mem_table_spill_in_streaming() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let epoch = EpochPair::new_test_epoch(65536);
+    let epoch = EpochPair::new_test_epoch(1 << EPOCH_PHYSICAL_SHIFT_BITS);
     state_table.init_epoch(epoch);
 
     state_table.insert(OwnedRow::new(vec![
@@ -194,7 +194,7 @@ async fn test_mem_table_spill_in_streaming_multiple_times() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let epoch = EpochPair::new_test_epoch(65536);
+    let epoch = EpochPair::new_test_epoch(1 << EPOCH_PHYSICAL_SHIFT_BITS);
     state_table.init_epoch(epoch);
 
     state_table.insert(OwnedRow::new(vec![

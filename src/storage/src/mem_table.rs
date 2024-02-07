@@ -667,6 +667,7 @@ mod tests {
     use rand::{thread_rng, Rng};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::{EPOCH_INC_MIN_STEP_FOR_TEST, EPOCH_PHYSICAL_SHIFT_BITS};
     use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
     use risingwave_hummock_sdk::EpochWithGap;
 
@@ -888,7 +889,7 @@ mod tests {
         }
 
         const TEST_TABLE_ID: TableId = TableId::new(233);
-        const TEST_EPOCH: u64 = 10 * 65536;
+        const TEST_EPOCH: u64 = 10 << EPOCH_PHYSICAL_SHIFT_BITS;
 
         async fn check_data(
             iter: &mut MemTableHummockIterator<'_>,
@@ -929,7 +930,7 @@ mod tests {
         check_data(&mut iter, &ordered_test_data).await;
 
         // Test seek with a later epoch, the first key is not skipped
-        let later_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH + 65536);
+        let later_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH + EPOCH_INC_MIN_STEP_FOR_TEST);
         let seek_idx = 500;
         iter.seek(FullKey {
             user_key: UserKey {
@@ -943,7 +944,7 @@ mod tests {
         check_data(&mut iter, &ordered_test_data[seek_idx..]).await;
 
         // Test seek with a earlier epoch, the first key is skipped
-        let early_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH - 65536);
+        let early_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH - EPOCH_INC_MIN_STEP_FOR_TEST);
         let seek_idx = 500;
         iter.seek(FullKey {
             user_key: UserKey {

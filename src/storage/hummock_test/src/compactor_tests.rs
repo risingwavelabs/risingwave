@@ -26,7 +26,7 @@ pub(crate) mod tests {
     use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
-    use risingwave_common::util::epoch::Epoch;
+    use risingwave_common::util::epoch::{Epoch, EPOCH_INC_MIN_STEP_FOR_TEST};
     use risingwave_common_service::observer_manager::NotificationClient;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{next_key, FullKey, TableKey, TABLE_PREFIX_LEN};
@@ -153,7 +153,7 @@ pub(crate) mod tests {
             .unwrap();
         for (i, &e) in epochs.iter().enumerate() {
             let epoch = e.as_u64_for_test();
-            let val_str = e.as_u64_for_test() / 65536;
+            let val_str = e.as_u64_for_test() / EPOCH_INC_MIN_STEP_FOR_TEST;
             let mut new_val = val.clone();
             new_val.extend_from_slice(&val_str.to_be_bytes());
             local
@@ -1062,7 +1062,7 @@ pub(crate) mod tests {
             .unwrap();
         assert!(compact_task.is_none());
 
-        epoch += 65536;
+        epoch += EPOCH_INC_MIN_STEP_FOR_TEST;
         // to update version for hummock_storage
         storage.wait_version(version).await;
 
@@ -1252,7 +1252,7 @@ pub(crate) mod tests {
             .unwrap();
         assert!(compact_task.is_none());
 
-        epoch += 65536;
+        epoch += EPOCH_INC_MIN_STEP_FOR_TEST;
         // to update version for hummock_storage
         storage.wait_version(version).await;
 
@@ -1754,7 +1754,7 @@ pub(crate) mod tests {
                 let (k, epoch) = if rand_v == 0 {
                     (last_k + 1000 * object_id, init_epoch)
                 } else if rand_v < 5 {
-                    (last_k, last_epoch - 65536)
+                    (last_k, last_epoch - EPOCH_INC_MIN_STEP_FOR_TEST)
                 } else {
                     (last_k + 1, init_epoch)
                 };

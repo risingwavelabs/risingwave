@@ -280,6 +280,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::EPOCH_PHYSICAL_SHIFT_BITS;
     use risingwave_hummock_sdk::key::{gen_key_from_str, FullKey, TableKey, UserKey};
     use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
     use risingwave_hummock_sdk::EpochWithGap;
@@ -288,7 +289,7 @@ mod tests {
     use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
     use crate::hummock::value::HummockValue;
 
-    const EPOCH: u64 = 65536;
+    const EPOCH: u64 = 1 << EPOCH_PHYSICAL_SHIFT_BITS;
     const TABLE_ID: TableId = TableId::new(233);
 
     async fn assert_iter_eq(
