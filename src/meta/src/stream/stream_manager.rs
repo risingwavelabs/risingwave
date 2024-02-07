@@ -205,14 +205,8 @@ impl GlobalStreamManager {
         source_manager: SourceManagerRef,
         hummock_manager: HummockManagerRef,
         stream_rpc_manager: StreamRpcManager,
+        scale_controller: ScaleControllerRef,
     ) -> MetaResult<Self> {
-        let scale_controller = Arc::new(ScaleController::new(
-            &metadata_manager,
-            source_manager.clone(),
-            stream_rpc_manager.clone(),
-            env.clone(),
-        ));
-
         Ok(Self {
             env,
             metadata_manager,
@@ -783,7 +777,7 @@ mod tests {
     use crate::model::{ActorId, FragmentId};
     use crate::rpc::ddl_controller::DropMode;
     use crate::rpc::metrics::MetaMetrics;
-    use crate::stream::SourceManager;
+    use crate::stream::{ScaleController, SourceManager};
     use crate::MetaOpts;
 
     struct FakeFragmentState {
@@ -982,6 +976,11 @@ mod tests {
             let (sink_manager, _) = SinkCoordinatorManager::start_worker();
 
             let stream_rpc_manager = StreamRpcManager::new(env.clone());
+            let scale_controller = Arc::new(ScaleController::new(
+                &metadata_manager,
+                source_manager.clone(),
+                env.clone(),
+            ));
 
             let barrier_manager = GlobalBarrierManager::new(
                 scheduled_barriers,
@@ -992,6 +991,7 @@ mod tests {
                 sink_manager,
                 meta_metrics.clone(),
                 stream_rpc_manager.clone(),
+                scale_controller.clone(),
             );
 
             let stream_manager = GlobalStreamManager::new(
@@ -1001,6 +1001,7 @@ mod tests {
                 source_manager.clone(),
                 hummock_manager,
                 stream_rpc_manager,
+                scale_controller.clone(),
             )?;
 
             let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager);
