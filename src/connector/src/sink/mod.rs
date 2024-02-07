@@ -56,6 +56,7 @@ use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
@@ -547,7 +548,7 @@ impl From<RpcError> for SinkError {
 
 impl From<ClickHouseError> for SinkError {
     fn from(value: ClickHouseError) -> Self {
-        SinkError::ClickHouse(format!("{}", value))
+        SinkError::ClickHouse(value.to_report_string())
     }
 }
 
@@ -559,6 +560,6 @@ impl From<DeltaTableError> for SinkError {
 
 impl From<RedisError> for SinkError {
     fn from(value: RedisError) -> Self {
-        SinkError::Redis(format!("{}", value))
+        SinkError::Redis(value.to_report_string())
     }
 }
