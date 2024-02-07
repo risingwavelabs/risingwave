@@ -43,7 +43,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-use tracing::Instrument;
+use tracing::{info, warn, Instrument};
 
 use self::command::CommandContext;
 use self::notifier::Notifier;
@@ -56,10 +56,12 @@ use crate::barrier::state::BarrierManagerState;
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
-use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager, WorkerId};
+use crate::manager::{
+    ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv, MetadataManager, WorkerId,
+};
 use crate::model::{ActorId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
-use crate::stream::{ScaleController, ScaleControllerRef, SourceManagerRef};
+use crate::stream::{ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 mod command;
@@ -185,6 +187,8 @@ pub struct GlobalBarrierManager {
     checkpoint_control: CheckpointControl,
 
     rpc_manager: BarrierRpcManager,
+
+    active_streaming_nodes: ActiveStreamingWorkerNodes,
 }
 
 /// Controls the concurrent execution of commands.
@@ -387,6 +391,7 @@ impl GlobalBarrierManager {
         sink_manager: SinkCoordinatorManager,
         metrics: Arc<MetaMetrics>,
         stream_rpc_manager: StreamRpcManager,
+        scale_controller: ScaleControllerRef,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
@@ -398,14 +403,9 @@ impl GlobalBarrierManager {
         );
         let checkpoint_control = CheckpointControl::new(metrics.clone());
 
-        let tracker = CreateMviewProgressTracker::new();
+        let active_streaming_nodes = ActiveStreamingWorkerNodes::uninitialized();
 
-        let scale_controller = Arc::new(ScaleController::new(
-            &metadata_manager,
-            source_manager.clone(),
-            stream_rpc_manager.clone(),
-            env.clone(),
-        ));
+        let tracker = CreateMviewProgressTracker::new();
 
         let context = GlobalBarrierManagerContext {
             status: Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting))),
@@ -431,6 +431,7 @@ impl GlobalBarrierManager {
             state: initial_invalid_state,
             checkpoint_control,
             rpc_manager,
+            active_streaming_nodes,
         }
     }
 
@@ -455,7 +456,7 @@ impl GlobalBarrierManager {
             .await
             .pause_on_next_bootstrap();
         if paused {
-            tracing::warn!(
+            warn!(
                 "The cluster will bootstrap with all data sources paused as specified by the system parameter `{}`. \
                  It will now be reset to `false`. \
                  To resume the data sources, either restart the cluster again or use `risectl meta resume`.",
@@ -507,7 +508,7 @@ impl GlobalBarrierManager {
             }
         }
 
-        self.state = {
+        {
             let latest_snapshot = self.context.hummock_manager.latest_snapshot();
             assert_eq!(
                 latest_snapshot.committed_epoch, latest_snapshot.current_epoch,
@@ -526,11 +527,10 @@ impl GlobalBarrierManager {
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
             let paused_reason = paused.then_some(PausedReason::Manual);
 
-            self.context
-                .recovery(prev_epoch, paused_reason, &self.scheduled_barriers)
+            self.recovery(prev_epoch, paused_reason)
                 .instrument(span)
-                .await
-        };
+                .await;
+        }
 
         self.context.set_status(BarrierManagerStatus::Running);
 
@@ -551,6 +551,59 @@ impl GlobalBarrierManager {
                     tracing::info!("Barrier manager is stopped");
                     break;
                 }
+
+                changed_worker = self.active_streaming_nodes.changed() => {
+                    #[cfg(debug_assertions)]
+                    {
+                        match self
+                            .context
+                            .metadata_manager
+                            .list_active_streaming_compute_nodes()
+                            .await
+                        {
+                            Ok(worker_nodes) => {
+                                let ignore_irrelevant_info = |node: &WorkerNode| {
+                                    (
+                                        node.id,
+                                        WorkerNode {
+                                            id: node.id,
+                                            r#type: node.r#type,
+                                            host: node.host.clone(),
+                                            parallel_units: node.parallel_units.clone(),
+                                            property: node.property.clone(),
+                                            resource: node.resource.clone(),
+                                            ..Default::default()
+                                        },
+                                    )
+                                };
+                                let worker_nodes: HashMap<_, _> =
+                                    worker_nodes.iter().map(ignore_irrelevant_info).collect();
+                                let curr_worker_nodes: HashMap<_, _> = self
+                                    .active_streaming_nodes
+                                    .current()
+                                    .values()
+                                    .map(ignore_irrelevant_info)
+                                    .collect();
+                                if worker_nodes != curr_worker_nodes {
+                                    warn!(
+                                        ?worker_nodes,
+                                        ?curr_worker_nodes,
+                                        "different to global snapshot"
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                warn!(e = ?e.as_report(), "fail to list_active_streaming_compute_nodes to compare with local snapshot");
+                            }
+                        }
+                    }
+
+                    info!(?changed_worker, "worker changed");
+
+                    self.state
+                        .resolve_worker_nodes(self.active_streaming_nodes.current().values().cloned());
+                }
+
                 // Checkpoint frequency changes.
                 notification = local_notification_rx.recv() => {
                     let notification = notification.unwrap();
@@ -572,13 +625,7 @@ impl GlobalBarrierManager {
                     if self
                         .checkpoint_control
                         .can_inject_barrier(self.in_flight_barrier_nums) => {
-                    let all_nodes = self
-                        .context
-                        .metadata_manager
-                        .list_active_streaming_compute_nodes()
-                        .await
-                        .unwrap();
-                    self.handle_new_barrier(scheduled, all_nodes);
+                    self.handle_new_barrier(scheduled);
                 }
             }
             self.checkpoint_control.update_barrier_nums_metrics();
@@ -586,11 +633,7 @@ impl GlobalBarrierManager {
     }
 
     /// Handle the new barrier from the scheduled queue and inject it.
-    fn handle_new_barrier(
-        &mut self,
-        scheduled: Scheduled,
-        nodes: impl IntoIterator<Item = WorkerNode>,
-    ) {
+    fn handle_new_barrier(&mut self, scheduled: Scheduled) {
         let Scheduled {
             command,
             mut notifiers,
@@ -599,7 +642,6 @@ impl GlobalBarrierManager {
             span,
         } = scheduled;
 
-        self.state.resolve_worker_nodes(nodes);
         let info = self.state.apply_command(&command);
 
         let (prev_epoch, curr_epoch) = self.state.next_epoch_pair();
@@ -663,7 +705,7 @@ impl GlobalBarrierManager {
             // back to frontend
             fail_point!("inject_barrier_err_success");
             let fail_node = self.checkpoint_control.barrier_failed();
-            tracing::warn!(%prev_epoch, error = %err.as_report(), "Failed to complete epoch");
+            warn!(%prev_epoch, error = %err.as_report(), "Failed to complete epoch");
             self.failure_recovery(err, fail_node).await;
             return;
         }
@@ -688,7 +730,7 @@ impl GlobalBarrierManager {
                 .drain(index..)
                 .chain(self.checkpoint_control.barrier_failed().into_iter())
                 .collect_vec();
-            tracing::warn!(%prev_epoch, error = %err.as_report(), "Failed to commit epoch");
+            warn!(%prev_epoch, error = %err.as_report(), "Failed to commit epoch");
             self.failure_recovery(err, fail_nodes).await;
         }
     }
@@ -728,11 +770,7 @@ impl GlobalBarrierManager {
 
             // No need to clean dirty tables for barrier recovery,
             // The foreground stream job should cleanup their own tables.
-            self.state = self
-                .context
-                .recovery(prev_epoch, None, &self.scheduled_barriers)
-                .instrument(span)
-                .await;
+            self.recovery(prev_epoch, None).instrument(span).await;
             self.context.set_status(BarrierManagerStatus::Running);
         } else {
             panic!("failed to execute barrier: {}", err.as_report());
@@ -907,23 +945,17 @@ impl GlobalBarrierManagerContext {
     /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
     /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
     /// will create or drop before this barrier flow through them.
-    async fn resolve_actor_info(&self) -> MetaResult<InflightActorInfo> {
+    async fn resolve_actor_info(
+        &self,
+        all_nodes: Vec<WorkerNode>,
+    ) -> MetaResult<InflightActorInfo> {
         let info = match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
-                let all_nodes = mgr
-                    .cluster_manager
-                    .list_active_streaming_compute_nodes()
-                    .await;
                 let all_actor_infos = mgr.fragment_manager.load_all_actors().await;
 
                 InflightActorInfo::resolve(all_nodes, all_actor_infos)
             }
             MetadataManager::V2(mgr) => {
-                let all_nodes = mgr
-                    .cluster_controller
-                    .list_active_streaming_workers()
-                    .await
-                    .unwrap();
                 let all_actor_infos = mgr.catalog_controller.load_all_actors().await?;
 
                 InflightActorInfo::resolve(all_nodes, all_actor_infos)

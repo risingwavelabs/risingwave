@@ -654,7 +654,7 @@ impl DdlController {
             .acquire()
             .await
             .unwrap();
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
         let stream_ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
 
@@ -1154,7 +1154,7 @@ impl DdlController {
         target_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<NotificationVersion> {
         let mgr = self.metadata_manager.as_v1_ref();
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
         let (mut version, streaming_job_ids) = match job_id {
             StreamingJobId::MaterializedView(table_id) => {
                 mgr.catalog_manager
@@ -1647,7 +1647,7 @@ impl DdlController {
                 .replace_table_v2(stream_job, fragment_graph, table_col_index_mapping)
                 .await;
         };
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
         let stream_ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
 
         let fragment_graph = self

@@ -69,7 +69,6 @@ impl BarrierManagerState {
         (prev_epoch, next_epoch)
     }
 
-    // TODO: optimize it as incremental updates.
     pub fn resolve_worker_nodes(&mut self, nodes: impl IntoIterator<Item = WorkerNode>) {
         self.inflight_actor_infos.resolve_worker_nodes(nodes);
     }
