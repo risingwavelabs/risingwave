@@ -6,6 +6,8 @@ fi
 if [ -z "${ARCH}" ]; then
   ARCH=$(uname -m)
 fi
+STATE_STORE_PATH="${HOME}/.risingwave/data/state_store"
+META_STORE_PATH="${HOME}/.risingwave/data/meta_store"
 
 VERSION="v1.7.0-single-node-2"
 # TODO(kwannoel): re-enable it once we have stable release in latest for single node mode.
@@ -50,11 +52,11 @@ fi
 ############# Setup data directories
 echo
 echo "Setting up data directories."
+echo "- ${STATE_STORE_PATH}"
+echo "- ${META_STORE_PATH}"
+mkdir -p "${STATE_STORE_PATH}"
+mkdir -p "${META_STORE_PATH}"
 echo
-set +x
-mkdir -p "${HOME}/.risingwave/data/state_store"
-mkdir -p "${HOME}/.risingwave/data/meta_store"
-set -x
 
 ############# BREW INSTALL
 if [ "${USE_BREW}" -eq 1 ]; then
