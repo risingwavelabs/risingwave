@@ -541,6 +541,7 @@ pub async fn start_service_as_election_leader(
     let scale_controller = Arc::new(ScaleController::new(
         &metadata_manager,
         source_manager.clone(),
+        stream_rpc_manager.clone(),
         env.clone(),
     ));
 

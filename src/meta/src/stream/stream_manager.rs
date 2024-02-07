@@ -27,7 +27,7 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::{oneshot, Mutex};
 use tracing::Instrument;
 
-use super::{Locations, RescheduleOptions, ScaleController, ScaleControllerRef, TableResizePolicy};
+use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan, StreamRpcManager};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
@@ -979,6 +979,7 @@ mod tests {
             let scale_controller = Arc::new(ScaleController::new(
                 &metadata_manager,
                 source_manager.clone(),
+                stream_rpc_manager.clone(),
                 env.clone(),
             ));
 
