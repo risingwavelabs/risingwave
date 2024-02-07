@@ -386,7 +386,7 @@ mod test {
     #[test]
     fn test_parse_extra_opts() {
         let raw_opts = "
---meta-extra-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\"
+--meta-extra-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --state-store hummock+fs:///root/.risingwave/state_store
 --compute-extra-opts=--listen-addr 127.0.0.1:8888 --total-memory-bytes 123 --parallelism 10
 ";
         let actual = SingleNodeOpts::parse_from(raw_opts.lines());
@@ -402,7 +402,7 @@ mod test {
                     frontend_addr: None,
                     compactor_addr: None,
                     meta_extra_opts: Some(
-                        "--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\"",
+                        "--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --state-store hummock+fs:///root/.risingwave/state_store",
                     ),
                     compute_extra_opts: Some(
                         "--listen-addr 127.0.0.1:8888 --total-memory-bytes 123 --parallelism 10",
@@ -449,7 +449,7 @@ mod test {
                             block_size_kb: None,
                             bloom_false_positive: None,
                             state_store: Some(
-                                "hummock+fs:///Users/noelkwan/.risingwave/state_store",
+                                "hummock+fs:///root/.risingwave/state_store",
                             ),
                             data_directory: Some(
                                 "some path with spaces",
