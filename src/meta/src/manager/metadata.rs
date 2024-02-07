@@ -18,16 +18,19 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_meta_model_v2::SourceId;
 use risingwave_pb::catalog::{PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, State};
-use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerType};
+use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, PbFragment};
 use risingwave_pb::stream_plan::{PbDispatchStrategy, PbStreamActor, StreamActor};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tracing::warn;
 
 use crate::barrier::Reschedule;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, WorkerExtraInfo};
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, StreamingClusterInfo, WorkerId,
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification,
+    StreamingClusterInfo, WorkerId,
 };
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::SplitAssignment;
@@ -50,6 +53,127 @@ pub struct MetadataManagerV1 {
 pub struct MetadataManagerV2 {
     pub cluster_controller: ClusterControllerRef,
     pub catalog_controller: CatalogControllerRef,
+}
+
+#[derive(Debug)]
+pub(crate) enum ActiveStreamingWorkerChange {
+    Add(WorkerNode),
+    Remove(WorkerNode),
+    Update(WorkerNode),
+}
+
+pub struct ActiveStreamingWorkerNodes {
+    worker_nodes: HashMap<WorkerId, WorkerNode>,
+    rx: UnboundedReceiver<LocalNotification>,
+}
+
+impl ActiveStreamingWorkerNodes {
+    pub(crate) fn uninitialized() -> Self {
+        Self {
+            worker_nodes: Default::default(),
+            rx: unbounded_channel().1,
+        }
+    }
+
+    /// Return an uninitialized one as a place holder for future initialized
+    pub(crate) async fn new_snapshot(meta_manager: MetadataManager) -> MetaResult<Self> {
+        let (nodes, rx) = meta_manager
+            .subscribe_active_streaming_compute_nodes()
+            .await?;
+        Ok(Self {
+            worker_nodes: nodes.into_iter().map(|node| (node.id, node)).collect(),
+            rx,
+        })
+    }
+
+    pub(crate) fn current(&self) -> &HashMap<WorkerId, WorkerNode> {
+        &self.worker_nodes
+    }
+
+    pub(crate) async fn changed(&mut self) -> ActiveStreamingWorkerChange {
+        let ret = loop {
+            let notification = self
+                .rx
+                .recv()
+                .await
+                .expect("notification stopped or uninitialized");
+            match notification {
+                LocalNotification::WorkerNodeDeleted(worker) => {
+                    let is_streaming_compute_node = worker.r#type == WorkerType::ComputeNode as i32
+                        && worker.property.as_ref().unwrap().is_streaming;
+                    let Some(prev_worker) = self.worker_nodes.remove(&worker.id) else {
+                        if is_streaming_compute_node {
+                            warn!(
+                                ?worker,
+                                "notify to delete an non-existing streaming compute worker"
+                            );
+                        }
+                        continue;
+                    };
+                    if !is_streaming_compute_node {
+                        warn!(
+                            ?worker,
+                            ?prev_worker,
+                            "deleted worker has a different recent type"
+                        );
+                    }
+                    if worker.state == State::Starting as i32 {
+                        warn!(
+                            id = worker.id,
+                            host = ?worker.host,
+                            state = worker.state,
+                            "a starting streaming worker is deleted"
+                        );
+                    }
+                    break ActiveStreamingWorkerChange::Remove(prev_worker);
+                }
+                LocalNotification::WorkerNodeActivated(worker) => {
+                    if worker.r#type != WorkerType::ComputeNode as i32
+                        || !worker.property.as_ref().unwrap().is_streaming
+                    {
+                        if let Some(prev_worker) = self.worker_nodes.remove(&worker.id) {
+                            warn!(
+                                ?worker,
+                                ?prev_worker,
+                                "the type of a streaming worker is changed"
+                            );
+                            break ActiveStreamingWorkerChange::Remove(prev_worker);
+                        } else {
+                            continue;
+                        }
+                    }
+                    assert_eq!(
+                        worker.state,
+                        State::Running as i32,
+                        "not started worker added: {:?}",
+                        worker
+                    );
+                    if let Some(prev_worker) = self.worker_nodes.insert(worker.id, worker.clone()) {
+                        assert_eq!(prev_worker.host, worker.host);
+                        assert_eq!(prev_worker.r#type, worker.r#type);
+                        warn!(
+                            ?prev_worker,
+                            ?worker,
+                            eq = prev_worker == worker,
+                            "notify to update an existing active worker"
+                        );
+                        if prev_worker == worker {
+                            continue;
+                        } else {
+                            break ActiveStreamingWorkerChange::Update(worker);
+                        }
+                    } else {
+                        break ActiveStreamingWorkerChange::Add(worker);
+                    }
+                }
+                _ => {
+                    continue;
+                }
+            }
+        };
+
+        ret
+    }
 }
 
 impl MetadataManager {
@@ -166,6 +290,22 @@ impl MetadataManager {
             MetadataManager::V2(mgr) => {
                 mgr.cluster_controller
                     .list_workers(worker_type.map(Into::into), worker_state.map(Into::into))
+                    .await
+            }
+        }
+    }
+
+    pub async fn subscribe_active_streaming_compute_nodes(
+        &self,
+    ) -> MetaResult<(Vec<WorkerNode>, UnboundedReceiver<LocalNotification>)> {
+        match self {
+            MetadataManager::V1(mgr) => Ok(mgr
+                .cluster_manager
+                .subscribe_active_streaming_compute_nodes()
+                .await),
+            MetadataManager::V2(mgr) => {
+                mgr.cluster_controller
+                    .subscribe_active_streaming_compute_nodes()
                     .await
             }
         }
