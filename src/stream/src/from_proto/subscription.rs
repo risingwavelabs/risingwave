@@ -18,7 +18,7 @@ use risingwave_storage::store::{NewLocalOptions, OpConsistencyLevel};
 
 use super::ExecutorBuilder;
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
-use crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V1_INFO;
+use crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V2_INFO;
 use crate::common::log_store_impl::subscription_log_store::SubscriptionLogStoreWriter;
 use crate::error::StreamResult;
 use crate::executor::{BoxedExecutor, SubscriptionExecutor};
@@ -56,8 +56,7 @@ impl ExecutorBuilder for SubscriptionExecutorBuilder {
         let serde = LogStoreRowSerde::new(
             node.log_store_table.as_ref().unwrap(),
             Some(vnodes.clone()),
-            // TODO: Use V2 after pr #14599
-            &KV_LOG_STORE_V1_INFO,
+            &KV_LOG_STORE_V2_INFO,
         );
         let log_store_identity = format!(
             "subscription[{}]-executor[{}]",

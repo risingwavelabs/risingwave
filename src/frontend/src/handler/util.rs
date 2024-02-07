@@ -28,7 +28,6 @@ use pgwire::types::{Format, FormatIterator, Row};
 use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnCatalog, Field};
-use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl, Timestamptz};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -39,6 +38,7 @@ use risingwave_sqlparser::ast::{
 };
 
 use crate::catalog::IndexCatalog;
+use crate::error::{ErrorCode, Result as RwResult};
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 use crate::session::{current, SessionImpl};
 
@@ -283,7 +283,7 @@ impl CompatibleSourceSchema {
     }
 }
 
-pub fn gen_query_from_table_name(from_name: ObjectName) -> risingwave_common::error::Result<Query> {
+pub fn gen_query_from_table_name(from_name: ObjectName) -> crate::error::Result<Query> {
     let table_factor = TableFactor::Table {
         name: from_name,
         alias: None,

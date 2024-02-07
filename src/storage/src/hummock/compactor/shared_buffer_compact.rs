@@ -285,11 +285,12 @@ pub async fn merge_imms_in_memory(
     instance_id: LocalInstanceId,
     imms: Vec<ImmutableMemtable>,
     memory_tracker: Option<MemoryTracker>,
-) -> HummockResult<ImmutableMemtable> {
+) -> ImmutableMemtable {
     let mut kv_count = 0;
     let mut epochs = vec![];
     let mut merged_size = 0;
-    let mut merged_imm_ids = Vec::with_capacity(imms.len());
+    assert!(imms.iter().rev().map(|imm| imm.batch_id()).is_sorted());
+    let max_imm_id = imms[0].batch_id();
 
     let mut imm_iters = Vec::with_capacity(imms.len());
     for imm in imms {
@@ -300,7 +301,6 @@ pub async fn merge_imms_in_memory(
             "should only merge data belonging to the same table"
         );
 
-        merged_imm_ids.push(imm.batch_id());
         epochs.push(imm.min_epoch());
         kv_count += imm.kv_count();
         merged_size += imm.size();
@@ -311,10 +311,10 @@ pub async fn merge_imms_in_memory(
 
     // use merge iterator to merge input imms
     let mut mi = MergeIterator::new(imm_iters);
-    mi.rewind().await?;
+    mi.rewind_no_await();
     assert!(mi.is_valid());
 
-    let first_item_key = mi.current_item().0.clone();
+    let first_item_key = mi.current_key_entry().key.clone();
 
     let mut merged_payload: Vec<SharedBufferVersionedEntry> = Vec::new();
 
@@ -327,46 +327,67 @@ pub async fn merge_imms_in_memory(
     let mut table_key_versions: Vec<(EpochWithGap, HummockValue<Bytes>)> = Vec::new();
 
     while mi.is_valid() {
-        let (key, (epoch_with_gap, value)) = mi.current_item();
-        let full_key = FullKey::new_with_gap_epoch(table_id, key.clone(), *epoch_with_gap);
-        if let Some(last_full_key) = full_key_tracker.observe(full_key) {
+        let key_entry = mi.current_key_entry();
+        let user_key = UserKey {
+            table_id,
+            table_key: key_entry.key.clone(),
+        };
+        if let Some(last_full_key) = full_key_tracker.observe_multi_version(
+            user_key,
+            key_entry
+                .new_values
+                .iter()
+                .map(|(epoch_with_gap, _)| *epoch_with_gap),
+        ) {
             let last_user_key = last_full_key.user_key;
             // `epoch_with_gap` of the `last_full_key` may not reflect the real epoch in the items
             // and should not be used because we use max epoch to initialize the tracker
             let _epoch_with_gap = last_full_key.epoch_with_gap;
 
             // Record kv entries
-            merged_payload.push((last_user_key.table_key, table_key_versions));
+            merged_payload.push(SharedBufferVersionedEntry::new(
+                last_user_key.table_key,
+                table_key_versions,
+            ));
 
             // Reset state before moving onto the new table key
             table_key_versions = vec![];
         }
-        table_key_versions.push((*epoch_with_gap, value.clone()));
-        mi.next().await?;
+        table_key_versions.extend(
+            key_entry
+                .new_values
+                .iter()
+                .map(|(epoch_with_gap, value)| (*epoch_with_gap, value.clone())),
+        );
+        mi.advance_peek_to_next_key();
+        // Since there is no blocking point in this method, but it is cpu intensive, we call this method
+        // to do cooperative scheduling
+        tokio::task::consume_budget().await;
     }
 
     // process the last key
     if !table_key_versions.is_empty() {
-        merged_payload.push((
+        merged_payload.push(SharedBufferVersionedEntry::new(
             full_key_tracker.latest_full_key.user_key.table_key,
             table_key_versions,
         ));
     }
 
-    Ok(SharedBufferBatch {
+    SharedBufferBatch {
         inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
             epochs,
             merged_payload,
             kv_count,
-            merged_imm_ids,
             merged_size,
+            max_imm_id,
             memory_tracker,
         )),
         table_id,
         instance_id,
-    })
+    }
 }
 
+///  Based on the incoming payload and opts, calculate the sharding method and sstable size of shared buffer compaction.
 fn generate_splits(
     payload: &UploadTaskPayload,
     existing_table_ids: &HashSet<u32>,
@@ -400,10 +421,8 @@ fn generate_splits(
     } else {
         compact_data_size
     };
-    // mul 1.2 for other extra memory usage.
-    let mut sub_compaction_sstable_size =
-        std::cmp::min(sstable_size, sub_compaction_data_size * 6 / 5);
-    let mut split_weight_by_vnode = 0;
+
+    let mut vnode_partition_count = 0;
     if existing_table_ids.len() > 1 {
         if parallelism > 1 && compact_data_size > sstable_size {
             let mut last_buffer_size = 0;
@@ -429,27 +448,33 @@ fn generate_splits(
             }
         }
     } else {
+        // Collect vnodes in imm
         let mut vnodes = vec![];
         for imm in payload {
             vnodes.extend(imm.collect_vnodes());
         }
         vnodes.sort();
         vnodes.dedup();
+
+        // Based on the estimated `vnode_avg_size`, calculate the required `vnode_partition_count` to avoid small files and further align
         const MIN_SSTABLE_SIZE: u64 = 16 * 1024 * 1024;
         if compact_data_size >= MIN_SSTABLE_SIZE && !vnodes.is_empty() {
             let mut avg_vnode_size = compact_data_size / (vnodes.len() as u64);
-            split_weight_by_vnode = VirtualNode::COUNT;
-            while avg_vnode_size < MIN_SSTABLE_SIZE && split_weight_by_vnode > 0 {
-                split_weight_by_vnode /= 2;
+            vnode_partition_count = VirtualNode::COUNT;
+            while avg_vnode_size < MIN_SSTABLE_SIZE && vnode_partition_count > 0 {
+                vnode_partition_count /= 2;
                 avg_vnode_size *= 2;
             }
-            sub_compaction_sstable_size = compact_data_size;
         }
     }
+
+    // mul 1.2 for other extra memory usage.
+    // Ensure that the size of each sstable is still less than `sstable_size` after optimization to avoid generating a huge size sstable which will affect the object store
+    let sub_compaction_sstable_size = std::cmp::min(sstable_size, sub_compaction_data_size * 6 / 5);
     (
         splits,
         sub_compaction_sstable_size,
-        split_weight_by_vnode as u32,
+        vnode_partition_count as u32,
     )
 }
 

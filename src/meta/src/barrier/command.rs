@@ -23,6 +23,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::BarrierKind;
@@ -31,12 +32,11 @@ use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers, FragmentTypeFlag,
-    PauseMutation, ResumeMutation, SourceChangeSplitMutation, StopMutation, ThrottleMutation,
-    UpdateMutation,
+    PauseMutation, ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamActor,
+    ThrottleMutation, UpdateMutation,
 };
-use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
+use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
-use uuid::Uuid;
 
 use super::info::{ActorDesc, CommandActorChanges, InflightActorInfo};
 use super::trace::TracedEpoch;
@@ -76,6 +76,8 @@ pub struct Reschedule {
     /// Whether this fragment is injectable. The injectable means whether the fragment contains
     /// any executors that are able to receive barrier.
     pub injectable: bool,
+
+    pub newly_created_actors: Vec<(StreamActor, PbActorStatus)>,
 }
 
 #[derive(Debug, Clone)]
@@ -133,13 +135,13 @@ pub enum Command {
     Resume(PausedReason),
 
     /// `DropStreamingJobs` command generates a `Stop` barrier to stop the given
-    /// [`HashMap<WorkerId, Vec<ActorId>>`]. The catalog has ensured that these streaming jobs are safe to be
+    /// [`Vec<ActorId>`]. The catalog has ensured that these streaming jobs are safe to be
     /// dropped by reference counts before.
     ///
     /// Barriers from the actors to be dropped will STILL be collected.
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
     /// drop actors, and then delete the table fragments info from meta store.
-    DropStreamingJobs(HashMap<WorkerId, Vec<ActorId>>),
+    DropStreamingJobs(Vec<ActorId>),
 
     /// `CreateStreamingJob` command generates a `Add` barrier by given info.
     ///
@@ -210,9 +212,9 @@ impl Command {
             Command::Plain(_) => None,
             Command::Pause(_) => None,
             Command::Resume(_) => None,
-            Command::DropStreamingJobs(node_actors) => Some(CommandActorChanges {
+            Command::DropStreamingJobs(actors) => Some(CommandActorChanges {
                 to_add: Default::default(),
-                to_remove: node_actors.values().flatten().cloned().collect(),
+                to_remove: actors.iter().cloned().collect(),
             }),
             Command::CreateStreamingJob {
                 table_fragments,
@@ -397,10 +399,9 @@ impl CommandContext {
                     }))
                 }
 
-                Command::DropStreamingJobs(node_actors) => {
-                    let actors = node_actors.values().flatten().copied().collect();
-                    Some(Mutation::Stop(StopMutation { actors }))
-                }
+                Command::DropStreamingJobs(actors) => Some(Mutation::Stop(StopMutation {
+                    actors: actors.clone(),
+                })),
 
                 Command::CreateStreamingJob {
                     table_fragments,
@@ -479,18 +480,15 @@ impl CommandContext {
                 ),
 
                 Command::RescheduleFragment { reschedules, .. } => {
-                    let MetadataManager::V1(mgr) = &self.barrier_manager_context.metadata_manager
-                    else {
-                        unimplemented!("implement scale functions in v2");
-                    };
+                    let metadata_manager = &self.barrier_manager_context.metadata_manager;
+
                     let mut dispatcher_update = HashMap::new();
                     for reschedule in reschedules.values() {
                         for &(upstream_fragment_id, dispatcher_id) in
                             &reschedule.upstream_fragment_dispatcher_ids
                         {
                             // Find the actors of the upstream fragment.
-                            let upstream_actor_ids = mgr
-                                .fragment_manager
+                            let upstream_actor_ids = metadata_manager
                                 .get_running_actors_of_fragment(upstream_fragment_id)
                                 .await?;
 
@@ -528,8 +526,7 @@ impl CommandContext {
                     for (&fragment_id, reschedule) in reschedules {
                         for &downstream_fragment_id in &reschedule.downstream_fragment_ids {
                             // Find the actors of the downstream fragment.
-                            let downstream_actor_ids = mgr
-                                .fragment_manager
+                            let downstream_actor_ids = metadata_manager
                                 .get_running_actors_of_fragment(downstream_fragment_id)
                                 .await?;
 
@@ -740,31 +737,17 @@ impl CommandContext {
     }
 
     /// Clean up actors in CNs if needed, used by drop, cancel and reschedule commands.
-    async fn clean_up(
-        &self,
-        actors_to_clean: impl IntoIterator<Item = (WorkerId, Vec<ActorId>)>,
-    ) -> MetaResult<()> {
-        let futures = actors_to_clean.into_iter().map(|(node_id, actors)| {
-            let node = self.info.node_map.get(&node_id).unwrap();
-            let request_id = Uuid::new_v4().to_string();
-
-            async move {
-                let client = self
-                    .barrier_manager_context
-                    .env
-                    .stream_client_pool()
-                    .get(node)
-                    .await?;
-                let request = DropActorsRequest {
-                    request_id,
-                    actor_ids: actors.to_owned(),
-                };
-                client.drop_actors(request).await
-            }
-        });
-
-        try_join_all(futures).await?;
-        Ok(())
+    async fn clean_up(&self, actors: Vec<ActorId>) -> MetaResult<()> {
+        self.barrier_manager_context
+            .stream_rpc_manager
+            .drop_actors(
+                &self.info.node_map,
+                self.info
+                    .node_map
+                    .keys()
+                    .map(|worker_id| (*worker_id, actors.clone())),
+            )
+            .await
     }
 
     pub async fn wait_epoch_commit(&self, epoch: HummockEpoch) -> MetaResult<()> {
@@ -815,15 +798,14 @@ impl CommandContext {
                     .await;
             }
 
-            Command::DropStreamingJobs(node_actors) => {
+            Command::DropStreamingJobs(actors) => {
                 // Tell compute nodes to drop actors.
-                self.clean_up(node_actors.clone()).await?;
+                self.clean_up(actors.clone()).await?;
             }
 
             Command::CancelStreamingJob(table_fragments) => {
                 tracing::debug!(id = ?table_fragments.table_id(), "cancelling stream job");
-                let node_actors = table_fragments.worker_actor_ids();
-                self.clean_up(node_actors).await?;
+                self.clean_up(table_fragments.actor_ids()).await?;
 
                 // NOTE(kwannoel): At this point, meta has already registered the table ids.
                 // We should unregister them.
@@ -878,8 +860,10 @@ impl CommandContext {
                             )))
                             .await?;
                     }
-                    MetadataManager::V2(_mgr) => {
-                        unimplemented!("implement cancel for sql backend")
+                    MetadataManager::V2(mgr) => {
+                        mgr.catalog_controller
+                            .try_abort_creating_streaming_job(table_id as _, true)
+                            .await?;
                     }
                 }
             }
@@ -921,12 +905,7 @@ impl CommandContext {
                             init_split_assignment,
                         }) = replace_table
                         {
-                            let table_ids =
-                                HashSet::from_iter(std::iter::once(old_table_fragments.table_id()));
-                            // Tell compute nodes to drop actors.
-                            let node_actors =
-                                mgr.fragment_manager.table_node_actors(&table_ids).await?;
-                            self.clean_up(node_actors).await?;
+                            self.clean_up(old_table_fragments.actor_ids()).await?;
 
                             // Drop fragment info in meta store.
                             mgr.fragment_manager
@@ -969,14 +948,15 @@ impl CommandContext {
                 reschedules,
                 table_parallelism,
             } => {
-                let node_dropped_actors = self
-                    .barrier_manager_context
+                let removed_actors = reschedules
+                    .values()
+                    .flat_map(|reschedule| reschedule.removed_actors.clone().into_iter())
+                    .collect_vec();
+                self.clean_up(removed_actors).await?;
+                self.barrier_manager_context
                     .scale_controller
-                    .as_ref()
-                    .unwrap()
                     .post_apply_reschedule(reschedules, table_parallelism)
                     .await?;
-                self.clean_up(node_dropped_actors).await?;
             }
 
             Command::ReplaceTable(ReplaceTablePlan {
@@ -986,14 +966,7 @@ impl CommandContext {
                 dispatchers,
                 init_split_assignment,
             }) => {
-                let table_ids = HashSet::from_iter(std::iter::once(old_table_fragments.table_id()));
-                // Tell compute nodes to drop actors.
-                let node_actors = self
-                    .barrier_manager_context
-                    .metadata_manager
-                    .get_worker_actor_ids(table_ids)
-                    .await?;
-                self.clean_up(node_actors).await?;
+                self.clean_up(old_table_fragments.actor_ids()).await?;
 
                 match &self.barrier_manager_context.metadata_manager {
                     MetadataManager::V1(mgr) => {

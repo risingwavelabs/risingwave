@@ -41,15 +41,13 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
     pub fn infer_internal_table_catalog(
         &self,
         schema: &Schema,
-        ctx: OptimizerContextRef,
+        _ctx: OptimizerContextRef,
         input_stream_key: &[usize],
         vnode_col_idx: Option<usize>,
     ) -> TableCatalog {
         let columns_fields = schema.fields().to_vec();
         let column_orders = &self.order.column_orders;
-        let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(ctx.with_options().internal_table_subset());
-
+        let mut internal_table_catalog_builder = TableCatalogBuilder::default();
         columns_fields.iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
         });

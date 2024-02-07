@@ -18,9 +18,9 @@ use std::collections::HashMap;
 use futures::StreamExt;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::types::Row;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::ObjectName;
 
+use crate::error::{ErrorCode, Result};
 use crate::handler::RwPgResponse;
 pub struct Cursor {
     cursor_name: String,

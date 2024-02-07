@@ -15,13 +15,13 @@
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::{Format, Row};
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{FetchCursorStatement, Statement};
+use risingwave_sqlparser::ast::FetchCursorStatement;
 use risingwave_sqlparser::parser::Parser;
 
 use super::query::handle_query;
 use super::{HandlerArgs, RwPgResponse};
-use crate::session::cursor_manager::{self, Cursor};
+use crate::error::{ErrorCode, Result};
+use crate::session::cursor_manager::Cursor;
 use crate::{Binder, PgResponseStream};
 
 pub async fn handle_fetch_cursor(

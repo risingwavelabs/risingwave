@@ -23,12 +23,12 @@ use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
 use risingwave_common::bail_not_implemented;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::*;
 
 use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
 use self::variable::handle_set_time_zone;
 use crate::catalog::table_catalog::TableType;
+use crate::error::{ErrorCode, Result};
 use crate::handler::cancel_job::handle_cancel;
 use crate::handler::kill_process::handle_kill;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
@@ -556,13 +556,18 @@ pub async fn handle(
         }
         Statement::AlterTable {
             name,
-            operation: AlterTableOperation::SetParallelism { parallelism },
+            operation:
+                AlterTableOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
         } => {
             alter_parallelism::handle_alter_parallelism(
                 handler_args,
                 name,
                 parallelism,
                 StatementType::ALTER_TABLE,
+                deferred,
             )
             .await
         }
@@ -585,13 +590,18 @@ pub async fn handle(
         } => alter_rename::handle_rename_index(handler_args, name, index_name).await,
         Statement::AlterIndex {
             name,
-            operation: AlterIndexOperation::SetParallelism { parallelism },
+            operation:
+                AlterIndexOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
         } => {
             alter_parallelism::handle_alter_parallelism(
                 handler_args,
                 name,
                 parallelism,
                 StatementType::ALTER_INDEX,
+                deferred,
             )
             .await
         }
@@ -615,13 +625,18 @@ pub async fn handle(
         Statement::AlterView {
             materialized,
             name,
-            operation: AlterViewOperation::SetParallelism { parallelism },
+            operation:
+                AlterViewOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
         } if materialized => {
             alter_parallelism::handle_alter_parallelism(
                 handler_args,
                 name,
                 parallelism,
                 StatementType::ALTER_MATERIALIZED_VIEW,
+                deferred,
             )
             .await
         }
@@ -705,13 +720,18 @@ pub async fn handle(
         }
         Statement::AlterSink {
             name,
-            operation: AlterSinkOperation::SetParallelism { parallelism },
+            operation:
+                AlterSinkOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
         } => {
             alter_parallelism::handle_alter_parallelism(
                 handler_args,
                 name,
                 parallelism,
                 StatementType::ALTER_SINK,
+                deferred,
             )
             .await
         }
@@ -746,13 +766,18 @@ pub async fn handle(
         }
         Statement::AlterSubscription {
             name,
-            operation: AlterSubscriptionOperation::SetParallelism { parallelism },
+            operation:
+                AlterSubscriptionOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
         } => {
             alter_parallelism::handle_alter_parallelism(
                 handler_args,
                 name,
                 parallelism,
                 StatementType::ALTER_SUBSCRIPTION,
+                deferred,
             )
             .await
         }

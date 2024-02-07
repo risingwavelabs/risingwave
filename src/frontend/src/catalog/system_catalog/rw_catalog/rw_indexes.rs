@@ -17,11 +17,11 @@ use std::sync::LazyLock;
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::error::Result;
 
 pub static RW_INDEXES_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
     vec![

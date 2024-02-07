@@ -15,7 +15,6 @@
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use anyhow::anyhow;
 use apache_avro::schema::{DecimalSchema, RecordSchema};
 use apache_avro::types::Value;
 use apache_avro::{Decimal as AvroDecimal, Schema};
@@ -23,13 +22,13 @@ use chrono::Datelike;
 use itertools::Itertools;
 use num_bigint::{BigInt, Sign};
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz};
-use risingwave_common::error::Result as RwResult;
 use risingwave_common::log::LogSuppresser;
-use risingwave_common::types::{DataType, Date, Datum, Interval, JsonbVal, ScalarImpl, Time};
+use risingwave_common::types::{
+    DataType, Date, Datum, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 
-use super::{Access, AccessError, AccessResult};
+use super::{bail_uncategorized, uncategorized, Access, AccessError, AccessResult};
 #[derive(Clone)]
 /// Options for parsing an `AvroValue` into Datum, with an optional avro schema.
 pub struct AvroParseOptions<'a> {
@@ -135,26 +134,25 @@ impl<'a> AvroParseOptions<'a> {
                         .iter()
                         .find(|field| field.0 == field_name)
                         .map(|field| &field.1)
+                        .ok_or_else(|| {
+                            uncategorized!("`{field_name}` field not found in VariableScaleDecimal")
+                        })
                 };
-                let scale = match find_in_records("scale").ok_or_else(|| {
-                    AccessError::Other(anyhow!("scale field not found in VariableScaleDecimal"))
-                })? {
-                    Value::Int(scale) => Ok(*scale),
-                    avro_value => Err(AccessError::Other(anyhow!(
+                let scale = match find_in_records("scale")? {
+                    Value::Int(scale) => *scale,
+                    avro_value => bail_uncategorized!(
                         "scale field in VariableScaleDecimal is not int, got {:?}",
                         avro_value
-                    ))),
-                }?;
+                    ),
+                };
 
-                let value: BigInt = match find_in_records("value").ok_or_else(|| {
-                    AccessError::Other(anyhow!("value field not found in VariableScaleDecimal"))
-                })? {
-                    Value::Bytes(bytes) => Ok(BigInt::from_signed_bytes_be(bytes)),
-                    avro_value => Err(AccessError::Other(anyhow!(
+                let value: BigInt = match find_in_records("value")? {
+                    Value::Bytes(bytes) => BigInt::from_signed_bytes_be(bytes),
+                    avro_value => bail_uncategorized!(
                         "value field in VariableScaleDecimal is not bytes, got {:?}",
                         avro_value
-                    ))),
-                }?;
+                    ),
+                };
 
                 let negative = value.sign() == Sign::Minus;
                 let (lo, mid, hi) = extract_decimal(value.to_bytes_be().1)?;
@@ -181,19 +179,27 @@ impl<'a> AvroParseOptions<'a> {
             }
             (Some(DataType::Varchar) | None, Value::String(s)) => s.clone().into_boxed_str().into(),
             // ---- Timestamp -----
-            (Some(DataType::Timestamp) | None, Value::TimestampMillis(ms)) => {
-                i64_to_timestamp(*ms).map_err(|_| create_error())?.into()
+            (Some(DataType::Timestamp) | None, Value::LocalTimestampMillis(ms)) => {
+                Timestamp::with_millis(*ms)
+                    .map_err(|_| create_error())?
+                    .into()
             }
-            (Some(DataType::Timestamp) | None, Value::TimestampMicros(us)) => {
-                i64_to_timestamp(*us).map_err(|_| create_error())?.into()
+            (Some(DataType::Timestamp) | None, Value::LocalTimestampMicros(us)) => {
+                Timestamp::with_micros(*us)
+                    .map_err(|_| create_error())?
+                    .into()
             }
 
             // ---- TimestampTz -----
-            (Some(DataType::Timestamptz), Value::TimestampMillis(ms)) => {
-                i64_to_timestamptz(*ms).map_err(|_| create_error())?.into()
+            (Some(DataType::Timestamptz) | None, Value::TimestampMillis(ms)) => {
+                Timestamptz::from_millis(*ms)
+                    .ok_or_else(|| {
+                        uncategorized!("timestamptz with milliseconds {ms} * 1000 is out of range")
+                    })?
+                    .into()
             }
-            (Some(DataType::Timestamptz), Value::TimestampMicros(us)) => {
-                i64_to_timestamptz(*us).map_err(|_| create_error())?.into()
+            (Some(DataType::Timestamptz) | None, Value::TimestampMicros(us)) => {
+                Timestamptz::from_micros(*us).into()
             }
 
             // ---- Interval -----
@@ -327,7 +333,7 @@ pub(crate) fn avro_decimal_to_rust_decimal(
     avro_decimal: AvroDecimal,
     _precision: usize,
     scale: usize,
-) -> RwResult<rust_decimal::Decimal> {
+) -> AccessResult<rust_decimal::Decimal> {
     let negative = !avro_decimal.is_positive();
     let bytes = avro_decimal.to_vec_unsigned();
 
@@ -341,7 +347,7 @@ pub(crate) fn avro_decimal_to_rust_decimal(
     ))
 }
 
-pub(crate) fn extract_decimal(bytes: Vec<u8>) -> anyhow::Result<(u32, u32, u32)> {
+pub(crate) fn extract_decimal(bytes: Vec<u8>) -> AccessResult<(u32, u32, u32)> {
     match bytes.len() {
         len @ 0..=4 => {
             let mut pad = vec![0; 4 - len];
@@ -374,7 +380,7 @@ pub(crate) fn extract_decimal(bytes: Vec<u8>) -> anyhow::Result<(u32, u32, u32)>
             let lo = u32::from_be_bytes(bytes[mid_end..].to_owned().try_into().unwrap());
             Ok((lo, mid, hi))
         }
-        _ => Err(anyhow!("decimal bytes len: {:?} > 12", bytes.len())),
+        _ => bail_uncategorized!("invalid decimal bytes length {}", bytes.len()),
     }
 }
 
@@ -423,8 +429,7 @@ pub(crate) fn unix_epoch_days() -> i32 {
 #[cfg(test)]
 mod tests {
     use apache_avro::Decimal as AvroDecimal;
-    use risingwave_common::error::{ErrorCode, RwError};
-    use risingwave_common::types::{Decimal, Timestamp};
+    use risingwave_common::types::{Decimal, Timestamptz};
 
     use super::*;
 
@@ -476,34 +481,34 @@ mod tests {
         value: Value,
         value_schema: &Schema,
         shape: &DataType,
-    ) -> RwResult<Datum> {
+    ) -> anyhow::Result<Datum> {
         AvroParseOptions {
             schema: Some(value_schema),
             relax_numeric: true,
         }
         .parse(&value, Some(shape))
-        .map_err(|err| RwError::from(ErrorCode::InternalError(format!("{:?}", err))))
+        .map_err(Into::into)
     }
 
     #[test]
-    fn test_avro_timestamp_micros() {
-        let v1 = Value::TimestampMicros(1620000000000);
-        let v2 = Value::TimestampMillis(1620000000);
+    fn test_avro_timestamptz_micros() {
+        let v1 = Value::TimestampMicros(1620000000000000);
+        let v2 = Value::TimestampMillis(1620000000000);
         let value_schema1 = Schema::TimestampMicros;
         let value_schema2 = Schema::TimestampMillis;
-        let datum1 = from_avro_value(v1, &value_schema1, &DataType::Timestamp).unwrap();
-        let datum2 = from_avro_value(v2, &value_schema2, &DataType::Timestamp).unwrap();
+        let datum1 = from_avro_value(v1, &value_schema1, &DataType::Timestamptz).unwrap();
+        let datum2 = from_avro_value(v2, &value_schema2, &DataType::Timestamptz).unwrap();
         assert_eq!(
             datum1,
-            Some(ScalarImpl::Timestamp(Timestamp::new(
-                "2021-05-03T00:00:00".parse().unwrap()
-            )))
+            Some(ScalarImpl::Timestamptz(
+                Timestamptz::from_str("2021-05-03T00:00:00Z").unwrap()
+            ))
         );
         assert_eq!(
             datum2,
-            Some(ScalarImpl::Timestamp(Timestamp::new(
-                "2021-05-03T00:00:00".parse().unwrap()
-            )))
+            Some(ScalarImpl::Timestamptz(
+                Timestamptz::from_str("2021-05-03T00:00:00Z").unwrap()
+            ))
         );
     }
 

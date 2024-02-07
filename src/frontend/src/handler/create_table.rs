@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -26,13 +27,13 @@ use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, TableId, TableVersionId, DEFAULT_SCHEMA_NAME,
     INITIAL_SOURCE_VERSION_ID, INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
 };
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_connector::source;
 use risingwave_connector::source::cdc::external::{
     DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
+use risingwave_connector::source::cdc::CDC_BACKFILL_ENABLE_KEY;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
@@ -54,6 +55,7 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, ColumnId};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
     bind_all_columns, bind_columns_from_source, bind_source_pk, bind_source_watermark,
@@ -212,7 +214,7 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
                 type_name: "".to_string(),
                 generated_or_default_column: None,
                 description: None,
-                additional_columns: AdditionalColumn { column_type: None },
+                additional_column: AdditionalColumn { column_type: None },
                 version: ColumnDescVersion::Pr13707,
             },
             is_hidden: false,
@@ -808,10 +810,20 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
 
+    // disable backfill if 'snapshot=false'
+    let disable_backfill = match context.with_options().get(CDC_BACKFILL_ENABLE_KEY) {
+        None => false,
+        Some(v) => {
+            !(bool::from_str(v)
+                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_ENABLE_KEY))?)
+        }
+    };
+
     let logical_scan = LogicalCdcScan::create(
         external_table_name,
         Rc::new(cdc_table_desc),
         context.clone(),
+        disable_backfill,
     );
 
     let scan_node: PlanRef = logical_scan.into();

@@ -18,7 +18,6 @@ use anyhow::anyhow;
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId};
-use risingwave_common::error::Result;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
@@ -36,6 +35,7 @@ use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
 use super::{DatabaseId, TableId};
+use crate::error::Result;
 use crate::user::UserId;
 
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
@@ -192,8 +192,12 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn alter_source_with_sr(&self, source: PbSource) -> Result<()>;
 
-    async fn alter_parallelism(&self, table_id: u32, parallelism: PbTableParallelism)
-        -> Result<()>;
+    async fn alter_parallelism(
+        &self,
+        table_id: u32,
+        parallelism: PbTableParallelism,
+        deferred: bool,
+    ) -> Result<()>;
 
     async fn alter_set_schema(
         &self,
@@ -555,9 +559,10 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         table_id: u32,
         parallelism: PbTableParallelism,
+        deferred: bool,
     ) -> Result<()> {
         self.meta_client
-            .alter_parallelism(table_id, parallelism)
+            .alter_parallelism(table_id, parallelism, deferred)
             .await
             .map_err(|e| anyhow!(e))?;
 

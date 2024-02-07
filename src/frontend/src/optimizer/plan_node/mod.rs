@@ -39,7 +39,6 @@ use itertools::Itertools;
 use paste::paste;
 use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::batch_plan::PlanNode as BatchPlanPb;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanPb;
 use serde::Serialize;
@@ -50,6 +49,7 @@ use self::generic::{GenericPlanRef, PhysicalPlanRef};
 use self::stream::StreamPlanRef;
 use self::utils::Distill;
 use super::property::{Distribution, FunctionalDependencySet, Order};
+use crate::error::{ErrorCode, Result};
 
 /// A marker trait for different conventions, used for enforcing type safety.
 ///
@@ -944,7 +944,7 @@ pub use stream_project_set::StreamProjectSet;
 pub use stream_row_id_gen::StreamRowIdGen;
 pub use stream_share::StreamShare;
 pub use stream_simple_agg::StreamSimpleAgg;
-pub use stream_sink::StreamSink;
+pub use stream_sink::{IcebergPartitionInfo, PartitionComputeInfo, StreamSink};
 pub use stream_sort::StreamEowcSort;
 pub use stream_source::StreamSource;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;

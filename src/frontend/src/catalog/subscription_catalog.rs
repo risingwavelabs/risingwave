@@ -17,12 +17,12 @@ use std::collections::{BTreeMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, TableId, UserId, OBJECT_ID_PLACEHOLDER};
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Interval;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{PbStreamJobStatus, PbSubscription};
 
 use super::OwnedByUserCatalog;
+use crate::error::{ErrorCode, Result};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(test, derive(Default))]

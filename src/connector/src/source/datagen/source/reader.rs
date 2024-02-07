@@ -14,10 +14,11 @@
 
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::{Stream, StreamExt, TryStreamExt};
 use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
+use thiserror_ext::AsReport;
 
 use super::generator::DatagenEventGenerator;
 use crate::parser::{EncodingProperties, ParserConfig, ProtocolProperties};
@@ -148,7 +149,9 @@ impl SplitReader for DatagenSplitReader {
         ) {
             (ProtocolProperties::Native, EncodingProperties::Native) => {
                 let actor_id = self.source_ctx.source_info.actor_id.to_string();
+                let fragment_id = self.source_ctx.source_info.fragment_id.to_string();
                 let source_id = self.source_ctx.source_info.source_id.to_string();
+                let source_name = self.source_ctx.source_info.source_name.to_string();
                 let split_id = self.split_id.to_string();
                 let metrics = self.source_ctx.metrics.clone();
                 spawn_data_generation_stream(
@@ -157,7 +160,13 @@ impl SplitReader for DatagenSplitReader {
                         .inspect_ok(move |stream_chunk| {
                             metrics
                                 .partition_input_count
-                                .with_label_values(&[&actor_id, &source_id, &split_id])
+                                .with_label_values(&[
+                                    &actor_id,
+                                    &source_id,
+                                    &split_id,
+                                    &source_name,
+                                    &fragment_id,
+                                ])
                                 .inc_by(stream_chunk.cardinality() as u64);
                         }),
                     BUFFER_SIZE,
@@ -201,9 +210,9 @@ fn generator_from_data_type(
                 Ok(seed) => seed ^ split_index,
                 Err(e) => {
                     tracing::warn!(
-                        "cannot parse {:?} to u64 due to {:?}, will use {:?} as random seed",
+                        error = %e.as_report(),
+                        "cannot parse {:?} to u64, will use {:?} as random seed",
                         seed,
-                        e,
                         split_index
                     );
                     split_index
@@ -222,11 +231,10 @@ fn generator_from_data_type(
                 .map(|s| s.to_lowercase());
             let basetime = match fields_option_map.get(format!("fields.{}.basetime", name).as_str())
             {
-                Some(base) => {
-                    Some(chrono::DateTime::parse_from_rfc3339(base).map_err(|e| {
-                        anyhow!("cannot parse {:?} to rfc3339 due to {:?}", base, e)
-                    })?)
-                }
+                Some(base) => Some(
+                    chrono::DateTime::parse_from_rfc3339(base)
+                        .with_context(|| format!("cannot parse `{base}` to rfc3339"))?,
+                ),
                 None => None,
             };
 

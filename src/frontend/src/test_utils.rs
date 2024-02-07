@@ -28,7 +28,6 @@ use risingwave_common::catalog::{
     FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
 };
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
@@ -64,6 +63,7 @@ use tempfile::{Builder, NamedTempFile};
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId};
+use crate::error::{ErrorCode, Result};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
 use crate::session::{AuthContext, FrontendEnv, SessionImpl};
@@ -626,6 +626,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         _table_id: u32,
         _parallelism: PbTableParallelism,
+        _deferred: bool,
     ) -> Result<()> {
         todo!()
     }

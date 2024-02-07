@@ -12,4 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod join;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum SimError {
+    #[error("NotFound error: {0}")]
+    NotFound(String),
+    #[error("Other error: {0}")]
+    Other(String),
+}
+
+impl SimError {
+    pub fn is_object_not_found_error(&self) -> bool {
+        matches!(self, SimError::NotFound(_))
+    }
+}
+
+impl SimError {
+    pub(crate) fn not_found(msg: impl ToString) -> Self {
+        SimError::NotFound(msg.to_string())
+    }
+
+    pub(crate) fn other(msg: impl ToString) -> Self {
+        SimError::Other(msg.to_string())
+    }
+}

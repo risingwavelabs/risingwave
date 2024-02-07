@@ -33,7 +33,8 @@ COPY rust-toolchain rust-toolchain
 RUN rustup self update \
   && rustup set profile minimal \
   && rustup show \
-  && rustup component add rustfmt
+  && rustup component add rustfmt \
+  && rustup target add wasm32-wasi
 
 RUN cargo install flamegraph
 # TODO: cargo-chef doesn't work well now, because we update Cargo.lock very often.

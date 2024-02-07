@@ -17,19 +17,19 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
 use thiserror_ext::AsReport;
 
 use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
-use super::create_sink::gen_sink_plan;
+use super::create_sink::{gen_sink_plan, get_partition_compute_info};
 use super::create_subscription::gen_subscription_plan;
 use super::create_table::ColumnIdGenerator;
 use super::query::gen_batch_plan_by_statement;
 use super::util::SourceSchemaCompatExt;
 use super::RwPgResponse;
+use crate::error::{ErrorCode, Result};
 use crate::handler::create_table::handle_create_table_plan;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -89,6 +89,13 @@ async fn do_handle_explain(
                 let context = plan.ctx();
                 (Ok(plan), context)
             }
+            Statement::CreateSink { stmt } => {
+                let partition_info = get_partition_compute_info(context.with_options()).await?;
+                let plan = gen_sink_plan(&session, context.into(), stmt, partition_info)
+                    .map(|plan| plan.sink_plan)?;
+                let context = plan.ctx();
+                (Ok(plan), context)
+            }
 
             // For other queries without `await` point, we can keep a copy of reference to the
             // `OptimizerContext` even if the planning fails. This enables us to log the partial
@@ -122,9 +129,6 @@ async fn do_handle_explain(
                             "EXPLAIN CREATE VIEW".into(),
                             "A created VIEW is just an alias. Instead, use EXPLAIN on the queries which reference the view.".into()
                         ).into());
-                    }
-                    Statement::CreateSink { stmt } => {
-                        gen_sink_plan(&session, context.clone(), stmt).map(|plan| plan.sink_plan)
                     }
 
                     Statement::CreateSubscription { stmt } => {

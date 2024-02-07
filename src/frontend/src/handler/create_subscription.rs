@@ -17,7 +17,6 @@ use std::rc::Rc;
 use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::UserId;
-use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{CreateSubscriptionStatement, Query};
 
@@ -25,6 +24,7 @@ use super::privilege::resolve_query_privileges;
 use super::util::gen_query_from_table_name;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
+use crate::error::Result;
 use crate::optimizer::RelationCollectorVisitor;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;

@@ -14,12 +14,12 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
-use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{DeclareCursorStatement, Ident, ObjectName, Statement};
 
 use super::query::handle_query;
 use super::util::gen_query_from_table_name;
 use super::{HandlerArgs, RwPgResponse};
+use crate::error::Result;
 use crate::session::cursor_manager::Cursor;
 use crate::Binder;
 

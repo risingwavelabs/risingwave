@@ -55,6 +55,8 @@ pub(super) struct BuildingFragment {
     table_id: Option<u32>,
 
     /// The required columns of each upstream table.
+    ///
+    /// For shared CDC table on source, its `vec![]`, since the upstream source's output schema is fixed.
     upstream_table_columns: HashMap<TableId, Vec<i32>>,
 }
 
@@ -179,10 +181,7 @@ impl BuildingFragment {
                     stream_scan.table_id.into(),
                     stream_scan.upstream_column_ids.clone(),
                 ),
-                NodeBody::CdcFilter(cdc_filter) => (
-                    cdc_filter.upstream_source_id.into(),
-                    cdc_filter.upstream_column_ids.clone(),
-                ),
+                NodeBody::CdcFilter(cdc_filter) => (cdc_filter.upstream_source_id.into(), vec![]),
                 _ => return,
             };
             table_columns
@@ -678,22 +677,8 @@ impl CompleteStreamFragmentGraph {
                                 let nodes = mview_fragment.actors[0].get_nodes().unwrap();
                                 let mview_node =
                                     nodes.get_node_body().unwrap().as_materialize().unwrap();
-                                let all_column_ids = mview_node
-                                    .get_table()
-                                    .unwrap()
-                                    .columns
-                                    .iter()
-                                    .map(|c| c.column_desc.as_ref().unwrap().column_id)
-                                    .collect_vec();
-                                let dist_key_indices: Vec<_> = mview_node
-                                    .table
-                                    .as_ref()
-                                    .unwrap()
-                                    .distribution_key
-                                    .iter()
-                                    .map(|i| *i as u32)
-                                    .collect();
-
+                                let all_column_ids = mview_node.column_ids();
+                                let dist_key_indices = mview_node.dist_key_indices();
                                 let output_indices = output_columns
                                     .iter()
                                     .map(|c| {
@@ -708,27 +693,11 @@ impl CompleteStreamFragmentGraph {
                                     )?;
                                 (dist_key_indices, output_indices)
                             };
-                            let dispatch_strategy = if uses_arrangement_backfill {
-                                if !dist_key_indices.is_empty() {
-                                    DispatchStrategy {
-                                        r#type: DispatcherType::Hash as _,
-                                        dist_key_indices,
-                                        output_indices,
-                                    }
-                                } else {
-                                    DispatchStrategy {
-                                        r#type: DispatcherType::Simple as _,
-                                        dist_key_indices: vec![], // empty for Simple
-                                        output_indices,
-                                    }
-                                }
-                            } else {
-                                DispatchStrategy {
-                                    r#type: DispatcherType::NoShuffle as _,
-                                    dist_key_indices: vec![], // not used for `NoShuffle`
-                                    output_indices,
-                                }
-                            };
+                            let dispatch_strategy = mv_on_mv_dispatch_strategy(
+                                uses_arrangement_backfill,
+                                dist_key_indices,
+                                output_indices,
+                            );
                             let edge = StreamFragmentEdge {
                                 id: EdgeId::UpstreamExternal {
                                     upstream_table_id,
@@ -811,6 +780,34 @@ impl CompleteStreamFragmentGraph {
             extra_downstreams,
             extra_upstreams,
         })
+    }
+}
+
+fn mv_on_mv_dispatch_strategy(
+    uses_arrangement_backfill: bool,
+    dist_key_indices: Vec<u32>,
+    output_indices: Vec<u32>,
+) -> DispatchStrategy {
+    if uses_arrangement_backfill {
+        if !dist_key_indices.is_empty() {
+            DispatchStrategy {
+                r#type: DispatcherType::Hash as _,
+                dist_key_indices,
+                output_indices,
+            }
+        } else {
+            DispatchStrategy {
+                r#type: DispatcherType::Simple as _,
+                dist_key_indices: vec![], // empty for Simple
+                output_indices,
+            }
+        }
+    } else {
+        DispatchStrategy {
+            r#type: DispatcherType::NoShuffle as _,
+            dist_key_indices: vec![], // not used for `NoShuffle`
+            output_indices,
+        }
     }
 }
 

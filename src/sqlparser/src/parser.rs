@@ -926,7 +926,7 @@ impl Parser {
         })
     }
 
-    /// Parse `CURRENT ROW` or `{ <positive number> | UNBOUNDED } { PRECEDING | FOLLOWING }`
+    /// Parse `CURRENT ROW` or `{ <non-negative numeric | datetime | interval> | UNBOUNDED } { PRECEDING | FOLLOWING }`
     pub fn parse_window_frame_bound(&mut self) -> Result<WindowFrameBound, ParserError> {
         if self.parse_keywords(&[Keyword::CURRENT, Keyword::ROW]) {
             Ok(WindowFrameBound::CurrentRow)
@@ -934,7 +934,7 @@ impl Parser {
             let rows = if self.parse_keyword(Keyword::UNBOUNDED) {
                 None
             } else {
-                Some(self.parse_literal_uint()?)
+                Some(Box::new(self.parse_expr()?))
             };
             if self.parse_keyword(Keyword::PRECEDING) {
                 Ok(WindowFrameBound::Preceding(rows))
@@ -3061,7 +3061,12 @@ impl Parser {
 
                 let value = self.parse_set_variable()?;
 
-                AlterTableOperation::SetParallelism { parallelism: value }
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterTableOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else {
                 return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
             }
@@ -3140,7 +3145,12 @@ impl Parser {
 
                 let value = self.parse_set_variable()?;
 
-                AlterIndexOperation::SetParallelism { parallelism: value }
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterIndexOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else {
                 return self.expected("PARALLELISM after SET", self.peek_token());
             }
@@ -3186,7 +3196,12 @@ impl Parser {
 
                 let value = self.parse_set_variable()?;
 
-                AlterViewOperation::SetParallelism { parallelism: value }
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterViewOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else {
                 return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
             }
@@ -3238,8 +3253,12 @@ impl Parser {
                 }
 
                 let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
 
-                AlterSinkOperation::SetParallelism { parallelism: value }
+                AlterSinkOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else {
                 return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
             }
@@ -3285,10 +3304,13 @@ impl Parser {
                         self.peek_token(),
                     );
                 }
-
                 let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
 
-                AlterSubscriptionOperation::SetParallelism { parallelism: value }
+                AlterSubscriptionOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else {
                 return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
             }

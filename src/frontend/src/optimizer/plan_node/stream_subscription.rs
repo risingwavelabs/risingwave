@@ -19,7 +19,6 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, TableId, UserId};
-use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::{derive_columns, derive_pk};
@@ -28,6 +27,7 @@ use super::stream::prelude::{GenericPlanRef, PhysicalPlanRef};
 use super::utils::{childless_record, Distill, IndicesDisplay};
 use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, StreamSink};
 use crate::catalog::subscription_catalog::{SubscriptionCatalog, SubscriptionId};
+use crate::error::Result;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{PlanRef, TableCatalog, WithOptions};

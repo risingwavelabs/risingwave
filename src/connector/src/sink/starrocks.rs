@@ -29,6 +29,7 @@ use serde::Deserialize;
 use serde_derive::Serialize;
 use serde_json::Value;
 use serde_with::serde_as;
+use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
 use super::doris_starrocks_connector::{
@@ -322,13 +323,17 @@ impl StarrocksSinkWriter {
                     .first()
                     .ok_or_else(|| SinkError::Starrocks("must have next".to_string()))?
                     .parse::<u8>()
-                    .map_err(|e| SinkError::Starrocks(format!("starrocks sink error {}", e)))?;
+                    .map_err(|e| {
+                        SinkError::Starrocks(format!("starrocks sink error: {}", e.as_report()))
+                    })?;
 
                 let scale = decimal_all
                     .last()
                     .ok_or_else(|| SinkError::Starrocks("must have next".to_string()))?
                     .parse::<u8>()
-                    .map_err(|e| SinkError::Starrocks(format!("starrocks sink error {}", e)))?;
+                    .map_err(|e| {
+                        SinkError::Starrocks(format!("starrocks sink error: {}", e.as_report()))
+                    })?;
                 decimal_map.insert(name.to_string(), (length, scale));
             }
         }
@@ -394,7 +399,7 @@ impl StarrocksSinkWriter {
                         Value::String("0".to_string()),
                     );
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
-                        SinkError::Starrocks(format!("Json derialize error {:?}", e))
+                        SinkError::Starrocks(format!("Json derialize error: {}", e.as_report()))
                     })?;
                     self.client
                         .as_mut()
@@ -411,7 +416,7 @@ impl StarrocksSinkWriter {
                         Value::String("1".to_string()),
                     );
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
-                        SinkError::Starrocks(format!("Json derialize error {:?}", e))
+                        SinkError::Starrocks(format!("Json derialize error: {}", e.as_report()))
                     })?;
                     self.client
                         .as_mut()
@@ -429,7 +434,7 @@ impl StarrocksSinkWriter {
                         Value::String("0".to_string()),
                     );
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
-                        SinkError::Starrocks(format!("Json derialize error {:?}", e))
+                        SinkError::Starrocks(format!("Json derialize error: {}", e.as_report()))
                     })?;
                     self.client
                         .as_mut()
