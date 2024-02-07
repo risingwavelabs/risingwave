@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use serde_json::json;
 
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::error::Result;
 
 // TODO: `rw_relation_info` contains some extra streaming meta info that's only meaningful for
 // streaming jobs, we'd better query relation infos from `rw_relations` and move these streaming

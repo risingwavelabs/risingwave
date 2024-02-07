@@ -814,10 +814,10 @@ impl fmt::Display for WindowFrameUnits {
 pub enum WindowFrameBound {
     /// `CURRENT ROW`
     CurrentRow,
-    /// `<N> PRECEDING` or `UNBOUNDED PRECEDING`
-    Preceding(Option<u64>),
-    /// `<N> FOLLOWING` or `UNBOUNDED FOLLOWING`.
-    Following(Option<u64>),
+    /// `<offset> PRECEDING` or `UNBOUNDED PRECEDING`
+    Preceding(Option<Box<Expr>>),
+    /// `<offset> FOLLOWING` or `UNBOUNDED FOLLOWING`.
+    Following(Option<Box<Expr>>),
 }
 
 impl fmt::Display for WindowFrameBound {

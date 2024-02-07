@@ -87,7 +87,8 @@ pub fn test_key_of(idx: usize, epoch: u64) -> FullKey<Vec<u8>> {
     )
 }
 
-const MAX_KEY_COUNT: usize = 128 * 1024;
+/// 8M keys.
+const MAX_KEY_COUNT: usize = 8 * 1024 * 1024;
 
 async fn build_table(
     sstable_store: SstableStoreRef,

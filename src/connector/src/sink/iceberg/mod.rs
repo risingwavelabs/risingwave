@@ -21,7 +21,7 @@ use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use arrow_schema::{
     DataType as ArrowDataType, Field as ArrowField, Fields, Schema as ArrowSchema, SchemaRef,
 };
@@ -40,14 +40,15 @@ use icelake::types::{data_file_from_json, data_file_to_json, Any, DataFile};
 use icelake::{Table, TableIdentifier};
 use itertools::Itertools;
 use risingwave_common::array::{to_iceberg_record_batch_with_schema, Op, StreamChunk};
+use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::anyhow_error;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
 use serde::de;
 use serde_derive::Deserialize;
+use thiserror_ext::AsReport;
 use url::Url;
 use with_options::WithOptions;
 
@@ -385,14 +386,14 @@ impl IcebergConfig {
         let catalog = self
             .create_catalog()
             .await
-            .map_err(|e| anyhow!("Unable to load iceberg catalog: {e}"))?;
+            .context("Unable to load iceberg catalog")?;
 
         let table_id = TableIdentifier::new(
             vec![self.database_name.as_str()]
                 .into_iter()
                 .chain(self.table_name.split('.')),
         )
-        .map_err(|e| anyhow!("Unable to parse table name: {e}"))?;
+        .context("Unable to parse table name")?;
 
         catalog
             .load_table(&table_id)
@@ -503,7 +504,7 @@ impl Sink for IcebergSink {
                 .await,
             self.param.clone(),
             writer_param.vnode_bitmap.ok_or_else(|| {
-                SinkError::Remote(anyhow_error!(
+                SinkError::Remote(anyhow!(
                     "sink needs coordination should not have singleton input"
                 ))
             })?,
@@ -804,12 +805,12 @@ impl WriteResult {
     fn try_from(value: &SinkMetadata, partition_type: &Any) -> Result<Self> {
         if let Some(Serialized(v)) = &value.metadata {
             let mut values = if let serde_json::Value::Object(v) =
-                serde_json::from_slice::<serde_json::Value>(&v.metadata).map_err(
-                    |e| -> SinkError { anyhow!("Can't parse iceberg sink metadata: {}", e).into() },
-                )? {
+                serde_json::from_slice::<serde_json::Value>(&v.metadata)
+                    .context("Can't parse iceberg sink metadata")?
+            {
                 v
             } else {
-                return Err(anyhow!("iceberg sink metadata should be a object").into());
+                bail!("iceberg sink metadata should be a object");
             };
 
             let data_files: Vec<DataFile>;
@@ -834,7 +835,7 @@ impl WriteResult {
                     .into_iter()
                     .map(|value| data_file_from_json(value, partition_type.clone()))
                     .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
-                    .map_err(|e| anyhow!("Failed to parse data file from json: {}", e))?;
+                    .context("Failed to parse data file from json")?;
             } else {
                 return Err(anyhow!("icberg sink metadata should have data_files object").into());
             }
@@ -859,7 +860,7 @@ impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
                 .cloned()
                 .map(data_file_to_json)
                 .collect::<std::result::Result<Vec<serde_json::Value>, icelake::Error>>()
-                .map_err(|e| anyhow!("Can't serialize data files to json: {}", e))?,
+                .context("Can't serialize data files to json")?,
         );
         let json_delete_files = serde_json::Value::Array(
             value
@@ -868,7 +869,7 @@ impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
                 .cloned()
                 .map(data_file_to_json)
                 .collect::<std::result::Result<Vec<serde_json::Value>, icelake::Error>>()
-                .map_err(|e| anyhow!("Can't serialize data files to json: {}", e))?,
+                .context("Can't serialize data files to json")?,
         );
         let json_value = serde_json::Value::Object(
             vec![
@@ -880,9 +881,8 @@ impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
         );
         Ok(SinkMetadata {
             metadata: Some(Serialized(SerializedMetadata {
-                metadata: serde_json::to_vec(&json_value).map_err(|e| -> SinkError {
-                    anyhow!("Can't serialized iceberg sink metadata: {}", e).into()
-                })?,
+                metadata: serde_json::to_vec(&json_value)
+                    .context("Can't serialize iceberg sink metadata")?,
             })),
         })
     }
@@ -917,7 +917,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             txn.append_delete_file(s.delete_files);
         });
         txn.commit().await.map_err(|err| {
-            tracing::error!(?err, "Failed to commit iceberg table");
+            tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
             SinkError::Iceberg(anyhow!(err))
         })?;
 
