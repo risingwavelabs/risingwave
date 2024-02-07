@@ -332,7 +332,7 @@ pub async fn single_node(
     tracing::info!("launching Risingwave in single_node mode");
 
     if let Some(opts) = meta_opts {
-        tracing::info!("starting meta-node thread with cli args: {:?}", opts);
+        tracing::info!(?opts, "starting meta-node service");
 
         let _meta_handle = tokio::spawn(async move {
             risingwave_meta_node::start(opts).await;
