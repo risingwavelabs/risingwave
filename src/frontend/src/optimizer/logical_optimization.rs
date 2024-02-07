@@ -144,6 +144,7 @@ static SIMPLE_UNNESTING: LazyLock<OptimizationStage> = LazyLock::new(|| {
             ApplyToJoinRule::create(),
             // Pull correlated predicates up the algebra tree to unnest simple subquery.
             PullUpCorrelatedPredicateRule::create(),
+            PullUpCorrelatedPredicateAggRule::create(),
         ],
         ApplyOrder::BottomUp,
     )
