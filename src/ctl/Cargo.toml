@@ -36,7 +36,7 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true }
 risingwave_stream = { workspace = true }
-serde = "1.0.196"
+serde = "1"
 serde_json = "1"
 serde_yaml = "0.9.25"
 size = "0.4"
