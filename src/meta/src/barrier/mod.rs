@@ -57,7 +57,7 @@ use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager, WorkerId};
 use crate::model::{ActorId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
-use crate::stream::{ScaleController, ScaleControllerRef, SourceManagerRef};
+use crate::stream::{ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 mod command;
@@ -385,6 +385,7 @@ impl GlobalBarrierManager {
         sink_manager: SinkCoordinatorManager,
         metrics: Arc<MetaMetrics>,
         stream_rpc_manager: StreamRpcManager,
+        scale_controller: ScaleControllerRef,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
@@ -397,13 +398,6 @@ impl GlobalBarrierManager {
         let checkpoint_control = CheckpointControl::new(metrics.clone());
 
         let tracker = CreateMviewProgressTracker::new();
-
-        let scale_controller = Arc::new(ScaleController::new(
-            &metadata_manager,
-            source_manager.clone(),
-            stream_rpc_manager.clone(),
-            env.clone(),
-        ));
 
         let context = GlobalBarrierManagerContext {
             status: Arc::new(Mutex::new(BarrierManagerStatus::Starting)),
