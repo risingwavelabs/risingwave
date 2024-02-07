@@ -88,7 +88,7 @@ ALTER TABLE t_user FORMAT PLAIN ENCODE PROTOBUF(
 statement ok
 CREATE MATERIALIZED VIEW t_user_ds_2 AS SELECT t_user.age FROM t_user;
 
-statement ok
+statement error unable to drop the column due to being referenced by downstream materialized views or sinks
 ALTER TABLE t_user FORMAT PLAIN ENCODE PROTOBUF(
     schema.registry = 'http://message_queue:8081',
     message = 'test.User'
