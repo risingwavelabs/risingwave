@@ -305,24 +305,10 @@ impl CatalogController {
             .map(|(fragment, actors, actor_dispatchers)| (fragment, (actors, actor_dispatchers)))
             .unzip();
         for fragment in fragments {
-            // let x = serde_json::to_value(&fragment.stream_node).unwrap();
-            // let y: StreamNode = serde_json::from_value(x).unwrap();
-            // println!("heiheihei: {:?}", y);
-
             let fragment_id = fragment.fragment_id;
             let state_table_ids = fragment.state_table_ids.inner_ref().clone();
             let fragment = fragment.into_active_model();
-
             Fragment::insert(fragment).exec(&txn).await?;
-
-            // PANIC: stack overflow.
-            // let stream_node: StreamNode = Fragment::find_by_id(fragment_id)
-            //     .select_only()
-            //     .column(fragment::Column::StreamNode)
-            //     .into_tuple()
-            //     .one(&txn)
-            //     .await?
-            //     .unwrap();
 
             // Update fragment id for all state tables.
             if !for_replace {
