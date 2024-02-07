@@ -935,6 +935,7 @@ pub fn bound_table_key_range<T: AsRef<[u8]> + EmptySliceRef>(
 pub struct FullKeyTracker<T: AsRef<[u8]> + Ord + Eq> {
     pub latest_full_key: FullKey<T>,
     last_observed_epoch_with_gap: EpochWithGap,
+    pub last_check_ret: std::result::Result<(), (EpochWithGap, EpochWithGap)>,
 }
 
 impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
@@ -943,6 +944,7 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
         Self {
             latest_full_key: init_full_key,
             last_observed_epoch_with_gap: epoch_with_gap,
+            last_check_ret: Ok(()),
         }
     }
 
@@ -1034,10 +1036,8 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
             Ordering::Equal => {
                 if max_epoch_with_gap >= self.last_observed_epoch_with_gap {
                     // Epoch from the same user key should be monotonically decreasing
-                    panic!(
-                        "key {:?} epoch {:?} >= prev epoch {:?}",
-                        user_key, max_epoch_with_gap, self.last_observed_epoch_with_gap
-                    );
+                    self.last_check_ret =
+                        Err((max_epoch_with_gap, self.last_observed_epoch_with_gap));
                 }
                 self.last_observed_epoch_with_gap = min_epoch_with_gap;
                 None
@@ -1167,6 +1167,8 @@ mod tests {
 
     #[test]
     fn test_prev_full_key() {
+        let epoch = EpochWithGap::from_u64(5887454591975424);
+        println!("offset: {}", epoch.offset());
         let user_key = b"aab";
         let epoch: HummockEpoch = HummockEpoch::MAX - 3;
         let mut full_key = key_with_epoch(user_key.to_vec(), epoch);

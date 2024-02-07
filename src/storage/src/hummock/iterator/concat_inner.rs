@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Greater, Less};
+use std::ops::Add;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
@@ -179,5 +180,18 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
         if let Some(iter) = &self.sstable_iter {
             iter.collect_local_statistic(stats);
         }
+    }
+
+    fn debug_print(&self) -> String {
+        let mut ret = "ConcatIterator: [ ".to_string();
+        if let Some(iter) = &self.sstable_iter {
+            ret.add(&format!(
+                "sst_info: [min_epoch: {}, max_epoch: {}],",
+                self.tables[self.cur_idx].min_epoch, self.tables[self.cur_idx].max_epoch,
+            ));
+            ret.add(&iter.debug_print());
+        }
+        ret.add("]");
+        ret
     }
 }

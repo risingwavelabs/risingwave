@@ -125,6 +125,10 @@ pub trait HummockIterator: Send + Sync {
 
     /// take local statistic info from iterator to report metrics.
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic);
+
+    fn debug_print(&self) -> String {
+        "default,".to_string()
+    }
 }
 
 /// This is a placeholder trait used in `HummockIteratorUnion`
@@ -259,6 +263,15 @@ impl<
             Fourth(iter) => iter.collect_local_statistic(stats),
         }
     }
+
+    fn debug_print(&self) -> String {
+        match self {
+            First(iter) => iter.debug_print(),
+            Second(iter) => iter.debug_print(),
+            Third(iter) => iter.debug_print(),
+            Fourth(iter) => iter.debug_print(),
+        }
+    }
 }
 
 impl<I: HummockIterator> HummockIterator for Box<I> {
@@ -290,6 +303,10 @@ impl<I: HummockIterator> HummockIterator for Box<I> {
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         (*self).deref().collect_local_statistic(stats);
+    }
+
+    fn debug_print(&self) -> String {
+        (*self).deref().debug_print();
     }
 }
 
@@ -439,6 +456,10 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
     }
 
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+
+    fn debug_print(&self) -> String {
+        format!("MemtableIterator: [epoch: {:?}]", self.epoch)
+    }
 }
 
 #[derive(PartialEq, Eq, Debug)]

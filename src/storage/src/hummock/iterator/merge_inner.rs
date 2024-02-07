@@ -14,12 +14,13 @@
 
 use std::collections::binary_heap::PeekMut;
 use std::collections::{BinaryHeap, LinkedList};
-use std::ops::{Deref, DerefMut};
+use std::ops::{Add, Deref, DerefMut};
 
 use futures::FutureExt;
 use risingwave_hummock_sdk::key::FullKey;
 
 use super::Forward;
+use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
 use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatchIterator, SharedBufferVersionedEntry,
@@ -290,5 +291,16 @@ where
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         self.collect_local_statistic_impl(stats);
+    }
+
+    fn debug_print(&self) -> String {
+        let mut ret = "MergeIterator: [ ".to_string();
+        for node in &self.heap {
+            if node.iter.is_valid() {
+                ret.add(&node.iter.debug_print());
+            }
+        }
+        ret.add("],");
+        ret
     }
 }
