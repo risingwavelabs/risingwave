@@ -58,8 +58,6 @@ cluster_stop() {
   elif [[ $mode == "single-node" ]]
   then
     stop_single_node
-    # Don't check single-node logs, they will exceed the limit.
-    cargo make kill
   else
     cargo make ci-kill
   fi
