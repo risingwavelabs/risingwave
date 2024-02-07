@@ -18,12 +18,12 @@ use anyhow::Result;
 use clap::Parser;
 use home::home_dir;
 use risingwave_common::config::{AsyncStackTraceOption, MetaBackend};
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::{default_parallelism, default_total_memory_bytes, ComputeNodeOpts};
 use risingwave_frontend::FrontendOpts;
 use risingwave_meta_node::MetaNodeOpts;
-
-use crate::ParsedStandaloneOpts;
+use tokio::signal;
 
 pub static DEFAULT_STORE_DIRECTORY: LazyLock<String> = LazyLock::new(|| {
     let mut home_path = home_dir().unwrap();
@@ -99,7 +99,7 @@ pub fn make_single_node_state_store_url(store_directory: &String) -> String {
     format!("hummock+fs://{}/state_store", store_directory)
 }
 
-pub fn map_single_node_opts_to_standalone_opts(opts: &SingleNodeOpts) -> ParsedStandaloneOpts {
+pub fn parse_single_node_opts(opts: &SingleNodeOpts) -> ParsedSingleNodeOpts {
     // Get default options
     let mut meta_opts = SingleNodeOpts::default_meta_opts();
     let mut compute_opts = SingleNodeOpts::default_compute_opts();
@@ -149,7 +149,7 @@ pub fn map_single_node_opts_to_standalone_opts(opts: &SingleNodeOpts) -> ParsedS
         meta_opts.update_from(meta_node_extra_opts);
     }
 
-    ParsedStandaloneOpts {
+    ParsedSingleNodeOpts {
         meta_opts: Some(meta_opts),
         compute_opts: Some(compute_opts),
         frontend_opts: Some(frontend_opts),
@@ -254,4 +254,84 @@ impl SingleNodeOpts {
         std::fs::create_dir_all(format!("{}/state_store", store_directory))?;
         Ok(())
     }
+}
+
+#[derive(Debug)]
+pub struct ParsedSingleNodeOpts {
+    pub meta_opts: Option<MetaNodeOpts>,
+    pub compute_opts: Option<ComputeNodeOpts>,
+    pub frontend_opts: Option<FrontendOpts>,
+    pub compactor_opts: Option<CompactorOpts>,
+}
+
+impl risingwave_common::opts::Opts for ParsedSingleNodeOpts {
+    fn name() -> &'static str {
+        "single_node"
+    }
+
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        if let Some(opts) = self.meta_opts.as_ref() {
+            opts.meta_addr()
+        } else if let Some(opts) = self.compute_opts.as_ref() {
+            opts.meta_addr()
+        } else if let Some(opts) = self.frontend_opts.as_ref() {
+            opts.meta_addr()
+        } else if let Some(opts) = self.compactor_opts.as_ref() {
+            opts.meta_addr()
+        } else {
+            unreachable!("at least one service should be specified as checked during parsing")
+        }
+    }
+}
+
+/// For `single_node` mode, we can configure and start multiple services in one process.
+/// `single_node` mode is meant to be used by our cloud service and docker,
+/// where we can configure and start multiple services in one process.
+pub async fn single_node(
+    ParsedSingleNodeOpts {
+        meta_opts,
+        compute_opts,
+        frontend_opts,
+        compactor_opts,
+    }: ParsedSingleNodeOpts,
+) -> Result<()> {
+    tracing::info!("launching Risingwave in single_node mode");
+
+    if let Some(opts) = meta_opts {
+        tracing::info!("starting meta-node thread with cli args: {:?}", opts);
+
+        let _meta_handle = tokio::spawn(async move {
+            risingwave_meta_node::start(opts).await;
+            tracing::warn!("meta is stopped, shutdown all nodes");
+        });
+        // wait for the service to be ready
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    if let Some(opts) = compute_opts {
+        tracing::info!("starting compute-node thread with cli args: {:?}", opts);
+        let _compute_handle = tokio::spawn(async move { risingwave_compute::start(opts).await });
+    }
+    if let Some(opts) = frontend_opts {
+        tracing::info!("starting frontend-node thread with cli args: {:?}", opts);
+        let _frontend_handle = tokio::spawn(async move { risingwave_frontend::start(opts).await });
+    }
+    if let Some(opts) = compactor_opts {
+        tracing::info!("starting compactor-node thread with cli args: {:?}", opts);
+        let _compactor_handle =
+            tokio::spawn(async move { risingwave_compactor::start(opts).await });
+    }
+
+    // wait for log messages to be flushed
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    eprintln!("-------------------------------");
+    eprintln!("RisingWave single_node mode is ready.");
+
+    // TODO: should we join all handles?
+    // Currently, not all services can be shutdown gracefully, just quit on Ctrl-C now.
+    // TODO(kwannoel): Why can't be shutdown gracefully? Is it that the service just does not
+    // support it?
+    signal::ctrl_c().await.unwrap();
+    tracing::info!("Ctrl+C received, now exiting");
+
+    Ok(())
 }

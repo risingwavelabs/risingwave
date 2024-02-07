@@ -240,10 +240,10 @@ fn standalone(opts: StandaloneOpts) {
 /// We will start a standalone instance, with all nodes in the same process.
 fn single_node(opts: SingleNodeOpts) {
     opts.create_store_directories().unwrap();
-    let opts = risingwave_cmd_all::map_single_node_opts_to_standalone_opts(&opts);
+    let opts = risingwave_cmd_all::parse_single_node_opts(&opts);
     let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
         .with_target("risingwave_storage", Level::WARN)
         .with_thread_name(true);
     risingwave_rt::init_risingwave_logger(settings);
-    risingwave_rt::main_okk(risingwave_cmd_all::standalone(opts)).unwrap();
+    risingwave_rt::main_okk(risingwave_cmd_all::single_node(opts)).unwrap();
 }
