@@ -34,7 +34,6 @@ use risingwave_connector::source::cdc::external::{
     DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
 use risingwave_connector::source::cdc::CDC_BACKFILL_ENABLE_KEY;
-use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
@@ -56,14 +55,13 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, ColumnId};
-use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
     bind_all_columns, bind_columns_from_source, bind_source_pk, bind_source_watermark,
     check_source_schema, handle_addition_columns, validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
-use crate::handler::util::{get_connector, is_iceberg_connector};
+use crate::handler::util::is_iceberg_connector;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
@@ -542,7 +540,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         &pk_column_ids,
     )?;
 
-    check_source_schema(&with_properties, row_id_index, &columns)?;
+    check_source_schema(&with_properties, row_id_index, &columns).await?;
 
     gen_table_plan_inner(
         context.into(),

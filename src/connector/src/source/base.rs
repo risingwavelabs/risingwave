@@ -29,7 +29,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorSuppressor;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{JsonbVal, Scalar};
-use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo, Source};
+use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
@@ -153,7 +153,6 @@ pub struct SourceEnumeratorContext {
 #[derive(Clone, Debug, Default)]
 pub struct SourceEnumeratorInfo {
     pub source_id: u32,
-    pub source: Option<Source>,
 }
 
 #[derive(Debug, Default)]

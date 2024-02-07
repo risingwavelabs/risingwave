@@ -16,13 +16,13 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, INITIAL_SOURCE_VERSION_ID,
+    is_column_ids_dedup, ColumnCatalog, ColumnDesc, Schema, TableId, INITIAL_SOURCE_VERSION_ID,
     KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
@@ -36,6 +36,7 @@ use risingwave_connector::parser::{
 use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
 };
+use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::cdc::external::CdcTableType;
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CITUS_CDC_CONNECTOR,
@@ -46,8 +47,9 @@ use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
-    GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NATS_CONNECTOR,
-    NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
+    ConnectorProperties, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
+    KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
+    PULSAR_CONNECTOR, S3_CONNECTOR,
 };
 use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
@@ -1061,12 +1063,11 @@ pub fn validate_compatibility(
 }
 
 /// Performs early stage checking in frontend to see if the schema of the given `columns` is
-/// compatible with the connector extracted from the properties. Currently this only works for
-/// `nexmark` connector since it's in chunk format.
+/// compatible with the connector extracted from the properties.
 ///
 /// One should only call this function after all properties of all columns are resolved, like
 /// generated column descriptors.
-pub(super) fn check_source_schema(
+pub(super) async fn check_source_schema(
     props: &HashMap<String, String>,
     row_id_index: Option<usize>,
     columns: &[ColumnCatalog],
@@ -1075,10 +1076,22 @@ pub(super) fn check_source_schema(
         return Ok(());
     };
 
-    if connector != NEXMARK_CONNECTOR {
-        return Ok(());
+    if connector == NEXMARK_CONNECTOR {
+        check_nexmark_schema(props, row_id_index, columns)
+    } else if connector == ICEBERG_CONNECTOR {
+        Ok(check_iceberg_source(props, columns)
+            .await
+            .map_err(|err| ProtocolError(err.to_string().into()))?)
+    } else {
+        Ok(())
     }
+}
 
+pub(super) fn check_nexmark_schema(
+    props: &HashMap<String, String>,
+    row_id_index: Option<usize>,
+    columns: &[ColumnCatalog],
+) -> Result<()> {
     let table_type = props
         .get("nexmark.table.type")
         .map(|t| t.to_ascii_lowercase());
@@ -1125,6 +1138,68 @@ pub(super) fn check_source_schema(
             "The schema of the nexmark source must specify all columns in order:\n{cmp}",
         ))));
     }
+    Ok(())
+}
+
+pub async fn check_iceberg_source(
+    props: &HashMap<String, String>,
+    columns: &[ColumnCatalog],
+) -> anyhow::Result<()> {
+    let props = ConnectorProperties::extract(props.clone(), true)?;
+    let ConnectorProperties::Iceberg(properties) = props else {
+        return Err(anyhow!(format!(
+            "Invalid properties for iceberg source: {:?}",
+            props
+        )));
+    };
+
+    let iceberg_config = IcebergConfig {
+        database_name: properties.database_name,
+        table_name: properties.table_name,
+        catalog_type: Some(properties.catalog_type),
+        path: properties.warehouse_path,
+        endpoint: Some(properties.endpoint),
+        access_key: properties.s3_access,
+        secret_key: properties.s3_secret,
+        region: Some(properties.region_name),
+        ..Default::default()
+    };
+
+    let schema = Schema {
+        fields: columns
+            .iter()
+            .cloned()
+            .map(|c| c.column_desc.into())
+            .collect(),
+    };
+
+    let table = iceberg_config.load_table().await?;
+
+    let iceberg_schema: arrow_schema::Schema = table
+        .current_table_metadata()
+        .current_schema()?
+        .clone()
+        .try_into()?;
+
+    for f1 in schema.fields() {
+        if !iceberg_schema.fields.iter().any(|f2| f2.name() == &f1.name) {
+            return Err(anyhow::anyhow!(format!(
+                "Column {} not found in iceberg table",
+                f1.name
+            )));
+        }
+    }
+
+    let new_iceberg_field = iceberg_schema
+        .fields
+        .iter()
+        .filter(|f1| schema.fields.iter().any(|f2| f1.name() == &f2.name))
+        .cloned()
+        .collect::<Vec<_>>();
+    let new_iceberg_schema = arrow_schema::Schema::new(new_iceberg_field);
+
+    risingwave_connector::sink::iceberg::try_matches_arrow_schema(&schema, &new_iceberg_schema)?;
+
     Ok(())
 }
 
@@ -1238,7 +1313,7 @@ pub async fn handle_create_source(
         &pk_column_ids,
     )?;
 
-    check_source_schema(&with_properties, row_id_index, &columns)?;
+    check_source_schema(&with_properties, row_id_index, &columns).await?;
 
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
 
