@@ -24,7 +24,7 @@ WORKDIR /risingwave
 
 COPY rust-toolchain rust-toolchain
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path -y
 
 ENV PATH /root/.cargo/bin/:$PATH
 

@@ -4,8 +4,6 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
-rustup default stable
-rustup +stable target add wasm32-wasi
 
 echo "--- Download artifacts"
 download-and-decompress-artifact risingwave_simulation .
