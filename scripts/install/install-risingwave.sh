@@ -67,7 +67,7 @@ if [ "${USE_BREW}" -eq 1 ]; then
   echo
   echo "You can run it as:"
   echo
-  echo "  risingwave"
+  echo "  risingwave >risingwave.log 2>&1 &"
   echo
   echo
   echo "In a separate terminal, you can attach a psql client to the standalone server using:"
@@ -98,7 +98,7 @@ chmod +x risingwave
 echo
 echo "Successfully downloaded the RisingWave binary, you can run it as:"
 echo
-echo "  ./risingwave"
+echo "  ./risingwave >risingwave.log 2>&1 &"
 echo
 echo
 echo "In a separate terminal, you can connect a psql client to the standalone server using:"
@@ -116,3 +116,4 @@ echo "To view other available options, run:"
 echo
 echo "  ./risingwave single-node --help"
 echo
+# TODO(kwannoel): Include link to our docs.
