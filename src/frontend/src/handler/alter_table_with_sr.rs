@@ -18,6 +18,7 @@ use anyhow::Context;
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_sqlparser::ast::{ConnectorSchema, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
@@ -102,6 +103,14 @@ pub async fn handle_alter_table_with_sr(
             .map(|old_c| {
                 table.columns.iter().position(|new_c| {
                     new_c.get_column_desc().unwrap().column_id == old_c.column_id().get_id()
+                        && DataType::from(
+                            new_c
+                                .get_column_desc()
+                                .unwrap()
+                                .column_type
+                                .as_ref()
+                                .unwrap(),
+                        ) == *old_c.data_type()
                 })
             })
             .collect(),
