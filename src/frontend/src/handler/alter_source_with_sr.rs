@@ -230,7 +230,7 @@ pub async fn handle_alter_source_with_sr(
     Ok(RwPgResponse::empty_result(StatementType::ALTER_SOURCE))
 }
 
-/// Apply the new `format_encode_options` to the source definition.
+/// Apply the new `format_encode_options` to the source/table definition.
 pub fn alter_definition_format_encode(
     definition: &str,
     format_encode_options: Vec<SqlOption>,
@@ -244,6 +244,10 @@ pub fn alter_definition_format_encode(
     match &mut stmt {
         Statement::CreateSource {
             stmt: CreateSourceStatement { source_schema, .. },
+        }
+        | Statement::CreateTable {
+            source_schema: Some(source_schema),
+            ..
         } => {
             match source_schema {
                 CompatibleSourceSchema::V2(schema) => {
@@ -269,7 +273,7 @@ pub mod tests {
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[tokio::test]
-    async fn test_alter_source_column_handler() {
+    async fn test_alter_source_with_sr_handler() {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE src

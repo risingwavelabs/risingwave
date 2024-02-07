@@ -22,6 +22,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_sqlparser::ast::{ConnectorSchema, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 
+use super::alter_source_with_sr::alter_definition_format_encode;
 use super::alter_table_column::{fetch_table_catalog_for_alter, schema_has_schema_registry};
 use super::{HandlerArgs, RwPgResponse};
 use crate::error::{ErrorCode, Result, RwError};
@@ -60,7 +61,12 @@ pub async fn handle_alter_table_with_sr(
         .into());
     }
 
-    let [definition]: [_; 1] = Parser::parse_sql(&original_table.definition)
+    let definition = alter_definition_format_encode(
+        &original_table.definition,
+        connector_schema.row_options.clone(),
+    )?;
+
+    let [definition]: [_; 1] = Parser::parse_sql(&definition)
         .context("unable to parse original table definition")?
         .try_into()
         .unwrap();
@@ -124,4 +130,73 @@ pub async fn handle_alter_table_with_sr(
         .await?;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_TABLE))
+}
+
+#[cfg(test)]
+pub mod tests {
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+
+    use crate::catalog::root_catalog::SchemaPath;
+    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
+
+    #[tokio::test]
+    async fn test_alter_table_with_sr_handler() {
+        let proto_file = create_proto_file(PROTO_FILE_DATA);
+        let sql = format!(
+            r#"CREATE TABLE t
+            WITH (
+                connector = 'kafka',
+                topic = 'test-topic',
+                properties.bootstrap.server = 'localhost:29092'
+            )
+            FORMAT PLAIN ENCODE PROTOBUF (
+                message = '.test.TestRecord',
+                schema.location = 'file://{}'
+            )"#,
+            proto_file.path().to_str().unwrap()
+        );
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
+
+        frontend.run_sql(sql).await.unwrap();
+
+        let sql = format!(
+            r#"ALTER TABLE t FORMAT UPSERT ENCODE PROTOBUF (
+                message = '.test.TestRecord',
+                schema.location = 'file://{}'
+            )"#,
+            proto_file.path().to_str().unwrap()
+        );
+        assert!(frontend
+            .run_sql(sql)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("the original definition is FORMAT Plain ENCODE Protobuf"));
+
+        let sql = format!(
+            r#"ALTER TABLE t FORMAT PLAIN ENCODE PROTOBUF (
+                message = '.test.TestRecordExt',
+                schema.location = 'file://{}'
+            )"#,
+            proto_file.path().to_str().unwrap()
+        );
+        frontend.run_sql(sql).await.unwrap();
+
+        let altered_table = session
+            .env()
+            .catalog_reader()
+            .read_guard()
+            .get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
+            .unwrap()
+            .0
+            .clone();
+
+        let altered_sql = format!(
+            r#"CREATE TABLE t () WITH (connector = 'kafka', topic = 'test-topic', properties.bootstrap.server = 'localhost:29092') FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecordExt', schema.location = 'file://{}')"#,
+            proto_file.path().to_str().unwrap()
+        );
+        assert_eq!(altered_sql, altered_table.definition);
+    }
 }
