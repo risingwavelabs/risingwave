@@ -22,6 +22,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
@@ -368,15 +369,13 @@ impl GlobalBarrierManagerContext {
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
                     let mut info = if !self.env.opts.disable_automatic_parallelism_control {
-                        let info = self.resolve_actor_info().await;
-                        let scaled = self.scale_actors(&info).await.inspect_err(|err| {
+                        self.scale_actors().await.inspect_err(|err| {
                             warn!(error = %err.as_report(), "scale actors failed");
                         })?;
-                        if scaled {
-                            self.resolve_actor_info().await
-                        } else {
-                            info
-                        }
+
+                        self.resolve_actor_info().await.inspect_err(|err| {
+                            warn!(error = %err.as_report(), "resolve actor info failed");
+                        })?
                     } else {
                         // Migrate actors in expired CN to newly joined one.
                         self.migrate_actors().await.inspect_err(|err| {
@@ -390,7 +389,9 @@ impl GlobalBarrierManagerContext {
                     })?;
 
                     if self.pre_apply_drop_cancel(scheduled_barriers).await? {
-                        info = self.resolve_actor_info().await;
+                        info = self.resolve_actor_info().await.inspect_err(|err| {
+                            warn!(error = %err.as_report(), "resolve actor info failed");
+                        })?;
                     }
 
                     // update and build all actors.
@@ -508,8 +509,7 @@ impl GlobalBarrierManagerContext {
             .collect();
         if expired_parallel_units.is_empty() {
             debug!("no expired parallel units, skipping.");
-            let info = self.resolve_actor_info().await;
-            return Ok(info);
+            return self.resolve_actor_info().await;
         }
 
         debug!("start migrate actors.");
@@ -531,8 +531,7 @@ impl GlobalBarrierManagerContext {
                 .list_active_parallel_units()
                 .await?
                 .into_iter()
-                .map(|pu| pu.id as i32)
-                .filter(|pu| !inuse_parallel_units.contains(pu))
+                .filter(|pu| !inuse_parallel_units.contains(&(pu.id as i32)))
                 .collect_vec();
             if !new_parallel_units.is_empty() {
                 debug!("new parallel units found: {:#?}", new_parallel_units);
@@ -540,9 +539,9 @@ impl GlobalBarrierManagerContext {
                     if let Some(from) = to_migrate_parallel_units.pop() {
                         debug!(
                             "plan to migrate from parallel unit {} to {}",
-                            from, target_parallel_unit
+                            from, target_parallel_unit.id
                         );
-                        inuse_parallel_units.insert(target_parallel_unit);
+                        inuse_parallel_units.insert(target_parallel_unit.id as i32);
                         plan.insert(from, target_parallel_unit);
                     } else {
                         break 'discovery;
@@ -560,15 +559,15 @@ impl GlobalBarrierManagerContext {
         mgr.catalog_controller.migrate_actors(plan).await?;
 
         debug!("migrate actors succeed.");
-        let info = self.resolve_actor_info().await;
-        Ok(info)
+
+        self.resolve_actor_info().await
     }
 
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
     async fn migrate_actors_v1(&self) -> MetaResult<InflightActorInfo> {
         let mgr = self.metadata_manager.as_v1_ref();
 
-        let info = self.resolve_actor_info().await;
+        let info = self.resolve_actor_info().await?;
 
         // 1. get expired workers.
         let expired_workers: HashSet<WorkerId> = info
@@ -592,25 +591,24 @@ impl GlobalBarrierManagerContext {
         migration_plan.delete(self.env.meta_store_checked()).await?;
         debug!("migrate actors succeed.");
 
-        let info = self.resolve_actor_info().await;
-        Ok(info)
+        self.resolve_actor_info().await
     }
 
-    async fn scale_actors(&self, info: &InflightActorInfo) -> MetaResult<bool> {
+    async fn scale_actors(&self) -> MetaResult<()> {
         match &self.metadata_manager {
-            MetadataManager::V1(_) => self.scale_actors_v1(info).await,
-            MetadataManager::V2(_) => self.scale_actors_v2(info).await,
+            MetadataManager::V1(_) => self.scale_actors_v1().await,
+            MetadataManager::V2(_) => self.scale_actors_v2().await,
         }
     }
 
-    async fn scale_actors_v2(&self, _info: &InflightActorInfo) -> MetaResult<bool> {
+    async fn scale_actors_v2(&self) -> MetaResult<()> {
         let mgr = self.metadata_manager.as_v2_ref();
         debug!("start resetting actors distribution");
 
         let table_parallelisms: HashMap<_, _> = {
             let streaming_parallelisms = mgr
                 .catalog_controller
-                .get_all_streaming_parallelisms()
+                .get_all_created_streaming_parallelisms()
                 .await?;
 
             streaming_parallelisms
@@ -662,16 +660,23 @@ impl GlobalBarrierManagerContext {
 
         let mut compared_table_parallelisms = table_parallelisms.clone();
 
-        let (reschedule_fragment, _) = self
-            .scale_controller
-            .prepare_reschedule_command(
-                plan,
-                RescheduleOptions {
-                    resolve_no_shuffle_upstream: true,
-                },
-                Some(&mut compared_table_parallelisms),
-            )
-            .await?;
+        // skip reschedule if no reschedule is generated.
+        let reschedule_fragment = if plan.is_empty() {
+            HashMap::new()
+        } else {
+            let (reschedule_fragment, _) = self
+                .scale_controller
+                .prepare_reschedule_command(
+                    plan,
+                    RescheduleOptions {
+                        resolve_no_shuffle_upstream: true,
+                    },
+                    Some(&mut compared_table_parallelisms),
+                )
+                .await?;
+
+            reschedule_fragment
+        };
 
         // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
         debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
@@ -690,16 +695,18 @@ impl GlobalBarrierManagerContext {
         }
 
         debug!("scaling-in actors succeed.");
-        Ok(true)
+        Ok(())
     }
 
-    async fn scale_actors_v1(&self, info: &InflightActorInfo) -> MetaResult<bool> {
+    async fn scale_actors_v1(&self) -> MetaResult<()> {
+        let info = self.resolve_actor_info().await?;
+
         let mgr = self.metadata_manager.as_v1_ref();
         debug!("start resetting actors distribution");
 
         if info.actor_location_map.is_empty() {
             debug!("empty cluster, skipping");
-            return Ok(true);
+            return Ok(());
         }
 
         let current_parallelism = info
@@ -745,6 +752,7 @@ impl GlobalBarrierManagerContext {
             guard
                 .table_fragments()
                 .iter()
+                .filter(|&(_, table)| matches!(table.state(), State::Created))
                 .map(|(table_id, table)| {
                     let target_parallelism =
                         derive_target_parallelism_for_custom(current_parallelism, table);
@@ -789,16 +797,20 @@ impl GlobalBarrierManagerContext {
 
         let mut compared_table_parallelisms = table_parallelisms.clone();
 
-        let (reschedule_fragment, applied_reschedules) = self
-            .scale_controller
-            .prepare_reschedule_command(
-                plan,
-                RescheduleOptions {
-                    resolve_no_shuffle_upstream: true,
-                },
-                Some(&mut compared_table_parallelisms),
-            )
-            .await?;
+        // skip reschedule if no reschedule is generated.
+        let (reschedule_fragment, applied_reschedules) = if plan.is_empty() {
+            (HashMap::new(), HashMap::new())
+        } else {
+            self.scale_controller
+                .prepare_reschedule_command(
+                    plan,
+                    RescheduleOptions {
+                        resolve_no_shuffle_upstream: true,
+                    },
+                    Some(&mut compared_table_parallelisms),
+                )
+                .await?
+        };
 
         // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
         debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
@@ -821,7 +833,7 @@ impl GlobalBarrierManagerContext {
         }
 
         debug!("scaling-in actors succeed.");
-        Ok(true)
+        Ok(())
     }
 
     /// This function will generate a migration plan, which includes the mapping for all expired and

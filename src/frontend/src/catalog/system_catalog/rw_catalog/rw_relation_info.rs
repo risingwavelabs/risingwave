@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 use serde_json::json;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::error::Result;
 
 // TODO: `rw_relation_info` contains some extra streaming meta info that's only meaningful for
 // streaming jobs, we'd better query relation infos from `rw_relations` and move these streaming

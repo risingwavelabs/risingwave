@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
 use risingwave_common::for_all_base_types;
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::error::Result;
 
 /// `rw_types` stores all supported types in the database.
 #[derive(Fields)]

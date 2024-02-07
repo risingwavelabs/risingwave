@@ -15,7 +15,6 @@
 use itertools::Itertools as _;
 use num_integer::Integer as _;
 use risingwave_common::bail_no_function;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -23,6 +22,7 @@ use risingwave_expr::aggregate::AggKind;
 pub use risingwave_expr::sig::*;
 
 use super::{align_types, cast_ok_base, CastContext};
+use crate::error::{ErrorCode, Result};
 use crate::expr::type_inference::cast::align_array_and_element;
 use crate::expr::{cast_ok, is_row_function, Expr as _, ExprImpl, ExprType, FunctionCall};
 

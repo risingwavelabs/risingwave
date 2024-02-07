@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::Result;
 use risingwave_common::types::{Fields, JsonbVal};
 use risingwave_frontend_macro::system_catalog;
 use serde_json::json;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::error::Result;
 
 #[derive(Fields)]
 struct RwHummockCompactionGroupConfig {

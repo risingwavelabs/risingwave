@@ -16,7 +16,7 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use std::str::FromStr;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use itertools::Itertools;
 use prost::Message;
@@ -111,7 +111,7 @@ where
             )
         })
         .await
-        .map_err(|e| anyhow!("failed to validate source: {:?}", e))??;
+        .context("failed to validate source")??;
 
         tracing::debug!("validate cdc source properties success");
         Ok(Self {

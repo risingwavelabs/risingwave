@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::Result;
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::error::Result;
 
 /// `rw_worker_nodes` contains all information about the compute nodes in the cluster.
 #[derive(Fields)]

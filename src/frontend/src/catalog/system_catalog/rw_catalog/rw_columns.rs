@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::error::Result;
 
 #[derive(Fields)]
 #[primary_key(relation_id, name)]
@@ -79,7 +79,7 @@ fn read_rw_columns(reader: &SysCatalogReaderImpl) -> Result<Vec<RwColumn>> {
                 })
                 .chain(view_rows);
 
-            let rows = schema
+            let catalog_rows = schema
                 .iter_system_tables()
                 .flat_map(|table| {
                     table
@@ -101,7 +101,7 @@ fn read_rw_columns(reader: &SysCatalogReaderImpl) -> Result<Vec<RwColumn>> {
                 })
                 .chain(sink_rows);
 
-            schema
+            let table_rows = schema
                 .iter_valid_table()
                 .flat_map(|table| {
                     table
@@ -121,7 +121,30 @@ fn read_rw_columns(reader: &SysCatalogReaderImpl) -> Result<Vec<RwColumn>> {
                             udt_type: column.data_type().pg_name().into(),
                         })
                 })
-                .chain(rows)
+                .chain(catalog_rows);
+
+            // source columns
+            schema
+                .iter_source()
+                .flat_map(|source| {
+                    source
+                        .columns
+                        .iter()
+                        .enumerate()
+                        .map(move |(index, column)| RwColumn {
+                            relation_id: source.id as i32,
+                            name: column.name().into(),
+                            position: index as i32 + 1,
+                            is_hidden: column.is_hidden,
+                            is_primary_key: source.pk_col_ids.contains(&column.column_id()),
+                            is_distribution_key: false,
+                            data_type: column.data_type().to_string(),
+                            type_oid: column.data_type().to_oid(),
+                            type_len: column.data_type().type_len(),
+                            udt_type: column.data_type().pg_name().into(),
+                        })
+                })
+                .chain(table_rows)
         })
         .collect())
 }

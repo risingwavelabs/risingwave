@@ -15,6 +15,8 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
 assert_matches = "1"
 async-recursion = "1"
 async-trait = "0.1"
@@ -24,6 +26,7 @@ futures-async-stream = { workspace = true }
 futures-util = "0.3"
 hashbrown = { workspace = true }
 hytra = "0.1.2"
+icelake = { workspace = true }
 itertools = "0.12"
 memcomparable = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }

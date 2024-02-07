@@ -23,6 +23,7 @@ anyhow = "1"
 clap = { version = "4", features = ["cargo", "derive"] }
 console = "0.15"
 const-str = "0.5"
+home = "0.5"
 prometheus = { version = "0.13" }
 risingwave_cmd = { workspace = true }
 risingwave_common = { workspace = true }

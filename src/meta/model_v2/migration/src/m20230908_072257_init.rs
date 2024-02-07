@@ -390,6 +390,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Actor::Status).string().not_null())
                     .col(ColumnDef::new(Actor::Splits).json())
                     .col(ColumnDef::new(Actor::ParallelUnitId).integer().not_null())
+                    .col(ColumnDef::new(Actor::WorkerId).integer().not_null())
                     .col(ColumnDef::new(Actor::UpstreamActorIds).json())
                     .col(ColumnDef::new(Actor::VnodeBitmap).json())
                     .col(ColumnDef::new(Actor::ExprContext).json().not_null())
@@ -535,7 +536,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Table::DistributionKey).json().not_null())
                     .col(ColumnDef::new(Table::StreamKey).json().not_null())
                     .col(ColumnDef::new(Table::AppendOnly).boolean().not_null())
-                    .col(ColumnDef::new(Table::Properties).json().not_null())
                     .col(ColumnDef::new(Table::FragmentId).integer())
                     .col(ColumnDef::new(Table::VnodeColIndex).integer())
                     .col(ColumnDef::new(Table::RowIdIndex).integer())
@@ -562,6 +562,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Table::Description).string())
                     .col(ColumnDef::new(Table::Version).json())
+                    .col(ColumnDef::new(Table::RetentionSeconds).integer())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_table_object_id")
@@ -966,6 +967,7 @@ enum Actor {
     Status,
     Splits,
     ParallelUnitId,
+    WorkerId,
     UpstreamActorIds,
     VnodeBitmap,
     ExprContext,
@@ -1009,7 +1011,6 @@ enum Table {
     DistributionKey,
     StreamKey,
     AppendOnly,
-    Properties,
     FragmentId,
     VnodeColIndex,
     RowIdIndex,
@@ -1024,6 +1025,7 @@ enum Table {
     CleanedByWatermark,
     Description,
     Version,
+    RetentionSeconds,
 }
 
 #[derive(DeriveIden)]

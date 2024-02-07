@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::error::{ErrorCode, Result};
 use crate::user::user_authentication::encrypted_raw_password;
 
 /// `rw_user_secret` stores all user encrypted passwords in the database, which is only readable by
