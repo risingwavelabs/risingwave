@@ -82,6 +82,10 @@ pub struct SingleNodeOpts {
     /// The address of the compactor node
     #[clap(long, env = "RW_SINGLE_NODE_COMPACTOR_ADDR")]
     compactor_addr: Option<String>,
+
+    /// Extra options for meta node.
+    #[clap(long, env = "RW_SINGLE_NODE_META_EXTRA_OPTS")]
+    meta_node_extra_opts: Option<String>,
 }
 
 pub fn make_single_node_sql_endpoint(store_directory: &String) -> String {
@@ -96,10 +100,13 @@ pub fn make_single_node_state_store_url(store_directory: &String) -> String {
 }
 
 pub fn map_single_node_opts_to_standalone_opts(opts: &SingleNodeOpts) -> ParsedStandaloneOpts {
+    // Get default options
     let mut meta_opts = SingleNodeOpts::default_meta_opts();
     let mut compute_opts = SingleNodeOpts::default_compute_opts();
     let mut frontend_opts = SingleNodeOpts::default_frontend_opts();
     let mut compactor_opts = SingleNodeOpts::default_compactor_opts();
+
+    // Override with process level options
     if let Some(prometheus_listener_addr) = &opts.prometheus_listener_addr {
         meta_opts.prometheus_listener_addr = Some(prometheus_listener_addr.clone());
         compute_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
@@ -135,6 +142,13 @@ pub fn map_single_node_opts_to_standalone_opts(opts: &SingleNodeOpts) -> ParsedS
     if let Some(compactor_addr) = &opts.compactor_addr {
         compactor_opts.listen_addr = compactor_addr.clone();
     }
+
+    // Override with node-level extra options
+    if let Some(meta_node_extra_opts) = &opts.meta_node_extra_opts {
+        let meta_node_extra_opts = meta_node_extra_opts.split_whitespace();
+        meta_opts.update_from(meta_node_extra_opts);
+    }
+
     ParsedStandaloneOpts {
         meta_opts: Some(meta_opts),
         compute_opts: Some(compute_opts),
