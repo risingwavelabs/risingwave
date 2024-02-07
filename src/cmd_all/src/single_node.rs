@@ -386,7 +386,7 @@ mod test {
     #[test]
     fn test_parse_extra_opts() {
         let raw_opts = "
---meta-extra-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\"\
+--meta-extra-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\"
 --compute-extra-opts=--listen-addr 127.0.0.1:8888 --total-memory-bytes 123 --parallelism 10
 ";
         let actual = SingleNodeOpts::parse_from(raw_opts.lines());
