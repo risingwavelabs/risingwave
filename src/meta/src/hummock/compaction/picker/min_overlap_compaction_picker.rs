@@ -28,6 +28,7 @@ pub struct MinOverlappingPicker {
     level: usize,
     target_level: usize,
     max_select_bytes: u64,
+    #[allow(dead_code)]
     split_by_table: bool,
     overlap_strategy: Arc<dyn OverlapStrategy>,
 }

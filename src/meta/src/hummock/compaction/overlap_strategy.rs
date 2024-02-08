@@ -94,15 +94,10 @@ impl OverlapInfo for RangeOverlapInfo {
                 if overlap_begin >= others.len() {
                     return overlap_begin..overlap_begin;
                 }
-                let mut overlap_end = overlap_begin;
-                for table in &others[overlap_begin..] {
-                    if key_range.compare_right_with(&table.key_range.as_ref().unwrap().left)
-                        == cmp::Ordering::Less
-                    {
-                        break;
-                    }
-                    overlap_end += 1;
-                }
+                let overlap_end = others.partition_point(|table_status| {
+                    key_range.compare_right_with(&table_status.key_range.as_ref().unwrap().left)
+                        != cmp::Ordering::Less
+                });
                 overlap_begin..overlap_end
             }
             None => others.len()..others.len(),
