@@ -71,7 +71,6 @@ impl Expression for UserDefinedFunction {
         self.return_type.clone()
     }
 
-    #[cfg_or_panic(not(madsim))]
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let vis = input.visibility();
         let mut columns = Vec::with_capacity(self.children.len());
@@ -82,7 +81,6 @@ impl Expression for UserDefinedFunction {
         self.eval_inner(columns, vis).await
     }
 
-    #[cfg_or_panic(not(madsim))]
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let mut columns = Vec::with_capacity(self.children.len());
         for child in &self.children {
@@ -183,7 +181,6 @@ impl UserDefinedFunction {
     }
 }
 
-#[cfg_or_panic(not(madsim))]
 impl Build for UserDefinedFunction {
     fn build(
         prost: &ExprNode,
