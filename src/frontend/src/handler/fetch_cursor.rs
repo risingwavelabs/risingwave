@@ -47,7 +47,7 @@ pub async fn handle_fetch_cursor(
             subscription_name,
         ) => {
             let sql_str = format!(
-                "SELECT * FROM {} WHERE rw_timestamp > {} ORDER BY rw_timestamp",
+                "SELECT * FROM {} WHERE kv_log_store_epoch > {} ORDER BY kv_log_store_epoch",
                 subscription_name, rw_timestamp
             );
             let query_stmt = Parser::parse_sql(&sql_str)

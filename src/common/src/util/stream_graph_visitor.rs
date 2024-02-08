@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_pb::catalog::Table;
+use risingwave_pb::catalog::{table, Table};
 use risingwave_pb::stream_plan::stream_fragment_graph::StreamFragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{agg_call_state, StreamNode};
@@ -196,8 +196,9 @@ pub fn visit_stream_node_tables_inner<F>(
 
             // Subscription
             NodeBody::Subscription(node) => {
-                // A Subscription should have a state table.
-                optional!(node.log_store_table, "Subscription")
+                // A Subscription should have a log store, and name == subscription's name.
+                optional!(node.log_store_table, "Subscription");
+                node.log_store_table.as_mut().unwrap().name = node.subscription_catalog.clone().unwrap().name;
             }
 
             // Now

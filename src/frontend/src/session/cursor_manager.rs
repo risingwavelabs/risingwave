@@ -102,6 +102,7 @@ impl Cursor {
                         self.pg_desc.clone(),
                     )))
                 } else if true {
+                    println!("{:?}",new_row);
                     Ok(CursorRowValue::Row((
                         Row::new(new_row),
                         self.pg_desc.clone(),
