@@ -75,13 +75,13 @@ async fn test_hash_agg_count_sum() {
     check_until_pending(
         &mut hash_agg,
         expect![[r#"
-            - !barrier 65536
+            - !barrier 1
             - !chunk |-
               +---+---+---+---+---+
               | + | 1 | 1 | 1 | 1 |
               | + | 2 | 2 | 4 | 4 |
               +---+---+---+---+---+
-            - !barrier 131072
+            - !barrier 2
             - !chunk |-
               +----+---+---+---+---+
               |  + | 3 | 1 | 3 | 3 |
@@ -89,7 +89,7 @@ async fn test_hash_agg_count_sum() {
               | U- | 2 | 2 | 4 | 4 |
               | U+ | 2 | 1 | 2 | 2 |
               +----+---+---+---+---+
-            - !barrier 196608
+            - !barrier 3
         "#]],
         SnapshotOptions::default().sort_chunk(true),
     );
@@ -152,20 +152,20 @@ async fn test_hash_agg_min() {
     check_until_pending(
         &mut hash_agg,
         expect![[r#"
-            - !barrier 65536
+            - !barrier 1
             - !chunk |-
               +---+---+---+------+
               | + | 1 | 2 | 233  |
               | + | 2 | 1 | 2333 |
               +---+---+---+------+
-            - !barrier 131072
+            - !barrier 2
             - !chunk |-
               +----+---+---+-------+
               |  - | 2 | 1 | 2333  |
               | U- | 1 | 2 | 233   |
               | U+ | 1 | 1 | 23333 |
               +----+---+---+-------+
-            - !barrier 196608
+            - !barrier 3
         "#]],
         SnapshotOptions::default().sort_chunk(true),
     );
@@ -232,13 +232,13 @@ async fn test_hash_agg_min_append_only() {
     check_until_pending(
         &mut hash_agg,
         expect![[r#"
-            - !barrier 65536
+            - !barrier 1
             - !chunk |-
               +---+---+---+---+
               | + | 1 | 2 | 8 |
               | + | 2 | 3 | 5 |
               +---+---+---+---+
-            - !barrier 131072
+            - !barrier 2
             - !chunk |-
               +----+---+---+---+
               | U- | 1 | 2 | 8 |
@@ -246,7 +246,7 @@ async fn test_hash_agg_min_append_only() {
               | U+ | 1 | 4 | 1 |
               | U+ | 2 | 5 | 5 |
               +----+---+---+---+
-            - !barrier 196608
+            - !barrier 3
         "#]],
         SnapshotOptions::default().sort_chunk(true),
     );
@@ -284,7 +284,7 @@ async fn test_hash_agg_emit_on_window_close() {
         (tx, hash_agg.execute())
     };
 
-    check_with_script_v2(
+    check_with_script(
         create_executor,
         &format!(
             r###"
@@ -320,7 +320,7 @@ async fn test_hash_agg_emit_on_window_close() {
         expect![[r#"
             - input: !barrier 1
               output:
-              - !barrier 65536
+              - !barrier 1
             - input: !chunk |-
                 +---+---+---+
                 | + | _ | 1 |
@@ -330,7 +330,7 @@ async fn test_hash_agg_emit_on_window_close() {
               output: []
             - input: !barrier 2
               output:
-              - !barrier 131072
+              - !barrier 2
             - input: !chunk |-
                 +---+---+---+
                 | - | _ | 2 |
@@ -350,7 +350,7 @@ async fn test_hash_agg_emit_on_window_close() {
               - !watermark
                 col_idx: 0
                 val: '3'
-              - !barrier 196608
+              - !barrier 3
             - input: !watermark
                 col_idx: 1
                 val: '4'
@@ -364,7 +364,7 @@ async fn test_hash_agg_emit_on_window_close() {
               - !watermark
                 col_idx: 0
                 val: '4'
-              - !barrier 262144
+              - !barrier 4
             - input: !watermark
                 col_idx: 1
                 val: '10'
@@ -378,7 +378,7 @@ async fn test_hash_agg_emit_on_window_close() {
               - !watermark
                 col_idx: 0
                 val: '10'
-              - !barrier 327680
+              - !barrier 5
             - input: !watermark
                 col_idx: 1
                 val: '20'
@@ -388,7 +388,7 @@ async fn test_hash_agg_emit_on_window_close() {
               - !watermark
                 col_idx: 0
                 val: '20'
-              - !barrier 393216
+              - !barrier 6
         "#]],
         SnapshotOptions::default().sort_chunk(true),
     )

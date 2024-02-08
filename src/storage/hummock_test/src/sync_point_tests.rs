@@ -25,7 +25,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{next_key, user_key};
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
-use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_hummock_sdk::{EpochWithGap, HummockVersionId};
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use risingwave_meta::hummock::compaction::selector::ManualCompactionOption;
 use risingwave_meta::hummock::test_utils::{setup_compute_env, setup_compute_env_with_config};
@@ -501,7 +501,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let get_result = storage
         .get(
             gen_key_from_bytes(VirtualNode::ZERO, b"kkk"),
-            EpochWithGap::new_for_test(120).as_u64_for_test(),
+            risingwave_hummock_sdk::EpochWithGap::new_for_test(120).as_u64_for_test(),
             read_options.clone(),
         )
         .await

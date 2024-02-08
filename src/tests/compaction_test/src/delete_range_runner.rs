@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::ops::{Bound, RangeBounds};
-use risingwave_common::util::epoch::EPOCH_INC_MIN_STEP_FOR_TEST;
 use std::pin::{pin, Pin};
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
@@ -31,6 +30,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, RwConfig,
 };
+use risingwave_common::util::epoch::EPOCH_INC_MIN_STEP_FOR_TEST;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::EpochWithGap;

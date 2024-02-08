@@ -108,7 +108,7 @@ async fn test_over_window() {
     check_with_script(
         || create_executor(calls.clone(), store.clone()),
         r###"
-- !barrier 65536
+- !barrier 1
 - !chunk |2
       I T  I   i
     + 1 p1 100 10
@@ -120,20 +120,20 @@ async fn test_over_window() {
     + 7 p2 201 22
     + 8 p3 300 33
 # NOTE: no watermark message here, since watermark(1) was already received
-- !barrier 131072
+- !barrier 2
 - recovery
-- !barrier 196608
+- !barrier 3
 - !chunk |2
       I  T  I   i
     + 10 p1 103 13
     + 12 p2 202 28
     + 13 p3 301 39
-- !barrier 262144
+- !barrier 4
 "###,
         expect![[r#"
-            - input: !barrier 65536
+            - input: !barrier 1
               output:
-              - !barrier 65536
+              - !barrier 1
             - input: !chunk |-
                 +---+---+----+-----+----+
                 | + | 1 | p1 | 100 | 10 |
@@ -157,14 +157,14 @@ async fn test_over_window() {
                 | + | 1 | p1 | 101 | 16 | 10 | 18 |
                 | + | 4 | p2 | 200 | 20 |    | 22 |
                 +---+---+----+-----+----+----+----+
-            - input: !barrier 131072
+            - input: !barrier 2
               output:
-              - !barrier 131072
+              - !barrier 2
             - input: recovery
               output: []
-            - input: !barrier 196608
+            - input: !barrier 3
               output:
-              - !barrier 196608
+              - !barrier 3
             - input: !chunk |-
                 +---+----+----+-----+----+
                 | + | 10 | p1 | 103 | 13 |
@@ -178,9 +178,9 @@ async fn test_over_window() {
                 | + | 7 | p2 | 201 | 22 | 20 | 28 |
                 | + | 8 | p3 | 300 | 33 |    | 39 |
                 +---+---+----+-----+----+----+----+
-            - input: !barrier 262144
+            - input: !barrier 4
               output:
-              - !barrier 262144
+              - !barrier 4
         "#]],
         SnapshotOptions::default(),
     )
@@ -200,7 +200,7 @@ async fn test_over_window_aggregate() {
     check_with_script(
         || create_executor(calls.clone(), store.clone()),
         r###"
-        - !barrier 65536
+        - !barrier 1
         - !chunk |2
               I T  I   i
             + 1 p1 100 10
@@ -212,9 +212,9 @@ async fn test_over_window_aggregate() {
             + 6 p1 104 11
         "###,
         expect![[r#"
-            - input: !barrier 65536
+            - input: !barrier 1
               output:
-              - !barrier 65536
+              - !barrier 1
             - input: !chunk |-
                 +---+---+----+-----+----+
                 | + | 1 | p1 | 100 | 10 |
