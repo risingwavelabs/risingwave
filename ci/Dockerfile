@@ -24,11 +24,12 @@ WORKDIR /risingwave
 
 COPY rust-toolchain rust-toolchain
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path -y
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
 
 ENV PATH /root/.cargo/bin/:$PATH
 
 RUN rustup show
+RUN rustup default `rustup show active-toolchain | awk '{print $1}'`
 
 RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.4.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
     tar -xvzf - -C /usr/local --strip-components 1
@@ -41,7 +42,7 @@ RUN curl -sSL https://install.python-poetry.org | python3 -
 
 # add required rustup components
 RUN rustup component add rustfmt llvm-tools-preview clippy
-RUN rustup +stable target add wasm32-wasi
+RUN rustup target add wasm32-wasi
 
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
