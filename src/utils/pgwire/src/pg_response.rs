@@ -124,6 +124,7 @@ pub struct PgResponse<VS> {
     callback: Option<BoxedCallback>,
     row_desc: Vec<PgFieldDescriptor>,
     status: ParameterStatus,
+    query_with_snapshot: Option<u64>,
 }
 
 pub struct PgResponseBuilder<VS> {
@@ -136,6 +137,7 @@ pub struct PgResponseBuilder<VS> {
     callback: Option<BoxedCallback>,
     row_desc: Vec<PgFieldDescriptor>,
     status: ParameterStatus,
+    query_with_snapshot: Option<u64>,
 }
 
 impl<VS> From<PgResponseBuilder<VS>> for PgResponse<VS> {
@@ -148,6 +150,7 @@ impl<VS> From<PgResponseBuilder<VS>> for PgResponse<VS> {
             callback: builder.callback,
             row_desc: builder.row_desc,
             status: builder.status,
+            query_with_snapshot: builder.query_with_snapshot,
         }
     }
 }
@@ -163,12 +166,20 @@ impl<VS> PgResponseBuilder<VS> {
             callback: None,
             row_desc: vec![],
             status: Default::default(),
+            query_with_snapshot: None,
         }
     }
 
     pub fn row_cnt(self, row_cnt: i32) -> Self {
         Self {
             row_cnt: Some(row_cnt),
+            ..self
+        }
+    }
+
+    pub fn query_with_snapshot(self, query_with_snapshot: u64) -> Self {
+        Self {
+            query_with_snapshot: Some(query_with_snapshot),
             ..self
         }
     }
@@ -210,6 +221,7 @@ impl<VS> std::fmt::Debug for PgResponse<VS> {
             .field("row_cnt", &self.row_cnt)
             .field("notices", &self.notices)
             .field("row_desc", &self.row_desc)
+            .field("query_with_snapshot", &self.query_with_snapshot)
             .finish()
     }
 }
@@ -377,6 +389,10 @@ where
 
     pub fn affected_rows_cnt(&self) -> Option<i32> {
         self.row_cnt
+    }
+
+    pub fn query_with_snapshot(&self) -> Option<u64> {
+        self.query_with_snapshot
     }
 
     pub fn is_query(&self) -> bool {

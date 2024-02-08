@@ -19,7 +19,7 @@ use risingwave_sqlparser::ast::{DeclareCursorStatement, Ident, ObjectName, State
 use super::query::handle_query;
 use super::util::gen_query_from_table_name;
 use super::{HandlerArgs, RwPgResponse};
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 use crate::session::cursor_manager::Cursor;
 use crate::Binder;
 
@@ -55,6 +55,9 @@ pub async fn handle_declare_cursor(
     )?));
 
     let res = handle_query(handle_args, query_stmt, formats).await?;
+    let start_rw_timestamp:u64 = res.query_with_snapshot().ok_or_else(||{
+        ErrorCode::InternalError("Fetch can't find snapshot epoch".to_string())
+    })?;
     let cursor = Cursor::new(
         cursor_name.clone(),
         res,

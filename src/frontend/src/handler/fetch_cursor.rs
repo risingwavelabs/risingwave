@@ -64,7 +64,7 @@ pub async fn handle_fetch_cursor(
             let cursor = Cursor::new(
                 cursor_name.clone(),
                 res,
-                rw_timestamp,
+                rw_timestamp - 1,
                 false,
                 subscription_name.clone(),
             )
