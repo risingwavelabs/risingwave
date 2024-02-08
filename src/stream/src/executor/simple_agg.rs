@@ -14,12 +14,15 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
+use tokio::time::{sleep, Duration};
 
 use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
 use super::aggregation::{
@@ -90,6 +93,8 @@ struct ExecutorInner<S: StateStore> {
 
     /// Extreme state cache size
     extreme_cache_size: usize,
+
+    counter: usize,
 }
 
 impl<S: StateStore> ExecutorInner<S> {
@@ -148,6 +153,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 distinct_dedup_tables: args.distinct_dedup_tables,
                 watermark_epoch: args.watermark_epoch,
                 extreme_cache_size: args.extreme_cache_size,
+                counter: 0,
             },
         })
     }
@@ -157,9 +163,19 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         vars: &mut ExecutionVars<S>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
+        this.counter += 1;
         if chunk.cardinality() == 0 {
             // If the chunk is empty, do nothing.
             return Ok(());
+        }
+        if this.counter == 30 {
+            sleep(Duration::from_secs(300)).await;
+        } else if this.counter > 100 {
+            let mut rng = StdRng::from_entropy();
+            let number = rng.gen_range(1..=1000);
+            if number < 1 {
+                sleep(Duration::from_secs(300)).await;
+            }
         }
 
         // Calculate the row visibility for every agg call.
