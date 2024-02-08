@@ -191,6 +191,7 @@ impl Build for UserDefinedFunction {
 
         let identifier = udf.get_identifier()?;
         let imp = match udf.language.as_str() {
+            #[cfg(not(madsim))]
             "wasm" | "rust" => {
                 let link = udf.get_link()?;
                 // Use `block_in_place` as an escape hatch to run async code here in sync context.
@@ -215,10 +216,13 @@ impl Build for UserDefinedFunction {
                 )?;
                 UdfImpl::JavaScript(rt)
             }
+            #[cfg(not(madsim))]
             _ => {
                 let link = udf.get_link()?;
                 UdfImpl::External(get_or_create_flight_client(link)?)
             }
+            #[cfg(madsim)]
+            l => panic!("UDF language {l:?} is not supported on madsim"),
         };
 
         let arg_schema = Arc::new(Schema::new(
