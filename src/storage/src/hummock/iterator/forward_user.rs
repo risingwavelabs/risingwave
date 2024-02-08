@@ -854,7 +854,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_range() {
-        println!("{}", Epoch::);
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
         let table = generate_test_data(
