@@ -485,6 +485,7 @@ impl ClickHouseSinkWriter {
             &self.config.common.table,
             self.rw_fields_name_after_calibration.clone(),
         )?;
+        tracing::warn!("ck test start {:?}", chunk.capacity());
         for (op, row) in chunk.rows() {
             let mut clickhouse_filed_vec = vec![];
             for (index, data) in row.iter().enumerate() {
@@ -519,6 +520,7 @@ impl ClickHouseSinkWriter {
             insert.write(&clickhouse_column).await?;
         }
         insert.end().await?;
+        tracing::warn!("ck test end {:?}", chunk.capacity());
         Ok(())
     }
 }
