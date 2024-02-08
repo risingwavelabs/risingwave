@@ -27,7 +27,7 @@ risingwave_hummock_sdk = { workspace = true }
 risingwave_meta = { workspace = true }
 risingwave_meta_model_v2 = { workspace = true }
 risingwave_pb = { workspace = true }
-sea-orm = { version = "0.12.0", features = [
+sea-orm = { version = "0.12.14", features = [
     "sqlx-mysql",
     "sqlx-postgres",
     "sqlx-sqlite",

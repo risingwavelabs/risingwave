@@ -18,14 +18,14 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_meta_model_v2::actor::ActorStatus;
-use risingwave_meta_model_v2::fragment::DistributionType;
+use risingwave_meta_model_v2::fragment::{DistributionType, StreamNode};
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
     object_dependency, schema, sink, source, table, user, user_privilege, view, ActorId,
     DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, PrivilegeId,
-    SchemaId, SourceId, StreamNode, UserId,
+    SchemaId, SourceId, UserId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
 use risingwave_pb::meta::PbFragmentParallelUnitMapping;
@@ -762,7 +762,7 @@ where
 
     let mut source_fragment_ids = HashMap::new();
     for (fragment_id, _, stream_node) in fragments {
-        if let Some(source) = find_stream_source(stream_node.inner_ref()) {
+        if let Some(source) = find_stream_source(&stream_node.to_protobuf()) {
             source_fragment_ids
                 .entry(source.source_id as SourceId)
                 .or_insert_with(BTreeSet::new)

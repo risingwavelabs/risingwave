@@ -25,6 +25,7 @@ pub use super::fragment::Entity as Fragment;
 pub use super::function::Entity as Function;
 pub use super::hummock_pinned_snapshot::Entity as HummockPinnedSnapshot;
 pub use super::hummock_pinned_version::Entity as HummockPinnedVersion;
+pub use super::hummock_sequence::Entity as HummockSequence;
 pub use super::hummock_version_delta::Entity as HummockVersionDelta;
 pub use super::hummock_version_stats::Entity as HummockVersionStats;
 pub use super::index::Entity as Index;

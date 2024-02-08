@@ -15,8 +15,10 @@
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::{Format, Row};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_sqlparser::ast::FetchCursorStatement;
 use risingwave_sqlparser::parser::Parser;
+use risingwave_storage::table::TableIter;
 
 use super::query::handle_query;
 use super::{HandlerArgs, RwPgResponse};
@@ -46,8 +48,9 @@ pub async fn handle_fetch_cursor(
             rw_timestamp,
             subscription_name,
         ) => {
+            println!("{}",rw_timestamp);
             let sql_str = format!(
-                "SELECT * FROM {} WHERE kv_log_store_epoch > {} ORDER BY kv_log_store_epoch",
+                "SELECT * FROM {} WHERE kv_log_store_epoch >= {} AND kv_log_store_row_op != 6 ORDER BY kv_log_store_epoch",
                 subscription_name, rw_timestamp
             );
             let query_stmt = Parser::parse_sql(&sql_str)
@@ -57,7 +60,7 @@ pub async fn handle_fetch_cursor(
                 .pop()
                 .ok_or_else(|| ErrorCode::InternalError("Can't get fetch statement".to_string()))?;
             let res = handle_query(handle_args, query_stmt, formats).await?;
-
+            
             let cursor = Cursor::new(
                 cursor_name.clone(),
                 res,

@@ -58,7 +58,7 @@ pub async fn handle_declare_cursor(
     let cursor = Cursor::new(
         cursor_name.clone(),
         res,
-        start_rw_timestamp,
+        start_rw_timestamp as i64 ^ (1i64 << 63),
         true,
         stmt.cursor_from.clone(),
     )

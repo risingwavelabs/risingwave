@@ -26,7 +26,7 @@ pub struct Cursor {
     cursor_name: String,
     rw_pg_response: RwPgResponse,
     data_chunk_cache: Vec<Row>,
-    rw_timestamp: u64,
+    rw_timestamp: i64,
     is_snapshot: bool,
     subscription_name: ObjectName,
     pg_desc: Vec<PgFieldDescriptor>,
@@ -36,12 +36,12 @@ impl Cursor {
     pub async fn new(
         cursor_name: String,
         mut rw_pg_response: RwPgResponse,
-        start_timestamp: u64,
+        start_timestamp: i64,
         is_snapshot: bool,
         subscription_name: ObjectName,
     ) -> Result<Self> {
-        let rw_timestamp = if is_snapshot {
-            start_timestamp
+        let (rw_timestamp,data_chunk_cache) = if is_snapshot {
+            (start_timestamp,vec![])
         } else {
             let data_chunk_cache = rw_pg_response
                 .values_stream()
@@ -54,22 +54,24 @@ impl Cursor {
                         e.to_string()
                     ))
                 })?;
-            data_chunk_cache
+                println!("{:?}",data_chunk_cache.get(0));
+            (data_chunk_cache
                 .get(0)
                 .map(|row| {
                     row.index(0)
                         .as_ref()
-                        .map(|bytes| u64::from_be_bytes(bytes.as_ref().try_into().unwrap()))
+                        .map(|bytes| std::str::from_utf8(&bytes).unwrap().parse().unwrap())
                         .unwrap()
                 })
-                .unwrap_or_else(|| start_timestamp)
+                .unwrap_or_else(|| start_timestamp),data_chunk_cache)
+
         };
         let pg_desc = rw_pg_response.row_desc();
         // check timestamp.
         Ok(Self {
             cursor_name,
             rw_pg_response,
-            data_chunk_cache: Vec::new(),
+            data_chunk_cache,
             rw_timestamp,
             is_snapshot,
             subscription_name,
@@ -102,7 +104,6 @@ impl Cursor {
                         self.pg_desc.clone(),
                     )))
                 } else if true {
-                    println!("{:?}",new_row);
                     Ok(CursorRowValue::Row((
                         Row::new(new_row),
                         self.pg_desc.clone(),
@@ -125,7 +126,7 @@ impl Cursor {
 
 pub enum CursorRowValue {
     Row((Row, Vec<PgFieldDescriptor>)),
-    NextQuery(u64, ObjectName),
+    NextQuery(i64, ObjectName),
 }
 pub struct CursorManager {
     cursor_map: HashMap<String, Cursor>,
