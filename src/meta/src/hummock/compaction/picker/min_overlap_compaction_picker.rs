@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::append_sstable_info_to_string;
@@ -213,245 +212,6 @@ impl NonOverlapSubLevelPicker {
         &self,
         levels: &[Level],
         level_handler: &LevelHandler,
-        sst_index: usize,
-        sst: &SstableInfo,
-    ) -> SubLevelSstables {
-        let mut ret = SubLevelSstables {
-            total_file_count: 1,
-            total_file_size: sst.file_size,
-            sstable_infos: vec![vec![]; levels.len()],
-        };
-        ret.sstable_infos[0].extend(vec![sst.clone()]);
-        let mut overlap_info = self.overlap_strategy.create_overlap_info();
-        let mut select_sst_id_set = BTreeSet::default();
-        #[allow(clippy::single_range_in_vec_init)]
-        let mut overlap_len_and_begins = vec![(sst_index..(sst_index + 1))];
-        for sst in &ret.sstable_infos[0] {
-            overlap_info.update(sst);
-            select_sst_id_set.insert(sst.sst_id);
-        }
-
-        for (target_index, target_level) in levels.iter().enumerate().skip(1) {
-            if target_level.level_type() != LevelType::Nonoverlapping {
-                break;
-            }
-
-            // more than 1 sub_level
-            if ret.total_file_count > 1 && ret.total_file_size >= self.max_compaction_bytes
-                || ret.total_file_count >= self.max_file_count as usize
-            {
-                break;
-            }
-
-            let mut overlap_files_range =
-                overlap_info.check_multiple_include(&target_level.table_infos);
-            // // println!(
-            //     "include1 overlap_files_range {} {}",
-            //     overlap_files_range.start, overlap_files_range.end
-            // );
-            if overlap_files_range.is_empty() {
-                overlap_files_range =
-                    overlap_info.check_multiple_overlap(&target_level.table_infos);
-            }
-
-            // We allow a layer in the middle without overlap, so we need to continue to
-            // the next layer to search for overlap
-            let mut pending_compact = false;
-            let mut current_level_size = 0;
-            for index in overlap_files_range.start..overlap_files_range.end {
-                let other = &target_level.table_infos[index];
-                if level_handler.is_pending_compact(&other.sst_id) {
-                    pending_compact = true;
-                    break;
-                }
-                overlap_info.update(other);
-                select_sst_id_set.insert(other.sst_id);
-                current_level_size += other.file_size;
-            }
-
-            if pending_compact {
-                break;
-            }
-
-            let mut extra_overlap_levels = vec![];
-
-            let mut add_files_size = 0;
-            // check reverse overlap
-            for (reverse_index, old_overlap_range) in
-                overlap_len_and_begins.iter_mut().enumerate().rev()
-            {
-                let target_tables = &levels[reverse_index].table_infos;
-                // It has select all files in this sub-level, so it can not overlap with more files.
-                if ret.sstable_infos[reverse_index].len() == target_tables.len() {
-                    continue;
-                }
-                let new_overlap_range = overlap_info.check_multiple_overlap(target_tables);
-                let mut extra_overlap_sst = Vec::with_capacity(new_overlap_range.len());
-                for new_overlap_index in new_overlap_range.clone() {
-                    if old_overlap_range.contains(&new_overlap_index) {
-                        // Since some of the files have already been selected when selecting
-                        // upwards, we filter here to avoid adding sst repeatedly
-                        continue;
-                    }
-
-                    let other = &target_tables[new_overlap_index];
-                    if level_handler.is_pending_compact(&other.sst_id) {
-                        pending_compact = true;
-                        break;
-                    }
-                    debug_assert!(!select_sst_id_set.contains(&other.sst_id));
-                    add_files_size += other.file_size;
-                    overlap_info.update(other);
-                    select_sst_id_set.insert(other.sst_id);
-                    extra_overlap_sst.push(other.clone());
-                }
-
-                if pending_compact {
-                    break;
-                }
-
-                extra_overlap_levels.push((reverse_index, extra_overlap_sst));
-                *old_overlap_range = new_overlap_range;
-            }
-
-            // check reverse overlap
-            if pending_compact {
-                // encountering a pending file means we don't need to continue processing this
-                // interval
-                break;
-            }
-
-            let add_files_count = overlap_files_range.len()
-                + extra_overlap_levels
-                    .iter()
-                    .map(|(_, files)| files.len())
-                    .sum::<usize>();
-
-            if ret
-                .sstable_infos
-                .iter()
-                .filter(|ssts| !ssts.is_empty())
-                .count()
-                > MAX_COMPACT_LEVEL_COUNT
-            {
-                break;
-            }
-
-            ret.total_file_count += add_files_count;
-            ret.total_file_size += add_files_size + current_level_size;
-            if !overlap_files_range.is_empty() {
-                ret.sstable_infos[target_index]
-                    .extend_from_slice(&target_level.table_infos[overlap_files_range.clone()]);
-            }
-            overlap_len_and_begins.push(overlap_files_range);
-            for (reverse_index, files) in extra_overlap_levels {
-                ret.sstable_infos[reverse_index].extend(files);
-            }
-        }
-
-        // sort sst per level due to reverse expand
-        ret.sstable_infos.iter_mut().for_each(|level_ssts| {
-            level_ssts.sort_by(|sst1, sst2| {
-                let a = sst1.key_range.as_ref().unwrap();
-                let b = sst2.key_range.as_ref().unwrap();
-                a.compare(b)
-            });
-        });
-
-        // // println!(
-        //     "1 self.enable_check_task_level_overlap {}",
-        //     self.enable_check_task_level_overlap
-        // );
-
-        if self.enable_check_task_level_overlap {
-            use std::fmt::Write;
-
-            use itertools::Itertools;
-
-            use crate::hummock::compaction::overlap_strategy::OverlapInfo;
-            let mut overlap_info: Option<Box<dyn OverlapInfo>> = None;
-            // // println!("ret.sstable_infos 1 {:?}", ret.sstable_infos);
-
-            for (level_idx, ssts) in ret.sstable_infos.iter().enumerate().rev() {
-                if let Some(overlap_info) = overlap_info.as_mut() {
-                    // skip the check if `overlap_info` is not initialized (i.e. the first non-empty level is not met)
-                    let level = levels.get(level_idx).unwrap();
-                    let overlap_sst_range = overlap_info.check_multiple_overlap(&level.table_infos);
-                    if !overlap_sst_range.is_empty() {
-                        let expected_sst_ids = level.table_infos[overlap_sst_range.clone()]
-                            .iter()
-                            .map(|s| s.object_id)
-                            .collect_vec();
-                        let actual_sst_ids = ssts.iter().map(|s| s.object_id).collect_vec();
-                        // `actual_sst_ids` can be larger than `expected_sst_ids` because we may use a larger key range to select SSTs.
-                        // `expected_sst_ids` must be a sub-range of `actual_sst_ids` to ensure correctness.
-
-                        // // println!(
-                        //     "expected_sst_ids1 {:?} actual_sst_ids {:?}",
-                        //     expected_sst_ids, actual_sst_ids
-                        // );
-                        let start_idx = actual_sst_ids
-                            .iter()
-                            .position(|sst_id| sst_id == expected_sst_ids.first().unwrap());
-                        if start_idx.map_or(true, |idx| {
-                            actual_sst_ids[idx..idx + expected_sst_ids.len()] != expected_sst_ids
-                        }) {
-                            // Print SstableInfo for `actual_sst_ids`
-                            let mut actual_sst_infos = String::new();
-                            ssts.iter().for_each(|s| {
-                                append_sstable_info_to_string(&mut actual_sst_infos, s)
-                            });
-
-                            // Print SstableInfo for `expected_sst_ids`
-                            let mut expected_sst_infos = String::new();
-                            level.table_infos[overlap_sst_range.clone()]
-                                .iter()
-                                .for_each(|s| {
-                                    append_sstable_info_to_string(&mut expected_sst_infos, s)
-                                });
-
-                            // Print SstableInfo for selected ssts in all sub-levels
-                            let mut ret_sst_infos = String::new();
-                            ret.sstable_infos
-                                .iter()
-                                .enumerate()
-                                .for_each(|(idx, ssts)| {
-                                    writeln!(
-                                        ret_sst_infos,
-                                        "sub level {}",
-                                        levels.get(idx).unwrap().sub_level_id
-                                    )
-                                    .unwrap();
-                                    ssts.iter().for_each(|s| {
-                                        append_sstable_info_to_string(&mut ret_sst_infos, s)
-                                    });
-                                });
-                            panic!(
-                                "Compact task overlap check fails. Actual: {} Expected: {} Ret {}",
-                                actual_sst_infos, expected_sst_infos, ret_sst_infos
-                            );
-                        }
-                    }
-                } else if !ssts.is_empty() {
-                    // init the `overlap_info` when meeting the first non-empty level.
-                    overlap_info = Some(self.overlap_strategy.create_overlap_info());
-                }
-
-                for sst in ssts {
-                    overlap_info.as_mut().unwrap().update(sst);
-                }
-            }
-        }
-
-        ret.sstable_infos.retain(|ssts| !ssts.is_empty());
-        ret
-    }
-
-    fn pick_sub_level2(
-        &self,
-        levels: &[Level],
-        level_handler: &LevelHandler,
-        _sst_index: usize,
         sst: &SstableInfo,
     ) -> SubLevelSstables {
         let mut ret = SubLevelSstables {
@@ -474,6 +234,16 @@ impl NonOverlapSubLevelPicker {
                 break;
             }
 
+            if ret
+                .sstable_infos
+                .iter()
+                .filter(|ssts| !ssts.is_empty())
+                .count()
+                > MAX_COMPACT_LEVEL_COUNT
+            {
+                break;
+            }
+
             let mut basic_overlap_info = self.overlap_strategy.create_overlap_info();
             {
                 let sst = &ret.sstable_infos[0][0];
@@ -482,17 +252,12 @@ impl NonOverlapSubLevelPicker {
 
             let mut overlap_files_range =
                 basic_overlap_info.check_multiple_include(&target_level.table_infos);
-            // println!(
-            //     "include2 overlap_files_range {} {}",
-            //     overlap_files_range.start, overlap_files_range.end
-            // );
             if overlap_files_range.is_empty() {
                 overlap_files_range =
                     basic_overlap_info.check_multiple_overlap(&target_level.table_infos);
             }
 
             if overlap_files_range.is_empty() {
-                // println!("target_index {} empty", target_index);
                 continue;
             }
 
@@ -512,13 +277,6 @@ impl NonOverlapSubLevelPicker {
                     basic_overlap_info.check_multiple_overlap(target_tables)
                 };
 
-                // println!(
-                //     "reverse_index {} overlap_files_range {} {}",
-                //     reverse_index, overlap_files_range.start, overlap_files_range.end
-                // );
-
-                let mut extra_overlap_sst = Vec::with_capacity(overlap_files_range.len());
-
                 // We allow a layer in the middle without overlap, so we need to continue to
                 // the next layer to search for overlap
                 for other in target_tables
@@ -531,61 +289,33 @@ impl NonOverlapSubLevelPicker {
                         break;
                     }
                     basic_overlap_info.update(other);
-                    extra_overlap_sst.push(other.clone());
 
                     add_files_size += other.get_file_size();
                     add_files_count += 1;
-
-                    // println!("add sst {}", other.sst_id);
                 }
 
                 if pending_compact {
                     break;
                 }
 
-                extra_overlap_levels.push((reverse_index, extra_overlap_sst));
-
                 if ret.total_file_count > 1
                     && (add_files_size >= self.max_compaction_bytes
                         || add_files_count >= self.max_file_count as usize)
                 {
-                    // println!(
-                    //     "reverse_index {} add_files_count {} add_files_size {}",
-                    //     reverse_index, add_files_count, add_files_size
-                    // );
-
                     finish = true;
                     break;
                 }
+
+                extra_overlap_levels.push((reverse_index, overlap_files_range.clone()));
             }
 
-            if pending_compact {
+            if pending_compact || finish {
                 break;
             }
 
-            if ret
-                .sstable_infos
-                .iter()
-                .filter(|ssts| !ssts.is_empty())
-                .count()
-                > MAX_COMPACT_LEVEL_COUNT
-            {
-                break;
-            }
-
-            if finish {
-                break;
-            }
-
-            // println!(
-            //     "extra_overlap_levels {:?} target_index {} levels {}",
-            //     extra_overlap_levels,
-            //     target_index,
-            //     levels.len()
-            // );
-
-            for (reverse_index, files) in extra_overlap_levels {
-                ret.sstable_infos[reverse_index] = files;
+            for (reverse_index, sst_range) in extra_overlap_levels {
+                let level_ssts = &levels[reverse_index].table_infos;
+                ret.sstable_infos[reverse_index] = level_ssts[sst_range].to_vec();
             }
 
             ret.total_file_count = add_files_count;
@@ -602,84 +332,7 @@ impl NonOverlapSubLevelPicker {
         });
 
         if self.enable_check_task_level_overlap {
-            use std::fmt::Write;
-
-            use itertools::Itertools;
-
-            use crate::hummock::compaction::overlap_strategy::OverlapInfo;
-            let mut overlap_info: Option<Box<dyn OverlapInfo>> = None;
-            // // println!("ret.sstable_infos {:?}", ret.sstable_infos);
-
-            for (level_idx, ssts) in ret.sstable_infos.iter().enumerate().rev() {
-                if let Some(overlap_info) = overlap_info.as_mut() {
-                    // skip the check if `overlap_info` is not initialized (i.e. the first non-empty level is not met)
-                    let level = levels.get(level_idx).unwrap();
-                    let overlap_sst_range = overlap_info.check_multiple_overlap(&level.table_infos);
-                    if !overlap_sst_range.is_empty() {
-                        let expected_sst_ids = level.table_infos[overlap_sst_range.clone()]
-                            .iter()
-                            .map(|s| s.object_id)
-                            .collect_vec();
-                        let actual_sst_ids = ssts.iter().map(|s| s.object_id).collect_vec();
-                        // `actual_sst_ids` can be larger than `expected_sst_ids` because we may use a larger key range to select SSTs.
-                        // `expected_sst_ids` must be a sub-range of `actual_sst_ids` to ensure correctness.
-
-                        // // println!(
-                        //     "expected_sst_ids2 {:?} actual_sst_ids {:?}",
-                        //     expected_sst_ids, actual_sst_ids
-                        // );
-                        let start_idx = actual_sst_ids
-                            .iter()
-                            .position(|sst_id| sst_id == expected_sst_ids.first().unwrap());
-                        if start_idx.map_or(true, |idx| {
-                            actual_sst_ids[idx..idx + expected_sst_ids.len()] != expected_sst_ids
-                        }) {
-                            // Print SstableInfo for `actual_sst_ids`
-                            let mut actual_sst_infos = String::new();
-                            ssts.iter().for_each(|s| {
-                                append_sstable_info_to_string(&mut actual_sst_infos, s)
-                            });
-
-                            // Print SstableInfo for `expected_sst_ids`
-                            let mut expected_sst_infos = String::new();
-                            level.table_infos[overlap_sst_range.clone()]
-                                .iter()
-                                .for_each(|s| {
-                                    append_sstable_info_to_string(&mut expected_sst_infos, s)
-                                });
-
-                            // Print SstableInfo for selected ssts in all sub-levels
-                            let mut ret_sst_infos = String::new();
-                            ret.sstable_infos
-                                .iter()
-                                .enumerate()
-                                .for_each(|(idx, ssts)| {
-                                    writeln!(
-                                        ret_sst_infos,
-                                        "sub level {}",
-                                        levels.get(idx).unwrap().sub_level_id
-                                    )
-                                    .unwrap();
-                                    ssts.iter().for_each(|s| {
-                                        append_sstable_info_to_string(&mut ret_sst_infos, s)
-                                    });
-                                });
-                            panic!(
-                                "Compact task overlap check fails. Actual: {} Expected: {} Ret {}",
-                                actual_sst_infos, expected_sst_infos, ret_sst_infos
-                            );
-                        }
-                    }
-                } else if !ssts.is_empty() {
-                    // init the `overlap_info` when meeting the first non-empty level.
-                    overlap_info = Some(self.overlap_strategy.create_overlap_info());
-                }
-
-                for sst in ssts {
-                    overlap_info.as_mut().unwrap().update(sst);
-                    // // println!("level_idx {} add sst {}", level_idx, sst.sst_id);
-                }
-            }
+            self.verify_task_level_overlap(&ret, levels);
         }
 
         ret.sstable_infos.retain(|ssts| !ssts.is_empty());
@@ -696,42 +349,12 @@ impl NonOverlapSubLevelPicker {
         }
 
         let mut scores = vec![];
-        let select_tables = &l0[0].table_infos;
-        for (sst_index, sst) in select_tables.iter().enumerate() {
+        for sst in &l0[0].table_infos {
             if level_handler.is_pending_compact(&sst.sst_id) {
                 continue;
             }
 
-            // println!(
-            //     "pick_sub_level sst_index {} sst_id {}",
-            //     sst_index, sst.sst_id
-            // );
-            // let ret = self.pick_sub_level(l0, level_handler, sst_index, sst);
-
-            let ret2 = self.pick_sub_level2(l0, level_handler, sst_index, sst);
-
-            // let r1: Vec<u64> = ret
-            //     .sstable_infos
-            //     .iter()
-            //     .flat_map(|ssts| ssts.iter().map(|sst| sst.sst_id))
-            //     .collect();
-            // // println!(
-            //     "sst_index {} sst_id {} ret1 {:?}",
-            //     sst_index, sst.sst_id, r1
-            // );
-
-            // let r2: Vec<u64> = ret2
-            //     .sstable_infos
-            //     .iter()
-            //     .flat_map(|ssts| ssts.iter().map(|sst| sst.sst_id))
-            //     .collect();
-            // // println!(
-            //     "sst_index {} sst_id {} ret2 {:?}",
-            //     sst_index, sst.sst_id, r2
-            // );
-
-            let ret = ret2; // use ret2
-
+            let ret = self.pick_sub_level(l0, level_handler, sst);
             if ret.sstable_infos.len() < self.min_depth
                 && ret.total_file_size < self.min_compaction_bytes
             {
@@ -777,10 +400,84 @@ impl NonOverlapSubLevelPicker {
 
         expected
     }
+
+    fn verify_task_level_overlap(&self, ret: &SubLevelSstables, levels: &[Level]) {
+        use std::fmt::Write;
+
+        use itertools::Itertools;
+
+        use crate::hummock::compaction::overlap_strategy::OverlapInfo;
+        let mut overlap_info: Option<Box<dyn OverlapInfo>> = None;
+        for (level_idx, ssts) in ret.sstable_infos.iter().enumerate().rev() {
+            if let Some(overlap_info) = overlap_info.as_mut() {
+                // skip the check if `overlap_info` is not initialized (i.e. the first non-empty level is not met)
+                let level = levels.get(level_idx).unwrap();
+                let overlap_sst_range = overlap_info.check_multiple_overlap(&level.table_infos);
+                if !overlap_sst_range.is_empty() {
+                    let expected_sst_ids = level.table_infos[overlap_sst_range.clone()]
+                        .iter()
+                        .map(|s| s.object_id)
+                        .collect_vec();
+                    let actual_sst_ids = ssts.iter().map(|s| s.object_id).collect_vec();
+                    // `actual_sst_ids` can be larger than `expected_sst_ids` because we may use a larger key range to select SSTs.
+                    // `expected_sst_ids` must be a sub-range of `actual_sst_ids` to ensure correctness.
+                    let start_idx = actual_sst_ids
+                        .iter()
+                        .position(|sst_id| sst_id == expected_sst_ids.first().unwrap());
+                    if start_idx.map_or(true, |idx| {
+                        actual_sst_ids[idx..idx + expected_sst_ids.len()] != expected_sst_ids
+                    }) {
+                        // Print SstableInfo for `actual_sst_ids`
+                        let mut actual_sst_infos = String::new();
+                        ssts.iter()
+                            .for_each(|s| append_sstable_info_to_string(&mut actual_sst_infos, s));
+
+                        // Print SstableInfo for `expected_sst_ids`
+                        let mut expected_sst_infos = String::new();
+                        level.table_infos[overlap_sst_range.clone()]
+                            .iter()
+                            .for_each(|s| {
+                                append_sstable_info_to_string(&mut expected_sst_infos, s)
+                            });
+
+                        // Print SstableInfo for selected ssts in all sub-levels
+                        let mut ret_sst_infos = String::new();
+                        ret.sstable_infos
+                            .iter()
+                            .enumerate()
+                            .for_each(|(idx, ssts)| {
+                                writeln!(
+                                    ret_sst_infos,
+                                    "sub level {}",
+                                    levels.get(idx).unwrap().sub_level_id
+                                )
+                                .unwrap();
+                                ssts.iter().for_each(|s| {
+                                    append_sstable_info_to_string(&mut ret_sst_infos, s)
+                                });
+                            });
+                        panic!(
+                            "Compact task overlap check fails. Actual: {} Expected: {} Ret {}",
+                            actual_sst_infos, expected_sst_infos, ret_sst_infos
+                        );
+                    }
+                }
+            } else if !ssts.is_empty() {
+                // init the `overlap_info` when meeting the first non-empty level.
+                overlap_info = Some(self.overlap_strategy.create_overlap_info());
+            }
+
+            for sst in ssts {
+                overlap_info.as_mut().unwrap().update(sst);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 pub mod tests {
+    use std::collections::BTreeSet;
+
     pub use risingwave_pb::hummock::{Level, LevelType};
 
     use super::*;
