@@ -1,10 +1,14 @@
 -- noinspection SqlNoDataSourceInspectionForFile
 -- noinspection SqlResolveForFile
 
-CREATE FUNCTION count_char(s varchar, c varchar) RETURNS int LANGUAGE rust AS $$
-  fn count_char(s: &str, c: &str) -> i32 {
-      s.matches(c).count() as i32
-  }
+CREATE FUNCTION count_char(s varchar, c varchar) RETURNS int LANGUAGE javascript AS $$
+    var count = 0;
+    for (var cc of s) {
+        if (cc === c) {
+            count++;
+        }
+    }
+    return count;
 $$;
 
 CREATE SINK nexmark_q14 AS
