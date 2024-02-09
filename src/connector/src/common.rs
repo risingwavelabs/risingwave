@@ -259,6 +259,10 @@ pub struct RdKafkaPropertiesCommon {
     #[serde(rename = "properties.client.id")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub client_id: Option<String>,
+
+    #[serde(rename = "properties.enable.ssl.certificate.verification")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub enable_ssl_certificate_verification: Option<bool>,
 }
 
 impl RdKafkaPropertiesCommon {
@@ -274,6 +278,9 @@ impl RdKafkaPropertiesCommon {
         }
         if let Some(v) = self.client_id.as_ref() {
             c.set("client.id", v);
+        }
+        if let Some(v) = self.enable_ssl_certificate_verification {
+            c.set("enable.ssl.certificate.verification", v.to_string());
         }
     }
 }
