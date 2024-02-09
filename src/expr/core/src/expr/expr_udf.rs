@@ -126,17 +126,16 @@ impl UserDefinedFunction {
             UdfImpl::JavaScript(runtime) => runtime.call(&self.identifier, &input)?,
             UdfImpl::External(client) => {
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
-                let result = if disable_retry_count != 0 {
-                    client
-                        .call(&self.identifier, input)
-                        .instrument_await(self.span.clone())
-                        .await
-                } else {
-                    client
-                        .call_with_retry(&self.identifier, input)
-                        .instrument_await(self.span.clone())
-                        .await
-                };
+                let result = client
+                    .call_opt(
+                        &self.identifier,
+                        input,
+                        // TODO: make timeout configurable
+                        Some(Duration::from_secs(10)),
+                        disable_retry_count == 0,
+                    )
+                    .instrument_await(self.span.clone())
+                    .await;
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
                 let connection_error = matches!(&result, Err(e) if e.is_connection_error());
                 if connection_error && disable_retry_count != INITIAL_RETRY_COUNT {
