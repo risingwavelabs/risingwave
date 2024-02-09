@@ -47,6 +47,7 @@ pub struct UdfExpression {
     /// On each successful call, the count will be decreased by 1.
     /// See <https://github.com/risingwavelabs/risingwave/issues/13791>.
     disable_retry_count: AtomicU8,
+    timeout: Option<Duration>,
 }
 
 const INITIAL_RETRY_COUNT: u8 = 16;
@@ -115,8 +116,7 @@ impl UdfExpression {
             .call_opt(
                 &self.identifier,
                 input,
-                // TODO: make timeout configurable
-                Some(Duration::from_secs(10)),
+                self.timeout,
                 disable_retry_count == 0,
             )
             .instrument_await(self.span.clone())
@@ -200,6 +200,10 @@ impl Build for UdfExpression {
             identifier: udf.identifier.clone(),
             span: format!("expr_udf_call ({})", udf.identifier).into(),
             disable_retry_count: AtomicU8::new(0),
+            timeout: match udf.timeout_ms {
+                0 => None,
+                ms => Some(Duration::from_millis(ms as u64)),
+            },
         })
     }
 }

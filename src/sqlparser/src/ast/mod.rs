@@ -2685,6 +2685,8 @@ pub struct CreateFunctionBody {
     pub return_: Option<Expr>,
     /// USING ...
     pub using: Option<CreateFunctionUsing>,
+    /// TIMEOUT N
+    pub timeout: Option<u64>,
 }
 
 impl fmt::Display for CreateFunctionBody {
@@ -2703,6 +2705,9 @@ impl fmt::Display for CreateFunctionBody {
         }
         if let Some(using) = &self.using {
             write!(f, " {using}")?;
+        }
+        if let Some(timeout) = &self.timeout {
+            write!(f, " TIMEOUT {}ms", timeout)?;
         }
         Ok(())
     }

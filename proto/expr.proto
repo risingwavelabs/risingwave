@@ -467,6 +467,7 @@ message UserDefinedFunction {
   string language = 4;
   string link = 5;
   string identifier = 6;
+  uint32 timeout_ms = 20;
 }
 
 message UserDefinedTableFunction {

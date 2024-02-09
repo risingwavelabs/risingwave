@@ -163,6 +163,7 @@ pub async fn handle_create_function(
         identifier,
         link,
         owner: session.user_id(),
+        timeout_ms: params.timeout.unwrap_or(0) as u32,
     };
 
     let catalog_writer = session.catalog_writer()?;

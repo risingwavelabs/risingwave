@@ -31,6 +31,7 @@ pub struct FunctionCatalog {
     pub language: String,
     pub identifier: String,
     pub link: String,
+    pub timeout_ms: u32,
 }
 
 #[derive(Clone, Display, PartialEq, Eq, Hash, Debug)]
@@ -64,6 +65,7 @@ impl From<&PbFunction> for FunctionCatalog {
             language: prost.language.clone(),
             identifier: prost.identifier.clone(),
             link: prost.link.clone(),
+            timeout_ms: prost.timeout_ms,
         }
     }
 }
