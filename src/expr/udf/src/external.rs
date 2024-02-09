@@ -24,6 +24,7 @@ use arrow_schema::Schema;
 use cfg_or_panic::cfg_or_panic;
 use futures_util::{stream, Stream, StreamExt, TryStreamExt};
 use thiserror_ext::AsReport;
+use tokio::time::{timeout, Duration as TokioDuration};
 use tonic::transport::Channel;
 
 use crate::metrics::GLOBAL_METRICS;
@@ -141,10 +142,18 @@ impl ArrowFlightUdfClient {
     async fn call_internal(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
         let mut output_stream = self.call_stream(id, stream::once(async { input })).await?;
         // TODO: support no output
-        let head = output_stream
-            .next()
-            .await
-            .ok_or_else(Error::no_returned)??;
+        let timeout_secs = 10;
+        let head = match timeout(TokioDuration::from_secs(timeout_secs), output_stream.next()).await
+        {
+            // TODO: support no output
+            Ok(result) => result.ok_or_else(Error::no_returned),
+            Err(_) => {
+                return Err(Error::timeout(format!(
+                    "function {} times out after {}s",
+                    id, timeout_secs
+                )));
+            }
+        }??;
         let remaining = output_stream.try_collect::<Vec<_>>().await?;
         if remaining.is_empty() {
             Ok(head)

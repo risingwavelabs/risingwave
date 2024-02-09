@@ -45,6 +45,9 @@ pub enum ErrorInner {
     #[error("UDF service returned no data")]
     NoReturned,
 
+    #[error("UDF call timeout")]
+    Timeout(String),
+
     #[error("Flight service error: {0}")]
     ServiceError(String),
 }
