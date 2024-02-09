@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, Weak};
+use std::time::Duration;
 
 use arrow_schema::{Field, Fields, Schema};
 use await_tree::InstrumentAwait;
@@ -109,17 +110,17 @@ impl UdfExpression {
         .expect("failed to build record batch");
 
         let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
-        let result = if disable_retry_count != 0 {
-            self.client
-                .call(&self.identifier, input)
-                .instrument_await(self.span.clone())
-                .await
-        } else {
-            self.client
-                .call_with_retry(&self.identifier, input)
-                .instrument_await(self.span.clone())
-                .await
-        };
+        let result = self
+            .client
+            .call_opt(
+                &self.identifier,
+                input,
+                // TODO: make timeout configurable
+                Some(Duration::from_secs(10)),
+                disable_retry_count == 0,
+            )
+            .instrument_await(self.span.clone())
+            .await;
         let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
         let connection_error = matches!(&result, Err(e) if e.is_connection_error());
         if connection_error && disable_retry_count != INITIAL_RETRY_COUNT {
