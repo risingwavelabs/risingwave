@@ -42,6 +42,9 @@ pub enum ErrorInner {
     // TODO(error-handling): should prefer use error types than strings.
     Unsupported(String),
 
+    #[error("UDF call timeout")]
+    Timeout(String),
+
     #[error("UDF service returned no data")]
     NoReturned,
 
