@@ -147,7 +147,7 @@ impl ArrowFlightUdfClient {
             batches.push(batch?);
         }
         Ok(arrow_select::concat::concat_batches(
-            output_stream.schema().ok_or_else(|| Error::no_returned())?,
+            output_stream.schema().ok_or_else(Error::no_returned)?,
             batches.iter(),
         )?)
     }
