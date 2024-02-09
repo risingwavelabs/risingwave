@@ -19,8 +19,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use fail::fail_point;
 use futures::future::try_join_all;
-use futures::stream::FuturesUnordered;
-use futures::{FutureExt, StreamExt};
+use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::hash::ActorId;
@@ -33,53 +32,22 @@ use risingwave_pb::stream_service::{
 };
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::StreamClient;
-use rw_futures_util::pending_on_none;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use super::command::CommandContext;
-use super::{BarrierCompletion, GlobalBarrierManagerContext};
+use super::{BarrierCollectResult, GlobalBarrierManagerContext};
 use crate::manager::{MetaSrvEnv, WorkerId};
 use crate::MetaResult;
 
-pub(super) struct BarrierRpcManager {
-    context: GlobalBarrierManagerContext,
-
-    /// Futures that await on the completion of barrier.
-    injected_in_progress_barrier: FuturesUnordered<BarrierCompletionFuture>,
-}
-
-impl BarrierRpcManager {
-    pub(super) fn new(context: GlobalBarrierManagerContext) -> Self {
-        Self {
-            context,
-            injected_in_progress_barrier: FuturesUnordered::new(),
-        }
-    }
-
-    pub(super) fn clear(&mut self) {
-        self.injected_in_progress_barrier = FuturesUnordered::new();
-    }
-
-    pub(super) async fn inject_barrier(&mut self, command_context: Arc<CommandContext>) {
-        let await_complete_future = self.context.inject_barrier(command_context).await;
-        self.injected_in_progress_barrier
-            .push(await_complete_future);
-    }
-
-    pub(super) async fn next_complete_barrier(&mut self) -> BarrierCompletion {
-        pending_on_none(self.injected_in_progress_barrier.next()).await
-    }
-}
-
-pub(super) type BarrierCompletionFuture = impl Future<Output = BarrierCompletion> + Send + 'static;
+pub(super) type BarrierCollectFuture = impl Future<Output = BarrierCollectResult> + Send + 'static;
 
 impl GlobalBarrierManagerContext {
     /// Inject a barrier to all CNs and spawn a task to collect it
     pub(super) async fn inject_barrier(
         &self,
         command_context: Arc<CommandContext>,
-    ) -> BarrierCompletionFuture {
+    ) -> BarrierCollectFuture {
         let (tx, rx) = oneshot::channel();
         let prev_epoch = command_context.prev_epoch.value().0;
         let result = self
@@ -99,7 +67,7 @@ impl GlobalBarrierManagerContext {
                 });
             }
             Err(e) => {
-                let _ = tx.send(BarrierCompletion {
+                let _ = tx.send(BarrierCollectResult {
                     prev_epoch,
                     result: Err(e),
                 });
@@ -107,7 +75,7 @@ impl GlobalBarrierManagerContext {
         }
         rx.map(move |result| match result {
             Ok(completion) => completion,
-            Err(_e) => BarrierCompletion {
+            Err(_e) => BarrierCollectResult {
                 prev_epoch,
                 result: Err(anyhow!("failed to receive barrier completion result").into()),
             },
@@ -195,7 +163,7 @@ impl StreamRpcManager {
         &self,
         node_need_collect: HashMap<WorkerId, bool>,
         command_context: Arc<CommandContext>,
-        barrier_complete_tx: oneshot::Sender<BarrierCompletion>,
+        barrier_collect_tx: oneshot::Sender<BarrierCollectResult>,
     ) {
         let prev_epoch = command_context.prev_epoch.value().0;
         let tracing_context =
@@ -245,8 +213,8 @@ impl StreamRpcManager {
                     .add_event_logs(vec![event_log::Event::CollectBarrierFail(event)]);
             })
             .map_err(Into::into);
-        let _ = barrier_complete_tx
-            .send(BarrierCompletion { prev_epoch, result })
+        let _ = barrier_collect_tx
+            .send(BarrierCollectResult { prev_epoch, result })
             .inspect_err(|_| tracing::warn!(prev_epoch, "failed to notify barrier completion"));
     }
 }

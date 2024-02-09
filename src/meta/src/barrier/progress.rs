@@ -254,6 +254,9 @@ pub(super) struct CreateMviewProgressTracker {
 
     /// Find the epoch of the create-mview DDL by the actor containing the backfill executors.
     actor_map: HashMap<ActorId, TableId>,
+
+    /// Get notified when we finished Create MV and collect a barrier(checkpoint = true)
+    pub(super) finished_jobs: Vec<TrackingJob>,
 }
 
 impl CreateMviewProgressTracker {
@@ -313,6 +316,7 @@ impl CreateMviewProgressTracker {
         Self {
             progress_map,
             actor_map,
+            finished_jobs: Vec::new(),
         }
     }
 
@@ -320,6 +324,7 @@ impl CreateMviewProgressTracker {
         Self {
             progress_map: Default::default(),
             actor_map: Default::default(),
+            finished_jobs: Vec::new(),
         }
     }
 
