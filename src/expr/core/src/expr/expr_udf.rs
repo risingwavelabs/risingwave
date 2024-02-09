@@ -37,6 +37,7 @@ pub struct UdfExpression {
     children: Vec<BoxedExpression>,
     arg_types: Vec<DataType>,
     return_type: DataType,
+    #[allow(dead_code)]
     arg_schema: Arc<Schema>,
     client: Arc<ArrowFlightUdfClient>,
     identifier: String,
@@ -60,13 +61,13 @@ impl Expression for UdfExpression {
 
     #[cfg_or_panic(not(madsim))]
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let vis = input.visibility();
         let mut columns = Vec::with_capacity(self.children.len());
         for child in &self.children {
             let array = child.eval(input).await?;
             columns.push(array);
         }
-        self.eval_inner(columns, vis).await
+        let chunk = DataChunk::new(columns, input.visibility().clone());
+        self.eval_inner(&chunk).await
     }
 
     #[cfg_or_panic(not(madsim))]
@@ -78,44 +79,22 @@ impl Expression for UdfExpression {
         }
         let arg_row = OwnedRow::new(columns);
         let chunk = DataChunk::from_rows(std::slice::from_ref(&arg_row), &self.arg_types);
-        let arg_columns = chunk.columns().to_vec();
-        let output_array = self.eval_inner(arg_columns, chunk.visibility()).await?;
+        let output_array = self.eval_inner(&chunk).await?;
         Ok(output_array.to_datum())
     }
 }
 
 impl UdfExpression {
-    async fn eval_inner(
-        &self,
-        columns: Vec<ArrayRef>,
-        vis: &risingwave_common::buffer::Bitmap,
-    ) -> Result<ArrayRef> {
-        let chunk = DataChunk::new(columns, vis.clone());
-        let compacted_chunk = chunk.compact_cow();
-        let compacted_columns: Vec<arrow_array::ArrayRef> = compacted_chunk
-            .columns()
-            .iter()
-            .map(|c| {
-                c.as_ref()
-                    .try_into()
-                    .expect("failed covert ArrayRef to arrow_array::ArrayRef")
-            })
-            .collect();
-        let opts = arrow_array::RecordBatchOptions::default()
-            .with_row_count(Some(compacted_chunk.capacity()));
-        let input = arrow_array::RecordBatch::try_new_with_options(
-            self.arg_schema.clone(),
-            compacted_columns,
-            &opts,
-        )
-        .expect("failed to build record batch");
+    async fn eval_inner(&self, input: &DataChunk) -> Result<ArrayRef> {
+        // this will drop invisible rows
+        let arrow_input = arrow_array::RecordBatch::try_from(input)?;
 
         let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
         let result = self
             .client
             .call_opt(
                 &self.identifier,
-                input,
+                arrow_input,
                 self.timeout,
                 disable_retry_count == 0,
             )
@@ -136,18 +115,18 @@ impl UdfExpression {
                 Ordering::Relaxed,
             );
         }
-        let output = result?;
+        let arrow_output = result?;
 
-        if output.num_rows() != vis.count_ones() {
+        if arrow_output.num_rows() != input.cardinality() {
             bail!(
                 "UDF returned {} rows, but expected {}",
-                output.num_rows(),
-                vis.len(),
+                arrow_output.num_rows(),
+                input.cardinality(),
             );
         }
 
-        let data_chunk = DataChunk::try_from(&output)?;
-        let output = data_chunk.uncompact(vis.clone());
+        let output = DataChunk::try_from(&arrow_output)?;
+        let output = output.uncompact(input.visibility().clone());
 
         let Some(array) = output.columns().first() else {
             bail!("UDF returned no columns");
