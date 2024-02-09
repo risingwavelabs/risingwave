@@ -429,8 +429,13 @@ pub fn start_compactor(
                         if pull_task_ack.load(Ordering::SeqCst) {
                             // reset pending_pull_task_count when all pending task had been refill
                             pending_pull_task_count = {
-                                assert_ge!(max_pull_task_count, running_task_count.load(Ordering::SeqCst));
-                                max_pull_task_count - running_task_count.load(Ordering::SeqCst)
+                                // assert_ge!(max_pull_task_count, running_task_count.load(Ordering::SeqCst));
+                                let running_task_count = running_task_count.load(Ordering::SeqCst);
+                                if max_pull_task_count > running_task_count {
+                                    max_pull_task_count - running_task_count
+                                } else {
+                                    0
+                                }
                             };
 
                             if pending_pull_task_count > 0 {
