@@ -73,6 +73,12 @@ impl Expression for UserDefinedFunction {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        if input.cardinality() == 0 {
+            // early return for empty input
+            let mut builder = self.return_type.create_array_builder(input.capacity());
+            builder.append_n_null(input.capacity());
+            return Ok(builder.finish().into_ref());
+        }
         let mut columns = Vec::with_capacity(self.children.len());
         for child in &self.children {
             let array = child.eval(input).await?;
