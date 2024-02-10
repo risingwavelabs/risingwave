@@ -25,7 +25,7 @@ use super::TaggedReceivedMessage;
 use crate::parser::ParserConfig;
 use crate::source::google_pubsub::{PubsubProperties, PubsubSplit};
 use crate::source::{
-    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, SourceContextRef,
+    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef,
     SourceMessage, SplitId, SplitMetaData, SplitReader,
 };
 
@@ -135,12 +135,12 @@ impl SplitReader for PubsubSplitReader {
                 .as_str()
                 .parse::<i64>()
                 .map(|nanos| Utc.timestamp_nanos(nanos))
-                .map_err(|e| anyhow!("error parsing offset: {:?}", e))?;
+                .context("error parsing offset")?;
 
             subscription
                 .seek(SeekTo::Timestamp(timestamp.into()), None)
                 .await
-                .map_err(|e| anyhow!("error seeking to pubsub offset: {:?}", e))?;
+                .context("error seeking to pubsub offset")?;
         }
 
         let stop_offset = if let Some(ref offset) = split.stop_offset {
@@ -164,7 +164,7 @@ impl SplitReader for PubsubSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self, parser_config, source_context)

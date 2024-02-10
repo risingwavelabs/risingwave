@@ -23,6 +23,7 @@ anyhow = "1"
 clap = { version = "4", features = ["cargo", "derive"] }
 console = "0.15"
 const-str = "0.5"
+home = "0.5"
 prometheus = { version = "0.13" }
 risingwave_cmd = { workspace = true }
 risingwave_common = { workspace = true }
@@ -35,7 +36,7 @@ risingwave_meta_node = { workspace = true }
 risingwave_rt = { workspace = true }
 shell-words = "1.1.0"
 strum = "0.25"
-strum_macros = "0.25"
+strum_macros = "0.26"
 tempfile = "3"
 tikv-jemallocator = { workspace = true, features = [
     "unprefixed_malloc_on_supported_platforms",

@@ -15,6 +15,8 @@
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
+use risingwave_meta_model_v2::object::ObjectType;
+use risingwave_meta_model_v2::ObjectId;
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -22,12 +24,12 @@ use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use thiserror_ext::AsReport;
 
+use crate::controller::catalog::ReleaseContext;
 use crate::manager::{
-    MetadataManager, MetadataManagerV2, NotificationVersion, StreamingJob,
-    IGNORED_NOTIFICATION_VERSION,
+    MetadataManagerV2, NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{MetadataModel, StreamContext};
-use crate::rpc::ddl_controller::{fill_table_stream_graph_info, DdlController};
+use crate::rpc::ddl_controller::{fill_table_stream_graph_info, DdlController, DropMode};
 use crate::stream::{validate_sink, StreamFragmentGraph};
 use crate::MetaResult;
 
@@ -37,13 +39,11 @@ impl DdlController {
         mut streaming_job: StreamingJob,
         mut fragment_graph: StreamFragmentGraphProto,
     ) -> MetaResult<NotificationVersion> {
-        let MetadataManager::V2(mgr) = &self.metadata_manager else {
-            unreachable!("MetadataManager should be V2")
-        };
+        let mgr = self.metadata_manager.as_v2_ref();
 
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
         mgr.catalog_controller
-            .create_job_catalog(&mut streaming_job, &ctx)
+            .create_job_catalog(&mut streaming_job, &ctx, &fragment_graph.parallelism)
             .await?;
         let job_id = streaming_job.id();
 
@@ -76,7 +76,7 @@ impl DdlController {
             .acquire()
             .await
             .unwrap();
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
         // create streaming job.
         match self
@@ -88,7 +88,7 @@ impl DdlController {
                 tracing::error!(id = job_id, error = ?err.as_report(), "failed to create streaming job");
                 let aborted = mgr
                     .catalog_controller
-                    .try_abort_creating_streaming_job(job_id as _)
+                    .try_abort_creating_streaming_job(job_id as _, false)
                     .await?;
                 if aborted {
                     tracing::warn!(id = job_id, "aborted streaming job");
@@ -194,6 +194,86 @@ impl DdlController {
         }
     }
 
+    pub async fn drop_object(
+        &self,
+        object_type: ObjectType,
+        object_id: ObjectId,
+        drop_mode: DropMode,
+    ) -> MetaResult<NotificationVersion> {
+        let mgr = self.metadata_manager.as_v2_ref();
+        let (release_ctx, version) = match object_type {
+            ObjectType::Database => mgr.catalog_controller.drop_database(object_id).await?,
+            ObjectType::Schema => {
+                return mgr
+                    .catalog_controller
+                    .drop_schema(object_id, drop_mode)
+                    .await;
+            }
+            ObjectType::Function => {
+                return mgr.catalog_controller.drop_function(object_id).await;
+            }
+            ObjectType::Connection => {
+                let (version, conn) = mgr.catalog_controller.drop_connection(object_id).await?;
+                self.delete_vpc_endpoint(&conn).await?;
+                return Ok(version);
+            }
+            _ => {
+                mgr.catalog_controller
+                    .drop_relation(object_type, object_id, drop_mode)
+                    .await?
+            }
+        };
+
+        let ReleaseContext {
+            state_table_ids,
+            source_ids,
+            connections,
+            source_fragments,
+            removed_actors,
+        } = release_ctx;
+
+        // delete vpc endpoints.
+        for conn in connections {
+            let _ = self
+                .delete_vpc_endpoint_v2(conn.into_inner())
+                .await
+                .inspect_err(|err| {
+                    tracing::warn!(err = ?err.as_report(), "failed to delete vpc endpoint");
+                });
+        }
+
+        // unregister sources.
+        self.source_manager
+            .unregister_sources(source_ids.into_iter().map(|id| id as _).collect())
+            .await;
+
+        // unregister fragments and actors from source manager.
+        self.source_manager
+            .drop_source_fragments_v2(
+                source_fragments
+                    .into_iter()
+                    .map(|(source_id, fragments)| {
+                        (
+                            source_id as u32,
+                            fragments.into_iter().map(|id| id as u32).collect(),
+                        )
+                    })
+                    .collect(),
+                removed_actors.iter().map(|id| *id as _).collect(),
+            )
+            .await;
+
+        // drop streaming jobs.
+        self.stream_manager
+            .drop_streaming_jobs_v2(
+                removed_actors.into_iter().map(|id| id as _).collect(),
+                state_table_ids.into_iter().map(|id| id as _).collect(),
+            )
+            .await;
+
+        Ok(version)
+    }
+
     /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
     pub async fn replace_table_v2(
         &self,
@@ -201,12 +281,10 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
         table_col_index_mapping: Option<ColIndexMapping>,
     ) -> MetaResult<NotificationVersion> {
-        let MetadataManager::V2(mgr) = &self.metadata_manager else {
-            unreachable!("MetadataManager should be V2")
-        };
+        let mgr = self.metadata_manager.as_v2_ref();
         let job_id = streaming_job.id();
 
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
 
         // 1. build fragment graph.
@@ -221,7 +299,12 @@ impl DdlController {
         };
         let dummy_id = mgr
             .catalog_controller
-            .create_job_catalog_for_replace(&streaming_job, &ctx, table.get_version()?)
+            .create_job_catalog_for_replace(
+                &streaming_job,
+                &ctx,
+                table.get_version()?,
+                &fragment_graph.default_parallelism(),
+            )
             .await?;
 
         tracing::debug!(id = streaming_job.id(), "building replace streaming job");

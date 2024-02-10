@@ -17,7 +17,6 @@ use std::sync::LazyLock;
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::user::grant_privilege::Object;
@@ -25,6 +24,7 @@ use risingwave_pb::user::grant_privilege::Object;
 use crate::catalog::system_catalog::{
     get_acl_items, BuiltinTable, SysCatalogReaderImpl, SystemCatalogColumnsDef,
 };
+use crate::error::Result;
 
 pub static RW_FUNCTIONS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
     vec![
@@ -70,7 +70,7 @@ impl SysCatalogReaderImpl {
                         ))),
                         Some(ScalarImpl::Int32(function.return_type.to_oid())),
                         Some(ScalarImpl::Utf8(function.language.clone().into())),
-                        Some(ScalarImpl::Utf8(function.link.clone().into())),
+                        function.link.clone().map(|s| ScalarImpl::Utf8(s.into())),
                         Some(ScalarImpl::Utf8(
                             get_acl_items(
                                 &Object::FunctionId(function.id.function_id()),

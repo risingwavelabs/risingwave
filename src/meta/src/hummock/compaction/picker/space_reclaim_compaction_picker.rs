@@ -169,6 +169,7 @@ impl SpaceReclaimCompactionPicker {
 mod test {
 
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     use itertools::Itertools;
     use risingwave_pb::hummock::compact_task;
@@ -183,6 +184,7 @@ mod test {
     use crate::hummock::compaction::selector::{
         CompactionSelector, LocalSelectorStatistic, SpaceReclaimCompactionSelector,
     };
+    use crate::hummock::compaction::CompactionDeveloperConfig;
     use crate::hummock::model::CompactionGroup;
 
     #[test]
@@ -253,6 +255,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -268,6 +271,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_eq!(task.input.input_levels.len(), 2);
@@ -307,6 +311,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -332,6 +337,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .is_none())
         }
@@ -354,6 +360,7 @@ mod test {
                 &mut levels_handler,
                 &mut local_stats,
                 HashMap::default(),
+                Arc::new(CompactionDeveloperConfig::default()),
             );
             assert!(task.is_none());
         }
@@ -375,6 +382,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -412,6 +420,7 @@ mod test {
                         &mut levels_handler,
                         &mut local_stats,
                         HashMap::default(),
+                        Arc::new(CompactionDeveloperConfig::default()),
                     )
                     .unwrap();
 
@@ -466,6 +475,7 @@ mod test {
                         &mut levels_handler,
                         &mut local_stats,
                         HashMap::default(),
+                        Arc::new(CompactionDeveloperConfig::default()),
                     )
                     .unwrap();
 

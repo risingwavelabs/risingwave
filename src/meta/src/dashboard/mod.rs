@@ -55,6 +55,7 @@ pub type Service = Arc<DashboardService>;
 pub(super) mod handlers {
     use anyhow::Context;
     use axum::Json;
+    use futures::future::join_all;
     use itertools::Itertools;
     use risingwave_common::bail;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
@@ -63,7 +64,8 @@ pub(super) mod handlers {
     use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::meta::{ActorLocation, PbTableFragments};
     use risingwave_pb::monitor_service::{
-        HeapProfilingResponse, ListHeapProfilingResponse, StackTraceResponse,
+        GetBackPressureResponse, HeapProfilingResponse, ListHeapProfilingResponse,
+        StackTraceResponse,
     };
     use serde_json::json;
     use thiserror_ext::AsReport;
@@ -360,6 +362,40 @@ pub(super) mod handlers {
 
         Ok(report)
     }
+
+    pub async fn get_back_pressure(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<GetBackPressureResponse>> {
+        let worker_nodes = srv
+            .metadata_manager
+            .list_active_streaming_compute_nodes()
+            .await
+            .map_err(err)?;
+
+        let mut futures = Vec::new();
+
+        for worker_node in worker_nodes {
+            let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+            let client = Arc::new(client);
+            let fut = async move {
+                let result = client.get_back_pressure().await.map_err(err)?;
+                Ok::<_, DashboardError>(result)
+            };
+            futures.push(fut);
+        }
+        let results = join_all(futures).await;
+
+        let mut all = GetBackPressureResponse::default();
+
+        for result in results {
+            let result = result
+                .map_err(|_| anyhow!("Failed to get back pressure"))
+                .map_err(err)?;
+            all.back_pressure_infos.extend(result.back_pressure_infos);
+        }
+
+        Ok(all.into())
+    }
 }
 
 impl DashboardService {
@@ -388,6 +424,7 @@ impl DashboardService {
                 "/metrics/actor/back_pressures",
                 get(prometheus::list_prometheus_actor_back_pressure),
             )
+            .route("/metrics/back_pressures", get(get_back_pressure))
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
             .route("/monitor/await_tree/", get(dump_await_tree_all))
             .route("/monitor/dump_heap_profile/:worker_id", get(heap_profile))

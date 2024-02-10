@@ -202,8 +202,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         // Configure levels for external crates.
         filter = filter
             .with_target("foyer", Level::WARN)
-            .with_target("aws_sdk_ec2", Level::INFO)
-            .with_target("aws_sdk_s3", Level::INFO)
+            .with_target("aws", Level::INFO)
             .with_target("aws_config", Level::WARN)
             .with_target("aws_endpoint", Level::WARN)
             .with_target("aws_credential_types::cache::lazy_caching", Level::WARN)
@@ -217,6 +216,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("sled", Level::INFO)
             .with_target("cranelift", Level::INFO)
             .with_target("wasmtime", Level::INFO)
+            .with_target("sqlx", Level::WARN)
             // Expose hyper connection socket addr log.
             .with_target("hyper::client::connect::http", Level::DEBUG);
 

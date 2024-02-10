@@ -14,6 +14,7 @@
 
 use std::future::Future;
 use std::pin::{pin, Pin};
+use std::task::{ready, Context, Poll};
 
 use futures::future::{pending, select, Either};
 use futures::stream::Peekable;
@@ -74,5 +75,47 @@ pub async fn await_future_with_monitor_error_stream<T, E, F: Future>(
             Some(Ok(_)) => Ok(send_future.await),
         },
         Either::Right((output, _)) => Ok(output),
+    }
+}
+
+/// Attach an item of type `T` to the future `F`. When the future is polled with ready,
+/// the item will be attached to the output of future as `(F::Output, item)`.
+///
+/// The generated future will be similar to `future.map(|output| (output, item))`. The
+/// only difference is that the `Map` future does not provide method `into_inner` to
+/// get the original inner future.
+pub struct AttachedFuture<F, T> {
+    inner: F,
+    item: Option<T>,
+}
+
+impl<F, T> AttachedFuture<F, T> {
+    pub fn new(inner: F, item: T) -> Self {
+        Self {
+            inner,
+            item: Some(item),
+        }
+    }
+
+    pub fn into_inner(self) -> (F, T) {
+        (
+            self.inner,
+            self.item.expect("should not be called after polled ready"),
+        )
+    }
+}
+
+impl<F: Future + Unpin, T: Unpin> Future for AttachedFuture<F, T> {
+    type Output = (F::Output, T);
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let output = ready!(this.inner.poll_unpin(cx));
+        Poll::Ready((
+            output,
+            this.item
+                .take()
+                .expect("should not be polled ready for twice"),
+        ))
     }
 }

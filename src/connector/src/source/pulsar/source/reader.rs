@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, Context};
 use arrow_array::{Int32Array, Int64Array, RecordBatch};
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -30,15 +30,15 @@ use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::ROWID_PREFIX;
-use risingwave_common::error::RwError;
+use risingwave_common::{bail, ensure};
 
 use crate::error::ConnectorError;
 use crate::parser::ParserConfig;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
-    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, SourceContextRef,
-    SourceMessage, SplitId, SplitMetaData, SplitReader, StreamChunkWithState,
+    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef,
+    SourceMessage, SplitId, SplitMetaData, SplitReader,
 };
 
 pub enum PulsarSplitReader {
@@ -57,7 +57,7 @@ impl SplitReader for PulsarSplitReader {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         ensure!(splits.len() == 1, "only support single split");
         let split = splits.into_iter().next().unwrap();
         let topic = split.topic.to_string();
@@ -83,7 +83,7 @@ impl SplitReader for PulsarSplitReader {
         }
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         match self {
             Self::Broker(reader) => {
                 let (parser_config, source_context) =
@@ -107,19 +107,15 @@ pub struct PulsarBrokerReader {
 }
 
 // {ledger_id}:{entry_id}:{partition}:{batch_index}
-fn parse_message_id(id: &str) -> Result<MessageIdData> {
+fn parse_message_id(id: &str) -> anyhow::Result<MessageIdData> {
     let splits = id.split(':').collect_vec();
 
     if splits.len() < 2 || splits.len() > 4 {
-        return Err(anyhow!("illegal message id string {}", id));
+        bail!("illegal message id string {}", id);
     }
 
-    let ledger_id = splits[0]
-        .parse::<u64>()
-        .map_err(|e| anyhow!("illegal ledger id {}", e))?;
-    let entry_id = splits[1]
-        .parse::<u64>()
-        .map_err(|e| anyhow!("illegal entry id {}", e))?;
+    let ledger_id = splits[0].parse::<u64>().context("illegal ledger id")?;
+    let entry_id = splits[1].parse::<u64>().context("illegal entry id")?;
 
     let mut message_id = MessageIdData {
         ledger_id,
@@ -132,16 +128,12 @@ fn parse_message_id(id: &str) -> Result<MessageIdData> {
     };
 
     if splits.len() > 2 {
-        let partition = splits[2]
-            .parse::<i32>()
-            .map_err(|e| anyhow!("illegal partition {}", e))?;
+        let partition = splits[2].parse::<i32>().context("illegal partition")?;
         message_id.partition = Some(partition);
     }
 
     if splits.len() == 4 {
-        let batch_index = splits[3]
-            .parse::<i32>()
-            .map_err(|e| anyhow!("illegal batch index {}", e))?;
+        let batch_index = splits[3].parse::<i32>().context("illegal batch index")?;
         message_id.batch_index = Some(batch_index);
     }
 
@@ -159,7 +151,7 @@ impl SplitReader for PulsarBrokerReader {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         ensure!(splits.len() == 1, "only support single split");
         let split = splits.into_iter().next().unwrap();
         let pulsar = props
@@ -234,7 +226,7 @@ impl SplitReader for PulsarBrokerReader {
         })
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self, parser_config, source_context)
@@ -287,7 +279,7 @@ impl PulsarIcebergReader {
         }
     }
 
-    async fn scan(&self) -> Result<FileScanStream> {
+    async fn scan(&self) -> anyhow::Result<FileScanStream> {
         let table = self.create_iceberg_table().await?;
         let schema = table.current_table_metadata().current_schema()?;
         tracing::debug!("Created iceberg pulsar table, schema is: {:?}", schema,);
@@ -302,18 +294,14 @@ impl PulsarIcebergReader {
                             .fields()
                             .iter()
                             .find(|f| f.name == META_COLUMN_PARTITION)
-                            .ok_or_else(|| {
-                                ConnectorError::Pulsar(anyhow!(
-                                    "Partition field not found in partition spec"
-                                ))
-                            })?;
+                            .context("Partition field not found in partition spec")?;
                         (s.clone(), field.clone())
                     }
                     _ => {
-                        return Err(ConnectorError::Pulsar(anyhow!(
+                        bail!(
                             "Partition type is not struct in iceberg table: {}",
                             table.table_name()
-                        )))?;
+                        );
                     }
                 };
 
@@ -339,24 +327,21 @@ impl PulsarIcebergReader {
             .await?)
     }
 
-    async fn create_iceberg_table(&self) -> Result<Table> {
+    async fn create_iceberg_table(&self) -> anyhow::Result<Table> {
         let catalog = load_catalog(&self.build_iceberg_configs()?)
             .await
-            .map_err(|e| ConnectorError::Pulsar(anyhow!("Unable to load iceberg catalog: {e}")))?;
+            .context("Unable to load iceberg catalog")?;
 
         let table_id =
             TableIdentifier::new(vec![self.split.topic.topic_str_without_partition()?])
-                .map_err(|e| ConnectorError::Pulsar(anyhow!("Unable to parse table name: {e}")))?;
+                .context("Unable to parse table name")?;
 
-        let table = catalog
-            .load_table(&table_id)
-            .await
-            .map_err(|err| ConnectorError::Pulsar(anyhow!(err)))?;
+        let table = catalog.load_table(&table_id).await?;
 
         Ok(table)
     }
 
-    #[try_stream(ok = StreamChunkWithState, error = anyhow::Error)]
+    #[try_stream(ok = (StreamChunk, HashMap<SplitId, String>), error = anyhow::Error)]
     async fn as_stream_chunk_stream(&self) {
         #[for_await]
         for file_scan in self.scan().await? {
@@ -371,7 +356,7 @@ impl PulsarIcebergReader {
         }
     }
 
-    #[try_stream(ok = StreamChunkWithState, error = RwError)]
+    #[try_stream(ok = StreamChunk, error = anyhow::Error)]
     async fn into_stream(self) {
         let (props, mut split, parser_config, source_ctx) = (
             self.props.clone(),
@@ -384,13 +369,9 @@ impl PulsarIcebergReader {
 
         #[for_await]
         for msg in self.as_stream_chunk_stream() {
-            let msg =
+            let (_chunk, mapping) =
                 msg.inspect_err(|e| tracing::error!("Failed to read message from iceberg: {}", e))?;
-            last_msg_id = msg
-                .split_offset_mapping
-                .as_ref()
-                .and_then(|m| m.get(self.split.topic.to_string().as_str()))
-                .cloned();
+            last_msg_id = mapping.get(self.split.topic.to_string().as_str()).cloned();
         }
 
         tracing::info!("Finished reading pulsar message from iceberg");
@@ -414,7 +395,7 @@ impl PulsarIcebergReader {
         }
     }
 
-    fn build_iceberg_configs(&self) -> Result<HashMap<String, String>> {
+    fn build_iceberg_configs(&self) -> anyhow::Result<HashMap<String, String>> {
         let mut iceberg_configs = HashMap::new();
 
         let bucket =
@@ -470,58 +451,49 @@ impl PulsarIcebergReader {
     fn convert_record_batch_to_source_with_state(
         &self,
         record_batch: &RecordBatch,
-    ) -> Result<StreamChunkWithState> {
+    ) -> anyhow::Result<(StreamChunk, HashMap<SplitId, String>)> {
         let mut offsets = Vec::with_capacity(record_batch.num_rows());
 
         let ledger_id_array = record_batch
             .column_by_name(META_COLUMN_LEDGER_ID)
-            .ok_or_else(|| ConnectorError::Pulsar(anyhow!("Ledger id not found in iceberg table")))?
+            .context("Ledger id not found in iceberg table")?
             .as_any()
             .downcast_ref::<Int64Array>()
-            .ok_or_else(|| {
-                ConnectorError::Pulsar(anyhow!("Ledger id is not i64 in iceberg table"))
-            })?;
+            .context("Ledger id is not i64 in iceberg table")?;
 
         let entry_id_array = record_batch
             .column_by_name(META_COLUMN_ENTRY_ID)
-            .ok_or_else(|| ConnectorError::Pulsar(anyhow!("Entry id not found in iceberg table")))?
+            .context("Entry id not found in iceberg table")?
             .as_any()
             .downcast_ref::<Int64Array>()
-            .ok_or_else(|| {
-                ConnectorError::Pulsar(anyhow!("Entry id is not i64 in iceberg table"))
-            })?;
+            .context("Entry id is not i64 in iceberg table")?;
 
         let partition_array = record_batch
             .column_by_name(META_COLUMN_PARTITION)
             .map(|arr| {
-                arr.as_any().downcast_ref::<Int32Array>().ok_or_else(|| {
-                    ConnectorError::Pulsar(anyhow!("Partition is not i32 in iceberg table"))
-                })
+                arr.as_any()
+                    .downcast_ref::<Int32Array>()
+                    .context("Partition is not i32 in iceberg table")
             })
             .transpose()?;
 
         let batch_index_array = record_batch
             .column_by_name(META_COLUMN_BATCH_INDEX)
             .map(|arr| {
-                arr.as_any().downcast_ref::<Int64Array>().ok_or_else(|| {
-                    ConnectorError::Pulsar(anyhow!("Batch index is not i64 in iceberg table"))
-                })
+                arr.as_any()
+                    .downcast_ref::<Int64Array>()
+                    .context("Batch index is not i64 in iceberg table")
             })
             .transpose()?;
 
-        let field_indices = self
+        let field_indices: Vec<_> = self
             .parser_config
             .common
             .rw_columns
             .iter()
             .filter(|col| col.name != ROWID_PREFIX)
-            .map(|col| {
-                record_batch
-                    .schema()
-                    .index_of(col.name.as_str())
-                    .map_err(|e| anyhow!(e))
-            })
-            .collect::<Result<Vec<usize>>>()?;
+            .map(|col| record_batch.schema().index_of(col.name.as_str()))
+            .try_collect()?;
 
         for row in 0..record_batch.num_rows() {
             let offset = format!(
@@ -539,14 +511,11 @@ impl PulsarIcebergReader {
 
         let stream_chunk = StreamChunk::from(data_chunk);
 
-        let state = Some(HashMap::from([(
+        let state = HashMap::from([(
             self.split.topic.to_string().into(),
             offsets.last().unwrap().clone(),
-        )]));
+        )]);
 
-        Ok(StreamChunkWithState {
-            chunk: stream_chunk,
-            split_offset_mapping: state,
-        })
+        Ok((stream_chunk, state))
     }
 }

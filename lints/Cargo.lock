@@ -588,6 +588,7 @@ dependencies = [
 name = "lints"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clippy_utils",
  "dylint_linting",
  "dylint_testing",

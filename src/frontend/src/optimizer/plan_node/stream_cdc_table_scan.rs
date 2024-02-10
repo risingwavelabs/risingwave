@@ -69,8 +69,8 @@ impl StreamCdcTableScan {
         &self,
         state: &mut BuildFragmentGraphState,
     ) -> TableCatalog {
-        let properties = self.ctx().with_options().internal_table_subset();
-        let mut catalog_builder = TableCatalogBuilder::new(properties);
+        let _properties = self.ctx().with_options().internal_table_subset();
+        let mut catalog_builder = TableCatalogBuilder::default();
         let upstream_schema = &self.core.get_table_columns();
 
         // Use `split_id` as primary key in state table.
@@ -199,7 +199,6 @@ impl StreamCdcTableScan {
             node_body: Some(PbNodeBody::CdcFilter(CdcFilterNode {
                 search_condition: Some(filter_expr.to_expr_proto()),
                 upstream_source_id,
-                upstream_column_ids: vec![], // not used,
             })),
         };
 
@@ -255,6 +254,8 @@ impl StreamCdcTableScan {
             // The table desc used by backfill executor
             state_table: Some(catalog),
             cdc_table_desc: Some(self.core.cdc_table_desc.to_protobuf()),
+            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+            disable_backfill: self.core.disable_backfill,
         });
 
         // plan: merge -> filter -> exchange(simple) -> stream_scan

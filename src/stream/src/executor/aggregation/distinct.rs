@@ -392,7 +392,7 @@ mod tests {
             &agg_calls,
             Arc::new(AtomicU64::new(0)),
             &dedup_tables,
-            ActorContext::create(0),
+            ActorContext::for_test(0),
         );
 
         // --- chunk 1 ---
@@ -483,7 +483,7 @@ mod tests {
             &agg_calls,
             Arc::new(AtomicU64::new(0)),
             &dedup_tables,
-            ActorContext::create(0),
+            ActorContext::for_test(0),
         );
 
         // --- chunk 3 ---
@@ -572,7 +572,7 @@ mod tests {
             &agg_calls,
             Arc::new(AtomicU64::new(0)),
             &dedup_tables,
-            ActorContext::create(0),
+            ActorContext::for_test(0),
         );
 
         let chunk = StreamChunk::from_pretty(

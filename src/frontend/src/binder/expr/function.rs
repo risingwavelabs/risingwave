@@ -21,24 +21,24 @@ use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
-use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
+use risingwave_common::types::{data_types, DataType, ScalarImpl, Timestamptz};
 use risingwave_common::{bail_not_implemented, current_cluster_version, no_function};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
-    Frame, FrameBound, FrameBounds, FrameExclusion, RowsFrameBounds, WindowFuncKind,
+    Frame, FrameBound, FrameBounds, FrameExclusion, RangeFrameBounds, RangeFrameOffset,
+    RowsFrameBounds, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
-    self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, Ident, SelectItem, SetExpr,
-    Statement, WindowFrameBound, WindowFrameExclusion, WindowFrameUnits, WindowSpec,
+    self, Function, FunctionArg, FunctionArgExpr, Ident, WindowFrameBound, WindowFrameExclusion,
+    WindowFrameUnits, WindowSpec,
 };
 use risingwave_sqlparser::parser::ParserError;
 use thiserror_ext::AsReport;
 
 use crate::binder::bind_context::Clause;
-use crate::binder::{Binder, BoundQuery, BoundSetExpr};
-use crate::catalog::function_catalog::FunctionCatalog;
+use crate::binder::{Binder, BoundQuery, BoundSetExpr, UdfContext};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal, Now, OrderBy,
     Subquery, SubqueryKind, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
@@ -160,73 +160,6 @@ impl Binder {
             return Ok(TableFunction::new(function_type, inputs)?.into());
         }
 
-        /// TODO: add name related logic
-        /// NOTE: need to think of a way to prevent naming conflict
-        /// e.g., when existing column names conflict with parameter names in sql udf
-        fn create_udf_context(
-            args: &[FunctionArg],
-            _catalog: &Arc<FunctionCatalog>,
-        ) -> Result<HashMap<String, AstExpr>> {
-            let mut ret: HashMap<String, AstExpr> = HashMap::new();
-            for (i, current_arg) in args.iter().enumerate() {
-                if let FunctionArg::Unnamed(arg) = current_arg {
-                    let FunctionArgExpr::Expr(e) = arg else {
-                        return Err(
-                            ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into()
-                        );
-                    };
-                    // if catalog.arg_names.is_some() {
-                    //      todo!()
-                    // }
-                    ret.insert(format!("${}", i + 1), e.clone());
-                    continue;
-                }
-                return Err(ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into());
-            }
-            Ok(ret)
-        }
-
-        fn extract_udf_expression(ast: Vec<Statement>) -> Result<AstExpr> {
-            if ast.len() != 1 {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "the query for sql udf should contain only one statement".to_string(),
-                )
-                .into());
-            }
-
-            // Extract the expression out
-            let Statement::Query(query) = ast[0].clone() else {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "invalid function definition, please recheck the syntax".to_string(),
-                )
-                .into());
-            };
-
-            let SetExpr::Select(select) = query.body else {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "missing `select` body for sql udf expression, please recheck the syntax"
-                        .to_string(),
-                )
-                .into());
-            };
-
-            if select.projection.len() != 1 {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "`projection` should contain only one `SelectItem`".to_string(),
-                )
-                .into());
-            }
-
-            let SelectItem::UnnamedExpr(expr) = select.projection[0].clone() else {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "expect `UnnamedExpr` for `projection`".to_string(),
-                )
-                .into());
-            };
-
-            Ok(expr)
-        }
-
         // user defined function
         // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
         if let Ok(schema) = self.first_valid_schema()
@@ -267,7 +200,7 @@ impl Binder {
 
                 // The actual inline logic for sql udf
                 // Note that we will always create new udf context for each sql udf
-                let Ok(context) = create_udf_context(&args, &Arc::clone(func)) else {
+                let Ok(context) = UdfContext::create_udf_context(&args, &Arc::clone(func)) else {
                     return Err(ErrorCode::InvalidInputSyntax(
                         "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
                     )
@@ -306,10 +239,17 @@ impl Binder {
                     self.udf_context.incr_global_count();
                 }
 
-                if let Ok(expr) = extract_udf_expression(ast) {
+                if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
                     let bind_result = self.bind_expr(expr);
+
+                    // We should properly decrement global count after a successful binding
+                    // Since the subsequent probe operation in `bind_column` or
+                    // `bind_parameter` relies on global counting
+                    self.udf_context.decr_global_count();
+
                     // Restore context information for subsequent binding
                     self.udf_context.update_context(stashed_udf_context);
+
                     return bind_result;
                 } else {
                     return Err(ErrorCode::InvalidInputSyntax(
@@ -633,6 +573,8 @@ impl Binder {
         Ok((vec![], args, order_by))
     }
 
+    /// Bind window function calls according to PostgreSQL syntax.
+    /// See <https://www.postgresql.org/docs/current/sql-expressions.html#SYNTAX-WINDOW-FUNCTIONS> for syntax detail.
     pub(super) fn bind_window_function(
         &mut self,
         kind: WindowFuncKind,
@@ -672,39 +614,177 @@ impl Binder {
             };
             let bounds = match frame.units {
                 WindowFrameUnits::Rows => {
-                    let convert_bound = |bound| match bound {
-                        WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
-                        WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
-                        WindowFrameBound::Preceding(Some(offset)) => {
-                            FrameBound::Preceding(offset as usize)
-                        }
-                        WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
-                        WindowFrameBound::Following(Some(offset)) => {
-                            FrameBound::Following(offset as usize)
-                        }
-                    };
-                    let start = convert_bound(frame.start_bound);
-                    let end = if let Some(end_bound) = frame.end_bound {
-                        convert_bound(end_bound)
-                    } else {
-                        FrameBound::CurrentRow
-                    };
+                    let (start, end) =
+                        self.bind_window_frame_usize_bounds(frame.start_bound, frame.end_bound)?;
                     FrameBounds::Rows(RowsFrameBounds { start, end })
                 }
-                WindowFrameUnits::Range | WindowFrameUnits::Groups => {
+                WindowFrameUnits::Range => {
+                    let order_by_expr = order_by
+                        .sort_exprs
+                        .iter()
+                        // for `RANGE` frame, there should be exactly one `ORDER BY` column
+                        .exactly_one()
+                        .map_err(|_| {
+                            ErrorCode::InvalidInputSyntax(
+                                "there should be exactly one ordering column for `RANGE` frame"
+                                    .to_string(),
+                            )
+                        })?;
+                    let order_data_type = order_by_expr.expr.return_type();
+                    let order_type = order_by_expr.order_type;
+
+                    let offset_data_type = match &order_data_type {
+                        // for numeric ordering columns, `offset` should be the same type
+                        // NOTE: actually in PG it can be a larger type, but we don't support this here
+                        t @ data_types::range_frame_numeric!() => t.clone(),
+                        // for datetime ordering columns, `offset` should be interval
+                        t @ data_types::range_frame_datetime!() => {
+                            if matches!(t, DataType::Date | DataType::Time) {
+                                bail_not_implemented!(
+                                    "`RANGE` frame with offset of type `{}` is not implemented yet, please manually cast the `ORDER BY` column to `timestamp`",
+                                    t
+                                );
+                            }
+                            DataType::Interval
+                        }
+                        // other types are not supported
+                        t => {
+                            return Err(ErrorCode::NotSupported(
+                                format!(
+                                    "`RANGE` frame with offset of type `{}` is not supported",
+                                    t
+                                ),
+                                "Please re-consider the `ORDER BY` column".to_string(),
+                            )
+                            .into())
+                        }
+                    };
+
+                    let (start, end) = self.bind_window_frame_scalar_impl_bounds(
+                        frame.start_bound,
+                        frame.end_bound,
+                        &offset_data_type,
+                    )?;
+                    FrameBounds::Range(RangeFrameBounds {
+                        order_data_type,
+                        order_type,
+                        offset_data_type,
+                        start: start.map(RangeFrameOffset::new),
+                        end: end.map(RangeFrameOffset::new),
+                    })
+                }
+                WindowFrameUnits::Groups => {
                     bail_not_implemented!(
                         issue = 9124,
-                        "window frame in `{}` mode is not supported yet",
-                        frame.units
+                        "window frame in `GROUPS` mode is not supported yet",
                     );
                 }
             };
+
+            // Validate the frame bounds, may return `ExprError` to user if the bounds given are not valid.
             bounds.validate()?;
+
             Some(Frame { bounds, exclusion })
         } else {
             None
         };
         Ok(WindowFunction::new(kind, partition_by, order_by, inputs, frame)?.into())
+    }
+
+    fn bind_window_frame_usize_bounds(
+        &mut self,
+        start: WindowFrameBound,
+        end: Option<WindowFrameBound>,
+    ) -> Result<(FrameBound<usize>, FrameBound<usize>)> {
+        let mut convert_offset = |offset: Box<ast::Expr>| -> Result<usize> {
+            let offset = self
+                .bind_window_frame_bound_offset(*offset, DataType::Int64)?
+                .into_int64();
+            if offset < 0 {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "offset in window frame bounds must be non-negative".to_string(),
+                )
+                .into());
+            }
+            Ok(offset as usize)
+        };
+        let mut convert_bound = |bound| -> Result<FrameBound<usize>> {
+            Ok(match bound {
+                WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
+                WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
+                WindowFrameBound::Preceding(Some(offset)) => {
+                    FrameBound::Preceding(convert_offset(offset)?)
+                }
+                WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
+                WindowFrameBound::Following(Some(offset)) => {
+                    FrameBound::Following(convert_offset(offset)?)
+                }
+            })
+        };
+        let start = convert_bound(start)?;
+        let end = if let Some(end_bound) = end {
+            convert_bound(end_bound)?
+        } else {
+            FrameBound::CurrentRow
+        };
+        Ok((start, end))
+    }
+
+    fn bind_window_frame_scalar_impl_bounds(
+        &mut self,
+        start: WindowFrameBound,
+        end: Option<WindowFrameBound>,
+        offset_data_type: &DataType,
+    ) -> Result<(FrameBound<ScalarImpl>, FrameBound<ScalarImpl>)> {
+        let mut convert_bound = |bound| -> Result<FrameBound<_>> {
+            Ok(match bound {
+                WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
+                WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
+                WindowFrameBound::Preceding(Some(offset)) => FrameBound::Preceding(
+                    self.bind_window_frame_bound_offset(*offset, offset_data_type.clone())?,
+                ),
+                WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
+                WindowFrameBound::Following(Some(offset)) => FrameBound::Following(
+                    self.bind_window_frame_bound_offset(*offset, offset_data_type.clone())?,
+                ),
+            })
+        };
+        let start = convert_bound(start)?;
+        let end = if let Some(end_bound) = end {
+            convert_bound(end_bound)?
+        } else {
+            FrameBound::CurrentRow
+        };
+        Ok((start, end))
+    }
+
+    fn bind_window_frame_bound_offset(
+        &mut self,
+        offset: ast::Expr,
+        cast_to: DataType,
+    ) -> Result<ScalarImpl> {
+        let mut offset = self.bind_expr(offset)?;
+        if !offset.is_const() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "offset in window frame bounds must be constant".to_string(),
+            )
+            .into());
+        }
+        if offset.cast_implicit_mut(cast_to.clone()).is_err() {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "offset in window frame bounds must be castable to {}",
+                cast_to
+            ))
+            .into());
+        }
+        let offset = offset.fold_const()?;
+        let Some(offset) = offset else {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "offset in window frame bounds must not be NULL".to_string(),
+            )
+            .into());
+        };
+        Ok(offset)
     }
 
     fn bind_builtin_scalar_function(
@@ -885,6 +965,9 @@ impl Binder {
                 ),
                 ("date_trunc", raw_call(ExprType::DateTrunc)),
                 ("date_part", raw_call(ExprType::DatePart)),
+                ("make_date", raw_call(ExprType::MakeDate)),
+                ("make_time", raw_call(ExprType::MakeTime)),
+                ("make_timestamp", raw_call(ExprType::MakeTimestamp)),
                 ("to_date", raw_call(ExprType::CharToDate)),
                 ("make_timestamptz", raw_call(ExprType::MakeTimestamptz)),
                 // string
@@ -938,6 +1021,8 @@ impl Binder {
                 ("sha256", raw_call(ExprType::Sha256)),
                 ("sha384", raw_call(ExprType::Sha384)),
                 ("sha512", raw_call(ExprType::Sha512)),
+                ("encrypt", raw_call(ExprType::Encrypt)),
+                ("decrypt", raw_call(ExprType::Decrypt)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
                 ("int8send", raw_call(ExprType::PgwireSend)),
