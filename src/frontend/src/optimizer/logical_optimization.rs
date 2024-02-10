@@ -415,14 +415,6 @@ static COMMON_SUB_EXPR_EXTRACT: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
-static CONST_CASE_WHEN_EVAL: LazyLock<OptimizationStage> = LazyLock::new(|| {
-    OptimizationStage::new(
-        "Const Case When Evaluation",
-        vec![ConstCaseWhenEvalRule::create()],
-        ApplyOrder::TopDown,
-    )
-});
-
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
         plan: PlanRef,
@@ -631,8 +623,6 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT);
 
-        plan = plan.optimize_by_rules(&CONST_CASE_WHEN_EVAL);
-
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
@@ -720,8 +710,6 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
 
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT);
-
-        plan = plan.optimize_by_rules(&CONST_CASE_WHEN_EVAL);
 
         plan = plan.optimize_by_rules(&PULL_UP_HOP);
 

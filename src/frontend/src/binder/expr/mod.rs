@@ -607,14 +607,15 @@ impl Binder {
         );
 
         if constant_case_when_flag {
-            // Here we reuse the `ConstantLookup` as the `FunctionCall`
-            // to avoid creating a dummy `ConstCaseWhenEval` expression type
-            // since we do not need to go through backend
-            return Ok(FunctionCall::new(
-                ExprType::ConstantLookup,
-                constant_case_when_eval_inputs,
-            )?
-            .into());
+            // Sanity check
+            if constant_case_when_eval_inputs.len() != 1 {
+                return Err(ErrorCode::BindError(
+                    "expect `constant_case_when_eval_inputs` only contains a single bound expression".to_string()
+                )
+                .into());
+            }
+            // Directly return the first element of the vector
+            return Ok(constant_case_when_eval_inputs[0].take());
         }
 
         // See if the case-when expression can be optimized

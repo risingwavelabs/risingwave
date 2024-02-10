@@ -157,8 +157,6 @@ pub use agg_call_merge_rule::*;
 mod values_extract_project_rule;
 pub use batch::batch_push_limit_to_scan_rule::*;
 pub use values_extract_project_rule::*;
-mod const_case_when_eval_rule;
-pub use const_case_when_eval_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -229,7 +227,6 @@ macro_rules! for_all_rules {
             , { AggCallMergeRule }
             , { ValuesExtractProjectRule }
             , { BatchPushLimitToScanRule }
-            , { ConstCaseWhenEvalRule }
         }
     };
 }
