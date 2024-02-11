@@ -214,7 +214,8 @@
   - logical_plan
   - batch_plan
 - id: const_case_when_with_table
-  before: create_table
+  before:
+  - create_table
   sql: |
     select
       case 1
