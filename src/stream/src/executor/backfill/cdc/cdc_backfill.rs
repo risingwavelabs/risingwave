@@ -241,6 +241,14 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                             match msg? {
                                 Message::Barrier(barrier) => {
                                     if !has_snapshot_read {
+                                        tracing::info!(
+                                            upstream_table_id,
+                                            upstream_table_name,
+                                            ?last_binlog_offset,
+                                            ?current_pk_pos,
+                                            "force a snapshot read"
+                                        );
+
                                         let mut snapshot_stream_end = false;
                                         // If no snapshot read happen, the current_pk_pos is unchanged in previous epoch.
                                         // We stall the barrier message and force a snapshot read here to avoid starvation of the snapshot stream.

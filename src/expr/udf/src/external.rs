@@ -138,7 +138,7 @@ impl ArrowFlightUdfClient {
 
         let n = if retry { 4 } else { 0 };
         let result = if let Some(timeout) = timeout {
-            match tokio::time::timeout(timeout.into(), self.call_with_retry(id, input, n)).await {
+            match tokio::time::timeout(timeout, self.call_with_retry(id, input, n)).await {
                 Ok(ret) => ret,
                 Err(_) => Err(Error::timeout(format!(
                     "UDF call timeout: {:?}, id: {:?}",
