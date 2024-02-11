@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::future::Future;
+use std::sync::Arc;
 
 use futures::{pin_mut, Stream};
 use futures_async_stream::try_stream;
@@ -21,9 +22,11 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReader};
+use tokio::time::Instant;
 
 use super::external::ExternalStorageTable;
 use crate::executor::backfill::utils::iter_chunks;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{StreamExecutorError, StreamExecutorResult, INVALID_EPOCH};
 
 pub trait UpstreamTableRead {
@@ -61,6 +64,7 @@ impl SnapshotReadArgs {
 /// and external upstream table.
 pub struct UpstreamTableReader<T> {
     inner: T,
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl<T> UpstreamTableReader<T> {
@@ -68,8 +72,11 @@ impl<T> UpstreamTableReader<T> {
         &self.inner
     }
 
-    pub fn new(table: T) -> Self {
-        Self { inner: table }
+    pub fn new(table: T, metrics: Arc<StreamingMetrics>) -> Self {
+        Self {
+            inner: table,
+            metrics,
+        }
     }
 }
 
@@ -102,9 +109,17 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
 
         let mut builder = DataChunkBuilder::new(self.inner.schema().data_types(), args.chunk_size);
         let chunk_stream = iter_chunks(row_stream, &mut builder);
+        let table_name = self.inner.qualified_table_name();
+        let mut start_time = Instant::now();
         #[for_await]
         for chunk in chunk_stream {
+            self.metrics
+                .cdc_backfill_snapshot_read_duration
+                .with_label_values(&[table_name.as_str()])
+                .observe(start_time.elapsed().as_millis() as f64);
+
             yield Some(chunk?);
+            start_time = Instant::now();
         }
         yield None;
     }
