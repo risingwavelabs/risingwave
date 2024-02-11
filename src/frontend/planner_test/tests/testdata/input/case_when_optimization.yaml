@@ -239,3 +239,13 @@
   expected_outputs:
   - logical_plan
   - batch_plan
+- id: const_case_when_fallback_case
+  sql: |
+    select
+      case 1
+        when 0 then 114514
+        else 1919810
+      end;
+  expected_outputs:
+  - logical_plan
+  - batch_plan
