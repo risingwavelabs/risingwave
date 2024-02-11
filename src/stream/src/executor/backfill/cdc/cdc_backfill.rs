@@ -253,9 +253,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         let mut snapshot_stream_end = false;
                                         // If no snapshot read happen, the current_pk_pos is unchanged in previous epoch.
                                         // We stall the barrier message and force a snapshot read here to avoid starvation of the snapshot stream.
-                                        let (_, snapshot_stream) = backfill_stream.into_inner();
-                                        #[for_await]
-                                        for msg in snapshot_stream {
+                                        let (_, mut snapshot_stream) = backfill_stream.into_inner();
+                                        if let Some(msg) = snapshot_stream.next().await {
                                             let Either::Right(msg) = msg else {
                                                 bail!(
                                                     "BUG: snapshot_read contains upstream messages"
@@ -264,7 +263,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             match msg? {
                                                 None => {
                                                     snapshot_stream_end = true;
-                                                    break;
                                                 }
                                                 Some(chunk) => {
                                                     // Raise the current position.
@@ -289,7 +287,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                         chunk,
                                                         &self.output_indices,
                                                     ));
-                                                    break;
                                                 }
                                             }
                                         }
