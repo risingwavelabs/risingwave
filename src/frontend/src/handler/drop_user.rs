@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
+use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_user(

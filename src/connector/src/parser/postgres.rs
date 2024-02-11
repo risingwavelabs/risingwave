@@ -23,6 +23,7 @@ use risingwave_common::types::{
     Timestamptz,
 };
 use rust_decimal::Decimal as RustDecimal;
+use thiserror_ext::AsReport;
 
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
 
@@ -159,10 +160,10 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                         Err(err) => {
                             if let Ok(sc) = LOG_SUPPERSSER.check() {
                                 tracing::error!(
-                                    "parse column \"{}\" fail: {} ({} suppressed)",
-                                    name,
-                                    err,
-                                    sc
+                                    suppressed_count = sc,
+                                    column_name = name,
+                                    error = %err.as_report(),
+                                    "parse column failed",
                                 );
                             }
                             None
@@ -256,10 +257,10 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 Err(err) => {
                                     if let Ok(sc) = LOG_SUPPERSSER.check() {
                                         tracing::error!(
-                                            "parse column \"{}\" fail: {} ({} suppressed)",
-                                            name,
-                                            err,
-                                            sc
+                                            suppressed_count = sc,
+                                            column_name = name,
+                                            error = %err.as_report(),
+                                            "parse column failed",
                                         );
                                     }
                                 }

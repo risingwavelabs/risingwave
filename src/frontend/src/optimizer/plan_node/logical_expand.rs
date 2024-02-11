@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::Result;
 
 use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
@@ -21,6 +20,7 @@ use super::{
     gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, Logical, PlanBase,
     PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
+use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, LogicalProject, PredicatePushdownContext, RewriteStreamContext,

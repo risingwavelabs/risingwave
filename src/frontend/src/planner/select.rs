@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -25,6 +24,7 @@ use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::JoinType;
 
 use crate::binder::{BoundDistinct, BoundSelect};
+use crate::error::{ErrorCode, Result};
 use crate::expr::{
     CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Subquery,
     SubqueryKind,

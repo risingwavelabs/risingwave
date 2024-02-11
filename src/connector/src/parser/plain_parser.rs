@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::bail;
 
 use super::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType,
@@ -44,7 +43,7 @@ impl PlainParser {
         props: SpecificParserConfig,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         let key_builder = if let Some(key_column_name) = get_key_column_name(&rw_columns) {
             Some(AccessBuilderImpl::Bytes(BytesAccessBuilder::new(
                 EncodingProperties::Bytes(BytesProperties {
@@ -62,11 +61,7 @@ impl PlainParser {
             | EncodingProperties::Bytes(_) => {
                 AccessBuilderImpl::new_default(props.encoding_config, EncodingType::Value).await?
             }
-            _ => {
-                return Err(RwError::from(ProtocolError(
-                    "unsupported encoding for Plain".to_string(),
-                )));
-            }
+            _ => bail!("Unsupported encoding for Plain"),
         };
 
         let transaction_meta_builder = Some(AccessBuilderImpl::DebeziumJson(
@@ -86,7 +81,7 @@ impl PlainParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<ParseResult> {
+    ) -> anyhow::Result<ParseResult> {
         // if the message is transaction metadata, parse it and return
         if let Some(msg_meta) = writer.row_meta
             && let SourceMeta::DebeziumCdc(cdc_meta) = msg_meta.meta
@@ -150,7 +145,7 @@ impl ByteStreamSourceParser for PlainParser {
         _key: Option<Vec<u8>>,
         _payload: Option<Vec<u8>>,
         _writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         unreachable!("should call `parse_one_with_txn` instead")
     }
 
@@ -159,7 +154,7 @@ impl ByteStreamSourceParser for PlainParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<ParseResult> {
+    ) -> anyhow::Result<ParseResult> {
         self.parse_inner(key, payload, writer).await
     }
 }
