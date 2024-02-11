@@ -191,6 +191,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             // drive the upstream changelog first to ensure we can receive timely changelog event,
             // otherwise the upstream changelog may be blocked by the snapshot read stream
             let _ = Pin::new(&mut upstream).peek().await;
+            let mut has_snapshot_read = false;
 
             // wait for a barrier to make sure the backfill starts after upstream source
             #[for_await]
@@ -217,8 +218,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             tracing::info!(upstream_table_id, initial_binlog_offset = ?last_binlog_offset, ?current_pk_pos, "start cdc backfill loop");
             'backfill_loop: loop {
                 let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
+
                 let left_upstream = upstream.by_ref().map(Either::Left);
-                let mut has_snapshot_read = false;
 
                 let args = SnapshotReadArgs::new_for_cdc(current_pk_pos.clone(), self.chunk_size);
                 let right_snapshot =
