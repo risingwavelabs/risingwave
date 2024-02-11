@@ -175,7 +175,7 @@ impl PostgresExternalTableReader {
         let order_key = primary_keys.iter().join(",");
         let sql = if start_pk_row.is_none() {
             format!(
-                "SELECT {} FROM {} ORDER BY {}",
+                "SELECT {} FROM {} ORDER BY {} LIMIT 512",
                 self.field_names,
                 self.get_normalized_table_name(&table_name),
                 order_key
@@ -183,7 +183,7 @@ impl PostgresExternalTableReader {
         } else {
             let filter_expr = Self::filter_expression(&primary_keys);
             format!(
-                "SELECT {} FROM {} WHERE {} ORDER BY {}",
+                "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT 512",
                 self.field_names,
                 self.get_normalized_table_name(&table_name),
                 filter_expr,

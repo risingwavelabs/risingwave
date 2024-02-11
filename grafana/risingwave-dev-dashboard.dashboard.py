@@ -985,6 +985,19 @@ def section_streaming_cdc(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_latency_ms(
+                    "CDC Backfill Snapshot Read Chunk Latency",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('cdc_backfill_snapshot_read_duration_milliseconds_bucket')}[$__rate_interval])) by (le, table_name))",
+                                f"lag p{legend}" + " - {{table_name}}",
+                                ),
+                            [50, 99, "max"],
+                        ),
+                    ],
+                ),
             ],
         ),
     ]

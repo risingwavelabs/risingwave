@@ -17,9 +17,10 @@ use std::sync::OnceLock;
 use prometheus::core::{AtomicF64, AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
-    register_histogram_with_registry, register_int_counter_vec_with_registry,
-    register_int_counter_with_registry, register_int_gauge_vec_with_registry,
-    register_int_gauge_with_registry, Histogram, IntCounter, IntCounterVec, IntGauge, Registry,
+    register_histogram_vec_with_registry, register_histogram_with_registry,
+    register_int_counter_vec_with_registry, register_int_counter_with_registry,
+    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
+    HistogramVec, IntCounter, IntCounterVec, IntGauge, Registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
@@ -129,6 +130,7 @@ pub struct StreamingMetrics {
     // CDC Backfill
     pub cdc_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
     pub cdc_backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
+    pub cdc_backfill_snapshot_read_duration: HistogramVec,
 
     // Over Window
     pub over_window_cached_entry_count: GenericGaugeVec<AtomicI64>,
@@ -717,6 +719,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let opts = histogram_opts!(
+            "cdc_backfill_snapshot_read_duration_milliseconds",
+            "cdc_backfill_snapshot_read_duration",
+            exponential_buckets(1.0, 2.0, 19).unwrap(), // max 262s
+        );
+        let cdc_backfill_snapshot_read_duration =
+            register_histogram_vec_with_registry!(opts, &["table_name"], registry).unwrap();
+
         let over_window_cached_entry_count = register_int_gauge_vec_with_registry!(
             "stream_over_window_cached_entry_count",
             "Total entry (partition) count in over window executor cache",
@@ -1104,6 +1114,7 @@ impl StreamingMetrics {
             arrangement_backfill_upstream_output_row_count,
             cdc_backfill_snapshot_read_row_count,
             cdc_backfill_upstream_output_row_count,
+            cdc_backfill_snapshot_read_duration,
             over_window_cached_entry_count,
             over_window_cache_lookup_count,
             over_window_cache_miss_count,
