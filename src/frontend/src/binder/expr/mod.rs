@@ -567,6 +567,10 @@ impl Binder {
         true
     }
 
+    /// Helper function to extract expression out and insert
+    /// the corresponding bound version to `inputs`
+    /// used in `check_convert_simple_form`
+    /// Note: this function will be invoked per arm
     fn try_extract_simple_form(
         &mut self,
         ident_expr: Expr,
