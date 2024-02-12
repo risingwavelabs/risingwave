@@ -39,7 +39,7 @@ mod value;
 /// this limit, we will try optimize the case-when
 /// expression to `ConstantLookupExpression`
 /// Check `case.rs` for details.
-const CASE_WHEN_ARMS_OPTIMIZE_LIMIT: usize = 0;
+const CASE_WHEN_ARMS_OPTIMIZE_LIMIT: usize = 30;
 
 impl Binder {
     /// Bind an expression with `bind_expr_inner`, attach the original expression
@@ -663,7 +663,6 @@ impl Binder {
             }
             constant_lookup_inputs.push(operand);
         } else {
-            println!("In convert simple form!");
             // Try converting to simple form
             // see the example as illustrated in `check_convert_simple_form`
             return self.check_convert_simple_form(
@@ -745,7 +744,6 @@ impl Binder {
         );
 
         if optimize_flag {
-            println!("##################################this way!###################################");
             return Ok(FunctionCall::new(ExprType::ConstantLookup, constant_lookup_inputs)?.into());
         }
 
