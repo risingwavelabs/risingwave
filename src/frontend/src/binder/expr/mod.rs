@@ -663,9 +663,6 @@ impl Binder {
             return false;
         }
 
-        // TODO(Zihao): we could possibly optimize some simple cases when
-        // `operand` is None in the future, the current choice is not conducting the optimization.
-        // e.g., select case when c1 = 1 then (...) when (same pattern) then (...) [else (...)] end from t1;
         if let Some(operand) = operand {
             let Ok(operand) = self.bind_expr_inner(*operand) else {
                 return false;
