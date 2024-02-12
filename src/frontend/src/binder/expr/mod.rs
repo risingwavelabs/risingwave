@@ -19,7 +19,8 @@ use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_common::{bail_not_implemented, not_implemented};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
 use risingwave_sqlparser::ast::{
-    Array, BinaryOperator, DataType as AstDataType, Expr, Function, JsonPredicateType, ObjectName, Query, StructField, TrimWhereField, UnaryOperator
+    Array, BinaryOperator, DataType as AstDataType, Expr, Function, JsonPredicateType, ObjectName,
+    Query, StructField, TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
@@ -606,11 +607,21 @@ impl Binder {
                     return false;
                 }
                 if let Expr::Identifier(_) = *(left.clone()) {
-                    if !self.try_extract_simple_form(*left, *right, &mut column_expr, constant_lookup_inputs) {
+                    if !self.try_extract_simple_form(
+                        *left,
+                        *right,
+                        &mut column_expr,
+                        constant_lookup_inputs,
+                    ) {
                         return false;
                     }
                 } else {
-                    if !self.try_extract_simple_form(*right, *left, &mut column_expr, constant_lookup_inputs) {
+                    if !self.try_extract_simple_form(
+                        *right,
+                        *left,
+                        &mut column_expr,
+                        constant_lookup_inputs,
+                    ) {
                         return false;
                     }
                 }
@@ -673,7 +684,8 @@ impl Binder {
                 conditions,
                 results_expr,
                 fallback,
-                constant_lookup_inputs);
+                constant_lookup_inputs,
+            );
         }
 
         for (condition, result) in zip_eq_fast(conditions, results_expr) {
