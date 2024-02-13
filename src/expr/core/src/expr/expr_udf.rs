@@ -186,7 +186,8 @@ impl Build for UdfExpression {
             span: format!("expr_udf_call ({})", udf.identifier).into(),
             disable_retry_count: AtomicU8::new(0),
             timeout: match udf.timeout_ms {
-                0 => Some(Duration::from_millis(10000_u64)),
+                // Disable timeout by setting it to a high number.
+                0 => Some(Duration::from_secs(60 * 60 * 24)),
                 ms => Some(Duration::from_millis(ms as u64)),
             },
         })
