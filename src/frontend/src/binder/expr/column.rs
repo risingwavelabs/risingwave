@@ -54,8 +54,10 @@ impl Binder {
                 // there will not exist any column identifiers
                 // And invalid cases should already be caught
                 // during semantic check phase
+                // Note: the error message here also help with hint display
+                // when invalid definition occurs at sql udf creation time
                 return Err(ErrorCode::BindError(format!(
-                    "failed to find named parameter {column_name}"
+                    "[sql udf] failed to find named parameter {column_name}"
                 ))
                 .into());
             }

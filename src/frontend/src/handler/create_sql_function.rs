@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use fancy_regex::Regex;
 
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
@@ -24,7 +25,6 @@ use risingwave_sqlparser::ast::{
     CreateFunctionBody, FunctionDefinition, ObjectName, OperateFunctionArg,
 };
 use risingwave_sqlparser::parser::{Parser, ParserError};
-use thiserror_ext::AsReport;
 
 use super::*;
 use crate::binder::UdfContext;
@@ -51,6 +51,23 @@ fn create_mock_udf_context(
     }
 
     ret
+}
+
+/// Find the pattern for better hint display
+/// return the exact index where the pattern first appears
+fn find_target(input: &str, target: &str) -> Option<usize> {
+    // Regex pattern to find `target` not preceded/followed by an ASCII letter.
+    // \b asserts a word boundary, and \B asserts NOT a word boundary
+    // The pattern uses negative lookbehind (?<!...) and lookahead (?!...) to ensure
+    // the target is not surrounded by ASCII alphabetic characters
+    let pattern = format!(r"(?<![A-Za-z]){0}(?![A-Za-z])", fancy_regex::escape(target));
+    let re = Regex::new(&pattern).unwrap();
+
+    let Ok(Some(ma)) = re.find(input) else {
+        return None;
+    };
+
+    Some(ma.start())
 }
 
 pub async fn handle_create_sql_function(
@@ -205,11 +222,48 @@ pub async fn handle_create_sql_function(
                         .into());
                     }
                 }
-                Err(e) => return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "failed to conduct semantic check, please see if you are calling non-existence functions or parameters\ndetailed error message: {}",
-                    e.as_report()
-                ))
-                .into()),
+                Err(e) => {
+                    let default_err_msg = "Failed to conduct semantic check".to_string();
+                    let prompt = "In SQL UDF definition: ".to_string();
+
+                    if let ErrorCode::BindErrorRoot { expr: _, error } = e.inner() {
+                        let invalid_msg = error.to_string();
+                        let pattern = "[sql udf]";
+
+                        // Valid error message for hint display
+                        let Some(_) = invalid_msg.as_str().find(pattern) else {
+                            return Err(ErrorCode::InvalidInputSyntax(default_err_msg).into());
+                        };
+
+                        // Get the name of the invalid item
+                        // We will just display the first one found
+                        let invalid_item_name = invalid_msg.split_whitespace().last().unwrap_or("null");
+
+                        // Find the invalid parameter / column
+                        let Some(idx) = find_target(body.as_str(), invalid_item_name) else {
+                            return Err(ErrorCode::InvalidInputSyntax(default_err_msg).into());
+                        };
+
+                        println!("Current idx: {}", idx);
+
+                        // The exact error position for `^` to point to
+                        let position = format!("{}{}",
+                            " ".repeat(idx + prompt.len() + 1),
+                            "^".repeat(invalid_item_name.len()));
+
+                        return Err(ErrorCode::InvalidInputSyntax(
+                            format!("\n{}: {}\n{}`{}`\n{}",
+                                default_err_msg,
+                                invalid_msg,
+                                prompt,
+                                body,
+                                position)
+                        ).into());
+                    }
+
+                    // Otherwise return the default error message
+                    return Err(ErrorCode::InvalidInputSyntax(default_err_msg).into())
+                }
             }
         } else {
             return Err(ErrorCode::InvalidInputSyntax(
