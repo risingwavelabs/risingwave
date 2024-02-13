@@ -8,7 +8,6 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-anyhow = "1"
 bincode = "1"
 bytes = "1"
 easy-ext = "1"
