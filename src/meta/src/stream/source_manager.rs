@@ -24,7 +24,7 @@ use anyhow::Context;
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_connector::dispatch_source_prop;
-use risingwave_connector::error::{ConnectorErrorContext, ConnectorResult};
+use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SourceProperties,
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,

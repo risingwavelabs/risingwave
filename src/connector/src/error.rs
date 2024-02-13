@@ -24,8 +24,10 @@ use crate::sink::SinkError;
 def_anyhow_newtype! {
     pub ConnectorError,
 
+    // Common errors
     std::io::Error => "",
 
+    // Fine-grained connector errors
     AccessError => "",
     WireFormatError => "",
     ConcurrentRequestError => "",
@@ -35,11 +37,13 @@ def_anyhow_newtype! {
 
     // TODO(error-handling): Remove implicit contexts below and specify ad-hoc context for each conversion.
 
+    // Parsing errors
     url::ParseError => "failed to parse url",
     serde_json::Error => "failed to parse json",
     csv::Error => "failed to parse csv",
 
-    opendal::Error => "",
+    // Connector errors
+    opendal::Error => "", // believed to be self-explanatory
 
     mysql_async::Error => "MySQL error",
     tokio_postgres::Error => "Postgres error",

@@ -385,6 +385,13 @@ pub struct PulsarOauthCommon {
     pub scope: Option<String>,
 }
 
+fn create_credential_temp_file(credentials: &[u8]) -> std::io::Result<NamedTempFile> {
+    let mut f = NamedTempFile::new()?;
+    f.write_all(credentials)?;
+    f.as_file().sync_all()?;
+    Ok(f)
+}
+
 impl PulsarCommon {
     pub(crate) async fn build_client(
         &self,
@@ -398,10 +405,10 @@ impl PulsarCommon {
             match url.scheme() {
                 "s3" => {
                     let credentials = load_file_descriptor_from_s3(&url, aws_auth_props).await?;
-                    let mut f = NamedTempFile::new()?;
-                    f.write_all(&credentials)?;
-                    f.as_file().sync_all()?;
-                    temp_file = Some(f);
+                    temp_file = Some(
+                        create_credential_temp_file(&credentials)
+                            .context("failed to create temp file for pulsar credentials")?,
+                    );
                 }
                 "file" => {}
                 _ => {

@@ -102,9 +102,7 @@ where
             )?;
 
             if let Some(error) = validate_source_response.error {
-                return Err(anyhow!(error.error_message)
-                    .context("source cannot pass validation")
-                    .into());
+                return Err(anyhow!(error.error_message).context("source cannot pass validation"));
             }
 
             Ok(())
