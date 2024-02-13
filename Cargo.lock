@@ -13730,6 +13730,7 @@ dependencies = [
  "axum",
  "base64 0.21.4",
  "bigdecimal 0.4.2",
+ "bit-set",
  "bit-vec",
  "bitflags 2.4.0",
  "byteorder",
