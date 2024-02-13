@@ -498,7 +498,6 @@ define_keywords!(
     THEN,
     TIES,
     TIME,
-    TIMEOUT,
     TIMESTAMP,
     TIMEZONE_HOUR,
     TIMEZONE_MINUTE,

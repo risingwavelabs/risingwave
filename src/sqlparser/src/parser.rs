@@ -2333,9 +2333,6 @@ impl Parser {
             } else if self.parse_keyword(Keyword::USING) {
                 ensure_not_set(&body.using, "USING")?;
                 body.using = Some(self.parse_create_function_using()?);
-            } else if self.parse_keyword(Keyword::TIMEOUT) {
-                ensure_not_set(&body.timeout, "TIMEOUT")?;
-                body.timeout = Some(self.parse_literal_uint()?);
             } else {
                 return Ok(body);
             }

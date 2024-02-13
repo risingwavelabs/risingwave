@@ -278,7 +278,6 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             link: value.0.link,
             identifier: value.0.identifier,
             kind: Some(value.0.kind.into()),
-            timeout_ms: 0, // FIXME
         }
     }
 }
