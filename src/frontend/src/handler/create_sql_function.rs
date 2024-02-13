@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use fancy_regex::Regex;
 
+use fancy_regex::Regex;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
@@ -227,42 +227,45 @@ pub async fn handle_create_sql_function(
                     }
                 }
                 Err(e) => {
-
                     if let ErrorCode::BindErrorRoot { expr: _, error } = e.inner() {
                         let invalid_msg = error.to_string();
                         let pattern = "[sql udf]";
 
                         // Valid error message for hint display
                         let Some(_) = invalid_msg.as_str().find(pattern) else {
-                            return Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into());
+                            return Err(
+                                ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into()
+                            );
                         };
 
                         // Get the name of the invalid item
                         // We will just display the first one found
-                        let invalid_item_name = invalid_msg.split_whitespace().last().unwrap_or("null");
+                        let invalid_item_name =
+                            invalid_msg.split_whitespace().last().unwrap_or("null");
 
                         // Find the invalid parameter / column
                         let Some(idx) = find_target(body.as_str(), invalid_item_name) else {
-                            return Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into());
+                            return Err(
+                                ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into()
+                            );
                         };
 
                         // The exact error position for `^` to point to
-                        let position = format!("{}{}",
+                        let position = format!(
+                            "{}{}",
                             " ".repeat(idx + PROMPT.len() + 1),
-                            "^".repeat(invalid_item_name.len()));
+                            "^".repeat(invalid_item_name.len())
+                        );
 
-                        return Err(ErrorCode::InvalidInputSyntax(
-                            format!("\n{}: {}\n{}`{}`\n{}",
-                                DEFAULT_ERR_MSG,
-                                invalid_msg,
-                                PROMPT,
-                                body,
-                                position)
-                        ).into());
+                        Err(ErrorCode::InvalidInputSyntax(format!(
+                            "\n{}: {}\n{}`{}`\n{}",
+                            DEFAULT_ERR_MSG, invalid_msg, PROMPT, body, position
+                        ))
+                        .into())
+                    } else {
+                        // Otherwise return the default error message
+                        Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into());
                     }
-
-                    // Otherwise return the default error message
-                    return Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into())
                 }
             }
         } else {
