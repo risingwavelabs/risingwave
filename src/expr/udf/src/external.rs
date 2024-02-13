@@ -24,6 +24,7 @@ use arrow_schema::Schema;
 use cfg_or_panic::cfg_or_panic;
 use futures_util::{stream, Stream, StreamExt, TryStreamExt};
 use thiserror_ext::AsReport;
+use tokio::time::{timeout, Duration as TokioDuration};
 use tonic::transport::Channel;
 
 use crate::metrics::GLOBAL_METRICS;
@@ -109,17 +110,6 @@ impl ArrowFlightUdfClient {
 
     /// Call a function.
     pub async fn call(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
-        self.call_opt(id, input, None, false).await
-    }
-
-    /// Call a function with timeout and retry.
-    pub async fn call_opt(
-        &self,
-        id: &str,
-        input: RecordBatch,
-        timeout: Option<Duration>,
-        retry: bool,
-    ) -> Result<RecordBatch> {
         let metrics = &*GLOBAL_METRICS;
         let labels = &[self.addr.as_str(), id];
         metrics
@@ -136,18 +126,7 @@ impl ArrowFlightUdfClient {
             .inc_by(input.get_array_memory_size() as u64);
         let timer = metrics.udf_latency.with_label_values(labels).start_timer();
 
-        let n = if retry { 4 } else { 0 };
-        let result = if let Some(timeout) = timeout {
-            match tokio::time::timeout(timeout, self.call_with_retry(id, input, n)).await {
-                Ok(ret) => ret,
-                Err(_) => Err(Error::timeout(format!(
-                    "UDF call timeout: {:?}, id: {:?}",
-                    timeout, id
-                ))),
-            }
-        } else {
-            self.call_with_retry(id, input, n).await
-        };
+        let result = self.call_internal(id, input).await;
 
         timer.stop_and_record();
         if result.is_ok() {
@@ -174,18 +153,18 @@ impl ArrowFlightUdfClient {
         )?)
     }
 
-    /// Call a function, retry up to `n` times if connection is broken.
-    async fn call_with_retry(&self, id: &str, input: RecordBatch, n: usize) -> Result<RecordBatch> {
+    /// Call a function, retry up to 5 times / 3s if connection is broken.
+    pub async fn call_with_retry(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
         let mut backoff = Duration::from_millis(100);
-        for i in 0..=n {
-            match self.call_internal(id, input.clone()).await {
-                Err(err) if err.is_connection_error() && i != n => {
+        for i in 0..5 {
+            match self.call(id, input.clone()).await {
+                Err(err) if err.is_connection_error() && i != 4 => {
                     tracing::error!(error = %err.as_report(), "UDF connection error. retry...");
                 }
                 ret => return ret,
             }
             tokio::time::sleep(backoff).await;
-            backoff = (backoff * 2).min(Duration::from_secs(10));
+            backoff *= 2;
         }
         unreachable!()
     }
