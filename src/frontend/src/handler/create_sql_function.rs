@@ -36,6 +36,8 @@ const DEFAULT_ERR_MSG: &str = "Failed to conduct semantic check";
 
 const PROMPT: &str = "In SQL UDF definition: ";
 
+const SQL_UDF_PATTERN: &str = "[sql udf]";
+
 /// Create a mock `udf_context`, which is used for semantic check
 fn create_mock_udf_context(
     arg_types: Vec<DataType>,
@@ -229,10 +231,9 @@ pub async fn handle_create_sql_function(
                 Err(e) => {
                     if let ErrorCode::BindErrorRoot { expr: _, error } = e.inner() {
                         let invalid_msg = error.to_string();
-                        let pattern = "[sql udf]";
 
                         // Valid error message for hint display
-                        let Some(_) = invalid_msg.as_str().find(pattern) else {
+                        let Some(_) = invalid_msg.as_str().find(SQL_UDF_PATTERN) else {
                             return Err(
                                 ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into()
                             );
@@ -257,14 +258,14 @@ pub async fn handle_create_sql_function(
                             "^".repeat(invalid_item_name.len())
                         );
 
-                        Err(ErrorCode::InvalidInputSyntax(format!(
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
                             "\n{}: {}\n{}`{}`\n{}",
                             DEFAULT_ERR_MSG, invalid_msg, PROMPT, body, position
                         ))
-                        .into())
+                        .into());
                     } else {
                         // Otherwise return the default error message
-                        Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into());
+                        return Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into());
                     }
                 }
             }
