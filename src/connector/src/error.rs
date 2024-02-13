@@ -16,46 +16,22 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ConnectorError {
-    #[error("Parse error: {0}")]
-    Parse(&'static str),
-
-    #[error("Invalid parameter {name}: {reason}")]
-    InvalidParam { name: &'static str, reason: String },
-
-    #[error("Kafka error: {0}")]
-    Kafka(#[from] rdkafka::error::KafkaError),
-
-    #[error("Config error: {0}")]
-    Config(
-        #[source]
-        #[backtrace]
-        anyhow::Error,
-    ),
-
-    #[error("Connection error: {0}")]
-    Connection(
-        #[source]
-        #[backtrace]
-        anyhow::Error,
-    ),
-
     #[error("MySQL error: {0}")]
-    MySql(#[from] mysql_async::Error),
+    MySql(
+        #[from]
+        #[backtrace]
+        mysql_async::Error,
+    ),
 
     #[error("Postgres error: {0}")]
     Postgres(#[from] tokio_postgres::Error),
 
-    #[error("Pulsar error: {0}")]
-    Pulsar(
-        #[source]
-        #[backtrace]
-        anyhow::Error,
-    ),
-
     #[error(transparent)]
-    Internal(
+    Uncategorized(
         #[from]
         #[backtrace]
         anyhow::Error,
     ),
 }
+
+pub type ConnectorResult<T> = Result<T, ConnectorError>;
