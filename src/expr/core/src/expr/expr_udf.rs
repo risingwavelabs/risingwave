@@ -204,8 +204,9 @@ pub(crate) fn get_or_create_client(link: &str) -> Result<Arc<ArrowFlightUdfClien
         LazyLock::new(Default::default);
     static OFFSETS: LazyLock<Mutex<HashMap<String, usize>>> = LazyLock::new(Default::default);
     let mut clients = CLIENTS.lock().unwrap();
+    let mut offsets = OFFSETS.lock().unwrap();
     if let Some(clients) = clients.get(link)
-        && let Some(pos) = OFFSETS.lock().unwrap().get_mut(link)
+        && let Some(pos) = offsets.get_mut(link)
         && let Some(client) = clients[*pos].upgrade()
     {
         *pos = (*pos + 1) % 8;
@@ -227,7 +228,7 @@ pub(crate) fn get_or_create_client(link: &str) -> Result<Arc<ArrowFlightUdfClien
             .or_default()
             .push(Arc::downgrade(&client));
         // Round robin back to 0
-        OFFSETS.lock().unwrap().insert(link.into(), 0);
+        offsets.insert(link.into(), 0);
         Ok(client)
     }
 }
