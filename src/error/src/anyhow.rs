@@ -46,6 +46,8 @@
 ///
 ///    mysql::Error => "failed to interact with MySQL",
 ///    postgres::Error => "failed to interact with PostgreSQL",
+///    opendal::Error => transparent, // if it's believed to be self-explanatory
+///                                   // and any context is not necessary
 /// }
 /// ```
 ///
@@ -62,7 +64,7 @@
 ///   * Yes, but we're here intentionally making the error type less actionable
 ///     to make it informative with no fear.
 ///   * To elaborate, consider the following `thiserror` example:
-///     ```rust,ignore
+///     ```ignore
 ///     #[derive(thiserror::Error, Debug)]
 ///     pub enum MyError {
 ///         #[error("failed to interact with MySQL")]
@@ -80,9 +82,16 @@
 ///     error is not actionable so such confusion is avoided.
 #[macro_export]
 macro_rules! def_anyhow_newtype {
+    (@from $error:ident transparent) => {
+        Self(::anyhow::Error::new($error))
+    };
+    (@from $error:ident $context:literal) => {
+        Self(::anyhow::Error::new($error).context($context))
+    };
+
     (
         $(#[$attr:meta])* $vis:vis $name:ident
-        $(, $from:ty => $context:literal)* $(,)?
+        $(, $from:ty => $context:tt)* $(,)?
     ) => {
         #[derive(::thiserror::Error, ::std::fmt::Debug)]
         #[error(transparent)]
@@ -98,7 +107,7 @@ macro_rules! def_anyhow_newtype {
         $(
             impl From<$from> for $name {
                 fn from(error: $from) -> Self {
-                    Self(::anyhow::Error::new(error).context($context))
+                    def_anyhow_newtype!(@from error $context)
                 }
             }
         )*
