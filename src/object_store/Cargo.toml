@@ -18,7 +18,7 @@ aws-smithy-runtime = { workspace = true }
 aws-smithy-runtime-api = { workspace = true }
 aws-smithy-types = { workspace = true }
 bytes = { version = "1", features = ["serde"] }
-crc32fast = "1.4.0"
+crc32fast = "1"
 either = "1"
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
