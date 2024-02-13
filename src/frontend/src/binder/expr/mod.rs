@@ -615,15 +615,13 @@ impl Binder {
                     ) {
                         return false;
                     }
-                } else {
-                    if !self.try_extract_simple_form(
-                        *right,
-                        *left,
-                        &mut column_expr,
-                        constant_lookup_inputs,
-                    ) {
-                        return false;
-                    }
+                } else if !self.try_extract_simple_form(
+                    *right,
+                    *left,
+                    &mut column_expr,
+                    constant_lookup_inputs,
+                ) {
+                    return false;
                 }
                 constant_lookup_inputs.push(result);
             } else {
