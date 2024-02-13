@@ -32,9 +32,10 @@ pub struct Topic {
     pub partition_index: Option<i32>,
 }
 
-impl ToString for Topic {
-    fn to_string(&self) -> String {
-        format!(
+impl std::fmt::Display for Topic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
             "{}://{}/{}/{}",
             self.domain, self.tenant, self.namespace, self.topic
         )

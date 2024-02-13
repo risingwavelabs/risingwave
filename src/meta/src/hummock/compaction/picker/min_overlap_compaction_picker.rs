@@ -874,7 +874,7 @@ pub mod tests {
 
     #[test]
     fn test_trivial_move_bug() {
-        let levels = vec![
+        let levels = [
             Level {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
