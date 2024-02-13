@@ -284,9 +284,9 @@ $1 + 114514 + $1
 # The following error message is just for reference
 # ----------------------------------------
 # db error: ERROR: Failed to run the query
-# 
+#
 # Caused by:
-#   Invalid input syntax: 
+#   Invalid input syntax:
 # Failed to conduct semantic check: Bind error: [sql udf] failed to find named parameter aa
 # In SQL UDF definition: `select a + aa + a`
 #                                    ^^
