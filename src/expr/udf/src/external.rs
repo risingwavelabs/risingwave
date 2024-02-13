@@ -24,7 +24,6 @@ use arrow_schema::Schema;
 use cfg_or_panic::cfg_or_panic;
 use futures_util::{stream, Stream, StreamExt, TryStreamExt};
 use thiserror_ext::AsReport;
-use tokio::time::{timeout, Duration as TokioDuration};
 use tonic::transport::Channel;
 
 use crate::metrics::GLOBAL_METRICS;
