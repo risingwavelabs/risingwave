@@ -205,30 +205,69 @@ pub(crate) fn get_or_create_client(link: &str) -> Result<Arc<ArrowFlightUdfClien
     static OFFSETS: LazyLock<Mutex<HashMap<String, usize>>> = LazyLock::new(Default::default);
     let mut clients = CLIENTS.lock().unwrap();
     let mut offsets = OFFSETS.lock().unwrap();
-    if let Some(clients) = clients.get(link)
-        && let Some(pos) = offsets.get_mut(link)
-        && let Some(client) = clients[*pos].upgrade()
+
+    if let Some(clients) = clients.get_mut(link)
+        && clients.len() >= 8
     {
-        *pos = (*pos + 1) % 8;
-        // reuse existing client
-        Ok(client)
-    } else {
-        // create new clients
-        for _ in 0..7 {
-            let client = Arc::new(ArrowFlightUdfClient::connect_lazy(link)?);
-            clients
-                .entry(link.into())
-                .or_default()
-                .push(Arc::downgrade(&client));
+        if let Some(pos) = offsets.get_mut(link) {
+            // reuse existing client
+            let client = if let Some(client) = clients[*pos].upgrade() {
+                client
+            } else {
+                let client = Arc::new(ArrowFlightUdfClient::connect_lazy(link)?);
+                clients[*pos] = Arc::downgrade(&client);
+                client
+            };
+            *pos = (*pos + 1) % 8;
+            Ok(client)
+        } else {
+            Err(crate::ExprError::Internal(anyhow::anyhow!(
+                "offset is dropped, clients.size: {}, should be unreachable",
+                clients.len()
+            )))
         }
-        // Get client at offset 7
+    } else {
+        let client_vec = clients.entry(link.into()).or_default();
         let client = Arc::new(ArrowFlightUdfClient::connect_lazy(link)?);
-        clients
-            .entry(link.into())
-            .or_default()
-            .push(Arc::downgrade(&client));
-        // Round robin back to 0
-        offsets.insert(link.into(), 0);
+        client_vec.push(Arc::downgrade(&client));
+        offsets.insert(link.into(), client_vec.len() % 8);
         Ok(client)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_get_or_create_client() {
+        let link = "grpc://localhost:8815";
+        let client1 = super::get_or_create_client(link).unwrap();
+        let client2 = super::get_or_create_client(link).unwrap();
+        let client3 = super::get_or_create_client(link).unwrap();
+        let client4 = super::get_or_create_client(link).unwrap();
+        let client5 = super::get_or_create_client(link).unwrap();
+        let client6 = super::get_or_create_client(link).unwrap();
+        let client7 = super::get_or_create_client(link).unwrap();
+        let client8 = super::get_or_create_client(link).unwrap();
+        let client9 = super::get_or_create_client(link).unwrap();
+        let client10 = super::get_or_create_client(link).unwrap();
+        let client11 = super::get_or_create_client(link).unwrap();
+        let client12 = super::get_or_create_client(link).unwrap();
+        let client13 = super::get_or_create_client(link).unwrap();
+        let client14 = super::get_or_create_client(link).unwrap();
+        let client15 = super::get_or_create_client(link).unwrap();
+        let client16 = super::get_or_create_client(link).unwrap();
+        let client17 = super::get_or_create_client(link).unwrap();
+        assert_eq!(Arc::ptr_eq(&client1, &client9), true);
+        assert_eq!(Arc::ptr_eq(&client2, &client10), true);
+        assert_eq!(Arc::ptr_eq(&client3, &client11), true);
+        assert_eq!(Arc::ptr_eq(&client4, &client12), true);
+        assert_eq!(Arc::ptr_eq(&client5, &client13), true);
+        assert_eq!(Arc::ptr_eq(&client6, &client14), true);
+        assert_eq!(Arc::ptr_eq(&client7, &client15), true);
+        assert_eq!(Arc::ptr_eq(&client8, &client16), true);
+        assert_eq!(Arc::ptr_eq(&client9, &client17), true);
     }
 }
