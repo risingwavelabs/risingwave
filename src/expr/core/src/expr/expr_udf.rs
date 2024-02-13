@@ -199,16 +199,35 @@ impl Build for UdfExpression {
 ///
 /// There is a global cache for clients, so that we can reuse the same client for the same service.
 pub(crate) fn get_or_create_client(link: &str) -> Result<Arc<ArrowFlightUdfClient>> {
-    static CLIENTS: LazyLock<Mutex<HashMap<String, Weak<ArrowFlightUdfClient>>>> =
+    // Spawn 8 clients for each UDF service.
+    static CLIENTS: LazyLock<Mutex<HashMap<String, Vec<Weak<ArrowFlightUdfClient>>>>> =
         LazyLock::new(Default::default);
+    static OFFSETS: LazyLock<Mutex<HashMap<String, usize>>> = LazyLock::new(Default::default);
     let mut clients = CLIENTS.lock().unwrap();
-    if let Some(client) = clients.get(link).and_then(|c| c.upgrade()) {
+    if let Some(clients) = clients.get(link)
+        && let Some(pos) = OFFSETS.lock().unwrap().get_mut(link)
+        && let Some(client) = clients[*pos].upgrade()
+    {
+        *pos = (*pos + 1) % 8;
         // reuse existing client
         Ok(client)
     } else {
-        // create new client
+        // create new clients
+        for _ in 0..7 {
+            let client = Arc::new(ArrowFlightUdfClient::connect_lazy(link)?);
+            clients
+                .entry(link.into())
+                .or_default()
+                .push(Arc::downgrade(&client));
+        }
+        // Get client at offset 7
         let client = Arc::new(ArrowFlightUdfClient::connect_lazy(link)?);
-        clients.insert(link.into(), Arc::downgrade(&client));
+        clients
+            .entry(link.into())
+            .or_default()
+            .push(Arc::downgrade(&client));
+        // Round robin back to 0
+        OFFSETS.lock().unwrap().insert(link.into(), 0);
         Ok(client)
     }
 }
