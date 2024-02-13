@@ -32,6 +32,10 @@ use crate::catalog::CatalogError;
 use crate::expr::{Expr, ExprImpl, Literal};
 use crate::{bind_data_type, Binder};
 
+const DEFAULT_ERR_MSG: &str = "Failed to conduct semantic check";
+
+const PROMPT: &str = "In SQL UDF definition: ";
+
 /// Create a mock `udf_context`, which is used for semantic check
 fn create_mock_udf_context(
     arg_types: Vec<DataType>,
@@ -223,8 +227,6 @@ pub async fn handle_create_sql_function(
                     }
                 }
                 Err(e) => {
-                    let default_err_msg = "Failed to conduct semantic check".to_string();
-                    let prompt = "In SQL UDF definition: ".to_string();
 
                     if let ErrorCode::BindErrorRoot { expr: _, error } = e.inner() {
                         let invalid_msg = error.to_string();
@@ -232,7 +234,7 @@ pub async fn handle_create_sql_function(
 
                         // Valid error message for hint display
                         let Some(_) = invalid_msg.as_str().find(pattern) else {
-                            return Err(ErrorCode::InvalidInputSyntax(default_err_msg).into());
+                            return Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into());
                         };
 
                         // Get the name of the invalid item
@@ -241,28 +243,26 @@ pub async fn handle_create_sql_function(
 
                         // Find the invalid parameter / column
                         let Some(idx) = find_target(body.as_str(), invalid_item_name) else {
-                            return Err(ErrorCode::InvalidInputSyntax(default_err_msg).into());
+                            return Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into());
                         };
-
-                        println!("Current idx: {}", idx);
 
                         // The exact error position for `^` to point to
                         let position = format!("{}{}",
-                            " ".repeat(idx + prompt.len() + 1),
+                            " ".repeat(idx + PROMPT.len() + 1),
                             "^".repeat(invalid_item_name.len()));
 
                         return Err(ErrorCode::InvalidInputSyntax(
                             format!("\n{}: {}\n{}`{}`\n{}",
-                                default_err_msg,
+                                DEFAULT_ERR_MSG,
                                 invalid_msg,
-                                prompt,
+                                PROMPT,
                                 body,
                                 position)
                         ).into());
                     }
 
                     // Otherwise return the default error message
-                    return Err(ErrorCode::InvalidInputSyntax(default_err_msg).into())
+                    return Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into())
                 }
             }
         } else {
