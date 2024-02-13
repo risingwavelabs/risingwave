@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context as _;
 use async_nats::jetstream::consumer;
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -61,7 +62,9 @@ impl SplitReader for NatsSplitReader {
                     "earliest" => NatsOffset::Earliest,
                     "timestamp_millis" => {
                         if let Some(time) = &properties.start_time {
-                            NatsOffset::Timestamp(time.parse()?)
+                            NatsOffset::Timestamp(time.parse().context(
+                                "failed to parse the start time as nats offset timestamp",
+                            )?)
                         } else {
                             bail!("scan_startup_timestamp_millis is required");
                         }

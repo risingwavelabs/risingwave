@@ -44,7 +44,7 @@ pub use self::mysql::mysql_row_to_owned_row;
 use self::plain_parser::PlainParser;
 pub use self::postgres::postgres_row_to_owned_row;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
-use self::unified::{AccessImpl, AccessResult};
+use self::unified::AccessImpl;
 use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
 use crate::common::AwsAuthProps;
@@ -76,6 +76,8 @@ mod protobuf;
 mod unified;
 mod upsert_parser;
 mod util;
+
+pub use unified::{AccessError, AccessResult};
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
 pub struct SourceStreamChunkBuilder {
@@ -708,7 +710,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                                 "failed to parse message, skipping"
                             );
                         }
-                        parser.source_ctx().report_user_source_error(&**error);
+                        parser.source_ctx().report_user_source_error(&error);
                     }
                 }
 

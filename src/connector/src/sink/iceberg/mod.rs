@@ -59,7 +59,7 @@ use super::{
     Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::deserialize_bool_from_string;
-use crate::error::{ConnectorErrorContext, ConnectorResult};
+use crate::error::ConnectorResult;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};

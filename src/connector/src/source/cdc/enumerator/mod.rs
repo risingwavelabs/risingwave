@@ -73,7 +73,7 @@ where
         );
 
         let source_id = context.info.source_id;
-        tokio::task::spawn_blocking(move || -> ConnectorResult<()> {
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
             let mut env = JVM.get_or_init()?.attach_current_thread()?;
 
             let validate_source_request = ValidateSourceRequest {

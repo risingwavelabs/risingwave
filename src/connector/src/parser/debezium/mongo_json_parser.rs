@@ -80,7 +80,8 @@ impl DebeziumMongoJsonParser {
         mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<()> {
-        let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)?;
+        let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
+            .context("failed to parse debezium mongo json payload")?;
 
         // Event can be configured with and without the "payload" field present.
         // See https://github.com/risingwavelabs/risingwave/issues/10178

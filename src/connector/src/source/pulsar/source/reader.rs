@@ -322,7 +322,8 @@ impl PulsarIcebergReader {
             .new_scan_builder()
             .with_partition_value(partition_value)
             .with_batch_size(max_chunk_size)
-            .build()?
+            .build()
+            .context("failed to build iceberg table scan")?
             .scan(&table)
             .await?)
     }
@@ -494,7 +495,8 @@ impl PulsarIcebergReader {
             .iter()
             .filter(|col| col.name != ROWID_PREFIX)
             .map(|col| record_batch.schema().index_of(col.name.as_str()))
-            .try_collect()?;
+            .try_collect()
+            .context("failed to look up column name in arrow record batch")?;
 
         for row in 0..record_batch.num_rows() {
             let offset = format!(
@@ -508,7 +510,8 @@ impl PulsarIcebergReader {
             offsets.push(offset);
         }
 
-        let data_chunk = DataChunk::try_from(&record_batch.project(&field_indices)?)?;
+        let data_chunk = DataChunk::try_from(&record_batch.project(&field_indices)?)
+            .context("failed to convert arrow record batch to data chunk")?;
 
         let stream_chunk = StreamChunk::from(data_chunk);
 

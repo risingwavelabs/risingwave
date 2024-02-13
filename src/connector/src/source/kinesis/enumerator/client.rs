@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context as _;
 use async_trait::async_trait;
 use aws_sdk_kinesis::types::Shard;
 use aws_sdk_kinesis::Client as kinesis_client;
@@ -57,7 +58,8 @@ impl SplitEnumerator for KinesisSplitEnumerator {
                 .set_next_token(next_token)
                 .stream_name(&self.stream_name)
                 .send()
-                .await?;
+                .await
+                .context("failed to list kinesis shards")?;
             match list_shard_output.shards {
                 Some(shard) => shard_collect.extend(shard),
                 None => bail!("no shards in stream {}", &self.stream_name),

@@ -155,7 +155,8 @@ impl ProtobufParserConfig {
         index: &mut i32,
         parse_trace: &mut Vec<String>,
     ) -> ConnectorResult<ColumnDesc> {
-        let field_type = protobuf_type_mapping(field_descriptor, parse_trace)?;
+        let field_type = protobuf_type_mapping(field_descriptor, parse_trace)
+            .context("failed to map protobuf type")?;
         if let Kind::Message(m) = field_descriptor.kind() {
             let field_descs = if let DataType::List { .. } = field_type {
                 vec![]

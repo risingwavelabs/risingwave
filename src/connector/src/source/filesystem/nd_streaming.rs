@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context as _;
 use bytes::BytesMut;
 use futures::io::Cursor;
 use futures::AsyncBufReadExt;
@@ -49,7 +50,7 @@ pub async fn split_stream(data_stream: BoxSourceStream) {
             .map(|msg| (msg.offset.clone(), msg.split_id.clone(), msg.meta.clone()))
             .unwrap();
 
-        let mut offset: usize = offset.parse()?;
+        let mut offset: usize = offset.parse().context("failed to parse the offset")?;
         let mut buf = BytesMut::new();
         for msg in batch {
             let payload = msg.payload.unwrap_or_default();

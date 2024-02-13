@@ -14,6 +14,7 @@
 
 use std::fmt::Debug;
 
+use anyhow::Context;
 use simd_json::prelude::MutableObject;
 use simd_json::BorrowedValue;
 
@@ -38,7 +39,8 @@ impl AccessBuilder for DebeziumJsonAccessBuilder {
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
         self.value = Some(payload);
         let mut event: BorrowedValue<'_> =
-            simd_json::to_borrowed_value(self.value.as_mut().unwrap())?;
+            simd_json::to_borrowed_value(self.value.as_mut().unwrap())
+                .context("failed to parse debezium json payload")?;
 
         let payload = if let Some(payload) = event.get_mut("payload") {
             std::mem::take(payload)

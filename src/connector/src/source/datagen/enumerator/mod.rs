@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use async_trait::async_trait;
 
 use crate::source::datagen::{DatagenProperties, DatagenSplit};
@@ -32,7 +33,9 @@ impl SplitEnumerator for DatagenSplitEnumerator {
         _context: SourceEnumeratorContextRef,
     ) -> crate::error::ConnectorResult<DatagenSplitEnumerator> {
         let split_num = properties.split_num.unwrap_or_else(|| "1".to_string());
-        let split_num = split_num.parse::<i32>()?;
+        let split_num = split_num
+            .parse::<i32>()
+            .context("failed to parse datagen split num")?;
         Ok(Self { split_num })
     }
 

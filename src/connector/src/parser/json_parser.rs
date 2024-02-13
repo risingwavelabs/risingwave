@@ -52,7 +52,8 @@ impl AccessBuilder for JsonAccessBuilder {
         }
         let value = simd_json::to_borrowed_value(
             &mut self.value.as_mut().unwrap()[self.payload_start_idx..],
-        )?;
+        )
+        .context("failed to parse json payload")?;
         Ok(AccessImpl::Json(JsonAccess::new_with_options(
             value,
             // Debezium and Canal have their special json access builder and will not
@@ -113,7 +114,8 @@ impl JsonParser {
         mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<()> {
-        let value = simd_json::to_borrowed_value(&mut payload[self.payload_start_idx..])?;
+        let value = simd_json::to_borrowed_value(&mut payload[self.payload_start_idx..])
+            .context("failed to parse json payload")?;
         let values = if let simd_json::BorrowedValue::Array(arr) = value {
             Either::Left(arr.into_iter())
         } else {

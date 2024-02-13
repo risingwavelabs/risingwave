@@ -60,7 +60,8 @@ impl CanalJsonParser {
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<()> {
         let mut event: BorrowedValue<'_> =
-            simd_json::to_borrowed_value(&mut payload[self.payload_start_idx..])?;
+            simd_json::to_borrowed_value(&mut payload[self.payload_start_idx..])
+                .context("failed to parse canal json payload")?;
 
         let is_ddl = event
             .get(IS_DDL)

@@ -261,7 +261,8 @@ fn generator_from_data_type(
             let length_value = fields_option_map
                 .get(&length_key)
                 .map(|s| s.parse::<usize>())
-                .transpose()?;
+                .transpose()
+                .context("failed to parse the length of varchar field")?;
             Ok(FieldGeneratorImpl::with_varchar(
                 &VarcharProperty::RandomFixedLength(length_value),
                 random_seed,

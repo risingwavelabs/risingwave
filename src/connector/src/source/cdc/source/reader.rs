@@ -109,7 +109,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         };
 
         std::thread::spawn(move || {
-            let result: ConnectorResult<_> = try {
+            let result: anyhow::Result<_> = try {
                 let env = jvm.attach_current_thread()?;
                 let get_event_stream_request_bytes =
                     env.byte_array_from_slice(&Message::encode_to_vec(&get_event_stream_request))?;
@@ -119,10 +119,8 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
             let (mut env, get_event_stream_request_bytes) = match result {
                 Ok(inner) => inner,
                 Err(e) => {
-                    let _ = tx.blocking_send(Err(anyhow!(
-                        "err before calling runJniDbzSourceThread: {:?}",
-                        e
-                    )));
+                    let _ = tx
+                        .blocking_send(Err(e.context("err before calling runJniDbzSourceThread")));
                     return;
                 }
             };

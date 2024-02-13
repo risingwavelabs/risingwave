@@ -215,7 +215,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
     let jvm = JVM.get_or_init()?;
     let sink_param = param.to_proto();
 
-    spawn_blocking(move || {
+    spawn_blocking(move || -> anyhow::Result<()> {
         let mut env = jvm.attach_current_thread()?;
         let validate_sink_request = ValidateSinkRequest {
             sink_param: Some(sink_param),
@@ -240,7 +240,9 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
         )
     })
     .await
-    .context("JoinHandle returns error")?
+    .context("JoinHandle returns error")??;
+
+    Ok(())
 }
 
 pub struct RemoteLogSinker {
