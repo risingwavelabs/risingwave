@@ -38,7 +38,7 @@ type ConsumedRows = u64;
 #[derive(Clone, Copy, Debug)]
 enum BackfillState {
     Init,
-    ConsumingUpstream(Epoch, ConsumedRows),
+    ConsumingUpstream(#[expect(dead_code)] Epoch, ConsumedRows),
     Done(ConsumedRows),
 }
 
