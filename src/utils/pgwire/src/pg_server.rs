@@ -130,7 +130,7 @@ pub struct ExecContext {
 
 /// `ExecContextGuard` holds a `Arc` pointer. Once `ExecContextGuard` is dropped,
 /// the inner `Arc<ExecContext>` should not be referred anymore, so that its `Weak` reference (used in `SessionImpl`) will be the same lifecycle of the running sql execution context.
-pub struct ExecContextGuard(#[expect(dead_code)] Arc<ExecContext>);
+pub struct ExecContextGuard(#[allow(dead_code)] Arc<ExecContext>);
 
 impl ExecContextGuard {
     pub fn new(exec_context: Arc<ExecContext>) -> Self {

@@ -86,7 +86,7 @@ pub(super) fn shrink_partition_cache(
         }
         CachePolicy::Recent => {
             let (sk_start, sk_end) = recently_accessed_range.into_inner();
-            let (ck_start, _ck_end) = (CacheKey::from(sk_start), CacheKey::from(sk_end));
+            let (ck_start, ck_end) = (CacheKey::from(sk_start), CacheKey::from(sk_end));
 
             let mut cursor = range_cache.inner().upper_bound(Bound::Excluded(&ck_start));
             for _ in 0..MAGIC_JITTER_PREVENTION {
