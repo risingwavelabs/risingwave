@@ -14,6 +14,22 @@
 
 /// Define a newtype wrapper around [`anyhow::Error`].
 ///
+/// # Usage
+///
+/// ```ignore
+/// def_anyhow_newtype! {
+///    /// Documentation for the newtype.
+///    #[derive(..)]
+///    pub MyError,
+///
+///    // Default context messages for each source error type goes below.
+///    mysql::Error => "failed to interact with MySQL",
+///    postgres::Error => "failed to interact with PostgreSQL",
+///    opendal::Error => transparent, // if it's believed to be self-explanatory
+///                                   // and any context is not necessary
+/// }
+/// ```
+///
 /// # Construction
 ///
 /// Unlike [`anyhow::Error`], the newtype **CANNOT** be converted from any error
@@ -24,11 +40,12 @@
 ///   information to the source error and make it an [`anyhow::Error`] before
 ///   converting it to the newtype.
 ///
-/// - Or specify the default context for each source error type in this macro
-///   as shown in the example below, which will enable the implicit conversion
-///   `From` the source error type to the newtype. This should not be preferred
-///   in most cases as the context could be less informative, but it is still
-///   useful during refactoring, or if the source error type is believed to be
+/// - Otherwise, specify the default context for each source error type as shown
+///   in the example above, which will be expanded into a `From` implementation
+///   from the source error type to the newtype. This should **NOT** be preferred
+///   in most cases since it's less informative than the ad-hoc context provided
+///   with [`anyhow::Context`] at the call site, but it could still be useful
+///   during refactoring, or if the source error type is believed to be
 ///   self-explanatory.
 ///
 /// To construct a new error from scratch, one can still use macros like
@@ -36,18 +53,32 @@
 /// already imply an `into()` call, developers do not need to care about the
 /// type conversion most of the time.
 ///
-/// # Example
+/// ## Example
 ///
 /// ```ignore
-/// def_anyhow_newtype! {
-///    /// Documentation for the newtype.
-///    #[derive(..)]
-///    pub MyError,
+/// fn read_offset_from_mysql() -> Result<String, mysql::Error> {
+///     ..
+/// }
+/// fn parse_offset(offset: &str) -> Result<i64, ParseIntError> {
+///     ..
+/// }
 ///
-///    mysql::Error => "failed to interact with MySQL",
-///    postgres::Error => "failed to interact with PostgreSQL",
-///    opendal::Error => transparent, // if it's believed to be self-explanatory
-///                                   // and any context is not necessary
+/// fn work() -> Result<(), MyError> {
+///     // `mysql::Error` can be converted to `MyError` implicitly with `?`
+///     // as the default context is provided in the definition.
+///     let offset = read_offset_from_mysql()?;
+///
+///     // Instead, `ParseIntError` cannot be directly converted to `MyError`
+///     // with `?`, so the caller must attach context explicitly.
+///     //
+///     // This makes sense as the semantics of the integer ("offset") holds
+///     // important information and are not implied by the error type itself.
+///     let offset = parse_offset(&offset).context("failed to parse offset")?;
+///
+///     if offset < 0 {
+///         // Construct a new error with `bail!` macro.
+///         bail!("offset `{}` must be non-negative", offset);
+///     }
 /// }
 /// ```
 ///
