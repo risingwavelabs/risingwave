@@ -58,6 +58,10 @@ impl ArrowFlightUdfClient {
     }
 
     async fn connect_inner(addr: &str, resolution_strategy: ResolutionStrategy) -> Result<Self> {
+        // FIXME(Kexiang): now only support addr with http://
+        let addr = addr.strip_prefix("http://").ok_or_else(|| {
+            Error::service_error(format!("udf address must starts with http://: {}", addr))
+        })?;
         let host_addr = HostAddr::from_str(addr)
             .map_err(|e| Error::service_error(format!("invalid address: {}, err: {}", addr, e)))?;
         let channel = LoadBalancedChannel::builder((host_addr.host.clone(), host_addr.port))
