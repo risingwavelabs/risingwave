@@ -280,18 +280,6 @@ $1 + 114514 + $1
 
 # Named sql udf with invalid parameter in body definition
 # Will be rejected at creation time
-# P.S. Unfortunately it seems that sqllogictest-rs in RW does not support multi-line error yet
-# The following error message is just for reference
-# ----------------------------------------
-# db error: ERROR: Failed to run the query
-#
-# Caused by:
-#   Invalid input syntax:
-# Failed to conduct semantic check: Bind error: [sql udf] failed to find named parameter aa
-# In SQL UDF definition: `select a + aa + a`
-#                                    ^^
-# ----------------------------------------
-# statement error failed to find named parameter aa
 statement error
 create function unknown_parameter(a INT) returns int language sql as 'select a + aa + a';
 ----
@@ -302,6 +290,7 @@ Caused by:
 Bind error: [sql udf] failed to find named parameter aa
 In SQL UDF definition: `select a + aa + a`
                                    ^^
+
 
 statement error Expected end of statement, found: 💩
 create function call_regexp_replace() returns varchar language sql as 'select regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')';
