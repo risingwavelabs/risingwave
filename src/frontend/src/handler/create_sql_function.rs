@@ -259,7 +259,7 @@ pub async fn handle_create_sql_function(
                         );
 
                         return Err(ErrorCode::InvalidInputSyntax(format!(
-                            "{}\n{}\n{}`{}`\n{}",
+                            "{}\n  {}\n  {}`{}`\n{}",
                             DEFAULT_ERR_MSG, invalid_msg, PROMPT, body, position
                         ))
                         .into());
