@@ -292,6 +292,32 @@ In SQL UDF definition: `select a + aa + a`
                                    ^^
 
 
+# With unnamed parameter
+statement error
+create function unnamed_param_hint(INT, INT) returns int language sql as 'select $1 + $3 + $2';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+Bind error: [sql udf] failed to find unnamed parameter $3
+In SQL UDF definition: `select $1 + $3 + $2`
+                                    ^^
+
+
+# A mixture of both
+statement error
+create function mix_hint(INT, aa INT, INT) returns int language sql as 'select $1 + aa + a + $2';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+Bind error: [sql udf] failed to find named parameter a
+In SQL UDF definition: `select $1 + aa + a + $2`
+                                         ^
+
+
 statement error Expected end of statement, found: 💩
 create function call_regexp_replace() returns varchar language sql as 'select regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')';
 
