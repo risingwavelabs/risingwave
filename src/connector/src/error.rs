@@ -25,15 +25,15 @@ def_anyhow_newtype! {
     pub ConnectorError,
 
     // Common errors
-    std::io::Error => "",
+    std::io::Error => transparent,
 
     // Fine-grained connector errors
-    AccessError => "",
-    WireFormatError => "",
-    ConcurrentRequestError => "",
-    InvalidOptionError => "",
-    SinkError => "",
-    PbFieldNotFound => "",
+    AccessError => transparent,
+    WireFormatError => transparent,
+    ConcurrentRequestError => transparent,
+    InvalidOptionError => transparent,
+    SinkError => transparent,
+    PbFieldNotFound => transparent,
 
     // TODO(error-handling): Remove implicit contexts below and specify ad-hoc context for each conversion.
 
@@ -43,7 +43,7 @@ def_anyhow_newtype! {
     csv::Error => "failed to parse csv",
 
     // Connector errors
-    opendal::Error => "", // believed to be self-explanatory
+    opendal::Error => transparent, // believed to be self-explanatory
 
     mysql_async::Error => "MySQL error",
     tokio_postgres::Error => "Postgres error",
