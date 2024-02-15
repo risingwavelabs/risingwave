@@ -12,26 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use thiserror::Error;
+use risingwave_common::error::v2::def_anyhow_newtype;
 
-#[derive(Error, Debug)]
-pub enum ConnectorError {
-    #[error("MySQL error: {0}")]
-    MySql(
-        #[from]
-        #[backtrace]
-        mysql_async::Error,
-    ),
+def_anyhow_newtype! {
+    pub ConnectorError,
 
-    #[error("Postgres error: {0}")]
-    Postgres(#[from] tokio_postgres::Error),
-
-    #[error(transparent)]
-    Uncategorized(
-        #[from]
-        #[backtrace]
-        anyhow::Error,
-    ),
+    // TODO(error-handling): Remove implicit contexts below and specify ad-hoc context for each conversion.
+    mysql_async::Error => "MySQL error",
+    tokio_postgres::Error => "Postgres error",
 }
 
 pub type ConnectorResult<T> = Result<T, ConnectorError>;
