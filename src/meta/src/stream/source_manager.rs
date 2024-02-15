@@ -54,6 +54,7 @@ pub struct SourceManager {
     pub paused: Mutex<()>,
     env: MetaSrvEnv,
     barrier_scheduler: BarrierScheduler,
+    metadata_manager: MetadataManager,
     core: Mutex<SourceManagerCore>,
     metrics: Arc<MetaMetrics>,
 }
@@ -598,7 +599,7 @@ impl SourceManager {
         }
 
         let core = Mutex::new(SourceManagerCore::new(
-            metadata_manager,
+            metadata_manager.clone(),
             managed_sources,
             source_fragments,
             actor_splits,
@@ -607,6 +608,7 @@ impl SourceManager {
         Ok(Self {
             env,
             barrier_scheduler,
+            metadata_manager,
             core,
             paused: Mutex::new(()),
             metrics,
@@ -923,9 +925,16 @@ impl SourceManager {
         };
 
         if !split_assignment.is_empty() {
-            let command = Command::SourceSplitAssignment(split_assignment);
+            let command = Command::SourceSplitAssignment(split_assignment.clone());
             tracing::info!(command = ?command, "pushing down split assignment command");
             self.barrier_scheduler.run_command(command).await?;
+
+            self.metadata_manager
+                .update_actor_splits_by_split_assignment(&split_assignment)
+                .await?;
+
+            self.apply_source_change(None, Some(split_assignment.clone()), None)
+                .await;
         }
 
         Ok(())

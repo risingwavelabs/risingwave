@@ -315,7 +315,13 @@ impl GlobalStreamManager {
                                 );
 
                                 self.barrier_scheduler
-                                    .run_command(Command::CancelStreamingJob(table_fragments))
+                                    .run_command(Command::CancelStreamingJob(
+                                        table_fragments.clone(),
+                                    ))
+                                    .await?;
+
+                                self.metadata_manager
+                                    .cancel_streaming_job(table_fragments)
                                     .await?;
                             } else {
                                 // streaming job is already completed.
@@ -471,13 +477,13 @@ impl GlobalStreamManager {
         let init_split_assignment = self.source_manager.allocate_splits(&table_id).await?;
 
         let command = Command::CreateStreamingJob {
-            table_fragments,
-            upstream_mview_actors,
-            dispatchers,
-            init_split_assignment,
+            table_fragments: table_fragments.clone(),
+            upstream_mview_actors: upstream_mview_actors.clone(),
+            dispatchers: dispatchers.clone(),
+            init_split_assignment: init_split_assignment.clone(),
             definition: definition.to_string(),
             ddl_type,
-            replace_table: replace_table_command,
+            replace_table: replace_table_command.clone(),
         };
 
         if let Err(err) = self.barrier_scheduler.run_command(command).await {
@@ -495,6 +501,68 @@ impl GlobalStreamManager {
 
             return Err(err);
         }
+
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                let mut dependent_table_actors = Vec::with_capacity(upstream_mview_actors.len());
+                for (table_id, actors) in &upstream_mview_actors {
+                    let downstream_actors = dispatchers
+                        .iter()
+                        .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
+                        .map(|(&k, v)| (k, v.clone()))
+                        .collect();
+                    dependent_table_actors.push((*table_id, downstream_actors));
+                }
+                mgr.fragment_manager
+                    .post_create_table_fragments(
+                        &table_fragments.table_id(),
+                        dependent_table_actors,
+                        init_split_assignment.clone(),
+                    )
+                    .await?;
+
+                if let Some(ReplaceTablePlan {
+                    old_table_fragments,
+                    new_table_fragments,
+                    merge_updates,
+                    dispatchers,
+                    init_split_assignment,
+                }) = &replace_table_command
+                {
+                    // Drop fragment info in meta store.
+                    mgr.fragment_manager
+                        .post_replace_table(
+                            old_table_fragments,
+                            new_table_fragments,
+                            merge_updates,
+                            dispatchers,
+                            init_split_assignment.clone(),
+                        )
+                        .await?;
+                }
+            }
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .post_collect_table_fragments(
+                        table_fragments.table_id().table_id as _,
+                        table_fragments.actor_ids(),
+                        dispatchers.clone(),
+                        &init_split_assignment,
+                    )
+                    .await?;
+            }
+        }
+
+        // Extract the fragments that include source operators.
+        let source_fragments = table_fragments.stream_source_fragments();
+
+        self.source_manager
+            .apply_source_change(
+                Some(source_fragments),
+                Some(init_split_assignment.clone()),
+                None,
+            )
+            .await;
 
         Ok(())
     }
@@ -520,11 +588,11 @@ impl GlobalStreamManager {
         if let Err(err) = self
             .barrier_scheduler
             .run_config_change_command_with_pause(Command::ReplaceTable(ReplaceTablePlan {
-                old_table_fragments,
-                new_table_fragments: table_fragments,
-                merge_updates,
-                dispatchers,
-                init_split_assignment,
+                old_table_fragments: old_table_fragments.clone(),
+                new_table_fragments: table_fragments.clone(),
+                merge_updates: merge_updates.clone(),
+                dispatchers: dispatchers.clone(),
+                init_split_assignment: init_split_assignment.clone(),
             }))
             .await
             && let MetadataManager::V1(mgr) = &self.metadata_manager
@@ -534,6 +602,45 @@ impl GlobalStreamManager {
                 .await?;
             return Err(err);
         }
+
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                // Drop fragment info in meta store.
+                mgr.fragment_manager
+                    .post_replace_table(
+                        &old_table_fragments,
+                        &table_fragments,
+                        &merge_updates,
+                        &dispatchers,
+                        init_split_assignment.clone(),
+                    )
+                    .await?;
+            }
+            MetadataManager::V2(mgr) => {
+                // Update actors and actor_dispatchers for new table fragments.
+                mgr.catalog_controller
+                    .post_collect_table_fragments(
+                        table_fragments.table_id().table_id as _,
+                        table_fragments.actor_ids(),
+                        dispatchers.clone(),
+                        &init_split_assignment,
+                    )
+                    .await?;
+            }
+        }
+
+        // Apply the split changes in source manager.
+        self.source_manager
+            .drop_source_fragments(std::slice::from_ref(&old_table_fragments))
+            .await;
+        let source_fragments = table_fragments.stream_source_fragments();
+        self.source_manager
+            .apply_source_change(
+                Some(source_fragments),
+                Some(init_split_assignment.clone()),
+                None,
+            )
+            .await;
 
         Ok(())
     }
@@ -652,9 +759,12 @@ impl GlobalStreamManager {
                     mgr.catalog_manager.cancel_create_table_procedure(id.into(), fragment.internal_table_ids()).await?;
                 }
 
+
                 self.barrier_scheduler
-                    .run_command(Command::CancelStreamingJob(fragment))
+                    .run_command(Command::CancelStreamingJob(fragment.clone()))
                     .await?;
+
+                self.metadata_manager.cancel_streaming_job(fragment).await?;
             };
             match result {
                 Ok(_) => {

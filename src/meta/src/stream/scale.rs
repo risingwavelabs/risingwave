@@ -2496,9 +2496,11 @@ impl GlobalStreamManager {
 
         tracing::debug!("reschedule plan: {:?}", reschedule_fragment);
 
+        let table_parallelism = table_parallelism.unwrap_or_default();
+
         let command = Command::RescheduleFragment {
-            reschedules: reschedule_fragment,
-            table_parallelism: table_parallelism.unwrap_or_default(),
+            reschedules: reschedule_fragment.clone(),
+            table_parallelism: table_parallelism.clone(),
         };
 
         match &self.metadata_manager {
@@ -2521,6 +2523,10 @@ impl GlobalStreamManager {
 
         self.barrier_scheduler
             .run_config_change_command_with_pause(command)
+            .await?;
+
+        self.scale_controller
+            .post_apply_reschedule(&reschedule_fragment, &table_parallelism)
             .await?;
 
         tracing::info!("reschedule done");

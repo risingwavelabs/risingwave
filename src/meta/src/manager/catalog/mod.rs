@@ -806,7 +806,7 @@ impl CatalogManager {
         }
     }
 
-    pub async fn assert_tables_deleted(&self, table_ids: Vec<TableId>) {
+    pub async fn assert_tables_deleted(&self, table_ids: impl Iterator<Item = TableId>) {
         let core = self.core.lock().await;
         let tables = &core.database.tables;
         for id in table_ids {

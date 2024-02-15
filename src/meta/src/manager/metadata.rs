@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::iter::once;
 
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_meta_model_v2::SourceId;
@@ -22,6 +23,7 @@ use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode,
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, PbFragment};
 use risingwave_pb::stream_plan::{PbDispatchStrategy, PbStreamActor, StreamActor};
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tracing::warn;
 
@@ -724,6 +726,53 @@ impl MetadataManager {
                 mgr.catalog_controller
                     .update_actor_splits(split_assignment)
                     .await
+            }
+        }
+    }
+
+    pub async fn cancel_streaming_job(&self, table_fragments: TableFragments) -> MetaResult<()> {
+        let table_id = table_fragments.table_id();
+        let internal_table_ids = table_fragments.internal_table_ids();
+        match self {
+            MetadataManager::V1(mgr) => {
+                // NOTE(kwannoel): At this point, catalog manager has persisted the tables already.
+                // We need to cleanup the table state. So we can do it here.
+                // The logic is the same as above, for hummock_manager.unregister_table_ids.
+                if let Err(e) = mgr
+                    .catalog_manager
+                    .cancel_create_table_procedure(table_id.table_id, internal_table_ids.clone())
+                    .await
+                {
+                    warn!(
+                        table_id = table_id.table_id,
+                        error = %e.as_report(),
+                        "cancel_create_table_procedure failed for CancelStreamingJob",
+                    );
+                    // If failed, check that table is not in meta store.
+                    // If any table is, just panic, let meta do bootstrap recovery.
+                    // Otherwise our persisted state is dirty.
+                    mgr.catalog_manager
+                        .assert_tables_deleted(
+                            internal_table_ids
+                                .iter()
+                                .cloned()
+                                .chain(once(table_id.table_id)),
+                        )
+                        .await;
+                }
+
+                // We need to drop table fragments here,
+                // since this is not done in stream manager (foreground ddl)
+                // OR barrier manager (background ddl)
+                mgr.fragment_manager
+                    .drop_table_fragments_vec(&HashSet::from_iter(once(table_id)))
+                    .await
+            }
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .try_abort_creating_streaming_job(table_id.table_id as _, true)
+                    .await?;
+                Ok(())
             }
         }
     }

@@ -36,7 +36,6 @@ use risingwave_pb::stream_plan::{
     ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::WaitEpochCommitRequest;
-use thiserror_ext::AsReport;
 
 use super::info::{ActorDesc, CommandActorChanges, InflightActorInfo};
 use super::trace::TracedEpoch;
@@ -787,16 +786,7 @@ impl CommandContext {
 
             Command::Resume(_) => {}
 
-            Command::SourceSplitAssignment(split_assignment) => {
-                self.barrier_manager_context
-                    .metadata_manager
-                    .update_actor_splits_by_split_assignment(split_assignment)
-                    .await?;
-                self.barrier_manager_context
-                    .source_manager
-                    .apply_source_change(None, Some(split_assignment.clone()), None)
-                    .await;
-            }
+            Command::SourceSplitAssignment(_) => {}
 
             Command::DropStreamingJobs(actors) => {
                 // Tell compute nodes to drop actors.
@@ -823,191 +813,35 @@ impl CommandContext {
                     .hummock_manager
                     .unregister_table_ids_fail_fast(&table_ids)
                     .await;
-
-                match &self.barrier_manager_context.metadata_manager {
-                    MetadataManager::V1(mgr) => {
-                        // NOTE(kwannoel): At this point, catalog manager has persisted the tables already.
-                        // We need to cleanup the table state. So we can do it here.
-                        // The logic is the same as above, for hummock_manager.unregister_table_ids.
-                        if let Err(e) = mgr
-                            .catalog_manager
-                            .cancel_create_table_procedure(
-                                table_fragments.table_id().table_id,
-                                table_fragments.internal_table_ids(),
-                            )
-                            .await
-                        {
-                            let table_id = table_fragments.table_id().table_id;
-                            tracing::warn!(
-                                table_id,
-                                error = %e.as_report(),
-                                "cancel_create_table_procedure failed for CancelStreamingJob",
-                            );
-                            // If failed, check that table is not in meta store.
-                            // If any table is, just panic, let meta do bootstrap recovery.
-                            // Otherwise our persisted state is dirty.
-                            let mut table_ids = table_fragments.internal_table_ids();
-                            table_ids.push(table_id);
-                            mgr.catalog_manager.assert_tables_deleted(table_ids).await;
-                        }
-
-                        // We need to drop table fragments here,
-                        // since this is not done in stream manager (foreground ddl)
-                        // OR barrier manager (background ddl)
-                        mgr.fragment_manager
-                            .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
-                                table_fragments.table_id(),
-                            )))
-                            .await?;
-                    }
-                    MetadataManager::V2(mgr) => {
-                        mgr.catalog_controller
-                            .try_abort_creating_streaming_job(table_id as _, true)
-                            .await?;
-                    }
-                }
             }
 
             Command::CreateStreamingJob {
-                table_fragments,
-                dispatchers,
-                upstream_mview_actors,
-                init_split_assignment,
                 definition: _,
                 replace_table,
                 ..
             } => {
-                match &self.barrier_manager_context.metadata_manager {
-                    MetadataManager::V1(mgr) => {
-                        let mut dependent_table_actors =
-                            Vec::with_capacity(upstream_mview_actors.len());
-                        for (table_id, actors) in upstream_mview_actors {
-                            let downstream_actors = dispatchers
-                                .iter()
-                                .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
-                                .map(|(&k, v)| (k, v.clone()))
-                                .collect();
-                            dependent_table_actors.push((*table_id, downstream_actors));
-                        }
-                        mgr.fragment_manager
-                            .post_create_table_fragments(
-                                &table_fragments.table_id(),
-                                dependent_table_actors,
-                                init_split_assignment.clone(),
-                            )
-                            .await?;
-
-                        if let Some(ReplaceTablePlan {
-                            old_table_fragments,
-                            new_table_fragments,
-                            merge_updates,
-                            dispatchers,
-                            init_split_assignment,
-                        }) = replace_table
-                        {
-                            self.clean_up(old_table_fragments.actor_ids()).await?;
-
-                            // Drop fragment info in meta store.
-                            mgr.fragment_manager
-                                .post_replace_table(
-                                    old_table_fragments,
-                                    new_table_fragments,
-                                    merge_updates,
-                                    dispatchers,
-                                    init_split_assignment.clone(),
-                                )
-                                .await?;
-                        }
-                    }
-                    MetadataManager::V2(mgr) => {
-                        mgr.catalog_controller
-                            .post_collect_table_fragments(
-                                table_fragments.table_id().table_id as _,
-                                table_fragments.actor_ids(),
-                                dispatchers.clone(),
-                                init_split_assignment,
-                            )
-                            .await?;
-                    }
+                if let Some(ReplaceTablePlan {
+                    old_table_fragments,
+                    ..
+                }) = &replace_table
+                {
+                    self.clean_up(old_table_fragments.actor_ids()).await?;
                 }
-
-                // Extract the fragments that include source operators.
-                let source_fragments = table_fragments.stream_source_fragments();
-
-                self.barrier_manager_context
-                    .source_manager
-                    .apply_source_change(
-                        Some(source_fragments),
-                        Some(init_split_assignment.clone()),
-                        None,
-                    )
-                    .await;
             }
 
-            Command::RescheduleFragment {
-                reschedules,
-                table_parallelism,
-            } => {
+            Command::RescheduleFragment { reschedules, .. } => {
                 let removed_actors = reschedules
                     .values()
                     .flat_map(|reschedule| reschedule.removed_actors.clone().into_iter())
                     .collect_vec();
                 self.clean_up(removed_actors).await?;
-                self.barrier_manager_context
-                    .scale_controller
-                    .post_apply_reschedule(reschedules, table_parallelism)
-                    .await?;
             }
 
             Command::ReplaceTable(ReplaceTablePlan {
                 old_table_fragments,
-                new_table_fragments,
-                merge_updates,
-                dispatchers,
-                init_split_assignment,
+                ..
             }) => {
                 self.clean_up(old_table_fragments.actor_ids()).await?;
-
-                match &self.barrier_manager_context.metadata_manager {
-                    MetadataManager::V1(mgr) => {
-                        // Drop fragment info in meta store.
-                        mgr.fragment_manager
-                            .post_replace_table(
-                                old_table_fragments,
-                                new_table_fragments,
-                                merge_updates,
-                                dispatchers,
-                                init_split_assignment.clone(),
-                            )
-                            .await?;
-                    }
-                    MetadataManager::V2(mgr) => {
-                        // Update actors and actor_dispatchers for new table fragments.
-                        mgr.catalog_controller
-                            .post_collect_table_fragments(
-                                new_table_fragments.table_id().table_id as _,
-                                new_table_fragments.actor_ids(),
-                                dispatchers.clone(),
-                                init_split_assignment,
-                            )
-                            .await?;
-                    }
-                }
-
-                // Apply the split changes in source manager.
-                self.barrier_manager_context
-                    .source_manager
-                    .drop_source_fragments(std::slice::from_ref(old_table_fragments))
-                    .await;
-                let source_fragments = new_table_fragments.stream_source_fragments();
-                self.barrier_manager_context
-                    .source_manager
-                    .apply_source_change(
-                        Some(source_fragments),
-                        Some(init_split_assignment.clone()),
-                        None,
-                    )
-                    .await;
             }
         }
 
