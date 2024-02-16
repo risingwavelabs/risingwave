@@ -16,11 +16,11 @@ use std::sync::LazyLock;
 
 use itertools::Itertools;
 use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::error::Result;
 
 pub static RW_COLUMNS: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
     name: "rw_columns",
@@ -47,6 +47,7 @@ impl SysCatalogReaderImpl {
 
         Ok(schemas
             .flat_map(|schema| {
+                // view columns
                 let view_rows = schema.iter_view().flat_map(|view| {
                     view.columns.iter().enumerate().map(|(index, column)| {
                         OwnedRow::new(vec![
@@ -64,6 +65,7 @@ impl SysCatalogReaderImpl {
                     })
                 });
 
+                // sink columns
                 let sink_rows = schema
                     .iter_sink()
                     .flat_map(|sink| {
@@ -87,7 +89,8 @@ impl SysCatalogReaderImpl {
                     })
                     .chain(view_rows);
 
-                let rows = schema
+                // pg_catalog columns
+                let catalog_rows = schema
                     .iter_system_tables()
                     .flat_map(|table| {
                         table
@@ -111,7 +114,8 @@ impl SysCatalogReaderImpl {
                     })
                     .chain(sink_rows);
 
-                schema
+                // table columns
+                let table_rows = schema
                     .iter_valid_table()
                     .flat_map(|table| {
                         table
@@ -137,7 +141,34 @@ impl SysCatalogReaderImpl {
                                 ])
                             })
                     })
-                    .chain(rows)
+                    .chain(catalog_rows);
+
+                // source columns
+                schema
+                    .iter_source()
+                    .flat_map(|source| {
+                        source
+                            .columns
+                            .iter()
+                            .enumerate()
+                            .map(move |(index, column)| {
+                                OwnedRow::new(vec![
+                                    Some(ScalarImpl::Int32(source.id as i32)),
+                                    Some(ScalarImpl::Utf8(column.name().into())),
+                                    Some(ScalarImpl::Int32(index as i32 + 1)),
+                                    Some(ScalarImpl::Bool(column.is_hidden)),
+                                    Some(ScalarImpl::Bool(
+                                        source.pk_col_ids.contains(&column.column_id()),
+                                    )),
+                                    Some(ScalarImpl::Bool(false)),
+                                    Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
+                                    Some(ScalarImpl::Int32(column.data_type().to_oid())),
+                                    Some(ScalarImpl::Int16(column.data_type().type_len())),
+                                    Some(ScalarImpl::Utf8(column.data_type().pg_name().into())),
+                                ])
+                            })
+                    })
+                    .chain(table_rows)
             })
             .collect_vec())
     }

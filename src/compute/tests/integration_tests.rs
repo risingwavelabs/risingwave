@@ -32,7 +32,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
 };
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::test_prelude::DataChunkTestExt;
@@ -297,7 +296,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         barrier_tx_clone
             .send(Barrier::new_test_barrier(curr_epoch))
             .unwrap();
-        Ok::<_, RwError>(())
+        anyhow::Ok(())
     });
 
     // Poll `Materialize`, should output the same insertion stream chunk.
@@ -379,7 +378,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         barrier_tx_clone
             .send(Barrier::new_test_barrier(curr_epoch))
             .unwrap();
-        Ok::<_, RwError>(())
+        anyhow::Ok(())
     });
 
     // Poll `Materialize`, should output the same deletion stream chunk.
@@ -429,7 +428,7 @@ async fn test_table_materialize() -> StreamResult<()> {
 }
 
 #[tokio::test]
-async fn test_row_seq_scan() -> Result<()> {
+async fn test_row_seq_scan() -> StreamResult<()> {
     // In this test we test if the memtable can be correctly scanned for K-V pair insertions.
     let memory_state_store = MemoryStateStore::new();
 

@@ -206,12 +206,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             this.intermediate_state_table
                 .update_without_old_value(encoded_states);
 
-            // Commit all state tables.
-            futures::future::try_join_all(
-                this.all_state_tables_mut().map(|table| table.commit(epoch)),
-            )
-            .await?;
-
             // Retrieve modified states and put the changes into the builders.
             vars.agg_group
                 .build_change(&this.storages, &this.agg_funcs)
@@ -219,12 +213,12 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 .map(|change| change.to_stream_chunk(&this.info.schema.data_types()))
         } else {
             // No state is changed.
-            // Call commit on state table to increment the epoch.
-            this.all_state_tables_mut().for_each(|table| {
-                table.commit_no_data_expected(epoch);
-            });
             None
         };
+
+        // Commit all state tables.
+        futures::future::try_join_all(this.all_state_tables_mut().map(|table| table.commit(epoch)))
+            .await?;
 
         vars.state_changed = false;
         Ok(chunk)
@@ -233,7 +227,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
     async fn try_flush_data(this: &mut ExecutorInner<S>) -> StreamExecutorResult<()> {
         futures::future::try_join_all(this.all_state_tables_mut().map(|table| table.try_flush()))
             .await?;
-
         Ok(())
     }
 

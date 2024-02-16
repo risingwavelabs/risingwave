@@ -14,10 +14,10 @@
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::error::Result;
 
 use super::Planner;
 use crate::binder::BoundUpdate;
+use crate::error::Result;
 use crate::optimizer::plan_node::{generic, LogicalProject, LogicalUpdate};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};

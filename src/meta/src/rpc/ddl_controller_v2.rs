@@ -43,7 +43,7 @@ impl DdlController {
 
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
         mgr.catalog_controller
-            .create_job_catalog(&mut streaming_job, &ctx)
+            .create_job_catalog(&mut streaming_job, &ctx, &fragment_graph.parallelism)
             .await?;
         let job_id = streaming_job.id();
 
@@ -76,7 +76,7 @@ impl DdlController {
             .acquire()
             .await
             .unwrap();
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
         // create streaming job.
         match self
@@ -284,7 +284,7 @@ impl DdlController {
         let mgr = self.metadata_manager.as_v2_ref();
         let job_id = streaming_job.id();
 
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
 
         // 1. build fragment graph.
@@ -299,7 +299,12 @@ impl DdlController {
         };
         let dummy_id = mgr
             .catalog_controller
-            .create_job_catalog_for_replace(&streaming_job, &ctx, table.get_version()?)
+            .create_job_catalog_for_replace(
+                &streaming_job,
+                &ctx,
+                table.get_version()?,
+                &fragment_graph.default_parallelism(),
+            )
             .await?;
 
         tracing::debug!(id = streaming_job.id(), "building replace streaming job");

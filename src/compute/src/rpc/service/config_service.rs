@@ -23,7 +23,7 @@ use tonic::{Code, Request, Response, Status};
 
 pub struct ConfigServiceImpl {
     batch_mgr: Arc<BatchManager>,
-    stream_mgr: Arc<LocalStreamManager>,
+    stream_mgr: LocalStreamManager,
 }
 
 #[async_trait::async_trait]
@@ -46,7 +46,7 @@ impl ConfigService for ConfigServiceImpl {
 }
 
 impl ConfigServiceImpl {
-    pub fn new(batch_mgr: Arc<BatchManager>, stream_mgr: Arc<LocalStreamManager>) -> Self {
+    pub fn new(batch_mgr: Arc<BatchManager>, stream_mgr: LocalStreamManager) -> Self {
         Self {
             batch_mgr,
             stream_mgr,

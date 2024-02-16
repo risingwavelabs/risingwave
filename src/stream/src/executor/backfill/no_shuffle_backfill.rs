@@ -331,7 +331,10 @@ where
                     // This is so we don't lose the tombstone iteration progress.
                     // If paused, we also can't read any snapshot records.
                     if !has_snapshot_read && !paused {
-                        assert!(builder.is_empty());
+                        assert!(
+                            builder.is_empty(),
+                            "Builder should be empty if no snapshot read"
+                        );
                         let (_, snapshot) = backfill_stream.into_inner();
                         #[for_await]
                         for msg in snapshot {

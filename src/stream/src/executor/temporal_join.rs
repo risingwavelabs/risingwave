@@ -38,15 +38,16 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
+use super::join::{JoinType, JoinTypePrimitive};
 use super::{
     Barrier, Execute, ExecutorInfo, Message, MessageStream, StreamExecutorError,
     StreamExecutorResult,
 };
 use crate::cache::{cache_may_stale, new_with_hasher_in, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
-use crate::common::JoinStreamChunkBuilder;
+use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, BoxedExecutor, JoinType, JoinTypePrimitive, Watermark};
+use crate::executor::{ActorContextRef, BoxedExecutor, Watermark};
 use crate::task::AtomicU64Ref;
 
 pub struct TemporalJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitive> {
