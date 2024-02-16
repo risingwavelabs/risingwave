@@ -139,7 +139,7 @@ tokio-postgres = "0.7"
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
-tonic = "0.11.0"
+tonic = { workspace = true }
 tracing = "0.1"
 url = "2"
 urlencoding = "2"
