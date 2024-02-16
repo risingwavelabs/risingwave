@@ -452,7 +452,7 @@ impl Default for SplitDiffOptions {
 ///
 /// See also:
 /// - [Kinesis resharding doc](https://docs.aws.amazon.com/streams/latest/dev/kinesis-using-sdk-java-after-resharding.html#kinesis-using-sdk-java-resharding-data-routing)
-/// - An example of how the shards can be like: https://stackoverflow.com/questions/72272034/list-shard-show-more-shards-than-provisioned
+/// - An example of how the shards can be like: <https://stackoverflow.com/questions/72272034/list-shard-show-more-shards-than-provisioned>
 fn reassign_splits<T>(
     fragment_id: FragmentId,
     actor_splits: HashMap<ActorId, Vec<T>>,

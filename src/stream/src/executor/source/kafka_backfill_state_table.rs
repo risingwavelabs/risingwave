@@ -31,7 +31,6 @@ pub struct BackfillStateTableHandler<S: StateStore> {
 
 impl<S: StateStore> BackfillStateTableHandler<S> {
     pub async fn from_table_catalog(table_catalog: &PbTable, store: S) -> Self {
-
         Self {
             state_store: StateTable::from_table_catalog(table_catalog, store, None).await,
         }

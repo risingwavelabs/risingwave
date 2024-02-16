@@ -131,7 +131,7 @@ impl ExecutorBuilder for KafkaBackfillExecutorBuilder {
             state_table_handler,
         );
 
-        let exec = KafkaBackfillExecutor::new(
+        let exec = KafkaBackfillExecutorInner::new(
             params.actor_context.clone(),
             params.info.clone(),
             stream_source_core,
@@ -142,6 +142,6 @@ impl ExecutorBuilder for KafkaBackfillExecutorBuilder {
             params.env.connector_params(),
             backfill_state_table,
         );
-        Ok(KafkaBackfillExecutorWrapper { inner: exec, input }.boxed())
+        Ok(KafkaBackfillExecutor { inner: exec, input }.boxed())
     }
 }
