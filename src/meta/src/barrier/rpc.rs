@@ -17,7 +17,6 @@ use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use either::Either;
 use fail::fail_point;
 use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
@@ -25,7 +24,6 @@ use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::hash::ActorId;
-use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::stream_plan::{Barrier, BarrierMutation, StreamActor};
@@ -394,6 +392,7 @@ impl StreamRpcManager {
     }
 }
 
+#[allow(dead_code)]
 fn merge_compute_node_rpc_error(
     message: &str,
     errors: impl IntoIterator<Item = (WorkerId, RpcError)>,
