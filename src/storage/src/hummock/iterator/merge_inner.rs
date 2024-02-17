@@ -291,4 +291,15 @@ where
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         self.collect_local_statistic_impl(stats);
     }
+
+    fn debug_print(&self) -> String {
+        let mut ret = "MergeIterator: [ ".to_string();
+        for node in &self.heap {
+            if node.iter.is_valid() {
+                ret += &node.iter.debug_print();
+            }
+        }
+        ret += "],";
+        ret
+    }
 }

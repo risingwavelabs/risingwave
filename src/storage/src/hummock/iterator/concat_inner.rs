@@ -180,4 +180,17 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
             iter.collect_local_statistic(stats);
         }
     }
+
+    fn debug_print(&self) -> String {
+        let mut ret = "ConcatIterator: [ ".to_string();
+        if let Some(iter) = &self.sstable_iter {
+            ret += &format!(
+                "sst_info: [min_epoch: {}, max_epoch: {}],",
+                self.tables[self.cur_idx].min_epoch, self.tables[self.cur_idx].max_epoch,
+            );
+            ret += &iter.debug_print();
+        }
+        ret += "]";
+        ret
+    }
 }
