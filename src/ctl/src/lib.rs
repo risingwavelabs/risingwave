@@ -266,10 +266,31 @@ enum HummockCommands {
     ValidateVersion,
     /// Rebuild table stats
     RebuildTableStats,
-
     CancelCompactTask {
         #[clap(short, long)]
         task_id: u64,
+    },
+    PrintUserKeyInArchive {
+        /// The ident of the archive file in object store. It's also the first Hummock version id of this archive.
+        #[clap(long, value_delimiter = ',')]
+        archive_ids: Vec<u64>,
+        /// The data directory of Hummock storage, where SSTable objects can be found.
+        #[clap(long)]
+        data_dir: String,
+        /// KVs that are matched with the user key are printed.
+        #[clap(long)]
+        user_key: String,
+    },
+    PrintVersionDeltaInArchive {
+        /// The ident of the archive file in object store. It's also the first Hummock version id of this archive.
+        #[clap(long, value_delimiter = ',')]
+        archive_ids: Vec<u64>,
+        /// The data directory of Hummock storage, where SSTable objects can be found.
+        #[clap(long)]
+        data_dir: String,
+        /// Version deltas that are related to the SST id are printed.
+        #[clap(long)]
+        sst_id: u64,
     },
 }
 
@@ -486,6 +507,10 @@ enum MetaCommands {
         /// The worker not found will be ignored
         #[clap(long, default_value_t = false)]
         ignore_not_found: bool,
+
+        /// Checking whether the fragment is occupied by workers
+        #[clap(long, default_value_t = false)]
+        check_fragment_occupied: bool,
     },
 
     /// Validate source interface for the cloud team
@@ -663,6 +688,27 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::CancelCompactTask { task_id }) => {
             cmd_impl::hummock::cancel_compact_task(context, task_id).await?;
         }
+        Commands::Hummock(HummockCommands::PrintVersionDeltaInArchive {
+            archive_ids,
+            data_dir,
+            sst_id,
+        }) => {
+            cmd_impl::hummock::print_version_delta_in_archive(
+                context,
+                archive_ids,
+                data_dir,
+                sst_id,
+            )
+            .await?;
+        }
+        Commands::Hummock(HummockCommands::PrintUserKeyInArchive {
+            archive_ids,
+            data_dir,
+            user_key,
+        }) => {
+            cmd_impl::hummock::print_user_key_in_archive(context, archive_ids, data_dir, user_key)
+                .await?;
+        }
         Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
             cmd_impl::table::scan(context, mv_name, data_dir).await?
         }
@@ -706,7 +752,17 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             workers,
             yes,
             ignore_not_found,
-        }) => cmd_impl::meta::unregister_workers(context, workers, yes, ignore_not_found).await?,
+            check_fragment_occupied,
+        }) => {
+            cmd_impl::meta::unregister_workers(
+                context,
+                workers,
+                yes,
+                ignore_not_found,
+                check_fragment_occupied,
+            )
+            .await?
+        }
         Commands::Meta(MetaCommands::ValidateSource { props }) => {
             cmd_impl::meta::validate_source(context, props).await?
         }

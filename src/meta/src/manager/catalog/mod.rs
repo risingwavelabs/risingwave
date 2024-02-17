@@ -87,7 +87,7 @@ macro_rules! commit_meta_with_trx {
                     $val_txn.apply_to_txn(&mut $trx).await?;
                 )*
                 // Commit to meta store
-                $manager.env.meta_store().txn($trx).await?;
+                $manager.env.meta_store_checked().txn($trx).await?;
                 // Upon successful commit, commit the change to in-mem meta
                 $(
                     $val_txn.commit();
@@ -1749,7 +1749,9 @@ impl CatalogManager {
         }
 
         for sink in database_mgr.sinks.values() {
-            if sink.dependent_relations.contains(&relation_id) {
+            if sink.dependent_relations.contains(&relation_id)
+                || sink.target_table == Some(relation_id)
+            {
                 let mut sink = sink.clone();
                 sink.definition = alter_relation_rename_refs(&sink.definition, from, to);
                 to_update_sinks.push(sink);
@@ -3019,7 +3021,7 @@ impl CatalogManager {
 
         let mut updated_indexes = vec![];
 
-        if let Some(table_col_index_mapping) = table_col_index_mapping.clone() {
+        if let Some(table_col_index_mapping) = table_col_index_mapping {
             let expr_rewriter = ReplaceTableExprRewriter {
                 table_col_index_mapping,
             };
@@ -3397,7 +3399,7 @@ impl CatalogManager {
                     ..Default::default()
                 };
 
-                default_user.insert(self.env.meta_store()).await?;
+                default_user.insert(self.env.meta_store_checked()).await?;
                 core.user_info.insert(default_user.id, default_user);
             }
         }

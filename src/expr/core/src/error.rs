@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 
 use risingwave_common::array::{ArrayError, ArrayRef};
-use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
@@ -117,15 +116,26 @@ pub enum ExprError {
 
     #[error("invalid state: {0}")]
     InvalidState(String),
+
+    #[error("error in cryptography: {0}")]
+    Cryptography(Box<CryptographyError>),
+}
+
+#[derive(Debug)]
+pub enum CryptographyStage {
+    Encrypt,
+    Decrypt,
+}
+
+#[derive(Debug, Error)]
+#[error("{stage:?} stage, reason: {reason}")]
+pub struct CryptographyError {
+    pub stage: CryptographyStage,
+    #[source]
+    pub reason: openssl::error::ErrorStack,
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);
-
-impl From<ExprError> for RwError {
-    fn from(s: ExprError) -> Self {
-        ErrorCode::ExprError(Box::new(s)).into()
-    }
-}
 
 impl From<chrono::ParseError> for ExprError {
     fn from(e: chrono::ParseError) -> Self {
@@ -156,7 +166,7 @@ impl MultiExprError {
 impl Display for MultiExprError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for (i, e) in self.0.iter().enumerate() {
-            writeln!(f, "{i}: {e}")?;
+            writeln!(f, "{i}: {}", e.as_report())?;
         }
         Ok(())
     }

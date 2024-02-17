@@ -213,22 +213,19 @@ impl LocalReplay for LocalReplayImpl {
         self.0.epoch()
     }
 
-    async fn flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<TracedBytes>, Bound<TracedBytes>)>,
-    ) -> Result<usize> {
-        let delete_ranges = delete_ranges
-            .into_iter()
-            .map(|(start, end)| (start.map(TracedBytes::into), end.map(TracedBytes::into)))
-            .collect();
-        self.0
-            .flush(delete_ranges)
-            .await
-            .map_err(|_| TraceError::FlushFailed)
+    async fn flush(&mut self) -> Result<usize> {
+        self.0.flush().await.map_err(|_| TraceError::FlushFailed)
     }
 
     fn is_dirty(&self) -> bool {
         self.0.is_dirty()
+    }
+
+    async fn try_flush(&mut self) -> Result<()> {
+        self.0
+            .try_flush()
+            .await
+            .map_err(|_| TraceError::TryFlushFailed)
     }
 }
 

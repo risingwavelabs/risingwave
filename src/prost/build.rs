@@ -51,6 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "stream_plan",
         "stream_service",
         "task_service",
+        "telemetry",
         "user",
     ];
     let protos: Vec<String> = proto_files
@@ -115,6 +116,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.Cardinality", "#[derive(Eq, Hash, Copy)]")
         .type_attribute("plan_common.ExternalTableDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.ColumnDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalColumn", "#[derive(Eq, Hash)]")
+        .type_attribute(
+            "plan_common.AdditionalColumn.column_type",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute("plan_common.AdditionalColumnNormal", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalColumnKey", "#[derive(Eq, Hash)]")
+        .type_attribute(
+            "plan_common.AdditionalColumnPartition",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute(
+            "plan_common.AdditionalColumnTimestamp",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute(
+            "plan_common.AdditionalColumnFilename",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute("plan_common.AdditionalColumnHeader", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalColumnHeaders", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalColumnOffset", "#[derive(Eq, Hash)]")
         .type_attribute("common.ColumnOrder", "#[derive(Eq, Hash)]")
         .type_attribute("common.OrderType", "#[derive(Eq, Hash)]")
         .type_attribute("common.Buffer", "#[derive(Eq)]")

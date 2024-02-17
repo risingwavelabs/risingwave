@@ -541,6 +541,80 @@ profile:
       - use: frontend
       - use: compactor
 
+  ci-3cn-1fe-with-monitoring:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: etcd
+        unsafe-no-fsync: true
+      - use: meta-node
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: prometheus
+      - use: grafana
+
+  ci-3cn-1fe-with-minio-rate-limit:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        api-requests-max: 30
+        api-requests-deadline: 3s
+      - use: etcd
+        unsafe-no-fsync: true
+      - use: meta-node
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
+  ci-3cn-1fe-with-monitoring-and-minio-rate-limit:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        api-requests-max: 30
+        api-requests-deadline: 2s
+      - use: etcd
+        unsafe-no-fsync: true
+      - use: meta-node
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: prometheus
+      - use: grafana
+
   ci-3cn-3fe:
     config-path: src/config/ci.toml
     steps:
@@ -735,6 +809,28 @@ profile:
       - use: frontend
       - use: compactor
 
+  ci-3cn-1fe-with-recovery:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: etcd
+        unsafe-no-fsync: true
+      - use: meta-node
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
   ci-1cn-1fe-kafka-with-recovery:
     config-path: src/config/ci-recovery.toml
     steps:
@@ -764,11 +860,6 @@ profile:
     config-path: src/config/ci-meta-backup-test.toml
     steps:
       - use: etcd
-      - use: minio
-
-  ci-delete-range-test:
-    config-path: src/config/ci-delete-range-test.toml
-    steps:
       - use: minio
 
   ci-iceberg-test:
@@ -884,6 +975,15 @@ template:
 
     # Prometheus nodes used by this MinIO
     provide-prometheus: "prometheus*"
+
+    # Max concurrent api requests.
+    # see: https://github.com/minio/minio/blob/master/docs/throttle/README.md.
+    # '0' means this env var will use the default of minio.
+    api-requests-max: 0
+
+    # Deadline for api requests.
+    # Empty string means this env var will use the default of minio.
+    api-requests-deadline: ""
 
   etcd:
     # Id of this instance

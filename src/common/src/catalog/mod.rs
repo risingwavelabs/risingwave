@@ -19,7 +19,6 @@ mod physical_table;
 mod schema;
 pub mod test_utils;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -31,7 +30,6 @@ pub use physical_table::*;
 use risingwave_pb::catalog::HandleConflictBehavior as PbHandleConflictBehavior;
 use risingwave_pb::plan_common::ColumnDescVersion;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
-use thiserror_ext::AsReport;
 
 pub use crate::constants::hummock;
 use crate::error::BoxedError;
@@ -64,6 +62,8 @@ pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 
 pub const NON_RESERVED_USER_ID: i32 = 11;
 pub const NON_RESERVED_SYS_CATALOG_ID: i32 = 1001;
+
+pub const OBJECT_ID_PLACEHOLDER: u32 = u32::MAX - 1;
 
 pub const SYSTEM_SCHEMAS: [&str; 3] = [
     PG_CATALOG_SCHEMA_NAME,
@@ -164,7 +164,7 @@ impl DatabaseId {
 
     pub fn placeholder() -> Self {
         DatabaseId {
-            database_id: u32::MAX - 1,
+            database_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 }
@@ -200,7 +200,7 @@ impl SchemaId {
 
     pub fn placeholder() -> Self {
         SchemaId {
-            schema_id: u32::MAX - 1,
+            schema_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 }
@@ -237,7 +237,7 @@ impl TableId {
     /// Sometimes the id field is filled later, we use this value for better debugging.
     pub const fn placeholder() -> Self {
         TableId {
-            table_id: u32::MAX - 1,
+            table_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 
@@ -271,46 +271,24 @@ pub struct TableOption {
 
 impl From<&risingwave_pb::hummock::TableOption> for TableOption {
     fn from(table_option: &risingwave_pb::hummock::TableOption) -> Self {
-        let retention_seconds =
-            if table_option.retention_seconds == hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND {
-                None
-            } else {
-                Some(table_option.retention_seconds)
-            };
-
-        Self { retention_seconds }
+        Self {
+            retention_seconds: table_option.retention_seconds,
+        }
     }
 }
 
 impl From<&TableOption> for risingwave_pb::hummock::TableOption {
     fn from(table_option: &TableOption) -> Self {
         Self {
-            retention_seconds: table_option
-                .retention_seconds
-                .unwrap_or(hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND),
+            retention_seconds: table_option.retention_seconds,
         }
     }
 }
 
 impl TableOption {
-    pub fn build_table_option(table_properties: &HashMap<String, String>) -> Self {
+    pub fn new(retention_seconds: Option<u32>) -> Self {
         // now we only support ttl for TableOption
-        let mut result = TableOption::default();
-        if let Some(ttl_string) = table_properties.get(hummock::PROPERTIES_RETENTION_SECOND_KEY) {
-            match ttl_string.trim().parse::<u32>() {
-                Ok(retention_seconds_u32) => result.retention_seconds = Some(retention_seconds_u32),
-                Err(e) => {
-                    tracing::info!(
-                        error = %e.as_report(),
-                        "build_table_option parse option ttl_string {}",
-                        ttl_string,
-                    );
-                    result.retention_seconds = None;
-                }
-            };
-        }
-
-        result
+        TableOption { retention_seconds }
     }
 }
 
@@ -328,7 +306,7 @@ impl IndexId {
     /// Sometimes the id field is filled later, we use this value for better debugging.
     pub const fn placeholder() -> Self {
         IndexId {
-            index_id: u32::MAX - 1,
+            index_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 
@@ -357,7 +335,7 @@ impl FunctionId {
     }
 
     pub const fn placeholder() -> Self {
-        FunctionId(u32::MAX - 1)
+        FunctionId(OBJECT_ID_PLACEHOLDER)
     }
 
     pub fn function_id(&self) -> u32 {
@@ -396,7 +374,7 @@ impl UserId {
 
     pub const fn placeholder() -> Self {
         UserId {
-            user_id: u32::MAX - 1,
+            user_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 }
@@ -428,7 +406,7 @@ impl ConnectionId {
     }
 
     pub const fn placeholder() -> Self {
-        ConnectionId(u32::MAX - 1)
+        ConnectionId(OBJECT_ID_PLACEHOLDER)
     }
 
     pub fn connection_id(&self) -> u32 {

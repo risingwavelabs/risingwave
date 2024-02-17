@@ -133,6 +133,7 @@ macro_rules! converts_generic {
             fn try_from(array: &ArrayImpl) -> Result<Self, Self::Error> {
                 match array {
                     $($ArrayImplPattern(a) => Ok(Arc::new(<$ArrowType>::try_from(a)?)),)*
+                    ArrayImpl::Timestamptz(a) => Ok(Arc::new(arrow_array::TimestampMicrosecondArray::try_from(a)?. with_timezone_utc())),
                     _ => todo!("unsupported array"),
                 }
             }
@@ -152,6 +153,13 @@ macro_rules! converts_generic {
                             .unwrap()
                             .try_into()?,
                     )),)*
+                    Timestamp(Microsecond, Some(_)) => Ok(ArrayImpl::Timestamptz(
+                        array
+                            .as_any()
+                            .downcast_ref::<arrow_array::TimestampMicrosecondArray>()
+                            .unwrap()
+                            .try_into()?,
+                    )),
                     t => Err(ArrayError::from_arrow(format!("unsupported data type: {t:?}"))),
                 }
             }
@@ -173,7 +181,6 @@ converts_generic! {
     { arrow_array::Decimal256Array, Decimal256(_, _), ArrayImpl::Int256 },
     { arrow_array::Date32Array, Date32, ArrayImpl::Date },
     { arrow_array::TimestampMicrosecondArray, Timestamp(Microsecond, None), ArrayImpl::Timestamp },
-    { arrow_array::TimestampMicrosecondArray, Timestamp(Microsecond, Some(_)), ArrayImpl::Timestamptz },
     { arrow_array::Time64MicrosecondArray, Time64(Microsecond), ArrayImpl::Time },
     { arrow_array::IntervalMonthDayNanoArray, Interval(MonthDayNano), ArrayImpl::Interval },
     { arrow_array::StructArray, Struct(_), ArrayImpl::Struct },
@@ -880,7 +887,7 @@ mod tests {
 
     #[test]
     fn int256() {
-        let values = vec![
+        let values = [
             None,
             Some(Int256::from(1)),
             Some(Int256::from(i64::MAX)),

@@ -254,7 +254,7 @@ mod tests {
         };
 
         let project = Box::new(ProjectExecutor::new(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             info,
             Box::new(source),
             vec![test_expr],
@@ -348,7 +348,7 @@ mod tests {
         };
 
         let project = Box::new(ProjectExecutor::new(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             info,
             Box::new(source),
             vec![a_expr, b_expr, c_expr],

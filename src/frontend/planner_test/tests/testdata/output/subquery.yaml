@@ -279,26 +279,21 @@
             │   ├─BatchExchange { order: [], dist: HashShard(rw_tables.schema_id) }
             │   │ └─BatchUnion { all: true }
             │   │   ├─BatchProject { exprs: [rw_tables.name, 'table':Varchar, rw_tables.schema_id, rw_tables.owner] }
-            │   │   │ └─BatchFilter { predicate: true }
-            │   │   │   └─BatchScan { table: rw_tables, columns: [rw_tables.name, rw_tables.schema_id, rw_tables.owner], distribution: Single }
+            │   │   │ └─BatchScan { table: rw_tables, columns: [rw_tables.name, rw_tables.schema_id, rw_tables.owner], distribution: Single }
             │   │   ├─BatchProject { exprs: [rw_system_tables.name, 'system table':Varchar, rw_system_tables.schema_id, rw_system_tables.owner] }
-            │   │   │ └─BatchFilter { predicate: true }
-            │   │   │   └─BatchScan { table: rw_system_tables, columns: [rw_system_tables.name, rw_system_tables.schema_id, rw_system_tables.owner], distribution: Single }
+            │   │   │ └─BatchScan { table: rw_system_tables, columns: [rw_system_tables.name, rw_system_tables.schema_id, rw_system_tables.owner], distribution: Single }
             │   │   ├─BatchProject { exprs: [rw_sources.name, 'source':Varchar, rw_sources.schema_id, rw_sources.owner] }
             │   │   │ └─BatchFilter { predicate: null:Boolean }
             │   │   │   └─BatchScan { table: rw_sources, columns: [rw_sources.name, rw_sources.schema_id, rw_sources.owner], distribution: Single }
             │   │   ├─BatchProject { exprs: [rw_indexes.name, 'index':Varchar, rw_indexes.schema_id, rw_indexes.owner] }
-            │   │   │ └─BatchFilter { predicate: false:Boolean }
-            │   │   │   └─BatchScan { table: rw_indexes, columns: [rw_indexes.name, rw_indexes.schema_id, rw_indexes.owner], distribution: Single }
+            │   │   │ └─BatchValues { rows: [] }
             │   │   ├─BatchProject { exprs: [rw_sinks.name, 'sink':Varchar, rw_sinks.schema_id, rw_sinks.owner] }
             │   │   │ └─BatchFilter { predicate: null:Boolean }
             │   │   │   └─BatchScan { table: rw_sinks, columns: [rw_sinks.name, rw_sinks.schema_id, rw_sinks.owner], distribution: Single }
             │   │   ├─BatchProject { exprs: [rw_materialized_views.name, 'materialized view':Varchar, rw_materialized_views.schema_id, rw_materialized_views.owner] }
-            │   │   │ └─BatchFilter { predicate: true }
-            │   │   │   └─BatchScan { table: rw_materialized_views, columns: [rw_materialized_views.name, rw_materialized_views.schema_id, rw_materialized_views.owner], distribution: Single }
+            │   │   │ └─BatchScan { table: rw_materialized_views, columns: [rw_materialized_views.name, rw_materialized_views.schema_id, rw_materialized_views.owner], distribution: Single }
             │   │   └─BatchProject { exprs: [rw_views.name, 'view':Varchar, rw_views.schema_id, rw_views.owner] }
-            │   │     └─BatchFilter { predicate: true }
-            │   │       └─BatchScan { table: rw_views, columns: [rw_views.name, rw_views.schema_id, rw_views.owner], distribution: Single }
+            │   │     └─BatchScan { table: rw_views, columns: [rw_views.name, rw_views.schema_id, rw_views.owner], distribution: Single }
             │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
             │     └─BatchFilter { predicate: (rw_schemas.name <> 'pg_catalog':Varchar) AND Not(RegexpEq(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) }
             │       └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
@@ -873,7 +868,7 @@
 - name: Only table-in-out functions can have subquery parameters.
   sql: |
     SELECT * FROM generate_series(1, (select 1));
-  binder_error: 'Invalid input syntax: Only table-in-out functions can have subquery parameters, generate_series only accepts constant parameters'
+  binder_error: 'Invalid input syntax: Only table-in-out functions can have subquery parameters. The table function has subquery parameters is generate_series'
 - name: While this one is allowed.
   sql: |
     SELECT generate_series(1, (select 1));
@@ -894,3 +889,7 @@
         └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
           └─BatchExchange { order: [], dist: HashShard(1:Int32) }
             └─BatchValues { rows: [[1:Int32], [2:Int32]] }
+- name: Only table-in-out functions can have subquery parameters. issue 14734
+  sql: |
+    SELECT anon_1.f1 AS "IntegerRange(0, -2, 1)" FROM unnest(CASE WHEN (nullif(1, 0) IS NOT NULL AND sign(1) = sign( -2 - 0)) THEN array_remove(array((SELECT generate_series(0,  -2, 1) AS generate_series_1)),  -2) ELSE CAST(ARRAY[] AS SMALLINT[]) END) AS anon_1(f1);
+  binder_error: 'Invalid input syntax: Only table-in-out functions can have subquery parameters. The table function has subquery parameters is unnest'

@@ -14,24 +14,28 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use either::Either;
 use fail::fail_point;
-use futures::future::join_all;
+use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::bail;
+use risingwave_common::hash::ActorId;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_common::util::pending_on_none;
 use risingwave_common::util::tracing::TracingContext;
-use risingwave_pb::stream_plan::{Barrier, BarrierMutation};
-use risingwave_pb::stream_service::{BarrierCompleteRequest, InjectBarrierRequest};
+use risingwave_pb::common::{ActorInfo, WorkerNode};
+use risingwave_pb::stream_plan::{Barrier, BarrierMutation, StreamActor};
+use risingwave_pb::stream_service::{
+    BarrierCompleteRequest, BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest,
+    ForceStopActorsRequest, InjectBarrierRequest, UpdateActorsRequest,
+};
 use risingwave_rpc_client::error::RpcError;
-use risingwave_rpc_client::StreamClientPoolRef;
+use risingwave_rpc_client::StreamClient;
+use rw_futures_util::pending_on_none;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -80,17 +84,21 @@ impl GlobalBarrierManagerContext {
     ) -> BarrierCompletionFuture {
         let (tx, rx) = oneshot::channel();
         let prev_epoch = command_context.prev_epoch.value().0;
-        let result = self.inject_barrier_inner(command_context.clone()).await;
+        let result = self
+            .stream_rpc_manager
+            .inject_barrier(command_context.clone())
+            .await;
         match result {
             Ok(node_need_collect) => {
                 // todo: the collect handler should be abort when recovery.
-                tokio::spawn(Self::collect_barrier(
-                    self.env.clone(),
-                    node_need_collect,
-                    self.env.stream_client_pool_ref(),
-                    command_context,
-                    tx,
-                ));
+                tokio::spawn({
+                    let stream_rpc_manager = self.stream_rpc_manager.clone();
+                    async move {
+                        stream_rpc_manager
+                            .collect_barrier(node_need_collect, command_context, tx)
+                            .await
+                    }
+                });
             }
             Err(e) => {
                 let _ = tx.send(BarrierCompletion {
@@ -101,15 +109,17 @@ impl GlobalBarrierManagerContext {
         }
         rx.map(move |result| match result {
             Ok(completion) => completion,
-            Err(e) => BarrierCompletion {
+            Err(_e) => BarrierCompletion {
                 prev_epoch,
-                result: Err(anyhow!("failed to receive barrier completion result: {:?}", e).into()),
+                result: Err(anyhow!("failed to receive barrier completion result").into()),
             },
         })
     }
+}
 
+impl StreamRpcManager {
     /// Send inject-barrier-rpc to stream service and wait for its response before returns.
-    async fn inject_barrier_inner(
+    async fn inject_barrier(
         &self,
         command_context: Arc<CommandContext>,
     ) -> MetaResult<HashMap<WorkerId, bool>> {
@@ -117,38 +127,44 @@ impl GlobalBarrierManagerContext {
         let mutation = command_context.to_mutation().await?;
         let info = command_context.info.clone();
         let mut node_need_collect = HashMap::new();
-        let inject_futures = info.node_map.iter().filter_map(|(node_id, node)| {
-            let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
-            let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
-            if actor_ids_to_collect.is_empty() {
-                // No need to send or collect barrier for this node.
-                assert!(actor_ids_to_send.is_empty());
-                node_need_collect.insert(*node_id, false);
-                None
-            } else {
-                node_need_collect.insert(*node_id, true);
-                let mutation = mutation.clone();
-                let request_id = Uuid::new_v4().to_string();
-                let barrier = Barrier {
-                    epoch: Some(risingwave_pb::data::Epoch {
-                        curr: command_context.curr_epoch.value().0,
-                        prev: command_context.prev_epoch.value().0,
-                    }),
-                    mutation: mutation.clone().map(|_| BarrierMutation { mutation }),
-                    tracing_context: TracingContext::from_span(command_context.curr_epoch.span())
+        self.make_request(
+            info.node_map.iter().filter_map(|(node_id, node)| {
+                let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
+                let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
+                if actor_ids_to_collect.is_empty() {
+                    // No need to send or collect barrier for this node.
+                    assert!(actor_ids_to_send.is_empty());
+                    node_need_collect.insert(*node_id, false);
+                    None
+                } else {
+                    node_need_collect.insert(*node_id, true);
+                    let mutation = mutation.clone();
+                    let barrier = Barrier {
+                        epoch: Some(risingwave_pb::data::Epoch {
+                            curr: command_context.curr_epoch.value().0,
+                            prev: command_context.prev_epoch.value().0,
+                        }),
+                        mutation: mutation.clone().map(|_| BarrierMutation { mutation }),
+                        tracing_context: TracingContext::from_span(
+                            command_context.curr_epoch.span(),
+                        )
                         .to_protobuf(),
-                    kind: command_context.kind as i32,
-                    passed_actors: vec![],
-                };
-                async move {
-                    let client = self.env.stream_client_pool().get(node).await?;
-
-                    let request = InjectBarrierRequest {
-                        request_id,
-                        barrier: Some(barrier),
-                        actor_ids_to_send,
-                        actor_ids_to_collect,
+                        kind: command_context.kind as i32,
+                        passed_actors: vec![],
                     };
+                    Some((
+                        node,
+                        InjectBarrierRequest {
+                            request_id: Self::new_request_id(),
+                            barrier: Some(barrier),
+                            actor_ids_to_send,
+                            actor_ids_to_collect,
+                        },
+                    ))
+                }
+            }),
+            |client, request| {
+                async move {
                     tracing::debug!(
                         target: "events::meta::barrier::inject_barrier",
                         ?request, "inject barrier request"
@@ -157,29 +173,10 @@ impl GlobalBarrierManagerContext {
                     // This RPC returns only if this worker node has injected this barrier.
                     client.inject_barrier(request).await
                 }
-                .into()
-            }
-        });
-
-        // join_all rather than try_join_all, in order to gather errors from all compute nodes.
-        let inject_results = join_all(inject_futures).await;
-        let mut errors = inject_results
-            .into_iter()
-            .zip_eq_debug(node_need_collect.iter().filter_map(|(id, v)| {
-                if *v {
-                    return Some(*id);
-                }
-                None
-            }))
-            .filter_map(|(result, id)| {
-                if let Err(e) = result {
-                    return Some((id, e));
-                }
-                None
-            })
-            .peekable();
-        if errors.peek().is_some() {
-            let e = merge_compute_node_rpc_error("inject barrier failure", errors);
+            },
+        )
+        .await
+        .inspect_err(|e| {
             // Record failure in event log.
             use risingwave_pb::meta::event_log;
             use thiserror_ext::AsReport;
@@ -191,17 +188,14 @@ impl GlobalBarrierManagerContext {
             self.env
                 .event_log_manager_ref()
                 .add_event_logs(vec![event_log::Event::InjectBarrierFail(event)]);
-            return Err(e);
-        }
-        drop(errors);
+        })?;
         Ok(node_need_collect)
     }
 
     /// Send barrier-complete-rpc and wait for responses from all CNs
     async fn collect_barrier(
-        env: MetaSrvEnv,
+        &self,
         node_need_collect: HashMap<WorkerId, bool>,
-        client_pool_ref: StreamClientPoolRef,
         command_context: Arc<CommandContext>,
         barrier_complete_tx: oneshot::Sender<BarrierCompletion>,
     ) {
@@ -210,67 +204,193 @@ impl GlobalBarrierManagerContext {
             TracingContext::from_span(command_context.prev_epoch.span()).to_protobuf();
 
         let info = command_context.info.clone();
-        let client_pool = client_pool_ref.deref();
-        let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
-            if !*node_need_collect.get(node_id).unwrap() {
-                // No need to send or collect barrier for this node.
-                None
-            } else {
-                let request_id = Uuid::new_v4().to_string();
-                let tracing_context = tracing_context.clone();
-                async move {
-                    let client = client_pool.get(node).await?;
-                    let request = BarrierCompleteRequest {
-                        request_id,
-                        prev_epoch,
-                        tracing_context,
-                    };
-                    tracing::debug!(
-                        target: "events::meta::barrier::barrier_complete",
-                        ?request, "barrier complete"
-                    );
+        let result = self
+            .broadcast(
+                info.node_map.iter().filter_map(|(node_id, node)| {
+                    if !*node_need_collect.get(node_id).unwrap() {
+                        // No need to send or collect barrier for this node.
+                        None
+                    } else {
+                        Some(node)
+                    }
+                }),
+                |client| {
+                    let tracing_context = tracing_context.clone();
+                    async move {
+                        let request = BarrierCompleteRequest {
+                            request_id: Self::new_request_id(),
+                            prev_epoch,
+                            tracing_context,
+                        };
+                        tracing::debug!(
+                            target: "events::meta::barrier::barrier_complete",
+                            ?request, "barrier complete"
+                        );
 
-                    // This RPC returns only if this worker node has collected this barrier.
-                    client.barrier_complete(request).await
-                }
-                .into()
-            }
-        });
-
-        // join_all rather than try_join_all, in order to gather errors from all compute nodes.
-        let collect_result = join_all(collect_futures).await;
-        let (successes, failures): (Vec<_>, Vec<_>) = collect_result
-            .into_iter()
-            .zip_eq_debug(node_need_collect.iter().filter_map(|(id, v)| {
-                if *v {
-                    return Some(*id);
-                }
-                None
-            }))
-            .partition_map(|(r, id)| match r {
-                Ok(v) => Either::Left(v),
-                Err(e) => Either::Right((id, e)),
-            });
-        let result = if failures.is_empty() {
-            Ok(successes)
-        } else {
-            let e = merge_compute_node_rpc_error("collect barrier failure", failures);
-            // Record failure in event log.
-            use risingwave_pb::meta::event_log;
-            use thiserror_ext::AsReport;
-            let event = event_log::EventCollectBarrierFail {
-                prev_epoch: command_context.prev_epoch.value().0,
-                cur_epoch: command_context.curr_epoch.value().0,
-                error: e.to_report_string(),
-            };
-            env.event_log_manager_ref()
-                .add_event_logs(vec![event_log::Event::CollectBarrierFail(event)]);
-            Err(e)
-        };
-
+                        // This RPC returns only if this worker node has collected this barrier.
+                        client.barrier_complete(request).await
+                    }
+                },
+            )
+            .await
+            .inspect_err(|e| {
+                // Record failure in event log.
+                use risingwave_pb::meta::event_log;
+                use thiserror_ext::AsReport;
+                let event = event_log::EventCollectBarrierFail {
+                    prev_epoch: command_context.prev_epoch.value().0,
+                    cur_epoch: command_context.curr_epoch.value().0,
+                    error: e.to_report_string(),
+                };
+                self.env
+                    .event_log_manager_ref()
+                    .add_event_logs(vec![event_log::Event::CollectBarrierFail(event)]);
+            })
+            .map_err(Into::into);
         let _ = barrier_complete_tx
             .send(BarrierCompletion { prev_epoch, result })
             .inspect_err(|_| tracing::warn!(prev_epoch, "failed to notify barrier completion"));
+    }
+}
+
+#[derive(Clone)]
+pub struct StreamRpcManager {
+    env: MetaSrvEnv,
+}
+
+impl StreamRpcManager {
+    pub fn new(env: MetaSrvEnv) -> Self {
+        Self { env }
+    }
+
+    async fn make_request<REQ, RSP, Fut: Future<Output = Result<RSP, RpcError>> + 'static>(
+        &self,
+        request: impl Iterator<Item = (&WorkerNode, REQ)>,
+        f: impl Fn(StreamClient, REQ) -> Fut,
+    ) -> MetaResult<Vec<RSP>> {
+        let pool = self.env.stream_client_pool();
+        let f = &f;
+        Ok(try_join_all(request.map(|(node, input)| async move {
+            let client = pool.get(node).await?;
+            f(client, input).await
+        }))
+        .await?)
+    }
+
+    async fn broadcast<RSP, Fut: Future<Output = Result<RSP, RpcError>> + 'static>(
+        &self,
+        nodes: impl Iterator<Item = &WorkerNode>,
+        f: impl Fn(StreamClient) -> Fut,
+    ) -> MetaResult<Vec<RSP>> {
+        self.make_request(nodes.map(|node| (node, ())), |client, ()| f(client))
+            .await
+    }
+
+    fn new_request_id() -> String {
+        Uuid::new_v4().to_string()
+    }
+
+    pub async fn build_actors(
+        &self,
+        node_map: &HashMap<WorkerId, WorkerNode>,
+        node_actors: impl Iterator<Item = (WorkerId, Vec<ActorId>)>,
+    ) -> MetaResult<()> {
+        self.make_request(
+            node_actors.map(|(worker_id, actors)| (node_map.get(&worker_id).unwrap(), actors)),
+            |client, actors| async move {
+                let request_id = Self::new_request_id();
+                tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
+                client
+                    .build_actors(BuildActorsRequest {
+                        request_id,
+                        actor_id: actors,
+                    })
+                    .await
+            },
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Broadcast and update actor info in CN.
+    /// `node_actors_to_create` must be a subset of `broadcast_worker_ids`.
+    pub async fn broadcast_update_actor_info(
+        &self,
+        worker_nodes: &HashMap<WorkerId, WorkerNode>,
+        broadcast_worker_ids: impl Iterator<Item = WorkerId>,
+        actor_infos_to_broadcast: impl Iterator<Item = ActorInfo>,
+        node_actors_to_create: impl Iterator<Item = (WorkerId, Vec<StreamActor>)>,
+    ) -> MetaResult<()> {
+        let actor_infos = actor_infos_to_broadcast.collect_vec();
+        let mut node_actors_to_create = node_actors_to_create.collect::<HashMap<_, _>>();
+        self.make_request(
+            broadcast_worker_ids
+                .map(|worker_id| {
+                    let node = worker_nodes.get(&worker_id).unwrap();
+                    let actors = node_actors_to_create.remove(&worker_id);
+                    (node, actors)
+                }),
+            |client, actors| {
+                let info = actor_infos.clone();
+                async move {
+                    client
+                        .broadcast_actor_info_table(BroadcastActorInfoTableRequest { info })
+                        .await?;
+                    if let Some(actors) = actors {
+                        let request_id = Self::new_request_id();
+                        let actor_ids = actors.iter().map(|actor| actor.actor_id).collect_vec();
+                        tracing::debug!(request_id = request_id.as_str(), actors = ?actor_ids, "update actors");
+                        client
+                            .update_actors(UpdateActorsRequest { request_id, actors })
+                            .await?;
+                    }
+                    Ok(())
+                }
+            },
+        )
+        .await?;
+        assert!(
+            node_actors_to_create.is_empty(),
+            "remaining uncreated actors: {:?}",
+            node_actors_to_create
+        );
+        Ok(())
+    }
+
+    pub async fn drop_actors(
+        &self,
+        node_map: &HashMap<WorkerId, WorkerNode>,
+        node_actors: impl Iterator<Item = (WorkerId, Vec<ActorId>)>,
+    ) -> MetaResult<()> {
+        self.make_request(
+            node_actors
+                .map(|(worker_id, actor_ids)| (node_map.get(&worker_id).unwrap(), actor_ids)),
+            |client, actor_ids| async move {
+                client
+                    .drop_actors(DropActorsRequest {
+                        request_id: Self::new_request_id(),
+                        actor_ids,
+                    })
+                    .await
+            },
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn force_stop_actors(
+        &self,
+        nodes: impl Iterator<Item = &WorkerNode>,
+    ) -> MetaResult<()> {
+        self.broadcast(nodes, |client| async move {
+            client
+                .force_stop_actors(ForceStopActorsRequest {
+                    request_id: Self::new_request_id(),
+                })
+                .await
+        })
+        .await?;
+        Ok(())
     }
 }
 

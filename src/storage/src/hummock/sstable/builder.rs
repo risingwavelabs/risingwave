@@ -200,12 +200,13 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         }
         if is_max_epoch(event.new_epoch)
             && self.monotonic_deletes.last().map_or(true, |last| {
-                is_max_epoch(last.new_epoch)
-                    && last.event_key.left_user_key.table_id
-                        == event.event_key.left_user_key.table_id
+                last.event_key.left_user_key.table_id != event.event_key.left_user_key.table_id
+                    || is_max_epoch(last.new_epoch)
             })
         {
-            // This range would never delete any key so we can merge it with last range.
+            // There are two case we shall skip the right end of delete-range.
+            //   1, it belongs the same table-id with the last event, and the last event is also right-end of some delete-range so we can merge them into one point.
+            //   2, this point does not belong the same table-id with the last event. It means that the left end of this delete-range may be dropped, so we can not add it.
             return;
         }
         if !is_max_epoch(event.new_epoch) {
@@ -355,8 +356,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             if !self.block_builder.is_empty() {
                 self.build_block().await?;
             }
-        } else if is_new_user_key
-            && self.block_builder.approximate_len() >= self.options.block_capacity
+        } else if self.block_builder.approximate_len() >= self.options.block_capacity
             && could_switch_block
         {
             self.build_block().await?;
@@ -851,14 +851,14 @@ pub(super) mod tests {
             .await
             .unwrap();
 
-        assert_eq!(table.value().has_bloom_filter(), with_blooms);
+        assert_eq!(table.has_bloom_filter(), with_blooms);
         for i in 0..key_count {
             let full_key = test_key_of(i);
-            if table.value().has_bloom_filter() {
+            if table.has_bloom_filter() {
                 let hash = Sstable::hash_for_bloom_filter(full_key.user_key.encode().as_slice(), 0);
                 let key_ref = full_key.user_key.as_ref();
                 assert!(
-                    table.value().may_match_hash(
+                    table.may_match_hash(
                         &(Bound::Included(key_ref), Bound::Included(key_ref)),
                         hash
                     ),
@@ -937,9 +937,9 @@ pub(super) mod tests {
             let k = UserKey::for_test(TableId::new(2), table_key.as_slice());
             let hash = Sstable::hash_for_bloom_filter(&k.encode(), 2);
             let key_ref = k.as_ref();
-            assert!(table
-                .value()
-                .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash));
+            assert!(
+                table.may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
+            );
         }
     }
 }

@@ -384,6 +384,11 @@ impl Interval {
         self > &Self::from_month_day_usec(0, 0, 0)
     }
 
+    /// Checks if all fields of [`Interval`] are all non-negative.
+    pub fn is_never_negative(&self) -> bool {
+        self.months >= 0 && self.days >= 0 && self.usecs >= 0
+    }
+
     /// Truncate the interval to the precision of milliseconds.
     ///
     /// # Example
@@ -1051,7 +1056,7 @@ impl Interval {
     pub fn from_iso_8601(s: &str) -> ParseResult<Self> {
         // ISO pattern - PnYnMnDTnHnMnS
         static ISO_8601_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"P([0-9]+)Y([0-9]+)M([0-9]+)DT([0-9]+)H([0-9]+)M([0-9]+(?:\.[0-9]+)?)S")
+            Regex::new(r"^P([0-9]+)Y([0-9]+)M([0-9]+)DT([0-9]+)H([0-9]+)M([0-9]+(?:\.[0-9]+)?)S$")
                 .unwrap()
         });
         // wrap into a closure to simplify error handling
@@ -1453,7 +1458,10 @@ impl Interval {
         if let Some(leading_field) = leading_field {
             Self::parse_sql_standard(s, leading_field)
         } else {
-            Self::parse_postgres(s)
+            match s.as_bytes().get(0) {
+                Some(b'P') => Self::from_iso_8601(s),
+                _ => Self::parse_postgres(s),
+            }
         }
     }
 }
@@ -1529,6 +1537,12 @@ mod tests {
         assert_eq!(
             interval,
             Interval::from_month(14) + Interval::from_days(3) + Interval::from_minutes(62)
+        );
+
+        let interval = "P1Y2M3DT0H5M0S".parse::<Interval>().unwrap();
+        assert_eq!(
+            interval,
+            Interval::from_month(14) + Interval::from_days(3) + Interval::from_minutes(5)
         );
     }
 

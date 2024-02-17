@@ -27,9 +27,7 @@ use jni::JavaVM;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::anyhow_error;
 use risingwave_common::types::DataType;
-use risingwave_common::util::drop_either_future;
 use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_jni_core::{
     call_static_method, gen_class_name, JniReceiverType, JniSenderType, JniSinkWriterStreamRequest,
@@ -49,6 +47,8 @@ use risingwave_rpc_client::{
     BidiStreamReceiver, BidiStreamSender, SinkCoordinatorStreamHandle, SinkWriterStreamHandle,
     DEFAULT_BUFFER_SIZE,
 };
+use rw_futures_util::drop_either_future;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender};
 use tokio::task::spawn_blocking;
@@ -162,7 +162,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> anyhow::Res
         && param.downstream_pk.len() > 1
         && param.properties.get(ES_OPTION_DELIMITER).is_none()
     {
-        return Err(anyhow_error!(
+        return Err(anyhow!(
             "Es sink only support single pk or pk with delimiter option"
         ));
     }
@@ -188,7 +188,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> anyhow::Res
                 if (sink_name==ElasticSearchSink::SINK_NAME) | matches!(list.as_ref(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
                     Ok(())
                 } else{
-                    Err(SinkError::Remote(anyhow_error!(
+                    Err(SinkError::Remote(anyhow!(
                         "Remote sink only support list<int16, int32, int64, float, double, varchar>, got {:?}: {:?}",
                         col.name,
                         col.data_type,
@@ -199,14 +199,14 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> anyhow::Res
                 if sink_name==ElasticSearchSink::SINK_NAME{
                     Ok(())
                 }else{
-                    Err(SinkError::Remote(anyhow_error!(
+                    Err(SinkError::Remote(anyhow!(
                         "Only Es sink support struct, got {:?}: {:?}",
                         col.name,
                         col.data_type,
                     )))
                 }
             },
-            DataType::Serial | DataType::Int256 => Err(SinkError::Remote(anyhow_error!(
+            DataType::Serial | DataType::Int256 => Err(SinkError::Remote(anyhow!(
                             "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Timestamptz, Bytea, List and Varchar, (Es sink support Struct) got {:?}: {:?}",
                             col.name,
                             col.data_type,
@@ -516,7 +516,7 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
                 .await,
             self.param.clone(),
             writer_param.vnode_bitmap.ok_or_else(|| {
-                SinkError::Remote(anyhow_error!(
+                SinkError::Remote(anyhow!(
                     "sink needs coordination should not have singleton input"
                 ))
             })?,
@@ -602,9 +602,7 @@ impl SinkWriter for CoordinatedRemoteSinkWriter {
             .inc_by(cardinality as _);
 
         let epoch = self.epoch.ok_or_else(|| {
-            SinkError::Remote(anyhow_error!(
-                "epoch has not been initialize, call `begin_epoch`"
-            ))
+            SinkError::Remote(anyhow!("epoch has not been initialize, call `begin_epoch`"))
         })?;
         let batch_id = self.batch_id;
         self.stream_handle
@@ -626,16 +624,14 @@ impl SinkWriter for CoordinatedRemoteSinkWriter {
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Option<SinkMetadata>> {
         let epoch = self.epoch.ok_or_else(|| {
-            SinkError::Remote(anyhow_error!(
-                "epoch has not been initialize, call `begin_epoch`"
-            ))
+            SinkError::Remote(anyhow!("epoch has not been initialize, call `begin_epoch`"))
         })?;
         if is_checkpoint {
             // TODO: add metrics to measure commit time
             let rsp = self.stream_handle.commit(epoch).await?;
             rsp.metadata
                 .ok_or_else(|| {
-                    SinkError::Remote(anyhow_error!(
+                    SinkError::Remote(anyhow!(
                         "get none metadata in commit response for coordinated sink writer"
                     ))
                 })
@@ -771,11 +767,13 @@ impl EmbeddedConnectorClient {
 
         let jvm = self.jvm;
         std::thread::spawn(move || {
-            let mut env = match jvm.attach_current_thread() {
+            let mut env = match jvm
+                .attach_current_thread()
+                .context("failed to attach current thread")
+            {
                 Ok(env) => env,
                 Err(e) => {
-                    let _ = response_tx
-                        .blocking_send(Err(anyhow!("failed to attach current thread: {:?}", e)));
+                    let _ = response_tx.blocking_send(Err(e));
                     return;
                 }
             };
@@ -794,7 +792,7 @@ impl EmbeddedConnectorClient {
                     tracing::info!("end of jni call {}::{}", class_name, method_name);
                 }
                 Err(e) => {
-                    tracing::error!("jni call error: {:?}", e);
+                    tracing::error!(error = %e.as_report(), "jni call error");
                 }
             };
         });

@@ -14,13 +14,13 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::catalog::system_catalog::{
     extract_parallelism_from_table_state, BuiltinTable, SysCatalogReaderImpl,
 };
+use crate::error::Result;
 
 pub const RW_TABLE_FRAGMENTS: BuiltinTable = BuiltinTable {
     name: "rw_table_fragments",

@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::Result;
 
 use super::RwPgResponse;
+use crate::error::Result;
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
 

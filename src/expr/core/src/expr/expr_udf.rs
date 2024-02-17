@@ -20,6 +20,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use arrow_schema::{Field, Fields, Schema};
+use arrow_udf_js::{CallMode, Runtime as JsRuntime};
 use arrow_udf_wasm::Runtime as WasmRuntime;
 use await_tree::InstrumentAwait;
 use cfg_or_panic::cfg_or_panic;
@@ -61,6 +62,7 @@ const INITIAL_RETRY_COUNT: u8 = 16;
 enum UdfImpl {
     External(Arc<ArrowFlightUdfClient>),
     Wasm(Arc<WasmRuntime>),
+    JavaScript(JsRuntime),
 }
 
 #[async_trait::async_trait]
@@ -69,7 +71,6 @@ impl Expression for UserDefinedFunction {
         self.return_type.clone()
     }
 
-    #[cfg_or_panic(not(madsim))]
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let vis = input.visibility();
         let mut columns = Vec::with_capacity(self.children.len());
@@ -80,7 +81,6 @@ impl Expression for UserDefinedFunction {
         self.eval_inner(columns, vis).await
     }
 
-    #[cfg_or_panic(not(madsim))]
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let mut columns = Vec::with_capacity(self.children.len());
         for child in &self.children {
@@ -123,6 +123,7 @@ impl UserDefinedFunction {
 
         let output: arrow_array::RecordBatch = match &self.imp {
             UdfImpl::Wasm(runtime) => runtime.call(&self.identifier, &input)?,
+            UdfImpl::JavaScript(runtime) => runtime.call(&self.identifier, &input)?,
             UdfImpl::External(client) => {
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
                 let result = if disable_retry_count != 0 {
@@ -180,7 +181,6 @@ impl UserDefinedFunction {
     }
 }
 
-#[cfg_or_panic(not(madsim))]
 impl Build for UserDefinedFunction {
     fn build(
         prost: &ExprNode,
@@ -189,16 +189,40 @@ impl Build for UserDefinedFunction {
         let return_type = DataType::from(prost.get_return_type().unwrap());
         let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
 
+        let identifier = udf.get_identifier()?;
         let imp = match udf.language.as_str() {
-            "wasm" => {
+            #[cfg(not(madsim))]
+            "wasm" | "rust" => {
+                let link = udf.get_link()?;
                 // Use `block_in_place` as an escape hatch to run async code here in sync context.
                 // Calling `block_on` directly will panic.
                 UdfImpl::Wasm(tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current()
-                        .block_on(get_or_create_wasm_runtime(&udf.link))
+                    tokio::runtime::Handle::current().block_on(get_or_create_wasm_runtime(link))
                 })?)
             }
-            _ => UdfImpl::External(get_or_create_flight_client(&udf.link)?),
+            "javascript" => {
+                let mut rt = JsRuntime::new()?;
+                let body = format!(
+                    "export function {}({}) {{ {} }}",
+                    identifier,
+                    udf.arg_names.join(","),
+                    udf.get_body()?
+                );
+                rt.add_function(
+                    identifier,
+                    arrow_schema::DataType::try_from(&return_type)?,
+                    CallMode::CalledOnNullInput,
+                    &body,
+                )?;
+                UdfImpl::JavaScript(rt)
+            }
+            #[cfg(not(madsim))]
+            _ => {
+                let link = udf.get_link()?;
+                UdfImpl::External(get_or_create_flight_client(link)?)
+            }
+            #[cfg(madsim)]
+            l => panic!("UDF language {l:?} is not supported on madsim"),
         };
 
         let arg_schema = Arc::new(Schema::new(
@@ -222,8 +246,8 @@ impl Build for UserDefinedFunction {
             return_type,
             arg_schema,
             imp,
-            identifier: udf.identifier.clone(),
-            span: format!("udf_call({})", udf.identifier).into(),
+            identifier: identifier.clone(),
+            span: format!("udf_call({})", identifier).into(),
             disable_retry_count: AtomicU8::new(0),
         })
     }

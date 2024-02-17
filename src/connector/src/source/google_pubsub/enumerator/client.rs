@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, bail};
+use anyhow::{bail, Context};
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
 use google_cloud_pubsub::client::{Client, ClientConfig};
@@ -37,12 +37,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
     ) -> anyhow::Result<PubsubSplitEnumerator> {
-        let split_count = properties.split_count;
         let subscription = properties.subscription.to_owned();
-
-        if split_count < 1 {
-            bail!("split_count must be >= 1")
-        }
 
         if properties.credentials.is_none() && properties.emulator_host.is_none() {
             bail!("credentials must be set if not using the pubsub emulator")
@@ -54,13 +49,13 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         let config = ClientConfig::default().with_auth().await?;
         let client = Client::new(config)
             .await
-            .map_err(|e| anyhow!("error initializing pubsub client: {:?}", e))?;
+            .context("error initializing pubsub client")?;
 
         let sub = client.subscription(&subscription);
         if !sub
             .exists(None)
             .await
-            .map_err(|e| anyhow!("error checking subscription validity: {:?}", e))?
+            .context("error checking subscription validity")?
         {
             bail!("subscription {} does not exist", &subscription)
         }
@@ -81,25 +76,25 @@ impl SplitEnumerator for PubsubSplitEnumerator {
             (Some(start_offset), None) => {
                 let ts = start_offset
                     .parse::<i64>()
-                    .map_err(|e| anyhow!("error parsing start_offset: {:?}", e))
+                    .context("error parsing start_offset")
                     .map(|nanos| Utc.timestamp_nanos(nanos).into())?;
                 Some(SeekTo::Timestamp(ts))
             }
             (None, Some(snapshot)) => Some(SeekTo::Snapshot(snapshot)),
             (Some(_), Some(_)) => {
-                bail!("specify atmost one of start_offset or start_snapshot")
+                bail!("specify at most one of start_offset or start_snapshot")
             }
         };
 
         if let Some(seek_to) = seek_to {
             sub.seek(seek_to, None)
                 .await
-                .map_err(|e| anyhow!("error seeking subscription: {:?}", e))?;
+                .context("error seeking subscription")?;
         }
 
         Ok(Self {
             subscription,
-            split_count,
+            split_count: 1,
         })
     }
 

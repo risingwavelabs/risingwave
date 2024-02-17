@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::thread::sleep;
 use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
 use risingwave_simulation::cluster::{Cluster, Configuration};
+use tokio::time::{sleep, timeout};
+
+use crate::utils::kill_cn_and_wait_recover;
 
 const SET_PARALLELISM: &str = "SET STREAMING_PARALLELISM=1;";
 const ROOT_TABLE_CREATE: &str = "create table t1 (_id int, data jsonb);";
@@ -150,7 +152,7 @@ async fn test_arrangement_backfill_replication() -> Result<()> {
     let upstream_task = tokio::spawn(async move {
         // The initial 100 records will take approx 3s
         // After that we start ingesting upstream records.
-        sleep(Duration::from_secs(3));
+        sleep(Duration::from_secs(3)).await;
         for i in 101..=200 {
             session2
                 .run(format!("insert into t values ({})", i))
@@ -190,7 +192,96 @@ async fn test_arrangement_backfill_replication() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn test_backfill_backpressure() -> Result<()> {
+    let mut cluster = Cluster::start(Configuration::default()).await?;
+    let mut session = cluster.start_session();
+
+    // Create dimension table
+    session.run("CREATE TABLE dim (v1 int);").await?;
+    // Ingest
+    // Amplification of 200 records
+    session
+        .run("INSERT INTO dim SELECT 1 FROM generate_series(1, 200);")
+        .await?;
+    // Create fact table
+    session.run("CREATE TABLE fact (v1 int);").await?;
+    // Create sink
+    session
+        .run("CREATE SINK s1 AS SELECT fact.v1 FROM fact JOIN dim ON fact.v1 = dim.v1 with (connector='blackhole');")
+        .await?;
+    session.run("FLUSH").await?;
+
+    // Ingest
+    tokio::spawn(async move {
+        session
+            .run("INSERT INTO fact SELECT 1 FROM generate_series(1, 100000);")
+            .await
+            .unwrap();
+    })
+    .await?;
+    let mut session = cluster.start_session();
+    session.run("FLUSH").await?;
+    // Run flush to check if barrier can go through. It should be able to.
+    // There will be some latency for the initial barrier.
+    session.run("FLUSH;").await?;
+    // But after that flush should be processed timely.
+    timeout(Duration::from_secs(1), session.run("FLUSH;")).await??;
+    Ok(())
+}
+
 // TODO(kwannoel): Test case where upstream distribution is Single, then downstream
 // distribution MUST also be single, and arrangement backfill should just use Simple.
 
 // TODO(kwannoel): Test arrangement backfill background recovery.
+#[tokio::test]
+async fn test_arrangement_backfill_progress() -> Result<()> {
+    let mut cluster = Cluster::start(Configuration::for_arrangement_backfill()).await?;
+    let mut session = cluster.start_session();
+
+    // Create base table
+    session.run("CREATE TABLE t (v1 int primary key)").await?;
+
+    // Ingest data
+    session
+        .run("INSERT INTO t SELECT * FROM generate_series(1, 1000)")
+        .await?;
+    session.run("FLUSH;").await?;
+
+    // Create arrangement backfill with rate limit
+    session.run("SET STREAMING_PARALLELISM=1").await?;
+    session.run("SET BACKGROUND_DDL=true").await?;
+    session.run("SET STREAMING_RATE_LIMIT=1").await?;
+    session
+        .run("CREATE MATERIALIZED VIEW m1 AS SELECT * FROM t")
+        .await?;
+
+    // Verify arrangement backfill progress after 10s, it should be 1% at least.
+    sleep(Duration::from_secs(10)).await;
+    let progress = session
+        .run("SELECT progress FROM rw_catalog.rw_ddl_progress")
+        .await?;
+    let progress = progress.replace('%', "");
+    let progress = progress.parse::<f64>().unwrap();
+    assert!(
+        (1.0..2.0).contains(&progress),
+        "progress not within bounds {}",
+        progress
+    );
+
+    // Trigger recovery and test it again.
+    kill_cn_and_wait_recover(&cluster).await;
+    let prev_progress = progress;
+    let progress = session
+        .run("SELECT progress FROM rw_catalog.rw_ddl_progress")
+        .await?;
+    let progress = progress.replace('%', "");
+    let progress = progress.parse::<f64>().unwrap();
+    assert!(
+        (prev_progress - 0.5..prev_progress + 1.5).contains(&progress),
+        "progress not within bounds {}",
+        progress
+    );
+
+    Ok(())
+}

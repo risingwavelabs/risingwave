@@ -32,21 +32,25 @@ use crate::executor::monitor::StreamingMetrics;
 
 mod buffer;
 mod reader;
-mod serde;
+pub(crate) mod serde;
 #[cfg(test)]
 mod test_utils;
 mod writer;
 
 pub(crate) use reader::{REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY};
+use risingwave_common::hash::VirtualNode;
+use risingwave_common::row::ArrayVec;
+use risingwave_common::types::{DataType, Datum};
+use risingwave_common::util::sort_util::OrderType;
 
-type SeqIdType = i32;
+pub(crate) type SeqIdType = i32;
 type RowOpCodeType = i16;
 
-const FIRST_SEQ_ID: SeqIdType = 0;
+pub(crate) const FIRST_SEQ_ID: SeqIdType = 0;
 
 /// Readers truncate the offset at the granularity of seq id.
 /// None `SeqIdType` means that the whole epoch is truncated.
-type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
+pub(crate) type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
 
 #[derive(Clone)]
 pub(crate) struct KvLogStoreReadMetrics {
@@ -189,6 +193,121 @@ impl FlushInfo {
     }
 }
 
+type KvLogStorePkRow = ArrayVec<[Datum; 3]>;
+
+pub(crate) struct KvLogStorePkInfo {
+    pub epoch_column_index: usize,
+    pub row_op_column_index: usize,
+    pub seq_id_column_index: usize,
+    pub predefined_columns: &'static [(&'static str, DataType)],
+    pub pk_orderings: &'static [OrderType],
+    pub compute_pk:
+        fn(vnode: VirtualNode, encoded_epoch: i64, seq_id: Option<SeqIdType>) -> KvLogStorePkRow,
+}
+
+impl KvLogStorePkInfo {
+    pub fn pk_len(&self) -> usize {
+        self.pk_orderings.len()
+    }
+
+    pub fn predefined_column_len(&self) -> usize {
+        self.predefined_columns.len()
+    }
+
+    pub fn pk_types(&self) -> Vec<DataType> {
+        (0..self.pk_len())
+            .map(|i| self.predefined_columns[i].1.clone())
+            .collect()
+    }
+}
+
+#[expect(deprecated)]
+pub(crate) use v1::KV_LOG_STORE_V1_INFO;
+
+mod v1 {
+    use std::sync::LazyLock;
+
+    use risingwave_common::constants::log_store::v1::{
+        EPOCH_COLUMN_INDEX, KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, ROW_OP_COLUMN_INDEX,
+        SEQ_ID_COLUMN_INDEX,
+    };
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::types::ScalarImpl;
+
+    use super::{KvLogStorePkInfo, KvLogStorePkRow};
+    use crate::common::log_store_impl::kv_log_store::SeqIdType;
+
+    #[deprecated]
+    pub(crate) static KV_LOG_STORE_V1_INFO: LazyLock<KvLogStorePkInfo> = LazyLock::new(|| {
+        fn compute_pk(
+            _vnode: VirtualNode,
+            encoded_epoch: i64,
+            seq_id: Option<SeqIdType>,
+        ) -> KvLogStorePkRow {
+            KvLogStorePkRow::from_array_len(
+                [
+                    Some(ScalarImpl::Int64(encoded_epoch)),
+                    seq_id.map(ScalarImpl::Int32),
+                    None,
+                ],
+                2,
+            )
+        }
+        KvLogStorePkInfo {
+            epoch_column_index: EPOCH_COLUMN_INDEX,
+            row_op_column_index: ROW_OP_COLUMN_INDEX,
+            seq_id_column_index: SEQ_ID_COLUMN_INDEX,
+            predefined_columns: &KV_LOG_STORE_PREDEFINED_COLUMNS[..],
+            pk_orderings: &PK_ORDERING[..],
+            compute_pk,
+        }
+    });
+}
+
+pub(crate) use v2::KV_LOG_STORE_V2_INFO;
+
+/// A new version of log store schema. Compared to v1, the v2 added a new vnode column to the log store pk,
+/// becomes `epoch`, `seq_id` and `vnode`. In this way, providing a log store pk, we can get exactly one single row.
+///
+/// In v1, dist key is not in pk, and we will get an error in batch query when we try to compute dist key in pk indices.
+/// Now in v2, since we add a vnode column in pk, we can set the vnode index in pk correctly, and the batch query can be
+/// correctly executed. See <https://github.com/risingwavelabs/risingwave/issues/14503> for details.
+mod v2 {
+    use std::sync::LazyLock;
+
+    use risingwave_common::constants::log_store::v2::{
+        EPOCH_COLUMN_INDEX, KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, ROW_OP_COLUMN_INDEX,
+        SEQ_ID_COLUMN_INDEX,
+    };
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::types::ScalarImpl;
+
+    use super::{KvLogStorePkInfo, KvLogStorePkRow};
+    use crate::common::log_store_impl::kv_log_store::SeqIdType;
+
+    pub(crate) static KV_LOG_STORE_V2_INFO: LazyLock<KvLogStorePkInfo> = LazyLock::new(|| {
+        fn compute_pk(
+            vnode: VirtualNode,
+            encoded_epoch: i64,
+            seq_id: Option<SeqIdType>,
+        ) -> KvLogStorePkRow {
+            KvLogStorePkRow::from([
+                Some(ScalarImpl::Int64(encoded_epoch)),
+                seq_id.map(ScalarImpl::Int32),
+                vnode.to_datum(),
+            ])
+        }
+        KvLogStorePkInfo {
+            epoch_column_index: EPOCH_COLUMN_INDEX,
+            row_op_column_index: ROW_OP_COLUMN_INDEX,
+            seq_id_column_index: SEQ_ID_COLUMN_INDEX,
+            predefined_columns: &KV_LOG_STORE_PREDEFINED_COLUMNS[..],
+            pk_orderings: &PK_ORDERING[..],
+            compute_pk,
+        }
+    });
+}
+
 pub struct KvLogStoreFactory<S: StateStore> {
     state_store: S,
 
@@ -201,6 +320,8 @@ pub struct KvLogStoreFactory<S: StateStore> {
     metrics: KvLogStoreMetrics,
 
     identity: String,
+
+    pk_info: &'static KvLogStorePkInfo,
 }
 
 impl<S: StateStore> KvLogStoreFactory<S> {
@@ -211,6 +332,7 @@ impl<S: StateStore> KvLogStoreFactory<S> {
         max_row_count: usize,
         metrics: KvLogStoreMetrics,
         identity: impl Into<String>,
+        pk_info: &'static KvLogStorePkInfo,
     ) -> Self {
         Self {
             state_store,
@@ -219,6 +341,7 @@ impl<S: StateStore> KvLogStoreFactory<S> {
             max_row_count,
             metrics,
             identity: identity.into(),
+            pk_info,
         }
     }
 }
@@ -230,7 +353,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
     async fn build(self) -> (Self::Reader, Self::Writer) {
         let table_id = TableId::new(self.table_catalog.id);
         let (pause_tx, pause_rx) = watch::channel(false);
-        let serde = LogStoreRowSerde::new(&self.table_catalog, self.vnodes);
+        let serde = LogStoreRowSerde::new(&self.table_catalog, self.vnodes, self.pk_info);
         let local_state_store = self
             .state_store
             .new_local(NewLocalOptions {
@@ -296,21 +419,31 @@ mod tests {
     use crate::common::log_store_impl::kv_log_store::reader::KvLogStoreReader;
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         calculate_vnode_bitmap, check_rows_eq, check_stream_chunk_eq,
-        gen_multi_vnode_stream_chunks, gen_stream_chunk, gen_test_log_store_table, TEST_DATA_SIZE,
+        gen_multi_vnode_stream_chunks, gen_stream_chunk_with_info, gen_test_log_store_table,
+        TEST_DATA_SIZE,
     };
-    use crate::common::log_store_impl::kv_log_store::{KvLogStoreFactory, KvLogStoreMetrics};
+    use crate::common::log_store_impl::kv_log_store::{
+        KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo, KV_LOG_STORE_V2_INFO,
+    };
 
     #[tokio::test]
     async fn test_basic() {
-        for count in 0..20 {
-            test_basic_inner(count * TEST_DATA_SIZE).await
+        for count in (0..20).step_by(5) {
+            #[expect(deprecated)]
+            test_basic_inner(
+                count * TEST_DATA_SIZE,
+                &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
+            )
+            .await;
+            test_basic_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V2_INFO).await;
         }
     }
 
-    async fn test_basic_inner(max_row_count: usize) {
+    async fn test_basic_inner(max_row_count: usize, pk_info: &'static KvLogStorePkInfo) {
+        let gen_stream_chunk = |base| gen_stream_chunk_with_info(base, pk_info);
         let test_env = prepare_hummock_test_env().await;
 
-        let table = gen_test_log_store_table();
+        let table = gen_test_log_store_table(pk_info);
 
         test_env.register_table(table.clone()).await;
 
@@ -325,6 +458,7 @@ mod tests {
             max_row_count,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -395,15 +529,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_recovery() {
-        for count in 0..20 {
-            test_recovery_inner(count * TEST_DATA_SIZE).await
+        for count in (0..20).step_by(5) {
+            #[expect(deprecated)]
+            test_recovery_inner(
+                count * TEST_DATA_SIZE,
+                &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
+            )
+            .await;
+            test_recovery_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V2_INFO).await;
         }
     }
 
-    async fn test_recovery_inner(max_row_count: usize) {
+    async fn test_recovery_inner(max_row_count: usize, pk_info: &'static KvLogStorePkInfo) {
+        let gen_stream_chunk = |base| gen_stream_chunk_with_info(base, pk_info);
         let test_env = prepare_hummock_test_env().await;
 
-        let table = gen_test_log_store_table();
+        let table = gen_test_log_store_table(pk_info);
 
         test_env.register_table(table.clone()).await;
 
@@ -419,6 +560,7 @@ mod tests {
             max_row_count,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -495,6 +637,8 @@ mod tests {
             .await
             .unwrap();
 
+        drop(writer);
+
         // Recovery
         test_env.storage.clear_shared_buffer().await.unwrap();
 
@@ -506,6 +650,7 @@ mod tests {
             max_row_count,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
         writer
@@ -557,15 +702,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_truncate() {
-        for count in 2..10 {
-            test_truncate_inner(count).await
+        for count in (2..10).step_by(3) {
+            #[expect(deprecated)]
+            test_truncate_inner(
+                count,
+                &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
+            )
+            .await;
+            test_truncate_inner(count, &KV_LOG_STORE_V2_INFO).await;
         }
     }
 
-    async fn test_truncate_inner(max_row_count: usize) {
+    async fn test_truncate_inner(max_row_count: usize, pk_info: &'static KvLogStorePkInfo) {
+        let gen_stream_chunk = |base| gen_stream_chunk_with_info(base, pk_info);
         let test_env = prepare_hummock_test_env().await;
 
-        let table = gen_test_log_store_table();
+        let table = gen_test_log_store_table(pk_info);
 
         test_env.register_table(table.clone()).await;
 
@@ -589,6 +741,7 @@ mod tests {
             max_row_count,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -689,6 +842,8 @@ mod tests {
             .await
             .unwrap();
 
+        drop(writer);
+
         // Recovery
         test_env.storage.clear_shared_buffer().await.unwrap();
 
@@ -700,6 +855,7 @@ mod tests {
             max_row_count,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -768,9 +924,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_vnode_recover() {
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
         let test_env = prepare_hummock_test_env().await;
 
-        let table = gen_test_log_store_table();
+        let table = gen_test_log_store_table(pk_info);
 
         test_env.register_table(table.clone()).await;
 
@@ -792,6 +949,7 @@ mod tests {
             10 * TEST_DATA_SIZE,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let factory2 = KvLogStoreFactory::new(
             test_env.storage.clone(),
@@ -800,6 +958,7 @@ mod tests {
             10 * TEST_DATA_SIZE,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader1, mut writer1) = factory1.build().await;
         let (mut reader2, mut writer2) = factory2.build().await;
@@ -820,13 +979,13 @@ mod tests {
             .unwrap();
         reader1.init().await.unwrap();
         reader2.init().await.unwrap();
-        let [chunk1_1, chunk1_2] = gen_multi_vnode_stream_chunks::<2>(0, 100);
+        let [chunk1_1, chunk1_2] = gen_multi_vnode_stream_chunks::<2>(0, 100, pk_info);
         writer1.write_chunk(chunk1_1.clone()).await.unwrap();
         writer2.write_chunk(chunk1_2.clone()).await.unwrap();
         let epoch2 = epoch1 + 1;
         writer1.flush_current_epoch(epoch2, false).await.unwrap();
         writer2.flush_current_epoch(epoch2, false).await.unwrap();
-        let [chunk2_1, chunk2_2] = gen_multi_vnode_stream_chunks::<2>(200, 100);
+        let [chunk2_1, chunk2_2] = gen_multi_vnode_stream_chunks::<2>(200, 100, pk_info);
         writer1.write_chunk(chunk2_1.clone()).await.unwrap();
         writer2.write_chunk(chunk2_2.clone()).await.unwrap();
 
@@ -909,6 +1068,9 @@ mod tests {
             .await
             .unwrap();
 
+        drop(writer1);
+        drop(writer2);
+
         // Recovery
         test_env.storage.clear_shared_buffer().await.unwrap();
 
@@ -920,6 +1082,7 @@ mod tests {
             10 * TEST_DATA_SIZE,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
         writer
@@ -962,9 +1125,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_cancellation_safe() {
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
+        let gen_stream_chunk = |base| gen_stream_chunk_with_info(base, pk_info);
         let test_env = prepare_hummock_test_env().await;
 
-        let table = gen_test_log_store_table();
+        let table = gen_test_log_store_table(pk_info);
 
         test_env.register_table(table.clone()).await;
 
@@ -979,6 +1144,7 @@ mod tests {
             0,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1029,9 +1195,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_rewind_on_consuming_persisted_log() {
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
+        let gen_stream_chunk = |base| gen_stream_chunk_with_info(base, pk_info);
         let test_env = prepare_hummock_test_env().await;
 
-        let table = gen_test_log_store_table();
+        let table = gen_test_log_store_table(pk_info);
 
         test_env.register_table(table.clone()).await;
 
@@ -1113,6 +1281,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1215,6 +1384,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1270,6 +1440,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
 

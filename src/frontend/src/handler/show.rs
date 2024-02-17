@@ -22,7 +22,6 @@ use pgwire::pg_server::Session;
 use pgwire::types::Row;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
@@ -36,6 +35,7 @@ use serde_json;
 use super::RwPgResponse;
 use crate::binder::{Binder, Relation};
 use crate::catalog::{CatalogError, IndexCatalog};
+use crate::error::Result;
 use crate::handler::util::{col_descs_to_rows, indexes_to_rows};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
@@ -252,7 +252,7 @@ pub async fn handle_show_object(
                         Some(t.arg_types.iter().map(|t| t.to_string()).join(", ").into()),
                         Some(t.return_type.to_string().into()),
                         Some(t.language.clone().into()),
-                        Some(t.link.clone().into()),
+                        t.link.clone().map(Into::into),
                     ])
                 })
                 .collect_vec();

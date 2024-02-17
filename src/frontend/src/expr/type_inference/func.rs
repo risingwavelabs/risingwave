@@ -15,13 +15,14 @@
 use itertools::Itertools as _;
 use num_integer::Integer as _;
 use risingwave_common::bail_no_function;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::AggKind;
 pub use risingwave_expr::sig::*;
 
 use super::{align_types, cast_ok_base, CastContext};
+use crate::error::{ErrorCode, Result};
 use crate::expr::type_inference::cast::align_array_and_element;
 use crate::expr::{cast_ok, is_row_function, Expr as _, ExprImpl, ExprType, FunctionCall};
 
@@ -326,6 +327,21 @@ fn infer_type_for_special(
             .map(Some)
             .map_err(Into::into)
         }
+        ExprType::ConstantLookup => {
+            let len = inputs.len();
+            align_types(inputs.iter_mut().enumerate().filter_map(|(i, e)| {
+                // This optimized `ConstantLookup` organize `inputs` as
+                // [dummy_expression] (cond, res) [else / fallback]? pairs.
+                // So we align exprs at even indices as well as the last one
+                // when length is odd.
+                match i != 0 && i.is_even() || i == len - 1 {
+                    true => Some(e),
+                    false => None,
+                }
+            }))
+            .map(Some)
+            .map_err(Into::into)
+        }
         ExprType::In => {
             align_types(inputs.iter_mut())?;
             Ok(Some(DataType::Boolean))
@@ -578,7 +594,7 @@ fn infer_type_for_special(
         }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);
-            Ok(Some(DataType::Int16))
+            Ok(Some(VirtualNode::RW_TYPE))
         }
         ExprType::Greatest | ExprType::Least => {
             ensure_arity!("greatest/least", 1 <= | inputs |);

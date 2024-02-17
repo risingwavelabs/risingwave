@@ -29,6 +29,7 @@ use crate::handler::create_source::debezium_cdc_source_schema;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{Explain, TableCatalog};
 
@@ -68,8 +69,8 @@ impl StreamCdcTableScan {
         &self,
         state: &mut BuildFragmentGraphState,
     ) -> TableCatalog {
-        let properties = self.ctx().with_options().internal_table_subset();
-        let mut catalog_builder = TableCatalogBuilder::new(properties);
+        let _properties = self.ctx().with_options().internal_table_subset();
+        let mut catalog_builder = TableCatalogBuilder::default();
         let upstream_schema = &self.core.get_table_columns();
 
         // Use `split_id` as primary key in state table.
@@ -131,7 +132,10 @@ impl StreamNode for StreamCdcTableScan {
 }
 
 impl StreamCdcTableScan {
-    pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> PbStreamNode {
+    pub fn adhoc_to_stream_prost(
+        &self,
+        state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<PbStreamNode> {
         use risingwave_pb::stream_plan::*;
 
         let stream_key = self
@@ -195,7 +199,6 @@ impl StreamCdcTableScan {
             node_body: Some(PbNodeBody::CdcFilter(CdcFilterNode {
                 search_condition: Some(filter_expr.to_expr_proto()),
                 upstream_source_id,
-                upstream_column_ids: vec![], // not used,
             })),
         };
 
@@ -251,10 +254,12 @@ impl StreamCdcTableScan {
             // The table desc used by backfill executor
             state_table: Some(catalog),
             cdc_table_desc: Some(self.core.cdc_table_desc.to_protobuf()),
+            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+            disable_backfill: self.core.disable_backfill,
         });
 
         // plan: merge -> filter -> exchange(simple) -> stream_scan
-        PbStreamNode {
+        Ok(PbStreamNode {
             fields: self.schema().to_prost(),
             input: vec![exchange_stream_node],
             node_body: Some(stream_scan_body),
@@ -262,7 +267,7 @@ impl StreamCdcTableScan {
             operator_id: self.base.id().0 as u64,
             identity: self.distill_to_string(),
             append_only: self.append_only(),
-        }
+        })
     }
 
     pub fn build_cdc_filter_expr(cdc_table_name: &str) -> ExprImpl {

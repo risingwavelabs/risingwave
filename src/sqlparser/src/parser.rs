@@ -80,6 +80,17 @@ pub enum IsLateral {
 
 use IsLateral::*;
 
+pub type IncludeOption = Vec<IncludeOptionItem>;
+
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Eq, Clone, Debug, PartialEq, Hash)]
+pub struct IncludeOptionItem {
+    pub column_type: Ident,
+    pub column_alias: Option<Ident>,
+    pub inner_field: Option<String>,
+    pub header_inner_expect_type: Option<DataType>,
+}
+
 #[derive(Debug)]
 pub enum WildcardOrExpr {
     Expr(Expr),
@@ -131,7 +142,12 @@ impl fmt::Display for ParserError {
 #[cfg(feature = "std")]
 impl std::error::Error for ParserError {}
 
-type ColumnsDefTuple = (Vec<ColumnDef>, Vec<TableConstraint>, Vec<SourceWatermark>);
+type ColumnsDefTuple = (
+    Vec<ColumnDef>,
+    Vec<TableConstraint>,
+    Vec<SourceWatermark>,
+    Option<usize>,
+);
 
 /// Reference:
 /// <https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-PRECEDENCE>
@@ -907,7 +923,7 @@ impl Parser {
         })
     }
 
-    /// Parse `CURRENT ROW` or `{ <positive number> | UNBOUNDED } { PRECEDING | FOLLOWING }`
+    /// Parse `CURRENT ROW` or `{ <non-negative numeric | datetime | interval> | UNBOUNDED } { PRECEDING | FOLLOWING }`
     pub fn parse_window_frame_bound(&mut self) -> Result<WindowFrameBound, ParserError> {
         if self.parse_keywords(&[Keyword::CURRENT, Keyword::ROW]) {
             Ok(WindowFrameBound::CurrentRow)
@@ -915,7 +931,7 @@ impl Parser {
             let rows = if self.parse_keyword(Keyword::UNBOUNDED) {
                 None
             } else {
-                Some(self.parse_literal_uint()?)
+                Some(Box::new(self.parse_expr()?))
             };
             if self.parse_keyword(Keyword::PRECEDING) {
                 Ok(WindowFrameBound::Preceding(rows))
@@ -2455,7 +2471,8 @@ impl Parser {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         let table_name = self.parse_object_name()?;
         // parse optional column list (schema) and watermarks on source.
-        let (columns, constraints, source_watermarks) = self.parse_columns_with_watermark()?;
+        let (columns, constraints, source_watermarks, wildcard_idx) =
+            self.parse_columns_with_watermark()?;
 
         let append_only = if self.parse_keyword(Keyword::APPEND) {
             self.expect_keyword(Keyword::ONLY)?;
@@ -2507,6 +2524,7 @@ impl Parser {
             name: table_name,
             temporary,
             columns,
+            wildcard_idx,
             constraints,
             with_options,
             or_replace,
@@ -2520,16 +2538,46 @@ impl Parser {
         })
     }
 
-    pub fn parse_include_options(&mut self) -> Result<Vec<(Ident, Option<Ident>)>, ParserError> {
+    pub fn parse_include_options(&mut self) -> Result<IncludeOption, ParserError> {
         let mut options = vec![];
         while self.parse_keyword(Keyword::INCLUDE) {
-            let add_column = self.parse_identifier()?;
-            if self.parse_keyword(Keyword::AS) {
-                let column_alias = self.parse_identifier()?;
-                options.push((add_column, Some(column_alias)));
-            } else {
-                options.push((add_column, None));
+            let column_type = self.parse_identifier()?;
+
+            let mut column_inner_field = None;
+            let mut header_inner_expect_type = None;
+            if let Token::SingleQuotedString(inner_field) = self.peek_token().token {
+                self.next_token();
+                column_inner_field = Some(inner_field);
+
+                if let Token::Word(w) = self.peek_token().token {
+                    match w.keyword {
+                        Keyword::BYTEA => {
+                            header_inner_expect_type = Some(DataType::Bytea);
+                            self.next_token();
+                        }
+                        Keyword::VARCHAR => {
+                            header_inner_expect_type = Some(DataType::Varchar);
+                            self.next_token();
+                        }
+                        _ => {
+                            // default to bytea
+                            header_inner_expect_type = Some(DataType::Bytea);
+                        }
+                    }
+                }
             }
+
+            let mut column_alias = None;
+            if self.parse_keyword(Keyword::AS) {
+                column_alias = Some(self.parse_identifier()?);
+            }
+
+            options.push(IncludeOptionItem {
+                column_type,
+                inner_field: column_inner_field,
+                column_alias,
+                header_inner_expect_type,
+            });
         }
         Ok(options)
     }
@@ -2538,12 +2586,21 @@ impl Parser {
         let mut columns = vec![];
         let mut constraints = vec![];
         let mut watermarks = vec![];
+        let mut wildcard_idx = None;
         if !self.consume_token(&Token::LParen) || self.consume_token(&Token::RParen) {
-            return Ok((columns, constraints, watermarks));
+            return Ok((columns, constraints, watermarks, wildcard_idx));
         }
 
         loop {
-            if let Some(constraint) = self.parse_optional_table_constraint()? {
+            if self.consume_token(&Token::Mul) {
+                if wildcard_idx.is_none() {
+                    wildcard_idx = Some(columns.len());
+                } else {
+                    return Err(ParserError::ParserError(
+                        "At most 1 wildcard is allowed in source definetion".to_string(),
+                    ));
+                }
+            } else if let Some(constraint) = self.parse_optional_table_constraint()? {
                 constraints.push(constraint);
             } else if let Some(watermark) = self.parse_optional_watermark()? {
                 watermarks.push(watermark);
@@ -2567,7 +2624,7 @@ impl Parser {
             }
         }
 
-        Ok((columns, constraints, watermarks))
+        Ok((columns, constraints, watermarks, wildcard_idx))
     }
 
     fn parse_column_def(&mut self) -> Result<ColumnDef, ParserError> {
@@ -2960,7 +3017,12 @@ impl Parser {
 
                 let value = self.parse_set_variable()?;
 
-                AlterTableOperation::SetParallelism { parallelism: value }
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterTableOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else {
                 return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
             }
@@ -3039,7 +3101,12 @@ impl Parser {
 
                 let value = self.parse_set_variable()?;
 
-                AlterIndexOperation::SetParallelism { parallelism: value }
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterIndexOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else {
                 return self.expected("PARALLELISM after SET", self.peek_token());
             }
@@ -3085,7 +3152,12 @@ impl Parser {
 
                 let value = self.parse_set_variable()?;
 
-                AlterViewOperation::SetParallelism { parallelism: value }
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterViewOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else {
                 return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
             }
@@ -3137,8 +3209,12 @@ impl Parser {
                 }
 
                 let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
 
-                AlterSinkOperation::SetParallelism { parallelism: value }
+                AlterSinkOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else {
                 return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
             }
@@ -3183,6 +3259,9 @@ impl Parser {
             } else {
                 return self.expected("SCHEMA after SET", self.peek_token());
             }
+        } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
+            let connector_schema = self.parse_schema()?.unwrap();
+            AlterSourceOperation::FormatEncode { connector_schema }
         } else {
             return self.expected(
                 "RENAME, ADD COLUMN or OWNER TO or SET after ALTER SOURCE",

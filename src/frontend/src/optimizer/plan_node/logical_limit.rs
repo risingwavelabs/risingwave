@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use super::utils::impl_distill_by_unit;
@@ -20,6 +19,7 @@ use super::{
     gen_filter_and_pushdown, generic, BatchLimit, ColPrunable, ExprRewritable, Logical, PlanBase,
     PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
+use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, LogicalTopN, PredicatePushdownContext, RewriteStreamContext,

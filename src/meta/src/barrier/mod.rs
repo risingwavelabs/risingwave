@@ -24,17 +24,17 @@ use itertools::Itertools;
 use prometheus::HistogramTimer;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::table_watermark::{
     merge_multiple_new_table_watermarks, TableWatermarks,
 };
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
-use risingwave_meta_model_v2::ObjectId;
 use risingwave_pb::catalog::table::TableType;
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -42,22 +42,25 @@ use thiserror_ext::AsReport;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-use tracing::Instrument;
+use tracing::{info, warn, Instrument};
 
 use self::command::CommandContext;
-use self::info::BarrierActorInfo;
 use self::notifier::Notifier;
 use self::progress::TrackingCommand;
+use crate::barrier::info::InflightActorInfo;
 use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::rpc::BarrierRpcManager;
+use crate::barrier::state::BarrierManagerState;
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
-use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager, WorkerId};
-use crate::model::{ActorId, BarrierManagerState, TableFragments};
+use crate::manager::{
+    ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv, MetadataManager, WorkerId,
+};
+use crate::model::{ActorId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
-use crate::stream::{ScaleController, ScaleControllerRef, SourceManagerRef};
+use crate::stream::{ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 mod command;
@@ -67,9 +70,11 @@ mod progress;
 mod recovery;
 mod rpc;
 mod schedule;
+mod state;
 mod trace;
 
 pub use self::command::{Command, ReplaceTablePlan, Reschedule};
+pub use self::rpc::StreamRpcManager;
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
 
@@ -130,35 +135,6 @@ struct Scheduled {
     checkpoint: bool,
 }
 
-/// Changes to the actors to be sent or collected after this command is committed.
-///
-/// Since the checkpoints might be concurrent, the meta store of table fragments is only updated
-/// after the command is committed. When resolving the actor info for those commands after this
-/// command, this command might be in-flight and the changes are not yet committed, so we need to
-/// record these uncommitted changes and assume they will be eventually successful.
-///
-/// See also [`CheckpointControl::can_actor_send_or_collect`].
-#[derive(Debug, Clone)]
-pub enum CommandChanges {
-    /// These tables will be dropped.
-    DropTables(HashSet<TableId>),
-    /// This table will be created.
-    CreateTable(TableId),
-    /// Some actors will be added or removed.
-    Actor {
-        to_add: HashSet<ActorId>,
-        to_remove: HashSet<ActorId>,
-    },
-    /// This is used for sinking into the table, featuring both `CreateTable` and `Actor` changes.
-    CreateSinkIntoTable {
-        sink_id: TableId,
-        to_add: HashSet<ActorId>,
-        to_remove: HashSet<ActorId>,
-    },
-    /// No changes.
-    None,
-}
-
 #[derive(Clone)]
 pub struct GlobalBarrierManagerContext {
     status: Arc<Mutex<BarrierManagerStatus>>,
@@ -171,11 +147,13 @@ pub struct GlobalBarrierManagerContext {
 
     source_manager: SourceManagerRef,
 
-    scale_controller: Option<ScaleControllerRef>,
+    scale_controller: ScaleControllerRef,
 
     sink_manager: SinkCoordinatorManager,
 
     metrics: Arc<MetaMetrics>,
+
+    stream_rpc_manager: StreamRpcManager,
 
     env: MetaSrvEnv,
 }
@@ -208,25 +186,14 @@ pub struct GlobalBarrierManager {
     checkpoint_control: CheckpointControl,
 
     rpc_manager: BarrierRpcManager,
+
+    active_streaming_nodes: ActiveStreamingWorkerNodes,
 }
 
 /// Controls the concurrent execution of commands.
 struct CheckpointControl {
     /// Save the state and message of barrier in order.
     command_ctx_queue: VecDeque<EpochNode>,
-
-    // Below for uncommitted changes for the inflight barriers.
-    /// In addition to the actors with status `Running`. The barrier needs to send or collect the
-    /// actors of these tables.
-    creating_tables: HashSet<TableId>,
-    /// The barrier does not send or collect the actors of these tables, even if they are
-    /// `Running`.
-    dropping_tables: HashSet<TableId>,
-    /// In addition to the actors with status `Running`. The barrier needs to send or collect these
-    /// actors.
-    adding_actors: HashSet<ActorId>,
-    /// The barrier does not send or collect these actors, even if they are `Running`.
-    removing_actors: HashSet<ActorId>,
 
     metrics: Arc<MetaMetrics>,
 
@@ -238,10 +205,6 @@ impl CheckpointControl {
     fn new(metrics: Arc<MetaMetrics>) -> Self {
         Self {
             command_ctx_queue: Default::default(),
-            creating_tables: Default::default(),
-            dropping_tables: Default::default(),
-            adding_actors: Default::default(),
-            removing_actors: Default::default(),
             metrics,
             finished_jobs: Default::default(),
         }
@@ -275,7 +238,6 @@ impl CheckpointControl {
                 x.command_ctx.prev_epoch.value() == cancelled_command.context.prev_epoch.value()
             }) {
                 self.command_ctx_queue.remove(index);
-                self.remove_changes(cancelled_command.context.command.changes());
             }
         } else {
             // Recovered jobs do not need to be cancelled since only `RUNNING` actors will get recovered.
@@ -285,98 +247,6 @@ impl CheckpointControl {
     fn cancel_stashed_command(&mut self, id: TableId) {
         self.finished_jobs
             .retain(|x| x.table_to_create() != Some(id));
-    }
-
-    /// Before resolving the actors to be sent or collected, we should first record the newly
-    /// created table and added actors into checkpoint control, so that `can_actor_send_or_collect`
-    /// will return `true`.
-    fn pre_resolve(&mut self, command: &Command) {
-        self.pre_resolve_helper(command.changes());
-    }
-
-    fn pre_resolve_helper(&mut self, changes: CommandChanges) {
-        match changes {
-            CommandChanges::CreateTable(table) => {
-                assert!(
-                    !self.dropping_tables.contains(&table),
-                    "conflict table in concurrent checkpoint"
-                );
-                assert!(
-                    self.creating_tables.insert(table),
-                    "duplicated table in concurrent checkpoint"
-                );
-            }
-
-            CommandChanges::Actor { to_add, .. } => {
-                assert!(
-                    self.adding_actors.is_disjoint(&to_add),
-                    "duplicated actor in concurrent checkpoint"
-                );
-                self.adding_actors.extend(to_add);
-            }
-
-            CommandChanges::CreateSinkIntoTable {
-                sink_id,
-                to_add,
-                to_remove,
-            } => {
-                self.pre_resolve_helper(CommandChanges::CreateTable(sink_id));
-                self.pre_resolve_helper(CommandChanges::Actor { to_add, to_remove });
-            }
-
-            _ => {}
-        }
-    }
-
-    /// After resolving the actors to be sent or collected, we should remove the dropped table and
-    /// removed actors from checkpoint control, so that `can_actor_send_or_collect` will return
-    /// `false`.
-    fn post_resolve(&mut self, command: &Command) {
-        self.post_resolve_helper(command.changes());
-    }
-
-    fn post_resolve_helper(&mut self, change: CommandChanges) {
-        match change {
-            CommandChanges::DropTables(tables) => {
-                assert!(
-                    self.dropping_tables.is_disjoint(&tables),
-                    "duplicated table in concurrent checkpoint"
-                );
-                self.dropping_tables.extend(tables);
-            }
-
-            CommandChanges::Actor { to_remove, .. }
-            | CommandChanges::CreateSinkIntoTable { to_remove, .. } => {
-                assert!(
-                    self.removing_actors.is_disjoint(&to_remove),
-                    "duplicated actor in concurrent checkpoint"
-                );
-                self.removing_actors.extend(to_remove);
-            }
-            _ => {}
-        }
-    }
-
-    /// Barrier can be sent to and collected from an actor if:
-    /// 1. The actor is Running and not being dropped or removed in rescheduling.
-    /// 2. The actor is Inactive and belongs to a creating MV or adding in rescheduling and not
-    /// belongs to a canceling command.
-    fn can_actor_send_or_collect(
-        &self,
-        s: ActorState,
-        table_id: TableId,
-        actor_id: ActorId,
-    ) -> bool {
-        let removing =
-            self.dropping_tables.contains(&table_id) || self.removing_actors.contains(&actor_id);
-        let adding =
-            self.creating_tables.contains(&table_id) || self.adding_actors.contains(&actor_id);
-
-        match s {
-            ActorState::Inactive => adding && !removing,
-            ActorState::Running => !removing,
-            ActorState::Unspecified => unreachable!(),
-        }
     }
 
     /// Update the metrics of barrier nums.
@@ -432,18 +302,11 @@ impl CheckpointControl {
             .unwrap_or(self.command_ctx_queue.len());
         let complete_nodes = self.command_ctx_queue.drain(..index).collect_vec();
         complete_nodes
-            .iter()
-            .for_each(|node| self.remove_changes(node.command_ctx.command.changes()));
-        complete_nodes
     }
 
     /// Remove all nodes from queue and return them.
     fn barrier_failed(&mut self) -> Vec<EpochNode> {
-        let complete_nodes = self.command_ctx_queue.drain(..).collect_vec();
-        complete_nodes
-            .iter()
-            .for_each(|node| self.remove_changes(node.command_ctx.command.changes()));
-        complete_nodes
+        self.command_ctx_queue.drain(..).collect_vec()
     }
 
     /// Pause inject barrier until True.
@@ -478,54 +341,8 @@ impl CheckpointControl {
             .any(|x| x.command_ctx.prev_epoch.value().0 == epoch)
     }
 
-    /// After some command is committed, the changes will be applied to the meta store so we can
-    /// remove the changes from checkpoint control.
-    pub fn remove_changes(&mut self, changes: CommandChanges) {
-        match changes {
-            CommandChanges::CreateTable(table_id) => {
-                assert!(self.creating_tables.remove(&table_id));
-            }
-            CommandChanges::DropTables(table_ids) => {
-                assert!(self.dropping_tables.is_superset(&table_ids));
-                self.dropping_tables.retain(|a| !table_ids.contains(a));
-            }
-            CommandChanges::Actor { to_add, to_remove } => {
-                assert!(self.adding_actors.is_superset(&to_add));
-                assert!(self.removing_actors.is_superset(&to_remove));
-
-                self.adding_actors.retain(|a| !to_add.contains(a));
-                self.removing_actors.retain(|a| !to_remove.contains(a));
-            }
-            CommandChanges::None => {}
-            CommandChanges::CreateSinkIntoTable {
-                sink_id,
-                to_add,
-                to_remove,
-            } => {
-                self.remove_changes(CommandChanges::CreateTable(sink_id));
-                self.remove_changes(CommandChanges::Actor { to_add, to_remove });
-            }
-        }
-    }
-
     /// We need to make sure there are no changes when doing recovery
     pub fn clear_changes(&mut self) {
-        if !self.creating_tables.is_empty() {
-            tracing::warn!("there are some changes in creating_tables");
-            self.creating_tables.clear();
-        }
-        if !self.removing_actors.is_empty() {
-            tracing::warn!("there are some changes in removing_actors");
-            self.removing_actors.clear();
-        }
-        if !self.adding_actors.is_empty() {
-            tracing::warn!("there are some changes in adding_actors");
-            self.adding_actors.clear();
-        }
-        if !self.dropping_tables.is_empty() {
-            tracing::warn!("there are some changes in dropping_tables");
-            self.dropping_tables.clear();
-        }
         self.finished_jobs.clear();
     }
 }
@@ -572,24 +389,23 @@ impl GlobalBarrierManager {
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         metrics: Arc<MetaMetrics>,
+        stream_rpc_manager: StreamRpcManager,
+        scale_controller: ScaleControllerRef,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
 
-        let initial_invalid_state =
-            BarrierManagerState::new(TracedEpoch::new(Epoch(INVALID_EPOCH)), None);
+        let initial_invalid_state = BarrierManagerState::new(
+            TracedEpoch::new(Epoch(INVALID_EPOCH)),
+            InflightActorInfo::default(),
+            None,
+        );
         let checkpoint_control = CheckpointControl::new(metrics.clone());
+
+        let active_streaming_nodes = ActiveStreamingWorkerNodes::uninitialized();
 
         let tracker = CreateMviewProgressTracker::new();
 
-        let scale_controller = match &metadata_manager {
-            MetadataManager::V1(_) => Some(Arc::new(ScaleController::new(
-                &metadata_manager,
-                source_manager.clone(),
-                env.clone(),
-            ))),
-            MetadataManager::V2(_) => None,
-        };
         let context = GlobalBarrierManagerContext {
             status: Arc::new(Mutex::new(BarrierManagerStatus::Starting)),
             metadata_manager,
@@ -599,6 +415,7 @@ impl GlobalBarrierManager {
             sink_manager,
             metrics,
             tracker: Arc::new(Mutex::new(tracker)),
+            stream_rpc_manager,
             env: env.clone(),
         };
 
@@ -613,6 +430,7 @@ impl GlobalBarrierManager {
             state: initial_invalid_state,
             checkpoint_control,
             rpc_manager,
+            active_streaming_nodes,
         }
     }
 
@@ -637,7 +455,7 @@ impl GlobalBarrierManager {
             .await
             .pause_on_next_bootstrap();
         if paused {
-            tracing::warn!(
+            warn!(
                 "The cluster will bootstrap with all data sources paused as specified by the system parameter `{}`. \
                  It will now be reset to `false`. \
                  To resume the data sources, either restart the cluster again or use `risectl meta resume`.",
@@ -650,6 +468,7 @@ impl GlobalBarrierManager {
             } else {
                 self.env
                     .system_params_manager()
+                    .unwrap()
                     .set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
                     .await?;
             }
@@ -687,7 +506,7 @@ impl GlobalBarrierManager {
             }
         }
 
-        self.state = {
+        {
             let latest_snapshot = self.context.hummock_manager.latest_snapshot();
             assert_eq!(
                 latest_snapshot.committed_epoch, latest_snapshot.current_epoch,
@@ -707,11 +526,10 @@ impl GlobalBarrierManager {
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
             let paused_reason = paused.then_some(PausedReason::Manual);
 
-            self.context
-                .recovery(prev_epoch, paused_reason, &self.scheduled_barriers)
+            self.recovery(prev_epoch, paused_reason)
                 .instrument(span)
-                .await
-        };
+                .await;
+        }
 
         self.context.set_status(BarrierManagerStatus::Running).await;
 
@@ -734,6 +552,59 @@ impl GlobalBarrierManager {
                     tracing::info!("Barrier manager is stopped");
                     break;
                 }
+
+                changed_worker = self.active_streaming_nodes.changed() => {
+                    #[cfg(debug_assertions)]
+                    {
+                        match self
+                            .context
+                            .metadata_manager
+                            .list_active_streaming_compute_nodes()
+                            .await
+                        {
+                            Ok(worker_nodes) => {
+                                let ignore_irrelevant_info = |node: &WorkerNode| {
+                                    (
+                                        node.id,
+                                        WorkerNode {
+                                            id: node.id,
+                                            r#type: node.r#type,
+                                            host: node.host.clone(),
+                                            parallel_units: node.parallel_units.clone(),
+                                            property: node.property.clone(),
+                                            resource: node.resource.clone(),
+                                            ..Default::default()
+                                        },
+                                    )
+                                };
+                                let worker_nodes: HashMap<_, _> =
+                                    worker_nodes.iter().map(ignore_irrelevant_info).collect();
+                                let curr_worker_nodes: HashMap<_, _> = self
+                                    .active_streaming_nodes
+                                    .current()
+                                    .values()
+                                    .map(ignore_irrelevant_info)
+                                    .collect();
+                                if worker_nodes != curr_worker_nodes {
+                                    warn!(
+                                        ?worker_nodes,
+                                        ?curr_worker_nodes,
+                                        "different to global snapshot"
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                warn!(e = ?e.as_report(), "fail to list_active_streaming_compute_nodes to compare with local snapshot");
+                            }
+                        }
+                    }
+
+                    info!(?changed_worker, "worker changed");
+
+                    self.state
+                        .resolve_worker_nodes(self.active_streaming_nodes.current().values().cloned());
+                }
+
                 // Checkpoint frequency changes.
                 notification = local_notification_rx.recv() => {
                     let notification = notification.unwrap();
@@ -783,15 +654,8 @@ impl GlobalBarrierManager {
             checkpoint,
             span,
         } = self.scheduled_barriers.pop_or_default().await;
-        self.checkpoint_control.pre_resolve(&command);
-        let info = self
-            .context
-            .resolve_actor_info(|s: ActorState, table_id: TableId, actor_id: ActorId| {
-                self.checkpoint_control
-                    .can_actor_send_or_collect(s, table_id, actor_id)
-            })
-            .await;
-        self.checkpoint_control.post_resolve(&command);
+
+        let info = self.state.apply_command(&command);
 
         let (prev_epoch, curr_epoch) = self.state.next_epoch_pair();
         let kind = if checkpoint {
@@ -857,7 +721,7 @@ impl GlobalBarrierManager {
             // back to frontend
             fail_point!("inject_barrier_err_success");
             let fail_node = self.checkpoint_control.barrier_failed();
-            tracing::warn!(prev_epoch, error = %err.as_report(), "Failed to complete epoch");
+            warn!(%prev_epoch, error = %err.as_report(), "Failed to complete epoch");
             self.failure_recovery(err, fail_node).await;
             return;
         }
@@ -882,7 +746,7 @@ impl GlobalBarrierManager {
                 .drain(index..)
                 .chain(self.checkpoint_control.barrier_failed().into_iter())
                 .collect_vec();
-            tracing::warn!("Failed to commit epoch {}: {:?}", prev_epoch, err);
+            warn!(%prev_epoch, error = %err.as_report(), "Failed to commit epoch");
             self.failure_recovery(err, fail_nodes).await;
         }
     }
@@ -917,20 +781,16 @@ impl GlobalBarrierManager {
             let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch
             let span = tracing::info_span!(
                 "failure_recovery",
-                %err,
+                error = %err.as_report(),
                 prev_epoch = prev_epoch.value().0
             );
 
             // No need to clean dirty tables for barrier recovery,
             // The foreground stream job should cleanup their own tables.
-            self.state = self
-                .context
-                .recovery(prev_epoch, None, &self.scheduled_barriers)
-                .instrument(span)
-                .await;
+            self.recovery(prev_epoch, None).instrument(span).await;
             self.context.set_status(BarrierManagerStatus::Running).await;
         } else {
-            panic!("failed to execute barrier: {:?}", err);
+            panic!("failed to execute barrier: {}", err.as_report());
         }
     }
 
@@ -1105,42 +965,22 @@ impl GlobalBarrierManagerContext {
     /// will create or drop before this barrier flow through them.
     async fn resolve_actor_info(
         &self,
-        check_state: impl Fn(ActorState, TableId, ActorId) -> bool,
-    ) -> BarrierActorInfo {
+        all_nodes: Vec<WorkerNode>,
+    ) -> MetaResult<InflightActorInfo> {
         let info = match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
-                let all_nodes = mgr
-                    .cluster_manager
-                    .list_active_streaming_compute_nodes()
-                    .await;
-                let all_actor_infos = mgr.fragment_manager.load_all_actors(&check_state).await;
+                let all_actor_infos = mgr.fragment_manager.load_all_actors().await;
 
-                BarrierActorInfo::resolve(all_nodes, all_actor_infos)
+                InflightActorInfo::resolve(all_nodes, all_actor_infos)
             }
             MetadataManager::V2(mgr) => {
-                let check_state = |s: ActorState, table_id: ObjectId, actor_id: i32| {
-                    check_state(s, TableId::new(table_id as _), actor_id as _)
-                };
-                let all_nodes = mgr
-                    .cluster_controller
-                    .list_active_streaming_workers()
-                    .await
-                    .unwrap();
-                let pu_mappings = all_nodes
-                    .iter()
-                    .flat_map(|node| node.parallel_units.iter().map(|pu| (pu.id, pu.clone())))
-                    .collect();
-                let all_actor_infos = mgr
-                    .catalog_controller
-                    .load_all_actors(&pu_mappings, check_state)
-                    .await
-                    .unwrap();
+                let all_actor_infos = mgr.catalog_controller.load_all_actors().await?;
 
-                BarrierActorInfo::resolve(all_nodes, all_actor_infos)
+                InflightActorInfo::resolve(all_nodes, all_actor_infos)
             }
         };
 
-        info
+        Ok(info)
     }
 
     pub async fn get_ddl_progress(&self) -> Vec<DdlProgress> {

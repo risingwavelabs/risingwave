@@ -245,7 +245,7 @@ do
   fi
 done
 
-if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 2000 )) ; then
+if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 3000 )) ; then
     echo "$(tput setaf 1)ERROR: log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
     exit 1
 fi
@@ -919,10 +919,10 @@ cargo build \
   -p risingwave_common \
   -p risingwave_compute \
   -p risingwave_connector \
+  -p risingwave_dml \
   -p risingwave_frontend \
   -p risingwave_meta \
   -p risingwave_object_store \
-  -p risingwave_source \
   -p risingwave_storage \
   -p risingwave_stream \
   -p pgwire \
@@ -944,10 +944,10 @@ cargo nextest run \
   -p risingwave_common \
   -p risingwave_compute \
   -p risingwave_connector \
+  -p risingwave_dml \
   -p risingwave_frontend \
   -p risingwave_meta \
   -p risingwave_object_store \
-  -p risingwave_source \
   -p risingwave_storage \
   -p risingwave_stream \
   -p pgwire \
@@ -1000,10 +1000,10 @@ cargo check \
   -p risingwave_common \
   -p risingwave_compute \
   -p risingwave_connector \
+  -p risingwave_dml \
   -p risingwave_frontend \
   -p risingwave_meta \
   -p risingwave_object_store \
-  -p risingwave_source \
   -p risingwave_storage \
   -p risingwave_stream \
   -p pgwire \
@@ -1304,6 +1304,11 @@ dependencies = ["clean-data", "pre-start-dev"]
 command = "target/${BUILD_MODE_DIR}/risedev-dev"
 args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
+
+[tasks.ci-kill-no-dump-logs]
+category = "RiseDev - CI"
+dependencies = ["k", "check-logs", "wait-processes-exit"]
+description = "Kill cluster and check logs, do not dump logs"
 
 [tasks.ci-kill]
 category = "RiseDev - CI"

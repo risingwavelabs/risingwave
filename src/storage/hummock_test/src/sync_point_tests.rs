@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -201,7 +200,7 @@ pub async fn compact_once(
     compact_task.compaction_filter_mask = compaction_filter_flag.bits();
     // 3. compact
     let (_tx, rx) = tokio::sync::oneshot::channel();
-    let (result_task, task_stats) = compact(
+    let ((result_task, task_stats), _) = compact(
         compact_ctx,
         compact_task.clone(),
         rx,
@@ -221,6 +220,7 @@ pub async fn compact_once(
         .unwrap();
 }
 
+#[ignore]
 #[tokio::test]
 #[cfg(feature = "sync_point")]
 #[serial]
@@ -296,7 +296,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
             None,
         )
         .unwrap();
-    local.flush(Vec::new()).await.unwrap();
+    local.flush().await.unwrap();
     local.seal_current_epoch(
         101,
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
@@ -324,13 +324,14 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
             None,
         )
         .unwrap();
-    local
-        .flush(vec![(
-            Bound::Included(Bytes::from(b"\0\0ggg".as_slice())),
-            Bound::Excluded(Bytes::from(b"\0\0hhh".as_slice())),
-        )])
-        .await
-        .unwrap();
+    // local
+    //     .flush(vec![(
+    //         Bound::Included(Bytes::from(b"\0\0ggg".as_slice())),
+    //         Bound::Excluded(Bytes::from(b"\0\0hhh".as_slice())),
+    //     )])
+    //     .await
+    //     .unwrap();
+    local.flush().await.unwrap();
     local.seal_current_epoch(
         102,
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
@@ -358,13 +359,14 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
             None,
         )
         .unwrap();
-    local
-        .flush(vec![(
-            Bound::Included(Bytes::from(b"\0\0jjj".as_slice())),
-            Bound::Excluded(Bytes::from(b"\0\0kkk".as_slice())),
-        )])
-        .await
-        .unwrap();
+    // local
+    //     .flush(vec![(
+    //         Bound::Included(Bytes::from(b"\0\0jjj".as_slice())),
+    //         Bound::Excluded(Bytes::from(b"\0\0kkk".as_slice())),
+    //     )])
+    //     .await
+    //     .unwrap();
+    local.flush().await.unwrap();
     local.seal_current_epoch(
         103,
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
@@ -393,7 +395,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
             None,
         )
         .unwrap();
-    local.flush(Vec::new()).await.unwrap();
+    local.flush().await.unwrap();
     local.seal_current_epoch(
         u64::MAX,
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),

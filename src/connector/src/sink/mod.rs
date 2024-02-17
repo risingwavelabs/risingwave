@@ -27,6 +27,7 @@ pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
 pub mod log_store;
+pub mod mock_coordination_client;
 pub mod nats;
 pub mod pulsar;
 pub mod redis;
@@ -47,7 +48,6 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
-use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
 };
@@ -56,15 +56,18 @@ use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
+use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
 use crate::ConnectorParams;
 
+const BOUNDED_CHANNEL_SIZE: usize = 16;
 #[macro_export]
 macro_rules! for_all_sinks {
     ($macro:path $(, $arg:tt)*) => {
@@ -265,8 +268,36 @@ pub struct SinkWriterParam {
     pub connector_params: ConnectorParams,
     pub executor_id: u64,
     pub vnode_bitmap: Option<Bitmap>,
-    pub meta_client: Option<MetaClient>,
+    pub meta_client: Option<SinkMetaClient>,
     pub sink_metrics: SinkMetrics,
+    // The val has two effect:
+    // 1. Indicates that the sink will accpect the data chunk with extra partition value column.
+    // 2. The index of the extra partition value column.
+    // More detail of partition value column, see `PartitionComputeInfo`
+    pub extra_partition_col_idx: Option<usize>,
+}
+
+#[derive(Clone)]
+pub enum SinkMetaClient {
+    MetaClient(MetaClient),
+    MockMetaClient(MockMetaClient),
+}
+
+impl SinkMetaClient {
+    pub async fn sink_coordinate_client(&self) -> SinkCoordinationRpcClientEnum {
+        match self {
+            SinkMetaClient::MetaClient(meta_client) => {
+                SinkCoordinationRpcClientEnum::SinkCoordinationRpcClient(
+                    meta_client.sink_coordinate_client().await,
+                )
+            }
+            SinkMetaClient::MockMetaClient(mock_meta_client) => {
+                SinkCoordinationRpcClientEnum::MockSinkCoordinationRpcClient(
+                    mock_meta_client.sink_coordinate_client(),
+                )
+            }
+        }
+    }
 }
 
 impl SinkWriterParam {
@@ -277,6 +308,7 @@ impl SinkWriterParam {
             vnode_bitmap: Default::default(),
             meta_client: Default::default(),
             sink_metrics: SinkMetrics::for_test(),
+            extra_partition_col_idx: Default::default(),
         }
     }
 }
@@ -504,36 +536,30 @@ pub enum SinkError {
 
 impl From<icelake::Error> for SinkError {
     fn from(value: icelake::Error) -> Self {
-        SinkError::Iceberg(anyhow_error!("{}", value))
+        SinkError::Iceberg(anyhow!(value))
     }
 }
 
 impl From<RpcError> for SinkError {
     fn from(value: RpcError) -> Self {
-        SinkError::Remote(anyhow_error!("{}", value))
+        SinkError::Remote(anyhow!(value))
     }
 }
 
 impl From<ClickHouseError> for SinkError {
     fn from(value: ClickHouseError) -> Self {
-        SinkError::ClickHouse(format!("{}", value))
+        SinkError::ClickHouse(value.to_report_string())
     }
 }
 
 impl From<DeltaTableError> for SinkError {
     fn from(value: DeltaTableError) -> Self {
-        SinkError::DeltaLake(anyhow_error!("{}", value))
+        SinkError::DeltaLake(anyhow!(value))
     }
 }
 
 impl From<RedisError> for SinkError {
     fn from(value: RedisError) -> Self {
-        SinkError::Redis(format!("{}", value))
-    }
-}
-
-impl From<SinkError> for RwError {
-    fn from(e: SinkError) -> Self {
-        ErrorCode::SinkError(Box::new(e)).into()
+        SinkError::Redis(value.to_report_string())
     }
 }

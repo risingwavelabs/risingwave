@@ -212,19 +212,18 @@ fn infer_dummy_view_sql(columns: &[SystemCatalogColumnsDef<'_>]) -> String {
 }
 
 fn extract_parallelism_from_table_state(state: &TableFragmentState) -> String {
-    let parallelism = match state
+    match state
         .parallelism
         .as_ref()
         .and_then(|parallelism| parallelism.parallelism.as_ref())
     {
-        None => "unknown".to_string(),
-        Some(PbParallelism::Auto(_)) => "auto".to_string(),
+        Some(PbParallelism::Auto(_)) | Some(PbParallelism::Adaptive(_)) => "adaptive".to_string(),
         Some(PbParallelism::Fixed(PbFixedParallelism { parallelism })) => {
             format!("fixed({parallelism})")
         }
         Some(PbParallelism::Custom(_)) => "custom".to_string(),
-    };
-    parallelism
+        None => "unknown".to_string(),
+    }
 }
 
 /// get acl items of `object` in string, ignore public.
@@ -288,27 +287,22 @@ pub struct SystemCatalog {
 }
 
 pub fn get_sys_tables_in_schema(schema_name: &str) -> Option<Vec<Arc<SystemTableCatalog>>> {
-    SYS_CATALOGS
-        .table_by_schema_name
-        .get(schema_name)
-        .map(Clone::clone)
+    SYS_CATALOGS.table_by_schema_name.get(schema_name).cloned()
 }
 
 pub fn get_sys_views_in_schema(schema_name: &str) -> Option<Vec<Arc<ViewCatalog>>> {
-    SYS_CATALOGS
-        .view_by_schema_name
-        .get(schema_name)
-        .map(Clone::clone)
+    SYS_CATALOGS.view_by_schema_name.get(schema_name).cloned()
 }
 
 /// The global registry of all builtin catalogs.
 pub static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
-    // SAFETY: this function is called after all `#[ctor]` functions are called.
     let mut table_by_schema_name = HashMap::new();
     let mut table_name_by_id = HashMap::new();
     let mut view_by_schema_name = HashMap::new();
-    tracing::info!("found {} catalogs", unsafe { SYS_CATALOGS_INIT.len() });
-    for (id, catalog) in unsafe { SYS_CATALOGS_INIT.drain(..) } {
+    tracing::info!("found {} catalogs", SYS_CATALOGS_SLICE.len());
+    for catalog in SYS_CATALOGS_SLICE {
+        let (id, catalog) = catalog();
+        assert!(id < NON_RESERVED_SYS_CATALOG_ID as u32);
         match catalog {
             BuiltinCatalog::Table(table) => {
                 let sys_table: SystemTableCatalog = table.into();
@@ -334,28 +328,19 @@ pub static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
     }
 });
 
-pub static mut SYS_CATALOGS_INIT: Vec<(u32, BuiltinCatalog)> = vec![];
-
-/// Register the catalog to global registry.
-///
-/// Note: The function is used by macro generated code. Don't call it directly.
-#[doc(hidden)]
-pub(super) unsafe fn _register(id: u32, builtin_catalog: BuiltinCatalog) {
-    assert!(id < NON_RESERVED_SYS_CATALOG_ID as u32);
-
-    SYS_CATALOGS_INIT.push((id, builtin_catalog));
-}
+#[linkme::distributed_slice]
+pub static SYS_CATALOGS_SLICE: [fn() -> (u32, BuiltinCatalog)];
 
 macro_rules! prepare_sys_catalog {
     ($( { $builtin_catalog:expr $(, $func:ident $($await:ident)?)? } ),* $(,)?) => {
-        paste::paste! {
-            $(
-                #[ctor::ctor]
-                unsafe fn [<register_${index()}>]() {
-                    _register((${index()} + 1) as u32, $builtin_catalog);
+        $(
+            const _: () = {
+                #[linkme::distributed_slice(crate::catalog::system_catalog::SYS_CATALOGS_SLICE)]
+                fn catalog() -> (u32, BuiltinCatalog) {
+                    (${index()} as u32 + 1, $builtin_catalog)
                 }
-            )*
-        }
+            };
+        )*
 
         #[async_trait]
         impl SysCatalogReader for SysCatalogReaderImpl {
@@ -440,6 +425,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_SYSTEM_TABLES), read_system_table_info },
     { BuiltinCatalog::View(&RW_RELATIONS) },
     { BuiltinCatalog::View(&RW_STREAMING_PARALLELISM) },
+    { BuiltinCatalog::View(&RW_FRAGMENT_PARALLELISM) },
     { BuiltinCatalog::Table(&RW_COLUMNS), read_rw_columns_info },
     { BuiltinCatalog::Table(&RW_TYPES), read_rw_types },
     { BuiltinCatalog::Table(&RW_HUMMOCK_PINNED_VERSIONS), read_hummock_pinned_versions await },

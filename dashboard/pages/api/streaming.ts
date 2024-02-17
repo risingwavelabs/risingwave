@@ -45,8 +45,26 @@ export interface StreamingJob extends Relation {
   dependentRelations: number[]
 }
 
+export function relationType(x: Relation) {
+  if ((x as Table).tableType !== undefined) {
+    return (x as Table).tableType
+  } else if ((x as Sink).sinkFromName !== undefined) {
+    return "SINK"
+  } else if ((x as Source).info !== undefined) {
+    return "SOURCE"
+  } else {
+    return "UNKNOWN"
+  }
+}
+export type RelationType = ReturnType<typeof relationType>
+
+export function relationTypeTitleCase(x: Relation) {
+  return _.startCase(_.toLower(relationType(x)))
+}
+
 export function relationIsStreamingJob(x: Relation): x is StreamingJob {
-  return (x as StreamingJob).dependentRelations !== undefined
+  const type = relationType(x)
+  return type !== "UNKNOWN" && type !== "SOURCE" && type !== "INTERNAL"
 }
 
 export async function getStreamingJobs() {

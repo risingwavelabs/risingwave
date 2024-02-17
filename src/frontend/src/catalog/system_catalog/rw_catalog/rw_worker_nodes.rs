@@ -14,11 +14,11 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
 
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::error::Result;
 
 /// `rw_worker_nodes` contains all information about the compute nodes in the cluster.
 pub const RW_WORKER_NODES: BuiltinTable = BuiltinTable {
@@ -35,8 +35,8 @@ pub const RW_WORKER_NODES: BuiltinTable = BuiltinTable {
         (DataType::Boolean, "is_serving"),
         (DataType::Boolean, "is_unschedulable"),
         (DataType::Varchar, "rw_version"),
-        (DataType::Int64, "total_memory_bytes"),
-        (DataType::Int64, "total_cpu_cores"),
+        (DataType::Int64, "system_total_memory_bytes"),
+        (DataType::Int64, "system_total_cpu_cores"),
         (DataType::Timestamptz, "started_at"),
     ],
     pk: &[0],

@@ -30,32 +30,67 @@ pub mod hummock {
             flag.bits()
         }
     }
-
-    pub const TABLE_OPTION_DUMMY_RETENTION_SECOND: u32 = 0;
-    pub const PROPERTIES_RETENTION_SECOND_KEY: &str = "retention_seconds";
 }
 
 pub mod log_store {
     use crate::types::DataType;
+    use crate::util::sort_util::OrderType;
 
     pub const EPOCH_COLUMN_NAME: &str = "kv_log_store_epoch";
     pub const SEQ_ID_COLUMN_NAME: &str = "kv_log_store_seq_id";
     pub const ROW_OP_COLUMN_NAME: &str = "kv_log_store_row_op";
-
-    /// `epoch`, `seq_id`, `row_op`
-    pub const KV_LOG_STORE_PREDEFINED_COLUMNS: [(&str, DataType); 3] = [
-        (EPOCH_COLUMN_NAME, EPOCH_COLUMN_TYPE),
-        (SEQ_ID_COLUMN_NAME, SEQ_ID_COLUMN_TYPE),
-        (ROW_OP_COLUMN_NAME, ROW_OP_COLUMN_TYPE),
-    ];
-    /// `epoch`, `seq_id`
-    pub const PK_TYPES: [DataType; 2] = [EPOCH_COLUMN_TYPE, SEQ_ID_COLUMN_TYPE];
+    pub const VNODE_COLUMN_NAME: &str = "kv_log_store_vnode";
 
     pub const EPOCH_COLUMN_TYPE: DataType = DataType::Int64;
     pub const SEQ_ID_COLUMN_TYPE: DataType = DataType::Int32;
     pub const ROW_OP_COLUMN_TYPE: DataType = DataType::Int16;
+    pub const VNODE_COLUMN_TYPE: DataType = DataType::Int16;
 
-    pub const EPOCH_COLUMN_INDEX: usize = 0;
-    pub const SEQ_ID_COLUMN_INDEX: usize = 1;
-    pub const ROW_OP_COLUMN_INDEX: usize = 2;
+    pub mod v1 {
+        use std::sync::LazyLock;
+
+        use super::*;
+
+        /// `epoch`, `seq_id`, `row_op`
+        pub const KV_LOG_STORE_PREDEFINED_COLUMNS: [(&str, DataType); 3] = [
+            (EPOCH_COLUMN_NAME, EPOCH_COLUMN_TYPE),
+            (SEQ_ID_COLUMN_NAME, SEQ_ID_COLUMN_TYPE),
+            (ROW_OP_COLUMN_NAME, ROW_OP_COLUMN_TYPE),
+        ];
+
+        pub const EPOCH_COLUMN_INDEX: usize = 0;
+        pub const SEQ_ID_COLUMN_INDEX: usize = 1;
+        pub const ROW_OP_COLUMN_INDEX: usize = 2;
+
+        /// `epoch`, `seq_id`
+        pub static PK_ORDERING: LazyLock<[OrderType; 2]> =
+            LazyLock::new(|| [OrderType::ascending(), OrderType::ascending_nulls_last()]);
+    }
+
+    pub mod v2 {
+        use std::sync::LazyLock;
+
+        use super::*;
+
+        /// `epoch`, `seq_id`, `vnode`, `row_op`
+        pub const KV_LOG_STORE_PREDEFINED_COLUMNS: [(&str, DataType); 4] = [
+            (EPOCH_COLUMN_NAME, EPOCH_COLUMN_TYPE),
+            (SEQ_ID_COLUMN_NAME, SEQ_ID_COLUMN_TYPE),
+            (VNODE_COLUMN_NAME, VNODE_COLUMN_TYPE),
+            (ROW_OP_COLUMN_NAME, ROW_OP_COLUMN_TYPE),
+        ];
+
+        pub const EPOCH_COLUMN_INDEX: usize = 0;
+        pub const SEQ_ID_COLUMN_INDEX: usize = 1;
+        pub const VNODE_COLUMN_INDEX: usize = 2;
+        pub const ROW_OP_COLUMN_INDEX: usize = 3;
+
+        pub static PK_ORDERING: LazyLock<[OrderType; 3]> = LazyLock::new(|| {
+            [
+                OrderType::ascending(),
+                OrderType::ascending_nulls_last(),
+                OrderType::ascending(),
+            ]
+        });
+    }
 }

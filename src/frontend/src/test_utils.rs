@@ -28,7 +28,6 @@ use risingwave_common::catalog::{
     FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
 };
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
@@ -63,6 +62,7 @@ use tempfile::{Builder, NamedTempFile};
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId};
+use crate::error::{ErrorCode, Result};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
 use crate::session::{AuthContext, FrontendEnv, SessionImpl};
@@ -521,6 +521,11 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn alter_source_with_sr(&self, source: PbSource) -> Result<()> {
+        self.catalog.write().update_source(&source);
+        Ok(())
+    }
+
     async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()> {
         for database in self.catalog.read().iter_databases() {
             for schema in database.iter_schemas() {
@@ -593,6 +598,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         _table_id: u32,
         _parallelism: PbTableParallelism,
+        _deferred: bool,
     ) -> Result<()> {
         todo!()
     }
@@ -978,6 +984,19 @@ pub static PROTO_FILE_DATA: &str = r#"
       Country country = 3;
       int64 zipcode = 4;
       float rate = 5;
+    }
+    message TestRecordAlterType {
+        string id = 1;
+        Country country = 3;
+        int32 zipcode = 4;
+        float rate = 5;
+      }
+    message TestRecordExt {
+      int32 id = 1;
+      Country country = 3;
+      int64 zipcode = 4;
+      float rate = 5;
+      string name = 6;
     }
     message Country {
       string address = 1;
