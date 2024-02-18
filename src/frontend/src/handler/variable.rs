@@ -19,6 +19,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::session_config::{ConfigReporter, SESSION_CONFIG_LIST_SEP};
 use risingwave_common::system_param::is_mutable;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
 use risingwave_sqlparser::keywords::Keyword;
@@ -158,13 +159,18 @@ async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<Vec<Row>
         .get_system_params()
         .await?;
     let rows = params
-        .to_kv()
+        .get_all()
         .into_iter()
-        .map(|(k, v)| {
-            let is_mutable_bytes = ScalarRefImpl::Bool(is_mutable(&k).unwrap())
+        .map(|info| {
+            let is_mutable_bytes = ScalarRefImpl::Bool(info.mutable)
                 .text_format(&DataType::Boolean)
                 .into();
-            Row::new(vec![Some(k.into()), Some(v.into()), Some(is_mutable_bytes)])
+            Row::new(vec![
+                Some(info.name.into()),
+                Some(info.value.into()),
+                Some(info.description.into()),
+                Some(is_mutable_bytes),
+            ])
         })
         .collect_vec();
     Ok(rows)
