@@ -138,13 +138,21 @@ impl<S: StateStore> SourceExecutor<S> {
         ]
     }
 
-    /// Returns `target_states` if split changed. Otherwise `None`.
+    /// - `should_trim_state`: whether to trim state for dropped splits.
+    ///
+    ///    For scaling, the connector splits can be migrated to other actors, but
+    ///    won't be added or removed. Actors should not trim states for splits that
+    ///    are moved to other actors.
+    ///
+    ///    For source split change, split will not be migrated and we can trim states
+    ///    for deleted splits.
     async fn apply_split_change<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
-    ) -> StreamExecutorResult<Option<Vec<SplitImpl>>> {
+        should_trim_state: bool,
+    ) -> StreamExecutorResult<()> {
         self.metrics
             .source_split_change_count
             .with_label_values(
@@ -156,25 +164,15 @@ impl<S: StateStore> SourceExecutor<S> {
             )
             .inc();
         if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
-            if let Some(target_state) = self.update_state_if_changed(Some(target_splits)).await? {
-                tracing::info!(
-                    actor_id = self.actor_ctx.id,
-                    state = ?target_state,
-                    "apply split change"
-                );
-
-                self.replace_stream_reader_with_target_state(
-                    source_desc,
-                    stream,
-                    target_state.clone(),
-                )
-                .await?;
-
-                return Ok(Some(target_state));
+            if self
+                .update_state_if_changed(target_splits, should_trim_state)
+                .await?
+            {
+                self.rebuild_stream_reader(source_desc, stream).await?;
             }
         }
 
-        Ok(None)
+        Ok(())
     }
 
     /// Returns `target_states` if split changed. Otherwise `None`.
@@ -182,15 +180,13 @@ impl<S: StateStore> SourceExecutor<S> {
     /// Note: `update_state_if_changed` will modify `updated_splits_in_epoch`
     async fn update_state_if_changed(
         &mut self,
-        state: ConnectorState,
-    ) -> StreamExecutorResult<ConnectorState> {
+        state: Vec<SplitImpl>,
+        should_trim_state: bool,
+    ) -> StreamExecutorResult<bool> {
         let core = self.stream_source_core.as_mut().unwrap();
 
-        let target_splits: HashMap<_, _> = state
-            .unwrap()
-            .into_iter()
-            .map(|split| (split.id(), split))
-            .collect();
+        let target_splits: HashMap<_, _> =
+            state.into_iter().map(|split| (split.id(), split)).collect();
 
         let mut target_state: Vec<SplitImpl> = Vec::with_capacity(target_splits.len());
 
@@ -231,7 +227,31 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
-        Ok(split_changed.then_some(target_state))
+        if split_changed {
+            tracing::info!(
+                actor_id = self.actor_ctx.id,
+                state = ?target_state,
+                "apply split change"
+            );
+
+            core.updated_splits_in_epoch
+                .retain(|split_id, _| target_splits.get(split_id).is_some());
+
+            let dropped_splits = core
+                .latest_split_info
+                .extract_if(|split_id, _| target_splits.get(split_id).is_none())
+                .map(|(_, split)| split)
+                .collect_vec();
+
+            if should_trim_state && !dropped_splits.is_empty() {
+                // trim dropped splits' state
+                core.split_state_store.trim_state(&dropped_splits).await?;
+            }
+
+            core.latest_split_info = target_splits;
+        }
+
+        Ok(split_changed)
     }
 
     /// Rebuild stream if there is a err in stream
@@ -256,17 +276,17 @@ impl<S: StateStore> SourceExecutor<S> {
             core.source_id.to_string(),
         ]);
 
-        let target_state = core.latest_split_info.values().cloned().collect();
-        self.replace_stream_reader_with_target_state(source_desc, stream, target_state)
-            .await
+        self.rebuild_stream_reader(source_desc, stream).await
     }
 
-    async fn replace_stream_reader_with_target_state<const BIASED: bool>(
+    async fn rebuild_stream_reader<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
-        target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
+        let core = self.stream_source_core.as_mut().unwrap();
+        let target_state: Vec<SplitImpl> = core.latest_split_info.values().cloned().collect();
+
         tracing::info!(
             "actor {:?} apply source split change to {:?}",
             self.actor_ctx.id,
@@ -284,56 +304,21 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(())
     }
 
-    /// - `target_state`: the new split info from barrier. `None` if no split update.
-    /// - `should_trim_state`: whether to trim state for dropped splits.
-    ///
-    ///    For scaling, the connector splits can be migrated to other actors, but
-    ///    won't be added or removed. Actors should not trim states for splits that
-    ///    are moved to other actors.
-    ///
-    ///    For source split change, split will not be migrated and we can trim states
-    ///    for deleted splits.
     async fn persist_state_and_clear_cache(
         &mut self,
         epoch: EpochPair,
-        // target_state is Some means split change (or migration) happened.
-        target_state: Option<Vec<SplitImpl>>,
-        should_trim_state: bool,
     ) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
 
-        let mut cache = core
+        let cache = core
             .updated_splits_in_epoch
             .values()
             .map(|split_impl| split_impl.to_owned())
             .collect_vec();
 
-        if let Some(target_splits) = target_state {
-            let target_split_ids: HashSet<_> =
-                target_splits.iter().map(|split| split.id()).collect();
-
-            cache.retain(|split| target_split_ids.contains(&split.id()));
-
-            let dropped_splits = core
-                .latest_split_info
-                .extract_if(|split_id, _| !target_split_ids.contains(split_id))
-                .map(|(_, split)| split)
-                .collect_vec();
-
-            if should_trim_state && !dropped_splits.is_empty() {
-                // trim dropped splits' state
-                core.split_state_store.trim_state(&dropped_splits).await?;
-            }
-
-            core.latest_split_info = target_splits
-                .into_iter()
-                .map(|split| (split.id(), split))
-                .collect();
-        }
-
         if !cache.is_empty() {
             tracing::debug!(actor_id = self.actor_ctx.id, state = ?cache, "take snapshot");
-            core.split_state_store.set_states(cache).await?
+            core.split_state_store.set_states(cache).await?;
         }
 
         // commit anyway, even if no message saved
@@ -471,9 +456,6 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     let epoch = barrier.epoch;
 
-                    let mut target_state = None;
-                    let mut should_trim_state = false;
-
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
                             Mutation::Pause => stream.pause_stream(),
@@ -485,23 +467,29 @@ impl<S: StateStore> SourceExecutor<S> {
                                     "source change split received"
                                 );
 
-                                target_state = self
-                                    .apply_split_change(&source_desc, &mut stream, actor_splits)
-                                    .await?;
-                                should_trim_state = true;
+                                self.apply_split_change(
+                                    &source_desc,
+                                    &mut stream,
+                                    actor_splits,
+                                    true,
+                                )
+                                .await?;
                             }
 
                             Mutation::Update(UpdateMutation { actor_splits, .. }) => {
-                                target_state = self
-                                    .apply_split_change(&source_desc, &mut stream, actor_splits)
-                                    .await?;
+                                self.apply_split_change(
+                                    &source_desc,
+                                    &mut stream,
+                                    actor_splits,
+                                    false,
+                                )
+                                .await?;
                             }
                             _ => {}
                         }
                     }
 
-                    self.persist_state_and_clear_cache(epoch, target_state, should_trim_state)
-                        .await?;
+                    self.persist_state_and_clear_cache(epoch).await?;
 
                     self.metrics
                         .source_row_per_barrier
