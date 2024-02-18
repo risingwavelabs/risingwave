@@ -18,7 +18,7 @@ use anyhow::Context;
 use risingwave_common::bail;
 use risingwave_common::types::DataType;
 
-use crate::parser::simd_json_parser::{DebeziumJsonAccessBuilder, DebeziumMongoJsonAccessBuilder};
+use crate::parser::simd_json_parser::DebeziumMongoJsonAccessBuilder;
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
@@ -37,12 +37,8 @@ pub struct DebeziumMongoJsonParser {
     payload_builder: AccessBuilderImpl,
 }
 
-// key and payload in DEBEZIUM_MONGO format are accessed in different ways
 fn build_accessor_builder(config: EncodingProperties) -> anyhow::Result<AccessBuilderImpl> {
     match config {
-        EncodingProperties::Json(_) => Ok(AccessBuilderImpl::DebeziumJson(
-            DebeziumJsonAccessBuilder::new()?,
-        )),
         EncodingProperties::MongoJson(_) => Ok(AccessBuilderImpl::DebeziumMongoJson(
             DebeziumMongoJsonAccessBuilder::new()?,
         )),
@@ -79,6 +75,7 @@ impl DebeziumMongoJsonParser {
             bail!("Debezium Mongo needs no more columns except `_id` and `payload` in table");
         }
 
+        // encodings are fixed to MongoJson
         let key_builder =
             build_accessor_builder(EncodingProperties::MongoJson(JsonProperties::default()))?;
         let payload_builder =
