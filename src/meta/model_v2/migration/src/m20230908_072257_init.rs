@@ -519,6 +519,14 @@ impl MigrationTrait for Migration {
                             .to(Connection::Table, Connection::ConnectionId)
                             .to_owned(),
                     )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_source_optional_associated_table_id")
+                            .from(Source::Table, Source::OptionalAssociatedTableId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
                     .to_owned(),
             )
             .await?;
