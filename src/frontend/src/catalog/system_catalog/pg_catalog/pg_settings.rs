@@ -15,11 +15,28 @@
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
+use crate::catalog::system_catalog::SysCatalogReaderImpl;
+
 /// The catalog `pg_settings` stores settings.
 /// Ref: [`https://www.postgresql.org/docs/current/view-pg-settings.html`]
-#[system_catalog(view, "pg_catalog.pg_settings")]
 #[derive(Fields)]
 struct PgSetting {
     name: String,
     setting: String,
+    short_desc: String,
+}
+
+#[system_catalog(table, "pg_catalog.pg_settings")]
+fn read_pg_settings(reader: &SysCatalogReaderImpl) -> Vec<PgSetting> {
+    let config_reader = reader.config.read();
+    let all_variables = config_reader.show_all();
+
+    all_variables
+        .iter()
+        .map(|info| PgSetting {
+            name: info.name.clone(),
+            setting: info.setting.clone(),
+            short_desc: info.description.clone(),
+        })
+        .collect()
 }
