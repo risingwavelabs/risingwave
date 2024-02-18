@@ -468,6 +468,7 @@ impl CatalogController {
             .clone()
             .into_iter()
             .chain(state_table_ids.clone().into_iter())
+            .chain(associated_source_ids.clone().into_iter())
             .collect();
 
         let res = Object::delete_many()
