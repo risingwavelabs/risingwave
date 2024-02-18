@@ -14,8 +14,8 @@
 
 use std::fmt::Debug;
 
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
+use anyhow::Context;
+use risingwave_common::bail;
 use risingwave_common::types::DataType;
 
 use crate::parser::simd_json_parser::{DebeziumJsonAccessBuilder, DebeziumMongoJsonAccessBuilder};
@@ -38,7 +38,7 @@ pub struct DebeziumMongoJsonParser {
 }
 
 // key and payload in DEBEZIUM_MONGO format are accessed in different ways
-fn build_accessor_builder(config: EncodingProperties) -> Result<AccessBuilderImpl> {
+fn build_accessor_builder(config: EncodingProperties) -> anyhow::Result<AccessBuilderImpl> {
     match config {
         EncodingProperties::Json(_) => Ok(AccessBuilderImpl::DebeziumJson(
             DebeziumJsonAccessBuilder::new()?,
@@ -46,14 +46,15 @@ fn build_accessor_builder(config: EncodingProperties) -> Result<AccessBuilderImp
         EncodingProperties::MongoJson(_) => Ok(AccessBuilderImpl::DebeziumMongoJson(
             DebeziumMongoJsonAccessBuilder::new()?,
         )),
-        _ => Err(RwError::from(ProtocolError(
-            "unsupported encoding for DEBEZIUM_MONGO format".to_string(),
-        ))),
+        _ => bail!("unsupported encoding for DEBEZIUM_MONGO format"),
     }
 }
 
 impl DebeziumMongoJsonParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>, source_ctx: SourceContextRef) -> Result<Self> {
+    pub fn new(
+        rw_columns: Vec<SourceColumnDesc>,
+        source_ctx: SourceContextRef,
+    ) -> anyhow::Result<Self> {
         let id_column = rw_columns
             .iter()
             .find(|desc| {
@@ -66,25 +67,16 @@ impl DebeziumMongoJsonParser {
                             | DataType::Int64
                     )
             })
-            .ok_or_else(|| RwError::from(ProtocolError(
-                "Debezium Mongo needs a `_id` column with supported types (Varchar Jsonb int32 int64) in table".into(),
-            )))?.clone();
+            .context("Debezium Mongo needs a `_id` column with supported types (Varchar Jsonb int32 int64) in table")?.clone();
         let payload_column = rw_columns
             .iter()
             .find(|desc| desc.name == "payload" && matches!(desc.data_type, DataType::Jsonb))
-            .ok_or_else(|| {
-                RwError::from(ProtocolError(
-                    "Debezium Mongo needs a `payload` column with supported types Jsonb in table"
-                        .into(),
-                ))
-            })?
+            .context("Debezium Mongo needs a `payload` column with supported types Jsonb in table")?
             .clone();
 
         // _rw_{connector}_file/partition & _rw_{connector}_offset are created automatically.
         if rw_columns.iter().filter(|desc| desc.is_visible()).count() != 2 {
-            return Err(RwError::from(ProtocolError(
-                "Debezium Mongo needs no more columns except `_id` and `payload` in table".into(),
-            )));
+            bail!("Debezium Mongo needs no more columns except `_id` and `payload` in table");
         }
 
         let key_builder =
@@ -107,7 +99,7 @@ impl DebeziumMongoJsonParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         let key_accessor = match key {
             None => None,
             Some(data) => Some(self.key_builder.generate_accessor(data).await?),
@@ -140,8 +132,7 @@ impl ByteStreamSourceParser for DebeziumMongoJsonParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
-        // only_parse_payload!(self, payload, writer)
+    ) -> anyhow::Result<()> {
         self.parse_inner(key, payload, writer).await
     }
 }

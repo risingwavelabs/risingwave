@@ -14,7 +14,6 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_common::{bail_not_implemented, not_implemented};
@@ -26,6 +25,7 @@ use risingwave_sqlparser::ast::{
 
 use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
 
 mod binary_op;
@@ -386,11 +386,13 @@ impl Binder {
 
     fn bind_parameter(&mut self, index: u64) -> Result<ExprImpl> {
         // Special check for sql udf
-        // Note: This is specific to anonymous sql udf, since the
+        // Note: This is specific to sql udf with unnamed parameters, since the
         // parameters will be parsed and treated as `Parameter`.
         // For detailed explanation, consider checking `bind_column`.
-        if let Some(expr) = self.udf_context.get_expr(&format!("${index}")) {
-            return Ok(expr.clone());
+        if self.udf_context.global_count() != 0 {
+            if let Some(expr) = self.udf_context.get_expr(&format!("${index}")) {
+                return Ok(expr.clone());
+            }
         }
 
         Ok(Parameter::new(index, self.param_types.clone()).into())
@@ -610,23 +612,9 @@ impl Binder {
         match &data_type {
             // Casting to Regclass type means getting the oid of expr.
             // See https://www.postgresql.org/docs/current/datatype-oid.html.
-            // Currently only string liter expr is supported since we cannot handle subquery in join
-            // on condition: https://github.com/risingwavelabs/risingwave/issues/6852
-            // TODO: Add generic expr support when needed
             AstDataType::Regclass => {
                 let input = self.bind_expr_inner(expr)?;
-                match input.return_type() {
-                    DataType::Varchar => Ok(ExprImpl::FunctionCall(Box::new(
-                        FunctionCall::new_unchecked(
-                            ExprType::CastRegclass,
-                            vec![input],
-                            DataType::Int32,
-                        ),
-                    ))),
-                    DataType::Int32 => Ok(input),
-                    dt if dt.is_int() => Ok(input.cast_explicit(DataType::Int32)?),
-                    _ => Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
-                }
+                Ok(input.cast_to_regclass()?)
             }
             AstDataType::Regproc => {
                 let lhs = self.bind_expr_inner(expr)?;
@@ -701,7 +689,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         type_name: "".to_string(),
         generated_or_default_column: None,
         description: None,
-        additional_columns: AdditionalColumn { column_type: None },
+        additional_column: AdditionalColumn { column_type: None },
         version: ColumnDescVersion::Pr13707,
     })
 }

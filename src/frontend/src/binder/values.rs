@@ -15,7 +15,6 @@
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::Values;
@@ -23,6 +22,7 @@ use risingwave_sqlparser::ast::Values;
 use super::bind_context::Clause;
 use super::statement::RewriteExprsRecursive;
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{align_types, CorrelatedId, Depth, ExprImpl};
 
 #[derive(Debug, Clone)]

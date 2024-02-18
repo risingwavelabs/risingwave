@@ -24,9 +24,7 @@ use risingwave_expr::expr::get_or_create_wasm_runtime;
 use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
-use risingwave_sqlparser::ast::{
-    CreateFunctionBody, FunctionDefinition, ObjectName, OperateFunctionArg,
-};
+use risingwave_sqlparser::ast::{CreateFunctionBody, ObjectName, OperateFunctionArg};
 use risingwave_storage::monitor::ObjectStoreMetrics;
 use risingwave_udf::ArrowFlightUdfClient;
 
@@ -54,7 +52,7 @@ pub async fn handle_create_function(
         Some(lang) => {
             let lang = lang.real_value().to_lowercase();
             match &*lang {
-                "python" | "java" | "wasm" | "javascript" => lang,
+                "python" | "java" | "wasm" | "rust" | "javascript" => lang,
                 _ => {
                     return Err(ErrorCode::InvalidParameterValue(format!(
                         "language {} is not supported",
@@ -134,12 +132,12 @@ pub async fn handle_create_function(
                 )
                 .into());
             };
-            let Some(FunctionDefinition::SingleQuotedDef(id)) = params.as_ else {
+            let Some(as_) = params.as_ else {
                 return Err(
                     ErrorCode::InvalidParameterValue("AS must be specified".to_string()).into(),
                 );
             };
-            identifier = id;
+            identifier = as_.into_string();
 
             // check UDF server
             {
@@ -173,16 +171,56 @@ pub async fn handle_create_function(
         }
         "javascript" => {
             identifier = function_name.to_string();
-            body = Some(match params.as_ {
-                Some(FunctionDefinition::SingleQuotedDef(s)) => s,
-                Some(FunctionDefinition::DoubleDollarDef(s)) => s,
-                _ => {
-                    return Err(ErrorCode::InvalidParameterValue(
-                        "AS must be specified".to_string(),
-                    )
-                    .into())
-                }
-            });
+            body = Some(
+                params
+                    .as_
+                    .ok_or_else(|| ErrorCode::InvalidParameterValue("AS must be specified".into()))?
+                    .into_string(),
+            );
+        }
+        "rust" => {
+            identifier = wasm_identifier(
+                &function_name,
+                &arg_types,
+                &return_type,
+                matches!(kind, Kind::Table(_)),
+            );
+            if params.using.is_some() {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "USING is not supported for rust function".to_string(),
+                )
+                .into());
+            }
+            let function_body = params
+                .as_
+                .ok_or_else(|| ErrorCode::InvalidParameterValue("AS must be specified".into()))?
+                .into_string();
+            let script = format!("#[arrow_udf::function(\"{identifier}\")]\n{function_body}");
+            body = Some(function_body.clone());
+
+            let wasm_binary =
+                tokio::task::spawn_blocking(move || arrow_udf_wasm::build::build("", &script))
+                    .await?
+                    .context("failed to build rust function")?;
+
+            // below is the same as `wasm` language
+            let runtime = arrow_udf_wasm::Runtime::new(&wasm_binary)?;
+            check_wasm_function(&runtime, &identifier)?;
+
+            let system_params = session.env().meta_client().get_system_params().await?;
+            let object_name = format!("{:?}.wasm", md5::compute(&wasm_binary));
+            upload_wasm_binary(
+                system_params.wasm_storage_url(),
+                &object_name,
+                wasm_binary.into(),
+            )
+            .await?;
+
+            link = Some(format!(
+                "{}/{}",
+                system_params.wasm_storage_url(),
+                object_name
+            ));
         }
         "wasm" => {
             identifier = wasm_identifier(

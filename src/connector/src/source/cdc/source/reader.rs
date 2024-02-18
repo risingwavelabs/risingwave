@@ -26,6 +26,7 @@ use risingwave_jni_core::{call_static_method, JniReceiverType, JniSenderType};
 use risingwave_pb::connector_service::{
     GetEventStreamRequest, GetEventStreamResponse, SourceCommonParam,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 
 use crate::parser::ParserConfig;
@@ -140,7 +141,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                     tracing::info!(?source_id, "end of jni call runJniDbzSourceThread");
                 }
                 Err(e) => {
-                    tracing::error!(?source_id, "jni call error: {:?}", e);
+                    tracing::error!(?source_id, error = %e.as_report(), "jni call error");
                 }
             }
         });

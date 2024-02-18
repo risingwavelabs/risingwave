@@ -135,12 +135,12 @@ impl SplitReader for PubsubSplitReader {
                 .as_str()
                 .parse::<i64>()
                 .map(|nanos| Utc.timestamp_nanos(nanos))
-                .map_err(|e| anyhow!("error parsing offset: {:?}", e))?;
+                .context("error parsing offset")?;
 
             subscription
                 .seek(SeekTo::Timestamp(timestamp.into()), None)
                 .await
-                .map_err(|e| anyhow!("error seeking to pubsub offset: {:?}", e))?;
+                .context("error seeking to pubsub offset")?;
         }
 
         let stop_offset = if let Some(ref offset) = split.stop_offset {

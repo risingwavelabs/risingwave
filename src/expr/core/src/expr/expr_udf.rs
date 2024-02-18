@@ -71,7 +71,6 @@ impl Expression for UserDefinedFunction {
         self.return_type.clone()
     }
 
-    #[cfg_or_panic(not(madsim))]
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let vis = input.visibility();
         let mut columns = Vec::with_capacity(self.children.len());
@@ -82,7 +81,6 @@ impl Expression for UserDefinedFunction {
         self.eval_inner(columns, vis).await
     }
 
-    #[cfg_or_panic(not(madsim))]
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let mut columns = Vec::with_capacity(self.children.len());
         for child in &self.children {
@@ -183,7 +181,6 @@ impl UserDefinedFunction {
     }
 }
 
-#[cfg_or_panic(not(madsim))]
 impl Build for UserDefinedFunction {
     fn build(
         prost: &ExprNode,
@@ -194,7 +191,8 @@ impl Build for UserDefinedFunction {
 
         let identifier = udf.get_identifier()?;
         let imp = match udf.language.as_str() {
-            "wasm" => {
+            #[cfg(not(madsim))]
+            "wasm" | "rust" => {
                 let link = udf.get_link()?;
                 // Use `block_in_place` as an escape hatch to run async code here in sync context.
                 // Calling `block_on` directly will panic.
@@ -218,10 +216,13 @@ impl Build for UserDefinedFunction {
                 )?;
                 UdfImpl::JavaScript(rt)
             }
+            #[cfg(not(madsim))]
             _ => {
                 let link = udf.get_link()?;
                 UdfImpl::External(get_or_create_flight_client(link)?)
             }
+            #[cfg(madsim)]
+            l => panic!("UDF language {l:?} is not supported on madsim"),
         };
 
         let arg_schema = Arc::new(Schema::new(
