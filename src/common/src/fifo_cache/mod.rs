@@ -6,8 +6,18 @@ mod ghost;
 mod most;
 mod small;
 
+pub use cache::FIFOCache;
+use crate::cache::LruKey;
+
 pub trait CacheKey: Eq + Send + Hash + Clone {}
+impl<T: Eq + Send + Hash + Clone> CacheKey for T {}
 pub trait CacheValue: Send + Clone {}
+impl<T: Send + Clone> CacheValue for T {}
+
+const KIND_GHOST: usize = 12;
+const KIND_MAIN: usize = 8;
+
+const KIND_SMALL: usize = 4;
 
 pub struct CacheItem<K: CacheKey, V: CacheValue> {
     pub key: K,
@@ -108,12 +118,12 @@ impl<K: CacheKey, V: CacheValue> CacheItem<K, V> {
         }
     }
 
-    pub fn mark_most(&self) -> bool {
+    pub fn mark_main(&self) -> bool {
         let mut flag = self.get_flag();
-        while (flag & 12) != 8 {
+        while (flag & 12) != KIND_MAIN {
             match self.flag.compare_exchange_weak(
                 flag,
-                set_kind(flag, 8),
+                set_kind(flag, KIND_MAIN),
                 std::sync::atomic::Ordering::SeqCst,
                 std::sync::atomic::Ordering::SeqCst,
             ) {
@@ -128,10 +138,10 @@ impl<K: CacheKey, V: CacheValue> CacheItem<K, V> {
 
     pub fn mark_small(&self) -> bool {
         let mut flag = self.get_flag();
-        while (flag & 12) != 4 {
+        while (flag & 12) != KIND_SMALL {
             match self.flag.compare_exchange_weak(
                 flag,
-                set_kind(flag, 4),
+                set_kind(flag, KIND_SMALL),
                 std::sync::atomic::Ordering::SeqCst,
                 std::sync::atomic::Ordering::SeqCst,
             ) {
@@ -146,10 +156,10 @@ impl<K: CacheKey, V: CacheValue> CacheItem<K, V> {
 
     pub fn mark_ghost(&self) -> bool {
         let mut flag = self.get_flag();
-        while (flag & 12) != 12 {
+        while (flag & 12) != KIND_GHOST {
             match self.flag.compare_exchange_weak(
                 flag,
-                set_kind(flag, 12),
+                set_kind(flag, KIND_GHOST),
                 std::sync::atomic::Ordering::SeqCst,
                 std::sync::atomic::Ordering::SeqCst,
             ) {

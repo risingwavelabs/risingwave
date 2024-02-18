@@ -1,35 +1,36 @@
-use crossbeam_queue::ArrayQueue;
+use crossbeam_queue::SegQueue;
 use dashmap::DashMap;
 
 use crate::fifo_cache::{CacheItem, CacheKey, CacheValue};
 
 pub struct GhostCache<K: CacheKey, V: CacheValue> {
     map: DashMap<K, Box<CacheItem<K, V>>>,
-    queue: ArrayQueue<K>,
-    capacity: usize,
+    queue: SegQueue<K>,
 }
 
 impl<K: CacheKey, V: CacheValue> GhostCache<K, V> {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new() -> Self {
         Self {
             map: DashMap::default(),
-            queue: ArrayQueue::new(capacity),
-            capacity,
+            queue: SegQueue::new(),
         }
     }
 
-    pub fn insert(&self, item: Box<CacheItem<K, V>>, deleted: &mut Vec<Box<CacheItem<K, V>>>) {
-        let mut key = item.key.clone();
+    pub fn insert(&self, item: Box<CacheItem<K, V>>, max_capacity: usize, deleted: &mut Vec<Box<CacheItem<K, V>>>) {
+        let key = item.key.clone();
         item.mark_ghost();
-        self.map.insert(item.key.clone(), item);
-        while let Err(e) = self.queue.push(key) {
+        if self.map.insert(item.key.clone(), item).is_some() {
+            return;
+        }
+        // avoid push fail
+        while self.queue.len() >= max_capacity {
             if let Some(expire_key) = self.queue.pop() {
                 if let Some((_, expire_item)) = self.map.remove(&expire_key) {
                     deleted.push(expire_item);
                 }
             }
-            key = e;
         }
+        self.queue.push(key);
     }
 
     pub fn remove(&self, key: &K) -> Option<Box<CacheItem<K, V>>> {

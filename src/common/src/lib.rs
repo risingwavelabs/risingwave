@@ -65,7 +65,7 @@ pub mod config;
 pub mod constants;
 pub mod estimate_size;
 pub mod field_generator;
-mod fifo_cache;
+pub mod fifo_cache;
 pub mod hash;
 pub mod log;
 pub mod memory;

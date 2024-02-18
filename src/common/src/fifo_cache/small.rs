@@ -25,11 +25,16 @@ impl<K: CacheKey, V: CacheValue> SmallHotCache<K, V> {
         self.cost.load(std::sync::atomic::Ordering::Acquire)
     }
 
+    pub fn count(&self) -> usize {
+        self.queue.len()
+    }
+
     pub fn evict(&self) -> Option<Box<CacheItem<K, V>>> {
         while self.size() > 0 {
             let item = self.queue.pop()?;
             self.cost
                 .fetch_sub(item.cost(), std::sync::atomic::Ordering::Release);
+            item.unmark();
             if item.get_freq() > 1 {
                 self.main.insert(item);
             } else {

@@ -29,6 +29,10 @@ impl<K: CacheKey, V: CacheValue> MostCache<K, V> {
         self.cost.load(std::sync::atomic::Ordering::Acquire)
     }
 
+    pub fn count(&self) -> usize {
+        self.queue.len()
+    }
+
     pub fn evict(&self) -> Option<Box<CacheItem<K, V>>> {
         while self.size() > 0 {
             let item = self.queue.pop()?;
@@ -44,7 +48,7 @@ impl<K: CacheKey, V: CacheValue> MostCache<K, V> {
     }
 
     pub fn insert(&self, item: Box<CacheItem<K, V>>) {
-        assert!(item.mark_most());
+        assert!(item.mark_main());
         self.cost
             .fetch_add(item.cost(), std::sync::atomic::Ordering::Release);
         self.queue.push(item);
