@@ -149,10 +149,10 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 Err(err) => {
                                     if let Ok(sc) = LOG_SUPPERSSER.check() {
                                         tracing::error!(
-                                            "parse uuid column \"{}\" fail: {} ({} suppressed)",
-                                            name,
-                                            err,
-                                            sc
+                                            suppressed_count = sc,
+                                            column_name = name,
+                                            error = %err.as_report(),
+                                            "parse uuid column failed",
                                         );
                                     }
                                     None
