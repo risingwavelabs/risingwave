@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,9 +28,9 @@ use risingwave_common::catalog::{
     FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
 };
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
@@ -40,18 +40,19 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
     alter_set_schema_request, create_connection_request, DdlProgress, PbTableJobType,
+    ReplaceTablePlan,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    BranchedObject, CompactTaskAssignment, CompactionGroupInfo, HummockSnapshot, HummockVersion,
-    HummockVersionDelta,
+    BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
+    HummockSnapshot,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::{EventLog, SystemParams};
+use risingwave_pb::meta::{EventLog, PbTableParallelism, SystemParams};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -61,6 +62,7 @@ use tempfile::{Builder, NamedTempFile};
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId};
+use crate::error::{ErrorCode, Result};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
 use crate::session::{AuthContext, FrontendEnv, SessionImpl};
@@ -310,7 +312,12 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_source_inner(source).map(|_| ())
     }
 
-    async fn create_sink(&self, sink: PbSink, graph: StreamFragmentGraph) -> Result<()> {
+    async fn create_sink(
+        &self,
+        sink: PbSink,
+        graph: StreamFragmentGraph,
+        _affected_table_change: Option<ReplaceTablePlan>,
+    ) -> Result<()> {
         self.create_sink_inner(sink, graph)
     }
 
@@ -429,7 +436,12 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()> {
+    async fn drop_sink(
+        &self,
+        sink_id: u32,
+        cascade: bool,
+        _target_table_change: Option<ReplaceTablePlan>,
+    ) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
                 "drop cascade in MockCatalogWriter is unsupported".to_string(),
@@ -509,6 +521,11 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn alter_source_with_sr(&self, source: PbSource) -> Result<()> {
+        self.catalog.write().update_source(&source);
+        Ok(())
+    }
+
     async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()> {
         for database in self.catalog.read().iter_databases() {
             for schema in database.iter_schemas() {
@@ -567,6 +584,23 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_source_name(&self, _source_id: u32, _source_name: &str) -> Result<()> {
         unreachable!()
+    }
+
+    async fn alter_schema_name(&self, _schema_id: u32, _schema_name: &str) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn alter_database_name(&self, _database_id: u32, _database_name: &str) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn alter_parallelism(
+        &self,
+        _table_id: u32,
+        _parallelism: PbTableParallelism,
+        _deferred: bool,
+    ) -> Result<()> {
+        todo!()
     }
 }
 
@@ -935,6 +969,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn list_all_nodes(&self) -> RpcResult<Vec<WorkerNode>> {
         unimplemented!()
     }
+
+    async fn list_compact_task_progress(&self) -> RpcResult<Vec<CompactTaskProgress>> {
+        unimplemented!()
+    }
 }
 
 #[cfg(test)]
@@ -946,6 +984,19 @@ pub static PROTO_FILE_DATA: &str = r#"
       Country country = 3;
       int64 zipcode = 4;
       float rate = 5;
+    }
+    message TestRecordAlterType {
+        string id = 1;
+        Country country = 3;
+        int32 zipcode = 4;
+        float rate = 5;
+      }
+    message TestRecordExt {
+      int32 id = 1;
+      Country country = 3;
+      int64 zipcode = 4;
+      float rate = 5;
+      string name = 6;
     }
     message Country {
       string address = 1;

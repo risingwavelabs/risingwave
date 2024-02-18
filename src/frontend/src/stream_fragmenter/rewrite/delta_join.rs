@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 use std::rc::Rc;
 
 use itertools::Itertools;
-use risingwave_common::error::Result;
 use risingwave_pb::plan_common::PbField;
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -24,6 +23,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::super::{BuildFragmentGraphState, StreamFragment, StreamFragmentEdge};
+use crate::error::Result;
 use crate::stream_fragmenter::build_and_add_fragment;
 
 fn build_no_shuffle_exchange_for_delta_join(

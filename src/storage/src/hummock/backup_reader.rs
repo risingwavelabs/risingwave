@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,9 +25,12 @@ use risingwave_backup::error::BackupError;
 use risingwave_backup::meta_snapshot::{MetaSnapshot, Metadata};
 use risingwave_backup::storage::{MetaSnapshotStorage, ObjectStoreMetaSnapshotStorage};
 use risingwave_backup::{meta_snapshot_v1, MetaSnapshotId};
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
+use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
+use thiserror_ext::AsReport;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::local_version::pinned_version::{PinVersionAction, PinnedVersion};
@@ -44,10 +47,11 @@ async fn create_snapshot_store(
     config: &StoreConfig,
 ) -> StorageResult<ObjectStoreMetaSnapshotStorage> {
     let backup_object_store = Arc::new(
-        parse_remote_object_store(
+        build_remote_object_store(
             &config.0,
             Arc::new(ObjectStoreMetrics::unused()),
             "Meta Backup",
+            ObjectStoreConfig::default(),
         )
         .await,
     );
@@ -128,7 +132,7 @@ impl BackupReader {
             }
             if let Err(e) = current_store.0.refresh_manifest().await {
                 // reschedule refresh request
-                tracing::warn!("failed to refresh backup manifest, will retry. {}", e);
+                tracing::warn!(error = %e.as_report(), "failed to refresh backup manifest, will retry");
                 let backup_reader_clone = backup_reader.clone();
                 tokio::spawn(async move {
                     tokio::time::sleep(Duration::from_secs(60)).await;
@@ -152,10 +156,9 @@ impl BackupReader {
     }
 
     pub fn try_refresh_manifest(self: &BackupReaderRef, min_manifest_id: u64) {
-        let _ = self
-            .refresh_tx
-            .send(min_manifest_id)
-            .inspect_err(|e| tracing::warn!("failed to send refresh_manifest request {}", e));
+        let _ = self.refresh_tx.send(min_manifest_id).inspect_err(|_| {
+            tracing::warn!(min_manifest_id, "failed to send refresh_manifest request")
+        });
     }
 
     /// Tries to get a hummock version eligible for querying `epoch`.
@@ -195,7 +198,11 @@ impl BackupReader {
                     // TODO: change to v2
                     let snapshot: meta_snapshot_v1::MetaSnapshotV1 =
                         current_store.0.get(snapshot_id).await.map_err(|e| {
-                            format!("failed to get meta snapshot {}. {}", snapshot_id, e)
+                            format!(
+                                "failed to get meta snapshot {}: {}",
+                                snapshot_id,
+                                e.as_report()
+                            )
                         })?;
                     let version_holder = build_version_holder(snapshot);
                     let version_clone = version_holder.0.clone();
@@ -235,10 +242,9 @@ impl BackupReader {
             if let Err(e) = self.set_store(config.clone()).await {
                 // Retry is driven by periodic system params notification.
                 tracing::warn!(
-                    "failed to update backup reader: url={}, dir={}, {:#?}",
-                    config.0,
-                    config.1,
-                    e
+                    url = config.0, dir = config.1,
+                    error = %e.as_report(),
+                    "failed to update backup reader",
                 );
             }
         }

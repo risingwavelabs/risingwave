@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::Infallible;
 use std::str::FromStr;
 
 use super::SESSION_CONFIG_LIST_SEP;
 use crate::catalog::{DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME};
-use crate::error::RwError;
 
 pub const USER_NAME_WILD_CARD: &str = "\"$user\"";
 
@@ -59,7 +59,7 @@ impl Default for SearchPath {
 }
 
 impl FromStr for SearchPath {
-    type Err = RwError;
+    type Err = Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let paths = s.split(SESSION_CONFIG_LIST_SEP).map(|path| path.trim());

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,10 +21,10 @@ use std::sync::LazyLock;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableDesc};
-use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 
+use crate::error::Result;
 use crate::expr::{
     collect_input_refs, factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
     try_get_bool_constant, ExprDisplay, ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor,
@@ -622,23 +622,7 @@ impl Condition {
                         op,
                     ) {
                         Ok(ResultForCmp::Success(expr)) => expr,
-                        Ok(ResultForCmp::OutUpperBound) => {
-                            if op == ExprType::GreaterThan || op == ExprType::GreaterThanOrEqual {
-                                return Ok(None);
-                            }
-                            // op == < and <= means result is always true, don't need any extra
-                            // work.
-                            continue;
-                        }
-                        Ok(ResultForCmp::OutLowerBound) => {
-                            if op == ExprType::LessThan || op == ExprType::LessThanOrEqual {
-                                return Ok(None);
-                            }
-                            // op == > and >= means result is always true, don't need any extra
-                            // work.
-                            continue;
-                        }
-                        Err(_) => {
+                        _ => {
                             other_conds.push(expr);
                             continue;
                         }

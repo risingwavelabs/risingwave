@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,18 +14,17 @@
 use core::fmt::Debug;
 use std::collections::HashMap;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context as _};
 use async_nats::jetstream::context::Context;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::anyhow_error;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 use with_options::WithOptions;
 
-use super::encoder::{DateHandlingMode, TimestamptzHandlingMode};
+use super::encoder::{DateHandlingMode, TimeHandlingMode, TimestamptzHandlingMode};
 use super::utils::chunk_to_json;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::common::NatsCommon;
@@ -111,7 +110,7 @@ impl Sink for NatsSink {
         match self.config.common.build_client().await {
             Ok(_client) => {}
             Err(error) => {
-                return Err(SinkError::Nats(anyhow_error!(
+                return Err(SinkError::Nats(anyhow!(
                     "validate nats sink error: {:?}",
                     error
                 )));
@@ -135,7 +134,7 @@ impl NatsSinkWriter {
             .common
             .build_context()
             .await
-            .map_err(|e| SinkError::Nats(anyhow_error!("nats sink error: {:?}", e)))?;
+            .map_err(|e| SinkError::Nats(anyhow!("nats sink error: {:?}", e)))?;
         Ok::<_, SinkError>(Self {
             config: config.clone(),
             context,
@@ -146,6 +145,7 @@ impl NatsSinkWriter {
                 DateHandlingMode::FromCe,
                 TimestampHandlingMode::Milli,
                 TimestamptzHandlingMode::UtcWithoutSuffix,
+                TimeHandlingMode::Milli,
             ),
         })
     }
@@ -159,13 +159,15 @@ impl NatsSinkWriter {
                     self.context
                         .publish(self.config.common.subject.clone(), item.into())
                         .await
-                        .map_err(|e| SinkError::Nats(anyhow_error!("nats sink error: {:?}", e)))?;
+                        .context("nats sink error")
+                        .map_err(SinkError::Nats)?;
                 }
                 Ok::<_, SinkError>(())
             },
         )
         .await
-        .map_err(|e| SinkError::Nats(anyhow_error!("nats sink error: {:?}", e)))
+        .context("nats sink error")
+        .map_err(SinkError::Nats)
     }
 }
 

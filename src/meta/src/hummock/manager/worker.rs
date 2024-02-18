@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use std::time::Duration;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::common::WorkerType;
 use sync_point::sync_point;
+use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
@@ -107,9 +108,9 @@ impl HummockManager {
                 || async {
                     if let Err(err) = self.release_contexts(vec![worker_node.id]).await {
                         tracing::warn!(
-                            "Failed to release hummock context {}. {}. Will retry.",
+                            error = %err.as_report(),
+                            "Failed to release hummock context {}, will retry",
                             worker_node.id,
-                            err
                         );
                         return Err(err);
                     }

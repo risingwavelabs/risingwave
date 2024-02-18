@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,23 +18,22 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use itertools::{enumerate, Itertools};
-use prost::Message;
-use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    object_size_map, BranchedSstInfo, HummockVersionExt,
+    object_size_map, BranchedSstInfo,
 };
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockSstableObjectId, HummockVersionId,
+    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
 };
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
-    HummockVersionCheckpoint, HummockVersionStats, LevelType,
+    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats, LevelType,
 };
 
-use super::compaction::get_compression_algorithm;
 use super::compaction::selector::DynamicLevelSelectorCore;
+use super::compaction::{get_compression_algorithm, CompactionDeveloperConfig};
+use crate::hummock::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::compaction::CompactStatus;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -48,7 +47,7 @@ pub fn trigger_version_stat(
         .set(current_version.max_committed_epoch as i64);
     metrics
         .version_size
-        .set(current_version.encoded_len() as i64);
+        .set(current_version.estimated_encode_len() as i64);
     metrics.safe_epoch.set(current_version.safe_epoch as i64);
     metrics.current_version_id.set(current_version.id as i64);
     metrics.version_stats.reset();
@@ -119,7 +118,7 @@ pub fn trigger_sst_stat(
     let mut compacting_task_stat: BTreeMap<(usize, usize), usize> = BTreeMap::default();
     for idx in 0..current_version.num_levels(compaction_group_id) {
         let sst_num = level_sst_cnt(idx);
-        let level_label = format!("cg{}_L{}", compaction_group_id, idx);
+        let level_label = build_level_metrics_label(compaction_group_id, idx);
         metrics
             .level_sst_num
             .with_label_values(&[&level_label])
@@ -157,7 +156,8 @@ pub fn trigger_sst_stat(
 
     tracing::debug!("LSM Compacting STAT {:?}", compacting_task_stat);
     for ((select, target), compacting_task_count) in &compacting_task_stat {
-        let label_str = format!("cg{} L{} -> L{}", compaction_group_id, select, target);
+        let label_str =
+            build_compact_task_stat_metrics_label(compaction_group_id, *select, *target);
         metrics
             .level_compact_task_cnt
             .with_label_values(&[&label_str])
@@ -173,8 +173,12 @@ pub fn trigger_sst_stat(
 
     {
         // sub level stat
-        let overlapping_level_label = format!("cg{}_l0_sub_overlapping", compaction_group_id);
-        let non_overlap_level_label = format!("cg{}_l0_sub_non_overlap", compaction_group_id);
+        let overlapping_level_label =
+            build_compact_task_l0_stat_metrics_label(compaction_group_id, true, false);
+        let non_overlap_level_label =
+            build_compact_task_l0_stat_metrics_label(compaction_group_id, false, false);
+        let partition_level_label =
+            build_compact_task_l0_stat_metrics_label(compaction_group_id, true, true);
 
         let overlapping_sst_num = current_version
             .levels
@@ -202,6 +206,21 @@ pub fn trigger_sst_stat(
             })
             .unwrap_or(0);
 
+        let partition_level_num = current_version
+            .levels
+            .get(&compaction_group_id)
+            .and_then(|level| {
+                level.l0.as_ref().map(|l0| {
+                    l0.sub_levels
+                        .iter()
+                        .filter(|sub_level| {
+                            sub_level.level_type() == LevelType::Nonoverlapping
+                                && sub_level.vnode_partition_count > 0
+                        })
+                        .count()
+                })
+            })
+            .unwrap_or(0);
         metrics
             .level_sst_num
             .with_label_values(&[&overlapping_level_label])
@@ -211,6 +230,11 @@ pub fn trigger_sst_stat(
             .level_sst_num
             .with_label_values(&[&non_overlap_level_label])
             .set(non_overlap_sst_num as i64);
+
+        metrics
+            .level_sst_num
+            .with_label_values(&[&partition_level_label])
+            .set(partition_level_num as i64);
     }
 
     let previous_time = metrics.time_after_last_observation.load(Ordering::Relaxed);
@@ -253,7 +277,7 @@ pub fn remove_compaction_group_in_sst_stat(
 ) {
     let mut idx = 0;
     loop {
-        let level_label = format!("{}_{}", idx, compaction_group_id);
+        let level_label = build_level_metrics_label(compaction_group_id, idx);
         let should_continue = metrics
             .level_sst_num
             .remove_label_values(&[&level_label])
@@ -274,8 +298,8 @@ pub fn remove_compaction_group_in_sst_stat(
         idx += 1;
     }
 
-    let overlapping_level_label = format!("cg{}_l0_sub_overlapping", compaction_group_id);
-    let non_overlap_level_label = format!("cg{}_l0_sub_non_overlap", compaction_group_id);
+    let overlapping_level_label = build_level_l0_metrics_label(compaction_group_id, true);
+    let non_overlap_level_label = build_level_l0_metrics_label(compaction_group_id, false);
     metrics
         .level_sst_num
         .remove_label_values(&[&overlapping_level_label])
@@ -287,6 +311,7 @@ pub fn remove_compaction_group_in_sst_stat(
 
     remove_compacting_task_stat(metrics, compaction_group_id, max_level);
     remove_split_stat(metrics, compaction_group_id);
+    remove_compact_task_metrics(metrics, compaction_group_id, max_level);
 }
 
 pub fn remove_compacting_task_stat(
@@ -296,9 +321,10 @@ pub fn remove_compacting_task_stat(
 ) {
     for select_level in 0..=max_level {
         for target_level in 0..=max_level {
-            let label_str = format!(
-                "cg{} L{} -> L{}",
-                compaction_group_id, select_level, target_level
+            let label_str = build_compact_task_stat_metrics_label(
+                compaction_group_id,
+                select_level,
+                target_level,
             );
             metrics
                 .level_compact_task_cnt
@@ -345,7 +371,7 @@ pub fn trigger_pin_unpin_snapshot_state(
     {
         metrics.min_pinned_epoch.set(m as i64);
     } else {
-        metrics.min_pinned_epoch.set(MAX_EPOCH as _);
+        metrics.min_pinned_epoch.set(HummockEpoch::MAX as _);
     }
 }
 
@@ -364,7 +390,7 @@ pub fn trigger_gc_stat(
     checkpoint: &HummockVersionCheckpoint,
     min_pinned_version_id: HummockVersionId,
 ) {
-    let current_version_object_size_map = object_size_map(checkpoint.version.as_ref().unwrap());
+    let current_version_object_size_map = object_size_map(&checkpoint.version);
     let current_version_object_size = current_version_object_size_map.values().sum::<u64>();
     let current_version_object_count = current_version_object_size_map.len();
     let mut old_version_object_size = 0;
@@ -409,7 +435,11 @@ pub fn trigger_lsm_stat(
 ) {
     let group_label = compaction_group_id.to_string();
     // compact_pending_bytes
-    let dynamic_level_core = DynamicLevelSelectorCore::new(compaction_config.clone());
+    // we don't actually generate a compaction task here so developer config can be ignored.
+    let dynamic_level_core = DynamicLevelSelectorCore::new(
+        compaction_config.clone(),
+        Arc::new(CompactionDeveloperConfig::default()),
+    );
     let ctx = dynamic_level_core.calculate_level_base_size(levels);
     {
         let compact_pending_bytes_needed =
@@ -499,4 +529,81 @@ pub fn trigger_split_stat(
         .branched_sst_count
         .with_label_values(&[&group_label])
         .set(branched_sst_count as _);
+}
+
+pub fn build_level_metrics_label(compaction_group_id: u64, level_idx: usize) -> String {
+    format!("cg{}_L{}", compaction_group_id, level_idx)
+}
+
+pub fn build_level_l0_metrics_label(compaction_group_id: u64, overlapping: bool) -> String {
+    if overlapping {
+        format!("cg{}_l0_sub_overlapping", compaction_group_id)
+    } else {
+        format!("cg{}_l0_sub_non_overlap", compaction_group_id)
+    }
+}
+
+pub fn build_compact_task_stat_metrics_label(
+    compaction_group_id: u64,
+    select_level: usize,
+    target_level: usize,
+) -> String {
+    format!(
+        "cg{} L{} -> L{}",
+        compaction_group_id, select_level, target_level
+    )
+}
+
+pub fn build_compact_task_l0_stat_metrics_label(
+    compaction_group_id: u64,
+    overlapping: bool,
+    partition: bool,
+) -> String {
+    if partition {
+        format!("cg{}_l0_sub_partition", compaction_group_id)
+    } else if overlapping {
+        format!("cg{}_l0_sub_overlapping", compaction_group_id)
+    } else {
+        format!("cg{}_l0_sub_non_overlap", compaction_group_id)
+    }
+}
+
+pub fn build_compact_task_level_type_metrics_label(
+    select_level: usize,
+    target_level: usize,
+) -> String {
+    format!("L{}->L{}", select_level, target_level)
+}
+
+pub fn remove_compact_task_metrics(
+    metrics: &MetaMetrics,
+    compaction_group_id: CompactionGroupId,
+    max_level: usize,
+) {
+    for select_level in 0..=max_level {
+        for target_level in 0..=max_level {
+            let level_type_label =
+                build_compact_task_level_type_metrics_label(select_level, target_level);
+            let should_continue = metrics
+                .l0_compact_level_count
+                .remove_label_values(&[&compaction_group_id.to_string(), &level_type_label])
+                .is_ok();
+
+            metrics
+                .compact_task_size
+                .remove_label_values(&[&compaction_group_id.to_string(), &level_type_label])
+                .ok();
+
+            metrics
+                .compact_task_size
+                .remove_label_values(&[
+                    &compaction_group_id.to_string(),
+                    &format!("{} uncompressed", level_type_label),
+                ])
+                .ok();
+            if !should_continue {
+                break;
+            }
+        }
+    }
 }

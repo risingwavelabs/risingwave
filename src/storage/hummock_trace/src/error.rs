@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ pub enum TraceError {
     #[error("failed to read or write {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("invalid magic bytes, expected {expected:?}, found {found:?}")]
+    #[error("invalid magic bytes, expected {expected}, found {found}")]
     MagicBytes { expected: u32, found: u32 },
 
     #[error("try to close a non-existing record {0}")]
@@ -62,4 +62,7 @@ pub enum TraceError {
 
     #[error("failed to flush")]
     FlushFailed,
+
+    #[error("failed to try_flush")]
+    TryFlushFailed,
 }

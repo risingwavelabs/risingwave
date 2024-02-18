@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
-use risingwave_expr::sig::FUNCTION_REGISTRY;
+use risingwave_expr::sig::{FuncBuilder, FUNCTION_REGISTRY};
 use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
 
@@ -168,13 +168,14 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
 impl<PlanRef: BatchPlanRef> Agg<PlanRef> {
     // Check if the input is already sorted on group keys.
     pub(crate) fn input_provides_order_on_group_keys(&self) -> bool {
-        self.group_key.indices().all(|group_by_idx| {
-            self.input
-                .order()
-                .column_orders
-                .iter()
-                .any(|order| order.column_index == group_by_idx)
-        })
+        let mut input_order_prefix = IndexSet::empty();
+        for input_order_col in &self.input.order().column_orders {
+            if !self.group_key.contains(input_order_col.column_index) {
+                break;
+            }
+            input_order_prefix.insert(input_order_col.column_index);
+        }
+        self.group_key == input_order_prefix
     }
 }
 
@@ -313,13 +314,12 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     /// - column mapping from upstream to table
     fn create_table_builder(
         &self,
-        ctx: OptimizerContextRef,
+        _ctx: OptimizerContextRef,
         window_col_idx: Option<usize>,
     ) -> (TableCatalogBuilder, Vec<usize>, BTreeMap<usize, usize>) {
         // NOTE: this function should be called to get a table builder, so that all state tables
         // created for Agg node have the same group key columns and pk ordering.
-        let mut table_builder =
-            TableCatalogBuilder::new(ctx.with_options().internal_table_subset());
+        let mut table_builder = TableCatalogBuilder::default();
 
         assert!(table_builder.columns().is_empty());
         assert_eq!(table_builder.get_current_pk_len(), 0);
@@ -521,7 +521,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .zip_eq_fast(&mut out_fields[self.group_key.len()..])
         {
             let sig = FUNCTION_REGISTRY
-                .get_aggregate(
+                .get(
                     agg_call.agg_kind,
                     &agg_call
                         .inputs
@@ -529,15 +529,36 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         .map(|input| input.data_type.clone())
                         .collect_vec(),
                     &agg_call.return_type,
-                    in_append_only,
                 )
                 .expect("agg not found");
-            if !in_append_only && sig.append_only {
-                // we use materialized input state for non-retractable aggregate function.
-                // for backward compatibility, the state type is same as the return type.
-                // its values in the intermediate state table are always null.
-            } else if let Some(state_type) = &sig.state_type {
-                field.data_type = state_type.clone();
+            // in_append_only: whether the input is append-only
+            // sig.is_append_only(): whether the agg function has append-only version
+            match (in_append_only, sig.is_append_only()) {
+                (false, true) => {
+                    // we use materialized input state for non-retractable aggregate function.
+                    // for backward compatibility, the state type is same as the return type.
+                    // its values in the intermediate state table are always null.
+                }
+                (true, true) => {
+                    // use append-only version
+                    if let FuncBuilder::Aggregate {
+                        append_only_state_type: Some(state_type),
+                        ..
+                    } = &sig.build
+                    {
+                        field.data_type = state_type.clone();
+                    }
+                }
+                (_, false) => {
+                    // there is only retractable version, use it
+                    if let FuncBuilder::Aggregate {
+                        retractable_state_type: Some(state_type),
+                        ..
+                    } = &sig.build
+                    {
+                        field.data_type = state_type.clone();
+                    }
+                }
             }
         }
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();

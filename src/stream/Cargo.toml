@@ -22,7 +22,9 @@ async-trait = "0.1"
 auto_enums = "0.8"
 await-tree = { workspace = true }
 bytes = "1"
-educe = "0.4"
+cfg-if = "1"
+delta_btree_map = { path = "../utils/delta_btree_map" }
+educe = "0.5"
 either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
@@ -36,10 +38,10 @@ governor = { version = "0.6", default-features = false, features = [
 hytra = "0.1.2"
 itertools = "0.12"
 local_stats_alloc = { path = "../utils/local_stats_alloc" }
-lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
+lru = { workspace = true }
 maplit = "1.0.2"
 memcomparable = "0.2"
-multimap = "0.9"
+multimap = "0.10"
 parking_lot = "0.12"
 pin-project = "1"
 prometheus = { version = "0.13", features = ["process"] }
@@ -47,16 +49,18 @@ prost = { workspace = true }
 rand = "0.8"
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
+risingwave_dml = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
-risingwave_source = { workspace = true }
 risingwave_storage = { workspace = true }
+rw_futures_util = { workspace = true }
 serde_json = "1"
 smallvec = "1"
 static_assertions = "1"
 thiserror = "1"
+thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -67,6 +71,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
 ] }
 tokio-metrics = "0.3.0"
+tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = { workspace = true }
 tracing = "0.1"

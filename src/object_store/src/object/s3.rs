@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,16 +36,18 @@ use aws_smithy_runtime::client::http::hyper_014::HyperClientBuilder;
 use aws_smithy_runtime_api::client::http::HttpClient;
 use aws_smithy_runtime_api::client::result::SdkError;
 use aws_smithy_types::body::SdkBody;
+use aws_smithy_types::error::metadata::ProvideErrorMetadata;
 use aws_smithy_types::retry::RetryConfig;
 use either::Either;
 use fail::fail_point;
 use futures::future::{try_join_all, BoxFuture, FutureExt};
 use futures::{stream, Stream, StreamExt, TryStreamExt};
-use hyper::{Body, Response};
+use hyper::Body;
 use itertools::Itertools;
-use risingwave_common::config::default::s3_objstore_config;
+use risingwave_common::config::{ObjectStoreConfig, S3ObjectStoreConfig};
 use risingwave_common::monitor::connection::monitor_connector;
 use risingwave_common::range::RangeBoundsExt;
+use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
@@ -280,7 +282,7 @@ impl StreamingUploader for S3StreamingUploader {
                 Ok(())
             }
         } else if let Err(e) = self.flush_multipart_and_complete().await {
-            tracing::warn!("Failed to upload object {}: {:?}", self.key, e);
+            tracing::warn!(key = self.key, error = %e.as_report(), "Failed to upload object");
             self.abort_multipart_upload().await?;
             Err(e)
         } else {
@@ -309,7 +311,7 @@ pub struct S3ObjectStore {
     /// For S3 specific metrics.
     metrics: Arc<ObjectStoreMetrics>,
 
-    config: S3ObjectStoreConfig,
+    config: ObjectStoreConfig,
 }
 
 #[async_trait::async_trait]
@@ -358,7 +360,7 @@ impl ObjectStore for S3ObjectStore {
 
         // retry if occurs AWS EC2 HTTP timeout error.
         let val = tokio_retry::RetryIf::spawn(
-            self.config.get_retry_strategy(),
+            self.get_retry_strategy(),
             || async {
                 match self.obj_store_request(path, range.clone()).send().await {
                     Ok(resp) => {
@@ -384,7 +386,7 @@ impl ObjectStore for S3ObjectStore {
                     }
                 }
             },
-            Self::should_retry,
+            RetryCondition::new(&self.config.s3),
         )
         .await?;
 
@@ -420,7 +422,7 @@ impl ObjectStore for S3ObjectStore {
                 .last_modified()
                 .expect("last_modified required")
                 .as_secs_f64(),
-            total_size: resp.content_length as usize,
+            total_size: resp.content_length.unwrap_or_default() as usize,
         })
     }
 
@@ -438,7 +440,7 @@ impl ObjectStore for S3ObjectStore {
 
         // retry if occurs AWS EC2 HTTP timeout error.
         let resp = tokio_retry::RetryIf::spawn(
-            self.config.get_retry_strategy(),
+            self.get_retry_strategy(),
             || async {
                 match self.obj_store_request(path, range.clone()).send().await {
                     Ok(resp) => Ok(resp),
@@ -456,7 +458,7 @@ impl ObjectStore for S3ObjectStore {
                     }
                 }
             },
-            Self::should_retry,
+            RetryCondition::new(&self.config.s3),
         )
         .await?;
         let reader = FuturesStreamCompatByteStream::new(resp.body);
@@ -532,35 +534,35 @@ impl ObjectStore for S3ObjectStore {
     }
 
     fn recv_buffer_size(&self) -> usize {
-        self.config.recv_buffer_size.unwrap_or(1 << 21)
+        self.config
+            .s3
+            .object_store_recv_buffer_size
+            .unwrap_or(1 << 21)
+    }
+
+    fn config(&self) -> Option<&ObjectStoreConfig> {
+        Some(&self.config)
     }
 }
 
 impl S3ObjectStore {
-    /// Creates an S3 object store from environment variable.
-    ///
-    /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
-    pub async fn new(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
-        Self::new_with_config(bucket, metrics, S3ObjectStoreConfig::default()).await
-    }
-
-    pub fn new_http_client(config: &S3ObjectStoreConfig) -> impl HttpClient {
+    pub fn new_http_client(config: &ObjectStoreConfig) -> impl HttpClient {
         let mut http = hyper::client::HttpConnector::new();
 
         // connection config
-        if let Some(keepalive_ms) = config.keepalive_ms.as_ref() {
+        if let Some(keepalive_ms) = config.s3.object_store_keepalive_ms.as_ref() {
             http.set_keepalive(Some(Duration::from_millis(*keepalive_ms)));
         }
 
-        if let Some(nodelay) = config.nodelay.as_ref() {
+        if let Some(nodelay) = config.s3.object_store_nodelay.as_ref() {
             http.set_nodelay(*nodelay);
         }
 
-        if let Some(recv_buffer_size) = config.recv_buffer_size.as_ref() {
+        if let Some(recv_buffer_size) = config.s3.object_store_recv_buffer_size.as_ref() {
             http.set_recv_buffer_size(Some(*recv_buffer_size));
         }
 
-        if let Some(send_buffer_size) = config.send_buffer_size.as_ref() {
+        if let Some(send_buffer_size) = config.s3.object_store_send_buffer_size.as_ref() {
             http.set_send_buffer_size(Some(*send_buffer_size));
         }
 
@@ -577,10 +579,13 @@ impl S3ObjectStore {
         HyperClientBuilder::new().build(conn)
     }
 
+    /// Creates an S3 object store from environment variable.
+    ///
+    /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
     pub async fn new_with_config(
         bucket: String,
         metrics: Arc<ObjectStoreMetrics>,
-        config: S3ObjectStoreConfig,
+        config: ObjectStoreConfig,
     ) -> Self {
         let sdk_config_loader = aws_config::from_env()
             .retry_config(RetryConfig::standard().with_max_attempts(4))
@@ -595,7 +600,7 @@ impl S3ObjectStore {
                     Err(_) => false,
                 };
 
-                let sdk_config: aws_config::SdkConfig = sdk_config_loader.load().await;
+                let sdk_config = sdk_config_loader.load().await;
                 #[cfg(madsim)]
                 let client = Client::new(&sdk_config);
                 #[cfg(not(madsim))]
@@ -625,7 +630,11 @@ impl S3ObjectStore {
     }
 
     /// Creates a minio client. The server should be like `minio://key:secret@address:port/bucket`.
-    pub async fn with_minio(server: &str, metrics: Arc<ObjectStoreMetrics>) -> Self {
+    pub async fn with_minio(
+        server: &str,
+        metrics: Arc<ObjectStoreMetrics>,
+        s3_object_store_config: ObjectStoreConfig,
+    ) -> Self {
         let server = server.strip_prefix("minio://").unwrap();
         let (access_key_id, rest) = server.split_once(':').unwrap();
         let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
@@ -641,20 +650,27 @@ impl S3ObjectStore {
         let (address, bucket) = rest.split_once('/').unwrap();
 
         #[cfg(madsim)]
-        let builder = aws_sdk_s3::config::Builder::new();
+        let builder = aws_sdk_s3::config::Builder::new().credentials_provider(
+            Credentials::from_keys(access_key_id, secret_access_key, None),
+        );
         #[cfg(not(madsim))]
-        let builder =
-            aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await)
-                .force_path_style(true)
-                .http_client(Self::new_http_client(&S3ObjectStoreConfig::default()));
+        let builder = aws_sdk_s3::config::Builder::from(
+            &aws_config::ConfigLoader::default()
+                // FIXME: https://github.com/awslabs/aws-sdk-rust/issues/973
+                .credentials_provider(Credentials::from_keys(
+                    access_key_id,
+                    secret_access_key,
+                    None,
+                ))
+                .load()
+                .await,
+        )
+        .force_path_style(true)
+        .http_client(Self::new_http_client(&s3_object_store_config))
+        .behavior_version_latest();
         let config = builder
             .region(Region::new("custom"))
             .endpoint_url(format!("{}{}", endpoint_prefix, address))
-            .credentials_provider(Credentials::from_keys(
-                access_key_id,
-                secret_access_key,
-                None,
-            ))
             .build();
         let client = Client::from_conf(config);
 
@@ -663,7 +679,7 @@ impl S3ObjectStore {
             bucket: bucket.to_string(),
             part_size: MINIO_PART_SIZE,
             metrics,
-            config: S3ObjectStoreConfig::default(),
+            config: s3_object_store_config,
         }
     }
 
@@ -803,70 +819,13 @@ impl S3ObjectStore {
     }
 
     #[inline(always)]
-    fn should_retry(
-        err: &Either<SdkError<GetObjectError, Response<SdkBody>>, ByteStreamError>,
-    ) -> bool {
-        match err {
-            Either::Left(err) => {
-                if let SdkError::DispatchFailure(e) = err {
-                    if e.is_timeout() {
-                        tracing::warn!(target: "http_timeout_retry", "{:?} occurs, trying to retry S3 get_object request.", e);
-                        return true;
-                    }
-                }
-            }
-            Either::Right(_) => {
-                // Unfortunately `ErrorKind` of `ByteStreamError` is not accessible.
-                // Always returns true and relies on req_retry_max_attempts to avoid infinite loop.
-                return true;
-            }
-        }
-
-        false
-    }
-}
-
-pub struct S3ObjectStoreConfig {
-    pub keepalive_ms: Option<u64>,
-    pub recv_buffer_size: Option<usize>,
-    pub send_buffer_size: Option<usize>,
-    pub nodelay: Option<bool>,
-
-    pub req_retry_interval_ms: Option<u64>,
-    pub req_retry_max_delay_ms: Option<u64>,
-    pub req_retry_max_attempts: Option<usize>,
-}
-
-impl Default for S3ObjectStoreConfig {
-    fn default() -> Self {
-        Self {
-            keepalive_ms: s3_objstore_config::object_store_keepalive_ms(),
-            recv_buffer_size: s3_objstore_config::object_store_recv_buffer_size(),
-            send_buffer_size: s3_objstore_config::object_store_send_buffer_size(),
-            nodelay: s3_objstore_config::object_store_nodelay(),
-            req_retry_interval_ms: Some(s3_objstore_config::object_store_req_retry_interval_ms()),
-            req_retry_max_delay_ms: Some(s3_objstore_config::object_store_req_retry_max_delay_ms()),
-            req_retry_max_attempts: Some(s3_objstore_config::object_store_req_retry_max_attempts()),
-        }
-    }
-}
-
-impl S3ObjectStoreConfig {
-    #[inline(always)]
     fn get_retry_strategy(&self) -> impl Iterator<Item = Duration> {
-        ExponentialBackoff::from_millis(
-            self.req_retry_interval_ms
-                .unwrap_or(s3_objstore_config::object_store_req_retry_interval_ms()),
-        )
-        .max_delay(Duration::from_millis(
-            self.req_retry_max_delay_ms
-                .unwrap_or(s3_objstore_config::object_store_req_retry_max_delay_ms()),
-        ))
-        .take(
-            self.req_retry_max_attempts
-                .unwrap_or(s3_objstore_config::object_store_req_retry_max_attempts()),
-        )
-        .map(jitter)
+        ExponentialBackoff::from_millis(self.config.s3.object_store_req_retry_interval_ms)
+            .max_delay(Duration::from_millis(
+                self.config.s3.object_store_req_retry_max_delay_ms,
+            ))
+            .take(self.config.s3.object_store_req_retry_max_attempts)
+            .map(jitter)
     }
 }
 
@@ -876,14 +835,14 @@ struct S3ObjectIter {
     bucket: String,
     prefix: String,
     next_continuation_token: Option<String>,
-    is_truncated: bool,
+    is_truncated: Option<bool>,
     #[allow(clippy::type_complexity)]
     send_future: Option<
         BoxFuture<
             'static,
             Result<
-                (Vec<ObjectMetadata>, Option<String>, bool),
-                SdkError<ListObjectsV2Error, Response<SdkBody>>,
+                (Vec<ObjectMetadata>, Option<String>, Option<bool>),
+                SdkError<ListObjectsV2Error, aws_smithy_runtime_api::http::Response<SdkBody>>,
             >,
         >,
     >,
@@ -897,7 +856,7 @@ impl S3ObjectIter {
             bucket,
             prefix,
             next_continuation_token: None,
-            is_truncated: true,
+            is_truncated: Some(true),
             send_future: None,
         }
     }
@@ -925,7 +884,7 @@ impl Stream for S3ObjectIter {
                 }
             };
         }
-        if !self.is_truncated {
+        if !self.is_truncated.unwrap_or_default() {
             return Poll::Ready(None);
         }
         let mut request = self
@@ -948,7 +907,7 @@ impl Stream for S3ObjectIter {
                                 .last_modified()
                                 .map(|l| l.as_secs_f64())
                                 .unwrap_or(0f64),
-                            total_size: obj.size() as usize,
+                            total_size: obj.size().unwrap_or_default() as usize,
                         })
                         .collect_vec();
                     let is_truncated = r.is_truncated;
@@ -963,12 +922,76 @@ impl Stream for S3ObjectIter {
     }
 }
 
-impl From<Either<SdkError<GetObjectError, Response<SdkBody>>, ByteStreamError>> for ObjectError {
-    fn from(e: Either<SdkError<GetObjectError, Response<SdkBody>>, ByteStreamError>) -> Self {
+type RetryError = Either<
+    SdkError<GetObjectError, aws_smithy_runtime_api::http::Response<SdkBody>>,
+    ByteStreamError,
+>;
+
+impl From<RetryError> for ObjectError {
+    fn from(e: RetryError) -> Self {
         match e {
             Either::Left(e) => e.into(),
             Either::Right(e) => e.into(),
         }
+    }
+}
+
+struct RetryCondition {
+    retry_unknown_service_error: bool,
+    retryable_service_error_codes: Vec<String>,
+}
+
+impl RetryCondition {
+    fn new(config: &S3ObjectStoreConfig) -> Self {
+        Self {
+            retry_unknown_service_error: config.developer.object_store_retry_unknown_service_error
+                || config.retry_unknown_service_error,
+            retryable_service_error_codes: config
+                .developer
+                .object_store_retryable_service_error_codes
+                .clone(),
+        }
+    }
+}
+
+impl tokio_retry::Condition<RetryError> for RetryCondition {
+    fn should_retry(&mut self, err: &RetryError) -> bool {
+        match err {
+            Either::Left(err) => match err {
+                SdkError::DispatchFailure(e) => {
+                    if e.is_timeout() {
+                        tracing::warn!(target: "http_timeout_retry", "{e:?} occurs, retry S3 get_object request.");
+                        return true;
+                    }
+                }
+                SdkError::ServiceError(e) => match e.err().code() {
+                    None => {
+                        if self.retry_unknown_service_error {
+                            tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
+                            return true;
+                        }
+                    }
+                    Some(code) => {
+                        if self
+                            .retryable_service_error_codes
+                            .iter()
+                            .any(|s| s.as_str().eq_ignore_ascii_case(code))
+                        {
+                            tracing::warn!(target: "retryable_service_error", "{e:?} occurs, retry S3 get_object request.");
+                            return true;
+                        }
+                    }
+                },
+                _ => {}
+            },
+            Either::Right(_) => {
+                // Unfortunately `ErrorKind` of `ByteStreamError` is not accessible.
+                // Always returns true and relies on req_retry_max_attempts to avoid infinite loop.
+                return true;
+            }
+        }
+
+        false
     }
 }
 

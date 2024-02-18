@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,24 +26,28 @@ pub enum SinkDecouple {
 }
 
 impl FromStr for SinkDecouple {
-    type Err = ();
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_ascii_lowercase().as_str() {
             "true" | "enable" => Ok(Self::Enable),
             "false" | "disable" => Ok(Self::Disable),
             "default" => Ok(Self::Default),
-            _ => Err(()),
+            _ => Err("expect one of [true, enable, false, disable, default]"),
         }
     }
 }
 
-impl ToString for SinkDecouple {
-    fn to_string(&self) -> String {
-        match self {
-            Self::Default => "default".to_string(),
-            Self::Enable => "enable".to_string(),
-            Self::Disable => "disable".to_string(),
-        }
+impl std::fmt::Display for SinkDecouple {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Default => "default",
+                Self::Enable => "enable",
+                Self::Disable => "disable",
+            }
+        )
     }
 }

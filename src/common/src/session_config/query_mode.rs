@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ pub enum QueryMode {
 }
 
 impl FromStr for QueryMode {
-    type Err = ();
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.eq_ignore_ascii_case("local") {
@@ -38,7 +38,7 @@ impl FromStr for QueryMode {
         } else if s.eq_ignore_ascii_case("auto") {
             Ok(Self::Auto)
         } else {
-            Err(())
+            Err("expect one of [local, distributed, auto]")
         }
     }
 }

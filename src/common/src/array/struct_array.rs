@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,11 +25,13 @@ use risingwave_pb::data::{PbArray, PbArrayType, StructArrayData};
 use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk};
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::error::BoxedError;
 use crate::estimate_size::EstimateSize;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, StructType, ToDatumRef, ToText,
+    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, StructType, ToDatumRef,
+    ToText,
 };
-use crate::util::iter_util::ZipEqFast;
+use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::util::memcmp_encoding;
 use crate::util::value_encoding::estimate_serialize_datum_size;
 
@@ -52,7 +54,7 @@ macro_rules! iter_fields_ref {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StructArrayBuilder {
     bitmap: BitmapBuilder,
     pub(super) children_array: Vec<ArrayBuilderImpl>,
@@ -111,7 +113,11 @@ impl ArrayBuilder for StructArrayBuilder {
 
     fn append_array(&mut self, other: &StructArray) {
         self.bitmap.append_bitmap(&other.bitmap);
-        for (a, o) in self.children_array.iter_mut().zip_eq_fast(&other.children) {
+        for (a, o) in self
+            .children_array
+            .iter_mut()
+            .zip_eq_fast(other.children.iter())
+        {
             a.append_array(o);
         }
         self.len += other.len();
@@ -144,10 +150,21 @@ impl ArrayBuilder for StructArrayBuilder {
     }
 }
 
+impl EstimateSize for StructArrayBuilder {
+    fn estimated_heap_size(&self) -> usize {
+        self.bitmap.estimated_heap_size()
+            + self
+                .children_array
+                .iter()
+                .map(|a| a.estimated_heap_size())
+                .sum::<usize>()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructArray {
     bitmap: Bitmap,
-    children: Vec<ArrayRef>,
+    children: Box<[ArrayRef]>,
     type_: StructType,
     heap_size: usize,
 }
@@ -207,7 +224,7 @@ impl StructArray {
 
         Self {
             bitmap,
-            children,
+            children: children.into(),
             type_,
             heap_size,
         }
@@ -318,6 +335,47 @@ impl StructValue {
             .map(|field| memcmp_encoding::deserialize_datum_in_composite(field, deserializer))
             .try_collect()
             .map(Self::new)
+    }
+
+    /// Construct an array from literal string.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use risingwave_common::types::{StructValue, StructType, DataType, ScalarImpl};
+    ///
+    /// let ty = DataType::Struct(StructType::unnamed(vec![
+    ///     DataType::Int32,
+    ///     DataType::Float64,
+    /// ]));
+    /// let s = StructValue::from_str("(1, 2.0)", &ty).unwrap();
+    /// assert_eq!(s.fields()[0], Some(ScalarImpl::Int32(1)));
+    /// assert_eq!(s.fields()[1], Some(ScalarImpl::Float64(2.0.into())));
+    ///
+    /// let s = StructValue::from_str("(,)", &ty).unwrap();
+    /// assert_eq!(s.fields()[0], None);
+    /// assert_eq!(s.fields()[1], None);
+    /// ```
+    pub fn from_str(s: &str, data_type: &DataType) -> Result<Self, BoxedError> {
+        // FIXME(runji): this is a trivial implementation which does not support nested struct.
+        let DataType::Struct(ty) = data_type else {
+            return Err(format!("Expect struct type, got {:?}", data_type).into());
+        };
+        if !s.starts_with('(') {
+            return Err("Missing left parenthesis".into());
+        }
+        if !s.ends_with(')') {
+            return Err("Missing right parenthesis".into());
+        }
+        let mut fields = Vec::with_capacity(s.len());
+        for (s, ty) in s[1..s.len() - 1].split(',').zip_eq_debug(ty.types()) {
+            let datum = match s.trim() {
+                "" => None,
+                s => Some(ScalarImpl::from_text(s, ty)?),
+            };
+            fields.push(datum);
+        }
+        Ok(StructValue::new(fields))
     }
 }
 

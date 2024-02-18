@@ -51,8 +51,6 @@
     ) from mysql_mydb table 'mydb.t1';
   expected_outputs:
     - explain_output
-  with_config_map:
-    CDC_BACKFILL: 'true'
 - id: create_source_with_cdc_backfill
   sql: |
     create source mysql_mydb with (
@@ -71,5 +69,3 @@
     ) from mysql_mydb table 'mydb.t1';
   expected_outputs:
   - explain_output
-  with_config_map:
-    CDC_BACKFILL: 'true'

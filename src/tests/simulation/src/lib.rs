@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,11 @@
 #![feature(trait_alias)]
 #![feature(lint_reasons)]
 #![feature(lazy_cell)]
+#![feature(let_chains)]
+#![feature(try_blocks)]
+#![feature(register_tool)]
+#![register_tool(rw)]
+#![allow(rw::format_error)] // test code
 
 pub mod client;
 pub mod cluster;

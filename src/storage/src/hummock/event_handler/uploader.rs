@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
@@ -26,9 +27,15 @@ use futures::FutureExt;
 use itertools::Itertools;
 use more_asserts::{assert_ge, assert_gt, assert_le};
 use prometheus::core::{AtomicU64, GenericGauge};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::EPOCH_LEN;
+use risingwave_hummock_sdk::table_watermark::{
+    TableWatermarks, VnodeWatermark, WatermarkDirection,
+};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
+use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
@@ -52,6 +59,26 @@ pub type SpawnUploadTask = Arc<
         + Sync
         + 'static,
 >;
+
+pub type SpawnMergingTask = Arc<
+    dyn Fn(
+            TableId,
+            LocalInstanceId,
+            Vec<ImmutableMemtable>,
+            Option<MemoryTracker>,
+        ) -> JoinHandle<ImmutableMemtable>
+        + Send
+        + Sync
+        + 'static,
+>;
+
+pub(crate) fn default_spawn_merging_task(
+    compaction_executor: Arc<CompactionExecutor>,
+) -> SpawnMergingTask {
+    Arc::new(move |table_id, instance_id, imms, tracker| {
+        compaction_executor.spawn(merge_imms_in_memory(table_id, instance_id, imms, tracker))
+    })
+}
 
 #[derive(Clone)]
 pub struct UploadTaskInfo {
@@ -92,6 +119,8 @@ struct UploadingTask {
 }
 
 pub struct MergeImmTaskOutput {
+    /// Input imm ids of the merging task. Larger imm ids at the front.
+    pub imm_ids: Vec<ImmId>,
     pub table_id: TableId,
     pub instance_id: LocalInstanceId,
     pub merged_imm: ImmutableMemtable,
@@ -102,7 +131,17 @@ struct MergingImmTask {
     table_id: TableId,
     instance_id: LocalInstanceId,
     input_imms: Vec<ImmutableMemtable>,
-    join_handle: JoinHandle<HummockResult<ImmutableMemtable>>,
+    join_handle: JoinHandle<ImmutableMemtable>,
+}
+
+impl Debug for MergingImmTask {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MergingImmTask")
+            .field("table_id", &self.table_id)
+            .field("instance_id", &self.instance_id)
+            .field("input_imms", &self.input_imms)
+            .finish()
+    }
 }
 
 impl MergingImmTask {
@@ -113,10 +152,9 @@ impl MergingImmTask {
         memory_tracker: Option<MemoryTracker>,
         context: &UploaderContext,
     ) -> Self {
+        assert!(imms.iter().rev().map(|imm| imm.batch_id()).is_sorted());
         let input_imms = imms.clone();
-        let join_handle = context.compaction_executor.spawn(async move {
-            merge_imms_in_memory(table_id, instance_id, imms, memory_tracker).await
-        });
+        let join_handle = (context.spawn_merging_task)(table_id, instance_id, imms, memory_tracker);
 
         MergingImmTask {
             table_id,
@@ -127,19 +165,22 @@ impl MergingImmTask {
     }
 
     /// Poll the result of the merge task
-    fn poll_result(&mut self, cx: &mut Context<'_>) -> Poll<HummockResult<ImmutableMemtable>> {
+    fn poll_result(&mut self, cx: &mut Context<'_>) -> Poll<ImmutableMemtable> {
         Poll::Ready(match ready!(self.join_handle.poll_unpin(cx)) {
             Ok(task_result) => task_result,
-            Err(err) => Err(HummockError::other(format!(
-                "fail to join imm merge join handle: {:?}",
-                err
-            ))),
+            Err(err) => {
+                panic!(
+                    "failed to join merging task: {:?} {:?}",
+                    err.as_report(),
+                    self
+                );
+            }
         })
     }
 }
 
 impl Future for MergingImmTask {
-    type Output = HummockResult<ImmutableMemtable>;
+    type Output = ImmutableMemtable;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.poll_result(cx)
@@ -209,11 +250,12 @@ impl UploadingTask {
             Ok(task_result) => task_result
                 .inspect(|_| {
                     if self.task_info.task_size > Self::LOG_THRESHOLD_FOR_UPLOAD_TASK_SIZE {
-                        info!("upload task finish {:?}", self.task_info)
+                        info!(task_info = ?self.task_info, "upload task finish");
                     } else {
-                        debug!("upload task finish {:?}", self.task_info)
+                        debug!(task_info = ?self.task_info, "upload task finish");
                     }
                 })
+                .inspect_err(|e| error!(task_info = ?self.task_info, err = ?e.as_report(), "upload task failed"))
                 .map(|ssts| {
                     StagingSstableInfo::new(
                         ssts,
@@ -224,8 +266,8 @@ impl UploadingTask {
                 }),
 
             Err(err) => Err(HummockError::other(format!(
-                "fail to join upload join handle: {:?}",
-                err
+                "fail to join upload join handle: {}",
+                err.as_report()
             ))),
         })
     }
@@ -238,8 +280,9 @@ impl UploadingTask {
                 Ok(sstables) => return Poll::Ready(sstables),
                 Err(e) => {
                     error!(
-                        "a flush task {:?} failed, start retry. Task info: {:?}",
-                        self.task_info, e
+                        error = %e.as_report(),
+                        task_info = ?self.task_info,
+                        "a flush task failed, start retry",
                     );
                     self.join_handle =
                         (self.spawn_upload_task)(self.payload.clone(), self.task_info.clone());
@@ -311,6 +354,8 @@ struct UnsealedEpochData {
     // newer data at the front
     imms: VecDeque<ImmutableMemtable>,
     spilled_data: SpilledData,
+
+    table_watermarks: HashMap<TableId, (WatermarkDirection, Vec<VnodeWatermark>, BitmapBuilder)>,
 }
 
 impl UnsealedEpochData {
@@ -327,6 +372,46 @@ impl UnsealedEpochData {
             self.spilled_data.add_task(task);
         }
     }
+
+    fn add_table_watermarks(
+        &mut self,
+        table_id: TableId,
+        table_watermarks: Vec<VnodeWatermark>,
+        direction: WatermarkDirection,
+    ) {
+        fn apply_new_vnodes(
+            vnode_bitmap: &mut BitmapBuilder,
+            vnode_watermarks: &Vec<VnodeWatermark>,
+        ) {
+            for vnode_watermark in vnode_watermarks {
+                for vnode in vnode_watermark.vnode_bitmap().iter_ones() {
+                    assert!(
+                        !vnode_bitmap.is_set(vnode),
+                        "vnode {} write multiple table watermarks",
+                        vnode
+                    );
+                    vnode_bitmap.set(vnode, true);
+                }
+            }
+        }
+        match self.table_watermarks.entry(table_id) {
+            Entry::Occupied(mut entry) => {
+                let (prev_direction, prev_watermarks, vnode_bitmap) = entry.get_mut();
+                assert_eq!(
+                    *prev_direction, direction,
+                    "table id {} new watermark direction not match with previous",
+                    table_id
+                );
+                apply_new_vnodes(vnode_bitmap, &table_watermarks);
+                prev_watermarks.extend(table_watermarks);
+            }
+            Entry::Vacant(entry) => {
+                let mut vnode_bitmap = BitmapBuilder::zeroed(VirtualNode::COUNT);
+                apply_new_vnodes(&mut vnode_bitmap, &table_watermarks);
+                entry.insert((direction, table_watermarks, vnode_bitmap));
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -341,6 +426,7 @@ struct SealedData {
     merged_imms: VecDeque<ImmutableMemtable>,
 
     // Sealed imms grouped by table shard.
+    // newer data (larger imm id) at the front
     imms_by_table_shard: HashMap<(TableId, LocalInstanceId), VecDeque<ImmutableMemtable>>,
 
     // Merging tasks generated from sealed imms
@@ -348,6 +434,8 @@ struct SealedData {
     merging_tasks: VecDeque<MergingImmTask>,
 
     spilled_data: SpilledData,
+
+    table_watermarks: HashMap<TableId, TableWatermarks>,
 }
 
 impl SealedData {
@@ -361,6 +449,7 @@ impl SealedData {
             .iter()
             .for_each(|task| task.join_handle.abort());
         self.merging_tasks.clear();
+        self.table_watermarks.clear();
     }
 
     /// Add the data of a newly sealed epoch.
@@ -401,10 +490,14 @@ impl SealedData {
 
         // rearrange sealed imms by table shard and in epoch descending order
         for imm in unseal_epoch_data.imms.into_iter().rev() {
-            self.imms_by_table_shard
+            let queue = self
+                .imms_by_table_shard
                 .entry((imm.table_id, imm.instance_id))
-                .or_default()
-                .push_front(imm);
+                .or_default();
+            if let Some(front) = queue.front() {
+                assert_gt!(imm.batch_id(), front.batch_id());
+            }
+            queue.push_front(imm);
         }
 
         self.epochs.push_front(epoch);
@@ -418,10 +511,21 @@ impl SealedData {
             .append(&mut self.spilled_data.uploaded_data);
         self.spilled_data.uploading_tasks = unseal_epoch_data.spilled_data.uploading_tasks;
         self.spilled_data.uploaded_data = unseal_epoch_data.spilled_data.uploaded_data;
+        for (table_id, (direction, watermarks, _)) in unseal_epoch_data.table_watermarks {
+            match self.table_watermarks.entry(table_id) {
+                Entry::Occupied(mut entry) => {
+                    entry
+                        .get_mut()
+                        .add_new_epoch_watermarks(epoch, watermarks, direction);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(TableWatermarks::single_epoch(epoch, watermarks, direction));
+                }
+            };
+        }
     }
 
     fn add_merged_imm(&mut self, merged_imm: &ImmutableMemtable) {
-        debug_assert!(merged_imm.is_merged_imm());
         // add merged_imm to merged_imms
         self.merged_imms.push_front(merged_imm.clone());
     }
@@ -484,15 +588,16 @@ impl SealedData {
     fn poll_success_merge_imm(&mut self, cx: &mut Context<'_>) -> Poll<Option<MergeImmTaskOutput>> {
         // only poll the oldest merge task if there is any
         if let Some(task) = self.merging_tasks.back_mut() {
-            let merge_result = ready!(task.poll_unpin(cx));
+            let merged_imm = ready!(task.poll_unpin(cx));
 
             // pop the finished task
             let task = self.merging_tasks.pop_back().expect("must exist");
 
             Poll::Ready(Some(MergeImmTaskOutput {
+                imm_ids: task.input_imms.iter().map(|imm| imm.batch_id()).collect(),
                 table_id: task.table_id,
                 instance_id: task.instance_id,
-                merged_imm: merge_result.unwrap(),
+                merged_imm,
             }))
         } else {
             Poll::Ready(None)
@@ -540,22 +645,27 @@ struct SyncingData {
     uploading_tasks: Option<TryJoinAll<UploadingTask>>,
     // newer data at the front
     uploaded: VecDeque<StagingSstableInfo>,
+    table_watermarks: HashMap<TableId, TableWatermarks>,
+}
+
+pub struct SyncedData {
+    pub staging_ssts: Vec<StagingSstableInfo>,
+    pub table_watermarks: HashMap<TableId, TableWatermarks>,
 }
 
 // newer staging sstable info at the front
-type SyncedDataState = HummockResult<Vec<StagingSstableInfo>>;
+type SyncedDataState = HummockResult<SyncedData>;
 
 struct UploaderContext {
     pinned_version: PinnedVersion,
     /// When called, it will spawn a task to flush the imm into sst and return the join handle.
     spawn_upload_task: SpawnUploadTask,
+    spawn_merging_task: SpawnMergingTask,
     buffer_tracker: BufferTracker,
     /// The number of immutable memtables that will be merged into a new imm.
     /// When the number of imms of a table shard exceeds this threshold, uploader will generate
     /// merging tasks to merge them.
     imm_merge_threshold: usize,
-
-    compaction_executor: Arc<CompactionExecutor>,
 
     stats: Arc<HummockStateStoreMetrics>,
 }
@@ -564,17 +674,17 @@ impl UploaderContext {
     fn new(
         pinned_version: PinnedVersion,
         spawn_upload_task: SpawnUploadTask,
+        spawn_merging_task: SpawnMergingTask,
         buffer_tracker: BufferTracker,
         config: &StorageOpts,
-        compaction_executor: Arc<CompactionExecutor>,
         stats: Arc<HummockStateStoreMetrics>,
     ) -> Self {
         UploaderContext {
             pinned_version,
             spawn_upload_task,
+            spawn_merging_task,
             buffer_tracker,
             imm_merge_threshold: config.imm_merge_threshold,
-            compaction_executor,
             stats,
         }
     }
@@ -625,9 +735,9 @@ impl HummockUploader {
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         pinned_version: PinnedVersion,
         spawn_upload_task: SpawnUploadTask,
+        spawn_merging_task: SpawnMergingTask,
         buffer_tracker: BufferTracker,
         config: &StorageOpts,
-        compaction_executor: Arc<CompactionExecutor>,
     ) -> Self {
         let initial_epoch = pinned_version.version().max_committed_epoch;
         Self {
@@ -641,9 +751,9 @@ impl HummockUploader {
             context: UploaderContext::new(
                 pinned_version,
                 spawn_upload_task,
+                spawn_merging_task,
                 buffer_tracker,
                 config,
-                compaction_executor,
                 state_store_metrics,
             ),
         }
@@ -688,6 +798,25 @@ impl HummockUploader {
             .or_default()
             .imms
             .push_front(imm);
+    }
+
+    pub(crate) fn add_table_watermarks(
+        &mut self,
+        epoch: u64,
+        table_id: TableId,
+        table_watermarks: Vec<VnodeWatermark>,
+        direction: WatermarkDirection,
+    ) {
+        assert!(
+            epoch > self.max_sealed_epoch,
+            "imm epoch {} older than max sealed epoch {}",
+            epoch,
+            self.max_sealed_epoch
+        );
+        self.unsealed_data
+            .entry(epoch)
+            .or_default()
+            .add_table_watermarks(table_id, table_watermarks, direction);
     }
 
     pub(crate) fn seal_epoch(&mut self, epoch: HummockEpoch) {
@@ -801,6 +930,7 @@ impl HummockUploader {
                     uploading_tasks,
                     uploaded_data,
                 },
+            table_watermarks,
             ..
         } = self.sealed_data.drain();
 
@@ -820,6 +950,7 @@ impl HummockUploader {
             sync_epoch: epoch,
             uploading_tasks: try_join_all_upload_task,
             uploaded: uploaded_data,
+            table_watermarks,
         });
     }
 
@@ -940,7 +1071,10 @@ impl HummockUploader {
                 // The newly uploaded `sstable_infos` contains newer data. Therefore,
                 // `sstable_infos` at the front
                 sstable_infos.extend(syncing_data.uploaded);
-                sstable_infos
+                SyncedData {
+                    staging_ssts: sstable_infos,
+                    table_watermarks: syncing_data.table_watermarks,
+                }
             });
             self.add_synced_data(epoch, result);
             Poll::Ready(Some((epoch, newly_uploaded_sstable_infos)))
@@ -1038,7 +1172,7 @@ impl<'a> Future for NextUploaderEvent<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
+    use std::collections::{HashMap, VecDeque};
     use std::future::{poll_fn, Future};
     use std::ops::Deref;
     use std::sync::atomic::AtomicUsize;
@@ -1053,8 +1187,9 @@ mod tests {
     use prometheus::core::GenericGauge;
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
+    use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
-    use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
+    use risingwave_pb::hummock::{KeyRange, SstableInfo};
     use spin::Mutex;
     use tokio::spawn;
     use tokio::sync::mpsc::unbounded_channel;
@@ -1064,8 +1199,8 @@ mod tests {
     use crate::hummock::compactor::CompactionExecutor;
     use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
     use crate::hummock::event_handler::uploader::{
-        HummockUploader, MergingImmTask, UploadTaskInfo, UploadTaskOutput, UploadTaskPayload,
-        UploaderContext, UploaderEvent, UploadingTask,
+        default_spawn_merging_task, HummockUploader, MergingImmTask, UploadTaskInfo,
+        UploadTaskOutput, UploadTaskPayload, UploaderContext, UploaderEvent, UploadingTask,
     };
     use crate::hummock::event_handler::LocalInstanceId;
     use crate::hummock::iterator::test_utils::{
@@ -1094,6 +1229,7 @@ mod tests {
             levels: Default::default(),
             max_committed_epoch: epoch,
             safe_epoch: 0,
+            table_watermarks: HashMap::new(),
         }
     }
 
@@ -1123,9 +1259,8 @@ mod tests {
             0,
             sorted_items,
             size,
-            vec![],
             TEST_TABLE_ID,
-            None,
+            LocalInstanceId::default(),
             tracker,
         )
     }
@@ -1164,9 +1299,9 @@ mod tests {
         UploaderContext::new(
             initial_pinned_version(),
             Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
+            default_spawn_merging_task(compaction_executor),
             BufferTracker::for_test(),
             &config,
-            compaction_executor,
             Arc::new(HummockStateStoreMetrics::unused()),
         )
     }
@@ -1176,15 +1311,18 @@ mod tests {
         Fut: UploadOutputFuture,
         F: UploadFn<Fut>,
     {
-        let config = StorageOpts::default();
+        let config = StorageOpts {
+            imm_merge_threshold: 4,
+            ..Default::default()
+        };
         let compaction_executor = Arc::new(CompactionExecutor::new(None));
         HummockUploader::new(
             Arc::new(HummockStateStoreMetrics::unused()),
             initial_pinned_version(),
             Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
+            default_spawn_merging_task(compaction_executor),
             BufferTracker::for_test(),
             &config,
-            compaction_executor,
         )
     }
 
@@ -1314,7 +1452,7 @@ mod tests {
         };
         assert_eq!(epoch1, uploader.max_synced_epoch());
         let synced_data = uploader.get_synced_data(epoch1).unwrap();
-        let ssts = synced_data.as_ref().unwrap();
+        let ssts = &synced_data.as_ref().unwrap().staging_ssts;
         assert_eq!(1, ssts.len());
         let staging_sst = ssts.first().unwrap();
         assert_eq!(&vec![epoch1], staging_sst.epochs());
@@ -1533,17 +1671,10 @@ mod tests {
             _ = sleep => {
                 println!("sleep timeout")
             }
-            res = &mut task => {
-                match res {
-                    Ok(imm) => {
-                        println!("merging task success");
-                        assert_eq!(table_id, imm.table_id);
-                        assert_eq!(9, imm.kv_count());
-                    }
-                    Err(err) => {
-                        println!("merging task failed: {:?}", err);
-                    }
-                }
+            imm = &mut task => {
+                println!("merging task success");
+                assert_eq!(table_id, imm.table_id);
+                assert_eq!(9, imm.kv_count());
             }
         }
         task.join_handle.abort();
@@ -1666,9 +1797,9 @@ mod tests {
                     })
                 }
             }),
+            default_spawn_merging_task(compaction_executor),
             buffer_tracker.clone(),
             &config,
-            compaction_executor,
         );
         (buffer_tracker, uploader, new_task_notifier)
     }
@@ -1793,7 +1924,12 @@ mod tests {
             unreachable!("should be sync finish");
         }
         assert_eq!(epoch1, uploader.max_synced_epoch);
-        let synced_data1 = uploader.get_synced_data(epoch1).unwrap().as_ref().unwrap();
+        let synced_data1 = &uploader
+            .get_synced_data(epoch1)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .staging_ssts;
         assert_eq!(3, synced_data1.len());
         assert_eq!(&vec![imm1_4.batch_id()], synced_data1[0].imm_ids());
         assert_eq!(&vec![imm1_3.batch_id()], synced_data1[1].imm_ids());
@@ -1817,7 +1953,12 @@ mod tests {
             unreachable!("should be sync finish");
         }
         assert_eq!(epoch2, uploader.max_synced_epoch);
-        let synced_data2 = uploader.get_synced_data(epoch2).unwrap().as_ref().unwrap();
+        let synced_data2 = &uploader
+            .get_synced_data(epoch2)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .staging_ssts;
         assert_eq!(1, synced_data2.len());
         assert_eq!(&vec![imm2.batch_id()], synced_data2[0].imm_ids());
 
@@ -1873,7 +2014,12 @@ mod tests {
             unreachable!("should be sync finish");
         }
         assert_eq!(epoch4, uploader.max_synced_epoch);
-        let synced_data4 = uploader.get_synced_data(epoch4).unwrap().as_ref().unwrap();
+        let synced_data4 = &uploader
+            .get_synced_data(epoch4)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .staging_ssts;
         assert_eq!(3, synced_data4.len());
         assert_eq!(&vec![epoch4, epoch3], synced_data4[0].epochs());
         assert_eq!(

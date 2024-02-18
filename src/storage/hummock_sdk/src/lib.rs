@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,12 +21,15 @@
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(is_sorted)]
+#![feature(let_chains)]
+#![feature(btree_cursors)]
+#![feature(split_array)]
 
 mod key_cmp;
 use std::cmp::Ordering;
 
 pub use key_cmp::*;
-use risingwave_common::util::epoch::{EPOCH_MASK, MAX_EPOCH};
+use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
@@ -40,6 +43,8 @@ pub mod key;
 pub mod key_range;
 pub mod prost_key_range;
 pub mod table_stats;
+pub mod table_watermark;
+pub mod version;
 
 pub use compact::*;
 
@@ -259,9 +264,14 @@ pub fn can_concat(ssts: &[SstableInfo]) -> bool {
 
 const CHECKPOINT_DIR: &str = "checkpoint";
 const CHECKPOINT_NAME: &str = "0";
+const ARCHIVE_DIR: &str = "archive";
 
 pub fn version_checkpoint_path(root_dir: &str) -> String {
     format!("{}/{}/{}", root_dir, CHECKPOINT_DIR, CHECKPOINT_NAME)
+}
+
+pub fn version_archive_dir(root_dir: &str) -> String {
+    format!("{}/{}", root_dir, ARCHIVE_DIR)
 }
 
 pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
@@ -279,11 +289,17 @@ pub struct EpochWithGap(u64);
 impl EpochWithGap {
     #[allow(unused_variables)]
     pub fn new(epoch: u64, spill_offset: u16) -> Self {
+        // We only use 48 high bit to store epoch and use 16 low bit to store spill offset. But for MAX epoch,
+        // we still keep `u64::MAX` because we have use it in delete range and persist this value to sstable files.
+        //  So for compatibility, we must skip checking it for u64::MAX. See bug description in https://github.com/risingwavelabs/risingwave/issues/13717
         #[cfg(not(feature = "enable_test_epoch"))]
         {
-            debug_assert_eq!(epoch & EPOCH_MASK, 0);
-            let epoch_with_gap = epoch + spill_offset as u64;
-            EpochWithGap(epoch_with_gap)
+            if risingwave_common::util::epoch::is_max_epoch(epoch) {
+                EpochWithGap::new_max_epoch()
+            } else {
+                debug_assert!((epoch & EPOCH_SPILL_TIME_MASK) == 0);
+                EpochWithGap(epoch + spill_offset as u64)
+            }
         }
         #[cfg(feature = "enable_test_epoch")]
         {
@@ -300,7 +316,7 @@ impl EpochWithGap {
     }
 
     pub fn new_max_epoch() -> Self {
-        EpochWithGap(MAX_EPOCH)
+        EpochWithGap(HummockEpoch::MAX)
     }
 
     // return the epoch_with_gap(epoch + spill_offset)
@@ -317,7 +333,7 @@ impl EpochWithGap {
     pub fn pure_epoch(&self) -> HummockEpoch {
         #[cfg(not(feature = "enable_test_epoch"))]
         {
-            self.0 & !EPOCH_MASK
+            self.0 & !EPOCH_SPILL_TIME_MASK
         }
         #[cfg(feature = "enable_test_epoch")]
         {
@@ -326,6 +342,6 @@ impl EpochWithGap {
     }
 
     pub fn offset(&self) -> u64 {
-        self.0 & EPOCH_MASK
+        self.0 & EPOCH_SPILL_TIME_MASK
     }
 }

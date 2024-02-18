@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -65,15 +65,26 @@ impl RowIdGenExecutor {
     }
 
     /// Generate a row ID column according to ops.
-    fn gen_row_id_column_by_op(&mut self, column: &ArrayRef, ops: Ops<'_>) -> ArrayRef {
+    fn gen_row_id_column_by_op(
+        &mut self,
+        column: &ArrayRef,
+        ops: Ops<'_>,
+        vis: &Bitmap,
+    ) -> ArrayRef {
         let len = column.len();
         let mut builder = SerialArrayBuilder::new(len);
 
-        for (datum, op) in column.iter().zip_eq_fast(ops) {
+        for ((datum, op), vis) in column.iter().zip_eq_fast(ops).zip_eq_fast(vis.iter()) {
             // Only refill row_id for insert operation.
             match op {
                 Op::Insert => builder.append(Some(self.row_id_generator.next().into())),
-                _ => builder.append(Some(Serial::try_from(datum.unwrap()).unwrap())),
+                _ => {
+                    if vis {
+                        builder.append(Some(Serial::try_from(datum.unwrap()).unwrap()))
+                    } else {
+                        builder.append(None)
+                    }
+                }
             }
         }
 
@@ -97,7 +108,7 @@ impl RowIdGenExecutor {
                     // For chunk message, we fill the row id column and then yield it.
                     let (ops, mut columns, bitmap) = chunk.into_inner();
                     columns[self.row_id_index] =
-                        self.gen_row_id_column_by_op(&columns[self.row_id_index], &ops);
+                        self.gen_row_id_column_by_op(&columns[self.row_id_index], &ops, &bitmap);
                     yield Message::Chunk(StreamChunk::with_visibility(ops, columns, bitmap));
                 }
                 Message::Barrier(barrier) => {
@@ -156,7 +167,7 @@ mod tests {
         let row_id_generator = Bitmap::ones(VirtualNode::COUNT);
         let (mut tx, upstream) = MockSource::channel(schema.clone(), pk_indices.clone());
         let row_id_gen_executor = Box::new(RowIdGenExecutor::new(
-            ActorContext::create(233),
+            ActorContext::for_test(233),
             ExecutorInfo {
                 schema,
                 pk_indices,

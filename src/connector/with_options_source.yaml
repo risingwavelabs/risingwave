@@ -1,5 +1,38 @@
 # THIS FILE IS AUTO_GENERATED. DO NOT EDIT
 
+DatagenProperties:
+  fields:
+  - name: datagen.split.num
+    field_type: String
+    comments: split_num means data source partition
+    required: false
+  - name: datagen.rows.per.second
+    field_type: u64
+    comments: default_rows_per_second =10  when the split_num = 3 and default_rows_per_second =10  there will be three readers that generate respectively 4,3,3 message per second
+    required: false
+    default: '10'
+  - name: fields
+    field_type: HashMap<String,String>
+    comments: 'Some connector options of the datagen source''s fields  for example: create datagen source with column v1 int, v2 float  ''fields.v1.kind''=''sequence'',  ''fields.v1.start''=''1'',  ''fields.v1.end''=''1000'',  ''fields.v2.kind''=''random'',  datagen will create v1 by self-incrementing from 1 to 1000  datagen will create v2 by randomly generating from default_min to default_max'
+    required: false
+GcsProperties:
+  fields:
+  - name: gcs.bucket_name
+    field_type: String
+    required: true
+  - name: gcs.credential
+    field_type: String
+    comments: The base64 encoded credential key. If not set, ADC will be used.
+    required: false
+  - name: gcs.service_account
+    field_type: String
+    comments: If credential/ADC is not set. The service account can be used to provide the credential info.
+    required: false
+    default: Default::default
+  - name: match_pattern
+    field_type: String
+    required: false
+    default: Default::default
 KafkaProperties:
   fields:
   - name: bytes.per.second
@@ -16,14 +49,10 @@ KafkaProperties:
     field_type: String
     required: false
     alias: kafka.scan.startup.mode
-  - name: scan.startup.timestamp_millis
+  - name: scan.startup.timestamp.millis
     field_type: String
     required: false
-    alias: kafka.time.offset
-  - name: properties.group.id
-    field_type: String
-    required: false
-    alias: kafka.consumer.group
+    alias: scan.startup.timestamp_millis
   - name: upsert
     field_type: String
     comments: 'This parameter is used to tell KafkaSplitReader to produce `UpsertMessage`s, which  combine both key and value fields of the Kafka message.  TODO: Currently, `Option<bool>` can not be parsed here.'
@@ -32,9 +61,6 @@ KafkaProperties:
     field_type: String
     required: true
     alias: kafka.brokers
-  - name: broker.rewrite.endpoints
-    field_type: HashMap<String,String>
-    required: false
   - name: topic
     field_type: String
     required: true
@@ -46,6 +72,9 @@ KafkaProperties:
   - name: properties.security.protocol
     field_type: String
     comments: Security protocol used for RisingWave to communicate with Kafka brokers. Could be  PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
+    required: false
+  - name: properties.ssl.endpoint.identification.algorithm
+    field_type: String
     required: false
   - name: properties.ssl.ca.location
     field_type: String
@@ -114,6 +143,9 @@ KafkaProperties:
     field_type: String
     comments: Client identifier
     required: false
+  - name: properties.enable.ssl.certificate.verification
+    field_type: bool
+    required: false
   - name: properties.queued.min.messages
     field_type: usize
     comments: Minimum number of messages per topic+partition librdkafka tries to maintain in the local  consumer queue.
@@ -136,6 +168,10 @@ KafkaProperties:
   - name: properties.enable.auto.commit
     field_type: bool
     comments: 'Automatically and periodically commit offsets in the background.  Note: setting this to false does not prevent the consumer from fetching previously committed start offsets.  To circumvent this behaviour set specific start offsets per partition in the call to assign().  default: true'
+    required: false
+  - name: broker.rewrite.endpoints
+    field_type: HashMap<String,String>
+    comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
     required: false
 KinesisProperties:
   fields:
@@ -219,13 +255,14 @@ NatsProperties:
   - name: scan.startup.mode
     field_type: String
     required: false
-  - name: scan.startup.timestamp_millis
+  - name: scan.startup.timestamp.millis
     field_type: String
     required: false
+    alias: scan.startup.timestamp_millis
   - name: stream
     field_type: String
     required: true
-NexmarkPropertiesInner:
+NexmarkProperties:
   fields:
   - name: nexmark.split.num
     field_type: i32
@@ -397,11 +434,47 @@ NexmarkPropertiesInner:
     field_type: usize
     required: false
     default: None
+OpendalS3Properties:
+  fields:
+  - name: s3.region_name
+    field_type: String
+    required: true
+  - name: s3.bucket_name
+    field_type: String
+    required: true
+  - name: match_pattern
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.credentials.access
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.credentials.secret
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.endpoint_url
+    field_type: String
+    required: false
+  - name: s3.assume_role
+    field_type: String
+    comments: The following are only supported by s3_v2 (opendal) source.
+    required: false
+    default: Default::default
+PosixFsProperties:
+  fields:
+  - name: posix_fs.root
+    field_type: String
+    comments: The root directly of the files to search. The files will be searched recursively.
+    required: true
+  - name: match_pattern
+    field_type: String
+    comments: The regex pattern to match files under root directory.
+    required: false
+    default: Default::default
 PubsubProperties:
   fields:
-  - name: pubsub.split_count
-    field_type: u32
-    required: true
   - name: pubsub.subscription
     field_type: String
     comments: pubsub subscription to consume messages from  The subscription should be configured with the `retain-on-ack` property to enable  message recovery within risingwave.
@@ -412,11 +485,11 @@ PubsubProperties:
     required: false
   - name: pubsub.credentials
     field_type: String
-    comments: credentials JSON object encoded with base64  See the [service-account credentials guide](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account).  The service account must have the `pubsub.subscriber` [role](https://cloud.google.com/pubsub/docs/access-control#roles).
+    comments: '`credentials` is a JSON string containing the service account credentials.  See the [service-account credentials guide](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account).  The service account must have the `pubsub.subscriber` [role](https://cloud.google.com/pubsub/docs/access-control#roles).'
     required: false
-  - name: pubsub.start_offset
+  - name: pubsub.start_offset.nanos
     field_type: String
-    comments: '`start_offset` is a numeric timestamp, ideallly the publish timestamp of a message  in the subscription. If present, the connector will attempt to seek the subscription  to the timestamp and start consuming from there. Note that the seek operation is  subject to limitations around the message retention policy of the subscription. See  [Seeking to a timestamp](https://cloud.google.com/pubsub/docs/replay-overview#seeking_to_a_timestamp) for  more details.'
+    comments: '`start_offset` is a numeric timestamp, ideally the publish timestamp of a message  in the subscription. If present, the connector will attempt to seek the subscription  to the timestamp and start consuming from there. Note that the seek operation is  subject to limitations around the message retention policy of the subscription. See  [Seeking to a timestamp](https://cloud.google.com/pubsub/docs/replay-overview#seeking_to_a_timestamp) for  more details.'
     required: false
   - name: pubsub.start_snapshot
     field_type: String
@@ -428,10 +501,10 @@ PulsarProperties:
     field_type: String
     required: false
     alias: pulsar.scan.startup.mode
-  - name: scan.startup.timestamp_millis
+  - name: scan.startup.timestamp.millis
     field_type: String
     required: false
-    alias: pulsar.time.offset
+    alias: scan.startup.timestamp_millis
   - name: topic
     field_type: String
     required: true
@@ -488,3 +561,31 @@ PulsarProperties:
     field_type: String
     required: false
     default: Default::default
+S3Properties:
+  fields:
+  - name: s3.region_name
+    field_type: String
+    required: true
+  - name: s3.bucket_name
+    field_type: String
+    required: true
+  - name: match_pattern
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.credentials.access
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.credentials.secret
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.endpoint_url
+    field_type: String
+    required: false
+TestSourceProperties:
+  fields:
+  - name: properties
+    field_type: HashMap<String,String>
+    required: false

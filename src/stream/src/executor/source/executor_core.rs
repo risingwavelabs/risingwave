@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
-use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::StateStore;
 
 use super::SourceStateTableHandler;
@@ -41,6 +41,9 @@ pub struct StreamSourceCore<S: StateStore> {
     pub(crate) split_state_store: SourceStateTableHandler<S>,
 
     /// In-memory cache for the splits.
+    ///
+    /// Source messages will only write the cache.
+    /// It is read on split change and rebuild stream reader on error.
     pub(crate) state_cache: HashMap<SplitId, SplitImpl>,
 }
 

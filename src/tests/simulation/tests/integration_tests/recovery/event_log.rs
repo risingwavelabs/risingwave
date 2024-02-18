@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 #![cfg(madsim)]
 
+use std::default;
 use std::io::Write;
 use std::time::Duration;
 
@@ -40,12 +41,11 @@ event_log_flush_interval_ms = 10\
     Configuration {
         config_path: ConfigPath::Temp(config_path.into()),
         frontend_nodes: 1,
-        compute_nodes: 1,
+        compute_nodes: 3,
         meta_nodes: 1,
         compactor_nodes: 0,
         compute_node_cores: 2,
-        etcd_timeout_rate: 0.0,
-        etcd_data_path: None,
+        ..Default::default()
     }
 }
 
@@ -126,9 +126,10 @@ async fn test_create_fail(
     assert_latest_event(session.clone(), name, create_should_fail, error).await;
 }
 
-/// Tests event log do record info of stream job creation failure, for CREATE TABLE/MV/INDEX/SINK.
+/// Tests event log can record info of stream job creation failure, for CREATE TABLE/MV/INDEX/SINK.
 #[tokio::test]
-async fn test_create_stream_job_fail() -> Result<()> {
+#[ignore]
+async fn failpoint_limited_test_create_stream_job_fail() -> Result<()> {
     let mut cluster = Cluster::start(cluster_config()).await.unwrap();
     let mut session = cluster.start_session();
     const WAIT_RECOVERY_SEC: u64 = 5;
@@ -214,6 +215,52 @@ async fn test_create_stream_job_fail() -> Result<()> {
         "intentional start_actors_err",
     )
     .await;
+
+    Ok(())
+}
+
+/// Tests event log can record info of barrier collection failure.
+///
+/// This test is expected to be flaky, but is not according to my test:
+/// Theoretically errors either reported by compute nodes, or chosen by meta node, may not be the root cause.
+/// But during my tests with MADSIM_TEST_SEED from 1..1000, this test always succeeded.
+#[tokio::test]
+#[ignore]
+async fn failpoint_limited_test_collect_barrier_failure() -> Result<()> {
+    let mut cluster = Cluster::start(cluster_config()).await.unwrap();
+    let mut session = cluster.start_session();
+    session
+        .run("create table t (c int primary key)")
+        .await
+        .unwrap();
+    session
+        .run("create materialized view mv as select * from t")
+        .await
+        .unwrap();
+
+    let fp_collect_actor_err = "collect_actors_err";
+    fail::cfg(fp_collect_actor_err, "return").unwrap();
+    // Wait until barrier fails.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    fail::remove(fp_collect_actor_err);
+
+    let event_type = "COLLECT_BARRIER_FAIL";
+    let info = session
+        .run(format!(
+            "select info from rw_event_logs where event_type='{}' order by timestamp desc limit 1",
+            event_type
+        ))
+        .await
+        .unwrap();
+    let json = serde_json::from_str::<serde_json::Value>(&info).unwrap();
+    let inner = json.get("collectBarrierFail").unwrap();
+    assert!(inner
+        .get("error")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .find("intentional collect_actors_err")
+        .is_some());
 
     Ok(())
 }

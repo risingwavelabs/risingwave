@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 // Licensed under the Apache License, Version 2.0 (the "License");
 //
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use futures::executor::block_on;
 use petgraph::dot::{Config, Dot};
 use petgraph::Graph;
@@ -27,8 +27,10 @@ use risingwave_common::array::DataChunk;
 use risingwave_pb::batch_plan::{TaskId as TaskIdPb, TaskOutputId as TaskOutputIdPb};
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
+use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn, Instrument};
 
 use super::{DistributedQueryMetrics, QueryExecutionInfoRef, QueryResultFetcher, StageEvent};
@@ -46,7 +48,8 @@ use crate::scheduler::{ExecutionContextRef, ReadSnapshot, SchedulerError, Schedu
 pub enum QueryMessage {
     /// Events passed running execution.
     Stage(StageEvent),
-    CancelQuery,
+    /// Cancelled by some reason
+    CancelQuery(String),
 }
 
 enum QueryState {
@@ -86,6 +89,7 @@ struct QueryRunner {
     query_execution_info: QueryExecutionInfoRef,
 
     query_metrics: Arc<DistributedQueryMetrics>,
+    timeout_abort_task_handle: Option<JoinHandle<()>>,
 }
 
 impl QueryExecution {
@@ -111,7 +115,7 @@ impl QueryExecution {
     /// cancel request (from ctrl-c, cli, ui etc).
     #[allow(clippy::too_many_arguments)]
     pub async fn start(
-        &self,
+        self: Arc<Self>,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeSelector,
         pinned_snapshot: ReadSnapshot,
@@ -128,7 +132,7 @@ impl QueryExecution {
         // can control when to release the snapshot.
         let stage_executions = self.gen_stage_executions(
             &pinned_snapshot,
-            context,
+            context.clone(),
             worker_node_manager,
             compute_client_pool.clone(),
             catalog_reader,
@@ -137,6 +141,22 @@ impl QueryExecution {
         match cur_state {
             QueryState::Pending { msg_receiver } => {
                 *state = QueryState::Running;
+
+                // Start a timer to cancel the query
+                let mut timeout_abort_task_handle: Option<JoinHandle<()>> = None;
+                if let Some(timeout) = context.timeout() {
+                    let this = self.clone();
+                    timeout_abort_task_handle = Some(tokio::spawn(async move {
+                        tokio::time::sleep(timeout).await;
+                        warn!(
+                            "Query {:?} timeout after {} seconds, sending cancel message.",
+                            this.query.query_id,
+                            timeout.as_secs(),
+                        );
+                        this.abort(format!("timeout after {} seconds", timeout.as_secs()))
+                            .await;
+                    }));
+                }
 
                 // Create a oneshot channel for QueryResultFetcher to get failed event.
                 let (root_stage_sender, root_stage_receiver) =
@@ -150,6 +170,7 @@ impl QueryExecution {
                     scheduled_stages_count: 0,
                     query_execution_info,
                     query_metrics,
+                    timeout_abort_task_handle,
                 };
 
                 let span = tracing::info_span!(
@@ -165,7 +186,7 @@ impl QueryExecution {
 
                 let root_stage = root_stage_receiver
                     .await
-                    .map_err(|e| anyhow!("Starting query execution failed: {:?}", e))??;
+                    .context("Starting query execution failed")??;
 
                 tracing::trace!(
                     "Received root stage query result fetcher: {:?}, query id: {:?}",
@@ -183,10 +204,10 @@ impl QueryExecution {
     }
 
     /// Cancel execution of this query.
-    pub async fn abort(self: Arc<Self>) {
+    pub async fn abort(self: Arc<Self>, reason: String) {
         if self
             .shutdown_tx
-            .send(QueryMessage::CancelQuery)
+            .send(QueryMessage::CancelQuery(reason))
             .await
             .is_err()
         {
@@ -235,6 +256,9 @@ impl QueryExecution {
 impl Drop for QueryRunner {
     fn drop(&mut self) {
         self.query_metrics.running_query_num.dec();
+        self.timeout_abort_task_handle
+            .as_ref()
+            .inspect(|h| h.abort());
     }
 }
 
@@ -322,8 +346,10 @@ impl QueryRunner {
                 }
                 Stage(StageEvent::Failed { id, reason }) => {
                     error!(
-                        "Query stage {:?}-{:?} failed: {:?}.",
-                        self.query.query_id, id, reason
+                        error = %reason.as_report(),
+                        query_id = ?self.query.query_id,
+                        stage_id = ?id,
+                        "query stage failed"
                     );
 
                     self.clean_all_stages(Some(reason)).await;
@@ -343,8 +369,8 @@ impl QueryRunner {
                         break;
                     }
                 }
-                QueryMessage::CancelQuery => {
-                    self.clean_all_stages(Some(SchedulerError::QueryCancelled))
+                QueryMessage::CancelQuery(reason) => {
+                    self.clean_all_stages(Some(SchedulerError::QueryCancelled(reason)))
                         .await;
                     // One stage failed, not necessary to execute schedule stages.
                     break;
@@ -400,7 +426,8 @@ impl QueryRunner {
     /// Handle ctrl-c query or failed execution. Should stop all executions and send error to query
     /// result fetcher.
     async fn clean_all_stages(&mut self, error: Option<SchedulerError>) {
-        let error_msg = error.as_ref().map(|e| e.to_string());
+        // TODO(error-handling): should prefer use error types than strings.
+        let error_msg = error.as_ref().map(|e| e.to_report_string());
         if let Some(reason) = error {
             // Consume sender here and send error to root stage.
             let root_stage_sender = mem::take(&mut self.root_stage_sender);
@@ -433,12 +460,12 @@ impl QueryRunner {
 #[cfg(test)]
 pub(crate) mod tests {
     use std::collections::HashMap;
-    use std::rc::Rc;
     use std::sync::{Arc, RwLock};
 
     use fixedbitset::FixedBitSet;
-    use risingwave_common::catalog::{ColumnDesc, TableDesc};
-    use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
+    use risingwave_common::catalog::{
+        ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SUPER_USER_ID,
+    };
     use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_common::types::DataType;
     use risingwave_pb::common::worker_node::Property;
@@ -448,6 +475,7 @@ pub(crate) mod tests {
 
     use crate::catalog::catalog_service::CatalogReader;
     use crate::catalog::root_catalog::Catalog;
+    use crate::catalog::table_catalog::{CreateType, TableType};
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
         generic, BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalScan, ToBatch,
@@ -464,6 +492,7 @@ pub(crate) mod tests {
     use crate::session::SessionImpl;
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
+    use crate::TableCatalog;
 
     #[tokio::test]
     async fn test_query_should_not_hang_with_empty_worker() {
@@ -485,7 +514,7 @@ pub(crate) mod tests {
 
         assert!(query_execution
             .start(
-                ExecutionContext::new(SessionImpl::mock().into()).into(),
+                ExecutionContext::new(SessionImpl::mock().into(), None).into(),
                 worker_node_selector,
                 ReadSnapshot::FrontendPinned {
                     snapshot: pinned_snapshot,
@@ -510,25 +539,55 @@ pub(crate) mod tests {
         //
         let ctx = OptimizerContext::mock().await;
         let table_id = 0.into();
+        let table_catalog: TableCatalog = TableCatalog {
+            id: table_id,
+            associated_source_id: None,
+            name: "test".to_string(),
+            columns: vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::new_atomic(DataType::Int32, "a", 0),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::new_atomic(DataType::Float64, "b", 1),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::new_atomic(DataType::Int64, "c", 2),
+                    is_hidden: false,
+                },
+            ],
+            pk: vec![],
+            stream_key: vec![],
+            table_type: TableType::Table,
+            distribution_key: vec![],
+            append_only: false,
+            owner: DEFAULT_SUPER_USER_ID,
+            retention_seconds: None,
+            fragment_id: 0,        // FIXME
+            dml_fragment_id: None, // FIXME
+            vnode_col_index: None,
+            row_id_index: None,
+            value_indices: vec![0, 1, 2],
+            definition: "".to_string(),
+            conflict_behavior: ConflictBehavior::NoCheck,
+            read_prefix_len_hint: 0,
+            version: None,
+            watermark_columns: FixedBitSet::with_capacity(3),
+            dist_key_in_pk: vec![],
+            cardinality: Cardinality::unknown(),
+            cleaned_by_watermark: false,
+            created_at_epoch: None,
+            initialized_at_epoch: None,
+            create_type: CreateType::Foreground,
+            description: None,
+            incoming_sinks: vec![],
+            initialized_at_cluster_version: None,
+            created_at_cluster_version: None,
+        };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
-            Rc::new(TableDesc {
-                table_id,
-                stream_key: vec![],
-                pk: vec![],
-                columns: vec![
-                    ColumnDesc::new_atomic(DataType::Int32, "a", 0),
-                    ColumnDesc::new_atomic(DataType::Float64, "b", 1),
-                    ColumnDesc::new_atomic(DataType::Int64, "c", 2),
-                ],
-                distribution_key: vec![],
-                append_only: false,
-                retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
-                value_indices: vec![0, 1, 2],
-                read_prefix_len_hint: 0,
-                watermark_columns: FixedBitSet::with_capacity(3),
-                versioned: false,
-            }),
+            table_catalog.into(),
             vec![],
             ctx,
             false,

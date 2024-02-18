@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,22 +17,24 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use either::Either;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::Schema;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
-use risingwave_connector::source::filesystem::FsPage;
-use risingwave_connector::source::{BoxTryStream, SourceCtrlOpts};
+use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
+use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_connector::ConnectorParams;
-use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::*;
+
+const CHUNK_SIZE: usize = 1024;
 
 #[allow(dead_code)]
 pub struct FsListExecutor<S: StateStore> {
@@ -82,39 +84,41 @@ impl<S: StateStore> FsListExecutor<S> {
         }
     }
 
-    async fn build_chunked_paginate_stream(
+    #[allow(clippy::disallowed_types)]
+    fn build_chunked_paginate_stream(
         &self,
         source_desc: &SourceDesc,
-    ) -> StreamExecutorResult<BoxTryStream<StreamChunk>> {
+    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<StreamChunk>>> {
         let stream = source_desc
             .source
             .get_source_list()
-            .await
-            .map_err(StreamExecutorError::connector_error)?;
+            .map_err(StreamExecutorError::connector_error)?
+            .map_err(StreamExecutorError::connector_error);
 
-        Ok(stream
-            .map(|item| item.map(Self::map_fs_page_to_chunk))
-            .boxed())
-    }
+        // Group FsPageItem stream into chunks of size 1024.
+        let chunked_stream = stream.chunks(CHUNK_SIZE).map(|chunk| {
+            let rows = chunk
+                .into_iter()
+                .map(|item| {
+                    let page_item = item.unwrap();
+                    (
+                        Op::Insert,
+                        OwnedRow::new(vec![
+                            Some(ScalarImpl::Utf8(page_item.name.into_boxed_str())),
+                            Some(ScalarImpl::Timestamptz(page_item.timestamp)),
+                            Some(ScalarImpl::Int64(page_item.size)),
+                        ]),
+                    )
+                })
+                .collect::<Vec<_>>();
 
-    fn map_fs_page_to_chunk(page: FsPage) -> StreamChunk {
-        let rows = page
-            .into_iter()
-            .map(|split| {
-                (
-                    Op::Insert,
-                    OwnedRow::new(vec![
-                        Some(ScalarImpl::Utf8(split.name.into_boxed_str())),
-                        Some(ScalarImpl::Timestamp(split.timestamp)),
-                        Some(ScalarImpl::Int64(split.size)),
-                    ]),
-                )
-            })
-            .collect::<Vec<_>>();
-        StreamChunk::from_rows(
-            &rows,
-            &[DataType::Varchar, DataType::Timestamp, DataType::Int64],
-        )
+            Ok(StreamChunk::from_rows(
+                &rows,
+                &[DataType::Varchar, DataType::Timestamptz, DataType::Int64],
+            ))
+        });
+
+        Ok(chunked_stream)
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -143,7 +147,7 @@ impl<S: StateStore> FsListExecutor<S> {
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = Some(core);
 
-        let chunked_paginate_stream = self.build_chunked_paginate_stream(&source_desc).await?;
+        let chunked_paginate_stream = self.build_chunked_paginate_stream(&source_desc)?;
 
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
         let mut stream =
@@ -158,7 +162,7 @@ impl<S: StateStore> FsListExecutor<S> {
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
-                    tracing::warn!("encountered an error, recovering. {:?}", e);
+                    tracing::warn!(error = %e.as_report(), "encountered an error, recovering");
                     // todo: rebuild stream here
                 }
                 Ok(msg) => match msg {

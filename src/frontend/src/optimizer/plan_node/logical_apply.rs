@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 //
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::generic::{
@@ -26,6 +25,7 @@ use super::{
     ColPrunable, Logical, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
     PredicatePushdown, ToBatch, ToStream,
 };
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
@@ -327,11 +327,11 @@ impl PredicatePushdown for LogicalApply {
         let join_type = self.join_type();
 
         let (left_from_filter, right_from_filter, on) =
-            push_down_into_join(&mut predicate, left_col_num, right_col_num, join_type);
+            push_down_into_join(&mut predicate, left_col_num, right_col_num, join_type, true);
 
         let mut new_on = self.on.clone().and(on);
         let (left_from_on, right_from_on) =
-            push_down_join_condition(&mut new_on, left_col_num, right_col_num, join_type);
+            push_down_join_condition(&mut new_on, left_col_num, right_col_num, join_type, true);
 
         let left_predicate = left_from_filter.and(left_from_on);
         let right_predicate = right_from_filter.and(right_from_on);

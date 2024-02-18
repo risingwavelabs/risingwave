@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::utils::{childless_record, Distill};
@@ -22,6 +21,7 @@ use super::{
     ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalProject, PlanBase, PlanRef,
     PredicatePushdown, ToBatch, ToStream,
 };
+use crate::error::Result;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor, TableFunction};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;

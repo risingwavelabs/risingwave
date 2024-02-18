@@ -22,6 +22,8 @@ prometheus = { version = "0.13" }
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
+thiserror = "1"
+thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tonic = { workspace = true }
 tower = { version = "0.4", features = ["util", "load-shed"] }

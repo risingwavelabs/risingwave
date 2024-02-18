@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,12 +13,14 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::Result;
+use risingwave_pb::ddl_service::ReplaceTablePlan;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::error::Result;
+use crate::handler::create_sink::{insert_merger_to_union, reparse_table_for_sink};
 use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_sink(
@@ -34,7 +36,7 @@ pub async fn handle_drop_sink(
     let user_name = &session.auth_context().user_name;
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let sink_id = {
+    let sink = {
         let catalog_reader = session.env().catalog_reader().read_guard();
         let (sink, schema_name) =
             match catalog_reader.get_sink_by_name(db_name, schema_path, &sink_name) {
@@ -52,11 +54,46 @@ pub async fn handle_drop_sink(
 
         session.check_privilege_for_drop_alter(schema_name, &*sink)?;
 
-        sink.id
+        sink
     };
 
+    let sink_id = sink.id;
+
+    let mut affected_table_change = None;
+    if let Some(target_table_id) = &sink.target_table {
+        let table_catalog = {
+            let reader = session.env().catalog_reader().read_guard();
+            let table = reader.get_table_by_id(target_table_id)?;
+            table.clone()
+        };
+
+        let (mut graph, mut table, source) =
+            reparse_table_for_sink(&session, &table_catalog).await?;
+
+        assert!(!table_catalog.incoming_sinks.is_empty());
+
+        table.incoming_sinks = table_catalog.incoming_sinks.clone();
+
+        for _ in 0..(table_catalog.incoming_sinks.len() - 1) {
+            for fragment in graph.fragments.values_mut() {
+                if let Some(node) = &mut fragment.node {
+                    insert_merger_to_union(node);
+                }
+            }
+        }
+
+        affected_table_change = Some(ReplaceTablePlan {
+            source,
+            table: Some(table),
+            fragment_graph: Some(graph),
+            table_col_index_mapping: None,
+        });
+    }
+
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.drop_sink(sink_id.sink_id, cascade).await?;
+    catalog_writer
+        .drop_sink(sink_id.sink_id, cascade, affected_table_change)
+        .await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SINK))
 }

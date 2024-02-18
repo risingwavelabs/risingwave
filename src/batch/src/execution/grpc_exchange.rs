@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::fmt::{Debug, Formatter};
 
 use futures::StreamExt;
 use risingwave_common::array::DataChunk;
+use risingwave_expr::expr_context::capture_expr_context;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::{self, Plan};
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::{ExecuteRequest, GetDataResponse};
@@ -50,6 +51,7 @@ impl GrpcExchangeSource {
                     plan: plan.plan,
                     epoch: plan.epoch,
                     tracing_context: plan.tracing_context,
+                    expr_context: Some(capture_expr_context()?),
                 };
                 client.execute(execute_request).await?
             }

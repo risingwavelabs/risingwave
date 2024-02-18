@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
@@ -21,9 +21,14 @@ use futures::future::join_all;
 use hytra::TrAdder;
 use parking_lot::Mutex;
 use risingwave_common::error::ErrorSuppressor;
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_expr::expr_context::expr_context_scope;
 use risingwave_expr::ExprError;
+use risingwave_pb::plan_common::ExprContext;
+use risingwave_pb::stream_plan::PbStreamActor;
+use thiserror_ext::AsReport;
 use tokio_stream::StreamExt;
 use tracing::Instrument;
 
@@ -31,12 +36,13 @@ use super::monitor::StreamingMetrics;
 use super::subtask::SubtaskHandle;
 use super::StreamConsumer;
 use crate::error::StreamResult;
-use crate::task::{ActorId, SharedContext};
+use crate::task::{ActorId, LocalBarrierManager};
 
 /// Shared by all operators of an actor.
 pub struct ActorContext {
     pub id: ActorId,
     pub fragment_id: u32,
+    pub mview_definition: String,
 
     // TODO(eric): these seem to be useless now?
     last_mem_val: Arc<AtomicUsize>,
@@ -45,46 +51,56 @@ pub struct ActorContext {
 
     pub streaming_metrics: Arc<StreamingMetrics>,
     pub error_suppressor: Arc<Mutex<ErrorSuppressor>>,
+
+    pub dispatch_num: usize,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
 
 impl ActorContext {
-    pub fn create(id: ActorId) -> ActorContextRef {
+    pub fn for_test(id: ActorId) -> ActorContextRef {
         Arc::new(Self {
             id,
             fragment_id: 0,
+            mview_definition: "".to_string(),
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             total_mem_val: Arc::new(TrAdder::new()),
             streaming_metrics: Arc::new(StreamingMetrics::unused()),
             error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(10))),
+            // Set 1 for test to enable sanity check on table
+            dispatch_num: 1,
         })
     }
 
-    pub fn create_with_metrics(
-        id: ActorId,
-        fragment_id: u32,
+    pub fn create(
+        stream_actor: &PbStreamActor,
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
         unique_user_errors: usize,
+        dispatch_num: usize,
     ) -> ActorContextRef {
         Arc::new(Self {
-            id,
-            fragment_id,
+            id: stream_actor.actor_id,
+            fragment_id: stream_actor.fragment_id,
+            mview_definition: stream_actor.mview_definition.clone(),
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             total_mem_val,
             streaming_metrics,
             error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(unique_user_errors))),
+            dispatch_num,
         })
     }
 
     pub fn on_compute_error(&self, err: ExprError, identity: &str) {
-        tracing::error!(identity, %err, "failed to evaluate expression");
+        static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
+        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+            tracing::error!(identity, error = %err.as_report(), suppressed_count, "failed to evaluate expression");
+        }
 
         let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
-        let mut err_str = err.to_string();
+        let mut err_str = err.to_report_string();
 
         if self.error_suppressor.lock().suppress_error(&err_str) {
             err_str = format!(
@@ -125,9 +141,10 @@ pub struct Actor<C> {
     /// The subtasks to execute concurrently.
     subtasks: Vec<SubtaskHandle>,
 
-    context: Arc<SharedContext>,
     _metrics: Arc<StreamingMetrics>,
-    actor_context: ActorContextRef,
+    pub actor_context: ActorContextRef,
+    expr_context: ExprContext,
+    barrier_manager: LocalBarrierManager,
 }
 
 impl<C> Actor<C>
@@ -137,27 +154,32 @@ where
     pub fn new(
         consumer: C,
         subtasks: Vec<SubtaskHandle>,
-        context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
         actor_context: ActorContextRef,
+        expr_context: ExprContext,
+        barrier_manager: LocalBarrierManager,
     ) -> Self {
         Self {
             consumer,
             subtasks,
-            context,
             _metrics: metrics,
             actor_context,
+            expr_context,
+            barrier_manager,
         }
     }
 
     #[inline(always)]
     pub async fn run(mut self) -> StreamResult<()> {
-        tokio::join!(
-            // Drive the subtasks concurrently.
-            join_all(std::mem::take(&mut self.subtasks)),
-            self.run_consumer(),
-        )
-        .1
+        expr_context_scope(self.expr_context.clone(), async move {
+            tokio::join!(
+                // Drive the subtasks concurrently.
+                join_all(std::mem::take(&mut self.subtasks)),
+                self.run_consumer(),
+            )
+            .1
+        })
+        .await
     }
 
     async fn run_consumer(self) -> StreamResult<()> {
@@ -200,8 +222,13 @@ where
                 Err(err) => break Err(err),
             };
 
+            fail::fail_point!("collect_actors_err", id == 10, |_| Err(anyhow::anyhow!(
+                "intentional collect_actors_err"
+            )
+            .into()));
+
             // Collect barriers to local barrier manager
-            self.context.lock_barrier_manager().collect(id, &barrier);
+            self.barrier_manager.collect(id, &barrier);
 
             // Then stop this actor if asked
             if barrier.is_stop(id) {

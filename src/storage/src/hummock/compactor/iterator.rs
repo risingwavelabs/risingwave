@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,19 +26,22 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::SstableInfo;
 
+use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::iterator::{Forward, HummockIterator};
-use crate::hummock::sstable_store::{BlockStream, SstableStoreRef};
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{BlockHolder, BlockIterator, BlockMeta, HummockResult};
 use crate::monitor::StoreLocalStatistic;
+
+const PROGRESS_KEY_INTERVAL: usize = 100;
 
 /// Iterates over the KV-pairs of an SST while downloading it.
 pub struct SstableStreamIterator {
     sstable_store: SstableStoreRef,
     block_metas: Vec<BlockMeta>,
     /// The downloading stream.
-    block_stream: Option<BlockStream>,
+    block_stream: Option<BlockDataStream>,
 
     /// Iterates over the KV-pairs of the current block.
     block_iter: Option<BlockIterator>,
@@ -69,7 +72,7 @@ impl SstableStreamIterator {
     // BlockStream follows a different approach. After new(), we do not seek, instead next()
     // returns the first value.
 
-    /// Initialises a new [`SstableStreamIterator`] which iterates over the given [`BlockStream`].
+    /// Initialises a new [`SstableStreamIterator`] which iterates over the given [`BlockDataStream`].
     /// The iterator reads at most `max_block_count` from the stream.
     pub fn new(
         block_metas: Vec<BlockMeta>,
@@ -99,10 +102,9 @@ impl SstableStreamIterator {
     async fn create_stream(&mut self) -> HummockResult<()> {
         let block_stream = self
             .sstable_store
-            .get_stream_by_position(
+            .get_stream_for_blocks(
                 self.sstable_info.object_id,
-                self.seek_block_idx,
-                &self.block_metas,
+                &self.block_metas[self.seek_block_idx..],
             )
             .verbose_instrument_await("stream_iter_get_stream")
             .await?;
@@ -252,9 +254,7 @@ impl SstableStreamIterator {
 
 impl Drop for SstableStreamIterator {
     fn drop(&mut self) {
-        self.task_progress
-            .num_pending_read_io
-            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        self.task_progress.dec_num_pending_read_io()
     }
 }
 
@@ -359,7 +359,7 @@ impl ConcatSstableIterator {
                 .sstable(table_info, &mut self.stats)
                 .verbose_instrument_await("stream_iter_sstable")
                 .await?;
-            let block_metas = &sstable.value().meta.block_metas;
+            let block_metas = &sstable.meta.block_metas;
             let mut start_index = match seek_key {
                 None => 0,
                 Some(seek_key) => {
@@ -396,11 +396,9 @@ impl ConcatSstableIterator {
             if start_index >= end_index {
                 found = false;
             } else {
-                self.task_progress
-                    .num_pending_read_io
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                self.task_progress.inc_num_pending_read_io();
                 let mut sstable_iter = SstableStreamIterator::new(
-                    sstable.value().meta.block_metas.clone(),
+                    sstable.meta.block_metas.clone(),
                     table_info.clone(),
                     self.existing_table_ids.clone(),
                     start_index,
@@ -487,6 +485,67 @@ impl HummockIterator for ConcatSstableIterator {
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         stats.add(&self.stats)
+    }
+}
+
+pub struct MonitoredCompactorIterator<I> {
+    inner: I,
+    task_progress: Arc<TaskProgress>,
+
+    processed_key_num: usize,
+}
+
+impl<I: HummockIterator<Direction = Forward>> MonitoredCompactorIterator<I> {
+    pub fn new(inner: I, task_progress: Arc<TaskProgress>) -> Self {
+        Self {
+            inner,
+            task_progress,
+            processed_key_num: 0,
+        }
+    }
+}
+
+impl<I: HummockIterator<Direction = Forward>> HummockIterator for MonitoredCompactorIterator<I> {
+    type Direction = Forward;
+
+    async fn next(&mut self) -> HummockResult<()> {
+        self.inner.next().await?;
+        self.processed_key_num += 1;
+
+        if self.processed_key_num % PROGRESS_KEY_INTERVAL == 0 {
+            self.task_progress
+                .inc_progress_key(PROGRESS_KEY_INTERVAL as _);
+        }
+
+        Ok(())
+    }
+
+    fn key(&self) -> FullKey<&[u8]> {
+        self.inner.key()
+    }
+
+    fn value(&self) -> HummockValue<&[u8]> {
+        self.inner.value()
+    }
+
+    fn is_valid(&self) -> bool {
+        self.inner.is_valid()
+    }
+
+    async fn rewind(&mut self) -> HummockResult<()> {
+        self.processed_key_num = 0;
+        self.inner.rewind().await?;
+        Ok(())
+    }
+
+    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+        self.processed_key_num = 0;
+        self.inner.seek(key).await?;
+        Ok(())
+    }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        self.inner.collect_local_statistic(stats)
     }
 }
 
@@ -659,7 +718,7 @@ mod tests {
             .sstable(&iter.sstables[0], &mut iter.stats)
             .await
             .unwrap();
-        let block_metas = &sst.value().meta.block_metas;
+        let block_metas = &sst.meta.block_metas;
         let block_1_smallest_key = block_metas[1].smallest_key.clone();
         let block_2_smallest_key = block_metas[2].smallest_key.clone();
         // Use block_1_smallest_key as seek key and result in the first KV of block 1.

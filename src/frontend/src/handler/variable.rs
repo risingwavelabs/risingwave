@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,29 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use itertools::Itertools;
 use pgwire::pg_protocol::ParameterStatus;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::{ConfigReporter, SESSION_CONFIG_LIST_SEP};
 use risingwave_common::system_param::is_mutable;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
+use risingwave_sqlparser::keywords::Keyword;
 
 use super::RwPgResponse;
+use crate::error::Result;
 use crate::handler::HandlerArgs;
 use crate::utils::infer_stmt_row_desc::infer_show_variable;
 
-fn set_var_to_guc_str(value: &SetVariableValue) -> String {
+/// convert `SetVariableValue` to string while remove the quotes on literals.
+pub(crate) fn set_var_to_param_str(value: &SetVariableValue) -> Option<String> {
     match value {
-        SetVariableValue::Literal(Value::DoubleQuotedString(s))
-        | SetVariableValue::Literal(Value::SingleQuotedString(s)) => s.clone(),
-        SetVariableValue::List(list) => list
-            .iter()
-            .map(set_var_to_guc_str)
-            .join(SESSION_CONFIG_LIST_SEP),
-        _ => value.to_string(),
+        SetVariableValue::Single(var) => Some(var.to_string_unquoted()),
+        SetVariableValue::List(list) => Some(
+            list.iter()
+                .map(|var| var.to_string_unquoted())
+                .join(SESSION_CONFIG_LIST_SEP),
+        ),
+        SetVariableValue::Default => None,
     }
 }
 
@@ -44,7 +47,7 @@ pub fn handle_set(
     value: SetVariableValue,
 ) -> Result<RwPgResponse> {
     // Strip double and single quotes
-    let string_val = set_var_to_guc_str(&value);
+    let mut string_val = set_var_to_param_str(&value);
 
     let mut status = ParameterStatus::default();
 
@@ -58,6 +61,18 @@ pub fn handle_set(
                 self.status.application_name = Some(new_val);
             }
         }
+    }
+
+    // special handle for streaming parallelism,
+    if name
+        .real_value()
+        .eq_ignore_ascii_case("streaming_parallelism")
+        && string_val
+            .as_ref()
+            .map(|val| val.eq_ignore_ascii_case(Keyword::ADAPTIVE.to_string().as_str()))
+            .unwrap_or(false)
+    {
+        string_val = None;
     }
 
     // Currently store the config variable simply as String -> ConfigEntry(String).
@@ -81,8 +96,9 @@ pub(super) fn handle_set_time_zone(
     value: SetTimeZoneValue,
 ) -> Result<RwPgResponse> {
     let tz_info = match value {
-        SetTimeZoneValue::Local => iana_time_zone::get_timezone()
-            .map_err(|e| ErrorCode::InternalError(format!("Failed to get local time zone: {}", e))),
+        SetTimeZoneValue::Local => {
+            iana_time_zone::get_timezone().context("Failed to get local time zone")
+        }
         SetTimeZoneValue::Default => Ok("UTC".to_string()),
         SetTimeZoneValue::Ident(ident) => Ok(ident.real_value()),
         SetTimeZoneValue::Literal(Value::DoubleQuotedString(s))

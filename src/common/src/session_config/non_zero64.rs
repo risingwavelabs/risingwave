@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::num::NonZeroU64;
+use std::num::{NonZeroU64, ParseIntError};
 use std::str::FromStr;
 
 /// When set this config as `0`, the value is `None`, otherwise the value is
@@ -21,10 +21,10 @@ use std::str::FromStr;
 pub struct ConfigNonZeroU64(pub Option<NonZeroU64>);
 
 impl FromStr for ConfigNonZeroU64 {
-    type Err = ();
+    type Err = ParseIntError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parsed = s.parse::<u64>().map_err(|_| ())?;
+        let parsed = s.parse::<u64>()?;
         if parsed == 0 {
             Ok(Self(None))
         } else {

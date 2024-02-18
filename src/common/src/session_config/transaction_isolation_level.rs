@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,8 @@
 use std::fmt::Formatter;
 use std::str::FromStr;
 
+use crate::error::{bail_not_implemented, NotImplemented};
+
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 // Some variants are never constructed so allow dead code here.
 #[allow(dead_code)]
@@ -27,20 +29,20 @@ pub enum IsolationLevel {
 }
 
 impl FromStr for IsolationLevel {
-    type Err = ();
+    type Err = NotImplemented;
 
     fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        Err(())
+        bail_not_implemented!(issue = 10736, "isolation level");
     }
 }
 
 impl std::fmt::Display for IsolationLevel {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ReadCommitted => write!(f, "READ_COMMITTED"),
-            Self::ReadUncommitted => write!(f, "READ_UNCOMMITTED"),
-            Self::RepeatableRead => write!(f, "REPEATABLE_READ"),
-            Self::Serializable => write!(f, "SERIALIZABLE"),
+            Self::ReadCommitted => write!(f, "read committed"),
+            Self::ReadUncommitted => write!(f, "read uncommitted"),
+            Self::RepeatableRead => write!(f, "repeatable read"),
+            Self::Serializable => write!(f, "serializable"),
         }
     }
 }

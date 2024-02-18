@@ -54,6 +54,8 @@ download_and_prepare_rw "$profile" common
 echo "--- Download artifacts"
 download-and-decompress-artifact e2e_test_generated ./
 download-and-decompress-artifact risingwave_e2e_extended_mode_test-"$profile" target/debug/
+mkdir -p e2e_test/udf/wasm/target/wasm32-wasi/release/
+buildkite-agent artifact download udf.wasm e2e_test/udf/wasm/target/wasm32-wasi/release/
 buildkite-agent artifact download risingwave-udf-example.jar ./
 mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/risingwave_e2e_extended_mode_test
 
@@ -88,12 +90,17 @@ pkill python3
 
 sqllogictest -p 4566 -d dev './e2e_test/udf/alter_function.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/graceful_shutdown_python.slt'
+# FIXME: flaky test
+# sqllogictest -p 4566 -d dev './e2e_test/udf/retry_python.slt'
 
 echo "--- e2e, $mode, java udf"
 java -jar risingwave-udf-example.jar &
 sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/udf/udf.slt'
 pkill java
+
+echo "--- e2e, $mode, wasm udf"
+sqllogictest -p 4566 -d dev './e2e_test/udf/wasm_udf.slt'
 
 echo "--- Kill cluster"
 cluster_stop
@@ -125,22 +132,6 @@ RUST_BACKTRACE=1 target/debug/risingwave_e2e_extended_mode_test --host 127.0.0.1
 
 echo "--- Kill cluster"
 cluster_stop
-
-if [[ "$RUN_DELETE_RANGE" -eq "1" ]]; then
-    echo "--- e2e, ci-delete-range-test"
-    cargo make clean-data
-    RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-    cargo make ci-start ci-delete-range-test
-    download-and-decompress-artifact delete-range-test-"$profile" target/debug/
-    mv target/debug/delete-range-test-"$profile" target/debug/delete-range-test
-    chmod +x ./target/debug/delete-range-test
-
-    config_path=".risingwave/config/risingwave.toml"
-    ./target/debug/delete-range-test --ci-mode --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
-
-    echo "--- Kill cluster"
-    cluster_stop
-fi
 
 if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     echo "--- e2e, ci-compaction-test, nexmark_q7"

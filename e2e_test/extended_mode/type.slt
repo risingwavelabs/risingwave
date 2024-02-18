@@ -21,7 +21,7 @@ SET RW_IMPLICIT_FLUSH TO true;
 include ../batch/types/boolean.slt.part
 include ../batch/types/cast.slt.part
 include ../batch/types/date.slt
-include ../batch/types/intercal.slt.part
+include ../batch/types/interval.slt.part
 include ../batch/types/number_arithmetic.slt.part
 include ../batch/types/temporal_arithmetic.slt.part
 include ../batch/types/time.slt.part

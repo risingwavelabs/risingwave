@@ -18,7 +18,8 @@ bytes = "1"
 easy-ext = "1"
 hex = "0.4"
 itertools = "0.12"
-parse-display = "0.8"
+parse-display = "0.9"
+prost = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
 tracing = "0.1"

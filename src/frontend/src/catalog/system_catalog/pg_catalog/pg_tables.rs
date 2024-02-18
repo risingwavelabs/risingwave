@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,41 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
-
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::types::DataType;
-
-use crate::catalog::system_catalog::{BuiltinView, SystemCatalogColumnsDef};
-
-pub const PG_TABLES_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Varchar, "schemaname"),
-    (DataType::Varchar, "tablename"),
-    (DataType::Varchar, "tableowner"),
-    (DataType::Varchar, "tablespace"), /* Since we don't have any concept of tablespace, we will
-                                        * set this to null. */
-];
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
 /// The view `pg_tables` provides access to useful information about each table in the database.
 /// Ref: [`https://www.postgresql.org/docs/current/view-pg-tables.html`]
-pub static PG_TABLES: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
-    name: "pg_tables",
-    schema: PG_CATALOG_SCHEMA_NAME,
-    columns: PG_TABLES_COLUMNS,
-    sql: "SELECT s.name AS schemaname, \
-                 t.tablename, \
-                 pg_catalog.pg_get_userbyid(t.owner) AS tableowner, \
-                 NULL AS tablespace \
-            FROM \
-                (SELECT name AS tablename, \
-                       schema_id, \
-                       owner \
-                       FROM rw_catalog.rw_tables \
-                 UNION \
-                 SELECT name AS tablename, \
-                       schema_id, \
-                       owner \
-                       FROM rw_catalog.rw_system_tables) AS t \
-                JOIN rw_catalog.rw_schemas s ON t.schema_id = s.id"
-        .into(),
-});
+#[system_catalog(
+    view,
+    "pg_catalog.pg_tables",
+    "SELECT s.name AS schemaname,
+            t.tablename,
+            pg_catalog.pg_get_userbyid(t.owner) AS tableowner,
+            NULL AS tablespace
+    FROM
+        (SELECT name AS tablename,
+                schema_id,
+                owner
+                FROM rw_catalog.rw_tables
+            UNION
+            SELECT name AS tablename,
+                schema_id,
+                owner
+                FROM rw_catalog.rw_system_tables) AS t
+        JOIN rw_catalog.rw_schemas s ON t.schema_id = s.id"
+)]
+#[derive(Fields)]
+struct PgTable {
+    schemaname: String,
+    tablename: String,
+    tableowner: String,
+    // Since we don't have any concept of tablespace, we will set this to null.
+    tablespace: String,
+}

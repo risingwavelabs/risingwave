@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use risingwave_expr::{capture_context, function, ExprError};
 use risingwave_sqlparser::parser::{Parser, ParserError};
 use risingwave_sqlparser::tokenizer::{Token, Tokenizer};
 use thiserror::Error;
+use thiserror_ext::AsReport;
 
 use super::context::{AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH};
 use crate::catalog::root_catalog::SchemaPath;
@@ -34,10 +35,10 @@ enum ResolveRegclassError {
 impl From<ResolveRegclassError> for ExprError {
     fn from(e: ResolveRegclassError) -> Self {
         match e {
-            ResolveRegclassError::Parser(e) => ExprError::Parse(e.to_string().into_boxed_str()),
+            ResolveRegclassError::Parser(e) => ExprError::Parse(e.to_report_string().into()),
             ResolveRegclassError::Catalog(e) => ExprError::InvalidParam {
                 name: "name",
-                reason: e.to_string().into_boxed_str(),
+                reason: e.to_report_string().into(),
             },
         }
     }

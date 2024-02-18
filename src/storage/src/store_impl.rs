@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use std::time::Duration;
 use enum_as_inner::EnumAsInner;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
-use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_object_store::object::build_remote_object_store;
 
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{RemoteTableAccessor, RpcFilterKeyExtractorManager};
@@ -28,7 +28,7 @@ use crate::hummock::file_cache::preclude::*;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::{
     set_foyer_metrics_registry, FileCache, FileCacheConfig, HummockError, HummockStorage,
-    RecentFilter, SstableStore,
+    RecentFilter, SstableStore, SstableStoreConfig,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -317,24 +317,19 @@ pub mod verify {
     }
 
     impl<A: StateStoreWrite, E: StateStoreWrite> StateStoreWrite for VerifyStateStore<A, E> {
-        async fn ingest_batch(
+        fn ingest_batch(
             &self,
             kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
             write_options: WriteOptions,
         ) -> StorageResult<usize> {
-            let actual = self
-                .actual
-                .ingest_batch(
-                    kv_pairs.clone(),
-                    delete_ranges.clone(),
-                    write_options.clone(),
-                )
-                .await;
+            let actual = self.actual.ingest_batch(
+                kv_pairs.clone(),
+                delete_ranges.clone(),
+                write_options.clone(),
+            );
             if let Some(expected) = &self.expected {
-                let expected = expected
-                    .ingest_batch(kv_pairs, delete_ranges, write_options)
-                    .await;
+                let expected = expected.ingest_batch(kv_pairs, delete_ranges, write_options);
                 assert_eq!(actual.is_err(), expected.is_err());
             }
             actual
@@ -420,14 +415,11 @@ pub mod verify {
             Ok(())
         }
 
-        async fn flush(
-            &mut self,
-            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        ) -> StorageResult<usize> {
+        async fn flush(&mut self) -> StorageResult<usize> {
             if let Some(expected) = &mut self.expected {
-                expected.flush(delete_ranges.clone()).await?;
+                expected.flush().await?;
             }
-            self.actual.flush(delete_ranges).await
+            self.actual.flush().await
         }
 
         async fn try_flush(&mut self) -> StorageResult<()> {
@@ -551,7 +543,6 @@ impl StateStoreImpl {
                 insert_rate_limit: opts.data_file_cache_insert_rate_limit_mb * MB,
                 flushers: opts.data_file_cache_flushers,
                 reclaimers: opts.data_file_cache_reclaimers,
-                reclaim_rate_limit: opts.data_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.data_file_cache_recover_concurrency,
                 ring_buffer_capacity: opts.data_file_cache_ring_buffer_capacity_mb * MB,
                 catalog_bits: opts.data_file_cache_catalog_bits,
@@ -590,7 +581,6 @@ impl StateStoreImpl {
                 insert_rate_limit: opts.meta_file_cache_insert_rate_limit_mb * MB,
                 flushers: opts.meta_file_cache_flushers,
                 reclaimers: opts.meta_file_cache_reclaimers,
-                reclaim_rate_limit: opts.meta_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.meta_file_cache_recover_concurrency,
                 ring_buffer_capacity: opts.meta_file_cache_ring_buffer_capacity_mb * MB,
                 catalog_bits: opts.meta_file_cache_catalog_bits,
@@ -609,30 +599,27 @@ impl StateStoreImpl {
 
         let store = match s {
             hummock if hummock.starts_with("hummock+") => {
-                let mut object_store = parse_remote_object_store(
+                let object_store = build_remote_object_store(
                     hummock.strip_prefix("hummock+").unwrap(),
                     object_store_metrics.clone(),
                     "Hummock",
+                    opts.object_store_config.clone(),
                 )
                 .await;
-                object_store.set_opts(
-                    opts.object_store_streaming_read_timeout_ms,
-                    opts.object_store_streaming_upload_timeout_ms,
-                    opts.object_store_read_timeout_ms,
-                    opts.object_store_upload_timeout_ms,
-                );
 
-                let sstable_store = Arc::new(SstableStore::new(
-                    Arc::new(object_store),
-                    opts.data_directory.to_string(),
-                    opts.block_cache_capacity_mb * (1 << 20),
-                    opts.meta_cache_capacity_mb * (1 << 20),
-                    opts.high_priority_ratio,
-                    opts.large_query_memory_usage_mb * (1 << 20),
+                let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
+                    store: Arc::new(object_store),
+                    path: opts.data_directory.to_string(),
+                    block_cache_capacity: opts.block_cache_capacity_mb * (1 << 20),
+                    meta_cache_capacity: opts.meta_cache_capacity_mb * (1 << 20),
+                    high_priority_ratio: opts.high_priority_ratio,
+                    prefetch_buffer_capacity: opts.prefetch_buffer_capacity_mb * (1 << 20),
+                    max_prefetch_block_number: opts.max_prefetch_block_number,
                     data_file_cache,
                     meta_file_cache,
                     recent_filter,
-                ));
+                    state_store_metrics: state_store_metrics.clone(),
+                }));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
                 let key_filter_manager = Arc::new(RpcFilterKeyExtractorManager::new(Box::new(
@@ -695,7 +682,7 @@ impl AsHummock for SledStateStore {
 #[cfg(debug_assertions)]
 pub mod boxed_state_store {
     use std::future::Future;
-    use std::ops::{Bound, Deref, DerefMut};
+    use std::ops::{Deref, DerefMut};
 
     use bytes::Bytes;
     use dyn_clone::{clone_trait_object, DynClone};
@@ -783,10 +770,7 @@ pub mod boxed_state_store {
 
         fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()>;
 
-        async fn flush(
-            &mut self,
-            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        ) -> StorageResult<usize>;
+        async fn flush(&mut self) -> StorageResult<usize>;
 
         async fn try_flush(&mut self) -> StorageResult<()>;
 
@@ -838,11 +822,8 @@ pub mod boxed_state_store {
             self.delete(key, old_val)
         }
 
-        async fn flush(
-            &mut self,
-            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        ) -> StorageResult<usize> {
-            self.flush(delete_ranges).await
+        async fn flush(&mut self) -> StorageResult<usize> {
+            self.flush().await
         }
 
         async fn try_flush(&mut self) -> StorageResult<()> {
@@ -908,11 +889,8 @@ pub mod boxed_state_store {
             self.deref_mut().delete(key, old_val)
         }
 
-        fn flush(
-            &mut self,
-            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        ) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
-            self.deref_mut().flush(delete_ranges)
+        fn flush(&mut self) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
+            self.deref_mut().flush()
         }
 
         fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_ {

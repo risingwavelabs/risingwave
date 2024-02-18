@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,20 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_meta_model_migration::WithQuery;
+use risingwave_meta_model_v2::actor::ActorStatus;
+use risingwave_meta_model_v2::fragment::{DistributionType, StreamNode};
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
-    actor_dispatcher, connection, function, index, object, object_dependency, schema, sink, source,
-    table, user, user_privilege, view, worker_property, ActorId, DataTypeArray, DatabaseId,
-    I32Array, ObjectId, PrivilegeId, SchemaId, UserId, WorkerId,
+    actor, actor_dispatcher, connection, database, fragment, function, index, object,
+    object_dependency, schema, sink, source, table, user, user_privilege, view, ActorId,
+    DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, PrivilegeId,
+    SchemaId, SourceId, UserId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
-use risingwave_pb::common::PbParallelUnit;
+use risingwave_pb::meta::PbFragmentParallelUnitMapping;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
 use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
 use sea_orm::sea_query::{
@@ -122,6 +127,34 @@ pub struct PartialObject {
     pub database_id: Option<DatabaseId>,
 }
 
+#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[sea_orm(entity = "Fragment")]
+pub struct PartialFragmentStateTables {
+    pub fragment_id: FragmentId,
+    pub job_id: ObjectId,
+    pub state_table_ids: I32Array,
+}
+
+#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[sea_orm(entity = "Actor")]
+pub struct PartialActorLocation {
+    pub actor_id: ActorId,
+    pub fragment_id: FragmentId,
+    pub parallel_unit_id: i32,
+    pub status: ActorStatus,
+}
+
+#[derive(FromQueryResult)]
+pub struct FragmentDesc {
+    pub fragment_id: FragmentId,
+    pub job_id: ObjectId,
+    pub fragment_type_mask: i32,
+    pub distribution_type: DistributionType,
+    pub state_table_ids: I32Array,
+    pub upstream_fragment_id: I32Array,
+    pub parallelism: i64,
+}
+
 /// List all objects that are using the given one in a cascade way. It runs a recursive CTE to find all the dependencies.
 pub async fn get_referring_objects_cascade<C>(
     obj_id: ObjectId,
@@ -169,6 +202,22 @@ where
     let count = User::find_by_id(user_id).count(db).await?;
     if count == 0 {
         return Err(anyhow!("user {} was concurrently dropped", user_id).into());
+    }
+    Ok(())
+}
+
+/// `check_database_name_duplicate` checks whether the database name is already used in the cluster.
+pub async fn check_database_name_duplicate<C>(name: &str, db: &C) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    let count = Database::find()
+        .filter(database::Column::Name.eq(name))
+        .count(db)
+        .await?;
+    if count > 0 {
+        assert_eq!(count, 1);
+        return Err(MetaError::catalog_duplicated("database", name));
     }
     Ok(())
 }
@@ -372,7 +421,7 @@ where
         .count(db)
         .await?;
     if count != 0 {
-        return Err(MetaError::permission_denied("schema is not empty".into()));
+        return Err(MetaError::permission_denied("schema is not empty"));
     }
 
     Ok(())
@@ -563,40 +612,6 @@ pub fn extract_grant_obj_id(object: &PbObject) -> ObjectId {
     }
 }
 
-// todo: deprecate parallel units and avoid this query.
-pub async fn get_parallel_unit_mapping<C>(db: &C) -> MetaResult<HashMap<u32, PbParallelUnit>>
-where
-    C: ConnectionTrait,
-{
-    let parallel_units: Vec<(WorkerId, I32Array)> = WorkerProperty::find()
-        .select_only()
-        .columns([
-            worker_property::Column::WorkerId,
-            worker_property::Column::ParallelUnitIds,
-        ])
-        .into_tuple()
-        .all(db)
-        .await?;
-    let parallel_units_map = parallel_units
-        .into_iter()
-        .flat_map(|(worker_id, parallel_unit_ids)| {
-            parallel_unit_ids
-                .into_inner()
-                .into_iter()
-                .map(move |parallel_unit_id| {
-                    (
-                        parallel_unit_id as _,
-                        PbParallelUnit {
-                            id: parallel_unit_id as _,
-                            worker_node_id: worker_id as _,
-                        },
-                    )
-                })
-        })
-        .collect();
-    Ok(parallel_units_map)
-}
-
 pub async fn get_actor_dispatchers<C>(
     db: &C,
     actor_ids: Vec<ActorId>,
@@ -609,10 +624,150 @@ where
         .all(db)
         .await?;
 
-    Ok(actor_dispatchers
+    let mut actor_dispatchers_map = HashMap::new();
+    for actor_dispatcher in actor_dispatchers {
+        actor_dispatchers_map
+            .entry(actor_dispatcher.actor_id)
+            .or_insert_with(Vec::new)
+            .push(actor_dispatcher);
+    }
+    Ok(actor_dispatchers_map)
+}
+
+/// `get_fragment_mappings` returns the fragment vnode mappings of the given job.
+pub async fn get_fragment_mappings<C>(
+    db: &C,
+    job_id: ObjectId,
+) -> MetaResult<Vec<PbFragmentParallelUnitMapping>>
+where
+    C: ConnectionTrait,
+{
+    let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
+        .select_only()
+        .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
+        .filter(fragment::Column::JobId.eq(job_id))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    Ok(fragment_mappings
         .into_iter()
-        .group_by(|actor_dispatcher| actor_dispatcher.actor_id)
-        .into_iter()
-        .map(|(actor_id, actor_dispatcher)| (actor_id, actor_dispatcher.collect()))
+        .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
+            fragment_id: fragment_id as _,
+            mapping: Some(mapping.into_inner()),
+        })
         .collect())
+}
+
+/// `get_fragment_mappings_by_jobs` returns the fragment vnode mappings of the given job list.
+pub async fn get_fragment_mappings_by_jobs<C>(
+    db: &C,
+    job_ids: Vec<ObjectId>,
+) -> MetaResult<Vec<PbFragmentParallelUnitMapping>>
+where
+    C: ConnectionTrait,
+{
+    if job_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
+        .select_only()
+        .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
+        .filter(fragment::Column::JobId.is_in(job_ids))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    Ok(fragment_mappings
+        .into_iter()
+        .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
+            fragment_id: fragment_id as _,
+            mapping: Some(mapping.into_inner()),
+        })
+        .collect())
+}
+
+/// `get_fragment_actor_ids` returns the fragment actor ids of the given fragments.
+pub async fn get_fragment_actor_ids<C>(
+    db: &C,
+    fragment_ids: Vec<FragmentId>,
+) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>>
+where
+    C: ConnectionTrait,
+{
+    let fragment_actors: Vec<(FragmentId, ActorId)> = Actor::find()
+        .select_only()
+        .columns([actor::Column::FragmentId, actor::Column::ActorId])
+        .filter(actor::Column::FragmentId.is_in(fragment_ids))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    Ok(fragment_actors.into_iter().into_group_map())
+}
+
+/// Find the external stream source info inside the stream node, if any.
+pub fn find_stream_source(stream_node: &PbStreamNode) -> Option<&StreamSource> {
+    if let Some(NodeBody::Source(source)) = &stream_node.node_body {
+        if let Some(inner) = &source.source_inner {
+            return Some(inner);
+        }
+    }
+
+    for child in &stream_node.input {
+        if let Some(source) = find_stream_source(child) {
+            return Some(source);
+        }
+    }
+
+    None
+}
+
+/// Resolve fragment list that are subscribing to sources and actor lists.
+pub async fn resolve_source_register_info_for_jobs<C>(
+    db: &C,
+    streaming_jobs: Vec<ObjectId>,
+) -> MetaResult<(HashMap<SourceId, BTreeSet<FragmentId>>, HashSet<ActorId>)>
+where
+    C: ConnectionTrait,
+{
+    if streaming_jobs.is_empty() {
+        return Ok((HashMap::default(), HashSet::default()));
+    }
+
+    let mut fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+        .select_only()
+        .columns([
+            fragment::Column::FragmentId,
+            fragment::Column::FragmentTypeMask,
+            fragment::Column::StreamNode,
+        ])
+        .filter(fragment::Column::JobId.is_in(streaming_jobs))
+        .into_tuple()
+        .all(db)
+        .await?;
+    let actors: Vec<ActorId> = Actor::find()
+        .select_only()
+        .column(actor::Column::ActorId)
+        .filter(
+            actor::Column::FragmentId.is_in(fragments.iter().map(|(id, _, _)| *id).collect_vec()),
+        )
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    fragments.retain(|(_, mask, _)| *mask & PbFragmentTypeFlag::Source as i32 != 0);
+
+    let mut source_fragment_ids = HashMap::new();
+    for (fragment_id, _, stream_node) in fragments {
+        if let Some(source) = find_stream_source(&stream_node.to_protobuf()) {
+            source_fragment_ids
+                .entry(source.source_id as SourceId)
+                .or_insert_with(BTreeSet::new)
+                .insert(fragment_id);
+        }
+    }
+
+    Ok((source_fragment_ids, actors.into_iter().collect()))
 }

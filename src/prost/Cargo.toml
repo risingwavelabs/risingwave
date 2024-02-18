@@ -12,6 +12,7 @@ enum-as-inner = "0.6"
 pbjson = "0.6"
 prost = { workspace = true }
 prost-helpers = { path = "helpers" }
+risingwave_error = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 strum = "0.25"
 thiserror = "1"

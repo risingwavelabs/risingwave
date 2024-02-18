@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -53,6 +53,8 @@ mod validator;
 pub mod value;
 pub mod write_limiter;
 
+pub mod block_stream;
+
 pub use error::*;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 pub use validator::*;
@@ -78,7 +80,7 @@ pub async fn get_from_sstable_info(
     // contain `TablePrefix` and `VnodePrefix`.
     if let Some(hash) = dist_key_hash
         && !hit_sstable_bloom_filter(
-            sstable.value(),
+            &sstable,
             &(
                 Bound::Included(full_key.user_key),
                 Bound::Included(full_key.user_key),
@@ -88,10 +90,7 @@ pub async fn get_from_sstable_info(
         )
     {
         if !read_options.ignore_range_tombstone {
-            let delete_epoch = get_min_delete_range_epoch_from_sstable(
-                sstable.value().as_ref(),
-                full_key.user_key,
-            );
+            let delete_epoch = get_min_delete_range_epoch_from_sstable(&sstable, full_key.user_key);
             if delete_epoch <= full_key.epoch_with_gap.pure_epoch() {
                 return Ok(Some((
                     HummockValue::Delete,
@@ -114,10 +113,8 @@ pub async fn get_from_sstable_info(
     // Iterator has sought passed the borders.
     if !iter.is_valid() {
         if !read_options.ignore_range_tombstone {
-            let delete_epoch = get_min_delete_range_epoch_from_sstable(
-                iter.sst().value().as_ref(),
-                full_key.user_key,
-            );
+            let delete_epoch =
+                get_min_delete_range_epoch_from_sstable(iter.sst(), full_key.user_key);
             if delete_epoch <= full_key.epoch_with_gap.pure_epoch() {
                 return Ok(Some((
                     HummockValue::Delete,
@@ -134,8 +131,7 @@ pub async fn get_from_sstable_info(
     let value = if iter.key().user_key == full_key.user_key {
         Some((iter.value().to_bytes(), iter.key().epoch_with_gap))
     } else if !read_options.ignore_range_tombstone {
-        let delete_epoch =
-            get_min_delete_range_epoch_from_sstable(iter.sst().value().as_ref(), full_key.user_key);
+        let delete_epoch = get_min_delete_range_epoch_from_sstable(iter.sst(), full_key.user_key);
         if delete_epoch <= full_key.epoch_with_gap.pure_epoch() {
             Some((
                 HummockValue::Delete,

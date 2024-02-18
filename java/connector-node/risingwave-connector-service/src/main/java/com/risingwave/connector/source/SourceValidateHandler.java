@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -79,21 +79,23 @@ public class SourceValidateHandler {
         ensurePropNotBlank(props, DbzConnectorConfig.USER);
         ensurePropNotBlank(props, DbzConnectorConfig.PASSWORD);
 
-        // ensure table name is passed by user in single mode
-        if (Utils.getCdcSourceMode(props) == CdcSourceMode.SINGLE_MODE) {
+        var commonParam = request.getCommonParam();
+        boolean isMultiTableShared = commonParam.getIsMultiTableShared();
+        // ensure table name is passed by user in non-sharing mode
+        if (!isMultiTableShared) {
             ensurePropNotBlank(props, DbzConnectorConfig.TABLE_NAME);
         }
 
         TableSchema tableSchema = TableSchema.fromProto(request.getTableSchema());
         switch (request.getSourceType()) {
             case POSTGRES:
-                ensurePropNotBlank(props, DbzConnectorConfig.TABLE_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_SCHEMA_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_SLOT_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_PUB_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_PUB_CREATE);
-                try (var validator = new PostgresValidator(props, tableSchema)) {
-                    validator.validateAll();
+                try (var validator =
+                        new PostgresValidator(props, tableSchema, isMultiTableShared)) {
+                    validator.validateAll(isMultiTableShared);
                 }
                 break;
 
@@ -128,7 +130,7 @@ public class SourceValidateHandler {
             case MYSQL:
                 ensurePropNotBlank(props, DbzConnectorConfig.MYSQL_SERVER_ID);
                 try (var validator = new MySqlValidator(props, tableSchema)) {
-                    validator.validateAll();
+                    validator.validateAll(isMultiTableShared);
                 }
                 break;
             default:

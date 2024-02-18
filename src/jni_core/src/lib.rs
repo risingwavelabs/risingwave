@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,12 +16,12 @@
 #![feature(lazy_cell)]
 #![feature(once_cell_try)]
 #![feature(type_alias_impl_trait)]
-#![feature(result_option_inspect)]
 #![feature(try_blocks)]
 
 pub mod hummock_iterator;
 pub mod jvm_runtime;
 mod macros;
+mod tracing_slf4j;
 
 use std::backtrace::Backtrace;
 use std::marker::PhantomData;
@@ -32,9 +32,10 @@ use std::sync::{LazyLock, OnceLock};
 use anyhow::anyhow;
 use bytes::Bytes;
 use cfg_or_panic::cfg_or_panic;
+use chrono::{Datelike, NaiveDateTime, Timelike};
 use jni::objects::{
     AutoElements, GlobalRef, JByteArray, JClass, JMethodID, JObject, JStaticMethodID, JString,
-    JValueGen, JValueOwned, ReleaseMode,
+    JValueOwned, ReleaseMode,
 };
 use jni::signature::ReturnType;
 use jni::sys::{
@@ -55,8 +56,10 @@ use risingwave_pb::connector_service::{
 use risingwave_pb::data::Op;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{Receiver, Sender};
+use tracing_slf4j::*;
 
 use crate::hummock_iterator::HummockJavaBindingIterator;
 pub use crate::jvm_runtime::register_native_method_for_jvm;
@@ -215,7 +218,7 @@ where
                     // the exception is already thrown. No need to throw again
                 }
                 _ => {
-                    env.throw(format!("get error while processing: {:?}", e))
+                    env.throw(format!("get error while processing: {:?}", e.as_report()))
                         .expect("should be able to throw");
                 }
             }
@@ -232,10 +235,13 @@ where
 #[derive(Default)]
 struct JavaClassMethodCache {
     big_decimal_ctor: OnceLock<(GlobalRef, JMethodID)>,
-    timestamp_ctor: OnceLock<(GlobalRef, JMethodID)>,
 
+    timestamp_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
+    timestamptz_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
     date_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
     time_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
+    instant_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
+    utc: OnceLock<GlobalRef>,
 }
 
 // TODO: may only return a RowRef
@@ -606,27 +612,149 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetTimestamp
     idx: jint,
 ) -> JObject<'a> {
     execute_and_catch(env, move |env: &mut EnvParam<'_>| {
-        let scalar_value = pointer.as_ref().datum_at(idx as usize).unwrap();
-        let millis = match scalar_value {
-            // supports sinking rw timestamptz to mysql timestamp
-            ScalarRefImpl::Timestamptz(tz) => tz.timestamp_millis(),
-            ScalarRefImpl::Timestamp(ts) => ts.0.timestamp_millis(),
-            _ => panic!("expect timestamp or timestamptz"),
-        };
-        let (ts_class_ref, constructor) = pointer
+        let value = pointer
+            .as_ref()
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_timestamp();
+
+        let sig = gen_jni_sig!(java.time.LocalDateTime of(int year, int month, int dayOfMonth, int hour, int minute, int second, int nanoOfSecond));
+
+        let (timestamp_class_ref, constructor) = pointer
             .as_ref()
             .class_cache
             .timestamp_ctor
             .get_or_try_init(|| {
-                let cls = env.find_class("java/sql/Timestamp")?;
-                let init_method = env.get_method_id(&cls, "<init>", "(J)V")?;
+                let cls = env.find_class(gen_class_name!(java.time.LocalDateTime))?;
+                let init_method = env.get_static_method_id(&cls, "of", sig)?;
                 Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
             })?;
         unsafe {
-            let ts_class = <&JClass<'_>>::from(ts_class_ref.as_obj());
-            let date_obj =
-                env.new_object_unchecked(ts_class, *constructor, &[jvalue { j: millis }])?;
-            Ok(date_obj)
+            let JValueOwned::Object(timestamp_obj) = env.call_static_method_unchecked(
+                <&JClass<'_>>::from(timestamp_class_ref.as_obj()),
+                *constructor,
+                ReturnType::Object,
+                &[
+                    jvalue { i: value.0.year() },
+                    jvalue {
+                        i: value.0.month() as i32,
+                    },
+                    jvalue {
+                        i: value.0.day() as i32,
+                    },
+                    jvalue {
+                        i: value.0.hour() as i32,
+                    },
+                    jvalue {
+                        i: value.0.minute() as i32,
+                    },
+                    jvalue {
+                        i: value.0.second() as i32,
+                    },
+                    jvalue {
+                        i: value.0.nanosecond() as i32,
+                    },
+                ],
+            )?
+            else {
+                return Err(BindingError::from(jni::errors::Error::MethodNotFound {
+                    name: "of".to_string(),
+                    sig: sig.into(),
+                }));
+            };
+            Ok(timestamp_obj)
+        }
+    })
+}
+
+#[no_mangle]
+extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetTimestamptzValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, JavaBindingIterator<'a>>,
+    idx: jint,
+) -> JObject<'a> {
+    execute_and_catch(env, move |env: &mut EnvParam<'_>| {
+        let value = pointer
+            .as_ref()
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_timestamptz();
+
+        let instant_sig =
+            gen_jni_sig!(java.time.Instant ofEpochSecond(long epochSecond, long nanoAdjustment));
+
+        let (instant_class_ref, instant_constructor) = pointer
+            .as_ref()
+            .class_cache
+            .instant_ctor
+            .get_or_try_init(|| {
+                let cls = env.find_class(gen_class_name!(java.time.Instant))?;
+                let init_method = env.get_static_method_id(&cls, "ofEpochSecond", instant_sig)?;
+                Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
+            })?;
+        let instant_obj = unsafe {
+            let JValueOwned::Object(instant_obj) = env.call_static_method_unchecked(
+                <&JClass<'_>>::from(instant_class_ref.as_obj()),
+                *instant_constructor,
+                ReturnType::Object,
+                &[
+                    jvalue {
+                        j: value.timestamp(),
+                    },
+                    jvalue {
+                        j: value.timestamp_subsec_nanos() as i64,
+                    },
+                ],
+            )?
+            else {
+                return Err(BindingError::from(jni::errors::Error::MethodNotFound {
+                    name: "ofEpochSecond".to_string(),
+                    sig: instant_sig.into(),
+                }));
+            };
+            instant_obj
+        };
+
+        let utc_ref = pointer.as_ref().class_cache.utc.get_or_try_init(|| {
+            let cls = env.find_class(gen_class_name!(java.time.ZoneOffset))?;
+            let utc = env
+                .get_static_field(&cls, "UTC", gen_jni_type_sig!(java.time.ZoneOffset))?
+                .l()?;
+            env.new_global_ref(utc)
+        })?;
+
+        let sig = gen_jni_sig!(java.time.OffsetDateTime ofInstant(java.time.Instant instant, java.time.ZoneId zone));
+
+        let (timestamptz_class_ref, constructor) = pointer
+            .as_ref()
+            .class_cache
+            .timestamptz_ctor
+            .get_or_try_init(|| {
+                let cls = env.find_class(gen_class_name!(java.time.OffsetDateTime))?;
+                let init_method = env.get_static_method_id(&cls, "ofInstant", sig)?;
+                Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
+            })?;
+        unsafe {
+            let JValueOwned::Object(timestamptz_obj) = env.call_static_method_unchecked(
+                <&JClass<'_>>::from(timestamptz_class_ref.as_obj()),
+                *constructor,
+                ReturnType::Object,
+                &[
+                    jvalue {
+                        l: instant_obj.as_raw(),
+                    },
+                    jvalue {
+                        l: utc_ref.as_obj().as_raw(),
+                    },
+                ],
+            )?
+            else {
+                return Err(BindingError::from(jni::errors::Error::MethodNotFound {
+                    name: "ofInstant".to_string(),
+                    sig: sig.into(),
+                }));
+            };
+            Ok(timestamptz_obj)
         }
     })
 }
@@ -675,38 +803,28 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetDateValue
     idx: jint,
 ) -> JObject<'a> {
     execute_and_catch(env, move |env: &mut EnvParam<'_>| {
-        let value = pointer
-            .as_ref()
-            .datum_at(idx as usize)
-            .unwrap()
-            .into_date()
-            .0
-            .to_string();
+        let value = pointer.as_ref().datum_at(idx as usize).unwrap().into_date();
+        let epoch_days = (value.0 - NaiveDateTime::UNIX_EPOCH.date()).num_days();
 
-        let string_value = env.new_string(value)?;
-        let (class_ref, constructor) =
+        let sig = gen_jni_sig!(java.time.LocalDate ofEpochDay(long));
+
+        let (date_class_ref, constructor) =
             pointer.as_ref().class_cache.date_ctor.get_or_try_init(|| {
-                let cls = env.find_class("java/sql/Date")?;
-                let init_method = env.get_static_method_id(
-                    &cls,
-                    "valueOf",
-                    "(Ljava/lang/String;)Ljava/sql/Date;",
-                )?;
+                let cls = env.find_class(gen_class_name!(java.time.LocalDate))?;
+                let init_method = env.get_static_method_id(&cls, "ofEpochDay", sig)?;
                 Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
             })?;
         unsafe {
             let JValueOwned::Object(date_obj) = env.call_static_method_unchecked(
-                <&JClass<'_>>::from(class_ref.as_obj()),
+                <&JClass<'_>>::from(date_class_ref.as_obj()),
                 *constructor,
                 ReturnType::Object,
-                &[jvalue {
-                    l: string_value.into_raw(),
-                }],
+                &[jvalue { j: epoch_days }],
             )?
             else {
                 return Err(BindingError::from(jni::errors::Error::MethodNotFound {
-                    name: "valueOf".to_string(),
-                    sig: "(Ljava/lang/String;)Ljava/sql/Date;".into(),
+                    name: "ofEpochDay".to_string(),
+                    sig: sig.into(),
                 }));
             };
             Ok(date_obj)
@@ -721,41 +839,43 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetTimeValue
     idx: jint,
 ) -> JObject<'a> {
     execute_and_catch(env, move |env: &mut EnvParam<'_>| {
-        let value = pointer
-            .as_ref()
-            .datum_at(idx as usize)
-            .unwrap()
-            .into_time()
-            .0
-            .to_string();
+        let value = pointer.as_ref().datum_at(idx as usize).unwrap().into_time();
 
-        let string_value = env.new_string(value)?;
-        let (class_ref, constructor) =
+        let sig = gen_jni_sig!(java.time.LocalTime of(int hour, int minute, int second, int nanoOfSecond));
+
+        let (time_class_ref, constructor) =
             pointer.as_ref().class_cache.time_ctor.get_or_try_init(|| {
-                let cls = env.find_class("java/sql/Time")?;
-                let init_method = env.get_static_method_id(
-                    &cls,
-                    "valueOf",
-                    "(Ljava/lang/String;)Ljava/sql/Time;",
-                )?;
+                let cls = env.find_class(gen_class_name!(java.time.LocalTime))?;
+                let init_method = env.get_static_method_id(&cls, "of", sig)?;
                 Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
             })?;
         unsafe {
-            let class = <&JClass<'_>>::from(class_ref.as_obj());
-            match env.call_static_method_unchecked(
-                class,
+            let JValueOwned::Object(time_obj) = env.call_static_method_unchecked(
+                <&JClass<'_>>::from(time_class_ref.as_obj()),
                 *constructor,
                 ReturnType::Object,
-                &[jvalue {
-                    l: string_value.into_raw(),
-                }],
-            )? {
-                JValueGen::Object(obj) => Ok(obj),
-                _ => Err(BindingError::from(jni::errors::Error::MethodNotFound {
-                    name: "valueOf".to_string(),
-                    sig: "(Ljava/lang/String;)Ljava/sql/Time;".into(),
-                })),
-            }
+                &[
+                    jvalue {
+                        i: value.0.hour() as i32,
+                    },
+                    jvalue {
+                        i: value.0.minute() as i32,
+                    },
+                    jvalue {
+                        i: value.0.second() as i32,
+                    },
+                    jvalue {
+                        i: value.0.nanosecond() as i32,
+                    },
+                ],
+            )?
+            else {
+                return Err(BindingError::from(jni::errors::Error::MethodNotFound {
+                    name: "of".to_string(),
+                    sig: sig.into(),
+                }));
+            };
+            Ok(time_obj)
         }
     })
 }
@@ -889,7 +1009,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToCh
         {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {
-                tracing::info!("send error.  {:?}", e);
+                tracing::info!(error = %e.as_report(), "send error");
                 Ok(JNI_FALSE)
             }
         }
@@ -897,20 +1017,82 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToCh
 }
 
 #[no_mangle]
+extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceErrorToChannel<'a>(
+    env: EnvParam<'a>,
+    channel: Pointer<'a, JniSenderType<GetEventStreamResponse>>,
+    msg: JString<'a>,
+) -> jboolean {
+    execute_and_catch(env, move |env| {
+        let err_msg: String = env
+            .get_string(&msg)
+            .expect("source error message should be a java string")
+            .into();
+
+        match channel.as_ref().blocking_send(Err(anyhow!(err_msg))) {
+            Ok(_) => Ok(JNI_TRUE),
+            Err(e) => {
+                tracing::error!(error = ?e.as_report(), "send error");
+                Ok(JNI_FALSE)
+            }
+        }
+    })
+}
+
+pub enum JniSinkWriterStreamRequest {
+    PbRequest(SinkWriterStreamRequest),
+    Chunk {
+        epoch: u64,
+        batch_id: u64,
+        chunk: StreamChunk,
+    },
+}
+
+impl From<SinkWriterStreamRequest> for JniSinkWriterStreamRequest {
+    fn from(value: SinkWriterStreamRequest) -> Self {
+        Self::PbRequest(value)
+    }
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_recvSinkWriterRequestFromChannel<
     'a,
 >(
     env: EnvParam<'a>,
-    mut channel: Pointer<'a, JniReceiverType<SinkWriterStreamRequest>>,
-) -> JByteArray<'a> {
+    mut channel: Pointer<'a, JniReceiverType<JniSinkWriterStreamRequest>>,
+) -> JObject<'a> {
     execute_and_catch(env, move |env| match channel.as_mut().blocking_recv() {
         Some(msg) => {
-            let bytes = env
-                .byte_array_from_slice(&Message::encode_to_vec(&msg))
-                .unwrap();
-            Ok(bytes)
+            let obj = match msg {
+                JniSinkWriterStreamRequest::PbRequest(request) => {
+                    let bytes = env.byte_array_from_slice(&Message::encode_to_vec(&request))?;
+                    call_static_method!(
+                        env,
+                        {com.risingwave.java.binding.JniSinkWriterStreamRequest},
+                        {com.risingwave.java.binding.JniSinkWriterStreamRequest fromSerializedPayload(byte[] payload)},
+                        &JObject::from(bytes)
+                    )?
+                }
+                JniSinkWriterStreamRequest::Chunk {
+                    epoch,
+                    batch_id,
+                    chunk,
+                } => {
+                    let pointer = Box::into_raw(Box::new(chunk));
+                    call_static_method!(
+                        env,
+                        {com.risingwave.java.binding.JniSinkWriterStreamRequest},
+                        {com.risingwave.java.binding.JniSinkWriterStreamRequest fromStreamChunkOwnedPointer(long pointer, long epoch, long batchId)},
+                        pointer as u64, epoch, batch_id
+                    )
+                    .inspect_err(|_| unsafe {
+                        // release the stream chunk on err
+                        drop(Box::from_raw(pointer));
+                    })?
+                }
+            };
+            Ok(obj)
         }
-        None => Ok(JObject::null().into()),
+        None => Ok(JObject::null()),
     })
 }
 
@@ -932,7 +1114,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkWriterRe
         {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {
-                tracing::info!("send error.  {:?}", e);
+                tracing::info!(error = ?e.as_report(), "send error");
                 Ok(JNI_FALSE)
             }
         }
@@ -954,7 +1136,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkWriterEr
         match channel.as_ref().blocking_send(Err(anyhow!(err_msg))) {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {
-                tracing::info!("send error.  {:?}", e);
+                tracing::info!(error = ?e.as_report(), "send error");
                 Ok(JNI_FALSE)
             }
         }
@@ -997,7 +1179,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkCoordina
         {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {
-                tracing::info!("send error.  {:?}", e);
+                tracing::info!(error = ?e.as_report(), "send error");
                 Ok(JNI_FALSE)
             }
         }

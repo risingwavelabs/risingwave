@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,29 +20,31 @@ use itertools::Itertools;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_initial_compaction_group_levels, get_compaction_group_ids, BranchedSstInfo,
-    HummockVersionExt,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
-    HummockVersionCheckpoint, HummockVersionDelta, HummockVersionStats, SstableInfo, TableStats,
+    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats,
+    SstableInfo, TableStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use crate::hummock::error::Result;
+use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
-use crate::hummock::manager::{commit_multi_var, read_lock, write_lock};
+use crate::hummock::manager::{commit_multi_var, create_trx_wrapper, read_lock, write_lock};
 use crate::hummock::metrics_utils::{trigger_safepoint_stat, trigger_write_stop_stats};
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::HummockManager;
-use crate::model::{ValTransaction, VarTransaction};
-use crate::storage::Transaction;
+use crate::model::{VarTransaction, VarTransactionWrapper};
+use crate::storage::MetaStore;
+use crate::MetaResult;
 
 /// `HummockVersionSafePoint` prevents hummock versions GE than it from being GC.
 /// It's used by meta node itself to temporarily pin versions.
@@ -53,15 +55,12 @@ pub struct HummockVersionSafePoint {
 
 impl Drop for HummockVersionSafePoint {
     fn drop(&mut self) {
-        if let Err(e) = self
+        if self
             .event_sender
             .send(HummockManagerEvent::DropSafePoint(self.id))
+            .is_err()
         {
-            tracing::debug!(
-                "failed to drop hummock version safe point {}. {}",
-                self.id,
-                e
-            );
+            tracing::debug!("failed to drop hummock version safe point {}", self.id);
         }
     }
 }
@@ -188,14 +187,18 @@ impl HummockManager {
     pub async fn list_workers(
         &self,
         context_ids: &[HummockContextId],
-    ) -> HashMap<HummockContextId, WorkerNode> {
+    ) -> MetaResult<HashMap<HummockContextId, WorkerNode>> {
         let mut workers = HashMap::new();
         for context_id in context_ids {
-            if let Some(worker) = self.cluster_manager.get_worker_by_id(*context_id).await {
-                workers.insert(*context_id, worker.worker_node);
+            if let Some(worker_node) = self
+                .metadata_manager()
+                .get_worker_by_id(*context_id)
+                .await?
+            {
+                workers.insert(*context_id, worker_node);
             }
         }
-        workers
+        Ok(workers)
     }
 
     #[named]
@@ -284,11 +287,17 @@ impl HummockManager {
 
     #[named]
     pub async fn rebuild_table_stats(&self) -> Result<()> {
+        use crate::model::ValTransaction;
         let mut versioning = write_lock!(self, versioning).await;
         let new_stats = rebuild_table_stats(&versioning.current_version);
-        let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
-        *version_stats = new_stats;
-        commit_multi_var!(self, None, Transaction::default(), version_stats)?;
+        let mut version_stats = create_trx_wrapper!(
+            self.sql_meta_store(),
+            VarTransactionWrapper,
+            VarTransaction::new(&mut versioning.version_stats)
+        );
+        // version_stats.hummock_version_id is always 0 in meta store.
+        version_stats.table_stats = new_stats.table_stats;
+        commit_multi_var!(self.env.meta_store(), self.sql_meta_store(), version_stats)?;
         Ok(())
     }
 }
@@ -339,6 +348,7 @@ pub(super) fn create_init_version(default_compaction_config: CompactionConfig) -
         levels: Default::default(),
         max_committed_epoch: INVALID_EPOCH,
         safe_epoch: INVALID_EPOCH,
+        table_watermarks: HashMap::new(),
     };
     for group_id in [
         StaticCompactionGroupId::StateDefault as CompactionGroupId,
@@ -398,12 +408,12 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
+    use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
     use risingwave_pb::hummock::hummock_version::Levels;
     use risingwave_pb::hummock::write_limits::WriteLimit;
     use risingwave_pb::hummock::{
-        HummockPinnedVersion, HummockVersion, HummockVersionStats, KeyRange, Level,
-        OverlappingLevel, SstableInfo,
+        HummockPinnedVersion, HummockVersionStats, KeyRange, Level, OverlappingLevel, SstableInfo,
     };
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -560,6 +570,7 @@ mod tests {
             levels: Default::default(),
             max_committed_epoch: 0,
             safe_epoch: 0,
+            table_watermarks: HashMap::new(),
         };
         for cg in 1..3 {
             version.levels.insert(

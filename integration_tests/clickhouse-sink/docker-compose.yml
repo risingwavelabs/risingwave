@@ -12,31 +12,19 @@ services:
     expose:
       - 9009
     volumes:
-      - ./clickhouse-sql:/opt/clickhouse/clickhouse-sql
-  compactor-0:
+      - ./clickhouse_prepare.sql:/clickhouse_prepare.sql
+  risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml
-      service: compactor-0
-  compute-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: compute-node-0
+      service: risingwave-standalone
   etcd-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: etcd-0
-  frontend-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: frontend-node-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: grafana-0
-  meta-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: meta-node-0
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -45,21 +33,8 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
-  message_queue:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: message_queue
-  datagen:
-    build: ../datagen
-    depends_on: [message_queue]
-    command:
-      - /bin/sh
-      - -c
-      - /datagen --mode clickstream --qps 2 kafka --brokers message_queue:29092
-    restart: always
-    container_name: datagen
 volumes:
-  compute-node-0:
+  risingwave-standalone:
     external: false
   etcd-0:
     external: false

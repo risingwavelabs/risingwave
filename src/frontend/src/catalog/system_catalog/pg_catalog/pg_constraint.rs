@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,50 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
-
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::types::DataType;
-
-use crate::catalog::system_catalog::{infer_dummy_view_sql, BuiltinView, SystemCatalogColumnsDef};
-
-pub static PG_CONSTRAINT_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> =
-    LazyLock::new(|| {
-        vec![
-            (DataType::Int32, "oid"),
-            (DataType::Varchar, "conname"),
-            (DataType::Int32, "connamespace"),
-            (DataType::Varchar, "contype"),
-            (DataType::Boolean, "condeferrable"),
-            (DataType::Boolean, "convalidated"),
-            (DataType::Int32, "conrelid"),
-            (DataType::Int32, "contypid"),
-            (DataType::Int32, "conindid"),
-            (DataType::Int32, "conparentid"),
-            (DataType::Int32, "confrelid"),
-            (DataType::Varchar, "confupdtype"),
-            (DataType::Varchar, "confdeltype"),
-            (DataType::Varchar, "confmatchtype"),
-            (DataType::Boolean, "conislocal"),
-            (DataType::Int32, "coninhcount"),
-            (DataType::Boolean, "connoinherit"),
-            (DataType::List(Box::new(DataType::Int16)), "conkey"),
-            (DataType::List(Box::new(DataType::Int16)), "confkey"),
-            (DataType::List(Box::new(DataType::Int32)), "conpfeqop"),
-            (DataType::List(Box::new(DataType::Int32)), "conppeqop"),
-            (DataType::List(Box::new(DataType::Int32)), "conffeqop"),
-            (DataType::List(Box::new(DataType::Int16)), "confdelsetcols"),
-            (DataType::List(Box::new(DataType::Int32)), "conexclop"),
-            (DataType::Varchar, "conbin"),
-        ]
-    });
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_constraint` records information about table and index inheritance hierarchies.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-constraint.html`]
 /// This is introduced only for pg compatibility and is not used in our system.
-pub static PG_CONSTRAINT: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
-    name: "pg_constraint",
-    schema: PG_CATALOG_SCHEMA_NAME,
-    columns: &PG_CONSTRAINT_COLUMNS,
-    sql: infer_dummy_view_sql(&PG_CONSTRAINT_COLUMNS),
-});
+#[system_catalog(view, "pg_catalog.pg_constraint")]
+#[derive(Fields)]
+struct PgConstraint {
+    oid: i32,
+    conname: String,
+    connamespace: i32,
+    contype: String,
+    condeferrable: bool,
+    convalidated: bool,
+    conrelid: i32,
+    contypid: i32,
+    conindid: i32,
+    conparentid: i32,
+    confrelid: i32,
+    confupdtype: String,
+    confdeltype: String,
+    confmatchtype: String,
+    conislocal: bool,
+    coninhcount: i32,
+    connoinherit: bool,
+    conkey: Vec<i16>,
+    confkey: Vec<i16>,
+    conpfeqop: Vec<i32>,
+    conppeqop: Vec<i32>,
+    conffeqop: Vec<i32>,
+    confdelsetcols: Vec<i16>,
+    conexclop: Vec<i32>,
+    conbin: String,
+}

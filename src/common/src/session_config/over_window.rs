@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ pub enum OverWindowCachePolicy {
 }
 
 impl FromStr for OverWindowCachePolicy {
-    type Err = ();
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.to_ascii_lowercase().replace('-', "_");
@@ -42,7 +42,7 @@ impl FromStr for OverWindowCachePolicy {
             "recent" => Ok(Self::Recent),
             "recent_first_n" => Ok(Self::RecentFirstN),
             "recent_last_n" => Ok(Self::RecentLastN),
-            _ => Err(()),
+            _ => Err("expect one of [full, recent, recent_first_n, recent_last_n]"),
         }
     }
 }

@@ -392,7 +392,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: SetVariableValue::Ident("b".into()),
+            value: SetVariableValueSingle::Ident("b".into()).into(),
         }
     );
 
@@ -402,7 +402,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: SetVariableValue::Literal(Value::SingleQuotedString("b".into())),
+            value: SetVariableValueSingle::Literal(Value::SingleQuotedString("b".into())).into(),
         }
     );
 
@@ -412,7 +412,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: SetVariableValue::Literal(number("0")),
+            value: SetVariableValueSingle::Literal(number("0")).into(),
         }
     );
 
@@ -432,7 +432,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: true,
             variable: "a".into(),
-            value: SetVariableValue::Ident("b".into()),
+            value: SetVariableValueSingle::Ident("b".into()).into(),
         }
     );
 
@@ -441,7 +441,7 @@ fn parse_set() {
     for (sql, err_msg) in [
         ("SET", "Expected identifier, found: EOF"),
         ("SET a b", "Expected equals sign or TO, found: b"),
-        ("SET a =", "Expected variable value, found: EOF"),
+        ("SET a =", "Expected parameter value, found: EOF"),
     ] {
         let res = parse_sql_statements(sql);
         assert!(format!("{}", res.unwrap_err()).contains(err_msg));
@@ -766,6 +766,53 @@ fn parse_create_function() {
                 ..Default::default()
             },
         }
+    );
+
+    let sql = "CREATE FUNCTION sub(INT, INT) RETURNS INT LANGUAGE SQL AS $$select $1 - $2;$$";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::CreateFunction {
+            or_replace: false,
+            temporary: false,
+            name: ObjectName(vec![Ident::new_unchecked("sub")]),
+            args: Some(vec![
+                OperateFunctionArg::unnamed(DataType::Int),
+                OperateFunctionArg::unnamed(DataType::Int),
+            ]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some("SQL".into()),
+                as_: Some(FunctionDefinition::DoubleDollarDef(
+                    "select $1 - $2;".into()
+                )),
+                ..Default::default()
+            }
+        },
+    );
+
+    // Anonymous return sql udf parsing test
+    let sql = "CREATE FUNCTION return_test(INT, INT) RETURNS INT LANGUAGE SQL RETURN $1 + $2";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::CreateFunction {
+            or_replace: false,
+            temporary: false,
+            name: ObjectName(vec![Ident::new_unchecked("return_test")]),
+            args: Some(vec![
+                OperateFunctionArg::unnamed(DataType::Int),
+                OperateFunctionArg::unnamed(DataType::Int),
+            ]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some("SQL".into()),
+                return_: Some(Expr::BinaryOp {
+                    left: Box::new(Expr::Parameter { index: 1 }),
+                    op: BinaryOperator::Plus,
+                    right: Box::new(Expr::Parameter { index: 2 }),
+                }),
+                ..Default::default()
+            }
+        },
     );
 
     let sql = "CREATE OR REPLACE FUNCTION add(a INT, IN b INT = 1) RETURNS INT LANGUAGE SQL IMMUTABLE RETURN a + b";

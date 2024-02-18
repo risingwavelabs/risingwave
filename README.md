@@ -9,7 +9,7 @@
 
 <div align="center">
 
-### 🌊Stream Processing Redefined.
+### 🌊 Reimagine Stream Processing.
 
 </div>
 
@@ -41,12 +41,6 @@
     <img alt="Slack" src="https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack" />
   </a>
   <a
-    href="https://hub.docker.com/r/risingwavelabs/risingwave"
-    target="_blank"
-  >
-    <img alt="Docker" src="https://img.shields.io/docker/v/risingwavelabs/risingwave" />
-  </a>
-  <a
     href="https://twitter.com/risingwavelabs"
     target="_blank"
   >
@@ -60,45 +54,34 @@
   </a>
 </div>
 
-RisingWave is a distributed SQL streaming database that enables <b>simple</b>, <b>efficient</b>, and <b>reliable</b> processing of streaming data.
+RisingWave is a Postgres-compatible streaming database engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data.
+
 
 ![RisingWave](https://github.com/risingwavelabs/risingwave-docs/blob/main/docs/images/new_archi_grey.png)
 
 ## Try it out in 5 minutes
-**Docker**
+Docker pull:
 ```
 docker run -it --pull=always -p 4566:4566 -p 5691:5691 risingwavelabs/risingwave:latest playground
-```
-**Mac**
-```
-brew tap risingwavelabs/risingwave
-brew install risingwave
-risingwave playground
-```
-**Ubuntu**
-```
-wget https://github.com/risingwavelabs/risingwave/releases/download/v1.4.0/risingwave-v1.4.0-x86_64-unknown-linux-all-in-one.tar.gz
-tar xvf risingwave-v1.4.0-x86_64-unknown-linux-all-in-one.tar.gz
-./risingwave playground
 ```
 Now connect to RisingWave using `psql`:
 ```
 psql -h localhost -p 4566 -d dev -U root
 ```
-Learn more at [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
+Don’t have Docker? Learn how to install RisingWave on Mac, Ubuntu, and other environments at [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
 
 ## Production deployments
 
-For **single-node Docker deployments**, please refer to [Docker Compose](https://docs.risingwave.com/docs/current/risingwave-trial/?method=docker-compose).
+For **single-node deployment**, please refer to [Docker Compose](https://docs.risingwave.com/docs/current/risingwave-trial/?method=docker-compose).
 
-For **Kubernetes deployments**, please refer to [Kubernetes with Helm](https://docs.risingwave.com/docs/current/risingwave-k8s-helm/) or [Kubernetes with Operator](https://docs.risingwave.com/docs/current/risingwave-kubernetes/).
+For **distributed deployment**, please refer to [Kubernetes with Helm](https://docs.risingwave.com/docs/current/risingwave-k8s-helm/) or [Kubernetes with Operator](https://docs.risingwave.com/docs/current/risingwave-kubernetes/).
 
 **RisingWave Cloud** the easiest way to run a fully-fledged RisingWave cluster. Try it out for free at: [cloud.risingwave.com](https://cloud.risingwave.com).
 
 
 ## Why RisingWave for stream processing?
 
-RisingWave specializes in providing **incrementally updated, consistent materialized views** — a persistent data structure that represents the results of stream processing. RisingWave significantly reduces the complexity of building stream processing applications by allowing developers to express intricate stream processing logic through cascaded materialized views. Furthermore, it allows users to persist data directly within the system, eliminating the need to deliver results to external databases for storage and query serving.
+RisingWave provides users with a comprehensive set of frequently used stream processing features, including exactly-once consistency, [time window functions](https://docs.risingwave.com/docs/current/sql-function-time-window/), [watermarks](https://docs.risingwave.com/docs/current/watermarks/), and more. It specializes in providing **incrementally updated, consistent materialized views** — a persistent data structure that represents the results of stream processing. RisingWave significantly reduces the complexity of building stream processing applications by allowing developers to express intricate stream processing logic through cascaded materialized views. Furthermore, it allows users to persist data directly within the system, eliminating the need to deliver results to external databases for storage and query serving.
 
 ![Real-time Data Pipelines without or with RisingWave](https://github.com/risingwavelabs/risingwave/assets/100685635/414afbb7-5187-410f-9ba4-9a640c8c6306)
 
@@ -122,18 +105,27 @@ Compared to existing stream processing systems like [Apache Flink](https://flink
 * **Instant failure recovery**
   * RisingWave's state management mechanism also allows it to recover from failure in seconds, not minutes or hours.
 
-## RisingWave's limitations
-RisingWave isn’t a panacea for all data engineering hurdles. It has its own set of limitations:
-* **No programmable interfaces**
-  * RisingWave does not provide low-level APIs in languages like Java and Scala, and does not allow users to manage internal states manually (unless you want to hack!). For coding in Java, Scala, and other languages, please consider using RisingWave's User-Defined Functions (UDF).
-* **No support for transaction processing**
-  * RisingWave isn’t cut out for transactional workloads, thus it’s not a viable substitute for operational databases dedicated to transaction processing. However, it supports read-only transactions, ensuring data freshness and consistency. It also comprehends the transactional semantics of upstream database Change Data Capture (CDC).
-* **Not tailored for ad-hoc analytical queries**
-  * RisingWave's row store design is tailored for optimal stream processing performance rather than interactive analytical workloads. Hence, it's not a suitable replacement for OLAP databases. Yet, a reliable integration with many OLAP databases exists, and a collaborative use of RisingWave and OLAP databases is a common practice among many users.
+### RisingWave as a database
+RisingWave is fundamentally a database that **extends beyond basic streaming data processing capabilities**.  It excels in **the effective management of streaming data**, making it a trusted choice for data persistence and powering online applications. RisingWave offers an extensive range of database capabilities, which include:
 
+* High availability
+* Serving highly concurrent queries
+* Role-based access control (RBAC)
+* Integration with data modeling tools, such as [dbt](https://docs.risingwave.com/docs/current/use-dbt/)
+* Integration with database management tools, such as [Dbeaver](https://docs.risingwave.com/docs/current/dbeaver-integration/)
+* Integration with BI tools, such as [Grafana](https://docs.risingwave.com/docs/current/grafana-integration/)
+* Schema change
+* Processing of semi-structured data
 
 ## In-production use cases
-Like other stream processing systems, the primary use cases of RisingWave include monitoring, alerting, real-time dashboard reporting, streaming ETL (Extract, Transform, Load), machine learning feature engineering, and more. It has already been adopted in fields such as financial trading, manufacturing, new media, logistics, gaming, and more. Check out [customer stories](https://www.risingwave.com/use-cases/).
+Within your data stack, RisingWave can assist with:
+
+* Processing and transforming event streaming data in real time
+* Offloading event-driven queries (e.g., materialized views, triggers) from operational databases
+* Performing real-time ETL (Extract, Transform, Load)
+* Supporting real-time feature stores
+
+RisingWave is extensively utilized in real-time applications such as monitoring, alerting, dashboard reporting, machine learning, among others. It has already been adopted in fields such as financial trading, manufacturing, new media, logistics, gaming, and more. Check out [customer stories](https://www.risingwave.com/use-cases/).
 
 ## Community
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ impl UserDefinedFunction {
     pub(super) fn from_expr_proto(
         udf: &risingwave_pb::expr::UserDefinedFunction,
         return_type: DataType,
-    ) -> risingwave_common::error::Result<Self> {
+    ) -> crate::error::Result<Self> {
         let args: Vec<_> = udf
             .get_children()
             .iter()
@@ -51,11 +51,13 @@ impl UserDefinedFunction {
             // FIXME(yuhao): owner is not in udf proto.
             owner: u32::MAX - 1,
             kind: FunctionKind::Scalar,
+            arg_names: udf.arg_names.clone(),
             arg_types,
             return_type,
             language: udf.get_language().clone(),
-            identifier: udf.get_identifier().clone(),
-            link: udf.get_link().clone(),
+            identifier: udf.identifier.clone(),
+            body: udf.body.clone(),
+            link: udf.link.clone(),
         };
 
         Ok(Self {
@@ -79,6 +81,7 @@ impl Expr for UserDefinedFunction {
             rex_node: Some(RexNode::Udf(UserDefinedFunction {
                 children: self.args.iter().map(Expr::to_expr_proto).collect(),
                 name: self.catalog.name.clone(),
+                arg_names: self.catalog.arg_names.clone(),
                 arg_types: self
                     .catalog
                     .arg_types
@@ -88,6 +91,7 @@ impl Expr for UserDefinedFunction {
                 language: self.catalog.language.clone(),
                 identifier: self.catalog.identifier.clone(),
                 link: self.catalog.link.clone(),
+                body: self.catalog.body.clone(),
             })),
         }
     }

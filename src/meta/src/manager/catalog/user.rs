@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ pub struct UserManager {
 
 impl UserManager {
     pub async fn new(env: MetaSrvEnv, database: &DatabaseManager) -> MetaResult<Self> {
-        let users = UserInfo::list(env.meta_store()).await?;
+        let users = UserInfo::list(env.meta_store_checked()).await?;
         let user_info = BTreeMap::from_iter(users.into_iter().map(|user| (user.id, user)));
 
         let mut user_manager = Self {

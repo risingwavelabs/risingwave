@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use risingwave_common::system_param::common::CommonHandler;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::{
     check_missing_params, derive_missing_fields, set_system_param,
@@ -44,11 +45,13 @@ pub struct SystemParamsController {
     notification_manager: NotificationManagerRef,
     // Cached parameters.
     params: RwLock<PbSystemParams>,
+    /// Common handler for system params.
+    common_handler: CommonHandler,
 }
 
 /// Derive system params from db models.
 macro_rules! impl_system_params_from_db {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $type:ty, $($rest:tt)* },)*) => {
         /// Try to deserialize deprecated fields as well.
         /// Warn if there are unrecognized fields.
         pub fn system_params_from_db(mut models: Vec<system_parameter::Model>) -> MetaResult<PbSystemParams> {
@@ -76,7 +79,7 @@ macro_rules! impl_system_params_from_db {
 
 /// Derive serialization to db models.
 macro_rules! impl_system_params_to_models {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $($rest:tt)* },)*) => {
         #[allow(clippy::vec_init_then_push)]
         pub fn system_params_to_model(params: &PbSystemParams) -> MetaResult<Vec<system_parameter::ActiveModel>> {
             check_missing_params(params).map_err(|e| anyhow!(e))?;
@@ -103,14 +106,14 @@ macro_rules! impl_system_params_to_models {
 // 4. None, None: A new version of RW cluster is launched for the first time and newly introduced
 // params are not set. The new field is not initialized either, just leave it as `None`.
 macro_rules! impl_merge_params {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $($rest:tt)* },)*) => {
         fn merge_params(mut persisted: PbSystemParams, init: PbSystemParams) -> PbSystemParams {
             $(
                 match (persisted.$field.as_ref(), init.$field) {
                     (Some(persisted), Some(init)) => {
                         if persisted != &init {
                             tracing::warn!(
-                                "The initializing value of \"{:?}\" ({}) differ from persisted ({}), using persisted value",
+                                "The initializing value of {} ({}) differ from persisted ({}), using persisted value",
                                 key_of!($field),
                                 init,
                                 persisted
@@ -146,7 +149,8 @@ impl SystemParamsController {
         let ctl = Self {
             db,
             notification_manager,
-            params: RwLock::new(params),
+            params: RwLock::new(params.clone()),
+            common_handler: CommonHandler::new(params.into()),
         };
         // flush to db.
         ctl.flush_params().await?;
@@ -169,10 +173,7 @@ impl SystemParamsController {
         // delete all params first and then insert all params. It follows the same logic
         // as the old code, we'd better change it to another way later to keep consistency.
         SystemParameter::delete_many().exec(&txn).await?;
-
-        for model in models {
-            model.insert(&txn).await?;
-        }
+        SystemParameter::insert_many(models).exec(&txn).await?;
         txn.commit().await?;
         Ok(())
     }
@@ -184,17 +185,28 @@ impl SystemParamsController {
             .one(&self.db)
             .await?
         else {
-            return Err(MetaError::system_param(format!(
+            return Err(MetaError::system_params(format!(
                 "unrecognized system parameter {}",
                 name
             )));
         };
         let mut params = params_guard.clone();
         let mut param: system_parameter::ActiveModel = param.into();
-        param.value =
-            Set(set_system_param(&mut params, name, value).map_err(MetaError::system_param)?);
+        let Some((new_value, diff)) =
+            set_system_param(&mut params, name, value).map_err(MetaError::system_params)?
+        else {
+            // No changes on the parameter.
+            return Ok(params);
+        };
+
+        param.value = Set(new_value);
         param.update(&self.db).await?;
         *params_guard = params.clone();
+
+        // Run common handler.
+        self.common_handler.handle_change(&diff);
+
+        // TODO: notify the diff instead of the snapshot.
 
         // Sync params to other managers on the meta node only once, since it's infallible.
         self.notification_manager
@@ -202,7 +214,7 @@ impl SystemParamsController {
             .await;
 
         // Sync params to worker nodes.
-        self.notify_workers(&params).await;
+        self.notify_workers(&params);
 
         Ok(params)
     }
@@ -226,8 +238,7 @@ impl SystemParamsController {
                     }
                 }
                 system_params_controller
-                    .notify_workers(&*system_params_controller.params.read().await)
-                    .await;
+                    .notify_workers(&*system_params_controller.params.read().await);
             }
         });
 
@@ -235,16 +246,14 @@ impl SystemParamsController {
     }
 
     // Notify workers of parameter change.
-    async fn notify_workers(&self, params: &PbSystemParams) {
+    // TODO: add system params into snapshot to avoid periodically sync.
+    fn notify_workers(&self, params: &PbSystemParams) {
         self.notification_manager
-            .notify_frontend(Operation::Update, Info::SystemParams(params.clone()))
-            .await;
+            .notify_frontend_without_version(Operation::Update, Info::SystemParams(params.clone()));
         self.notification_manager
-            .notify_compute(Operation::Update, Info::SystemParams(params.clone()))
-            .await;
+            .notify_compute_without_version(Operation::Update, Info::SystemParams(params.clone()));
         self.notification_manager
-            .notify_compactor(Operation::Update, Info::SystemParams(params.clone()))
-            .await;
+            .notify_compute_without_version(Operation::Update, Info::SystemParams(params.clone()));
     }
 }
 

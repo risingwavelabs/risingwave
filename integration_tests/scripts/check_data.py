@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
-# Every demo directory contains a 'data_check' file that lists the relations (either source or mv)
+# Every sink demo directory contains a 'sink_check.py' file that used to check test,
+# and other demo directory contains a 'data_check' file that lists the relations (either source or mv)
 # that are expected to have >=1 rows. This script runs the checks by creating a materialized view over it,
 # and verify the rows count in the view.
 
@@ -52,35 +53,67 @@ def run_psql(sql):
                                     "-d", "dev", "-U", "root", "--tuples-only", "-c", sql])
 
 
+def data_check(data_check_file: str):
+    with open(data_check_file) as f:
+        relations = f.read().strip().split(",")
+        for rel in relations:
+            create_mv(rel)
+            time.sleep(20)
+        failed_cases = []
+        for rel in relations:
+            if not check_mv(rel):
+                failed_cases.append(rel)
+        if len(failed_cases) != 0:
+            raise Exception("Data check failed for case {}".format(failed_cases))
+
+
+def sink_check(demo_dir: str, sink_check_file: str):
+    print("sink created. Wait for half min time for ingestion")
+
+    # wait for half min ingestion
+    time.sleep(30)
+    subprocess.run(["python3", sink_check_file], cwd=demo_dir, check=True)
+
+
+def cdc_check(cdc_check_file: str, upstream: str):
+    with open(cdc_check_file) as f:
+        print("Check cdc table with upstream {}".format(upstream))
+        relations = f.read().strip().split(",")
+        for rel in relations:
+            check_cdc_table(rel)
+
+
+def test_check(demo: str, upstream: str, need_data_check=True, need_sink_check=False):
+    file_dir = dirname(abspath(__file__))
+    project_dir = dirname(file_dir)
+    demo_dir = os.path.join(project_dir, demo)
+
+    data_check_file = os.path.join(demo_dir, 'data_check')
+    if need_data_check or os.path.exists(data_check_file):
+        data_check(data_check_file)
+    else:
+        print(f"skip data check for {demo}")
+
+    sink_check_file = os.path.join(demo_dir, 'sink_check.py')
+    if need_sink_check or os.path.exists(sink_check_file):
+        sink_check(demo_dir, sink_check_file)
+    else:
+        print(f"skip sink check for {demo}")
+
+    cdc_check_file = os.path.join(demo_dir, 'cdc_check')
+    if os.path.exists(cdc_check_file):
+        cdc_check(cdc_check_file, upstream)
+    else:
+        print(f"skip cdc check for {demo}")
+
+
 demo = sys.argv[1]
 upstream = sys.argv[2]  # mysql, postgres, etc. see scripts/integration_tests.sh
-if demo in ['docker', 'iceberg-sink','clickhouse-sink', 'iceberg-cdc', 'kafka-cdc-sink', 'cassandra-and-scylladb-sink', 'elasticsearch-sink']:
+if demo in ['docker', 'iceberg-cdc']:
     print('Skip for running test for `%s`' % demo)
     sys.exit(0)
 
-file_dir = dirname(abspath(__file__))
-project_dir = dirname(file_dir)
-demo_dir = os.path.join(project_dir, demo)
-data_check_file = os.path.join(demo_dir, 'data_check')
-with open(data_check_file) as f:
-    relations = f.read().strip().split(",")
-    for rel in relations:
-        create_mv(rel)
-        time.sleep(20)
-    failed_cases = []
-    for rel in relations:
-        if not check_mv(rel):
-            failed_cases.append(rel)
-    if len(failed_cases) != 0:
-        raise Exception("Data check failed for case {}".format(failed_cases))
-
-cdc_check_file = os.path.join(demo_dir, 'cdc_check')
-if not os.path.exists(cdc_check_file):
-    print("Skip cdc check for {}".format(demo))
-    sys.exit(0)
-
-with open(cdc_check_file) as f:
-    print("Check cdc table with upstream {}".format(upstream))
-    relations = f.read().strip().split(",")
-    for rel in relations:
-        check_cdc_table(rel)
+if 'sink' in demo:
+    test_check(demo, upstream, need_data_check=False, need_sink_check=True)
+else:
+    test_check(demo, upstream, need_data_check=True, need_sink_check=False)

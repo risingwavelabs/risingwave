@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use either::Either;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
+use pgwire::error::{PsqlError, PsqlResult};
 use pgwire::net::{Address, AddressRef};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_message::TransactionStatus;
@@ -41,7 +42,6 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{load_config, BatchConfig, MetaConfig, MetricLevel};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -49,8 +49,10 @@ use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::resource_util;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::{GIT_SHA, RW_VERSION};
+use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::MetricsManager;
 use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS};
@@ -62,6 +64,7 @@ use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient}
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tokio::runtime::Builder;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
@@ -75,6 +78,7 @@ use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{
     check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId,
 };
+use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
 };
@@ -166,6 +170,18 @@ impl FrontendEnv {
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
         let client_pool = Arc::new(ComputeClientPool::default());
         let creating_streaming_tracker = StreamingJobTracker::new(meta_client.clone());
+        let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
+            Builder::new_multi_thread()
+                .worker_threads(
+                    load_config("", FrontendOpts::default())
+                        .batch
+                        .frontend_compute_runtime_worker_threads,
+                )
+                .thread_name("rw-batch-local")
+                .enable_all()
+                .build()
+                .unwrap(),
+        ));
         Self {
             meta_client,
             catalog_writer,
@@ -183,7 +199,7 @@ impl FrontendEnv {
             meta_config: MetaConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
-            compute_runtime: Self::create_compute_runtime(),
+            compute_runtime,
         }
     }
 
@@ -213,7 +229,7 @@ impl FrontendEnv {
 
         // Register in meta by calling `AddWorkerNode` RPC.
         let (meta_client, system_params_reader) = MetaClient::register_new(
-            opts.meta_addr.clone().as_str(),
+            opts.meta_addr,
             WorkerType::Frontend,
             &frontend_address,
             Default::default(),
@@ -324,6 +340,39 @@ impl FrontendEnv {
         let creating_streaming_job_tracker =
             Arc::new(StreamingJobTracker::new(frontend_meta_client.clone()));
 
+        let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
+            Builder::new_multi_thread()
+                .worker_threads(batch_config.frontend_compute_runtime_worker_threads)
+                .thread_name("rw-batch-local")
+                .enable_all()
+                .build()
+                .unwrap(),
+        ));
+
+        let sessions_map: SessionMapRef = Arc::new(RwLock::new(HashMap::new()));
+        let sessions = sessions_map.clone();
+
+        // Idle transaction background monitor
+        let join_handle = tokio::spawn(async move {
+            let mut check_idle_txn_interval =
+                tokio::time::interval(core::time::Duration::from_secs(10));
+            check_idle_txn_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            check_idle_txn_interval.reset();
+            loop {
+                check_idle_txn_interval.tick().await;
+                sessions.read().values().for_each(|session| {
+                    let _ = session.check_idle_in_transaction_timeout();
+                })
+            }
+        });
+        join_handles.push(join_handle);
+
+        let total_memory_bytes = resource_util::memory::system_memory_available_bytes();
+        let heap_profiler =
+            HeapProfiler::new(total_memory_bytes, config.server.heap_profiling.clone());
+        // Run a background heap profiler
+        heap_profiler.start();
+
         Ok((
             Self {
                 catalog_reader,
@@ -337,12 +386,12 @@ impl FrontendEnv {
                 server_addr: frontend_address,
                 client_pool,
                 frontend_metrics,
-                sessions_map: Arc::new(RwLock::new(HashMap::new())),
+                sessions_map,
                 batch_config,
                 meta_config,
                 source_metrics,
                 creating_streaming_job_tracker,
-                compute_runtime: Self::create_compute_runtime(),
+                compute_runtime,
             },
             join_handles,
             shutdown_senders,
@@ -431,17 +480,6 @@ impl FrontendEnv {
         self.compute_runtime.clone()
     }
 
-    fn create_compute_runtime() -> Arc<BackgroundShutdownRuntime> {
-        Arc::new(BackgroundShutdownRuntime::from(
-            Builder::new_multi_thread()
-                .worker_threads(4)
-                .thread_name("frontend-compute-threads")
-                .enable_all()
-                .build()
-                .unwrap(),
-        ))
-    }
-
     /// Cancel queries (i.e. batch queries) in session.
     /// If the session exists return true, otherwise, return false.
     pub fn cancel_queries_in_session(&self, session_id: SessionId) -> bool {
@@ -513,6 +551,9 @@ pub struct SessionImpl {
 
     /// execution context represents the lifetime of a running SQL in the current session
     exec_context: Mutex<Option<Weak<ExecContext>>>,
+
+    /// Last idle instant
+    last_idle_instant: Arc<Mutex<Option<Instant>>>,
 }
 
 #[derive(Error, Debug)]
@@ -551,6 +592,7 @@ impl SessionImpl {
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
             exec_context: Mutex::new(None),
+            last_idle_instant: Default::default(),
         }
     }
 
@@ -576,6 +618,7 @@ impl SessionImpl {
                 8080,
             ))
             .into(),
+            last_idle_instant: Default::default(),
         }
     }
 
@@ -608,16 +651,29 @@ impl SessionImpl {
     }
 
     pub fn set_config(&self, key: &str, value: String) -> Result<()> {
-        self.config_map.write().set(key, value, &mut ())
+        self.config_map
+            .write()
+            .set(key, value, &mut ())
+            .map_err(Into::into)
     }
 
     pub fn set_config_report(
         &self,
         key: &str,
-        value: String,
+        value: Option<String>,
         mut reporter: impl ConfigReporter,
     ) -> Result<()> {
-        self.config_map.write().set(key, value, &mut reporter)
+        if let Some(value) = value {
+            self.config_map
+                .write()
+                .set(key, value, &mut reporter)
+                .map_err(Into::into)
+        } else {
+            self.config_map
+                .write()
+                .reset(key, &mut reporter)
+                .map_err(Into::into)
+        }
     }
 
     pub fn session_id(&self) -> SessionId {
@@ -642,6 +698,13 @@ impl SessionImpl {
             .as_ref()
             .and_then(|weak| weak.upgrade())
             .map(|context| context.last_instant.elapsed().as_millis())
+    }
+
+    pub fn elapse_since_last_idle_instant(&self) -> Option<u128> {
+        self.last_idle_instant
+            .lock()
+            .as_ref()
+            .map(|x| x.elapsed().as_millis())
     }
 
     pub fn check_relation_name_duplicated(
@@ -795,8 +858,9 @@ impl SessionImpl {
         formats: Vec<Format>,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(&sql)
-            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))?;
+        let mut stmts = Parser::parse_sql(&sql).inspect_err(
+            |e| tracing::error!(error = %e.as_report(), %sql, "failed to parse sql"),
+        )?;
         if stmts.is_empty() {
             return Ok(PgResponse::empty_result(
                 pgwire::pg_response::StatementType::EMPTY,
@@ -810,27 +874,9 @@ impl SessionImpl {
             );
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, sql.clone(), formats));
-            if cfg!(debug_assertions) {
-                // Report the SQL in the log periodically if the query is slow.
-                const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
-                const SLOW_QUERY_LOG: &str = "risingwave_frontend_slow_query_log";
-                loop {
-                    match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
-                        Ok(result) => break result,
-                        Err(_) => tracing::warn!(
-                            target: SLOW_QUERY_LOG,
-                            sql = sql.as_ref(),
-                            "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
-                        ),
-                    }
-                }
-            } else {
-                handle_fut.await
-            }
-        }
-        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
+        let rsp = handle(self, stmt, sql.clone(), formats).await.inspect_err(
+            |e| tracing::error!(error = %e.as_report(), %sql, "failed to handle sql"),
+        )?;
         Ok(rsp)
     }
 
@@ -845,6 +891,14 @@ impl SessionImpl {
             VisibilityMode::Default => self.env.batch_config.enable_barrier_read,
             VisibilityMode::All => true,
             VisibilityMode::Checkpoint => false,
+        }
+    }
+
+    pub fn statement_timeout(&self) -> Duration {
+        if self.config().statement_timeout() == 0 {
+            Duration::from_secs(self.env.batch_config.statement_timeout_in_sec as u64)
+        } else {
+            Duration::from_secs(self.config().statement_timeout() as u64)
         }
     }
 }
@@ -1010,25 +1064,11 @@ impl Session for SessionImpl {
         let string = stmt.to_string();
         let sql_str = string.as_str();
         let sql: Arc<str> = Arc::from(sql_str);
-        let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, sql.clone(), vec![format]));
-            if cfg!(debug_assertions) {
-                // Report the SQL in the log periodically if the query is slow.
-                const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
-                loop {
-                    match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
-                        Ok(result) => break result,
-                        Err(_) => tracing::warn!(
-                            sql_str,
-                            "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
-                        ),
-                    }
-                }
-            } else {
-                handle_fut.await
-            }
-        }
-        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
+        let rsp = handle(self, stmt, sql.clone(), vec![format])
+            .await
+            .inspect_err(
+                |e| tracing::error!(error = %e.as_report(), %sql, "failed to handle sql"),
+            )?;
         Ok(rsp)
     }
 
@@ -1071,24 +1111,9 @@ impl Session for SessionImpl {
         self: Arc<Self>,
         portal: Portal,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
-        let rsp = {
-            let mut handle_fut = Box::pin(handle_execute(self, portal));
-            if cfg!(debug_assertions) {
-                // Report the SQL in the log periodically if the query is slow.
-                const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
-                loop {
-                    match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
-                        Ok(result) => break result,
-                        Err(_) => tracing::warn!(
-                            "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
-                        ),
-                    }
-                }
-            } else {
-                handle_fut.await
-            }
-        }
-        .inspect_err(|e| tracing::error!("failed to handle execute:\n{}", e))?;
+        let rsp = handle_execute(self, portal)
+            .await
+            .inspect_err(|e| tracing::error!(error=%e.as_report(), "failed to handle execute"))?;
         Ok(rsp)
     }
 
@@ -1153,9 +1178,40 @@ impl Session for SessionImpl {
         let exec_context = Arc::new(ExecContext {
             running_sql: sql,
             last_instant: Instant::now(),
+            last_idle_instant: self.last_idle_instant.clone(),
         });
         *self.exec_context.lock() = Some(Arc::downgrade(&exec_context));
+        // unset idle state, since there is a sql running
+        *self.last_idle_instant.lock() = None;
         ExecContextGuard::new(exec_context)
+    }
+
+    /// Check whether idle transaction timeout.
+    /// If yes, unpin snapshot and return an `IdleInTxnTimeout` error.
+    fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()> {
+        // In transaction.
+        if matches!(self.transaction_status(), TransactionStatus::InTransaction) {
+            let idle_in_transaction_session_timeout =
+                self.config().idle_in_transaction_session_timeout() as u128;
+            // Idle transaction timeout has been enabled.
+            if idle_in_transaction_session_timeout != 0 {
+                // Hold the `exec_context` lock to ensure no new sql coming when unpin_snapshot.
+                let guard = self.exec_context.lock();
+                // No running sql i.e. idle
+                if guard.as_ref().and_then(|weak| weak.upgrade()).is_none() {
+                    // Idle timeout.
+                    if let Some(elapse_since_last_idle_instant) =
+                        self.elapse_since_last_idle_instant()
+                    {
+                        if elapse_since_last_idle_instant > idle_in_transaction_session_timeout {
+                            self.unpin_snapshot();
+                            return Err(PsqlError::IdleInTxnTimeout);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1187,6 +1243,10 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
                 DataType::Varchar.type_len(),
             ),
         ]),
+        Statement::ShowTransactionIsolationLevel => {
+            let name = "transaction_isolation";
+            Ok(infer_show_variable(name))
+        }
         Statement::ShowVariable { variable } => {
             let name = &variable[0].real_value().to_lowercase();
             Ok(infer_show_variable(name))

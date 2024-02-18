@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -76,8 +76,6 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
 
-        let mut commit_data = false;
-
         #[for_await]
         for msg in input {
             self.cache.evict();
@@ -127,20 +125,13 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                         let chunk = StreamChunk::with_visibility(ops, columns, vis);
                         self.state_table.write_chunk(chunk.clone());
 
-                        commit_data = true;
-
                         yield Message::Chunk(chunk);
                     }
+                    self.state_table.try_flush().await?;
                 }
 
                 Message::Barrier(barrier) => {
-                    if commit_data {
-                        // Only commit when we have new data in this epoch.
-                        self.state_table.commit(barrier.epoch).await?;
-                        commit_data = false;
-                    } else {
-                        self.state_table.commit_no_data_expected(barrier.epoch);
-                    }
+                    self.state_table.commit(barrier.epoch).await?;
 
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         let (_prev_vnode_bitmap, cache_may_stale) =
@@ -262,7 +253,7 @@ mod tests {
             Box::new(input),
             state_table,
             info,
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             Arc::new(AtomicU64::new(0)),
             Arc::new(StreamingMetrics::unused()),
         ))

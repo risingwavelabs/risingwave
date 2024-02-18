@@ -13,6 +13,7 @@
 //! SQL Abstract Syntax Tree (AST) types
 mod data_type;
 pub(crate) mod ddl;
+mod legacy_source;
 mod operator;
 mod query;
 mod statement;
@@ -36,6 +37,9 @@ pub use self::ddl::{
     AlterSchemaOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
     ReferentialAction, SourceWatermark, TableConstraint,
 };
+pub use self::legacy_source::{
+    get_delimiter, AvroSchema, CompatibleSourceSchema, DebeziumAvroSchema, ProtobufSchema,
+};
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
     Cte, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView, OrderByExpr, Query,
@@ -51,7 +55,7 @@ pub use crate::ast::ddl::{
     AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterViewOperation,
 };
 use crate::keywords::Keyword;
-use crate::parser::{Parser, ParserError};
+use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError};
 
 pub struct DisplaySeparated<'a, T>
 where
@@ -323,6 +327,13 @@ pub enum Expr {
         low: Box<Expr>,
         high: Box<Expr>,
     },
+    /// `<expr> [ NOT ] SIMILAR TO <pat> ESCAPE <esc_text>`
+    SimilarTo {
+        expr: Box<Expr>,
+        negated: bool,
+        pat: Box<Expr>,
+        esc_text: Option<Box<Expr>>,
+    },
     /// Binary operation e.g. `1 + 1` or `foo > bar`
     BinaryOp {
         left: Box<Expr>,
@@ -522,6 +533,24 @@ impl fmt::Display for Expr {
                 low,
                 high
             ),
+            Expr::SimilarTo {
+                expr,
+                negated,
+                pat,
+                esc_text,
+            } => {
+                write!(
+                    f,
+                    "{} {}SIMILAR TO {}",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pat,
+                )?;
+                if let Some(et) = esc_text {
+                    write!(f, "ESCAPE {}", et)?;
+                }
+                Ok(())
+            }
             Expr::BinaryOp { left, op, right } => write!(f, "{} {} {}", left, op, right),
             Expr::SomeOp(expr) => write!(f, "SOME({})", expr),
             Expr::AllOp(expr) => write!(f, "ALL({})", expr),
@@ -785,10 +814,10 @@ impl fmt::Display for WindowFrameUnits {
 pub enum WindowFrameBound {
     /// `CURRENT ROW`
     CurrentRow,
-    /// `<N> PRECEDING` or `UNBOUNDED PRECEDING`
-    Preceding(Option<u64>),
-    /// `<N> FOLLOWING` or `UNBOUNDED FOLLOWING`.
-    Following(Option<u64>),
+    /// `<offset> PRECEDING` or `UNBOUNDED PRECEDING`
+    Preceding(Option<Box<Expr>>),
+    /// `<offset> FOLLOWING` or `UNBOUNDED FOLLOWING`.
+    Following(Option<Box<Expr>>),
 }
 
 impl fmt::Display for WindowFrameBound {
@@ -1019,9 +1048,13 @@ pub struct CdcTableInfo {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Statement {
     /// Analyze (Hive)
-    Analyze { table_name: ObjectName },
+    Analyze {
+        table_name: ObjectName,
+    },
     /// Truncate (Hive)
-    Truncate { table_name: ObjectName },
+    Truncate {
+        table_name: ObjectName,
+    },
     /// SELECT
     Query(Box<Query>),
     /// INSERT
@@ -1084,6 +1117,8 @@ pub enum Statement {
         name: ObjectName,
         /// Optional schema
         columns: Vec<ColumnDef>,
+        // The wildchar position in columns defined in sql. Only exist when using external schema.
+        wildcard_idx: Option<usize>,
         constraints: Vec<TableConstraint>,
         with_options: Vec<SqlOption>,
         /// Optional schema of the external source with which the table is created
@@ -1096,6 +1131,8 @@ pub enum Statement {
         query: Option<Box<Query>>,
         /// `FROM cdc_source TABLE database_name.table_name`
         cdc_table_info: Option<CdcTableInfo>,
+        /// `INCLUDE a AS b INCLUDE c`
+        include_column_options: IncludeOption,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -1109,11 +1146,17 @@ pub enum Statement {
         if_not_exists: bool,
     },
     /// CREATE SOURCE
-    CreateSource { stmt: CreateSourceStatement },
+    CreateSource {
+        stmt: CreateSourceStatement,
+    },
     /// CREATE SINK
-    CreateSink { stmt: CreateSinkStatement },
+    CreateSink {
+        stmt: CreateSinkStatement,
+    },
     /// CREATE CONNECTION
-    CreateConnection { stmt: CreateConnectionStatement },
+    CreateConnection {
+        stmt: CreateConnectionStatement,
+    },
     /// CREATE FUNCTION
     ///
     /// Postgres: <https://www.postgresql.org/docs/15/sql-createfunction.html>
@@ -1209,6 +1252,7 @@ pub enum Statement {
         /// Show create object name
         name: ObjectName,
     },
+    ShowTransactionIsolationLevel,
     /// CANCEL JOBS COMMAND
     CancelJobs(JobIdents),
     /// KILL COMMAND
@@ -1237,11 +1281,17 @@ pub enum Statement {
     /// `SHOW <variable>`
     ///
     /// Note: this is a PostgreSQL-specific statement.
-    ShowVariable { variable: Vec<Ident> },
+    ShowVariable {
+        variable: Vec<Ident>,
+    },
     /// `START TRANSACTION ...`
-    StartTransaction { modes: Vec<TransactionMode> },
+    StartTransaction {
+        modes: Vec<TransactionMode>,
+    },
     /// `BEGIN [ TRANSACTION | WORK ]`
-    Begin { modes: Vec<TransactionMode> },
+    Begin {
+        modes: Vec<TransactionMode>,
+    },
     /// ABORT
     Abort,
     /// `SET TRANSACTION ...`
@@ -1264,9 +1314,13 @@ pub enum Statement {
         comment: Option<String>,
     },
     /// `COMMIT [ TRANSACTION | WORK ] [ AND [ NO ] CHAIN ]`
-    Commit { chain: bool },
+    Commit {
+        chain: bool,
+    },
     /// `ROLLBACK [ TRANSACTION | WORK ] [ AND [ NO ] CHAIN ]`
-    Rollback { chain: bool },
+    Rollback {
+        chain: bool,
+    },
     /// CREATE SCHEMA
     CreateSchema {
         schema_name: ObjectName,
@@ -1297,11 +1351,17 @@ pub enum Statement {
     /// `DEALLOCATE [ PREPARE ] { name | ALL }`
     ///
     /// Note: this is a PostgreSQL-specific statement.
-    Deallocate { name: Ident, prepare: bool },
+    Deallocate {
+        name: Ident,
+        prepare: bool,
+    },
     /// `EXECUTE name [ ( parameter [, ...] ) ]`
     ///
     /// Note: this is a PostgreSQL-specific statement.
-    Execute { name: Ident, parameters: Vec<Expr> },
+    Execute {
+        name: Ident,
+        parameters: Vec<Expr>,
+    },
     /// `PREPARE name [ ( data_type [, ...] ) ] AS statement`
     ///
     /// Note: this is a PostgreSQL-specific statement.
@@ -1379,6 +1439,10 @@ impl fmt::Display for Statement {
             }
             Statement::ShowCreateObject{ create_type: show_type, name } => {
                 write!(f, "SHOW CREATE {} {}", show_type, name)?;
+                Ok(())
+            }
+            Statement::ShowTransactionIsolationLevel => {
+                write!(f, "SHOW TRANSACTION ISOLATION LEVEL")?;
                 Ok(())
             }
             Statement::Insert {
@@ -1544,6 +1608,7 @@ impl fmt::Display for Statement {
             Statement::CreateTable {
                 name,
                 columns,
+                wildcard_idx,
                 constraints,
                 with_options,
                 or_replace,
@@ -1554,6 +1619,7 @@ impl fmt::Display for Statement {
                 append_only,
                 query,
                 cdc_table_info,
+                include_column_options,
             } => {
                 // We want to allow the following options
                 // Empty column list, allowed by PostgreSQL:
@@ -1571,13 +1637,32 @@ impl fmt::Display for Statement {
                     name = name,
                 )?;
                 if !columns.is_empty() || !constraints.is_empty() {
-                    write!(f, " {}", fmt_create_items(columns, constraints, source_watermarks)?)?;
+                    write!(f, " {}", fmt_create_items(columns, constraints, source_watermarks, *wildcard_idx)?)?;
                 } else if query.is_none() {
                     // PostgreSQL allows `CREATE TABLE t ();`, but requires empty parens
                     write!(f, " ()")?;
                 }
                 if *append_only {
                     write!(f, " APPEND ONLY")?;
+                }
+                if !include_column_options.is_empty() { // (Ident, Option<Ident>)
+                    write!(f, "{}", display_comma_separated(
+                        include_column_options.iter().map(|option_item: &IncludeOptionItem| {
+                            format!("INCLUDE {}{}{}",
+                            option_item.column_type,
+                                    if let Some(inner_field) = &option_item.inner_field {
+                                        format!(" {}", inner_field)
+                                    } else {
+                                        "".into()
+                                    }
+                                    , if let Some(alias) = &option_item.column_alias {
+                                        format!(" AS {}", alias)
+                                    } else {
+                                        "".into()
+                                    }
+                                )
+                        }).collect_vec().as_slice()
+                    ))?;
                 }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
@@ -2557,6 +2642,24 @@ impl fmt::Display for FunctionDefinition {
     }
 }
 
+impl FunctionDefinition {
+    /// Returns the function definition as a string slice.
+    pub fn as_str(&self) -> &str {
+        match self {
+            FunctionDefinition::SingleQuotedDef(s) => s,
+            FunctionDefinition::DoubleDollarDef(s) => s,
+        }
+    }
+
+    /// Returns the function definition as a string.
+    pub fn into_string(self) -> String {
+        match self {
+            FunctionDefinition::SingleQuotedDef(s) => s,
+            FunctionDefinition::DoubleDollarDef(s) => s,
+        }
+    }
+}
+
 /// Return types of a function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -2638,6 +2741,7 @@ impl fmt::Display for CreateFunctionBody {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CreateFunctionUsing {
     Link(String),
+    Base64(String),
 }
 
 impl fmt::Display for CreateFunctionUsing {
@@ -2645,6 +2749,9 @@ impl fmt::Display for CreateFunctionUsing {
         write!(f, "USING ")?;
         match self {
             CreateFunctionUsing::Link(uri) => write!(f, "LINK '{uri}'"),
+            CreateFunctionUsing::Base64(s) => {
+                write!(f, "BASE64 '{s}'")
+            }
         }
     }
 }
@@ -2652,24 +2759,51 @@ impl fmt::Display for CreateFunctionUsing {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SetVariableValue {
-    Ident(Ident),
-    Literal(Value),
-    List(Vec<SetVariableValue>),
+    Single(SetVariableValueSingle),
+    List(Vec<SetVariableValueSingle>),
     Default,
+}
+
+impl From<SetVariableValueSingle> for SetVariableValue {
+    fn from(value: SetVariableValueSingle) -> Self {
+        SetVariableValue::Single(value)
+    }
 }
 
 impl fmt::Display for SetVariableValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use SetVariableValue::*;
         match self {
+            Single(val) => write!(f, "{}", val),
+            List(list) => write!(f, "{}", display_comma_separated(list),),
+            Default => write!(f, "DEFAULT"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SetVariableValueSingle {
+    Ident(Ident),
+    Literal(Value),
+}
+
+impl SetVariableValueSingle {
+    pub fn to_string_unquoted(&self) -> String {
+        match self {
+            Self::Literal(Value::SingleQuotedString(s))
+            | Self::Literal(Value::DoubleQuotedString(s)) => s.clone(),
+            _ => self.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for SetVariableValueSingle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use SetVariableValueSingle::*;
+        match self {
             Ident(ident) => write!(f, "{}", ident),
             Literal(literal) => write!(f, "{}", literal),
-            List(list) => write!(
-                f,
-                "{}",
-                list.iter().map(|value| value.to_string()).join(", ")
-            ),
-            Default => write!(f, "DEFAULT"),
         }
     }
 }

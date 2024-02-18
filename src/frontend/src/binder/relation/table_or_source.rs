@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{is_system_schema, Field};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_sqlparser::ast::{Statement, TableAlias};
 use risingwave_sqlparser::parser::Parser;
+use thiserror_ext::AsReport;
 
 use super::BoundShare;
 use crate::binder::relation::BoundSubquery;
@@ -31,11 +31,12 @@ use crate::catalog::system_catalog::SystemTableCatalog;
 use crate::catalog::table_catalog::{TableCatalog, TableType};
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{CatalogError, IndexCatalog, TableId};
+use crate::error::{ErrorCode, Result, RwError};
 
 #[derive(Debug, Clone)]
 pub struct BoundBaseTable {
     pub table_id: TableId,
-    pub table_catalog: TableCatalog,
+    pub table_catalog: Arc<TableCatalog>,
     pub table_indexes: Vec<Arc<IndexCatalog>>,
     pub for_system_time_as_of_proctime: bool,
 }
@@ -100,26 +101,24 @@ impl Binder {
                         {
                             self.resolve_view_relation(&view_catalog.clone())?
                         } else {
-                            return Err(ErrorCode::NotImplemented(
-                                format!(
-                                    r###"{}.{} is not supported, please use `SHOW` commands for now.
+                            bail_not_implemented!(
+                                issue = 1695,
+                                r###"{}.{} is not supported, please use `SHOW` commands for now.
 `SHOW TABLES`,
 `SHOW MATERIALIZED VIEWS`,
 `DESCRIBE <table>`,
 `SHOW COLUMNS FROM [table]`
 "###,
-                                    schema_name, table_name
-                                ),
-                                1695.into(),
-                            )
-                            .into());
+                                schema_name,
+                                table_name
+                            );
                         }
                     } else if let Ok((table_catalog, schema_name)) =
                         self.catalog
                             .get_table_by_name(&self.db_name, schema_path, table_name)
                     {
                         self.resolve_table_relation(
-                            &table_catalog.clone(),
+                            table_catalog.clone(),
                             schema_name,
                             for_system_time_as_of_proctime,
                         )?
@@ -163,7 +162,7 @@ impl Binder {
                             {
                                 if let Some(table_catalog) = schema.get_table_by_name(table_name) {
                                     return self.resolve_table_relation(
-                                        &table_catalog.clone(),
+                                        table_catalog.clone(),
                                         &schema_name.clone(),
                                         for_system_time_as_of_proctime,
                                     );
@@ -193,12 +192,11 @@ impl Binder {
 
     fn resolve_table_relation(
         &mut self,
-        table_catalog: &TableCatalog,
+        table_catalog: Arc<TableCatalog>,
         schema_name: &str,
         for_system_time_as_of_proctime: bool,
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
         let table_id = table_catalog.id();
-        let table_catalog = table_catalog.clone();
         let columns = table_catalog
             .columns
             .iter()
@@ -248,7 +246,9 @@ impl Binder {
         let query = self.bind_query(*query).map_err(|e| {
             ErrorCode::BindError(format!(
                 "failed to bind view {}, sql: {}\nerror: {}",
-                view_catalog.name, view_catalog.sql, e
+                view_catalog.name,
+                view_catalog.sql,
+                e.as_report()
             ))
         })?;
 
@@ -308,7 +308,7 @@ impl Binder {
         let (table_catalog, schema_name) =
             self.catalog
                 .get_table_by_name(db_name, schema_path, table_name)?;
-        let table_catalog = table_catalog.deref().clone();
+        let table_catalog = table_catalog.clone();
 
         let table_id = table_catalog.id();
         let table_indexes = self.resolve_table_indexes(schema_name, table_id)?;

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,10 +18,12 @@ use std::fs;
 use std::path::Path;
 use std::sync::OnceLock;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, bail, Context};
+use jni::objects::{JObject, JString};
 use jni::strings::JNIString;
-use jni::{InitArgsBuilder, JNIVersion, JavaVM, NativeMethod};
+use jni::{InitArgsBuilder, JNIEnv, JNIVersion, JavaVM, NativeMethod};
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
+use thiserror_ext::AsReport;
 use tracing::error;
 
 use crate::call_method;
@@ -30,27 +32,30 @@ use crate::call_method;
 const DEFAULT_MEMORY_PROPORTION: f64 = 0.07;
 
 pub static JVM: JavaVmWrapper = JavaVmWrapper;
-static JVM_RESULT: OnceLock<Result<JavaVM, String>> = OnceLock::new();
+static JVM_RESULT: OnceLock<anyhow::Result<JavaVM>> = OnceLock::new();
 
 pub struct JavaVmWrapper;
 
 impl JavaVmWrapper {
     pub fn get_or_init(&self) -> anyhow::Result<&'static JavaVM> {
-        match JVM_RESULT.get_or_init(|| {
-            Self::inner_new().inspect_err(|e| error!("failed to init jvm: {:?}", e))
-        }) {
+        match JVM_RESULT.get_or_init(Self::inner_new) {
             Ok(jvm) => Ok(jvm),
-            Err(e) => Err(anyhow!("jvm not initialized properly: {:?}", e)),
+            Err(e) => {
+                error!(error = %e.as_report(), "jvm not initialized properly");
+                // Note: anyhow!(e) doesn't preserve source
+                // https://github.com/dtolnay/anyhow/issues/341
+                Err(anyhow!(e.to_report_string()).context("jvm not initialized properly"))
+            }
         }
     }
 
-    fn inner_new() -> Result<JavaVM, String> {
+    fn inner_new() -> anyhow::Result<JavaVM> {
         let libs_path = if let Ok(libs_path) = std::env::var("CONNECTOR_LIBS_PATH") {
             libs_path
         } else {
             tracing::warn!("environment variable CONNECTOR_LIBS_PATH is not specified, so use default path `./libs` instead");
             let path = std::env::current_exe()
-                .map_err(|e| format!("unable to get path of current_exe: {:?}", e))?
+                .context("unable to get path of current_exe")?
                 .parent()
                 .expect("not root")
                 .join("./libs");
@@ -62,10 +67,7 @@ impl JavaVmWrapper {
         let dir = Path::new(&libs_path);
 
         if !dir.is_dir() {
-            return Err(format!(
-                "CONNECTOR_LIBS_PATH \"{}\" is not a directory",
-                libs_path
-            ));
+            bail!("CONNECTOR_LIBS_PATH \"{}\" is not a directory", libs_path);
         }
 
         let mut class_vec = vec![];
@@ -80,10 +82,7 @@ impl JavaVmWrapper {
                 }
             }
         } else {
-            return Err(format!(
-                "failed to read CONNECTOR_LIBS_PATH \"{}\"",
-                libs_path
-            ));
+            bail!("failed to read CONNECTOR_LIBS_PATH \"{}\"", libs_path);
         }
 
         let jvm_heap_size = if let Ok(heap_size) = std::env::var("JVM_HEAP_SIZE") {
@@ -95,6 +94,7 @@ impl JavaVmWrapper {
             )
         };
 
+        // FIXME: passing custom arguments to the embedded jvm when compute node start
         // Build the VM properties
         let args_builder = InitArgsBuilder::new()
             // Pass the JNI API version (default is 8)
@@ -109,26 +109,24 @@ impl JavaVmWrapper {
             // In RisingWave we assume the upstream changelog may contain duplicate events and
             // handle conflicts in the mview operator, thus we don't need to obey the above
             // instructions. So we decrease the wait time here to reclaim jvm thread faster.
-            .option("-Ddebezium.embedded.shutdown.pause.before.interrupt.ms=1");
+            .option("-Ddebezium.embedded.shutdown.pause.before.interrupt.ms=1")
+            .option("-Dcdc.source.wait.streaming.before.exit.seconds=30");
 
         tracing::info!("JVM args: {:?}", args_builder);
-        let jvm_args = args_builder
-            .build()
-            .map_err(|e| format!("invalid jvm args: {:?}", e))?;
+        let jvm_args = args_builder.build().context("invalid jvm args")?;
 
         // Create a new VM
         let jvm = match JavaVM::new(jvm_args) {
             Err(err) => {
-                tracing::error!("fail to new JVM {:?}", err);
-                return Err("fail to new JVM".to_string());
+                tracing::error!(error = ?err.as_report(), "fail to new JVM");
+                bail!("fail to new JVM");
             }
             Ok(jvm) => jvm,
         };
 
         tracing::info!("initialize JVM successfully");
 
-        register_native_method_for_jvm(&jvm)
-            .map_err(|e| format!("failed to register native method: {:?}", e))?;
+        register_native_method_for_jvm(&jvm).context("failed to register native method")?;
 
         Ok(jvm)
     }
@@ -137,11 +135,11 @@ impl JavaVmWrapper {
 pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::Error> {
     let mut env = jvm
         .attach_current_thread()
-        .inspect_err(|e| tracing::error!("jvm attach thread error: {:?}", e))?;
+        .inspect_err(|e| tracing::error!(error = ?e.as_report(), "jvm attach thread error"))?;
 
     let binding_class = env
         .find_class("com/risingwave/java/binding/Binding")
-        .inspect_err(|e| tracing::error!("jvm find class error: {:?}", e))?;
+        .inspect_err(|e| tracing::error!(error = ?e.as_report(), "jvm find class error"))?;
     use crate::*;
     macro_rules! gen_native_method_array {
         () => {{
@@ -164,7 +162,9 @@ pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::E
         }
     }
     env.register_native_methods(binding_class, &gen_native_method_array!())
-        .inspect_err(|e| tracing::error!("jvm register native methods error: {:?}", e))?;
+        .inspect_err(
+            |e| tracing::error!(error = ?e.as_report(), "jvm register native methods error"),
+        )?;
 
     tracing::info!("register native methods for jvm successfully");
     Ok(())
@@ -194,11 +194,51 @@ pub fn load_jvm_memory_stats() -> (usize, usize) {
             match result {
                 Ok(ret) => ret,
                 Err(e) => {
-                    error!("failed to collect jvm stats: {:?}", e);
+                    error!(error = ?e.as_report(), "failed to collect jvm stats");
                     (0, 0)
                 }
             }
         }
         _ => (0, 0),
     }
+}
+
+pub fn execute_with_jni_env<T>(
+    jvm: &JavaVM,
+    f: impl FnOnce(&mut JNIEnv<'_>) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let _guard = jvm
+        .attach_current_thread()
+        .with_context(|| "Failed to attach current rust thread to jvm")?;
+
+    let mut env = jvm.get_env().with_context(|| "Failed to get jni env")?;
+
+    let ret = f(&mut env);
+
+    match env.exception_check() {
+        Ok(true) => env
+            .exception_clear()
+            .inspect_err(|e| {
+                tracing::warn!(error = %e.as_report(), "Exception occurred but failed to clear");
+            })
+            .unwrap(),
+        Ok(false) => {
+            // No exception, do nothing
+        }
+        Err(e) => {
+            tracing::warn!(error = %e.as_report(), "Failed to check exception");
+        }
+    }
+
+    ret
+}
+
+/// A helper method to convert an java object to rust string.
+pub fn jobj_to_str(env: &mut JNIEnv<'_>, obj: JObject<'_>) -> anyhow::Result<String> {
+    if !env.is_instance_of(&obj, "java/lang/String")? {
+        bail!("Input object is not a java string and can't be converted!")
+    }
+    let jstr = JString::from(obj);
+    let java_str = env.get_string(&jstr)?;
+    Ok(java_str.to_str()?.to_string())
 }

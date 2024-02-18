@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,8 +22,6 @@ use itertools::Itertools;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::must_match;
-use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -94,17 +92,14 @@ pub fn gen_dummy_sst_info(
     epoch: HummockEpoch,
 ) -> SstableInfo {
     let mut min_table_key: Vec<u8> = batches[0].start_table_key().to_vec();
-    let mut max_table_key: Vec<u8> =
-        must_match!(batches[0].end_table_key(), Bound::Included(table_key) => table_key.to_vec());
+    let mut max_table_key: Vec<u8> = batches[0].end_table_key().to_vec();
     let mut file_size = 0;
     for batch in batches.iter().skip(1) {
         if min_table_key.as_slice() > *batch.start_table_key() {
             min_table_key = batch.start_table_key().to_vec();
         }
-        if max_table_key.as_slice()
-            < must_match!(batch.end_table_key(), Bound::Included(table_key) => *table_key)
-        {
-            max_table_key = must_match!(batch.end_table_key(), Bound::Included(table_key) => table_key.to_vec());
+        if max_table_key.as_slice() < *batch.end_table_key() {
+            max_table_key = batch.end_table_key().to_vec();
         }
         file_size += batch.size() as u64;
     }
@@ -117,8 +112,10 @@ pub fn gen_dummy_sst_info(
             right_exclusive: false,
         }),
         file_size,
-        table_ids: vec![],
+        table_ids: vec![table_id.table_id],
         uncompressed_file_size: file_size,
+        min_epoch: epoch,
+        max_epoch: epoch,
         ..Default::default()
     }
 }
@@ -228,17 +225,17 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     );
 
     let mut last_key = FullKey::<B>::default();
-    let mut user_key_last_delete = MAX_EPOCH;
+    let mut user_key_last_delete = HummockEpoch::MAX;
     for (mut key, value) in kv_iter {
         let is_new_user_key =
             last_key.is_empty() || key.user_key.as_ref() != last_key.user_key.as_ref();
         let epoch = key.epoch_with_gap.pure_epoch();
         if is_new_user_key {
             last_key = key.clone();
-            user_key_last_delete = MAX_EPOCH;
+            user_key_last_delete = HummockEpoch::MAX;
         }
 
-        let mut earliest_delete_epoch = MAX_EPOCH;
+        let mut earliest_delete_epoch = HummockEpoch::MAX;
         let extended_user_key = PointRange::from_user_key(key.user_key.as_ref(), false);
         for range_tombstone in &range_tombstones {
             if range_tombstone
@@ -393,6 +390,7 @@ pub fn create_small_table_cache() -> Arc<LruCache<HummockSstableObjectId, Box<Ss
 
 pub mod delete_range {
     use super::*;
+    use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferDeleteRangeIterator;
 
     #[derive(Default)]
     pub struct CompactionDeleteRangesBuilder {
@@ -406,18 +404,12 @@ pub mod delete_range {
             table_id: TableId,
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         ) {
-            let size = SharedBufferBatch::measure_delete_range_size(&delete_ranges);
-            let batch = SharedBufferBatch::build_shared_buffer_batch(
-                epoch,
-                0,
-                vec![],
-                size,
-                delete_ranges,
-                table_id,
-                None,
-                None,
-            );
-            self.iter.add_batch_iter(batch.delete_range_iter());
+            self.iter
+                .add_batch_iter(SharedBufferDeleteRangeIterator::new(
+                    epoch,
+                    table_id,
+                    delete_ranges,
+                ));
         }
 
         pub fn build_for_compaction(self) -> CompactionDeleteRangeIterator {
@@ -486,7 +478,7 @@ pub mod delete_range {
             apply_event(&mut epochs, &event);
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
                 event_key: event.0,
-                new_epoch: epochs.first().map_or(MAX_EPOCH, |epoch| *epoch),
+                new_epoch: epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch),
             });
         }
         monotonic_tombstone_events.dedup_by(|a, b| {
@@ -527,7 +519,7 @@ pub mod delete_range {
     /// `<1, +epoch1> <3, +epoch2> <5, -epoch1> <7, -epoch2> <10, +epoch3> <12, -epoch3>`
     /// We rely on the fact that keys met in compaction are in order.
     /// When user key 0 comes, no events have happened yet so no range delete epoch. (will be
-    /// represented as range delete epoch `MAX_EPOCH`)
+    /// represented as range delete epoch MAX EPOCH)
     /// When user key 1 comes, event `<1, +epoch1>` happens so there is currently one range delete
     /// epoch: epoch1.
     /// When user key 2 comes, no more events happen so the set remains `{epoch1}`.

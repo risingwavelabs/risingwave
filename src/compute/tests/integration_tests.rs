@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,7 +32,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
 };
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::test_prelude::DataChunkTestExt;
@@ -40,13 +39,13 @@ use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
 use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_connector::ConnectorParams;
+use risingwave_dml::dml_manager::DmlManager;
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::PbRowFormatType;
-use risingwave_source::connector_test_utils::create_source_desc_builder;
-use risingwave_source::dml_manager::DmlManager;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::panic_store::PanicStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -156,9 +155,10 @@ async fn test_table_materialize() -> StreamResult<()> {
         .map(|(column_id, field)| ColumnDesc::named(field.name, *column_id, field.data_type))
         .collect_vec();
     let (barrier_tx, barrier_rx) = unbounded_channel();
+    let barrier_tx = Arc::new(barrier_tx);
     let vnodes = Bitmap::from_bytes(&[0b11111111]);
 
-    let actor_ctx = ActorContext::create(0x3f3f3f);
+    let actor_ctx = ActorContext::for_test(0x3f3f3f);
     let system_params_manager = LocalSystemParamsManager::for_test();
 
     // Create a `SourceExecutor` to read the changes.
@@ -189,6 +189,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         table_id,
         INITIAL_TABLE_VERSION_ID,
         column_descs.clone(),
+        1024,
     );
 
     let row_id_gen_executor = RowIdGenExecutor::new(
@@ -243,13 +244,8 @@ async fn test_table_materialize() -> StreamResult<()> {
         vec![],
         Some(row_id_index),
         false,
+        0,
     ));
-
-    tokio::spawn(async move {
-        let mut stream = insert.execute();
-        let _ = stream.next().await.unwrap()?;
-        Ok::<_, RwError>(())
-    });
 
     let value_indices = (0..column_descs.len()).collect_vec();
     // Since we have not polled `Materialize`, we cannot scan anything from this table
@@ -270,13 +266,14 @@ async fn test_table_materialize() -> StreamResult<()> {
         1024,
         "RowSeqExecutor2".to_string(),
         None,
+        None,
     ));
     let mut stream = scan.execute();
     let result = stream.next().await;
     assert!(result.is_none());
 
     // Send a barrier to start materialized view.
-    let curr_epoch = 1919;
+    let mut curr_epoch = 1919;
     barrier_tx
         .send(Barrier::new_test_barrier(curr_epoch))
         .unwrap();
@@ -289,6 +286,18 @@ async fn test_table_materialize() -> StreamResult<()> {
             ..
         }) if epoch.curr == curr_epoch
     ));
+
+    curr_epoch += 1;
+    let barrier_tx_clone = barrier_tx.clone();
+    tokio::spawn(async move {
+        let mut stream = insert.execute();
+        let _ = stream.next().await.unwrap()?;
+        // Send a barrier and poll again, should write changes to storage.
+        barrier_tx_clone
+            .send(Barrier::new_test_barrier(curr_epoch))
+            .unwrap();
+        anyhow::Ok(())
+    });
 
     // Poll `Materialize`, should output the same insertion stream chunk.
     let message = materialize.next().await.unwrap()?;
@@ -309,12 +318,6 @@ async fn test_table_materialize() -> StreamResult<()> {
         Message::Barrier(_) => panic!(),
     }
 
-    // Send a barrier and poll again, should write changes to storage.
-    let curr_epoch = 1920;
-    barrier_tx
-        .send(Barrier::new_test_barrier(curr_epoch))
-        .unwrap();
-
     assert!(matches!(
         materialize.next().await.unwrap()?,
         Message::Barrier(Barrier {
@@ -332,6 +335,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         to_committed_batch_query_epoch(u64::MAX),
         1024,
         "RowSeqScanExecutor2".to_string(),
+        None,
         None,
     ));
 
@@ -362,12 +366,19 @@ async fn test_table_materialize() -> StreamResult<()> {
         1024,
         "DeleteExecutor".to_string(),
         false,
+        0,
     ));
 
+    curr_epoch += 1;
+    let barrier_tx_clone = barrier_tx.clone();
     tokio::spawn(async move {
         let mut stream = delete.execute();
         let _ = stream.next().await.unwrap()?;
-        Ok::<_, RwError>(())
+        // Send a barrier and poll again, should write changes to storage.
+        barrier_tx_clone
+            .send(Barrier::new_test_barrier(curr_epoch))
+            .unwrap();
+        anyhow::Ok(())
     });
 
     // Poll `Materialize`, should output the same deletion stream chunk.
@@ -386,18 +397,13 @@ async fn test_table_materialize() -> StreamResult<()> {
         Message::Barrier(_) => panic!(),
     }
 
-    // Send a barrier and poll again, should write changes to storage.
-    barrier_tx
-        .send(Barrier::new_test_barrier(curr_epoch + 1))
-        .unwrap();
-
     assert!(matches!(
         materialize.next().await.unwrap()?,
         Message::Barrier(Barrier {
             epoch,
             mutation: None,
             ..
-        }) if epoch.curr == curr_epoch + 1
+        }) if epoch.curr == curr_epoch
     ));
 
     // Scan the table again, we are able to see the deletion now!
@@ -408,6 +414,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         to_committed_batch_query_epoch(u64::MAX),
         1024,
         "RowSeqScanExecutor2".to_string(),
+        None,
         None,
     ));
 
@@ -421,7 +428,7 @@ async fn test_table_materialize() -> StreamResult<()> {
 }
 
 #[tokio::test]
-async fn test_row_seq_scan() -> Result<()> {
+async fn test_row_seq_scan() -> StreamResult<()> {
     // In this test we test if the memtable can be correctly scanned for K-V pair insertions.
     let memory_state_store = MemoryStateStore::new();
 
@@ -478,6 +485,7 @@ async fn test_row_seq_scan() -> Result<()> {
         to_committed_batch_query_epoch(u64::MAX),
         1,
         "RowSeqScanExecutor2".to_string(),
+        None,
         None,
     ));
 

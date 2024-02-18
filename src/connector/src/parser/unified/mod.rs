@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,11 +17,13 @@
 use auto_impl::auto_impl;
 use risingwave_common::types::{DataType, Datum};
 use thiserror::Error;
+use thiserror_ext::Macro;
 
 use self::avro::AvroAccess;
 use self::bytes::BytesAccess;
 use self::json::JsonAccess;
 use self::protobuf::ProtobufAccess;
+use crate::source::SourceColumnDesc;
 
 pub mod avro;
 pub mod bytes;
@@ -69,7 +71,7 @@ pub trait ChangeEvent {
     /// Access the operation type.
     fn op(&self) -> std::result::Result<ChangeEventOperation, AccessError>;
     /// Access the field after the operation.
-    fn access_field(&self, name: &str, type_expected: &DataType) -> AccessResult;
+    fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult;
 }
 
 impl<A> ChangeEvent for (ChangeEventOperation, A)
@@ -80,12 +82,13 @@ where
         Ok(self.0)
     }
 
-    fn access_field(&self, name: &str, type_expected: &DataType) -> AccessResult {
-        self.1.access(&[name], Some(type_expected))
+    fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult {
+        self.1.access(&[desc.name.as_str()], Some(&desc.data_type))
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Macro)]
+#[thiserror_ext(macro(mangle))]
 pub enum AccessError {
     #[error("Undefined field `{name}` at `{path}`")]
     Undefined { name: String, path: String },
@@ -97,10 +100,8 @@ pub enum AccessError {
     },
     #[error("Unsupported data type `{ty}`")]
     UnsupportedType { ty: String },
-    #[error(transparent)]
-    Other(
-        #[from]
-        #[backtrace]
-        anyhow::Error,
-    ),
+
+    /// Errors that are not categorized into variants above.
+    #[error("{message}")]
+    Uncategorized { message: String },
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,13 +23,13 @@ use crate::controller::system_param::SystemParamsControllerRef;
 use crate::manager::SystemParamsManagerRef;
 
 pub struct SystemParamsServiceImpl {
-    system_params_manager: SystemParamsManagerRef,
+    system_params_manager: Option<SystemParamsManagerRef>,
     system_params_controller: Option<SystemParamsControllerRef>,
 }
 
 impl SystemParamsServiceImpl {
     pub fn new(
-        system_params_manager: SystemParamsManagerRef,
+        system_params_manager: Option<SystemParamsManagerRef>,
         system_params_controller: Option<SystemParamsControllerRef>,
     ) -> Self {
         Self {
@@ -48,7 +48,11 @@ impl SystemParamsService for SystemParamsServiceImpl {
         let params = if let Some(ctl) = &self.system_params_controller {
             ctl.get_pb_params().await
         } else {
-            self.system_params_manager.get_pb_params().await
+            self.system_params_manager
+                .as_ref()
+                .unwrap()
+                .get_pb_params()
+                .await
         };
 
         Ok(Response::new(GetSystemParamsResponse {
@@ -65,6 +69,8 @@ impl SystemParamsService for SystemParamsServiceImpl {
             ctl.set_param(&req.param, req.value).await?
         } else {
             self.system_params_manager
+                .as_ref()
+                .unwrap()
                 .set_param(&req.param, req.value)
                 .await?
         };

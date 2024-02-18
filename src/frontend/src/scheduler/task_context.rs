@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -75,7 +75,7 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         self.env.batch_config()
     }
 
-    fn dml_manager(&self) -> risingwave_source::dml_manager::DmlManagerRef {
+    fn dml_manager(&self) -> risingwave_dml::dml_manager::DmlManagerRef {
         unimplemented!("not supported in local mode")
     }
 

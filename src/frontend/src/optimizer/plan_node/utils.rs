@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,27 +13,27 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::default::Default;
 use std::vec;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, Schema,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, Schema, OBJECT_ID_PLACEHOLDER,
 };
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::{CreateType, TableType};
-use crate::catalog::{ColumnId, FragmentId, TableCatalog, TableId};
-use crate::optimizer::property::Cardinality;
-use crate::utils::WithOptions;
+use crate::catalog::{ColumnId, TableCatalog, TableId};
+use crate::optimizer::property::{Cardinality, Order, RequiredDist};
+use crate::utils::{Condition, IndexSet};
 
 #[derive(Default)]
 pub struct TableCatalogBuilder {
     /// All columns in this table
     columns: Vec<ColumnCatalog>,
     pk: Vec<ColumnOrder>,
-    properties: WithOptions,
     value_indices: Option<Vec<usize>>,
     vnode_col_idx: Option<usize>,
     column_names: HashMap<String, i32>,
@@ -45,14 +45,6 @@ pub struct TableCatalogBuilder {
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
 /// Be careful of the order of add column.
 impl TableCatalogBuilder {
-    // TODO: Add more fields if internal table is more configurable.
-    pub fn new(properties: WithOptions) -> Self {
-        Self {
-            properties,
-            ..Default::default()
-        }
-    }
-
     /// Add a column from Field info, return the column index of the table
     pub fn add_column(&mut self, field: &Field) -> usize {
         let column_idx = self.columns.len();
@@ -158,9 +150,7 @@ impl TableCatalogBuilder {
             table_type: TableType::Internal,
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            properties: self.properties,
-            // TODO(zehua): replace it with FragmentId::placeholder()
-            fragment_id: FragmentId::MAX - 1,
+            fragment_id: OBJECT_ID_PLACEHOLDER,
             dml_fragment_id: None,
             vnode_col_index: self.vnode_col_idx,
             row_id_index: None,
@@ -181,6 +171,10 @@ impl TableCatalogBuilder {
             // It should be ignored for internal tables.
             create_type: CreateType::Foreground,
             description: None,
+            incoming_sinks: vec![],
+            initialized_at_cluster_version: None,
+            created_at_cluster_version: None,
+            retention_seconds: None,
         }
     }
 
@@ -285,6 +279,23 @@ impl<'a> IndicesDisplay<'a> {
     }
 }
 
+pub(crate) fn sum_affected_row(dml: PlanRef) -> Result<PlanRef> {
+    let dml = RequiredDist::single().enforce_if_not_satisfies(dml, &Order::any())?;
+    // Accumulate the affected rows.
+    let sum_agg = PlanAggCall {
+        agg_kind: AggKind::Sum,
+        return_type: DataType::Int64,
+        inputs: vec![InputRef::new(0, DataType::Int64)],
+        distinct: false,
+        order_by: vec![],
+        filter: Condition::true_cond(),
+        direct_args: vec![],
+    };
+    let agg = Agg::new(vec![sum_agg], IndexSet::empty(), dml);
+    let batch_agg = BatchSimpleAgg::new(agg);
+    Ok(batch_agg.into())
+}
+
 /// Call `debug_struct` on the given formatter to create a debug struct builder.
 /// If a property list is provided, properties in it will be added to the struct name according to
 /// the condition of that property.
@@ -305,6 +316,13 @@ macro_rules! plan_node_name {
     };
 }
 pub(crate) use plan_node_name;
+use risingwave_common::types::DataType;
+use risingwave_expr::aggregate::AggKind;
 
 use super::generic::{self, GenericPlanRef};
 use super::pretty_config;
+use crate::error::Result;
+use crate::expr::InputRef;
+use crate::optimizer::plan_node::generic::Agg;
+use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
+use crate::PlanRef;

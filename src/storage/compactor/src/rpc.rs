@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,9 +21,10 @@ use risingwave_pb::compactor::{
 };
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, HeapProfilingRequest, HeapProfilingResponse,
-    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
-    StackTraceRequest, StackTraceResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, GetBackPressureRequest, GetBackPressureResponse,
+    HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
+    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
+    StackTraceResponse,
 };
 use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
@@ -131,6 +132,15 @@ impl MonitorService for MonitorServiceImpl {
     ) -> Result<Response<AnalyzeHeapResponse>, Status> {
         Err(Status::unimplemented(
             "Heap profiling unimplemented in compactor",
+        ))
+    }
+
+    async fn get_back_pressure(
+        &self,
+        _request: Request<GetBackPressureRequest>,
+    ) -> Result<Response<GetBackPressureResponse>, Status> {
+        Err(Status::unimplemented(
+            "Get Back Pressure unimplemented in compactor",
         ))
     }
 }

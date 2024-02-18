@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
@@ -450,7 +449,7 @@ where
         Included(k) => Included(FullKey::new(
             table_id,
             TableKey(Bytes::from(k.as_ref().to_vec())),
-            MAX_EPOCH,
+            HummockEpoch::MAX,
         )),
         Excluded(k) => Excluded(FullKey::new(
             table_id,
@@ -460,7 +459,7 @@ where
         Unbounded => Included(FullKey::new(
             table_id,
             TableKey(Bytes::from(b"".to_vec())),
-            MAX_EPOCH,
+            HummockEpoch::MAX,
         )),
     };
     let end = match table_key_range.end_bound() {
@@ -472,14 +471,14 @@ where
         Excluded(k) => Excluded(FullKey::new(
             table_id,
             TableKey(Bytes::from(k.as_ref().to_vec())),
-            MAX_EPOCH,
+            HummockEpoch::MAX,
         )),
         Unbounded => {
             if let Some(next_table_id) = table_id.table_id().checked_add(1) {
                 Excluded(FullKey::new(
                     next_table_id.into(),
                     TableKey(Bytes::from(b"".to_vec())),
-                    MAX_EPOCH,
+                    HummockEpoch::MAX,
                 ))
             } else {
                 Unbounded
@@ -576,8 +575,7 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
-    #[allow(clippy::unused_async)]
-    async fn ingest_batch(
+    fn ingest_batch(
         &self,
         mut kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
@@ -748,7 +746,6 @@ mod tests {
                     table_id: Default::default(),
                 },
             )
-            .await
             .unwrap();
         state_store
             .ingest_batch(
@@ -768,7 +765,6 @@ mod tests {
                     table_id: Default::default(),
                 },
             )
-            .await
             .unwrap();
         assert_eq!(
             state_store

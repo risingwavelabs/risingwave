@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,17 +21,21 @@ use risingwave_backup::error::BackupError;
 use risingwave_backup::storage::{MetaSnapshotStorage, ObjectStoreMetaSnapshotStorage};
 use risingwave_backup::{MetaBackupJobId, MetaSnapshotId, MetaSnapshotManifest};
 use risingwave_common::bail;
+use risingwave_common::config::ObjectStoreConfig;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::backup_service::{BackupJobStatus, MetaBackupManifestId};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 
 use crate::backup_restore::meta_snapshot_builder;
 use crate::backup_restore::metrics::BackupManagerMetrics;
+use crate::hummock::sequence::next_meta_backup_id;
 use crate::hummock::{HummockManagerRef, HummockVersionSafePoint};
-use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
+use crate::manager::{LocalNotification, MetaSrvEnv};
 use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
 
@@ -131,10 +135,10 @@ impl BackupManager {
         if let Err(e) = self.set_store(new_config.clone()).await {
             // Retry is driven by periodic system params notification.
             tracing::warn!(
-                "failed to apply new backup config: url={}, dir={}, {:#?}",
-                new_config.0,
-                new_config.1,
-                e
+                url = &new_config.0,
+                dir = &new_config.1,
+                error = %e.as_report(),
+                "failed to apply new backup config",
             );
         }
     }
@@ -183,7 +187,10 @@ impl BackupManager {
 
     /// Starts a backup job in background. It's non-blocking.
     /// Returns job id.
-    pub async fn start_backup_job(self: &Arc<Self>) -> MetaResult<MetaBackupJobId> {
+    pub async fn start_backup_job(
+        self: &Arc<Self>,
+        remarks: Option<String>,
+    ) -> MetaResult<MetaBackupJobId> {
         let mut guard = self.running_job_handle.lock().await;
         if let Some(job) = (*guard).as_ref() {
             bail!(format!(
@@ -211,11 +218,7 @@ impl BackupManager {
             ))
         }
 
-        let job_id = self
-            .env
-            .id_gen_manager()
-            .generate::<{ IdCategory::Backup }>()
-            .await?;
+        let job_id = next_meta_backup_id(&self.env).await?;
         self.latest_job_info
             .store(Arc::new((job_id, BackupJobStatus::Running, "".into())));
         let hummock_version_safe_point = self.hummock_manager.register_safe_point().await;
@@ -225,7 +228,7 @@ impl BackupManager {
         // - It's likely meta store is deployed in the same node with meta node.
         // - IO volume of metadata snapshot is not expected to be large.
         // - Backup job is not expected to be frequent.
-        BackupWorker::new(self.clone()).start(job_id);
+        BackupWorker::new(self.clone()).start(job_id, remarks);
         let job_handle = BackupJobHandle::new(job_id, hummock_version_safe_point);
         *guard = Some(job_handle);
         self.metrics.job_count.inc();
@@ -267,7 +270,7 @@ impl BackupManager {
             }
             BackupJobResult::Failed(e) => {
                 self.metrics.job_latency_failure.observe(job_latency);
-                let message = format!("failed backup job {}: {}", job_id, e);
+                let message = format!("failed backup job {}: {}", job_id, e.as_report());
                 tracing::warn!(message);
                 self.latest_job_info
                     .store(Arc::new((job_id, BackupJobStatus::Failed, message)));
@@ -331,7 +334,7 @@ impl BackupWorker {
         Self { backup_manager }
     }
 
-    fn start(self, job_id: u64) -> JoinHandle<()> {
+    fn start(self, job_id: u64, remarks: Option<String>) -> JoinHandle<()> {
         let backup_manager_clone = self.backup_manager.clone();
         let job = async move {
             let mut snapshot_builder = meta_snapshot_builder::MetaSnapshotV1Builder::new(
@@ -349,7 +352,7 @@ impl BackupWorker {
                 .backup_store
                 .load()
                 .0
-                .create(&snapshot)
+                .create(&snapshot, remarks)
                 .await?;
             Ok(BackupJobResult::Succeeded)
         };
@@ -366,7 +369,15 @@ async fn create_snapshot_store(
     config: &StoreConfig,
     metric: Arc<ObjectStoreMetrics>,
 ) -> MetaResult<ObjectStoreMetaSnapshotStorage> {
-    let object_store = Arc::new(parse_remote_object_store(&config.0, metric, "Meta Backup").await);
+    let object_store = Arc::new(
+        build_remote_object_store(
+            &config.0,
+            metric,
+            "Meta Backup",
+            ObjectStoreConfig::default(),
+        )
+        .await,
+    );
     let store = ObjectStoreMetaSnapshotStorage::new(&config.1, object_store).await?;
     Ok(store)
 }

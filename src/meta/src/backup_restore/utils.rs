@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +15,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Context;
 use etcd_client::ConnectOptions;
 use risingwave_backup::error::BackupResult;
 use risingwave_backup::storage::{MetaSnapshotStorageRef, ObjectStoreMetaSnapshotStorage};
-use risingwave_common::config::MetaBackend;
+use risingwave_common::config::{MetaBackend, ObjectStoreConfig};
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
 
 use crate::backup_restore::RestoreOpts;
 use crate::controller::SqlMetaStore;
@@ -61,6 +62,7 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendI
             },
         },
         MetaBackend::Mem => MetaStoreBackend::Mem,
+        MetaBackend::Sql => panic!("not supported"),
     };
     match meta_store_backend {
         MetaStoreBackend::Etcd {
@@ -74,18 +76,20 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendI
             }
             let client = EtcdClient::connect(endpoints, Some(options), credentials.is_some())
                 .await
-                .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
+                .context("failed to connect etcd")?;
             Ok(MetaStoreBackendImpl::Etcd(EtcdMetaStore::new(client)))
         }
         MetaStoreBackend::Mem => Ok(MetaStoreBackendImpl::Mem(MemStore::new())),
+        MetaStoreBackend::Sql { .. } => panic!("not supported"),
     }
 }
 
 pub async fn get_backup_store(opts: RestoreOpts) -> BackupResult<MetaSnapshotStorageRef> {
-    let object_store = parse_remote_object_store(
+    let object_store = build_remote_object_store(
         &opts.backup_storage_url,
         Arc::new(ObjectStoreMetrics::unused()),
         "Meta Backup",
+        ObjectStoreConfig::default(),
     )
     .await;
     let backup_store =

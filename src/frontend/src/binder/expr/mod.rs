@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,10 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::zip_eq_fast;
+use risingwave_common::{bail_not_implemented, not_implemented};
+use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
 use risingwave_sqlparser::ast::{
     Array, BinaryOperator, DataType as AstDataType, Expr, Function, JsonPredicateType, ObjectName,
     Query, StructField, TrimWhereField, UnaryOperator,
@@ -24,6 +25,7 @@ use risingwave_sqlparser::ast::{
 
 use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
 
 mod binary_op;
@@ -32,6 +34,13 @@ mod function;
 mod order_by;
 mod subquery;
 mod value;
+
+/// The limit arms for case-when expression
+/// When the number of condition arms exceed
+/// this limit, we will try optimize the case-when
+/// expression to `ConstantLookupExpression`
+/// Check `case.rs` for details.
+const CASE_WHEN_ARMS_OPTIMIZE_LIMIT: usize = 30;
 
 impl Binder {
     /// Bind an expression with `bind_expr_inner`, attach the original expression
@@ -137,6 +146,12 @@ impl Binder {
                 low,
                 high,
             } => self.bind_between(*expr, negated, *low, *high),
+            Expr::SimilarTo {
+                expr,
+                negated,
+                pat,
+                esc_text,
+            } => self.bind_similar_to(*expr, negated, *pat, esc_text),
             Expr::InList {
                 expr,
                 list,
@@ -168,11 +183,8 @@ impl Binder {
             } => self.bind_overlay(*expr, *new_substring, *start, count),
             Expr::Parameter { index } => self.bind_parameter(index),
             Expr::Collate { expr, collation } => self.bind_collate(*expr, collation),
-            _ => Err(ErrorCode::NotImplemented(
-                format!("unsupported expression {:?}", expr),
-                112.into(),
-            )
-            .into()),
+            Expr::ArraySubquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Array),
+            _ => bail_not_implemented!(issue = 112, "unsupported expression {:?}", expr),
         }
     }
 
@@ -184,12 +196,11 @@ impl Binder {
             vec![self.bind_string(field.clone())?.into(), arg],
         )
         .map_err(|_| {
-            ErrorCode::NotImplemented(
-                format!(
-                    "function extract({} from {:?}) doesn't exist",
-                    field, arg_type
-                ),
-                112.into(),
+            not_implemented!(
+                issue = 112,
+                "function extract({} from {:?}) doesn't exist",
+                field,
+                arg_type
             )
         })?
         .into())
@@ -291,13 +302,7 @@ impl Binder {
             }
             UnaryOperator::PGSquareRoot => ExprType::Sqrt,
             UnaryOperator::PGCubeRoot => ExprType::Cbrt,
-            _ => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("unsupported unary expression: {:?}", op),
-                    112.into(),
-                )
-                .into())
-            }
+            _ => bail_not_implemented!(issue = 112, "unsupported unary expression: {:?}", op),
         };
         let expr = self.bind_expr_inner(expr)?;
         FunctionCall::new(func_type, vec![expr]).map(|f| f.into())
@@ -380,6 +385,16 @@ impl Binder {
     }
 
     fn bind_parameter(&mut self, index: u64) -> Result<ExprImpl> {
+        // Special check for sql udf
+        // Note: This is specific to sql udf with unnamed parameters, since the
+        // parameters will be parsed and treated as `Parameter`.
+        // For detailed explanation, consider checking `bind_column`.
+        if self.udf_context.global_count() != 0 {
+            if let Some(expr) = self.udf_context.get_expr(&format!("${index}")) {
+                return Ok(expr.clone());
+            }
+        }
+
         Ok(Parameter::new(index, self.param_types.clone()).into())
     }
 
@@ -421,6 +436,91 @@ impl Binder {
         Ok(func_call.into())
     }
 
+    /// Bind `<expr> [ NOT ] SIMILAR TO <pat> ESCAPE <esc_text>`
+    pub(super) fn bind_similar_to(
+        &mut self,
+        expr: Expr,
+        negated: bool,
+        pat: Expr,
+        esc_text: Option<Box<Expr>>,
+    ) -> Result<ExprImpl> {
+        let expr = self.bind_expr_inner(expr)?;
+        let pat = self.bind_expr_inner(pat)?;
+
+        let esc_inputs = if let Some(et) = esc_text {
+            let esc_text = self.bind_expr_inner(*et)?;
+            vec![pat, esc_text]
+        } else {
+            vec![pat]
+        };
+
+        let esc_call =
+            FunctionCall::new_unchecked(ExprType::SimilarToEscape, esc_inputs, DataType::Varchar);
+
+        let regex_call = FunctionCall::new_unchecked(
+            ExprType::RegexpEq,
+            vec![expr, esc_call.into()],
+            DataType::Boolean,
+        );
+        let func_call = if negated {
+            FunctionCall::new_unchecked(ExprType::Not, vec![regex_call.into()], DataType::Boolean)
+        } else {
+            regex_call
+        };
+
+        Ok(func_call.into())
+    }
+
+    /// The helper function to check if the current case-when
+    /// expression in `bind_case` could be optimized
+    /// into `ConstantLookupExpression`
+    fn check_bind_case_optimization(
+        &mut self,
+        conditions: Vec<Expr>,
+        results_expr: Vec<ExprImpl>,
+        operand: Option<Box<Expr>>,
+        fallback: Option<ExprImpl>,
+        constant_lookup_inputs: &mut Vec<ExprImpl>,
+    ) -> bool {
+        if conditions.len() < CASE_WHEN_ARMS_OPTIMIZE_LIMIT {
+            return false;
+        }
+
+        // TODO(Zihao): we could possibly optimize some simple cases when
+        // `operand` is None in the future, the current choice is not conducting the optimization.
+        // e.g., select case when c1 = 1 then (...) when (same pattern) then (... ) [else (...)] end from t1;
+        if let Some(operand) = operand {
+            let Ok(operand) = self.bind_expr_inner(*operand) else {
+                return false;
+            };
+            constant_lookup_inputs.push(operand);
+        } else {
+            return false;
+        }
+
+        for (condition, result) in zip_eq_fast(conditions, results_expr) {
+            if let Expr::Value(_) = condition.clone() {
+                let Ok(input) = self.bind_expr_inner(condition.clone()) else {
+                    return false;
+                };
+                constant_lookup_inputs.push(input);
+            } else {
+                // If at least one condition is not in the simple form / not constant,
+                // we can NOT do the subsequent optimization then
+                return false;
+            }
+
+            constant_lookup_inputs.push(result);
+        }
+
+        // The fallback arm for case-when expression
+        if let Some(expr) = fallback {
+            constant_lookup_inputs.push(expr);
+        }
+
+        true
+    }
+
     pub(super) fn bind_case(
         &mut self,
         operand: Option<Box<Expr>>,
@@ -437,6 +537,21 @@ impl Binder {
             .map(|expr| self.bind_expr_inner(*expr))
             .transpose()?;
 
+        let mut constant_lookup_inputs = Vec::new();
+
+        // See if the case-when expression can be optimized
+        let optimize_flag = self.check_bind_case_optimization(
+            conditions.clone(),
+            results_expr.clone(),
+            operand.clone(),
+            else_result_expr.clone(),
+            &mut constant_lookup_inputs,
+        );
+
+        if optimize_flag {
+            return Ok(FunctionCall::new(ExprType::ConstantLookup, constant_lookup_inputs)?.into());
+        }
+
         for (condition, result) in zip_eq_fast(conditions, results_expr) {
             let condition = match operand {
                 Some(ref t) => Expr::BinaryOp {
@@ -452,14 +567,18 @@ impl Binder {
             );
             inputs.push(result);
         }
+
+        // The fallback arm for case-when expression
         if let Some(expr) = else_result_expr {
             inputs.push(expr);
         }
+
         if inputs.iter().any(ExprImpl::has_table_function) {
             return Err(
                 ErrorCode::BindError("table functions are not allowed in CASE".into()).into(),
             );
         }
+
         Ok(FunctionCall::new(ExprType::Case, inputs)?.into())
     }
 
@@ -493,23 +612,9 @@ impl Binder {
         match &data_type {
             // Casting to Regclass type means getting the oid of expr.
             // See https://www.postgresql.org/docs/current/datatype-oid.html.
-            // Currently only string liter expr is supported since we cannot handle subquery in join
-            // on condition: https://github.com/risingwavelabs/risingwave/issues/6852
-            // TODO: Add generic expr support when needed
             AstDataType::Regclass => {
                 let input = self.bind_expr_inner(expr)?;
-                match input.return_type() {
-                    DataType::Varchar => Ok(ExprImpl::FunctionCall(Box::new(
-                        FunctionCall::new_unchecked(
-                            ExprType::CastRegclass,
-                            vec![input],
-                            DataType::Int32,
-                        ),
-                    ))),
-                    DataType::Int32 => Ok(input),
-                    dt if dt.is_int() => Ok(input.cast_explicit(DataType::Int32)?),
-                    _ => Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
-                }
+                Ok(input.cast_to_regclass()?)
             }
             AstDataType::Regproc => {
                 let lhs = self.bind_expr_inner(expr)?;
@@ -539,11 +644,7 @@ impl Binder {
 
     pub fn bind_collate(&mut self, expr: Expr, collation: ObjectName) -> Result<ExprImpl> {
         if !["C", "POSIX"].contains(&collation.real_value().as_str()) {
-            return Err(ErrorCode::NotImplemented(
-                "Collate collation other than `C` or `POSIX` is not implemented".into(),
-                None.into(),
-            )
-            .into());
+            bail_not_implemented!("Collate collation other than `C` or `POSIX` is not implemented");
         }
 
         let bound_inner = self.bind_expr_inner(expr)?;
@@ -588,16 +689,13 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         type_name: "".to_string(),
         generated_or_default_column: None,
         description: None,
+        additional_column: AdditionalColumn { column_type: None },
+        version: ColumnDescVersion::Pr13707,
     })
 }
 
 pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
-    let new_err = || {
-        ErrorCode::NotImplemented(
-            format!("unsupported data type: {:}", data_type),
-            None.into(),
-        )
-    };
+    let new_err = || not_implemented!("unsupported data type: {:}", data_type);
     let data_type = match data_type {
         AstDataType::Boolean => DataType::Boolean,
         AstDataType::SmallInt => DataType::Int16,
@@ -615,11 +713,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Interval => DataType::Interval,
         AstDataType::Array(datatype) => DataType::List(Box::new(bind_data_type(datatype)?)),
         AstDataType::Char(..) => {
-            return Err(ErrorCode::NotImplemented(
-                "CHAR is not supported, please use VARCHAR instead\n".to_string(),
-                None.into(),
-            )
-            .into())
+            bail_not_implemented!("CHAR is not supported, please use VARCHAR instead")
         }
         AstDataType::Struct(types) => DataType::new_struct(
             types

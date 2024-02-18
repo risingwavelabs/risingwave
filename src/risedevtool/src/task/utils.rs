@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -122,6 +122,10 @@ pub fn add_hummock_backend(
                 cmd.arg("--state-store")
                 .arg(format!("hummock+gcs://{}", opendal.bucket));
             }
+            else if opendal.engine == "obs"{
+                cmd.arg("--state-store")
+                .arg(format!("hummock+obs://{}", opendal.bucket));
+            }
             else if opendal.engine == "oss"{
                 cmd.arg("--state-store")
                 .arg(format!("hummock+oss://{}", opendal.bucket));
@@ -137,7 +141,7 @@ pub fn add_hummock_backend(
             else if opendal.engine == "fs"{
                 println!("using fs engine xxxx");
                 cmd.arg("--state-store")
-                .arg("hummock+fs://");
+                .arg(format!("hummock+fs://{}", opendal.bucket));
             }
             else{
                 unimplemented!()

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,17 +16,19 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
+use thiserror_ext::AsReport;
 
 use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
-use super::create_sink::gen_sink_plan;
+use super::create_sink::{gen_sink_plan, get_partition_compute_info};
 use super::create_table::ColumnIdGenerator;
 use super::query::gen_batch_plan_by_statement;
 use super::util::SourceSchemaCompatExt;
 use super::RwPgResponse;
+use crate::error::{ErrorCode, Result};
 use crate::handler::create_table::handle_create_table_plan;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -61,6 +63,8 @@ async fn do_handle_explain(
                 source_watermarks,
                 append_only,
                 cdc_table_info,
+                include_column_options,
+                wildcard_idx,
                 ..
             } => {
                 let col_id_gen = ColumnIdGenerator::new_initial();
@@ -74,11 +78,20 @@ async fn do_handle_explain(
                     cdc_table_info,
                     name.clone(),
                     columns,
+                    wildcard_idx,
                     constraints,
                     source_watermarks,
                     append_only,
+                    include_column_options,
                 )
                 .await?;
+                let context = plan.ctx();
+                (Ok(plan), context)
+            }
+            Statement::CreateSink { stmt } => {
+                let partition_info = get_partition_compute_info(context.with_options()).await?;
+                let plan = gen_sink_plan(&session, context.into(), stmt, partition_info)
+                    .map(|plan| plan.sink_plan)?;
                 let context = plan.ctx();
                 (Ok(plan), context)
             }
@@ -107,11 +120,15 @@ async fn do_handle_explain(
                         emit_mode,
                     )
                     .map(|x| x.0),
-
-                    Statement::CreateSink { stmt } => {
-                        gen_sink_plan(&session, context.clone(), stmt).map(|x| x.1)
+                    Statement::CreateView {
+                        materialized: false,
+                        ..
+                    } => {
+                        return Err(ErrorCode::NotSupported(
+                            "EXPLAIN CREATE VIEW".into(),
+                            "A created VIEW is just an alias. Instead, use EXPLAIN on the queries which reference the view.".into()
+                        ).into());
                     }
-
                     Statement::CreateIndex {
                         name,
                         table_name,
@@ -138,13 +155,7 @@ async fn do_handle_explain(
                         gen_batch_plan_by_statement(&session, context.clone(), stmt).map(|x| x.plan)
                     }
 
-                    _ => {
-                        return Err(ErrorCode::NotImplemented(
-                            format!("unsupported statement {:?}", stmt),
-                            None.into(),
-                        )
-                        .into())
-                    }
+                    _ => bail_not_implemented!("unsupported statement {:?}", stmt),
                 };
 
                 (plan, context)
@@ -178,7 +189,7 @@ async fn do_handle_explain(
                             )?);
                         }
                         Convention::Stream => {
-                            let graph = build_graph(plan.clone());
+                            let graph = build_graph(plan.clone())?;
                             blocks.push(explain_stream_graph(&graph, explain_verbose));
                         }
                     }
@@ -221,7 +232,7 @@ pub async fn handle_explain(
     analyze: bool,
 ) -> Result<RwPgResponse> {
     if analyze {
-        return Err(ErrorCode::NotImplemented("explain analyze".to_string(), 4856.into()).into());
+        bail_not_implemented!(issue = 4856, "explain analyze");
     }
 
     let context = OptimizerContext::new(handler_args.clone(), options.clone());
@@ -233,9 +244,9 @@ pub async fn handle_explain(
         if options.trace {
             // If `trace` is on, we include the error in the output with partial traces.
             blocks.push(if options.verbose {
-                format!("ERROR: {:?}", e)
+                format!("ERROR: {:?}", e.as_report())
             } else {
-                format!("ERROR: {}", e)
+                format!("ERROR: {}", e.as_report())
             });
         } else {
             // Else, directly return the error.

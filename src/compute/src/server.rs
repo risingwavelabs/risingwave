@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ use risingwave_common::config::{
 };
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
@@ -38,6 +39,7 @@ use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
 use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
+use risingwave_dml::dml_manager::DmlManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
 use risingwave_pb::connector_service::SinkPayloadFormat;
@@ -48,7 +50,6 @@ use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, ConnectorClient, ExtraInfoSourceRef, MetaClient};
-use risingwave_source::dml_manager::DmlManager;
 use risingwave_storage::hummock::compactor::{
     start_compactor, CompactionExecutor, CompactorContext,
 };
@@ -62,14 +63,13 @@ use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tower::Layer;
 
-use crate::memory_management::memory_manager::GlobalMemoryManager;
-use crate::memory_management::{
-    reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
-};
+use crate::memory::config::{reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB};
+use crate::memory::manager::MemoryManager;
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::GLOBAL_EXCHANGE_SERVICE_METRICS;
@@ -100,13 +100,12 @@ pub async fn compute_node_serve(
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
     // Initialize all the configs
-    let stream_config: Arc<risingwave_common::config::StreamingConfig> =
-        Arc::new(config.streaming.clone());
+    let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let (meta_client, system_params) = MetaClient::register_new(
-        &opts.meta_address,
+        opts.meta_address,
         WorkerType::ComputeNode,
         &advertise_addr,
         Property {
@@ -208,17 +207,26 @@ pub async fn compute_node_serve(
             let memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
+
+            let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));
+            let max_task_parallelism = Arc::new(AtomicU32::new(
+                (compaction_executor.worker_num() as f32
+                    * storage_opts.compactor_max_task_multiplier)
+                    .ceil() as u32,
+            ));
+
             let compactor_context = CompactorContext {
                 storage_opts,
                 sstable_store: storage.sstable_store(),
                 compactor_metrics: compactor_metrics.clone(),
                 is_share_buffer_compact: false,
-                compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
+                compaction_executor,
                 memory_limiter,
 
                 task_progress_manager: Default::default(),
                 await_tree_reg: None,
-                running_task_count: Arc::new(AtomicU32::new(0)),
+                running_task_parallelism: Arc::new(AtomicU32::new(0)),
+                max_task_parallelism,
             };
 
             let (handle, shutdown_sender) = start_compactor(
@@ -264,17 +272,6 @@ pub async fn compute_node_serve(
         config.batch.clone(),
         batch_manager_metrics,
     ));
-    let stream_mgr = Arc::new(LocalStreamManager::new(
-        advertise_addr.clone(),
-        state_store.clone(),
-        streaming_metrics.clone(),
-        config.streaming.clone(),
-        await_tree_config.clone(),
-    ));
-
-    // Spawn LRU Manager that have access to collect memory from batch mgr and stream mgr.
-    let batch_mgr_clone = batch_mgr.clone();
-    let stream_mgr_clone = stream_mgr.clone();
 
     // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
     // `total_compute_memory_bytes` for memory control. This is just a workaround for some
@@ -283,15 +280,13 @@ pub async fn compute_node_serve(
     // Related issues:
     // - https://github.com/risingwavelabs/risingwave/issues/8696
     // - https://github.com/risingwavelabs/risingwave/issues/8822
-    let memory_mgr = GlobalMemoryManager::new(
+    let memory_mgr = MemoryManager::new(
         streaming_metrics.clone(),
         compute_memory_bytes + storage_memory_bytes,
     );
 
     // Run a background memory manager
     tokio::spawn(memory_mgr.clone().run(
-        batch_mgr_clone,
-        stream_mgr_clone,
         system_params.barrier_interval_ms(),
         system_params_manager.watch_params(),
     ));
@@ -303,13 +298,6 @@ pub async fn compute_node_serve(
     // Run a background heap profiler
     heap_profiler.start();
 
-    let watermark_epoch = memory_mgr.get_watermark_epoch();
-    // Set back watermark epoch to stream mgr. Executor will read epoch from stream manager instead
-    // of lru manager.
-    stream_mgr.set_watermark_epoch(watermark_epoch).await;
-
-    let grpc_await_tree_reg = await_tree_config
-        .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
     let dml_mgr = Arc::new(DmlManager::new(
         worker_id,
         config.streaming.developer.dml_channel_initial_permits,
@@ -364,6 +352,16 @@ pub async fn compute_node_serve(
         meta_client.clone(),
     );
 
+    let stream_mgr = LocalStreamManager::new(
+        stream_env.clone(),
+        streaming_metrics.clone(),
+        await_tree_config.clone(),
+        memory_mgr.get_watermark_epoch(),
+    );
+
+    let grpc_await_tree_reg = await_tree_config
+        .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
+
     // Generally, one may use `risedev ctl trace` to manually get the trace reports. However, if
     // this is not the case, we can use the following command to get it printed into the logs
     // periodically.
@@ -404,6 +402,9 @@ pub async fn compute_node_serve(
         tonic::transport::Server::builder()
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
+            .http2_max_pending_accept_reset_streams(Some(
+                config.server.grpc_max_reset_stream as usize,
+            ))
             .layer(TracingExtractLayer::new())
             // XXX: unlimit the max message size to allow arbitrary large SQL input.
             .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
@@ -437,12 +438,12 @@ pub async fn compute_node_serve(
                         _ = tokio::signal::ctrl_c() => {},
                         _ = &mut shutdown_recv => {
                             for (join_handle, shutdown_sender) in sub_tasks {
-                                if let Err(err) = shutdown_sender.send(()) {
-                                    tracing::warn!("Failed to send shutdown: {:?}", err);
+                                if let Err(_err) = shutdown_sender.send(()) {
+                                    tracing::warn!("Failed to send shutdown");
                                     continue;
                                 }
                                 if let Err(err) = join_handle.await {
-                                    tracing::warn!("Failed to join shutdown: {:?}", err);
+                                    tracing::warn!(error = %err.as_report(), "Failed to join shutdown");
                                 }
                             }
                         },

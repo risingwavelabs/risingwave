@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -613,17 +613,11 @@ mod tests {
                 },
                 {
                     list_builder.append(None);
-                    list_builder.append(Some(ListRef::ValueRef {
-                        val: &ListValue::new(vec![
-                            Some(1i64.to_scalar_value()),
-                            None,
-                            Some(3i64.to_scalar_value()),
-                        ]),
-                    }));
+                    list_builder.append(Some(
+                        ListValue::from_iter([Some(1i64), None, Some(3i64)]).as_scalar_ref(),
+                    ));
                     list_builder.append(None);
-                    list_builder.append(Some(ListRef::ValueRef {
-                        val: &ListValue::new(vec![Some(2i64.to_scalar_value())]),
-                    }));
+                    list_builder.append(Some(ListValue::from_iter([2i64]).as_scalar_ref()));
                     list_builder.append(None);
                     list_builder.finish().into_ref()
                 },
@@ -675,16 +669,10 @@ mod tests {
                 },
                 {
                     list_builder.append(None);
-                    list_builder.append(Some(ListRef::ValueRef {
-                        val: &ListValue::new(vec![Some(2i64.to_scalar_value())]),
-                    }));
-                    list_builder.append(Some(ListRef::ValueRef {
-                        val: &ListValue::new(vec![
-                            Some(1i64.to_scalar_value()),
-                            None,
-                            Some(3i64.to_scalar_value()),
-                        ]),
-                    }));
+                    list_builder.append(Some(ListValue::from_iter([2i64]).as_scalar_ref()));
+                    list_builder.append(Some(
+                        ListValue::from_iter([Some(1i64), None, Some(3i64)]).as_scalar_ref(),
+                    ));
                     list_builder.append(None);
                     list_builder.append(None);
                     list_builder.finish().into_ref()
