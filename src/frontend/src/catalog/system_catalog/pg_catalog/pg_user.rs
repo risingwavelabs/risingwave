@@ -12,32 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
-
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::types::DataType;
-
-use crate::catalog::system_catalog::BuiltinView;
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_user` provides access to information about database users.
 /// Ref: [`https://www.postgresql.org/docs/current/view-pg-user.html`]
-pub const PG_USER_TABLE_NAME: &str = "pg_user";
-
-pub static PG_USER: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
-    name: PG_USER_TABLE_NAME,
-    schema: PG_CATALOG_SCHEMA_NAME,
-    columns: &[
-        (DataType::Int32, "usesysid"),
-        (DataType::Varchar, "name"),
-        (DataType::Boolean, "usecreatedb"),
-        (DataType::Boolean, "usesuper"),
-        (DataType::Varchar, "passwd"),
-    ],
-    sql: "SELECT id AS usesysid, \
-                name, \
-                create_db AS usecreatedb, \
-                is_super AS usesuper, \
-                '********' AS passwd \
-            FROM rw_catalog.rw_users"
-        .into(),
-});
+#[system_catalog(
+    view,
+    "pg_catalog.pg_user",
+    "SELECT id AS usesysid,
+        name,
+        create_db AS usecreatedb,
+        is_super AS usesuper,
+        '********' AS passwd
+    FROM rw_catalog.rw_users"
+)]
+#[derive(Fields)]
+struct PgUser {
+    usesysid: i32,
+    usename: String,
+    usecreatedb: bool,
+    usesuper: bool,
+    passwd: String,
+}

@@ -141,23 +141,19 @@ impl Catalog {
             .unwrap()
             .create_schema(proto);
 
-        if let Some(sys_tables) = get_sys_tables_in_schema(proto.name.as_str()) {
-            sys_tables.into_iter().for_each(|sys_table| {
-                self.get_database_mut(proto.database_id)
-                    .unwrap()
-                    .get_schema_mut(proto.id)
-                    .unwrap()
-                    .create_sys_table(sys_table);
-            });
+        for sys_table in get_sys_tables_in_schema(proto.name.as_str()) {
+            self.get_database_mut(proto.database_id)
+                .unwrap()
+                .get_schema_mut(proto.id)
+                .unwrap()
+                .create_sys_table(sys_table);
         }
-        if let Some(sys_views) = get_sys_views_in_schema(proto.name.as_str()) {
-            sys_views.into_iter().for_each(|sys_view| {
-                self.get_database_mut(proto.database_id)
-                    .unwrap()
-                    .get_schema_mut(proto.id)
-                    .unwrap()
-                    .create_sys_view(sys_view);
-            });
+        for sys_view in get_sys_views_in_schema(proto.name.as_str()) {
+            self.get_database_mut(proto.database_id)
+                .unwrap()
+                .get_schema_mut(proto.id)
+                .unwrap()
+                .create_sys_view(sys_view);
         }
     }
 
