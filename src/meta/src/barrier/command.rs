@@ -648,15 +648,13 @@ impl CommandContext {
             .flat_map(build_actor_connector_splits)
             .collect();
 
-        let mutation = Mutation::Update(UpdateMutation {
+        Some(Mutation::Update(UpdateMutation {
             actor_new_dispatchers,
             merge_update: merge_updates.to_owned(),
             dropped_actors,
             actor_splits,
             ..Default::default()
-        });
-
-        Some(mutation)
+        }))
     }
 
     /// Returns the paused reason after executing the current command.

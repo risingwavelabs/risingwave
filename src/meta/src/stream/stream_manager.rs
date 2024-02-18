@@ -155,7 +155,6 @@ impl CreatingStreamingJobInfo {
 
 type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
 
-#[derive(Clone)]
 /// [`ReplaceTableContext`] carries one-time infos for replacing the plan of an existing table.
 ///
 /// Note: for better readability, keep this struct complete and immutable once created.

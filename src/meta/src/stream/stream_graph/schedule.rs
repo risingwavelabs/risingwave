@@ -326,7 +326,6 @@ impl Scheduler {
 
 /// [`Locations`] represents the parallel unit and worker locations of the actors.
 #[cfg_attr(test, derive(Default))]
-#[derive(Clone)]
 pub struct Locations {
     /// actor location map.
     pub actor_locations: BTreeMap<ActorId, ParallelUnit>,

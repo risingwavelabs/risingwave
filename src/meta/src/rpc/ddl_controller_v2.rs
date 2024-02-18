@@ -197,7 +197,15 @@ impl DdlController {
         let stream_job_id = streaming_job.id();
         match streaming_job.create_type() {
             CreateType::Unspecified | CreateType::Foreground => {
-                let replace_table_job_info = ctx.replace_table_job_info.clone();
+                let replace_table_job_info = ctx.replace_table_job_info.as_ref().map(
+                    |(streaming_job, ctx, table_fragments)| {
+                        (
+                            streaming_job.clone(),
+                            ctx.merge_updates.clone(),
+                            table_fragments.table_id(),
+                        )
+                    },
+                );
 
                 self.stream_manager
                     .create_streaming_job(table_fragments, ctx)
@@ -208,13 +216,13 @@ impl DdlController {
                     .finish_streaming_job(stream_job_id as _)
                     .await?;
 
-                if let Some((streaming_job, ctx, table_fragments)) = replace_table_job_info {
+                if let Some((streaming_job, merge_updates, table_id)) = replace_table_job_info {
                     version = mgr
                         .catalog_controller
                         .finish_replace_streaming_job(
-                            table_fragments.table_id().table_id as _,
+                            table_id.table_id as _,
                             streaming_job,
-                            ctx.merge_updates.clone(),
+                            merge_updates,
                             None,
                             Some(stream_job_id),
                             None,
