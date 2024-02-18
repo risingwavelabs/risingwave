@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use arrow_array::{Int32Array, Int64Array, RecordBatch};
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -32,7 +32,6 @@ use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::ROWID_PREFIX;
 use risingwave_common::{bail, ensure};
 
-use crate::error::ConnectorError;
 use crate::parser::ParserConfig;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
@@ -398,10 +397,11 @@ impl PulsarIcebergReader {
     fn build_iceberg_configs(&self) -> anyhow::Result<HashMap<String, String>> {
         let mut iceberg_configs = HashMap::new();
 
-        let bucket =
-            self.props.iceberg_bucket.as_ref().ok_or_else(|| {
-                ConnectorError::Pulsar(anyhow!("Iceberg bucket is not configured"))
-            })?;
+        let bucket = self
+            .props
+            .iceberg_bucket
+            .as_ref()
+            .context("Iceberg bucket is not configured")?;
 
         iceberg_configs.insert(CATALOG_TYPE.to_string(), "storage".to_string());
         iceberg_configs.insert(CATALOG_NAME.to_string(), "pulsar".to_string());

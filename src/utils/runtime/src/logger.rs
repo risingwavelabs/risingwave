@@ -216,6 +216,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("sled", Level::INFO)
             .with_target("cranelift", Level::INFO)
             .with_target("wasmtime", Level::INFO)
+            .with_target("sqlx", Level::WARN)
             // Expose hyper connection socket addr log.
             .with_target("hyper::client::connect::http", Level::DEBUG);
 

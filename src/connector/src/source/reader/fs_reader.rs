@@ -72,7 +72,7 @@ impl FsSourceReader {
                     .with_context(|| {
                         format!("Failed to find column id: {} in source: {:?}", id, self)
                     })
-                    .map(|col| col.clone())
+                    .cloned()
             })
             .try_collect()
     }
