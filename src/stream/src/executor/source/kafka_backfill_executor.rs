@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt::Formatter;
-use std::pin::pin;
 
 use anyhow::anyhow;
 use either::Either;
@@ -28,7 +28,7 @@ use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::types::JsonbVal;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
-    BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
+    BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitMetaData,
 };
 use risingwave_connector::ConnectorParams;
 use risingwave_storage::StateStore;
@@ -39,7 +39,6 @@ use super::kafka_backfill_state_table::BackfillStateTableHandler;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 
-pub type SplitId = String;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum BackfillState {
     /// `None` means not started yet. It's the initial state.
@@ -64,7 +63,7 @@ impl BackfillState {
         &mut self,
         split: &str,
         offset: &str,
-        abort_handles: &HashMap<String, AbortHandle>,
+        abort_handles: &HashMap<SplitId, AbortHandle>,
     ) -> bool {
         let mut vis = false;
         match self {
@@ -81,7 +80,7 @@ impl BackfillState {
                     Ordering::Greater => {
                         // backfilling for this split produced more data.
                         *self = BackfillState::SourceCachingUp(offset.to_string());
-                        abort_handles.get(&split.to_string()).unwrap().abort();
+                        abort_handles.get(split).unwrap().abort();
                     }
                 }
             }
@@ -123,7 +122,7 @@ pub struct KafkaBackfillExecutorInner<S: StateStore> {
     info: ExecutorInfo,
 
     /// Streaming source for external
-    // FIXME: some fields e.g. its state table is not used. We might need to refactor
+    // FIXME: some fields e.g. its state table is not used. We might need to refactor. Even latest_split_info is not used.
     stream_source_core: StreamSourceCore<S>,
     backfill_state_store: BackfillStateTableHandler<S>,
 
@@ -142,22 +141,37 @@ pub struct KafkaBackfillExecutorInner<S: StateStore> {
     connector_params: ConnectorParams,
 }
 
+/// Local variables used in the backfill stage.
+struct BackfillStage {
+    // stream: Option<EitherStream<'a>>,
+    abort_handles: HashMap<SplitId, AbortHandle>,
+    states: BackfillStates,
+    /// Note: the offsets are not updated. Should use `state`'s offset to update before using it.
+    unfinished_splits: Vec<SplitImpl>,
+}
+
 mod stream {
     use either::Either;
-    use futures::stream::select_with_strategy;
+    use futures::stream::{select_with_strategy, BoxStream, PollNext, SelectWithStrategy};
     use futures::{Stream, StreamExt};
     use risingwave_common::array::StreamChunk;
     use risingwave_connector::source::BoxChunkSourceStream;
 
     use super::{BoxedMessageStream, MessageStreamItem};
 
-    pub type EitherStream<'a> =
-        impl Stream<Item = Either<MessageStreamItem, anyhow::Result<StreamChunk>>> + 'a;
+    type EitherItem = Either<MessageStreamItem, anyhow::Result<StreamChunk>>;
 
-    pub fn build_combined_stream(
-        upstream: &mut BoxedMessageStream,
+    pub type EitherStream<'a> = SelectWithStrategy<
+        impl Stream<Item = EitherItem>,
+        impl Stream<Item = EitherItem>,
+        impl FnMut(&mut ()) -> PollNext,
+        (),
+    >;
+
+    pub fn build_combined_stream<'a>(
+        upstream: &'a mut BoxedMessageStream,
         backfill: BoxChunkSourceStream,
-    ) -> EitherStream<'_> {
+    ) -> EitherStream<'a> {
         select_with_strategy(
             upstream.by_ref().map(Either::Left),
             backfill.map(Either::Right),
@@ -197,7 +211,7 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
     async fn build_stream_source_reader(
         &self,
         source_desc: &SourceDesc,
-        state: ConnectorState,
+        splits: Vec<SplitImpl>,
     ) -> StreamExecutorResult<(BoxChunkSourceStream, HashMap<SplitId, AbortHandle>)> {
         let column_ids = source_desc
             .columns
@@ -217,26 +231,21 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
         );
         let source_ctx = Arc::new(source_ctx);
 
-        match state {
-            Some(splits) => {
-                let mut abort_handles = HashMap::new();
-                let mut streams = vec![];
-                for split in splits {
-                    let split_id = split.id().to_string();
-                    let reader = source_desc
-                        .source
-                        .to_stream(Some(vec![split]), column_ids.clone(), source_ctx.clone())
-                        .await
-                        .map_err(StreamExecutorError::connector_error)?;
-                    let (abort_handle, abort_registration) = AbortHandle::new_pair();
-                    let stream = Abortable::new(reader, abort_registration);
-                    abort_handles.insert(split_id, abort_handle);
-                    streams.push(stream);
-                }
-                return Ok((futures::stream::select_all(streams).boxed(), abort_handles));
-            }
-            None => return Ok((futures::stream::pending().boxed(), HashMap::new())),
+        let mut abort_handles = HashMap::new();
+        let mut streams = vec![];
+        for split in splits {
+            let split_id = split.id();
+            let reader = source_desc
+                .source
+                .to_stream(Some(vec![split]), column_ids.clone(), source_ctx.clone())
+                .await
+                .map_err(StreamExecutorError::connector_error)?;
+            let (abort_handle, abort_registration) = AbortHandle::new_pair();
+            let stream = Abortable::new(reader, abort_registration);
+            abort_handles.insert(split_id, abort_handle);
+            streams.push(stream);
         }
+        Ok((futures::stream::select_all(streams).boxed(), abort_handles))
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -275,35 +284,23 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
         self.backfill_state_store.init_epoch(barrier.epoch);
 
         let mut backfill_states: BackfillStates = HashMap::new();
-
-        let mut unfinished_splits = vec![];
+        let mut unfinished_splits = Vec::new();
         for ele in boot_state {
-            let split_id = ele.id().to_string();
+            let split_id = ele.id();
             let (split, backfill_state) = self
                 .backfill_state_store
                 .try_recover_from_state_store(ele)
                 .await?;
 
             backfill_states.insert(split_id, backfill_state);
-            if split.is_some() {
-                unfinished_splits.push(split.unwrap());
+            if let Some(split) = split {
+                unfinished_splits.push(split);
             }
         }
         tracing::debug!(?backfill_states, "source backfill started");
 
-        // init in-memory split states with persisted state if any
-        core.init_split_state(unfinished_splits.clone());
-
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = core;
-
-        let recover_state: ConnectorState =
-            (!unfinished_splits.is_empty()).then_some(unfinished_splits);
-        let (source_chunk_reader, abort_handles) = self
-            .build_stream_source_reader(&source_desc, recover_state)
-            .instrument_await("source_build_reader")
-            .await?;
-        // let source_chunk_reader = pin!(source_chunk_reader);
 
         // If the first barrier requires us to pause on startup, pause the stream.
         if barrier.is_pause_on_startup() {
@@ -312,14 +309,25 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
 
         yield Message::Barrier(barrier);
 
-        // XXX:
-        // - What's the best poll strategy?
-        // - Should we also add a barrier stream for backfill executor?
-        let mut backfill_stream = build_combined_stream(&mut input, source_chunk_reader);
-
         if !backfill_finished(&backfill_states) {
-            #[for_await]
-            'backfill_loop: for either in &mut backfill_stream {
+            let (source_chunk_reader, abort_handles) = self
+                .build_stream_source_reader(&source_desc, unfinished_splits.clone())
+                .instrument_await("source_build_reader")
+                .await?;
+
+            // XXX:
+            // - What's the best poll strategy?
+            // - Should we also add a barrier stream for backfill executor?
+            let mut backfill_stream =
+                Some(build_combined_stream(&mut input, source_chunk_reader));
+            let mut backfill_stage = BackfillStage {
+                abort_handles,
+                states: backfill_states,
+                unfinished_splits,
+            };
+
+            'backfill_loop: while let Some(either) = backfill_stream.as_mut().unwrap().next().await
+            {
                 match either {
                     // Upstream
                     Either::Left(msg) => {
@@ -328,9 +336,6 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
                         };
                         match msg {
                             Message::Barrier(barrier) => {
-                                let mut target_state = None;
-                                let mut should_trim_state = false;
-
                                 if let Some(ref mutation) = barrier.mutation.as_deref() {
                                     match mutation {
                                         Mutation::Pause => { // TODO:
@@ -344,23 +349,29 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
                                                 "source change split received"
                                             );
 
-                                             self
-                                                .apply_split_change(
-                                                    &source_desc,
-                                                    &mut backfill_stream,
-                                                    actor_splits,
-                                                )
-                                                .await?;
-                                            should_trim_state = true;
+                                            _ = backfill_stream.take();
+                                            self.apply_split_change(
+                                                &source_desc,
+                                                actor_splits,
+                                                &mut backfill_stage,
+                                                &mut backfill_stream,
+                                                &mut input,
+                                                true,
+                                            )
+                                            .await?;
                                         }
                                         Mutation::Update(UpdateMutation {
                                             actor_splits, ..
                                         }) => {
-                                              self
+                                            _ = backfill_stream.take();
+                                            let _ = self
                                                 .apply_split_change(
                                                     &source_desc,
-                                                    &mut backfill_stream,
                                                     actor_splits,
+                                                    &mut backfill_stage,
+                                                    &mut backfill_stream,
+                                                    &mut input,
+                                                    false,
                                                 )
                                                 .await?;
                                         }
@@ -369,7 +380,7 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
                                 }
 
                                 self.backfill_state_store
-                                    .set_states(backfill_states.clone())
+                                    .set_states(backfill_stage.states.clone())
                                     .await?;
                                 self.backfill_state_store
                                     .state_store
@@ -378,10 +389,10 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
 
                                 yield Message::Barrier(barrier);
 
-                                if backfill_finished(&backfill_states) {
+                                if backfill_finished(&backfill_stage.states) {
                                     // all splits finished backfilling
                                     self.backfill_state_store
-                                        .set_states(backfill_states.clone())
+                                        .set_states(backfill_stage.states.clone())
                                         .await?;
                                     break 'backfill_loop;
                                 }
@@ -395,11 +406,12 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
                                     tracing::debug!(row = %row.display());
                                     let split = row.datum_at(split_idx).unwrap().into_utf8();
                                     let offset = row.datum_at(offset_idx).unwrap().into_utf8();
-                                    let backfill_state = backfill_states.get_mut(split).unwrap();
+                                    let backfill_state =
+                                        backfill_stage.states.get_mut(split).unwrap();
                                     let vis = backfill_state.handle_upstream_row(
                                         split,
                                         offset,
-                                        &abort_handles,
+                                        &backfill_stage.abort_handles,
                                     );
                                     new_vis.set(i, vis);
                                 }
@@ -423,32 +435,19 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
                         let split_offset_mapping =
                             get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx)
                                 .unwrap();
-                        let _state: HashMap<_, _> = split_offset_mapping
-                            .iter()
-                            .flat_map(|(split_id, offset)| {
-                                let origin_split_impl = self
-                                    .stream_source_core
-                                    .stream_source_splits
-                                    .get_mut(split_id);
-
-                                // update backfill progress
-                                let prev_state = backfill_states.insert(
-                                    split_id.to_string(),
-                                    BackfillState::Backfilling(Some(offset.to_string())),
-                                );
-                                // abort_handles should prevents other cases happening
-                                assert_matches!(
-                                    prev_state,
-                                    Some(BackfillState::Backfilling(_)),
-                                    "Unexpected backfilling state, split_id: {split_id}"
-                                );
-
-                                origin_split_impl.map(|split_impl| {
-                                    split_impl.update_in_place(offset.clone())?;
-                                    Ok::<_, anyhow::Error>((split_id.clone(), split_impl.clone()))
-                                })
-                            })
-                            .try_collect()?;
+                        split_offset_mapping.iter().for_each(|(split_id, offset)| {
+                            // update backfill progress
+                            let prev_state = backfill_stage.states.insert(
+                                split_id.clone(),
+                                BackfillState::Backfilling(Some(offset.to_string())),
+                            );
+                            // abort_handles should prevents other cases happening
+                            assert_matches!(
+                                prev_state,
+                                Some(BackfillState::Backfilling(_)),
+                                "Unexpected backfilling state, split_id: {split_id}"
+                            );
+                        });
 
                         yield Message::Chunk(chunk);
                     }
@@ -462,7 +461,7 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
             let msg = msg?;
             match msg {
                 Message::Barrier(barrier) => {
-                    //
+                    // TODO: split change
 
                     // We might need to persist its state. Is is possible that we need to backfill?
                     yield Message::Barrier(barrier);
@@ -495,117 +494,134 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
     }
 
     /// For newly added splits, we do not need to backfill and can directly forward from upstream.
-    async fn apply_split_change<'upstream>(
+    async fn apply_split_change<'input>(
         &mut self,
         source_desc: &SourceDesc,
         split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
-        upstream: &'upstream mut BoxedMessageStream,
-        stream: &mut EitherStream<'upstream>,
-        abort_handles: &mut HashMap<String, AbortHandle>,
-    ) -> StreamExecutorResult<Option<Vec<SplitImpl>>> {
+        stage: &mut BackfillStage,
+        stream: &mut Option<EitherStream<'input>>,
+        input: &'input mut BoxedMessageStream,
+        should_trim_state: bool,
+    ) -> StreamExecutorResult<()> {
         if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
-            if let Some(target_state) = self.update_state_if_changed(Some(target_splits)).await? {
-                tracing::info!(
-                    actor_id = self.actor_ctx.id,
-                    state = ?target_state,
-                    "apply split change"
-                );
-
-                self.replace_stream_reader_with_target_state(
-                    source_desc,
-                    target_state.clone(),
-                    upstream,
-                    stream,
-                    abort_handles,
-                )
-                .await?;
-
-                return Ok(Some(target_state));
+            if self
+                .update_state_if_changed(target_splits, stage, should_trim_state)
+                .await?
+            {
+                self.rebuild_stream_reader(source_desc, stage, stream, input)
+                    .await?;
             }
         }
 
-        Ok(None)
+        Ok(())
     }
 
-    /// Note: `update_state_if_changed` will modify `state_cache`
+    /// Returns `true` if split changed. Otherwise `false`.
     async fn update_state_if_changed(
         &mut self,
-        target_splits: ConnectorState,
-    ) -> StreamExecutorResult<ConnectorState> {
-        let core = &mut self.stream_source_core;
-
+        target_splits: Vec<SplitImpl>,
+        stage: &mut BackfillStage,
+        should_trim_state: bool,
+    ) -> StreamExecutorResult<bool> {
         let target_splits: HashMap<_, _> = target_splits
-            .unwrap()
             .into_iter()
             .map(|split| (split.id(), split))
             .collect();
 
-        let mut target_state: Vec<SplitImpl> = Vec::with_capacity(target_splits.len());
+        let mut target_state: HashMap<SplitId, BackfillState> =
+            HashMap::with_capacity(target_splits.len());
 
         let mut split_changed = false;
 
-        // Note: SourceExecutor uses core.state_cache, but it's a little hard to understand.
-
-        // Checks added splits.
-        for (split_id, split) in &target_splits {
-            if let Some(s) = core.state_cache.get(split_id) {
-                // existing split, no change, clone from cache
-                target_state.push(s.clone())
+        // Checks added splits
+        for (split_id, split) in target_splits {
+            if let Some(s) = stage.states.get(&split_id) {
+                target_state.insert(split_id, s.clone());
             } else {
                 split_changed = true;
-                // write new assigned split to state cache. snapshot is base on cache.
 
-                let initial_state = if let Some(recover_state) = core
-                    .split_state_store
+                let (split, backfill_state) = self
+                    .backfill_state_store
                     .try_recover_from_state_store(split)
-                    .await?
-                {
-                    recover_state
-                } else {
-                    split.clone()
-                };
+                    .await?;
 
-                core.state_cache
-                    .entry(split.id())
-                    .or_insert_with(|| initial_state.clone());
-
-                target_state.push(initial_state);
+                target_state.insert(split_id, backfill_state);
+                if let Some(split) = split {
+                    stage.unfinished_splits.push(split);
+                }
             }
         }
 
-        // Checks dropped splits.
-        // state cache may be stale
-        for existing_split_id in core.stream_source_splits.keys() {
-            if !target_splits.contains_key(existing_split_id) {
+        // Checks dropped splits
+        for existing_split_id in stage.states.keys() {
+            if !target_state.contains_key(existing_split_id) {
                 tracing::info!("split dropping detected: {}", existing_split_id);
                 split_changed = true;
             }
         }
 
-        Ok(split_changed.then_some(target_state))
+        if split_changed {
+            tracing::info!(
+                actor_id = self.actor_ctx.id,
+                state = ?target_state,
+                "apply split change"
+            );
+
+            stage
+                .unfinished_splits
+                .retain(|split| target_state.get(split.id().as_ref()).is_some());
+
+            let dropped_splits = stage
+                .states
+                .extract_if(|split_id, _| target_state.get(split_id).is_none())
+                .map(|(split_id, _)| split_id);
+
+            if should_trim_state {
+                // trim dropped splits' state
+                self.backfill_state_store.trim_state(dropped_splits).await?;
+            }
+
+            stage.states = target_state;
+        }
+
+        Ok(split_changed)
     }
 
-    async fn replace_stream_reader_with_target_state<'upstream>(
+    async fn rebuild_stream_reader<'input>(
         &mut self,
         source_desc: &SourceDesc,
-        target_state: Vec<SplitImpl>,
-        upstream: &'upstream mut BoxedMessageStream,
-        stream: &mut EitherStream<'upstream>,
-        abort_handles: &mut HashMap<String, AbortHandle>,
+        stage: &mut BackfillStage,
+        stream: &mut Option<EitherStream<'input>>,
+        input: &'input mut BoxedMessageStream,
     ) -> StreamExecutorResult<()> {
+        let mut unfinished_splits = Vec::new();
+        for split in &mut stage.unfinished_splits {
+            let state = stage.states.get(split.id().as_ref()).unwrap();
+            match state {
+                BackfillState::Backfilling(Some(offset)) => {
+                    split.update_in_place(offset.clone())?;
+                    unfinished_splits.push(split.clone());
+                }
+                BackfillState::Backfilling(None)
+                | BackfillState::SourceCachingUp(_)
+                | BackfillState::Finished => {}
+            }
+        }
+        stage.unfinished_splits = unfinished_splits;
+
         tracing::info!(
             "actor {:?} apply source split change to {:?}",
             self.actor_ctx.id,
-            target_state
+            stage.unfinished_splits
         );
 
         // Replace the source reader with a new one of the new state.
         let (reader, new_abort_handles) = self
-            .build_stream_source_reader(source_desc, Some(target_state.clone()))
+            .build_stream_source_reader(source_desc, stage.unfinished_splits.clone())
             .await?;
-        *abort_handles = new_abort_handles;
+        stage.abort_handles = new_abort_handles;
 
-        *stream = build_combined_stream(upstream, reader);
+        *stream = Some(build_combined_stream(input, reader));
 
         Ok(())
     }
