@@ -122,7 +122,7 @@ mod tests {
                 ("v7", DataType::Bytea),
                 ("v8", DataType::List(Box::new(DataType::Int16))),
                 ("v9", DataType::List(Box::new(DataType::Int64))),
-                // ("v10", DataType::List(Box::new(DataType::Float32))),
+                ("v10", DataType::List(Box::new(DataType::Float32))),
                 ("v11", DataType::Timestamp),
                 (
                     "v14",
