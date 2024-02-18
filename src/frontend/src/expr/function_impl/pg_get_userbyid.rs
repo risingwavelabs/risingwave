@@ -12,14 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::v2::def_anyhow_newtype;
+use risingwave_expr::{capture_context, function, Result};
 
-def_anyhow_newtype! {
-    pub ConnectorError,
+use super::context::USER_INFO_READER;
+use crate::user::user_service::UserInfoReader;
 
-    // TODO(error-handling): Remove implicit contexts below and specify ad-hoc context for each conversion.
-    mysql_async::Error => "MySQL error",
-    tokio_postgres::Error => "Postgres error",
+#[function("pg_get_userbyid(int4) -> varchar")]
+fn pg_get_userbyid(oid: i32) -> Result<Option<Box<str>>> {
+    pg_get_userbyid_impl_captured(oid)
 }
 
-pub type ConnectorResult<T> = Result<T, ConnectorError>;
+#[capture_context(USER_INFO_READER)]
+fn pg_get_userbyid_impl(reader: &UserInfoReader, oid: i32) -> Result<Option<Box<str>>> {
+    Ok(reader
+        .read_guard()
+        .get_user_name_by_id(oid as u32)
+        .map(|s| s.into_boxed_str()))
+}
