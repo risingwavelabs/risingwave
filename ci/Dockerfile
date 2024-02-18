@@ -29,6 +29,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-mo
 ENV PATH /root/.cargo/bin/:$PATH
 
 RUN rustup show
+RUN rustup default `rustup show active-toolchain | awk '{print $1}'`
 
 RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.4.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
     tar -xvzf - -C /usr/local --strip-components 1
@@ -48,7 +49,7 @@ ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 # install build tools
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 RUN cargo binstall -y --no-symlinks cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-cache cargo-audit \
-    cargo-make@0.36.10 \
+    cargo-make@0.37.9 \
     sqllogictest-bin@0.19.1 \
     sccache@0.7.4 \
     && cargo cache -a \
