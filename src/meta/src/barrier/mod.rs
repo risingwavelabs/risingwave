@@ -951,7 +951,9 @@ impl CheckpointControl {
                 }
             };
             let join_result = ready!(completing_command.join_handle.poll_unpin(cx))
-                .map_err(|e| anyhow!("failed to join completing command: {:?}", e).into())
+                .map_err(|e| {
+                    anyhow!("failed to join completing command: {:?}", e.as_report()).into()
+                })
                 .and_then(|result| result);
             let completed_command = self.completing_command.take().expect("non-empty");
             let result = join_result.map(|output| {
