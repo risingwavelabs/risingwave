@@ -24,7 +24,7 @@ use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
-    BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
+    BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitMetaData,
 };
 use risingwave_connector::ConnectorParams;
 use risingwave_storage::StateStore;
@@ -175,53 +175,55 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(())
     }
 
-    /// Returns `target_states` if split changed. Otherwise `None`.
-    ///
-    /// Note: `update_state_if_changed` will modify `updated_splits_in_epoch`
+    /// Returns `true` if split changed. Otherwise `false`.
     async fn update_state_if_changed(
         &mut self,
-        state: Vec<SplitImpl>,
+        target_splits: Vec<SplitImpl>,
         should_trim_state: bool,
     ) -> StreamExecutorResult<bool> {
         let core = self.stream_source_core.as_mut().unwrap();
 
-        let target_splits: HashMap<_, _> =
-            state.into_iter().map(|split| (split.id(), split)).collect();
+        let target_splits: HashMap<_, _> = target_splits
+            .into_iter()
+            .map(|split| (split.id(), split))
+            .collect();
 
-        let mut target_state: Vec<SplitImpl> = Vec::with_capacity(target_splits.len());
+        let mut target_state: HashMap<SplitId, SplitImpl> =
+            HashMap::with_capacity(target_splits.len());
 
         let mut split_changed = false;
 
         // Checks added splits
-        for (split_id, split) in &target_splits {
-            if let Some(s) = core.updated_splits_in_epoch.get(split_id) {
-                // existing split, no change, clone from cache
-                target_state.push(s.clone())
+        for (split_id, split) in target_splits {
+            if let Some(s) = core.latest_split_info.get(&split_id) {
+                // For existing splits, we should use the latest offset from the cache.
+                // `target_splits` is from meta and contains the initial offset.
+                target_state.insert(split_id, s.clone());
             } else {
                 split_changed = true;
                 // write new assigned split to state cache. snapshot is base on cache.
 
                 let initial_state = if let Some(recover_state) = core
                     .split_state_store
-                    .try_recover_from_state_store(split)
+                    .try_recover_from_state_store(&split)
                     .await?
                 {
                     recover_state
                 } else {
-                    split.clone()
+                    split
                 };
 
                 core.updated_splits_in_epoch
-                    .entry(split.id())
+                    .entry(split_id.clone())
                     .or_insert_with(|| initial_state.clone());
 
-                target_state.push(initial_state);
+                target_state.insert(split_id, initial_state);
             }
         }
 
         // Checks dropped splits
         for existing_split_id in core.latest_split_info.keys() {
-            if !target_splits.contains_key(existing_split_id) {
+            if !target_state.contains_key(existing_split_id) {
                 tracing::info!("split dropping detected: {}", existing_split_id);
                 split_changed = true;
             }
@@ -235,11 +237,11 @@ impl<S: StateStore> SourceExecutor<S> {
             );
 
             core.updated_splits_in_epoch
-                .retain(|split_id, _| target_splits.get(split_id).is_some());
+                .retain(|split_id, _| target_state.get(split_id).is_some());
 
             let dropped_splits = core
                 .latest_split_info
-                .extract_if(|split_id, _| target_splits.get(split_id).is_none())
+                .extract_if(|split_id, _| target_state.get(split_id).is_none())
                 .map(|(_, split)| split)
                 .collect_vec();
 
@@ -248,7 +250,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 core.split_state_store.trim_state(&dropped_splits).await?;
             }
 
-            core.latest_split_info = target_splits;
+            core.latest_split_info = target_state;
         }
 
         Ok(split_changed)
