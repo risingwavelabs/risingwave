@@ -145,13 +145,13 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                         &Type::UUID => {
                             let res = row.try_get::<_, Option<uuid::Uuid>>(i);
                             match res {
-                                Ok(val) => val.map(|v|  ScalarImpl::from(v.to_string())),
+                                Ok(val) => val.map(|v| ScalarImpl::from(v.to_string())),
                                 Err(err) => {
                                     if let Ok(sc) = LOG_SUPPERSSER.check() {
                                         tracing::error!(
-                                            "parse uuid column \"{}\" fail: {} ({} suppressed)" ,
-                                            name ,
-                                            err ,
+                                            "parse uuid column \"{}\" fail: {} ({} suppressed)",
+                                            name,
+                                            err,
                                             sc
                                         );
                                     }
