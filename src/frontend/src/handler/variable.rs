@@ -18,7 +18,6 @@ use pgwire::pg_protocol::ParameterStatus;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::session_config::{ConfigReporter, SESSION_CONFIG_LIST_SEP};
-use risingwave_common::system_param::is_mutable;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
