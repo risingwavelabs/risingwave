@@ -274,6 +274,7 @@ impl StreamRpcManager {
             f(client, input).await.map_err(|e| (node.id, e))
         });
 
+        // similar to join_all, but return early if a timeout occurs since the first error.
         let stream = FuturesUnordered::from_iter(iters);
         pin_mut!(stream);
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -296,12 +297,12 @@ impl StreamRpcManager {
                 Either::Right((Some(Err(err)), _)) => {
                     results_err.push(err);
                     if is_err_timeout {
-                       continue;
+                        continue;
                     }
                     is_err_timeout = true;
                     let tx = tx.clone();
                     tokio::spawn(async move {
-                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        tokio::time::sleep(Duration::from_secs(3)).await;
                         let _ = tx.send(());
                     });
                 }
