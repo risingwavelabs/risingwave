@@ -17,13 +17,14 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_common::error::Result;
 use risingwave_common::session_config::{ConfigMap, SearchPath};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_sqlparser::ast::{
     Expr as AstExpr, FunctionArg, FunctionArgExpr, SelectItem, SetExpr, Statement,
 };
+
+use crate::error::Result;
 
 mod bind_context;
 mod bind_param;
@@ -51,7 +52,6 @@ pub use relation::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
     BoundWindowTableFunction, Relation, ResolveQualifiedNameError, WindowTableFunctionKind,
 };
-use risingwave_common::error::ErrorCode;
 pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::*;
 pub use statement::BoundStatement;
@@ -62,6 +62,7 @@ use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, TableId, ViewId};
+use crate::error::ErrorCode;
 use crate::expr::ExprImpl;
 use crate::session::{AuthContext, SessionImpl};
 
@@ -151,6 +152,10 @@ impl UdfContext {
         self.udf_global_counter += 1;
     }
 
+    pub fn decr_global_count(&mut self) {
+        self.udf_global_counter -= 1;
+    }
+
     pub fn _is_empty(&self) -> bool {
         self.udf_param_context.is_empty()
     }
@@ -215,26 +220,37 @@ impl UdfContext {
         Ok(expr)
     }
 
-    /// TODO: add name related logic
-    /// NOTE: need to think of a way to prevent naming conflict
-    /// e.g., when existing column names conflict with parameter names in sql udf
+    /// Create the sql udf context
+    /// used per `bind_function` for sql udf & semantic check at definition time
     pub fn create_udf_context(
         args: &[FunctionArg],
-        _catalog: &Arc<FunctionCatalog>,
+        catalog: &Arc<FunctionCatalog>,
     ) -> Result<HashMap<String, AstExpr>> {
         let mut ret: HashMap<String, AstExpr> = HashMap::new();
         for (i, current_arg) in args.iter().enumerate() {
-            if let FunctionArg::Unnamed(arg) = current_arg {
-                let FunctionArgExpr::Expr(e) = arg else {
-                    return Err(ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into());
-                };
-                // if catalog.arg_names.is_some() {
-                //      todo!()
-                // }
-                ret.insert(format!("${}", i + 1), e.clone());
-                continue;
+            match current_arg {
+                FunctionArg::Unnamed(arg) => {
+                    let FunctionArgExpr::Expr(e) = arg else {
+                        return Err(ErrorCode::InvalidInputSyntax(
+                            "expect `FunctionArgExpr` for unnamed argument".to_string(),
+                        )
+                        .into());
+                    };
+                    if catalog.arg_names[i].is_empty() {
+                        ret.insert(format!("${}", i + 1), e.clone());
+                    } else {
+                        // The index mapping here is accurate
+                        // So that we could directly use the index
+                        ret.insert(catalog.arg_names[i].clone(), e.clone());
+                    }
+                }
+                _ => {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "expect unnamed argument when creating sql udf context".to_string(),
+                    )
+                    .into())
+                }
             }
-            return Err(ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into());
         }
         Ok(ret)
     }

@@ -25,6 +25,7 @@ use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
 use risingwave_pb::hummock::{PbHummockVersionArchive, PbHummockVersionCheckpoint};
+use thiserror_ext::AsReport;
 
 use crate::hummock::error::Result;
 use crate::hummock::manager::{read_lock, write_lock};
@@ -178,7 +179,8 @@ impl HummockManager {
         if let Some(archive) = archive {
             if let Err(e) = self.write_version_archive(&archive).await {
                 tracing::warn!(
-                    "failed to write version archive {}, {e}",
+                    error = %e.as_report(),
+                    "failed to write version archive {}",
                     archive.version.as_ref().unwrap().id
                 );
             }

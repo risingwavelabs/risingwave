@@ -497,7 +497,7 @@ pub fn cmp_delete_range_left_bounds(a: Bound<&Bytes>, b: Bound<&Bytes>) -> Order
     }
 }
 
-fn validate_delete_range(left: &Bound<Bytes>, right: &Bound<Bytes>) -> bool {
+pub(crate) fn validate_delete_range(left: &Bound<Bytes>, right: &Bound<Bytes>) -> bool {
     match (left, right) {
         // only right bound of delete range can be `Unbounded`
         (Unbounded, _) => unreachable!(),
@@ -509,6 +509,7 @@ fn validate_delete_range(left: &Bound<Bytes>, right: &Bound<Bytes>) -> bool {
     }
 }
 
+#[expect(dead_code)]
 pub(crate) fn filter_with_delete_range<'a>(
     kv_iter: impl Iterator<Item = (TableKey<Bytes>, KeyOp)> + 'a,
     mut delete_ranges_iter: impl Iterator<Item = &'a (Bound<Bytes>, Bound<Bytes>)> + 'a,

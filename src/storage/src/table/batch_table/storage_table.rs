@@ -146,11 +146,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             .collect_vec();
 
         let table_option = TableOption {
-            retention_seconds: if table_desc.retention_seconds > 0 {
-                Some(table_desc.retention_seconds)
-            } else {
-                None
-            },
+            retention_seconds: table_desc.retention_seconds,
         };
         let value_indices = table_desc
             .get_value_indices()

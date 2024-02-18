@@ -25,9 +25,10 @@ use risingwave_common::catalog::{
     is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, INITIAL_SOURCE_VERSION_ID,
     KAFKA_TIMESTAMP_COLUMN_NAME,
 };
-use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, NotSupported, ProtocolError};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_connector::parser::additional_columns::{
+    build_additional_column_catalog, COMPATIBLE_ADDITIONAL_COLUMNS,
+};
 use risingwave_connector::parser::{
     schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
     SpecificParserConfig,
@@ -44,24 +45,27 @@ use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
-    get_connector_compatible_additional_columns, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR,
-    KAFKA_CONNECTOR, KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR,
-    POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
+    GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NATS_CONNECTOR,
+    NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
 };
 use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
 };
-use risingwave_pb::plan_common::{AdditionalColumnType, EncodeType, FormatType};
+use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
+use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     get_delimiter, AstString, ColumnDef, ConnectorSchema, CreateSourceStatement, Encode, Format,
-    Ident, ProtobufSchema, SourceWatermark,
+    ProtobufSchema, SourceWatermark,
 };
+use risingwave_sqlparser::parser::IncludeOption;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
+use crate::error::ErrorCode::{self, InvalidInputSyntax, NotSupported, ProtocolError};
+use crate::error::{Result, RwError};
 use crate::expr::Expr;
 use crate::handler::create_table::{
     bind_pk_on_relation, bind_sql_column_constraints, bind_sql_columns, bind_sql_pk_names,
@@ -495,29 +499,21 @@ fn bind_columns_from_source_for_cdc(
 /// add connector-spec columns to the end of column catalog
 pub fn handle_addition_columns(
     with_properties: &HashMap<String, String>,
-    mut additional_columns: Vec<(Ident, Option<Ident>)>,
+    mut additional_columns: IncludeOption,
     columns: &mut Vec<ColumnCatalog>,
 ) -> Result<()> {
     let connector_name = get_connector(with_properties).unwrap(); // there must be a connector in source
 
-    let addition_col_list =
-        match get_connector_compatible_additional_columns(connector_name.as_str()) {
-            Some(cols) => cols,
-            // early return if there are no accepted additional columns for the connector
-            None => {
-                return if additional_columns.is_empty() {
-                    Ok(())
-                } else {
-                    Err(RwError::from(ProtocolError(format!(
-                        "Connector {} accepts no additional column but got {:?}",
-                        connector_name, additional_columns
-                    ))))
-                }
-            }
-        };
-    let gen_default_column_name = |connector_name: &str, addi_column_name: &str| {
-        format!("_rw_{}_{}", connector_name, addi_column_name)
-    };
+    if COMPATIBLE_ADDITIONAL_COLUMNS
+        .get(connector_name.as_str())
+        .is_none()
+        && !additional_columns.is_empty()
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "Connector {} accepts no additional column but got {:?}",
+            connector_name, additional_columns
+        ))));
+    }
 
     let latest_col_id: ColumnId = columns
         .iter()
@@ -525,27 +521,31 @@ pub fn handle_addition_columns(
         .max()
         .unwrap(); // there must be at least one column in the column catalog
 
-    for (col_name, gen_column_catalog_fn) in addition_col_list {
-        // always insert in spec order
-        if let Some(idx) = additional_columns
-            .iter()
-            .position(|(col, _)| col.real_value().eq_ignore_ascii_case(col_name))
+    while let Some(item) = additional_columns.pop() {
         {
-            let (_, alias) = additional_columns.remove(idx);
-            columns.push(gen_column_catalog_fn(
-                latest_col_id.next(),
-                alias
-                    .map(|alias| alias.real_value())
-                    .unwrap_or_else(|| gen_default_column_name(connector_name.as_str(), col_name))
-                    .as_str(),
-            ))
+            // only allow header column have inner field
+            if item.inner_field.is_some()
+                && !item.column_type.real_value().eq_ignore_ascii_case("header")
+            {
+                return Err(RwError::from(ProtocolError(format!(
+                    "Only header column can have inner field, but got {:?}",
+                    item.column_type.real_value(),
+                ))));
+            }
         }
-    }
-    if !additional_columns.is_empty() {
-        return Err(RwError::from(ProtocolError(format!(
-            "Unknown additional columns {:?}",
-            additional_columns
-        ))));
+
+        let data_type_name: Option<String> = item
+            .header_inner_expect_type
+            .map(|dt| format!("{:?}", dt).to_lowercase());
+        columns.push(build_additional_column_catalog(
+            latest_col_id.next(),
+            connector_name.as_str(),
+            item.column_type.real_value().as_str(),
+            item.column_alias.map(|alias| alias.real_value()),
+            item.inner_field.as_deref(),
+            data_type_name.as_deref(),
+            true,
+        )?);
     }
 
     Ok(())
@@ -684,7 +684,10 @@ pub(crate) async fn bind_source_pk(
         // iter columns to check if contains additional columns from key part
         // return the key column names if exists
         columns.iter().find_map(|catalog| {
-            if catalog.column_desc.additional_column_type == AdditionalColumnType::Key {
+            if matches!(
+                catalog.column_desc.additional_column.column_type,
+                Some(AdditionalColumnType::Key(_))
+            ) {
                 Some(catalog.name().to_string())
             } else {
                 None
@@ -694,9 +697,7 @@ pub(crate) async fn bind_source_pk(
     let additional_column_names = columns
         .iter()
         .filter_map(|col| {
-            if (col.column_desc.additional_column_type != AdditionalColumnType::Unspecified)
-                && (col.column_desc.additional_column_type != AdditionalColumnType::Normal)
-            {
+            if col.column_desc.additional_column.column_type.is_some() {
                 Some(col.name().to_string())
             } else {
                 None
@@ -845,21 +846,27 @@ fn check_and_add_timestamp_column(
     columns: &mut Vec<ColumnCatalog>,
 ) {
     if is_kafka_connector(with_properties) {
-        if columns
-            .iter()
-            .any(|col| col.column_desc.additional_column_type == AdditionalColumnType::Timestamp)
-        {
+        if columns.iter().any(|col| {
+            matches!(
+                col.column_desc.additional_column.column_type,
+                Some(AdditionalColumnType::Timestamp(_))
+            )
+        }) {
             // already has timestamp column, no need to add a new one
             return;
         }
 
         // add a hidden column `_rw_kafka_timestamp` to each message from Kafka source
-        let mut catalog = get_connector_compatible_additional_columns(KAFKA_CONNECTOR)
-            .unwrap()
-            .iter()
-            .find(|(col_name, _)| col_name.eq(&"timestamp"))
-            .unwrap()
-            .1(ColumnId::placeholder(), KAFKA_TIMESTAMP_COLUMN_NAME);
+        let mut catalog = build_additional_column_catalog(
+            ColumnId::placeholder(),
+            KAFKA_CONNECTOR,
+            "timestamp",
+            Some(KAFKA_TIMESTAMP_COLUMN_NAME.to_string()),
+            None,
+            None,
+            true,
+        )
+        .unwrap();
         catalog.is_hidden = true;
 
         columns.push(catalog);
@@ -1542,6 +1549,19 @@ pub mod tests {
         match frontend.run_sql(sql).await {
             Err(e) => {
                 assert_eq!(e.to_string(), "Protocol error: Primary key must be specified to _rw_kafka_key when creating source with FORMAT UPSERT ENCODE Json")
+            }
+            _ => unreachable!(),
+        }
+
+        let sql =
+            "CREATE SOURCE s3 (v1 int) include timestamp 'header1' as header_col with (connector = 'kafka') format plain encode json"
+                .to_string();
+        match frontend.run_sql(sql).await {
+            Err(e) => {
+                assert_eq!(
+                    e.to_string(),
+                    "Protocol error: Only header column can have inner field, but got \"timestamp\""
+                )
             }
             _ => unreachable!(),
         }

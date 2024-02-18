@@ -22,8 +22,6 @@ use crate::catalog::system_catalog::BuiltinView;
 /// The catalog `pg_user` provides access to information about database users.
 /// Ref: [`https://www.postgresql.org/docs/current/view-pg-user.html`]
 pub const PG_USER_TABLE_NAME: &str = "pg_user";
-pub const PG_USER_ID_INDEX: usize = 0;
-pub const PG_USER_NAME_INDEX: usize = 1;
 
 pub static PG_USER: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
     name: PG_USER_TABLE_NAME,

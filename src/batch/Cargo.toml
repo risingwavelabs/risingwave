@@ -15,6 +15,8 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
 assert_matches = "1"
 async-recursion = "1"
 async-trait = "0.1"
@@ -24,6 +26,7 @@ futures-async-stream = { workspace = true }
 futures-util = "0.3"
 hashbrown = { workspace = true }
 hytra = "0.1.2"
+icelake = { workspace = true }
 itertools = "0.12"
 memcomparable = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
@@ -31,11 +34,11 @@ paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
+risingwave_dml = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
-risingwave_source = { workspace = true }
 risingwave_storage = { workspace = true }
 rw_futures_util = { workspace = true }
 scopeguard = "1"

@@ -39,6 +39,7 @@ use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
 use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
+use risingwave_dml::dml_manager::DmlManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
 use risingwave_pb::connector_service::SinkPayloadFormat;
@@ -49,7 +50,6 @@ use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, ConnectorClient, ExtraInfoSourceRef, MetaClient};
-use risingwave_source::dml_manager::DmlManager;
 use risingwave_storage::hummock::compactor::{
     start_compactor, CompactionExecutor, CompactorContext,
 };
@@ -298,17 +298,6 @@ pub async fn compute_node_serve(
     // Run a background heap profiler
     heap_profiler.start();
 
-    let stream_mgr = Arc::new(LocalStreamManager::new(
-        advertise_addr.clone(),
-        state_store.clone(),
-        streaming_metrics.clone(),
-        config.streaming.clone(),
-        await_tree_config.clone(),
-        memory_mgr.get_watermark_epoch(),
-    ));
-
-    let grpc_await_tree_reg = await_tree_config
-        .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
     let dml_mgr = Arc::new(DmlManager::new(
         worker_id,
         config.streaming.developer.dml_channel_initial_permits,
@@ -362,6 +351,16 @@ pub async fn compute_node_serve(
         source_metrics,
         meta_client.clone(),
     );
+
+    let stream_mgr = LocalStreamManager::new(
+        stream_env.clone(),
+        streaming_metrics.clone(),
+        await_tree_config.clone(),
+        memory_mgr.get_watermark_epoch(),
+    );
+
+    let grpc_await_tree_reg = await_tree_config
+        .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
 
     // Generally, one may use `risedev ctl trace` to manually get the trace reports. However, if
     // this is not the case, we can use the following command to get it printed into the logs

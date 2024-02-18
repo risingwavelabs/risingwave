@@ -13,6 +13,7 @@ members = [
   "src/connector",
   "src/connector/with_options",
   "src/ctl",
+  "src/dml",
   "src/error",
   "src/expr/core",
   "src/expr/impl",
@@ -33,7 +34,6 @@ members = [
   "src/risedevtool",
   "src/risedevtool/config",
   "src/rpc_client",
-  "src/source",
   "src/sqlparser",
   "src/sqlparser/test_runner",
   "src/storage",
@@ -121,7 +121,7 @@ tonic = { package = "madsim-tonic", version = "0.4.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "58c1f003484449d7c6dd693b348bf19dd44889cb" }
 prost = { version = "0.12" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "32c0bbf242f5c47b1e743f10577012fe7436c770", features = [
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "56943d203464d32701c20d74b278b6b3ef2eefc7", features = [
   "prometheus",
 ] }
 arrow-array = "50"
@@ -133,8 +133,8 @@ arrow-flight = "50"
 arrow-select = "50"
 arrow-ord = "50"
 arrow-row = "50"
-arrow-udf-js = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "7ba1c22" }
-arrow-udf-wasm = "0.1"
+arrow-udf-js = "0.1"
+arrow-udf-wasm = { version = "0.1.2", features = ["build"] }
 arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
 arrow-buffer-deltalake = { package = "arrow-buffer", version = "48.0.1" }
 arrow-cast-deltalake = { package = "arrow-cast", version = "48.0.1" }
@@ -164,6 +164,7 @@ risingwave_compactor = { path = "./src/storage/compactor" }
 risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }
 risingwave_connector = { path = "./src/connector" }
+risingwave_dml = { path = "./src/dml" }
 risingwave_error = { path = "./src/error" }
 risingwave_expr = { path = "./src/expr/core" }
 risingwave_expr_impl = { path = "./src/expr/impl" }
@@ -181,7 +182,6 @@ risingwave_object_store = { path = "./src/object_store" }
 risingwave_pb = { path = "./src/prost" }
 risingwave_rpc_client = { path = "./src/rpc_client" }
 risingwave_rt = { path = "./src/utils/runtime" }
-risingwave_source = { path = "./src/source" }
 risingwave_sqlparser = { path = "./src/sqlparser" }
 risingwave_sqlsmith = { path = "./src/tests/sqlsmith" }
 risingwave_storage = { path = "./src/storage" }

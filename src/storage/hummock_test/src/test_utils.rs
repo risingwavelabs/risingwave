@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -90,7 +89,6 @@ pub trait TestIngestBatch: LocalStateStore {
     async fn ingest_batch(
         &mut self,
         kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize>;
 }
@@ -100,7 +98,6 @@ impl<S: LocalStateStore> TestIngestBatch for S {
     async fn ingest_batch(
         &mut self,
         kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize> {
         assert_eq!(self.epoch(), write_options.epoch);
@@ -110,10 +107,11 @@ impl<S: LocalStateStore> TestIngestBatch for S {
                 Some(value) => self.insert(key, value, None)?,
             }
         }
-        self.flush(delete_ranges).await
+        self.flush().await
     }
 }
 
+#[cfg(test)]
 #[async_trait::async_trait]
 pub(crate) trait HummockStateStoreTestTrait: StateStore {
     fn get_pinned_version(&self) -> PinnedVersion;
@@ -123,6 +121,7 @@ pub(crate) trait HummockStateStoreTestTrait: StateStore {
     }
 }
 
+#[cfg(test)]
 impl HummockStateStoreTestTrait for HummockStorage {
     fn get_pinned_version(&self) -> PinnedVersion {
         self.get_pinned_version()

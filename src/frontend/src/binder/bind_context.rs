@@ -18,9 +18,10 @@ use std::rc::Rc;
 
 use parse_display::Display;
 use risingwave_common::catalog::Field;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::TableAlias;
+
+use crate::error::{ErrorCode, Result};
 
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
 

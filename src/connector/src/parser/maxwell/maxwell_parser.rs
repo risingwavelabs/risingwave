@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::bail;
 
 use crate::only_parse_payload;
 use crate::parser::unified::maxwell::MaxwellChangeEvent;
@@ -35,7 +35,7 @@ impl MaxwellParser {
         props: SpecificParserConfig,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         match props.encoding_config {
             EncodingProperties::Json(_) => {
                 let payload_builder =
@@ -47,9 +47,7 @@ impl MaxwellParser {
                     source_ctx,
                 })
             }
-            _ => Err(RwError::from(ErrorCode::ProtocolError(
-                "unsupported encoding for Maxwell".to_string(),
-            ))),
+            _ => bail!("unsupported encoding for Maxwell"),
         }
     }
 
@@ -57,7 +55,7 @@ impl MaxwellParser {
         &mut self,
         payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         let payload_accessor = self.payload_builder.generate_accessor(payload).await?;
         let row_op = MaxwellChangeEvent::new(payload_accessor);
 
@@ -83,7 +81,7 @@ impl ByteStreamSourceParser for MaxwellParser {
         _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         // restrict the behaviours since there is no corresponding
         // key/value test for maxwell yet.
         only_parse_payload!(self, payload, writer)

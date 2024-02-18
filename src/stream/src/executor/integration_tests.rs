@@ -47,7 +47,7 @@ async fn test_merger_sum_aggr() {
         time_zone: String::from("UTC"),
     };
 
-    let actor_ctx = ActorContext::create(0);
+    let actor_ctx = ActorContext::for_test(0);
     // `make_actor` build an actor to do local aggregation
     let make_actor = |input_rx| {
         let _schema = Schema {

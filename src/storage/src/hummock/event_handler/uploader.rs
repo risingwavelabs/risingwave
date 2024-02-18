@@ -60,6 +60,26 @@ pub type SpawnUploadTask = Arc<
         + 'static,
 >;
 
+pub type SpawnMergingTask = Arc<
+    dyn Fn(
+            TableId,
+            LocalInstanceId,
+            Vec<ImmutableMemtable>,
+            Option<MemoryTracker>,
+        ) -> JoinHandle<ImmutableMemtable>
+        + Send
+        + Sync
+        + 'static,
+>;
+
+pub(crate) fn default_spawn_merging_task(
+    compaction_executor: Arc<CompactionExecutor>,
+) -> SpawnMergingTask {
+    Arc::new(move |table_id, instance_id, imms, tracker| {
+        compaction_executor.spawn(merge_imms_in_memory(table_id, instance_id, imms, tracker))
+    })
+}
+
 #[derive(Clone)]
 pub struct UploadTaskInfo {
     pub task_size: usize,
@@ -99,6 +119,8 @@ struct UploadingTask {
 }
 
 pub struct MergeImmTaskOutput {
+    /// Input imm ids of the merging task. Larger imm ids at the front.
+    pub imm_ids: Vec<ImmId>,
     pub table_id: TableId,
     pub instance_id: LocalInstanceId,
     pub merged_imm: ImmutableMemtable,
@@ -109,7 +131,17 @@ struct MergingImmTask {
     table_id: TableId,
     instance_id: LocalInstanceId,
     input_imms: Vec<ImmutableMemtable>,
-    join_handle: JoinHandle<HummockResult<ImmutableMemtable>>,
+    join_handle: JoinHandle<ImmutableMemtable>,
+}
+
+impl Debug for MergingImmTask {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MergingImmTask")
+            .field("table_id", &self.table_id)
+            .field("instance_id", &self.instance_id)
+            .field("input_imms", &self.input_imms)
+            .finish()
+    }
 }
 
 impl MergingImmTask {
@@ -120,10 +152,9 @@ impl MergingImmTask {
         memory_tracker: Option<MemoryTracker>,
         context: &UploaderContext,
     ) -> Self {
+        assert!(imms.iter().rev().map(|imm| imm.batch_id()).is_sorted());
         let input_imms = imms.clone();
-        let join_handle = context.compaction_executor.spawn(async move {
-            merge_imms_in_memory(table_id, instance_id, imms, memory_tracker).await
-        });
+        let join_handle = (context.spawn_merging_task)(table_id, instance_id, imms, memory_tracker);
 
         MergingImmTask {
             table_id,
@@ -134,19 +165,22 @@ impl MergingImmTask {
     }
 
     /// Poll the result of the merge task
-    fn poll_result(&mut self, cx: &mut Context<'_>) -> Poll<HummockResult<ImmutableMemtable>> {
+    fn poll_result(&mut self, cx: &mut Context<'_>) -> Poll<ImmutableMemtable> {
         Poll::Ready(match ready!(self.join_handle.poll_unpin(cx)) {
             Ok(task_result) => task_result,
-            Err(err) => Err(HummockError::other(format!(
-                "fail to join imm merge join handle: {}",
-                err.as_report()
-            ))),
+            Err(err) => {
+                panic!(
+                    "failed to join merging task: {:?} {:?}",
+                    err.as_report(),
+                    self
+                );
+            }
         })
     }
 }
 
 impl Future for MergingImmTask {
-    type Output = HummockResult<ImmutableMemtable>;
+    type Output = ImmutableMemtable;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.poll_result(cx)
@@ -216,11 +250,12 @@ impl UploadingTask {
             Ok(task_result) => task_result
                 .inspect(|_| {
                     if self.task_info.task_size > Self::LOG_THRESHOLD_FOR_UPLOAD_TASK_SIZE {
-                        info!("upload task finish {:?}", self.task_info)
+                        info!(task_info = ?self.task_info, "upload task finish");
                     } else {
-                        debug!("upload task finish {:?}", self.task_info)
+                        debug!(task_info = ?self.task_info, "upload task finish");
                     }
                 })
+                .inspect_err(|e| error!(task_info = ?self.task_info, err = ?e.as_report(), "upload task failed"))
                 .map(|ssts| {
                     StagingSstableInfo::new(
                         ssts,
@@ -391,6 +426,7 @@ struct SealedData {
     merged_imms: VecDeque<ImmutableMemtable>,
 
     // Sealed imms grouped by table shard.
+    // newer data (larger imm id) at the front
     imms_by_table_shard: HashMap<(TableId, LocalInstanceId), VecDeque<ImmutableMemtable>>,
 
     // Merging tasks generated from sealed imms
@@ -454,10 +490,14 @@ impl SealedData {
 
         // rearrange sealed imms by table shard and in epoch descending order
         for imm in unseal_epoch_data.imms.into_iter().rev() {
-            self.imms_by_table_shard
+            let queue = self
+                .imms_by_table_shard
                 .entry((imm.table_id, imm.instance_id))
-                .or_default()
-                .push_front(imm);
+                .or_default();
+            if let Some(front) = queue.front() {
+                assert_gt!(imm.batch_id(), front.batch_id());
+            }
+            queue.push_front(imm);
         }
 
         self.epochs.push_front(epoch);
@@ -486,7 +526,6 @@ impl SealedData {
     }
 
     fn add_merged_imm(&mut self, merged_imm: &ImmutableMemtable) {
-        debug_assert!(merged_imm.is_merged_imm());
         // add merged_imm to merged_imms
         self.merged_imms.push_front(merged_imm.clone());
     }
@@ -549,15 +588,16 @@ impl SealedData {
     fn poll_success_merge_imm(&mut self, cx: &mut Context<'_>) -> Poll<Option<MergeImmTaskOutput>> {
         // only poll the oldest merge task if there is any
         if let Some(task) = self.merging_tasks.back_mut() {
-            let merge_result = ready!(task.poll_unpin(cx));
+            let merged_imm = ready!(task.poll_unpin(cx));
 
             // pop the finished task
             let task = self.merging_tasks.pop_back().expect("must exist");
 
             Poll::Ready(Some(MergeImmTaskOutput {
+                imm_ids: task.input_imms.iter().map(|imm| imm.batch_id()).collect(),
                 table_id: task.table_id,
                 instance_id: task.instance_id,
-                merged_imm: merge_result.unwrap(),
+                merged_imm,
             }))
         } else {
             Poll::Ready(None)
@@ -620,13 +660,12 @@ struct UploaderContext {
     pinned_version: PinnedVersion,
     /// When called, it will spawn a task to flush the imm into sst and return the join handle.
     spawn_upload_task: SpawnUploadTask,
+    spawn_merging_task: SpawnMergingTask,
     buffer_tracker: BufferTracker,
     /// The number of immutable memtables that will be merged into a new imm.
     /// When the number of imms of a table shard exceeds this threshold, uploader will generate
     /// merging tasks to merge them.
     imm_merge_threshold: usize,
-
-    compaction_executor: Arc<CompactionExecutor>,
 
     stats: Arc<HummockStateStoreMetrics>,
 }
@@ -635,17 +674,17 @@ impl UploaderContext {
     fn new(
         pinned_version: PinnedVersion,
         spawn_upload_task: SpawnUploadTask,
+        spawn_merging_task: SpawnMergingTask,
         buffer_tracker: BufferTracker,
         config: &StorageOpts,
-        compaction_executor: Arc<CompactionExecutor>,
         stats: Arc<HummockStateStoreMetrics>,
     ) -> Self {
         UploaderContext {
             pinned_version,
             spawn_upload_task,
+            spawn_merging_task,
             buffer_tracker,
             imm_merge_threshold: config.imm_merge_threshold,
-            compaction_executor,
             stats,
         }
     }
@@ -696,9 +735,9 @@ impl HummockUploader {
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         pinned_version: PinnedVersion,
         spawn_upload_task: SpawnUploadTask,
+        spawn_merging_task: SpawnMergingTask,
         buffer_tracker: BufferTracker,
         config: &StorageOpts,
-        compaction_executor: Arc<CompactionExecutor>,
     ) -> Self {
         let initial_epoch = pinned_version.version().max_committed_epoch;
         Self {
@@ -712,9 +751,9 @@ impl HummockUploader {
             context: UploaderContext::new(
                 pinned_version,
                 spawn_upload_task,
+                spawn_merging_task,
                 buffer_tracker,
                 config,
-                compaction_executor,
                 state_store_metrics,
             ),
         }
@@ -1160,8 +1199,8 @@ mod tests {
     use crate::hummock::compactor::CompactionExecutor;
     use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
     use crate::hummock::event_handler::uploader::{
-        HummockUploader, MergingImmTask, UploadTaskInfo, UploadTaskOutput, UploadTaskPayload,
-        UploaderContext, UploaderEvent, UploadingTask,
+        default_spawn_merging_task, HummockUploader, MergingImmTask, UploadTaskInfo,
+        UploadTaskOutput, UploadTaskPayload, UploaderContext, UploaderEvent, UploadingTask,
     };
     use crate::hummock::event_handler::LocalInstanceId;
     use crate::hummock::iterator::test_utils::{
@@ -1220,9 +1259,8 @@ mod tests {
             0,
             sorted_items,
             size,
-            vec![],
             TEST_TABLE_ID,
-            None,
+            LocalInstanceId::default(),
             tracker,
         )
     }
@@ -1261,9 +1299,9 @@ mod tests {
         UploaderContext::new(
             initial_pinned_version(),
             Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
+            default_spawn_merging_task(compaction_executor),
             BufferTracker::for_test(),
             &config,
-            compaction_executor,
             Arc::new(HummockStateStoreMetrics::unused()),
         )
     }
@@ -1282,9 +1320,9 @@ mod tests {
             Arc::new(HummockStateStoreMetrics::unused()),
             initial_pinned_version(),
             Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
+            default_spawn_merging_task(compaction_executor),
             BufferTracker::for_test(),
             &config,
-            compaction_executor,
         )
     }
 
@@ -1633,17 +1671,10 @@ mod tests {
             _ = sleep => {
                 println!("sleep timeout")
             }
-            res = &mut task => {
-                match res {
-                    Ok(imm) => {
-                        println!("merging task success");
-                        assert_eq!(table_id, imm.table_id);
-                        assert_eq!(9, imm.kv_count());
-                    }
-                    Err(err) => {
-                        println!("merging task failed: {:?}", err);
-                    }
-                }
+            imm = &mut task => {
+                println!("merging task success");
+                assert_eq!(table_id, imm.table_id);
+                assert_eq!(9, imm.kv_count());
             }
         }
         task.join_handle.abort();
@@ -1766,9 +1797,9 @@ mod tests {
                     })
                 }
             }),
+            default_spawn_merging_task(compaction_executor),
             buffer_tracker.clone(),
             &config,
-            compaction_executor,
         );
         (buffer_tracker, uploader, new_task_notifier)
     }

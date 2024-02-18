@@ -15,6 +15,7 @@
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::fmt::Debug;
+use std::iter::once;
 use std::ops::Bound::*;
 use std::ops::{Bound, Deref, DerefMut, RangeBounds};
 use std::ptr;
@@ -652,10 +653,11 @@ impl<T: AsRef<[u8]>> Debug for FullKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "FullKey {{ {:?}, epoch: {}, epoch_with_gap: {}}}",
+            "FullKey {{ {:?}, epoch: {}, epoch_with_gap: {}, spill_offset: {}}}",
             self.user_key,
+            self.epoch_with_gap.pure_epoch(),
             self.epoch_with_gap.as_u64(),
-            self.epoch_with_gap.pure_epoch()
+            self.epoch_with_gap.as_u64() - self.epoch_with_gap.pure_epoch(),
         )
     }
 }
@@ -826,6 +828,15 @@ impl<T: AsRef<[u8]> + Ord + Eq> PartialOrd for FullKey<T> {
     }
 }
 
+impl<'a, T> From<UserKey<&'a [u8]>> for UserKey<T>
+where
+    T: AsRef<[u8]> + CopyFromSlice,
+{
+    fn from(value: UserKey<&'a [u8]>) -> Self {
+        value.copy_into()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PointRange<T: AsRef<[u8]>> {
     // When comparing `PointRange`, we first compare `left_user_key`, then
@@ -919,6 +930,141 @@ pub fn bound_table_key_range<T: AsRef<[u8]> + EmptySliceRef>(
     };
 
     (start, end)
+}
+
+pub struct FullKeyTracker<T: AsRef<[u8]> + Ord + Eq> {
+    pub latest_full_key: FullKey<T>,
+    last_observed_epoch_with_gap: EpochWithGap,
+    /// TODO: Temporary bypass full key check. Remove this field after #15099 is resolved.
+    allow_same_full_key: bool,
+}
+
+impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
+    pub fn new(init_full_key: FullKey<T>) -> Self {
+        Self::with_config(init_full_key, false)
+    }
+
+    pub fn with_config(init_full_key: FullKey<T>, allow_same_full_key: bool) -> Self {
+        let epoch_with_gap = init_full_key.epoch_with_gap;
+        Self {
+            latest_full_key: init_full_key,
+            last_observed_epoch_with_gap: epoch_with_gap,
+            allow_same_full_key,
+        }
+    }
+
+    /// Check and observe a new full key during iteration
+    ///
+    /// # Examples:
+    /// ```
+    /// use bytes::Bytes;
+    /// use risingwave_common::catalog::TableId;
+    /// use risingwave_common::util::epoch::EPOCH_AVAILABLE_BITS;
+    /// use risingwave_hummock_sdk::EpochWithGap;
+    /// use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, TableKey};
+    ///
+    /// let table_id = TableId { table_id: 1 };
+    /// let full_key1 = FullKey::new(table_id, TableKey(Bytes::from("c")), 5 << EPOCH_AVAILABLE_BITS);
+    /// let mut a = FullKeyTracker::<Bytes>::new(full_key1.clone());
+    ///
+    /// // Panic on non-decreasing epoch observed for the same user key.
+    /// // let full_key_with_larger_epoch = FullKey::new(table_id, TableKey(Bytes::from("c")), 6 << EPOCH_AVAILABLE_BITS);
+    /// // a.observe(full_key_with_larger_epoch);
+    ///
+    /// // Panic on non-increasing user key observed.
+    /// // let full_key_with_smaller_user_key = FullKey::new(table_id, TableKey(Bytes::from("b")), 3 << EPOCH_AVAILABLE_BITS);
+    /// // a.observe(full_key_with_smaller_user_key);
+    ///
+    /// let full_key2 = FullKey::new(table_id, TableKey(Bytes::from("c")), 3 << EPOCH_AVAILABLE_BITS);
+    /// assert_eq!(a.observe(full_key2), None);
+    ///
+    /// let full_key3 = FullKey::new(table_id, TableKey(Bytes::from("f")), 4 << EPOCH_AVAILABLE_BITS);
+    /// assert_eq!(a.observe(full_key3), Some(full_key1));
+    /// ```
+    ///
+    /// Return:
+    /// - If the provided `key` contains a new user key, return the latest full key observed for the previous user key.
+    /// - Otherwise: return None
+    pub fn observe<F>(&mut self, key: FullKey<F>) -> Option<FullKey<T>>
+    where
+        UserKey<F>: Into<UserKey<T>>,
+        F: AsRef<[u8]>,
+    {
+        self.observe_multi_version(key.user_key, once(key.epoch_with_gap))
+    }
+
+    /// `epochs` comes from greater to smaller
+    pub fn observe_multi_version<F>(
+        &mut self,
+        user_key: UserKey<F>,
+        mut epochs: impl Iterator<Item = EpochWithGap>,
+    ) -> Option<FullKey<T>>
+    where
+        UserKey<F>: Into<UserKey<T>>,
+        F: AsRef<[u8]>,
+    {
+        let max_epoch_with_gap = epochs.next().expect("non-empty");
+        let min_epoch_with_gap = epochs.fold(
+            max_epoch_with_gap,
+            |prev_epoch_with_gap, curr_epoch_with_gap| {
+                assert!(
+                    prev_epoch_with_gap > curr_epoch_with_gap,
+                    "epoch list not sorted. prev: {:?}, curr: {:?}, user_key: {:?}",
+                    prev_epoch_with_gap,
+                    curr_epoch_with_gap,
+                    user_key
+                );
+                curr_epoch_with_gap
+            },
+        );
+        match self
+            .latest_full_key
+            .user_key
+            .as_ref()
+            .cmp(&user_key.as_ref())
+        {
+            Ordering::Less => {
+                // Observe a new user key
+
+                // Reset epochs
+                self.last_observed_epoch_with_gap = min_epoch_with_gap;
+
+                // Take the previous key and set latest key
+                Some(std::mem::replace(
+                    &mut self.latest_full_key,
+                    FullKey {
+                        user_key: user_key.into(),
+                        epoch_with_gap: min_epoch_with_gap,
+                    },
+                ))
+            }
+            Ordering::Equal => {
+                if max_epoch_with_gap > self.last_observed_epoch_with_gap
+                    || (!self.allow_same_full_key
+                        && max_epoch_with_gap == self.last_observed_epoch_with_gap)
+                {
+                    // Epoch from the same user key should be monotonically decreasing
+                    panic!(
+                        "key {:?} epoch {:?} >= prev epoch {:?}",
+                        user_key, max_epoch_with_gap, self.last_observed_epoch_with_gap
+                    );
+                }
+                self.last_observed_epoch_with_gap = min_epoch_with_gap;
+                None
+            }
+            Ordering::Greater => {
+                // User key should be monotonically increasing
+                panic!(
+                    "key {:?} <= prev key {:?}",
+                    user_key,
+                    FullKey {
+                        user_key: self.latest_full_key.user_key.as_ref(),
+                        epoch_with_gap: self.last_observed_epoch_with_gap
+                    }
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]

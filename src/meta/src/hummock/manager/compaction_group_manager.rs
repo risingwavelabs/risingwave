@@ -56,6 +56,7 @@ use crate::model::{
     BTreeMapTransactionWrapper, MetadataModel, MetadataModelError, TableFragments, ValTransaction,
 };
 use crate::storage::MetaStore;
+use crate::stream::CreateStreamingJobOption;
 
 impl HummockManager {
     pub(super) async fn build_compaction_group_manager(
@@ -106,12 +107,8 @@ impl HummockManager {
         &self,
         mv_table: Option<u32>,
         mut internal_tables: Vec<u32>,
-        table_properties: &HashMap<String, String>,
+        create_stream_job_option: CreateStreamingJobOption,
     ) -> Result<Vec<StateTableId>> {
-        let is_independent_compaction_group = table_properties
-            .get("independent_compaction_group")
-            .map(|s| s == "1")
-            == Some(true);
         let mut pairs = vec![];
         if let Some(mv_table) = mv_table {
             if internal_tables.extract_if(|t| *t == mv_table).count() > 0 {
@@ -120,7 +117,7 @@ impl HummockManager {
             // materialized_view
             pairs.push((
                 mv_table,
-                if is_independent_compaction_group {
+                if create_stream_job_option.new_independent_compaction_group {
                     CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
                 } else {
                     CompactionGroupId::from(StaticCompactionGroupId::MaterializedView)
@@ -131,7 +128,7 @@ impl HummockManager {
         for table_id in internal_tables {
             pairs.push((
                 table_id,
-                if is_independent_compaction_group {
+                if create_stream_job_option.new_independent_compaction_group {
                     CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
                 } else {
                     CompactionGroupId::from(StaticCompactionGroupId::StateDefault)
@@ -782,10 +779,10 @@ pub(super) struct CompactionGroupManager {
 }
 
 impl CompactionGroupManager {
-    async fn init<S: MetaStore>(&mut self, meta_store: &S) -> Result<()> {
+    async fn init<S: MetaStore>(&mut self, meta_store: Option<&S>) -> Result<()> {
         let loaded_compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup> =
             match &self.sql_meta_store {
-                None => CompactionGroup::list(meta_store)
+                None => CompactionGroup::list(meta_store.unwrap())
                     .await?
                     .into_iter()
                     .map(|cg| (cg.group_id(), cg))
@@ -811,7 +808,7 @@ impl CompactionGroupManager {
     pub(super) async fn get_or_insert_compaction_group_config<S: MetaStore>(
         &mut self,
         compaction_group_id: CompactionGroupId,
-        meta_store: &S,
+        meta_store: Option<&S>,
     ) -> Result<CompactionGroup> {
         let r = self
             .get_or_insert_compaction_group_configs(&[compaction_group_id], meta_store)
@@ -823,7 +820,7 @@ impl CompactionGroupManager {
     pub(super) async fn get_or_insert_compaction_group_configs<S: MetaStore>(
         &mut self,
         compaction_group_ids: &[CompactionGroupId],
-        meta_store: &S,
+        meta_store: Option<&S>,
     ) -> Result<HashMap<CompactionGroupId, CompactionGroup>> {
         let mut compaction_groups = create_trx_wrapper!(
             self.sql_meta_store,
@@ -862,7 +859,7 @@ impl CompactionGroupManager {
         &mut self,
         compaction_group_ids: &[CompactionGroupId],
         config_to_update: &[MutableConfig],
-        meta_store: &S,
+        meta_store: Option<&S>,
     ) -> Result<Vec<CompactionGroup>> {
         let mut compaction_groups = create_trx_wrapper!(
             self.sql_meta_store,
@@ -894,7 +891,7 @@ impl CompactionGroupManager {
         &mut self,
         group_id: CompactionGroupId,
         config: CompactionConfig,
-        meta_store: &S,
+        meta_store: Option<&S>,
     ) -> Result<()> {
         let insert = create_trx_wrapper!(
             self.sql_meta_store,
@@ -916,7 +913,7 @@ impl CompactionGroupManager {
     async fn purge<S: MetaStore>(
         &mut self,
         existing_groups: HashSet<CompactionGroupId>,
-        meta_store: &S,
+        meta_store: Option<&S>,
     ) -> Result<()> {
         let mut compaction_groups = create_trx_wrapper!(
             self.sql_meta_store,
@@ -994,17 +991,17 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::BTreeMap;
 
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
-    use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
     use risingwave_pb::meta::table_fragments::Fragment;
 
     use crate::hummock::test_utils::setup_compute_env;
     use crate::hummock::HummockManager;
     use crate::model::TableFragments;
+    use crate::stream::CreateStreamingJobOption;
 
     #[tokio::test]
     async fn test_inner() {
@@ -1101,16 +1098,14 @@ mod tests {
         let group_number =
             || async { compaction_group_manager.list_compaction_group().await.len() };
         assert_eq!(registered_number().await, 0);
-        let mut table_properties = HashMap::from([(
-            String::from(PROPERTIES_RETENTION_SECOND_KEY),
-            String::from("300"),
-        )]);
 
         compaction_group_manager
             .register_table_fragments(
                 Some(table_fragment_1.table_id().table_id),
                 table_fragment_1.internal_table_ids(),
-                &table_properties,
+                CreateStreamingJobOption {
+                    new_independent_compaction_group: false,
+                },
             )
             .await
             .unwrap();
@@ -1119,7 +1114,9 @@ mod tests {
             .register_table_fragments(
                 Some(table_fragment_2.table_id().table_id),
                 table_fragment_2.internal_table_ids(),
-                &table_properties,
+                CreateStreamingJobOption {
+                    new_independent_compaction_group: false,
+                },
             )
             .await
             .unwrap();
@@ -1141,15 +1138,14 @@ mod tests {
 
         // Test `StaticCompactionGroupId::NewCompactionGroup` in `register_table_fragments`
         assert_eq!(group_number().await, 2);
-        table_properties.insert(
-            String::from("independent_compaction_group"),
-            String::from("1"),
-        );
+
         compaction_group_manager
             .register_table_fragments(
                 Some(table_fragment_1.table_id().table_id),
                 table_fragment_1.internal_table_ids(),
-                &table_properties,
+                CreateStreamingJobOption {
+                    new_independent_compaction_group: true,
+                },
             )
             .await
             .unwrap();

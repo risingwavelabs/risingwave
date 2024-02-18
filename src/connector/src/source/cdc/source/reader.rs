@@ -19,20 +19,22 @@ use async_trait::async_trait;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prost::Message;
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_jni_core::{call_static_method, JniReceiverType, JniSenderType};
 use risingwave_pb::connector_service::{
     GetEventStreamRequest, GetEventStreamResponse, SourceCommonParam,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::cdc::{CdcProperties, CdcSourceType, CdcSourceTypeTrait, DebeziumCdcSplit};
 use crate::source::{
-    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, SourceContextRef,
-    SplitId, SplitMetaData, SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef, SplitId,
+    SplitMetaData, SplitReader,
 };
 
 pub struct CdcSplitReader<T: CdcSourceTypeTrait> {
@@ -136,7 +138,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                     tracing::info!(?source_id, "end of jni call runJniDbzSourceThread");
                 }
                 Err(e) => {
-                    tracing::error!(?source_id, "jni call error: {:?}", e);
+                    tracing::error!(?source_id, error = %e.as_report(), "jni call error");
                 }
             }
         });
@@ -186,7 +188,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         }
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self, parser_config, source_context)
@@ -202,14 +204,25 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
         let metrics = self.source_ctx.metrics.clone();
 
         while let Some(result) = rx.recv().await {
-            let GetEventStreamResponse { events, .. } = result?;
-            tracing::trace!("receive {} cdc events ", events.len());
-            metrics
-                .connector_source_rows_received
-                .with_label_values(&[source_type.as_str_name(), &source_id])
-                .inc_by(events.len() as u64);
-            let msgs = events.into_iter().map(SourceMessage::from).collect_vec();
-            yield msgs;
+            match result {
+                Ok(GetEventStreamResponse { events, .. }) => {
+                    tracing::trace!("receive {} cdc events ", events.len());
+                    metrics
+                        .connector_source_rows_received
+                        .with_label_values(&[source_type.as_str_name(), &source_id])
+                        .inc_by(events.len() as u64);
+                    let msgs = events.into_iter().map(SourceMessage::from).collect_vec();
+                    yield msgs;
+                }
+                Err(e) => {
+                    GLOBAL_ERROR_METRICS.cdc_source_error.report([
+                        source_type.as_str_name().into(),
+                        source_id.clone(),
+                        e.to_string(),
+                    ]);
+                    Err(e)?;
+                }
+            }
         }
 
         Err(anyhow!("all senders are dropped"))?;
