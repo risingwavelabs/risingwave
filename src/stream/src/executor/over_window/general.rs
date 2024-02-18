@@ -182,7 +182,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         let order_key_data_types = args
             .order_key_indices
             .iter()
-            .map(|i| input_schema.fields()[*i].data_type.clone())
+            .map(|i| input_schema[*i].data_type())
             .collect();
 
         let state_key_to_table_sub_pk_proj = RowConverter::calc_state_key_to_table_sub_pk_proj(

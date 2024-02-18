@@ -204,20 +204,11 @@
 - sql: |
     select pg_catalog.pg_get_userbyid(1)
   logical_plan: |-
-    LogicalProject { exprs: [rw_users.name] }
-    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-      └─LogicalProject { exprs: [rw_users.name] }
-        └─LogicalFilter { predicate: (1:Int32 = rw_users.id) }
-          └─LogicalShare { id: 2 }
-            └─LogicalProject { exprs: [rw_users.id, rw_users.name, rw_users.create_db, rw_users.is_super, '********':Varchar] }
-              └─LogicalSysScan { table: rw_users, columns: [rw_users.id, rw_users.name, rw_users.is_super, rw_users.create_db, rw_users.create_user, rw_users.can_login] }
+    LogicalProject { exprs: [PgGetUserbyid(1:Int32) as $expr1] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |-
-    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
-    ├─BatchValues { rows: [[]] }
-    └─BatchProject { exprs: [rw_users.name] }
-      └─BatchFilter { predicate: (1:Int32 = rw_users.id) }
-        └─BatchScan { table: rw_users, columns: [rw_users.name, rw_users.id], distribution: Single }
+    BatchProject { exprs: [PgGetUserbyid(1:Int32) as $expr1] }
+    └─BatchValues { rows: [[]] }
 - sql: |
     select 'pg_namespace'::regclass
   logical_plan: |-

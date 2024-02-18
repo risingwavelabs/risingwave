@@ -22,6 +22,7 @@ quote = "1"
 proc-macro2 = { version = "1", default-features = false }
 syn = "1"
 bae = "0.1.7"
+itertools = "0.12"
 
 [lints]
 workspace = true

@@ -19,13 +19,13 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Schema, TableVersionId};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Assignment, AssignmentValue, Expr, ObjectName, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
 use super::{Binder, BoundBaseTable};
 use crate::catalog::TableId;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr as _, ExprImpl, InputRef};
 use crate::user::UserId;
 use crate::TableCatalog;

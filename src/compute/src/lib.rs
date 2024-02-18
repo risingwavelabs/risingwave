@@ -64,6 +64,8 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_ADVERTISE_ADDR")]
     pub advertise_addr: Option<String>,
 
+    /// We will start a http server at this address via `MetricsManager`.
+    /// Then the prometheus instance will poll the metrics from this address.
     #[clap(
         long,
         env = "RW_PROMETHEUS_LISTENER_ADDR",
@@ -223,14 +225,14 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
     })
 }
 
-fn default_total_memory_bytes() -> usize {
+pub fn default_total_memory_bytes() -> usize {
     (system_memory_available_bytes() as f64 * DEFAULT_MEMORY_PROPORTION) as usize
 }
 
-fn default_parallelism() -> usize {
+pub fn default_parallelism() -> usize {
     total_cpu_available().ceil() as usize
 }
 
-fn default_role() -> Role {
+pub fn default_role() -> Role {
     Role::Both
 }

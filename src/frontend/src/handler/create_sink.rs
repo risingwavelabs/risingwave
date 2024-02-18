@@ -23,12 +23,11 @@ use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
-use risingwave_connector::sink::iceberg::{create_table, IcebergConfig, ICEBERG_SINK};
+use risingwave_connector::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
 };
@@ -49,6 +48,7 @@ use super::create_source::UPSTREAM_SOURCE_KEY;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
@@ -321,7 +321,7 @@ pub async fn get_partition_compute_info(
 async fn get_partition_compute_info_for_iceberg(
     iceberg_config: &IcebergConfig,
 ) -> Result<Option<PartitionComputeInfo>> {
-    let table = create_table(iceberg_config).await?;
+    let table = iceberg_config.load_table().await?;
     let Some(partition_spec) = table.current_table_metadata().current_partition_spec().ok() else {
         return Ok(None);
     };

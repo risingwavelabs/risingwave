@@ -656,6 +656,7 @@ impl HummockEventHandler {
                         .write()
                         .update(VersionUpdate::Staging(StagingData::MergedImmMem(
                             merge_output.merged_imm,
+                            merge_output.imm_ids,
                         )));
                 } else {
                     warn!(
@@ -888,9 +889,7 @@ mod tests {
     use crate::hummock::event_handler::{HummockEvent, HummockEventHandler, HummockVersionUpdate};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::local_version::pinned_version::PinnedVersion;
-    use crate::hummock::shared_buffer::shared_buffer_batch::{
-        SharedBufferBatch, SharedBufferBatchInner,
-    };
+    use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
     use crate::hummock::store::version::{StagingData, VersionUpdate};
     use crate::hummock::test_utils::default_opts_for_test;
     use crate::hummock::value::HummockValue;
@@ -933,26 +932,14 @@ mod tests {
                     Err(HummockError::other("".to_string()))
                 })
             }),
-            Arc::new(move |table_id, instance_id, imms, _| {
+            Arc::new(move |_, _, imms, _| {
                 let (tx, rx) = oneshot::channel::<()>();
                 let (finish_tx, finish_rx) = oneshot::channel::<()>();
                 spawn_merging_task_tx.send((tx, finish_rx)).unwrap();
                 spawn(async move {
                     rx.await.unwrap();
                     finish_tx.send(()).unwrap();
-                    let first_imm = &imms[0];
-                    Ok(SharedBufferBatch {
-                        inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
-                            first_imm.epochs().clone(),
-                            first_imm.get_payload().iter().cloned().collect_vec(),
-                            100,
-                            imms.iter().map(|imm| imm.batch_id()).collect_vec(),
-                            100,
-                            None,
-                        )),
-                        table_id,
-                        instance_id,
-                    })
+                    imms[0].clone()
                 })
             }),
             CacheRefiller::default_spawn_refill_task(),
