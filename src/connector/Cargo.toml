@@ -135,12 +135,13 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tokio-postgres = "0.7"
+tokio-postgres = {version = "0.7", features = ["with-uuid-1"]}
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { workspace = true }
 tracing = "0.1"
+uuid = {version = "1", features = ["v4", "fast-rng", "macro-diagnostics"]}
 url = "2"
 urlencoding = "2"
 with_options = { path = "./with_options" }
