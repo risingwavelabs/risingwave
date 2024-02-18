@@ -274,44 +274,12 @@ impl StreamRpcManager {
             f(client, input).await.map_err(|e| (node.id, e))
         });
 
-        // similar to join_all, but return early if a timeout occurs since the first error.
-        let stream = FuturesUnordered::from_iter(iters);
-        pin_mut!(stream);
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut results_ok = vec![];
-        let mut results_err = vec![];
-        let mut is_err_timeout = false;
-        loop {
-            let rx = rx.recv();
-            pin_mut!(rx);
-            match select(rx, stream.next()).await {
-                Either::Left((_, _)) => {
-                    break;
-                }
-                Either::Right((None, _)) => {
-                    break;
-                }
-                Either::Right((Some(Ok(rsp)), _)) => {
-                    results_ok.push(rsp);
-                }
-                Either::Right((Some(Err(err)), _)) => {
-                    results_err.push(err);
-                    if is_err_timeout {
-                        continue;
-                    }
-                    is_err_timeout = true;
-                    let tx = tx.clone();
-                    tokio::spawn(async move {
-                        tokio::time::sleep(Duration::from_secs(3)).await;
-                        let _ = tx.send(());
-                    });
-                }
-            }
-        }
+        let (results_ok, results_err) =
+            try_join_all_with_error_timeout(iters, Duration::from_secs(3)).await;
         if results_err.is_empty() {
             return Ok(results_ok);
         }
-        let merged_error = merge_compute_node_rpc_error("merged RPC Error", results_err);
+        let merged_error = merge_node_rpc_errors("merged RPC Error", results_err);
         Err(merged_error)
     }
 
@@ -432,7 +400,54 @@ impl StreamRpcManager {
     }
 }
 
-fn merge_compute_node_rpc_error(
+/// This function is similar to `try_join_all`, but it attempts to collect many error as possible within `error_timeout`.
+async fn try_join_all_with_error_timeout<I, RSP, E, F>(
+    iters: I,
+    error_timeout: Duration,
+) -> (Vec<RSP>, Vec<E>)
+where
+    I: IntoIterator<Item = F>,
+    F: Future<Output = Result<RSP, E>>,
+{
+    let stream = FuturesUnordered::from_iter(iters);
+    pin_mut!(stream);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut results_ok = vec![];
+    let mut results_err = vec![];
+    let mut is_err_timeout = false;
+    loop {
+        let rx = rx.recv();
+        pin_mut!(rx);
+        match select(rx, stream.next()).await {
+            Either::Left((_, _)) => {
+                // error_timeout
+                break;
+            }
+            Either::Right((None, _)) => {
+                break;
+            }
+            Either::Right((Some(Ok(rsp)), _)) => {
+                results_ok.push(rsp);
+            }
+            Either::Right((Some(Err(err)), _)) => {
+                results_err.push(err);
+                if is_err_timeout {
+                    continue;
+                }
+                // Start `error_timeout` when the first error occurs.
+                is_err_timeout = true;
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(error_timeout).await;
+                    let _ = tx.send(());
+                });
+            }
+        }
+    }
+    (results_ok, results_err)
+}
+
+fn merge_node_rpc_errors(
     message: &str,
     errors: impl IntoIterator<Item = (WorkerId, RpcError)>,
 ) -> MetaError {
