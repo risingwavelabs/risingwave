@@ -709,15 +709,6 @@ impl CommandContext {
         }
     }
 
-    /// For `CancelStreamingJob`, returns the actors of the `StreamScan` nodes. For other commands,
-    /// returns an empty set.
-    pub fn actors_to_cancel(&self) -> HashSet<ActorId> {
-        match &self.command {
-            Command::CancelStreamingJob(table_fragments) => table_fragments.backfill_actor_ids(),
-            _ => Default::default(),
-        }
-    }
-
     /// For `CancelStreamingJob`, returns the table id of the target table.
     pub fn table_to_cancel(&self) -> Option<TableId> {
         match &self.command {

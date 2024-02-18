@@ -16,7 +16,6 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -44,7 +43,7 @@ enum BackfillState {
 
 /// Progress of all actors containing backfill executors while creating mview.
 #[derive(Debug)]
-struct Progress {
+pub(super) struct Progress {
     states: HashMap<ActorId, BackfillState>,
 
     done_count: usize,
@@ -250,10 +249,13 @@ pub(super) struct TrackingCommand {
 /// 4. With `actor_map` we can use an actor's `ActorId` to find the ID of the `StreamJob`.
 pub(super) struct CreateMviewProgressTracker {
     /// Progress of the create-mview DDL indicated by the TableId.
-    progress_map: HashMap<TableId, (Progress, TrackingJob)>,
+    pub(super) progress_map: HashMap<TableId, (Progress, TrackingJob)>,
 
     /// Find the epoch of the create-mview DDL by the actor containing the backfill executors.
-    actor_map: HashMap<ActorId, TableId>,
+    pub(super) actor_map: HashMap<ActorId, TableId>,
+
+    /// Get notified when we finished Create MV and collect a barrier(checkpoint = true)
+    pub(super) finished_jobs: Vec<TrackingJob>,
 }
 
 impl CreateMviewProgressTracker {
@@ -313,6 +315,7 @@ impl CreateMviewProgressTracker {
         Self {
             progress_map,
             actor_map,
+            finished_jobs: Vec::new(),
         }
     }
 
@@ -320,6 +323,7 @@ impl CreateMviewProgressTracker {
         Self {
             progress_map: Default::default(),
             actor_map: Default::default(),
+            finished_jobs: Vec::new(),
         }
     }
 
@@ -336,27 +340,6 @@ impl CreateMviewProgressTracker {
                 (table_id, ddl_progress)
             })
             .collect()
-    }
-
-    /// Try to find the target create-streaming-job command from track.
-    ///
-    /// Return the target command as it should be cancelled based on the input actors.
-    pub fn find_cancelled_command(
-        &mut self,
-        actors_to_cancel: HashSet<ActorId>,
-    ) -> Option<TrackingJob> {
-        let epochs = actors_to_cancel
-            .into_iter()
-            .map(|actor_id| self.actor_map.get(&actor_id))
-            .collect_vec();
-        assert!(epochs.iter().all_equal());
-        // If the target command found in progress map, return and remove it. Note that the command
-        // should have finished if not found.
-        if let Some(Some(epoch)) = epochs.first() {
-            Some(self.progress_map.remove(epoch).unwrap().1)
-        } else {
-            None
-        }
     }
 
     /// Add a new create-mview DDL command to track.
@@ -496,7 +479,7 @@ impl CreateMviewProgressTracker {
                         table_id
                     );
 
-                    // Clean-up the mapping from actors to DDL epoch.
+                    // Clean-up the mapping from actors to DDL table_id.
                     for actor in o.get().0.actors() {
                         self.actor_map.remove(&actor);
                     }
