@@ -24,10 +24,10 @@ use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
-use tokio::sync::{oneshot, Mutex, RwLock};
+use tokio::sync::{oneshot, Mutex};
 use tracing::Instrument;
 
-use super::{Locations, RescheduleOptions, ScaleController, ScaleControllerRef, TableResizePolicy};
+use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan, StreamRpcManager};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
@@ -192,9 +192,7 @@ pub struct GlobalStreamManager {
 
     hummock_manager: HummockManagerRef,
 
-    pub reschedule_lock: RwLock<()>,
-
-    pub(crate) scale_controller: ScaleControllerRef,
+    pub scale_controller: ScaleControllerRef,
 
     pub stream_rpc_manager: StreamRpcManager,
 }
@@ -207,14 +205,8 @@ impl GlobalStreamManager {
         source_manager: SourceManagerRef,
         hummock_manager: HummockManagerRef,
         stream_rpc_manager: StreamRpcManager,
+        scale_controller: ScaleControllerRef,
     ) -> MetaResult<Self> {
-        let scale_controller = Arc::new(ScaleController::new(
-            &metadata_manager,
-            source_manager.clone(),
-            stream_rpc_manager.clone(),
-            env.clone(),
-        ));
-
         Ok(Self {
             env,
             metadata_manager,
@@ -222,7 +214,6 @@ impl GlobalStreamManager {
             source_manager,
             hummock_manager,
             creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
-            reschedule_lock: RwLock::new(()),
             scale_controller,
             stream_rpc_manager,
         })
@@ -629,7 +620,7 @@ impl GlobalStreamManager {
             return vec![];
         }
 
-        let _reschedule_job_lock = self.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.reschedule_lock_read_guard().await;
         let (receivers, recovered_job_ids) = self.creating_job_info.cancel_jobs(table_ids).await;
 
         let futures = receivers.into_iter().map(|(id, receiver)| async move {
@@ -688,7 +679,7 @@ impl GlobalStreamManager {
         parallelism: TableParallelism,
         deferred: bool,
     ) -> MetaResult<()> {
-        let _reschedule_job_lock = self.reschedule_lock.write().await;
+        let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
         let worker_nodes = self
             .metadata_manager
@@ -786,7 +777,7 @@ mod tests {
     use crate::model::{ActorId, FragmentId};
     use crate::rpc::ddl_controller::DropMode;
     use crate::rpc::metrics::MetaMetrics;
-    use crate::stream::SourceManager;
+    use crate::stream::{ScaleController, SourceManager};
     use crate::MetaOpts;
 
     struct FakeFragmentState {
@@ -985,6 +976,12 @@ mod tests {
             let (sink_manager, _) = SinkCoordinatorManager::start_worker();
 
             let stream_rpc_manager = StreamRpcManager::new(env.clone());
+            let scale_controller = Arc::new(ScaleController::new(
+                &metadata_manager,
+                source_manager.clone(),
+                stream_rpc_manager.clone(),
+                env.clone(),
+            ));
 
             let barrier_manager = GlobalBarrierManager::new(
                 scheduled_barriers,
@@ -995,6 +992,7 @@ mod tests {
                 sink_manager,
                 meta_metrics.clone(),
                 stream_rpc_manager.clone(),
+                scale_controller.clone(),
             );
 
             let stream_manager = GlobalStreamManager::new(
@@ -1004,6 +1002,7 @@ mod tests {
                 source_manager.clone(),
                 hummock_manager,
                 stream_rpc_manager,
+                scale_controller.clone(),
             )?;
 
             let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager);
