@@ -934,14 +934,21 @@ pub fn bound_table_key_range<T: AsRef<[u8]> + EmptySliceRef>(
 pub struct FullKeyTracker<T: AsRef<[u8]> + Ord + Eq> {
     pub latest_full_key: FullKey<T>,
     last_observed_epoch_with_gap: EpochWithGap,
+    /// TODO: Temporary bypass full key check. Remove this field after #15099 is resolved.
+    allow_same_full_key: bool,
 }
 
 impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
     pub fn new(init_full_key: FullKey<T>) -> Self {
+        Self::with_config(init_full_key, false)
+    }
+
+    pub fn with_config(init_full_key: FullKey<T>, allow_same_full_key: bool) -> Self {
         let epoch_with_gap = init_full_key.epoch_with_gap;
         Self {
             latest_full_key: init_full_key,
             last_observed_epoch_with_gap: epoch_with_gap,
+            allow_same_full_key,
         }
     }
 
@@ -998,7 +1005,10 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
                 Some(std::mem::replace(&mut self.latest_full_key, key.into()))
             }
             Ordering::Equal => {
-                if key.epoch_with_gap >= self.last_observed_epoch_with_gap {
+                if key.epoch_with_gap > self.last_observed_epoch_with_gap
+                    || (!self.allow_same_full_key
+                        && key.epoch_with_gap == self.last_observed_epoch_with_gap)
+                {
                     // Epoch from the same user key should be monotonically decreasing
                     panic!(
                         "key {:?} epoch {:?} >= prev epoch {:?}",
