@@ -45,7 +45,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "parking_lot", "std",
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true }
-opentelemetry_sdk = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] } # only enable `rt-tokio` feature under non-madsim target
 workspace-hack = { path = "../../workspace-hack" }
 
 [lints]
