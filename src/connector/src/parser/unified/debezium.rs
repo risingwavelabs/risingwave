@@ -261,7 +261,7 @@ where
                     Err(AccessError::Undefined {
                         name: "_id".to_string(),
                         path: path[0].to_string(),
-                    })
+                    })?
                 }
             }
             ["after" | "before", "payload"] => self.access(&[path[0]], Some(&DataType::Jsonb)),
@@ -282,7 +282,7 @@ where
                         Err(AccessError::Undefined {
                             name: "_id".to_string(),
                             path: "id".to_string(),
-                        })
+                        })?
                     }
                 } else {
                     ret
