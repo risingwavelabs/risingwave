@@ -12,34 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
-
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::types::DataType;
-
-use crate::catalog::system_catalog::{infer_dummy_view_sql, BuiltinView, SystemCatalogColumnsDef};
-
-pub static PG_EXTENSION_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
-    vec![
-        (DataType::Int32, "oid"), // oid
-        (DataType::Varchar, "extname"),
-        (DataType::Int32, "extowner"),     // oid
-        (DataType::Int32, "extnamespace"), // oid
-        (DataType::Boolean, "extrelocatable"),
-        (DataType::Varchar, "extversion"),
-        (DataType::List(Box::new(DataType::Int32)), "extconfig"), // []oid
-        (DataType::List(Box::new(DataType::Varchar)), "extcondition"),
-    ]
-});
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_extension` stores information about the installed extensions. See Section 38.17
 /// for details about extensions.
 ///
 /// Reference: <https://www.postgresql.org/docs/current/catalog-pg-extension.html>.
 /// Currently, we don't have any type of extension.
-pub static PG_EXTENSION: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
-    name: "pg_extension",
-    schema: PG_CATALOG_SCHEMA_NAME,
-    columns: &PG_EXTENSION_COLUMNS,
-    sql: infer_dummy_view_sql(&PG_EXTENSION_COLUMNS),
-});
+#[system_catalog(view, "pg_catalog.pg_extension")]
+#[derive(Fields)]
+struct PgExtension {
+    oid: i32,
+    extname: String,
+    extowner: i32,
+    extnamespace: i32,
+    extrelocatable: bool,
+    extversion: String,
+    extconfig: Vec<i32>,
+    extcondition: Vec<String>,
+}

@@ -20,6 +20,7 @@ members = [
   "src/expr/macro",
   "src/expr/udf",
   "src/frontend",
+  "src/frontend/macro",
   "src/frontend/planner_test",
   "src/java_binding",
   "src/jni_core",
