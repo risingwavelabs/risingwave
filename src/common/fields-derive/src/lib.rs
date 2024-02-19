@@ -66,16 +66,17 @@ fn gen(tokens: TokenStream) -> Result<TokenStream> {
         .iter()
         .map(|field| field.ident.as_ref().expect("field no name"))
         .collect::<Vec<_>>();
-    let primary_key = get_primary_key(&input).map(|indices| {
-        quote! {
-            fn primary_key() -> &'static [usize] {
-                &[#(#indices),*]
-            }
-        }
-    });
+    let primary_key = get_primary_key(&input).map_or_else(
+        || quote! { None },
+        |indices| {
+            quote! { Some(&[#(#indices),*]) }
+        },
+    );
 
     Ok(quote! {
         impl ::risingwave_common::types::Fields for #ident {
+            const PRIMARY_KEY: Option<&'static [usize]> = #primary_key;
+
             fn fields() -> Vec<(&'static str, ::risingwave_common::types::DataType)> {
                 vec![#(#fields_rw),*]
             }
@@ -84,7 +85,6 @@ fn gen(tokens: TokenStream) -> Result<TokenStream> {
                     ::risingwave_common::types::ToOwnedDatum::to_owned_datum(self.#names)
                 ),*])
             }
-            #primary_key
         }
         impl From<#ident> for ::risingwave_common::types::ScalarImpl {
             fn from(v: #ident) -> Self {
@@ -117,7 +117,9 @@ fn get_primary_key(input: &syn::DeriveInput) -> Option<Vec<usize>> {
         return Some(
             keys.to_string()
                 .split(',')
-                .map(|s| index(s.trim()))
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(index)
                 .collect(),
         );
     }
