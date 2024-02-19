@@ -48,3 +48,33 @@ visibility_mode
 query TT
 SELECT * FROM pg_catalog.pg_settings where name='dummy';
 ----
+
+# Tab-completion of `SET` command
+query T
+SELECT name
+FROM
+  (SELECT pg_catalog.lower(name) AS name
+   FROM pg_catalog.pg_settings
+   WHERE context IN ('user',
+                     'superuser')
+   UNION ALL SELECT 'constraints'
+   UNION ALL SELECT 'transaction'
+   UNION ALL SELECT 'session'
+   UNION ALL SELECT 'role'
+   UNION ALL SELECT 'tablespace'
+   UNION ALL SELECT 'all') ss
+WHERE substring(name, 1, 8)='search_p';
+----
+search_path
+
+# Tab-completion of `ALTER SYSTEM SET` command
+query T
+SELECT name
+FROM
+  (SELECT pg_catalog.lower(name) AS name
+   FROM pg_catalog.pg_settings
+   WHERE context != 'internal'
+   UNION ALL SELECT 'all') ss
+WHERE substring(name, 1, 7)='checkpo';
+----
+checkpoint_frequency
