@@ -318,6 +318,20 @@ In SQL UDF definition: `select $1 + aa + a + $2`
                                          ^
 
 
+# Long invalid parameter
+statement error
+create function long_invalid_param(i_am_valid INT) returns int language sql as
+  'select i_am_valid + _this_is_invalid_please_properly_mark_the_boundary_of_this_invalid_paramerter_ + i_am_valid';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+Bind error: [sql udf] failed to find named parameter _this_is_invalid_please_properly_mark_the_boundary_of_this_invalid_paramerter_
+In SQL UDF definition: `select i_am_valid + _this_is_invalid_please_properly_mark_the_boundary_of_this_invalid_paramerter_ + i_am_valid`
+                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
 statement error Expected end of statement, found: 💩
 create function call_regexp_replace() returns varchar language sql as 'select regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')';
 
