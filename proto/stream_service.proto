@@ -46,6 +46,7 @@ message DropActorsResponse {
 
 message ForceStopActorsRequest {
   string request_id = 1;
+  uint64 prev_epoch = 2;
 }
 
 message ForceStopActorsResponse {

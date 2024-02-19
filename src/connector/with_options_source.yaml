@@ -143,6 +143,9 @@ KafkaProperties:
     field_type: String
     comments: Client identifier
     required: false
+  - name: properties.enable.ssl.certificate.verification
+    field_type: bool
+    required: false
   - name: properties.queued.min.messages
     field_type: usize
     comments: Minimum number of messages per topic+partition librdkafka tries to maintain in the local  consumer queue.

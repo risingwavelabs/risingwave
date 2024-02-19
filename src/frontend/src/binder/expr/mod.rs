@@ -619,23 +619,9 @@ impl Binder {
         match &data_type {
             // Casting to Regclass type means getting the oid of expr.
             // See https://www.postgresql.org/docs/current/datatype-oid.html.
-            // Currently only string liter expr is supported since we cannot handle subquery in join
-            // on condition: https://github.com/risingwavelabs/risingwave/issues/6852
-            // TODO: Add generic expr support when needed
             AstDataType::Regclass => {
                 let input = self.bind_expr_inner(expr)?;
-                match input.return_type() {
-                    DataType::Varchar => Ok(ExprImpl::FunctionCall(Box::new(
-                        FunctionCall::new_unchecked(
-                            ExprType::CastRegclass,
-                            vec![input],
-                            DataType::Int32,
-                        ),
-                    ))),
-                    DataType::Int32 => Ok(input),
-                    dt if dt.is_int() => Ok(input.cast_explicit(DataType::Int32)?),
-                    _ => Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
-                }
+                Ok(input.cast_to_regclass()?)
             }
             AstDataType::Regproc => {
                 let lhs = self.bind_expr_inner(expr)?;
