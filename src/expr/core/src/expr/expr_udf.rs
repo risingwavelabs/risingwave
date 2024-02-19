@@ -44,6 +44,7 @@ pub struct UserDefinedFunction {
     children: Vec<BoxedExpression>,
     arg_types: Vec<DataType>,
     return_type: DataType,
+    #[expect(dead_code)]
     arg_schema: Arc<Schema>,
     imp: UdfImpl,
     identifier: String,
@@ -72,13 +73,19 @@ impl Expression for UserDefinedFunction {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let vis = input.visibility();
+        if input.cardinality() == 0 {
+            // early return for empty input
+            let mut builder = self.return_type.create_array_builder(input.capacity());
+            builder.append_n_null(input.capacity());
+            return Ok(builder.finish().into_ref());
+        }
         let mut columns = Vec::with_capacity(self.children.len());
         for child in &self.children {
             let array = child.eval(input).await?;
             columns.push(array);
         }
-        self.eval_inner(columns, vis).await
+        let chunk = DataChunk::new(columns, input.visibility().clone());
+        self.eval_inner(&chunk).await
     }
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
@@ -89,51 +96,29 @@ impl Expression for UserDefinedFunction {
         }
         let arg_row = OwnedRow::new(columns);
         let chunk = DataChunk::from_rows(std::slice::from_ref(&arg_row), &self.arg_types);
-        let arg_columns = chunk.columns().to_vec();
-        let output_array = self.eval_inner(arg_columns, chunk.visibility()).await?;
+        let output_array = self.eval_inner(&chunk).await?;
         Ok(output_array.to_datum())
     }
 }
 
 impl UserDefinedFunction {
-    async fn eval_inner(
-        &self,
-        columns: Vec<ArrayRef>,
-        vis: &risingwave_common::buffer::Bitmap,
-    ) -> Result<ArrayRef> {
-        let chunk = DataChunk::new(columns, vis.clone());
-        let compacted_chunk = chunk.compact_cow();
-        let compacted_columns: Vec<arrow_array::ArrayRef> = compacted_chunk
-            .columns()
-            .iter()
-            .map(|c| {
-                c.as_ref()
-                    .try_into()
-                    .expect("failed covert ArrayRef to arrow_array::ArrayRef")
-            })
-            .collect();
-        let opts = arrow_array::RecordBatchOptions::default()
-            .with_row_count(Some(compacted_chunk.capacity()));
-        let input = arrow_array::RecordBatch::try_new_with_options(
-            self.arg_schema.clone(),
-            compacted_columns,
-            &opts,
-        )
-        .expect("failed to build record batch");
+    async fn eval_inner(&self, input: &DataChunk) -> Result<ArrayRef> {
+        // this will drop invisible rows
+        let arrow_input = arrow_array::RecordBatch::try_from(input)?;
 
-        let output: arrow_array::RecordBatch = match &self.imp {
-            UdfImpl::Wasm(runtime) => runtime.call(&self.identifier, &input)?,
-            UdfImpl::JavaScript(runtime) => runtime.call(&self.identifier, &input)?,
+        let arrow_output: arrow_array::RecordBatch = match &self.imp {
+            UdfImpl::Wasm(runtime) => runtime.call(&self.identifier, &arrow_input)?,
+            UdfImpl::JavaScript(runtime) => runtime.call(&self.identifier, &arrow_input)?,
             UdfImpl::External(client) => {
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
                 let result = if disable_retry_count != 0 {
                     client
-                        .call(&self.identifier, input)
+                        .call(&self.identifier, arrow_input)
                         .instrument_await(self.span.clone())
                         .await
                 } else {
                     client
-                        .call_with_retry(&self.identifier, input)
+                        .call_with_retry(&self.identifier, arrow_input)
                         .instrument_await(self.span.clone())
                         .await
                 };
@@ -155,16 +140,16 @@ impl UserDefinedFunction {
                 result?
             }
         };
-        if output.num_rows() != vis.count_ones() {
+        if arrow_output.num_rows() != input.cardinality() {
             bail!(
                 "UDF returned {} rows, but expected {}",
-                output.num_rows(),
-                vis.len(),
+                arrow_output.num_rows(),
+                input.cardinality(),
             );
         }
 
-        let data_chunk = DataChunk::try_from(&output)?;
-        let output = data_chunk.uncompact(vis.clone());
+        let output = DataChunk::try_from(&arrow_output)?;
+        let output = output.uncompact(input.visibility().clone());
 
         let Some(array) = output.columns().first() else {
             bail!("UDF returned no columns");
