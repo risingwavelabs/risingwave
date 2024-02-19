@@ -1,6 +1,49 @@
 query TT
-SELECT * FROM pg_catalog.pg_settings;
+SELECT name FROM pg_catalog.pg_settings order by name;
 ----
+application_name
+background_ddl
+batch_enable_distributed_dml
+batch_parallelism
+bytea_output
+client_encoding
+client_min_messages
+create_compaction_group_for_mv
+datestyle
+extra_float_digits
+idle_in_transaction_session_timeout
+intervalstyle
+lock_timeout
+max_split_range_gap
+query_epoch
+query_mode
+row_security
+rw_batch_enable_lookup_join
+rw_batch_enable_sort_agg
+rw_enable_join_ordering
+rw_enable_share_plan
+rw_enable_two_phase_agg
+rw_force_split_distinct_agg
+rw_force_two_phase_agg
+rw_implicit_flush
+rw_streaming_allow_jsonb_in_stream_key
+rw_streaming_enable_bushy_join
+rw_streaming_enable_delta_join
+rw_streaming_over_window_cache_policy
+search_path
+server_encoding
+server_version
+server_version_num
+sink_decouple
+standard_conforming_strings
+statement_timeout
+streaming_enable_arrangement_backfill
+streaming_parallelism
+streaming_rate_limit
+synchronize_seqscans
+timezone
+transaction_isolation
+visibility_mode
 
 query TT
 SELECT * FROM pg_catalog.pg_settings where name='dummy';

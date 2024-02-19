@@ -123,6 +123,7 @@ pub struct Model {
     pub description: Option<String>,
     pub version: Option<TableVersion>,
     pub retention_seconds: Option<i32>,
+    pub incoming_sinks: I32Array,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -232,6 +233,7 @@ impl From<PbTable> for ActiveModel {
             description: Set(pb_table.description),
             version: Set(pb_table.version.map(|v| v.into())),
             retention_seconds: Set(pb_table.retention_seconds.map(|i| i as _)),
+            incoming_sinks: Set(pb_table.incoming_sinks.into()),
         }
     }
 }

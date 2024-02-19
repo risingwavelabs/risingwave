@@ -392,8 +392,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     if let Some(endpoint) = settings.tracing_endpoint {
         println!("opentelemetry tracing will be exported to `{endpoint}` if enabled");
 
-        use opentelemetry::{sdk, KeyValue};
+        use opentelemetry::KeyValue;
         use opentelemetry_otlp::WithExportConfig;
+        use opentelemetry_sdk as sdk;
         use opentelemetry_semantic_conventions::resource;
 
         let id = format!(
@@ -435,7 +436,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                     KeyValue::new(resource::SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
                     KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
                 ])))
-                .install_batch(opentelemetry::runtime::Tokio)
+                .install_batch(sdk::runtime::Tokio)
                 .unwrap()
         };
 
