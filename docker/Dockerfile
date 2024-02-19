@@ -108,9 +108,9 @@ RUN mvn dependency:go-offline --fail-never
 # Besides, rust-maven-plugin sets --target-dir, so the dependencies are built twice. How to dedup?
 COPY ./ /risingwave
 
-# RUN mvn -B package -Dmaven.test.skip=true -Dno-build-rust && \
-#   mkdir -p /risingwave/bin/connector-node && \
-#   tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
+RUN mvn -B package -Dmaven.test.skip=true -Dno-build-rust && \
+  mkdir -p /risingwave/bin/connector-node && \
+  tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
 
 FROM base AS risingwave
 
@@ -122,11 +122,11 @@ RUN apt-get update && apt-get -y install linux-tools-generic \
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install gdb libpam-krb5 krb5-user telnet kafkacat \
   && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
-# RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
+RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 
 COPY --from=rust-builder /risingwave/bin/risingwave /risingwave/bin/risingwave
 COPY --from=rust-builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwave.dwp
-# COPY --from=java-builder /risingwave/bin/connector-node /risingwave/bin/connector-node
+COPY --from=java-builder /risingwave/bin/connector-node /risingwave/bin/connector-node
 COPY --from=dashboard-builder /risingwave/dashboard/out /risingwave/ui
 COPY --from=rust-builder /risingwave/bin/jeprof /usr/local/bin/jeprof
 COPY --from=rust-base /root/.cargo/bin/flamegraph /usr/local/bin/flamegraph
@@ -136,7 +136,7 @@ ENV PLAYGROUND_PROFILE docker-playground
 # Set default dashboard UI to local path instead of github proxy
 ENV RW_DASHBOARD_UI_PATH /risingwave/ui
 # Set default connector libs path
-# ENV CONNECTOR_LIBS_PATH /risingwave/bin/connector-node/libs
+ENV CONNECTOR_LIBS_PATH /risingwave/bin/connector-node/libs
 ENV IN_CONTAINER=1
 
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
