@@ -329,7 +329,14 @@ impl GlobalBarrierManager {
     /// the cluster or `risectl` command. Used for debugging purpose.
     ///
     /// Returns the new state of the barrier manager after recovery.
-    pub async fn recovery(&mut self, prev_epoch: TracedEpoch, paused_reason: Option<PausedReason>) {
+    pub async fn recovery(&mut self, paused_reason: Option<PausedReason>) {
+        let prev_epoch = TracedEpoch::new(
+            self.context
+                .hummock_manager
+                .latest_snapshot()
+                .committed_epoch
+                .into(),
+        );
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked("cluster is under recovering");
