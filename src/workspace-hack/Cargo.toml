@@ -150,7 +150,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "local
 unicode-bidi = { version = "0.3" }
 unicode-normalization = { version = "0.1" }
 url = { version = "2", features = ["serde"] }
-uuid = { version = "1", features = ["fast-rng", "macro-diagnostics", "serde", "v4"] }
+uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
 whoami = { version = "1" }
 zeroize = { version = "1" }
 zstd = { version = "0.13" }

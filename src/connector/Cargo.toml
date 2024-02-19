@@ -143,7 +143,7 @@ tonic = { workspace = true }
 tracing = "0.1"
 url = "2"
 urlencoding = "2"
-uuid = { version = "1", features = ["v4", "fast-rng", "macro-diagnostics"] }
+uuid = { version = "1", features = ["v4", "fast-rng"] }
 with_options = { path = "./with_options" }
 yup-oauth2 = "8.3"
 
