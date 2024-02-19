@@ -27,6 +27,7 @@ use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
+use crate::handler::create_sql_function::SQL_UDF_PATTERN;
 
 mod binary_op;
 mod column;
@@ -392,14 +393,13 @@ impl Binder {
         if self.udf_context.global_count() != 0 {
             if let Some(expr) = self.udf_context.get_expr(&format!("${index}")) {
                 return Ok(expr.clone());
-            } else {
-                // Same as `bind_column`, the error message here
-                // help with hint display when invalid definition occurs
-                return Err(ErrorCode::BindError(format!(
-                    "[sql udf] failed to find unnamed parameter ${index}"
-                ))
-                .into());
             }
+            // Same as `bind_column`, the error message here
+            // help with hint display when invalid definition occurs
+            return Err(ErrorCode::BindError(format!(
+                "{SQL_UDF_PATTERN} failed to find unnamed parameter ${index}"
+            ))
+            .into());
         }
 
         Ok(Parameter::new(index, self.param_types.clone()).into())

@@ -36,7 +36,7 @@ const DEFAULT_ERR_MSG: &str = "Failed to conduct semantic check";
 
 const PROMPT: &str = "In SQL UDF definition: ";
 
-const SQL_UDF_PATTERN: &str = "[sql udf]";
+pub const SQL_UDF_PATTERN: &str = "[sql udf]";
 
 /// Create a mock `udf_context`, which is used for semantic check
 fn create_mock_udf_context(
