@@ -301,10 +301,7 @@ impl GlobalBarrierManagerContext {
 impl GlobalBarrierManager {
     /// Pre buffered drop and cancel command, return true if any.
     async fn pre_apply_drop_cancel(&self) -> MetaResult<bool> {
-        let (dropped_actors, cancelled) = self
-            .scheduled_barriers
-            .pre_apply_drop_cancel_scheduled()
-            .await;
+        let (dropped_actors, cancelled) = self.scheduled_barriers.pre_apply_drop_cancel_scheduled();
         let applied = !dropped_actors.is_empty() || !cancelled.is_empty();
         if !cancelled.is_empty() {
             match &self.context.metadata_manager {
@@ -335,8 +332,7 @@ impl GlobalBarrierManager {
     pub async fn recovery(&mut self, prev_epoch: TracedEpoch, paused_reason: Option<PausedReason>) {
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
-            .abort_and_mark_blocked("cluster is under recovering")
-            .await;
+            .abort_and_mark_blocked("cluster is under recovering");
 
         tracing::info!("recovery start!");
         self.context
@@ -465,9 +461,13 @@ impl GlobalBarrierManager {
                             command_ctx.wait_epoch_commit(mce).await?;
                         }
                     };
-                    let await_barrier_complete =
-                        self.context.inject_barrier(command_ctx.clone()).await;
-                    let res = match await_barrier_complete.await.result {
+
+                    let res = match self
+                        .context
+                        .inject_barrier(command_ctx.clone(), None, None)
+                        .await
+                        .result
+                    {
                         Ok(response) => {
                             if let Err(err) = command_ctx.post_collect().await {
                                 warn!(error = %err.as_report(), "post_collect failed");
@@ -499,7 +499,7 @@ impl GlobalBarrierManager {
         .expect("Retry until recovery success.");
 
         recovery_timer.observe_duration();
-        self.scheduled_barriers.mark_ready().await;
+        self.scheduled_barriers.mark_ready();
 
         tracing::info!(
             epoch = state.in_flight_prev_epoch().value().0,
