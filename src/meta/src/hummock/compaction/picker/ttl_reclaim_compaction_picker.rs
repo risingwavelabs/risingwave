@@ -611,7 +611,7 @@ mod test {
             );
 
             let expect_task_file_count = [1, 1, 1];
-            let expect_task_sst_id_range = vec![vec![2], vec![3], vec![4]];
+            let expect_task_sst_id_range = [vec![2], vec![3], vec![4]];
             for (index, x) in expect_task_file_count.iter().enumerate() {
                 // // pick ttl reclaim
                 let task = selector
@@ -694,7 +694,7 @@ mod test {
             );
 
             let expect_task_file_count = [1, 1];
-            let expect_task_sst_id_range = vec![vec![2], vec![3]];
+            let expect_task_sst_id_range = [vec![2], vec![3]];
             for (index, x) in expect_task_file_count.iter().enumerate() {
                 if index == expect_task_file_count.len() - 1 {
                     table_id_to_options.insert(
