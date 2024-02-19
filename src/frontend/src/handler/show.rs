@@ -19,7 +19,6 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_protocol::truncated_fmt;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::pg_server::Session;
-use pgwire::types::Row;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::types::{DataType, Fields};
@@ -108,11 +107,13 @@ fn schema_or_default(schema: &Option<Ident>) -> String {
 }
 
 #[derive(Fields)]
+#[fields(style = "Title Case")]
 struct ShowObjectRow {
     name: String,
 }
 
 #[derive(Fields)]
+#[fields(style = "Title Case")]
 pub struct ShowColumnRow {
     pub name: String,
     pub r#type: String,
@@ -143,6 +144,7 @@ impl ShowColumnRow {
 }
 
 #[derive(Fields)]
+#[fields(style = "Title Case")]
 struct ShowConnectionRow {
     name: String,
     r#type: String,
@@ -150,6 +152,7 @@ struct ShowConnectionRow {
 }
 
 #[derive(Fields)]
+#[fields(style = "Title Case")]
 struct ShowFunctionRow {
     name: String,
     arguments: String,
@@ -159,6 +162,7 @@ struct ShowFunctionRow {
 }
 
 #[derive(Fields)]
+#[fields(style = "Title Case")]
 struct ShowIndexRow {
     name: String,
     on: String,
@@ -182,6 +186,7 @@ impl From<Arc<IndexCatalog>> for ShowIndexRow {
 }
 
 #[derive(Fields)]
+#[fields(style = "Title Case")]
 struct ShowClusterRow {
     addr: String,
     state: String,
@@ -192,6 +197,7 @@ struct ShowClusterRow {
 }
 
 #[derive(Fields)]
+#[fields(style = "Title Case")]
 struct ShowJobRow {
     id: i64,
     statement: String,
@@ -199,6 +205,7 @@ struct ShowJobRow {
 }
 
 #[derive(Fields)]
+#[fields(style = "Title Case")]
 struct ShowProcessListRow {
     id: String,
     user: String,
@@ -209,6 +216,7 @@ struct ShowProcessListRow {
 }
 
 #[derive(Fields)]
+#[fields(style = "Title Case")]
 struct ShowCreateObjectRow {
     name: String,
     create_sql: String,
@@ -502,21 +510,10 @@ pub fn handle_show_create_object(
     let name = format!("{}.{}", schema_name, object_name);
 
     Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
-        .values(
-            vec![Row::new(vec![Some(name.into()), Some(sql.into())])].into(),
-            vec![
-                PgFieldDescriptor::new(
-                    "Name".to_owned(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                ),
-                PgFieldDescriptor::new(
-                    "Create Sql".to_owned(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                ),
-            ],
-        )
+        .rows([ShowCreateObjectRow {
+            name,
+            create_sql: sql,
+        }])
         .into())
 }
 

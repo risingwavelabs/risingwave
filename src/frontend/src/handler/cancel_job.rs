@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
-use pgwire::types::Row;
-use risingwave_common::types::DataType;
+use risingwave_common::types::Fields;
 use risingwave_pb::meta::cancel_creating_jobs_request::{CreatingJobIds, PbJobs};
 use risingwave_sqlparser::ast::JobIdents;
 
+use super::RwPgResponseBuilderExt;
 use crate::error::Result;
 use crate::handler::{HandlerArgs, RwPgResponse};
 
@@ -36,16 +34,14 @@ pub(super) async fn handle_cancel(
         .await?;
     let rows = canceled_jobs
         .into_iter()
-        .map(|id| Row::new(vec![Some(id.to_string().into())]))
-        .collect_vec();
+        .map(|id| CancelRow { id: id as i32 });
     Ok(PgResponse::builder(StatementType::CANCEL_COMMAND)
-        .values(
-            rows.into(),
-            vec![PgFieldDescriptor::new(
-                "Id".to_string(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            )],
-        )
+        .rows(rows)
         .into())
+}
+
+#[derive(Fields)]
+#[fields(style = "Title Case")]
+struct CancelRow {
+    id: i32,
 }

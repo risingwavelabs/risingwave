@@ -177,11 +177,13 @@ pub fn infer_show_variable(name: &str) -> Vec<PgFieldDescriptor> {
 }
 
 #[derive(Fields)]
+#[fields(style = "Title Case")]
 struct ShowVariableRow {
     name: String,
 }
 
 #[derive(Fields)]
+#[fields(style = "Title Case")]
 struct ShowVariableAllRow {
     name: String,
     setting: String,
@@ -189,6 +191,7 @@ struct ShowVariableAllRow {
 }
 
 #[derive(Fields)]
+#[fields(style = "Title Case")]
 struct ShowVariableParamsRow {
     name: String,
     value: String,

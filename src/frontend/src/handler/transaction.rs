@@ -118,6 +118,7 @@ pub async fn handle_set(
 }
 
 #[derive(Fields)]
+#[fields(style = "Title Case")]
 struct ShowVariableRow {
     name: String,
 }
