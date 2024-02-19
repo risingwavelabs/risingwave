@@ -117,8 +117,8 @@ struct TemporalSide<K: HashKey, S: StateStore> {
 }
 
 impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
-    /// Lookup the temporal side table and return a `JoinEntry` which could be empty if there are no
-    /// matched records.
+    /// Fetch records from temporal side table and ensure the entry in the cache.
+    /// If already exists, the entry will be promoted.
     async fn fetch_or_promote_keys(
         &mut self,
         keys: impl Iterator<Item = &K>,
