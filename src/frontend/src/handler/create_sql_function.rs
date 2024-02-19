@@ -62,9 +62,10 @@ fn create_mock_udf_context(
 /// Find the pattern for better hint display
 /// return the exact index where the pattern first appears
 fn find_target(input: &str, target: &str) -> Option<usize> {
-    // Regex pattern to find `target` as a single word without any preceding or following characters
-    // here `\b` asserts a word boundary
-    let pattern = format!(r"\b{}\b", fancy_regex::escape(target));
+    // Regex pattern to find `target` not preceded or followed by an ASCII letter
+    // The pattern uses negative lookbehind (?<!...) and lookahead (?!...) to ensure
+    // the target is not surrounded by ASCII alphabetic characters
+    let pattern = format!(r"(?<![A-Za-z]){0}(?![A-Za-z])", fancy_regex::escape(target));
     let re = Regex::new(&pattern).unwrap();
 
     let Ok(Some(ma)) = re.find(input) else {
@@ -227,8 +228,11 @@ pub async fn handle_create_sql_function(
                     }
                 }
                 Err(e) => {
+                    println!("e: {:#?}", e);
                     if let ErrorCode::BindErrorRoot { expr: _, error } = e.inner() {
                         let invalid_msg = error.to_string();
+
+                        println!("invalid_msg: {}", invalid_msg);
 
                         // Valid error message for hint display
                         let Some(_) = invalid_msg.as_str().find(SQL_UDF_PATTERN) else {
@@ -241,6 +245,8 @@ pub async fn handle_create_sql_function(
                         // We will just display the first one found
                         let invalid_item_name =
                             invalid_msg.split_whitespace().last().unwrap_or("null");
+
+                        println!("invalid_item_name: {}", invalid_item_name);
 
                         // Find the invalid parameter / column
                         let Some(idx) = find_target(body.as_str(), invalid_item_name) else {
@@ -261,10 +267,10 @@ pub async fn handle_create_sql_function(
                             DEFAULT_ERR_MSG, invalid_msg, PROMPT, body, position
                         ))
                         .into());
-                    } else {
-                        // Otherwise return the default error message
-                        return Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into());
                     }
+
+                    // Otherwise return the default error message
+                    return Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into());
                 }
             }
         } else {
