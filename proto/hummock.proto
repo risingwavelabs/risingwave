@@ -547,6 +547,7 @@ message TriggerManualCompactionRequest {
   uint32 table_id = 3;
   uint32 level = 4;
   repeated uint64 sst_ids = 5;
+  uint64 max_compaction_bytes = 6;
 }
 
 message TriggerManualCompactionResponse {

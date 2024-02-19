@@ -96,9 +96,16 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         table_id: u32,
         level: u32,
         sst_ids: Vec<u64>,
+        max_compaction_bytes: u64,
     ) -> Result<()> {
         self.meta_client
-            .trigger_manual_compaction(compaction_group_id, table_id, level, sst_ids)
+            .trigger_manual_compaction(
+                compaction_group_id,
+                table_id,
+                level,
+                sst_ids,
+                max_compaction_bytes,
+            )
             .await
     }
 

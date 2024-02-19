@@ -50,6 +50,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         table_id: u32,
         level: u32,
         sst_ids: Vec<u64>,
+        max_compaction_bytes: u64,
     ) -> Result<()>;
     async fn report_full_scan_task(
         &self,

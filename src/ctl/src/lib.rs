@@ -192,6 +192,9 @@ enum HummockCommands {
 
         #[clap(short, long = "sst-ids")]
         sst_ids: Vec<u64>,
+
+        #[clap(short, long = "max_compaction_bytes", default_value_t = u64::MAX)]
+        max_compaction_bytes: u64,
     },
     /// trigger a full GC for SSTs that is not in version and with timestamp <= now -
     /// sst_retention_time_sec.
@@ -592,6 +595,7 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             table_id,
             level,
             sst_ids,
+            max_compaction_bytes,
         }) => {
             cmd_impl::hummock::trigger_manual_compaction(
                 context,
@@ -599,6 +603,7 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 table_id,
                 level,
                 sst_ids,
+                max_compaction_bytes,
             )
             .await?
         }

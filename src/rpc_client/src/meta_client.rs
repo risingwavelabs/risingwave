@@ -1380,6 +1380,7 @@ impl HummockMetaClient for MetaClient {
         table_id: u32,
         level: u32,
         sst_ids: Vec<u64>,
+        max_compaction_bytes: u64,
     ) -> Result<()> {
         // TODO: support key_range parameter
         let req = TriggerManualCompactionRequest {
@@ -1389,6 +1390,7 @@ impl HummockMetaClient for MetaClient {
             // without check internal_table_id
             level,
             sst_ids,
+            max_compaction_bytes,
             ..Default::default()
         };
 
