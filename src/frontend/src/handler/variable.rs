@@ -14,19 +14,18 @@
 
 use anyhow::Context;
 use itertools::Itertools;
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_protocol::ParameterStatus;
 use pgwire::pg_response::{PgResponse, StatementType};
-use pgwire::types::Row;
 use risingwave_common::session_config::{ConfigReporter, SESSION_CONFIG_LIST_SEP};
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_common::types::{DataType, ScalarRefImpl};
+use risingwave_common::types::Fields;
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
 use risingwave_sqlparser::keywords::Keyword;
 
-use super::RwPgResponse;
+use super::{fields_to_descriptors, RwPgResponse, RwPgResponseBuilderExt};
 use crate::error::Result;
 use crate::handler::HandlerArgs;
-use crate::utils::infer_stmt_row_desc::infer_show_variable;
 
 /// convert `SetVariableValue` to string while remove the quotes on literals.
 pub(crate) fn set_var_to_param_str(value: &SetVariableValue) -> Option<String> {
@@ -117,40 +116,36 @@ pub(super) async fn handle_show(
 ) -> Result<RwPgResponse> {
     // TODO: Verify that the name used in `show` command is indeed always case-insensitive.
     let name = variable.iter().map(|e| e.real_value()).join(" ");
-    let row_desc = infer_show_variable(&name);
-    let rows = if name.eq_ignore_ascii_case("PARAMETERS") {
-        handle_show_system_params(handler_args).await?
+    if name.eq_ignore_ascii_case("PARAMETERS") {
+        handle_show_system_params(handler_args).await
     } else if name.eq_ignore_ascii_case("ALL") {
-        handle_show_all(handler_args.clone())?
+        handle_show_all(handler_args.clone())
     } else {
         let config_reader = handler_args.session.config();
-        vec![Row::new(vec![Some(config_reader.get(&name)?.into())])]
-    };
-
-    Ok(PgResponse::builder(StatementType::SHOW_VARIABLE)
-        .values(rows.into(), row_desc)
-        .into())
+        Ok(PgResponse::builder(StatementType::SHOW_VARIABLE)
+            .rows([ShowVariableRow {
+                name: config_reader.get(&name)?,
+            }])
+            .into())
+    }
 }
 
-fn handle_show_all(handler_args: HandlerArgs) -> Result<Vec<Row>> {
+fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse> {
     let config_reader = handler_args.session.config();
 
     let all_variables = config_reader.show_all();
 
-    let rows = all_variables
-        .iter()
-        .map(|info| {
-            Row::new(vec![
-                Some(info.name.clone().into()),
-                Some(info.setting.clone().into()),
-                Some(info.description.clone().into()),
-            ])
-        })
-        .collect_vec();
-    Ok(rows)
+    let rows = all_variables.iter().map(|info| ShowVariableAllRow {
+        name: info.name.clone(),
+        setting: info.setting.clone(),
+        description: info.description.clone(),
+    });
+    Ok(PgResponse::builder(StatementType::SHOW_VARIABLE)
+        .rows(rows)
+        .into())
 }
 
-async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<Vec<Row>> {
+async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResponse> {
     let params = handler_args
         .session
         .env()
@@ -160,17 +155,43 @@ async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<Vec<Row>
     let rows = params
         .get_all()
         .into_iter()
-        .map(|info| {
-            let is_mutable_bytes = ScalarRefImpl::Bool(info.mutable)
-                .text_format(&DataType::Boolean)
-                .into();
-            Row::new(vec![
-                Some(info.name.into()),
-                Some(info.value.into()),
-                Some(info.description.into()),
-                Some(is_mutable_bytes),
-            ])
-        })
-        .collect_vec();
-    Ok(rows)
+        .map(|info| ShowVariableParamsRow {
+            name: info.name.into(),
+            value: info.value,
+            description: info.description.into(),
+            mutable: info.mutable,
+        });
+    Ok(PgResponse::builder(StatementType::SHOW_VARIABLE)
+        .rows(rows)
+        .into())
+}
+
+pub fn infer_show_variable(name: &str) -> Vec<PgFieldDescriptor> {
+    fields_to_descriptors(if name.eq_ignore_ascii_case("ALL") {
+        ShowVariableAllRow::fields()
+    } else if name.eq_ignore_ascii_case("PARAMETERS") {
+        ShowVariableParamsRow::fields()
+    } else {
+        ShowVariableRow::fields()
+    })
+}
+
+#[derive(Fields)]
+struct ShowVariableRow {
+    name: String,
+}
+
+#[derive(Fields)]
+struct ShowVariableAllRow {
+    name: String,
+    setting: String,
+    description: String,
+}
+
+#[derive(Fields)]
+struct ShowVariableParamsRow {
+    name: String,
+    value: String,
+    description: String,
+    mutable: bool,
 }
