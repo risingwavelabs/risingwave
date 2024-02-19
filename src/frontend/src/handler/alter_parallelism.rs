@@ -14,7 +14,6 @@
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::table_parallelism::{
     AdaptiveParallelism, FixedParallelism, PbParallelism,
 };
@@ -27,6 +26,7 @@ use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::CatalogError;
+use crate::error::{ErrorCode, Result};
 use crate::Binder;
 
 pub async fn handle_alter_parallelism(

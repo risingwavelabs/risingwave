@@ -14,7 +14,7 @@
 
 use std::marker::PhantomData;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
@@ -92,14 +92,13 @@ impl CdcSplitTrait for MySqlCdcSplit {
     fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
         let mut snapshot_done = self.inner.snapshot_done;
         if !snapshot_done {
-            let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset).map_err(|e| {
-                anyhow!(
-                    "invalid mysql offset: {}, error: {}, split: {}",
-                    start_offset,
-                    e,
-                    self.inner.split_id
-                )
-            })?;
+            let dbz_offset: DebeziumOffset =
+                serde_json::from_str(&start_offset).with_context(|| {
+                    format!(
+                        "invalid mysql offset: {}, split: {}",
+                        start_offset, self.inner.split_id
+                    )
+                })?;
 
             // heartbeat event should not update the `snapshot_done` flag
             if !dbz_offset.is_heartbeat {
@@ -146,14 +145,13 @@ impl CdcSplitTrait for PostgresCdcSplit {
     fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
         let mut snapshot_done = self.inner.snapshot_done;
         if !snapshot_done {
-            let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset).map_err(|e| {
-                anyhow!(
-                    "invalid postgres offset: {}, error: {}, split: {}",
-                    start_offset,
-                    e,
-                    self.inner.split_id
-                )
-            })?;
+            let dbz_offset: DebeziumOffset =
+                serde_json::from_str(&start_offset).with_context(|| {
+                    format!(
+                        "invalid postgres offset: {}, split: {}",
+                        start_offset, self.inner.split_id
+                    )
+                })?;
 
             // heartbeat event should not update the `snapshot_done` flag
             if !dbz_offset.is_heartbeat {
@@ -198,14 +196,13 @@ impl CdcSplitTrait for MongoDbCdcSplit {
         let mut snapshot_done = self.inner.snapshot_done;
         // extract snapshot state from debezium offset
         if !snapshot_done {
-            let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset).map_err(|e| {
-                anyhow!(
-                    "invalid mongodb offset: {}, error: {}, split: {}",
-                    start_offset,
-                    e,
-                    self.inner.split_id
-                )
-            })?;
+            let dbz_offset: DebeziumOffset =
+                serde_json::from_str(&start_offset).with_context(|| {
+                    format!(
+                        "invalid mongodb offset: {}, split: {}",
+                        start_offset, self.inner.split_id
+                    )
+                })?;
 
             // heartbeat event should not update the `snapshot_done` flag
             if !dbz_offset.is_heartbeat {
@@ -237,7 +234,7 @@ pub struct DebeziumCdcSplit<T: CdcSourceTypeTrait> {
     pub _phantom: PhantomData<T>,
 }
 
-macro_rules! dispatch_cdc_split {
+macro_rules! dispatch_cdc_split_inner {
     ($dbz_split:expr, $as_type:tt, {$($cdc_source_type:tt),*}, $body:expr) => {
         match T::source_type() {
             $(
@@ -254,6 +251,13 @@ macro_rules! dispatch_cdc_split {
                 unreachable!("invalid debezium split");
             }
         }
+    }
+}
+
+// call corresponding split method of the specific cdc source type
+macro_rules! dispatch_cdc_split {
+    ($dbz_split:expr, $as_type:tt, $body:expr) => {
+      dispatch_cdc_split_inner!($dbz_split, $as_type, {Mysql, Postgres, Citus, Mongodb}, $body)
     }
 }
 
@@ -309,39 +313,19 @@ impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
     }
 
     pub fn split_id(&self) -> u32 {
-        dispatch_cdc_split!(self, ref, {
-            Mysql,
-            Postgres,
-            Citus,
-            Mongodb
-        }, split_id())
+        dispatch_cdc_split!(self, ref, split_id())
     }
 
     pub fn start_offset(&self) -> &Option<String> {
-        dispatch_cdc_split!(self, ref, {
-            Mysql,
-            Postgres,
-            Citus,
-            Mongodb
-        }, start_offset())
+        dispatch_cdc_split!(self, ref, start_offset())
     }
 
     pub fn snapshot_done(&self) -> bool {
-        dispatch_cdc_split!(self, ref, {
-            Mysql,
-            Postgres,
-            Citus,
-            Mongodb
-        }, is_snapshot_done())
+        dispatch_cdc_split!(self, ref, is_snapshot_done())
     }
 
     pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
-        dispatch_cdc_split!(self, mut, {
-            Mysql,
-            Postgres,
-            Citus,
-            Mongodb
-        }, update_with_offset(start_offset)?);
+        dispatch_cdc_split!(self, mut, update_with_offset(start_offset)?);
         Ok(())
     }
 }

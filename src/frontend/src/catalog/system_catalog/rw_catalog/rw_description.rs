@@ -15,11 +15,11 @@
 use std::iter;
 
 use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::error::Result;
 
 pub const RW_DESCRIPTION: BuiltinTable = BuiltinTable {
     name: "rw_description",

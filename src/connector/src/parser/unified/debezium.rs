@@ -257,10 +257,11 @@ where
                         &bson_doc.take(),
                     )?)
                 } else {
-                    unreachable!(
-                        "access result must match the type_expected. path: {:?}, payload: {:?}, type_expected: {:?}",
-                        path, payload, type_expected
-                    )
+                    // fail to extract the "_id" field from the message payload
+                    Err(AccessError::Undefined {
+                        name: "_id".to_string(),
+                        path: path[0].to_string(),
+                    })?
                 }
             }
             ["after" | "before", "payload"] => self.access(&[path[0]], Some(&DataType::Jsonb)),
@@ -277,10 +278,11 @@ where
                             &bson_doc.take(),
                         )?)
                     } else {
-                        unreachable!(
-                            "access result must match the type_expected. path: [\"id\"], id: {:?}, type_expected: {:?}",
-                            id_bson, type_expected
-                        )
+                        // fail to extract the "_id" field from the message key
+                        Err(AccessError::Undefined {
+                            name: "_id".to_string(),
+                            path: "id".to_string(),
+                        })?
                     }
                 } else {
                     ret

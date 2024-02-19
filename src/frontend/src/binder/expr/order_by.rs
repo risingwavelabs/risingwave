@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_sqlparser::ast::OrderByExpr;
 
+use crate::error::Result;
 use crate::expr::OrderByExpr as BoundOrderByExpr;
 use crate::Binder;
 

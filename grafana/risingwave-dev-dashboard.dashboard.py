@@ -3679,6 +3679,26 @@ def section_memory_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_memory(
+                    "The resident memory of jemalloc",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jemalloc_resident_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
+                    "The metadata memory of jemalloc",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jemalloc_metadata_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
                     "The allocated memory of jvm",
                     "",
                     [

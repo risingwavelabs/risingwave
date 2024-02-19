@@ -23,6 +23,7 @@ use risingwave_common::types::{
     DataType, Date, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
 use rust_decimal::Decimal as RustDecimal;
+use thiserror_ext::AsReport;
 
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
 
@@ -102,12 +103,12 @@ pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> Owne
                             ScalarImpl::from(Timestamptz::from_micros(v.timestamp_micros()))
                         }),
                         Err(err) => {
-                            if let Ok(suppressed) = LOG_SUPPERSSER.check() {
+                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                                 tracing::error!(
-                                    "parse column `{}` fail: {} ({} suppressed)",
-                                    name,
-                                    err,
-                                    suppressed
+                                    suppressed_count,
+                                    column_name = name,
+                                    error = %err.as_report(),
+                                    "parse column failed",
                                 );
                             }
                             None
@@ -121,12 +122,12 @@ pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> Owne
                     match res {
                         Ok(val) => val.map(|v| ScalarImpl::from(v.into_boxed_slice())),
                         Err(err) => {
-                            if let Ok(suppressed) = LOG_SUPPERSSER.check() {
+                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                                 tracing::error!(
-                                    "parse column `{}` fail: {} ({} suppressed)",
-                                    name,
-                                    err,
-                                    suppressed
+                                    suppressed_count,
+                                    column_name = name,
+                                    error = %err.as_report(),
+                                    "parse column failed",
                                 );
                             }
                             None

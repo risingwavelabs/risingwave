@@ -17,7 +17,6 @@ use itertools::Itertools;
 use pgwire::pg_protocol::ParameterStatus;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::error::Result;
 use risingwave_common::session_config::{ConfigReporter, SESSION_CONFIG_LIST_SEP};
 use risingwave_common::system_param::is_mutable;
 use risingwave_common::types::{DataType, ScalarRefImpl};
@@ -25,6 +24,7 @@ use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value
 use risingwave_sqlparser::keywords::Keyword;
 
 use super::RwPgResponse;
+use crate::error::Result;
 use crate::handler::HandlerArgs;
 use crate::utils::infer_stmt_row_desc::infer_show_variable;
 

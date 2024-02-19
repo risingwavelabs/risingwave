@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, PbObject};
 use risingwave_pb::user::PbGrantPrivilege;
 use risingwave_sqlparser::ast::{GrantObjects, Privileges, Statement};
@@ -22,6 +21,7 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
+use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
 use crate::user::user_privilege::{

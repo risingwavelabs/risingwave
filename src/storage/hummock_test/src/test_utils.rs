@@ -111,6 +111,7 @@ impl<S: LocalStateStore> TestIngestBatch for S {
     }
 }
 
+#[cfg(test)]
 #[async_trait::async_trait]
 pub(crate) trait HummockStateStoreTestTrait: StateStore {
     fn get_pinned_version(&self) -> PinnedVersion;
@@ -120,6 +121,7 @@ pub(crate) trait HummockStateStoreTestTrait: StateStore {
     }
 }
 
+#[cfg(test)]
 impl HummockStateStoreTestTrait for HummockStorage {
     fn get_pinned_version(&self) -> PinnedVersion {
         self.get_pinned_version()
