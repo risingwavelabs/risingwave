@@ -228,11 +228,8 @@ pub async fn handle_create_sql_function(
                     }
                 }
                 Err(e) => {
-                    println!("e: {:#?}", e);
                     if let ErrorCode::BindErrorRoot { expr: _, error } = e.inner() {
                         let invalid_msg = error.to_string();
-
-                        println!("invalid_msg: {}", invalid_msg);
 
                         // Valid error message for hint display
                         let Some(_) = invalid_msg.as_str().find(SQL_UDF_PATTERN) else {
@@ -245,8 +242,6 @@ pub async fn handle_create_sql_function(
                         // We will just display the first one found
                         let invalid_item_name =
                             invalid_msg.split_whitespace().last().unwrap_or("null");
-
-                        println!("invalid_item_name: {}", invalid_item_name);
 
                         // Find the invalid parameter / column
                         let Some(idx) = find_target(body.as_str(), invalid_item_name) else {
