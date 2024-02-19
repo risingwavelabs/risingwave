@@ -44,7 +44,7 @@ pub struct UserDefinedFunction {
     children: Vec<BoxedExpression>,
     arg_types: Vec<DataType>,
     return_type: DataType,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     arg_schema: Arc<Schema>,
     imp: UdfImpl,
     identifier: String,
