@@ -50,7 +50,7 @@ use self::notifier::Notifier;
 use self::progress::TrackingCommand;
 use crate::barrier::info::InflightActorInfo;
 use crate::barrier::notifier::BarrierInfo;
-use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
+use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::BarrierRpcManager;
 use crate::barrier::state::BarrierManagerState;
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
@@ -205,37 +205,6 @@ impl CheckpointControl {
             command_ctx_queue: Default::default(),
             context,
         }
-    }
-}
-
-impl CreateMviewProgressTracker {
-    /// Stash a command to finish later.
-    fn stash_command_to_finish(&mut self, finished_job: TrackingJob) {
-        self.finished_jobs.push(finished_job);
-    }
-
-    /// Finish stashed jobs.
-    /// If checkpoint, means all jobs can be finished.
-    /// If not checkpoint, jobs which do not require checkpoint can be finished.
-    ///
-    /// Returns whether there are still remaining stashed jobs to finish.
-    async fn finish_jobs(&mut self, checkpoint: bool) -> MetaResult<bool> {
-        for job in self
-            .finished_jobs
-            .extract_if(|job| checkpoint || !job.is_checkpoint_required())
-        {
-            // The command is ready to finish. We can now call `pre_finish`.
-            job.pre_finish().await?;
-            job.notify_finished();
-        }
-        Ok(!self.finished_jobs.is_empty())
-    }
-
-    fn cancel_command(&mut self, id: TableId) {
-        let _ = self.progress_map.remove(&id);
-        self.finished_jobs
-            .retain(|x| x.table_to_create() != Some(id));
-        self.actor_map.retain(|_, table_id| *table_id != id);
     }
 }
 
