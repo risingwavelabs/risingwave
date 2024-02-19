@@ -206,9 +206,7 @@ impl CheckpointControl {
             context,
         }
     }
-}
 
-impl CheckpointControl {
     /// Update the metrics of barrier nums.
     fn update_barrier_nums_metrics(&self) {
         self.context.metrics.in_flight_barrier_nums.set(
