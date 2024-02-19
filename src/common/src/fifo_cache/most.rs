@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crossbeam_queue::SegQueue;
 
@@ -69,5 +69,12 @@ impl<K: CacheKey, V: CacheValue> MostCache<K, V> {
         self.cost
             .fetch_add(item.cost(), std::sync::atomic::Ordering::Release);
         self.queue.push(item);
+    }
+
+    pub fn clear(&self) {
+        while !self.queue.is_empty() {
+            self.queue.pop();
+        }
+        self.cost.store(0, Ordering::Release);
     }
 }

@@ -20,7 +20,7 @@ use std::sync::Arc;
 use await_tree::InstrumentAwait;
 use futures::Future;
 use risingwave_common::cache::{
-    CachePriority, CacheableEntry, LookupResponse, LruCache, LruCacheEventListener,
+    CachePriority, CacheableEntry, LruCacheEventListener,
 };
 use risingwave_common::fifo_cache::FIFOCache;
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -87,13 +87,13 @@ type BlockCacheEventListener =
 
 #[derive(Clone)]
 pub struct BlockCache {
-    inner: Arc<LruCache<(HummockSstableObjectId, u64), Box<Block>>>,
+    inner: Arc<FIFOCache<(HummockSstableObjectId, u64), Arc<Block>>>,
 }
 
 pub enum BlockResponse {
     Block(BlockHolder),
     WaitPendingRequest(Receiver<CachedBlockEntry>),
-    Miss(JoinHandle<Result<CachedBlockEntry, HummockError>>),
+    Miss(JoinHandle<Result<BlockHolder, HummockError>>),
 }
 
 impl BlockResponse {
@@ -105,11 +105,12 @@ impl BlockResponse {
                 .await
                 .map_err(|recv_error| recv_error.into())
                 .map(BlockHolder::from_cached_block),
-            BlockResponse::Miss(join_handle) => join_handle
-                .verbose_instrument_await("fetch_block")
-                .await
-                .unwrap()
-                .map(BlockHolder::from_cached_block),
+            BlockResponse::Miss(join_handle) => {
+                join_handle
+                    .verbose_instrument_await("fetch_block")
+                    .await
+                    .unwrap()
+            },
         }
     }
 }
@@ -135,27 +136,15 @@ impl BlockCache {
 
     fn new_inner(
         capacity: usize,
-        mut max_shard_bits: usize,
-        high_priority_ratio: usize,
-        listener: Option<BlockCacheEventListener>,
+        _max_shard_bits: usize,
+        _high_priority_ratio: usize,
+        _listener: Option<BlockCacheEventListener>,
     ) -> Self {
         if capacity == 0 {
             panic!("block cache capacity == 0");
         }
-        while (capacity >> max_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && max_shard_bits > 0 {
-            max_shard_bits -= 1;
-        }
 
-        let cache = match listener {
-            Some(listener) => LruCache::with_event_listener(
-                max_shard_bits,
-                capacity,
-                high_priority_ratio,
-                listener,
-            ),
-            None => LruCache::new(max_shard_bits, capacity, high_priority_ratio),
-        };
-
+        let cache = FIFOCache::new(capacity);
         Self {
             inner: Arc::new(cache),
         }
@@ -163,13 +152,13 @@ impl BlockCache {
 
     pub fn get(&self, object_id: HummockSstableObjectId, block_idx: u64) -> Option<BlockHolder> {
         self.inner
-            .lookup(Self::hash(object_id, block_idx), &(object_id, block_idx))
-            .map(BlockHolder::from_cached_block)
+            .get( &(object_id, block_idx))
+            .map(BlockHolder::from_ref_block)
     }
 
     pub fn exists_block(&self, sst_id: HummockSstableObjectId, block_idx: u64) -> bool {
         self.inner
-            .contains(Self::hash(sst_id, block_idx), &(sst_id, block_idx))
+            .contains(&(sst_id, block_idx))
     }
 
     pub fn insert(
@@ -179,48 +168,37 @@ impl BlockCache {
         block: Block,
         priority: CachePriority,
     ) -> BlockHolder {
-        BlockHolder::from_cached_block(self.inner.insert(
+        let block = Arc::new(block);
+        self.inner.insert(
             (object_id, block_idx),
-            Self::hash(object_id, block_idx),
+            block.clone(),
             block.capacity(),
-            Box::new(block),
-            priority,
-        ))
+        );
+        BlockHolder::from_ref_block(block)
     }
 
     pub fn get_or_insert_with<F, Fut>(
         &self,
         object_id: HummockSstableObjectId,
         block_idx: u64,
-        priority: CachePriority,
+        _priority: CachePriority,
         mut fetch_block: F,
     ) -> BlockResponse
     where
         F: FnMut() -> Fut,
-        Fut: Future<Output = HummockResult<Box<Block>>> + Send + 'static,
+        Fut: Future<Output = HummockResult<Block>> + Send + 'static,
     {
-        let h = Self::hash(object_id, block_idx);
         let key = (object_id, block_idx);
-        let lookup_response =
-            self.inner
-                .lookup_with_request_dedup::<_, HummockError, _>(h, key, priority, || {
-                    let f = fetch_block();
-                    async move {
-                        let block = f.await?;
-                        let len = block.capacity();
-                        Ok((block, len))
-                    }
-                });
-        match lookup_response {
-            LookupResponse::Invalid => unreachable!(),
-            LookupResponse::Cached(entry) => {
-                BlockResponse::Block(BlockHolder::from_cached_block(entry))
-            }
-            LookupResponse::WaitPendingRequest(receiver) => {
-                BlockResponse::WaitPendingRequest(receiver)
-            }
-            LookupResponse::Miss(join_handle) => BlockResponse::Miss(join_handle),
-        }
+            if let Some(item) = self.inner.get(&key) {
+                return BlockResponse::Block(BlockHolder::from_ref_block(item));
+            };
+        let f = fetch_block();
+        let handle = tokio::spawn(async move {
+            f.await.map(|block| {
+                BlockHolder::from_ref_block(Arc::new(block))
+            })
+        });
+        BlockResponse::Miss(handle)
     }
 
     fn hash(object_id: HummockSstableObjectId, block_idx: u64) -> u64 {
@@ -231,7 +209,7 @@ impl BlockCache {
     }
 
     pub fn size(&self) -> usize {
-        self.inner.get_memory_usage()
+        self.inner.size()
     }
 
     #[cfg(any(test, feature = "test"))]

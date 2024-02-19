@@ -439,28 +439,14 @@ impl SstableStore {
         stats.cache_data_block_total += 1;
         let file_size = sst.meta.estimated_size;
         let mut fetch_block = || {
-            let file_cache = self.data_file_cache.clone();
+            // let file_cache = self.data_file_cache.clone();
             stats.cache_data_block_miss += 1;
             let data_path = self.get_sst_data_path(object_id);
             let store = self.store.clone();
-            let use_file_cache = !matches!(policy, CachePolicy::Disable);
+            // let use_file_cache = !matches!(policy, CachePolicy::Disable);
             let range = range.clone();
 
             async move {
-                let key = SstableBlockIndex {
-                    sst_id: object_id,
-                    block_idx: block_index as u64,
-                };
-                if use_file_cache
-                    && let Some(block) = file_cache
-                        .lookup(&key)
-                        .await
-                        .map_err(HummockError::file_cache)?
-                {
-                    let block = block.try_into_block()?;
-                    return Ok(block);
-                }
-
                 let block_data = match store
                     .read(&data_path, range.clone())
                     .verbose_instrument_await("get_block_response")
@@ -477,7 +463,7 @@ impl SstableStore {
                         return Err(HummockError::from(e));
                     }
                 };
-                let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
+                let block = Block::decode(block_data, uncompressed_capacity)?;
 
                 Ok(block)
             }
@@ -513,22 +499,27 @@ impl SstableStore {
                         block_idx: block_index as u64,
                     },
                     CachedBlock::Loaded {
-                        block: block.clone(),
+                        block: Box::new(block.clone()),
                     },
                 );
-                Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
+                Ok(BlockResponse::Block(BlockHolder::from_owned_block(Box::new(block))))
             }
             CachePolicy::NotFill => match self.block_cache.get(object_id, block_index as u64) {
                 Some(block) => Ok(BlockResponse::Block(block)),
-                None => fetch_block()
-                    .await
-                    .map(BlockHolder::from_owned_block)
-                    .map(BlockResponse::Block),
+                None => {
+                    fetch_block()
+                        .await
+                        .map(|block| {
+                            BlockResponse::Block(BlockHolder::from_ref_block(Arc::new(block)))
+                        })
+                },
             },
-            CachePolicy::Disable => fetch_block()
-                .await
-                .map(BlockHolder::from_owned_block)
-                .map(BlockResponse::Block),
+            CachePolicy::Disable =>
+                fetch_block()
+                    .await
+                    .map(|block| {
+                        BlockResponse::Block(BlockHolder::from_ref_block(Arc::new(block)))
+                    }),
         }
     }
 

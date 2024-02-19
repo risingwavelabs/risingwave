@@ -68,6 +68,11 @@ impl<K: CacheKey, V: CacheValue> FIFOCache<K, V> {
         self.small.size() + self.main.size()
     }
 
+    pub fn clear(&self) {
+        self.small.clear();
+        self.main.clear();
+    }
+
     pub fn is_full(&self) -> bool {
         self.size() > self.capacity
     }
