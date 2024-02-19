@@ -401,12 +401,23 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
+        let associated_source_id: Option<SourceId> = Table::find_by_id(job_id)
+            .select_only()
+            .column(table::Column::OptionalAssociatedSourceId)
+            .filter(table::Column::OptionalAssociatedSourceId.is_not_null())
+            .into_tuple()
+            .one(&txn)
+            .await?;
+
         Object::delete_by_id(job_id).exec(&txn).await?;
         if !internal_table_ids.is_empty() {
             Object::delete_many()
                 .filter(object::Column::Oid.is_in(internal_table_ids))
                 .exec(&txn)
                 .await?;
+        }
+        if let Some(source_id) = associated_source_id {
+            Object::delete_by_id(source_id).exec(&txn).await?;
         }
         txn.commit().await?;
 

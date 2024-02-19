@@ -52,7 +52,7 @@ use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::{ReadSnapshot, SchedulerError, SchedulerResult};
-use crate::session::{AuthContext, FrontendEnv, SessionImpl};
+use crate::session::{FrontendEnv, SessionImpl};
 
 pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
 
@@ -94,10 +94,6 @@ impl LocalQueryExecution {
         }
     }
 
-    fn auth_context(&self) -> Arc<AuthContext> {
-        self.session.auth_context()
-    }
-
     fn shutdown_rx(&self) -> ShutdownToken {
         self.session.reset_cancel_query_flag()
     }
@@ -106,7 +102,7 @@ impl LocalQueryExecution {
     pub async fn run_inner(self) {
         debug!(%self.query.query_id, self.sql, "Starting to run query");
 
-        let context = FrontendBatchTaskContext::new(self.front_env.clone(), self.auth_context());
+        let context = FrontendBatchTaskContext::new(self.session.clone());
 
         let task_id = TaskId {
             query_id: self.query.query_id.id.clone(),

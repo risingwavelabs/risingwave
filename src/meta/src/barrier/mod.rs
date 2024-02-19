@@ -19,6 +19,7 @@ use std::mem::take;
 use std::sync::Arc;
 use std::time::Duration;
 
+use arc_swap::ArcSwap;
 use fail::fail_point;
 use itertools::Itertools;
 use prometheus::HistogramTimer;
@@ -137,7 +138,7 @@ struct Scheduled {
 
 #[derive(Clone)]
 pub struct GlobalBarrierManagerContext {
-    status: Arc<Mutex<BarrierManagerStatus>>,
+    status: Arc<ArcSwap<BarrierManagerStatus>>,
 
     tracker: Arc<Mutex<CreateMviewProgressTracker>>,
 
@@ -396,7 +397,7 @@ impl GlobalBarrierManager {
         let tracker = CreateMviewProgressTracker::new();
 
         let context = GlobalBarrierManagerContext {
-            status: Arc::new(Mutex::new(BarrierManagerStatus::Starting)),
+            status: Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting))),
             metadata_manager,
             hummock_manager,
             source_manager,
@@ -473,6 +474,7 @@ impl GlobalBarrierManager {
         let interval = Duration::from_millis(
             self.env.system_params_reader().await.barrier_interval_ms() as u64,
         );
+        self.scheduled_barriers.set_min_interval(interval);
         tracing::info!(
             "Starting barrier manager with: interval={:?}, enable_recovery={}, in_flight_barrier_nums={}",
             interval,
@@ -510,8 +512,7 @@ impl GlobalBarrierManager {
             // Even if there's no actor to recover, we still go through the recovery process to
             // inject the first `Initial` barrier.
             self.context
-                .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap))
-                .await;
+                .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap));
             let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
@@ -522,10 +523,8 @@ impl GlobalBarrierManager {
                 .await;
         }
 
-        self.context.set_status(BarrierManagerStatus::Running).await;
+        self.context.set_status(BarrierManagerStatus::Running);
 
-        let mut min_interval = tokio::time::interval(interval);
-        min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
         self.env
@@ -601,11 +600,7 @@ impl GlobalBarrierManager {
                     let notification = notification.unwrap();
                     // Handle barrier interval and checkpoint frequency changes
                     if let LocalNotification::SystemParamsChange(p) = &notification {
-                        let new_interval = Duration::from_millis(p.barrier_interval_ms() as u64);
-                        if new_interval != min_interval.period() {
-                            min_interval = tokio::time::interval(new_interval);
-                            min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                        }
+                        self.scheduled_barriers.set_min_interval(Duration::from_millis(p.barrier_interval_ms() as u64));
                         self.scheduled_barriers
                             .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
                     }
@@ -617,15 +612,11 @@ impl GlobalBarrierManager {
                     )
                     .await;
                 }
-
-                // There's barrier scheduled.
-                _ = self.scheduled_barriers.wait_one(), if self.checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums) => {
-                    min_interval.reset(); // Reset the interval as we have a new barrier.
-                    self.handle_new_barrier().await;
-                }
-                // Minimum interval reached.
-                _ = min_interval.tick(), if self.checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums) => {
-                    self.handle_new_barrier().await;
+                scheduled = self.scheduled_barriers.next_barrier(),
+                    if self
+                        .checkpoint_control
+                        .can_inject_barrier(self.in_flight_barrier_nums) => {
+                    self.handle_new_barrier(scheduled);
                 }
             }
             self.checkpoint_control.update_barrier_nums_metrics();
@@ -633,18 +624,14 @@ impl GlobalBarrierManager {
     }
 
     /// Handle the new barrier from the scheduled queue and inject it.
-    async fn handle_new_barrier(&mut self) {
-        assert!(self
-            .checkpoint_control
-            .can_inject_barrier(self.in_flight_barrier_nums));
-
+    fn handle_new_barrier(&mut self, scheduled: Scheduled) {
         let Scheduled {
             command,
             mut notifiers,
             send_latency_timer,
             checkpoint,
             span,
-        } = self.scheduled_barriers.pop_or_default().await;
+        } = scheduled;
 
         let info = self.state.apply_command(&command);
 
@@ -667,15 +654,12 @@ impl GlobalBarrierManager {
             command,
             kind,
             self.context.clone(),
-            span.clone(),
+            span,
         ));
 
         send_latency_timer.observe_duration();
 
-        self.rpc_manager
-            .inject_barrier(command_ctx.clone())
-            .instrument(span)
-            .await;
+        self.rpc_manager.inject_barrier(command_ctx.clone());
 
         // Notify about the injection.
         let prev_paused_reason = self.state.paused_reason();
@@ -687,7 +671,7 @@ impl GlobalBarrierManager {
             prev_paused_reason,
             curr_paused_reason,
         };
-        notifiers.iter_mut().for_each(|n| n.notify_injected(info));
+        notifiers.iter_mut().for_each(|n| n.notify_started(info));
 
         // Update the paused state after the barrier is injected.
         self.state.set_paused_reason(curr_paused_reason);
@@ -765,8 +749,7 @@ impl GlobalBarrierManager {
             self.context
                 .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Failover(
                     err.clone(),
-                )))
-                .await;
+                )));
             let latest_snapshot = self.context.hummock_manager.latest_snapshot();
             let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch
             let span = tracing::info_span!(
@@ -778,7 +761,7 @@ impl GlobalBarrierManager {
             // No need to clean dirty tables for barrier recovery,
             // The foreground stream job should cleanup their own tables.
             self.recovery(prev_epoch, None).instrument(span).await;
-            self.context.set_status(BarrierManagerStatus::Running).await;
+            self.context.set_status(BarrierManagerStatus::Running);
         } else {
             panic!("failed to execute barrier: {}", err.as_report());
         }
@@ -918,9 +901,9 @@ impl GlobalBarrierManager {
 
 impl GlobalBarrierManagerContext {
     /// Check the status of barrier manager, return error if it is not `Running`.
-    pub async fn check_status_running(&self) -> MetaResult<()> {
-        let status = self.status.lock().await;
-        match &*status {
+    pub fn check_status_running(&self) -> MetaResult<()> {
+        let status = self.status.load();
+        match &**status {
             BarrierManagerStatus::Starting
             | BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap) => {
                 bail!("The cluster is bootstrapping")
@@ -933,9 +916,8 @@ impl GlobalBarrierManagerContext {
     }
 
     /// Set barrier manager status.
-    async fn set_status(&self, new_status: BarrierManagerStatus) {
-        let mut status = self.status.lock().await;
-        *status = new_status;
+    fn set_status(&self, new_status: BarrierManagerStatus) {
+        self.status.store(Arc::new(new_status));
     }
 
     /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.

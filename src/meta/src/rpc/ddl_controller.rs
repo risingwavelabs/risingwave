@@ -269,7 +269,7 @@ impl DdlController {
     /// would be a huge hassle and pain if we don't spawn here.
     pub async fn run_command(&self, command: DdlCommand) -> MetaResult<NotificationVersion> {
         if !command.allow_in_recovery() {
-            self.barrier_manager.check_status_running().await?;
+            self.barrier_manager.check_status_running()?;
         }
         let ctrl = self.clone();
         let fut = async move {
