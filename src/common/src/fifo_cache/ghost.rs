@@ -1,40 +1,49 @@
+// Copyright 2024 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use crossbeam_queue::SegQueue;
-use dashmap::DashMap;
+use dashmap::DashSet;
 
-use crate::fifo_cache::{CacheItem, CacheKey, CacheValue};
+use crate::fifo_cache::CacheKey;
 
-pub struct GhostCache<K: CacheKey, V: CacheValue> {
-    map: DashMap<K, Box<CacheItem<K, V>>>,
+pub struct GhostCache<K: CacheKey> {
+    map: DashSet<K>,
     queue: SegQueue<K>,
 }
 
-impl<K: CacheKey, V: CacheValue> GhostCache<K, V> {
+impl<K: CacheKey> GhostCache<K> {
     pub fn new() -> Self {
         Self {
-            map: DashMap::default(),
+            map: DashSet::default(),
             queue: SegQueue::new(),
         }
     }
 
-    pub fn insert(&self, item: Box<CacheItem<K, V>>, max_capacity: usize, deleted: &mut Vec<Box<CacheItem<K, V>>>) {
-        let key = item.key.clone();
-        item.mark_ghost();
-        if self.map.insert(item.key.clone(), item).is_some() {
+    pub fn insert(&self, key: &K, max_capacity: usize) {
+        if !self.map.insert(key.clone()) {
             return;
         }
         // avoid push fail
         while self.queue.len() >= max_capacity {
             if let Some(expire_key) = self.queue.pop() {
-                if let Some((_, expire_item)) = self.map.remove(&expire_key) {
-                    deleted.push(expire_item);
-                }
+                self.map.remove(&expire_key);
             }
         }
-        self.queue.push(key);
+        self.queue.push(key.clone());
     }
 
-    pub fn remove(&self, key: &K) -> Option<Box<CacheItem<K, V>>> {
-        let (_, item) = self.map.remove(key)?;
-        Some(item)
+    pub fn is_ghost(&self, key: &K) -> bool {
+        self.map.contains(key)
     }
 }

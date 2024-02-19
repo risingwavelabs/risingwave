@@ -83,17 +83,19 @@ impl CacheBase for MokaCache {
     }
 }
 
-use tokio::sync::oneshot::{channel, Receiver, Sender};
+use tokio::sync::oneshot::{channel, Sender};
 type RequestQueue = Vec<Sender<Arc<Block>>>;
 pub struct LruCacheImpl {
     inner: Arc<LruCache<(u64, u64), Arc<Block>>>,
     fake_io_latency: Duration,
 }
 
+const BLOCK_SIZE: usize = 4096;
+
 impl LruCacheImpl {
     pub fn new(capacity: usize, fake_io_latency: Duration) -> Self {
         Self {
-            inner: Arc::new(LruCache::new(1, capacity, 0)),
+            inner: Arc::new(LruCache::new(2, capacity * BLOCK_SIZE, 0)),
             fake_io_latency,
         }
     }
@@ -113,7 +115,7 @@ impl CacheBase for LruCacheImpl {
             .lookup_with_request_dedup(h, key, CachePriority::High, || async move {
                 get_fake_block(sst_object_id, block_idx, latency)
                     .await
-                    .map(|block| (Arc::new(block), 1))
+                    .map(|block| (Arc::new(block), BLOCK_SIZE))
             })
             .await?;
         Ok((*entry).clone())
@@ -142,7 +144,7 @@ pub struct FIFOCacheImpl {
 impl FIFOCacheImpl {
     pub fn new(capacity: usize, fake_io_latency: Duration) -> Self {
         Self {
-            inner: FIFOCache::new(capacity),
+            inner: FIFOCache::new(capacity * BLOCK_SIZE),
             fake_io_latency,
             write_requests: Arc::new(Mutex::new(HashMap::default())),
         }
@@ -195,7 +197,7 @@ impl CacheBase for FIFOCacheImpl {
             for sender in que {
                 let _ = sender.send(block.clone());
             }
-            self.inner.insert(key, block.clone(), 1);
+            self.inner.insert(key, block.clone(), BLOCK_SIZE);
             return Ok(block);
         }
     }

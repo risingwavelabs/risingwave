@@ -1,21 +1,30 @@
-use std::sync::atomic::AtomicUsize;
-use std::sync::Arc;
+// Copyright 2024 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
+use std::sync::atomic::AtomicUsize;
 use crossbeam_queue::SegQueue;
 
-use crate::fifo_cache::most::MostCache;
 use crate::fifo_cache::{CacheItem, CacheKey, CacheValue};
 
 pub struct SmallHotCache<K: CacheKey, V: CacheValue> {
-    main: Arc<MostCache<K, V>>,
     queue: SegQueue<Box<CacheItem<K, V>>>,
     cost: AtomicUsize,
 }
 
 impl<K: CacheKey, V: CacheValue> SmallHotCache<K, V> {
-    pub fn new(main: Arc<MostCache<K, V>>) -> Self {
+    pub fn new() -> Self {
         Self {
-            main,
             queue: SegQueue::new(),
             cost: AtomicUsize::new(0),
         }
@@ -30,18 +39,11 @@ impl<K: CacheKey, V: CacheValue> SmallHotCache<K, V> {
     }
 
     pub fn evict(&self) -> Option<Box<CacheItem<K, V>>> {
-        while self.size() > 0 {
-            let item = self.queue.pop()?;
-            self.cost
-                .fetch_sub(item.cost(), std::sync::atomic::Ordering::Release);
-            item.unmark();
-            if item.get_freq() > 1 {
-                self.main.insert(item);
-            } else {
-                return Some(item);
-            }
-        }
-        None
+        let item = self.queue.pop()?;
+        self.cost
+            .fetch_sub(item.cost(), std::sync::atomic::Ordering::Release);
+        item.unmark();
+        Some(item)
     }
 
     pub fn insert(&self, item: Box<CacheItem<K, V>>) {
