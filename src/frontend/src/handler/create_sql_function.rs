@@ -62,11 +62,9 @@ fn create_mock_udf_context(
 /// Find the pattern for better hint display
 /// return the exact index where the pattern first appears
 fn find_target(input: &str, target: &str) -> Option<usize> {
-    // Regex pattern to find `target` not preceded/followed by an ASCII letter.
-    // \b asserts a word boundary, and \B asserts NOT a word boundary
-    // The pattern uses negative lookbehind (?<!...) and lookahead (?!...) to ensure
-    // the target is not surrounded by ASCII alphabetic characters
-    let pattern = format!(r"(?<![A-Za-z]){0}(?![A-Za-z])", fancy_regex::escape(target));
+    // Regex pattern to find `target` as a single word without any preceding or following characters
+    // here `\b` asserts a word boundary
+    let pattern = format!(r"\b{}\b", fancy_regex::escape(target));
     let re = Regex::new(&pattern).unwrap();
 
     let Ok(Some(ma)) = re.find(input) else {
