@@ -31,6 +31,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::ConfigMap;
+use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::types::DataType;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::table_parallelism::{PbFixedParallelism, PbParallelism};
@@ -110,6 +111,8 @@ pub struct SysCatalogReaderImpl {
     auth_context: Arc<AuthContext>,
     // Read config.
     config: Arc<RwLock<ConfigMap>>,
+    // Read system params.
+    system_params: SystemParamsReaderRef,
 }
 
 impl SysCatalogReaderImpl {
@@ -120,6 +123,7 @@ impl SysCatalogReaderImpl {
         meta_client: Arc<dyn FrontendMetaClient>,
         auth_context: Arc<AuthContext>,
         config: Arc<RwLock<ConfigMap>>,
+        system_params: SystemParamsReaderRef,
     ) -> Self {
         Self {
             catalog_reader,
@@ -128,6 +132,7 @@ impl SysCatalogReaderImpl {
             meta_client,
             auth_context,
             config,
+            system_params,
         }
     }
 }
