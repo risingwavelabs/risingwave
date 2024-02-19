@@ -411,7 +411,7 @@ impl SstableStore {
                     CachePriority::Low
                 };
                 self.block_cache
-                    .insert(object_id, idx as u64, Box::new(block), cache_priority)
+                    .insert(object_id, idx as u64, block, cache_priority)
             } else {
                 BlockHolder::from_owned_block(Box::new(block))
             };
@@ -693,7 +693,7 @@ impl SstableStore {
         &self,
         object_id: HummockSstableObjectId,
         block_index: u64,
-        block: Box<Block>,
+        block: Block,
     ) {
         if let Some(filter) = self.recent_filter.as_ref() {
             filter.extend([(object_id, usize::MAX), (object_id, block_index as usize)]);
@@ -939,7 +939,7 @@ impl SstableWriter for BatchUploadWriter {
                     self.sstable_store.block_cache.insert(
                         self.object_id,
                         block_idx as u64,
-                        Box::new(block),
+                        block,
                         fill_cache_priority,
                     );
                 }
@@ -1048,7 +1048,7 @@ impl SstableWriter for StreamingUploadWriter {
                     self.sstable_store.block_cache.insert(
                         self.object_id,
                         block_idx as u64,
-                        Box::new(block),
+                        block,
                         fill_high_priority_cache,
                     );
                 }

@@ -72,6 +72,10 @@ impl<K: CacheKey, V: CacheValue> FIFOCache<K, V> {
         self.size() > self.capacity
     }
 
+    pub fn contains(&self, key: &K) -> bool {
+        self.map.contains_key(key)
+    }
+
     pub fn evict(&self, ghost_capacity: usize, deleted: &mut Vec<Box<CacheItem<K, V>>>) {
         if self.small.size() > self.capacity / 10 {
             if let Some(item) = self.small.evict() {
@@ -115,3 +119,5 @@ impl<K: CacheKey, V: CacheValue> FIFOCache<K, V> {
         }
     }
 }
+
+

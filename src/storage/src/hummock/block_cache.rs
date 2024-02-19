@@ -22,6 +22,7 @@ use futures::Future;
 use risingwave_common::cache::{
     CachePriority, CacheableEntry, LookupResponse, LruCache, LruCacheEventListener,
 };
+use risingwave_common::fifo_cache::FIFOCache;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use tokio::sync::oneshot::Receiver;
 use tokio::task::JoinHandle;
@@ -175,14 +176,14 @@ impl BlockCache {
         &self,
         object_id: HummockSstableObjectId,
         block_idx: u64,
-        block: Box<Block>,
+        block: Block,
         priority: CachePriority,
     ) -> BlockHolder {
         BlockHolder::from_cached_block(self.inner.insert(
             (object_id, block_idx),
             Self::hash(object_id, block_idx),
             block.capacity(),
-            block,
+            Box::new(block),
             priority,
         ))
     }
