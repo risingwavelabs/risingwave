@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
+
+use futures::{pin_mut, StreamExt};
+use risingwave_common::row;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRef, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::{bail, row};
-use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
+use risingwave_connector::source::SplitId;
 use risingwave_pb::catalog::PbTable;
 use risingwave_storage::StateStore;
 
@@ -49,6 +52,31 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
             .get_row(row::once(Some(Self::string_to_scalar(key.as_ref()))))
             .await
             .map_err(StreamExecutorError::from)
+    }
+
+    /// XXX: we might get stale data for other actors' writes, but it's fine?
+    pub async fn scan(&self) -> StreamExecutorResult<Vec<BackfillState>> {
+        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
+
+        let state_table_iter = self
+            .state_store
+            .iter_with_prefix(None::<OwnedRow>, sub_range, Default::default())
+            .await?;
+        pin_mut!(state_table_iter);
+
+        let mut ret = vec![];
+        while let Some(item) = state_table_iter.next().await {
+            let row = item?.into_owned_row();
+            tracing::debug!("scanning backfill state table, row: {:?}", row);
+            let state = match row.datum_at(1) {
+                Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
+                    BackfillState::restore_from_json(jsonb_ref.to_owned_scalar())?
+                }
+                _ => unreachable!(),
+            };
+            ret.push(state);
+        }
+        Ok(ret)
     }
 
     pub async fn set(&mut self, key: SplitId, value: JsonbVal) -> StreamExecutorResult<()> {
@@ -94,29 +122,19 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
         Ok(())
     }
 
-    /// `None` means no need to read from the split anymore (backfill finished)
     pub async fn try_recover_from_state_store(
         &mut self,
-        mut stream_source_split: SplitImpl,
-    ) -> StreamExecutorResult<(Option<SplitImpl>, BackfillState)> {
-        Ok(match self.get(&stream_source_split.id()).await? {
-            None => (Some(stream_source_split), BackfillState::Backfilling(None)),
-            Some(row) => match row.datum_at(1) {
+        split_id: &SplitId,
+    ) -> StreamExecutorResult<Option<BackfillState>> {
+        Ok(self
+            .get(split_id)
+            .await?
+            .map(|row| match row.datum_at(1) {
                 Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                    let state = BackfillState::restore_from_json(jsonb_ref.to_owned_scalar())?;
-                    let new_split = match &state {
-                        BackfillState::Backfilling(None) => Some(stream_source_split),
-                        BackfillState::Backfilling(Some(offset)) => {
-                            stream_source_split.update_in_place(offset.clone())?;
-                            Some(stream_source_split)
-                        }
-                        BackfillState::SourceCachingUp(_) => None,
-                        BackfillState::Finished => None,
-                    };
-                    (new_split, state)
+                    BackfillState::restore_from_json(jsonb_ref.to_owned_scalar())
                 }
                 _ => unreachable!(),
-            },
-        })
+            })
+            .transpose()?)
     }
 }
