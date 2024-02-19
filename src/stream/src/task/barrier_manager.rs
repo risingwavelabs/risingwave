@@ -102,6 +102,9 @@ pub(super) enum LocalBarrierEvent {
         actors: Vec<ActorId>,
         result_sender: oneshot::Sender<StreamResult<()>>,
     },
+    TryGetRootActorFailure {
+        result_sender: oneshot::Sender<Option<StreamError>>,
+    },
     #[cfg(test)]
     Flush(oneshot::Sender<()>),
 }
@@ -187,7 +190,7 @@ pub(super) struct LocalBarrierWorker {
     state: ManagedBarrierState,
 
     /// Record all unexpected exited actors.
-    failure_actors: HashMap<ActorId, StreamError>,
+    pub(super) failure_actors: HashMap<ActorId, StreamError>,
 
     epoch_result_sender: HashMap<u64, oneshot::Sender<StreamResult<BarrierCompleteResult>>>,
 
@@ -308,6 +311,9 @@ impl LocalBarrierWorker {
                 actors,
                 result_sender,
             } => self.start_create_actors(&actors, result_sender),
+            LocalBarrierEvent::TryGetRootActorFailure { result_sender } => {
+                self.try_get_root_actor_failure(result_sender)
+            }
         }
     }
 }
@@ -591,6 +597,15 @@ impl LocalBarrierManager {
             result_sender,
         })
         .await?
+    }
+
+    pub async fn try_get_root_actor_failure(&self) -> Option<StreamError> {
+        self.send_and_await(|result_sender| LocalBarrierEvent::TryGetRootActorFailure {
+            result_sender,
+        })
+        .await
+        .ok()
+        .flatten()
     }
 
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
