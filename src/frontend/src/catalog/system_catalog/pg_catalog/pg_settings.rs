@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::{DataType, Datum, Fields, ToOwnedDatum, WithDataType};
 use risingwave_frontend_macro::system_catalog;
 
@@ -67,16 +68,27 @@ impl ToOwnedDatum for Context {
 
 #[system_catalog(table, "pg_catalog.pg_settings")]
 fn read_pg_settings(reader: &SysCatalogReaderImpl) -> Vec<PgSetting> {
-    let config_reader = reader.config.read();
-    let all_variables = config_reader.show_all();
-
-    all_variables
-        .iter()
+    let variables = (reader.config.read().show_all())
+        .into_iter()
         .map(|info| PgSetting {
-            name: info.name.clone(),
-            setting: info.setting.clone(),
-            short_desc: info.description.clone(),
+            name: info.name,
+            setting: info.setting,
+            short_desc: info.description,
             context: Context::User,
-        })
-        .collect()
+        });
+
+    let system_params = (reader.system_params.load().get_all())
+        .into_iter()
+        .map(|info| PgSetting {
+            name: info.name.to_owned(),
+            setting: info.value,
+            short_desc: info.description.to_owned(),
+            context: if info.mutable {
+                Context::Postmaster
+            } else {
+                Context::Internal
+            },
+        });
+
+    variables.chain(system_params).collect()
 }
