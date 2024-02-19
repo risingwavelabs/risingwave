@@ -31,7 +31,7 @@ use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy}
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan, StreamRpcManager};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
-use crate::model::{ActorId, TableFragments, TableParallelism};
+use crate::model::{ActorId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
@@ -284,11 +284,7 @@ impl GlobalStreamManager {
                             .await
                         {
                             // try to cancel buffered creating command.
-                            if self
-                                .barrier_scheduler
-                                .try_cancel_scheduled_create(table_id)
-                                .await
-                            {
+                            if self.barrier_scheduler.try_cancel_scheduled_create(table_id) {
                                 tracing::debug!(
                                     "cancelling streaming job {table_id} in buffer queue."
                                 );
@@ -434,10 +430,7 @@ impl GlobalStreamManager {
         self.build_actors(&table_fragments, &building_locations, &existing_locations)
             .await?;
 
-        if let Some((_, context, table_fragments)) = replace_table_job_info {
-            let MetadataManager::V1(mgr) = &self.metadata_manager else {
-                unimplemented!("support create sink into table in v2");
-            };
+        if let Some((streaming_job, context, table_fragments)) = replace_table_job_info {
             self.build_actors(
                 &table_fragments,
                 &context.building_locations,
@@ -445,10 +438,19 @@ impl GlobalStreamManager {
             )
             .await?;
 
-            // Add table fragments to meta store with state: `State::Initial`.
-            mgr.fragment_manager
-                .start_create_table_fragments(table_fragments.clone())
-                .await?;
+            match &self.metadata_manager {
+                MetadataManager::V1(mgr) => {
+                    // Add table fragments to meta store with state: `State::Initial`.
+                    mgr.fragment_manager
+                        .start_create_table_fragments(table_fragments.clone())
+                        .await?
+                }
+                MetadataManager::V2(mgr) => {
+                    mgr.catalog_controller
+                        .prepare_streaming_job(table_fragments.to_protobuf(), &streaming_job, true)
+                        .await?
+                }
+            }
 
             let dummy_table_id = table_fragments.table_id();
 

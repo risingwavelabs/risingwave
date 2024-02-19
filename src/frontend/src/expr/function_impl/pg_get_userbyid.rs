@@ -12,18 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use risingwave_expr::{capture_context, function, Result};
 
-use risingwave_common::session_config::SearchPath;
-use risingwave_expr::define_context;
+use super::context::USER_INFO_READER;
+use crate::user::user_service::UserInfoReader;
 
-use crate::session::AuthContext;
+#[function("pg_get_userbyid(int4) -> varchar")]
+fn pg_get_userbyid(oid: i32) -> Result<Option<Box<str>>> {
+    pg_get_userbyid_impl_captured(oid)
+}
 
-// Only for local mode.
-define_context! {
-    pub(super) CATALOG_READER: crate::catalog::CatalogReader,
-    pub(super) USER_INFO_READER: crate::user::user_service::UserInfoReader,
-    pub(super) AUTH_CONTEXT: Arc<AuthContext>,
-    pub(super) DB_NAME: String,
-    pub(super) SEARCH_PATH: SearchPath,
+#[capture_context(USER_INFO_READER)]
+fn pg_get_userbyid_impl(reader: &UserInfoReader, oid: i32) -> Result<Option<Box<str>>> {
+    Ok(reader
+        .read_guard()
+        .get_user_name_by_id(oid as u32)
+        .map(|s| s.into_boxed_str()))
 }
