@@ -208,6 +208,7 @@ impl NonOverlapSubLevelPicker {
         }
     }
 
+    // Use the incoming sst as the basic range and select as many sub levels as possible
     fn pick_sub_level(
         &self,
         levels: &[Level],
@@ -244,11 +245,9 @@ impl NonOverlapSubLevelPicker {
                 break;
             }
 
+            // reset the `basic_overlap_info` with basic sst
             let mut basic_overlap_info = self.overlap_strategy.create_overlap_info();
-            {
-                let sst = &ret.sstable_infos[0][0];
-                basic_overlap_info.update(sst);
-            }
+            basic_overlap_info.update(sst);
 
             let mut overlap_files_range =
                 basic_overlap_info.check_multiple_include(&target_level.table_infos);
@@ -298,6 +297,7 @@ impl NonOverlapSubLevelPicker {
                     break;
                 }
 
+                // When size / file count has exceeded the limit, we need to abandon this plan, it cannot be expanded to the last sub_level
                 if ret.total_file_count > 1
                     && (add_files_size >= self.max_compaction_bytes
                         || add_files_count >= self.max_file_count as usize)
