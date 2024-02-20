@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::str::FromStr;
 use std::time::Duration;
 
 use arrow_array::RecordBatch;
@@ -22,12 +23,20 @@ use arrow_flight::flight_service_client::FlightServiceClient;
 use arrow_flight::{FlightData, FlightDescriptor};
 use arrow_schema::Schema;
 use cfg_or_panic::cfg_or_panic;
-use futures_util::{stream, Stream, StreamExt, TryStreamExt};
+use futures_util::{stream, FutureExt, Stream, StreamExt, TryStreamExt};
+use ginepro::{LoadBalancedChannel, ResolutionStrategy};
+use risingwave_common::util::addr::HostAddr;
 use thiserror_ext::AsReport;
+use tokio::time::Duration as TokioDuration;
 use tonic::transport::Channel;
 
 use crate::metrics::GLOBAL_METRICS;
 use crate::{Error, Result};
+
+const DNS_PROBE_INTERVAL_SECS: u64 = 5;
+const EAGER_DNS_PROBE_INTERVAL_SECS: u64 = 5;
+const REQUEST_TIMEOUT_SECS: u64 = 5;
+const CONNECT_TIMEOUT_SECS: u64 = 5;
 
 /// Client for external function service based on Arrow Flight.
 #[derive(Debug)]
@@ -41,25 +50,48 @@ pub struct ArrowFlightUdfClient {
 impl ArrowFlightUdfClient {
     /// Connect to a UDF service.
     pub async fn connect(addr: &str) -> Result<Self> {
-        let conn = tonic::transport::Endpoint::new(addr.to_string())?
-            .timeout(Duration::from_secs(5))
-            .connect_timeout(Duration::from_secs(5))
-            .connect()
-            .await?;
-        let client = FlightServiceClient::new(conn);
-        Ok(Self {
-            client,
-            addr: addr.into(),
-        })
+        Self::connect_inner(
+            addr,
+            ResolutionStrategy::Eager {
+                timeout: TokioDuration::from_secs(EAGER_DNS_PROBE_INTERVAL_SECS),
+            },
+        )
+        .await
     }
 
     /// Connect to a UDF service lazily (i.e. only when the first request is sent).
     pub fn connect_lazy(addr: &str) -> Result<Self> {
-        let conn = tonic::transport::Endpoint::new(addr.to_string())?
-            .timeout(Duration::from_secs(5))
-            .connect_timeout(Duration::from_secs(5))
-            .connect_lazy();
-        let client = FlightServiceClient::new(conn);
+        Self::connect_inner(addr, ResolutionStrategy::Lazy)
+            .now_or_never()
+            .unwrap()
+    }
+
+    async fn connect_inner(
+        mut addr: &str,
+        resolution_strategy: ResolutionStrategy,
+    ) -> Result<Self> {
+        if addr.starts_with("http://") {
+            addr = addr.strip_prefix("http://").unwrap();
+        }
+        if addr.starts_with("https://") {
+            addr = addr.strip_prefix("https://").unwrap();
+        }
+        let host_addr = HostAddr::from_str(addr)
+            .map_err(|e| Error::service_error(format!("invalid address: {}, err: {}", addr, e)))?;
+        let channel = LoadBalancedChannel::builder((host_addr.host.clone(), host_addr.port))
+            .dns_probe_interval(std::time::Duration::from_secs(DNS_PROBE_INTERVAL_SECS))
+            .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
+            .resolution_strategy(resolution_strategy)
+            .channel()
+            .await
+            .map_err(|e| {
+                Error::service_error(format!(
+                    "failed to create LoadBalancedChannel, address: {}, err: {}",
+                    host_addr, e
+                ))
+            })?;
+        let client = FlightServiceClient::new(channel.into());
         Ok(Self {
             client,
             addr: addr.into(),
