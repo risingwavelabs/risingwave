@@ -22,6 +22,7 @@ use std::sync::{Arc, LazyLock};
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use itertools::Itertools;
+use parking_lot::RwLock;
 use risingwave_common::acl::AclMode;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{
@@ -29,6 +30,8 @@ use risingwave_common::catalog::{
     NON_RESERVED_SYS_CATALOG_ID,
 };
 use risingwave_common::error::BoxedError;
+use risingwave_common::session_config::ConfigMap;
+use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::types::DataType;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::table_parallelism::{PbFixedParallelism, PbParallelism};
@@ -104,7 +107,12 @@ pub struct SysCatalogReaderImpl {
     worker_node_manager: WorkerNodeManagerRef,
     // Read from meta.
     meta_client: Arc<dyn FrontendMetaClient>,
+    // Read auth context.
     auth_context: Arc<AuthContext>,
+    // Read config.
+    config: Arc<RwLock<ConfigMap>>,
+    // Read system params.
+    system_params: SystemParamsReaderRef,
 }
 
 impl SysCatalogReaderImpl {
@@ -114,6 +122,8 @@ impl SysCatalogReaderImpl {
         worker_node_manager: WorkerNodeManagerRef,
         meta_client: Arc<dyn FrontendMetaClient>,
         auth_context: Arc<AuthContext>,
+        config: Arc<RwLock<ConfigMap>>,
+        system_params: SystemParamsReaderRef,
     ) -> Self {
         Self {
             catalog_reader,
@@ -121,6 +131,8 @@ impl SysCatalogReaderImpl {
             worker_node_manager,
             meta_client,
             auth_context,
+            config,
+            system_params,
         }
     }
 }
