@@ -1,0 +1,52 @@
+system ok
+python3 e2e_test/udf/test.py &
+
+# wait for server to start
+sleep 10s
+
+statement ok
+CREATE FUNCTION sleep(INT) RETURNS INT AS 'sleep' USING LINK 'http://localhost:8815';
+
+# Create a table with 60 records
+statement ok
+CREATE TABLE t (v1 int);
+
+statement ok
+INSERT INTO t select 1 from generate_series(1, 60);
+
+statement ok
+flush;
+
+statement ok
+SET STREAMING_RATE_LIMIT=1;
+
+statement ok
+SET BACKGROUND_DDL=true;
+
+# Create a Materialized View
+statement ok
+CREATE MATERIALIZED VIEW mv AS SELECT sleep(v1) as s1 from t;
+
+# Immediately kill the server, sleep for 1minute.
+system ok
+pkill -9 -i python && sleep 60
+
+# Restart the server
+system ok
+python3 e2e_test/udf/test.py &
+
+# Wait for materialized view to be complete
+statement ok
+wait;
+
+query I
+SELECT count(*) FROM mv where s1 is NULL;
+----
+0
+
+# close the server
+system ok
+pkill -i python
+
+statement ok
+DROP FUNCTION sleep;
