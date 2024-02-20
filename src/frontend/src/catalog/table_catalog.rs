@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, TableDesc, TableId, TableVersionId,
+    ColumnCatalog, ConflictBehavior, Field, Schema, TableDesc, TableId, TableVersionId,
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -491,6 +491,15 @@ impl TableCatalog {
 
     pub fn has_generated_column(&self) -> bool {
         self.columns.iter().any(|c| c.is_generated())
+    }
+
+    pub fn column_schema(&self) -> Schema {
+        Schema::new(
+            self.columns
+                .iter()
+                .map(|c| Field::from(&c.column_desc))
+                .collect(),
+        )
     }
 }
 
