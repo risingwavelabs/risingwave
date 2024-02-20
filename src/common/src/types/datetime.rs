@@ -328,12 +328,15 @@ impl ToText for Date {
     /// ```
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
         let (ce, year) = self.0.year_ce();
-        write!(f, "{:04}-{:02}-{:02}", year, self.0.month(), self.0.day())?;
-        if ce {
-            Ok(())
-        } else {
-            f.write_str(" BC")
-        }
+        let suffix = if ce { "" } else { " BC" };
+        write!(
+            f,
+            "{:04}-{:02}-{:02}{}",
+            year,
+            self.0.month(),
+            self.0.day(),
+            suffix
+        )
     }
 
     fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
@@ -360,19 +363,16 @@ impl ToText for Time {
 impl ToText for Timestamp {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
         let (ce, year) = self.0.year_ce();
+        let suffix = if ce { "" } else { " BC" };
         write!(
             f,
-            "{:04}-{:02}-{:02} {}",
+            "{:04}-{:02}-{:02} {}{}",
             year,
             self.0.month(),
             self.0.day(),
-            self.0.time()
-        )?;
-        if ce {
-            Ok(())
-        } else {
-            f.write_str(" BC")
-        }
+            self.0.time(),
+            suffix
+        )
     }
 
     fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {

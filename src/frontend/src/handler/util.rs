@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use anyhow::Context as _;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use futures::Stream;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
@@ -139,7 +139,7 @@ fn timestamptz_to_string_with_session_data(
     let tz = d.into_timestamptz();
     let time_zone = Timestamptz::lookup_time_zone(&session_data.timezone).unwrap();
     let instant_local = tz.to_datetime_in_zone(time_zone);
-    let mut result_string = String::new();
+    let mut result_string = BytesMut::new();
     write_date_time_tz(instant_local, &mut result_string).unwrap();
     result_string.into()
 }

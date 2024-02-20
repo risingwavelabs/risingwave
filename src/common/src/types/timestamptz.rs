@@ -213,13 +213,12 @@ pub fn write_date_time_tz(
         year,
         date.month(),
         date.day(),
-        instant_local.format("%H:%M:%S%.f%:z")
-    )?;
-    if ce {
-        std::fmt::Result::Ok(())
-    } else {
-        writer.write_str(" BC")
-    }
+        instant_local.format(if ce {
+            "%H:%M:%S%.f%:z"
+        } else {
+            "%H:%M:%S%.f%:z BC"
+        })
+    )
 }
 
 #[cfg(test)]
