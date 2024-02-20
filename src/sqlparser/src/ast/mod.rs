@@ -26,6 +26,7 @@ use alloc::{
     vec::Vec,
 };
 use core::fmt;
+use core::fmt::Display;
 
 use itertools::Itertools;
 #[cfg(feature = "serde")]
@@ -1168,6 +1169,7 @@ pub enum Statement {
         returns: Option<CreateFunctionReturns>,
         /// Optional parameters.
         params: CreateFunctionBody,
+        with_options: CreateFunctionWithOptions,
     },
     /// CREATE AGGREGATE
     ///
@@ -1536,6 +1538,7 @@ impl fmt::Display for Statement {
                 args,
                 returns,
                 params,
+                with_options,
             } => {
                 write!(
                     f,
@@ -1550,6 +1553,7 @@ impl fmt::Display for Statement {
                     write!(f, " {}", return_type)?;
                 }
                 write!(f, "{params}")?;
+                write!(f, " WITH ({})", with_options)?;
                 Ok(())
             }
             Statement::CreateAggregate {
@@ -2736,6 +2740,57 @@ impl fmt::Display for CreateFunctionBody {
         Ok(())
     }
 }
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CreateFunctionWithOptions {
+    /// Always retry on network errors.
+    pub always_retry_on_network_error: Option<bool>,
+}
+
+/// TODO(kwannoel): Generate from the struct definition instead.
+impl CreateFunctionWithOptions {
+    fn is_empty(&self) -> bool {
+        self.always_retry_on_network_error.is_none()
+    }
+}
+
+/// TODO(kwannoel): Generate from the struct definition instead.
+impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
+    type Error = ParserError;
+
+    fn try_from(with_options: Vec<SqlOption>) -> Result<Self, Self::Error> {
+        let mut always_retry_on_network_error = None;
+        for option in with_options {
+            if option.name.to_string().to_lowercase() == "always_retry_network_errors" {
+                always_retry_on_network_error = Some(option.value == Value::Boolean(true));
+            } else {
+                return Err(ParserError::ParserError(format!(
+                    "Unsupported option: {}",
+                    option.name
+                )));
+            }
+        }
+        Ok(Self {
+            always_retry_on_network_error,
+        })
+    }
+}
+
+impl Display for CreateFunctionWithOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_empty() {
+            return Ok(());
+        }
+        let mut options = vec![];
+        if let Some(always_retry_on_network_error) = self.always_retry_on_network_error {
+            options.push(format!(
+                "ALWAYS_RETRY_NETWORK_ERRORS = {}",
+                always_retry_on_network_error
+            ));
+        }
+        write!(f, "( {} )", display_comma_separated(&options))
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -2935,5 +2990,51 @@ mod tests {
             ))))),
         };
         assert_eq!("NOT true IS NOT FALSE", format!("{}", unary_op));
+    }
+
+    #[test]
+    fn test_create_function_display() {
+        let create_function = Statement::CreateFunction {
+            temporary: false,
+            or_replace: false,
+            name: ObjectName(vec![Ident::new_unchecked("foo")]),
+            args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some(Ident::new_unchecked("python")),
+                behavior: Some(FunctionBehavior::Immutable),
+                as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
+                return_: None,
+                using: None,
+            },
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: None,
+            },
+        };
+        assert_eq!(
+            "CREATE FUNCTION foo() RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1'",
+            format!("{}", create_function)
+        );
+        let create_function = Statement::CreateFunction {
+            temporary: false,
+            or_replace: false,
+            name: ObjectName(vec![Ident::new_unchecked("foo")]),
+            args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some(Ident::new_unchecked("python")),
+                behavior: Some(FunctionBehavior::Immutable),
+                as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
+                return_: None,
+                using: None,
+            },
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: Some(true),
+            },
+        };
+        assert_eq!(
+            "CREATE FUNCTION foo() RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( ALWAYS_RETRY_NETWORK_ERRORS = true )",
+            format!("{}", create_function)
+        );
     }
 }

@@ -220,6 +220,7 @@ message Function {
   optional string link = 8;
   optional string identifier = 10;
   optional string body = 14;
+  bool always_retry_on_network_error = 16;
 
   oneof kind {
     ScalarFunction scalar = 11;

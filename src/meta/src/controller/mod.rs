@@ -285,6 +285,7 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             identifier: value.0.identifier,
             body: value.0.body,
             kind: Some(value.0.kind.into()),
+            always_retry_on_network_error: value.0.always_retry_on_network_error,
         }
     }
 }
