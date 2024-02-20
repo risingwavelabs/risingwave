@@ -145,6 +145,18 @@ mod tests {
         prettyplease::unparse(&output)
     }
 
+    fn do_test(code: &str, expected_path: &str) {
+        let input: TokenStream = str::parse(code).unwrap();
+
+        let output = super::gen(input).unwrap();
+
+        let output = pretty_print(output);
+
+        let expected = expect_test::expect_file![expected_path];
+
+        expected.assert_eq(&output);
+    }
+
     #[test]
     fn test_gen() {
         let code = indoc! {r#"
@@ -159,14 +171,33 @@ mod tests {
             }
         "#};
 
-        let input: TokenStream = str::parse(code).unwrap();
+        do_test(code, "gen/test_output.rs");
+    }
 
-        let output = super::gen(input).unwrap();
+    #[test]
+    fn test_no_pk() {
+        let code = indoc! {r#"
+            #[derive(Fields)]
+            struct Data {
+                v1: i16,
+                v2: String,
+            }
+        "#};
 
-        let output = pretty_print(output);
+        do_test(code, "gen/test_no_pk.rs");
+    }
 
-        let expected = expect_test::expect_file!["gen/test_output.rs"];
+    #[test]
+    fn test_empty_pk() {
+        let code = indoc! {r#"
+            #[derive(Fields)]
+            #[primary_key()]
+            struct Data {
+                v1: i16,
+                v2: String,
+            }
+        "#};
 
-        expected.assert_eq(&output);
+        do_test(code, "gen/test_empty_pk.rs");
     }
 }
