@@ -56,7 +56,7 @@ pub struct UserDefinedFunction {
     /// See <https://github.com/risingwavelabs/risingwave/issues/13791>.
     disable_retry_count: AtomicU8,
     /// Always retry. Overrides `disable_retry_count`.
-    always_retry: bool,
+    always_retry_on_network_error: bool,
 }
 
 const INITIAL_RETRY_COUNT: u8 = 16;
@@ -113,9 +113,9 @@ impl UserDefinedFunction {
             UdfImpl::JavaScript(runtime) => runtime.call(&self.identifier, &arrow_input)?,
             UdfImpl::External(client) => {
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
-                let result = if self.always_retry {
+                let result = if self.always_retry_on_network_error {
                     client
-                        .call_with_always_retry(&self.identifier, input)
+                        .call_with_always_retry_on_network_error(&self.identifier, input)
                         .instrument_await(self.span.clone())
                         .await
                 } else if disable_retry_count != 0 {
@@ -241,7 +241,7 @@ impl Build for UserDefinedFunction {
             identifier: identifier.clone(),
             span: format!("udf_call({})", identifier).into(),
             disable_retry_count: AtomicU8::new(0),
-            always_retry: true,
+            always_retry_on_network_error: udf.always_retry_on_network_error,
         })
     }
 }

@@ -205,7 +205,7 @@ impl ArrowFlightUdfClient {
     }
 
     /// Always retry on connection
-    pub async fn call_with_always_retry(
+    pub async fn call_with_always_retry_on_network_error(
         &self,
         id: &str,
         input: RecordBatch,
