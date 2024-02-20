@@ -16,7 +16,7 @@ use clippy_utils::diagnostics::span_lint_and_help;
 use clippy_utils::macros::{
     find_format_arg_expr, find_format_args, is_format_macro, macro_backtrace,
 };
-use clippy_utils::ty::implements_trait;
+use clippy_utils::ty::{implements_trait, match_type};
 use clippy_utils::{
     is_in_cfg_test, is_in_test_function, is_trait_method, match_def_path, match_function_call,
 };
@@ -64,6 +64,7 @@ const TRACING_FIELD_DEBUG: [&str; 3] = ["tracing_core", "field", "debug"];
 const TRACING_FIELD_DISPLAY: [&str; 3] = ["tracing_core", "field", "display"];
 const TRACING_MACROS_EVENT: [&str; 3] = ["tracing", "macros", "event"];
 const ANYHOW_MACROS_ANYHOW: [&str; 3] = ["anyhow", "macros", "anyhow"];
+const ANYHOW_ERROR: [&str; 2] = ["anyhow", "Error"];
 
 impl<'tcx> LateLintPass<'tcx> for FormatError {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
@@ -176,7 +177,10 @@ fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>, span: Span, help: &str) 
 
     let ty = cx.typeck_results().expr_ty(arg_expr).peel_refs();
 
-    if implements_trait(cx, ty, error_trait_id, &[]) {
+    let is_error = || implements_trait(cx, ty, error_trait_id, &[]);
+    let is_anyhow = || match_type(cx, ty, &ANYHOW_ERROR);
+
+    if is_error() || is_anyhow() {
         if let Some(span) = core::iter::successors(Some(span), |s| s.parent_callsite())
             .find(|s| s.can_be_used_for_suggestions())
         {
