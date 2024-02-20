@@ -20,6 +20,7 @@ anyhow = "1"
 arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
 arrow-udf-js = { workspace = true }
+arrow-udf-python = { workspace = true }
 arrow-udf-wasm = { workspace = true }
 async-trait = "0.1"
 auto_impl = "1"

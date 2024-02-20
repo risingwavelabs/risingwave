@@ -1,0 +1,174 @@
+statement ok
+create function int_42() returns int language python as $$
+def int_42():
+    return 42;
+$$;
+
+query I
+select int_42();
+----
+42
+
+statement ok
+drop function int_42;
+
+
+statement ok
+create function gcd(a int, b int) returns int language python as $$
+def gcd(a, b):
+    while b != 0:
+        a, b = b, a % b
+    return a
+$$;
+
+query I
+select gcd(25, 15);
+----
+5
+
+statement ok
+drop function gcd;
+
+
+statement ok
+create function decimal_add(a decimal, b decimal) returns decimal language python as $$
+def decimal_add(a, b):
+    return a + b
+$$;
+
+query R
+select decimal_add(1.11, 2.22);
+----
+3.33
+
+statement ok
+drop function decimal_add;
+
+
+statement ok
+create function to_string(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb) returns varchar language python as $$
+import json
+
+def to_string(a, b, c, d, e, f, g, h, i, j):
+    return str(a) + str(b) + str(c) + str(d) + str(e) + str(f) + str(g) + str(h) + str(i) + json.dumps(j);
+$$;
+
+query T
+select to_string(false, 1::smallint, 2, 3, 4.5, 6.7, 8.9, 'abc', '\x010203', '{"key": 1}');
+----
+False1234.56.78.9abc'\x01\x02\x03'{"key": 1}
+
+statement ok
+drop function to_string;
+
+
+# show data types in python
+statement ok
+create function py_typeof(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb) returns jsonb language python as $$
+def py_typeof(a, b, c, d, e, f, g, h, i, j):
+    return {
+        "boolean": type(a).__name__,
+        "smallint": type(b).__name__,
+        "int": type(c).__name__,
+        "bigint": type(d).__name__,
+        "real": type(e).__name__,
+        "float": type(f).__name__,
+        "decimal": type(g).__name__,
+        "varchar": type(h).__name__,
+        "bytea": type(i).__name__,
+        "jsonb": type(j).__name__,
+    };
+$$;
+
+query T
+select py_typeof(false, 1::smallint, 2, 3, 4.5, 6.7, 8.9, 'abc', '\x010203', '{"key": 1}');
+----
+{"bigint": "int", "boolean": "bool", "bytea": "bytes", "decimal": "Decimal", "float": "float", "int": "int", "jsonb": "dict", "real": "float", "smallint": "int", "varchar": "str"}
+
+statement ok
+drop function py_typeof;
+
+
+statement ok
+create function return_all(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb, s struct<f1 int, f2 int>)
+returns struct<a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb, s struct<f1 int, f2 int>>
+language python as $$
+class Ret:
+    def __init__(self, a, b, c, d, e, f, g, h, i, j, s):
+        self.a = a
+        self.b = b
+        self.c = c
+        self.d = d
+        self.e = e
+        self.f = f
+        self.g = g
+        self.h = h
+        self.i = i
+        self.j = j
+        self.s = s
+
+def return_all(a, b, c, d, e, f, g, h, i, j, s):
+    return Ret(a, b, c, d, e, f, g, h, i, j, s)
+$$;
+
+query T
+select (return_all(
+    true,
+    1 ::smallint,
+    1,
+    1,
+    1,
+    1,
+    12345678901234567890.12345678,
+    'string',
+    'bytes',
+    '{"key":1}',
+    row(1, 2)::struct<f1 int, f2 int>
+)).*;
+----
+t 1 1 1 1 1 12345678901234567890.12345678 string \x6279746573 {"key": 1} (1,2)
+
+statement ok
+drop function return_all;
+
+
+statement ok
+create function series(n int) returns table (x int) language python as $$
+def series(n):
+    for i in range(n):
+        yield i
+$$;
+
+query I
+select series(5);
+----
+0
+1
+2
+3
+4
+
+statement ok
+drop function series;
+
+
+statement ok
+create function split(s varchar) returns table (word varchar, length int) language python as $$
+class Ret:
+    def __init__(self, word, length):
+        self.word = word
+        self.length = length
+
+def split(s):
+    for word in s.split():
+        yield Ret(word, len(word))
+$$;
+
+query IT
+select * from split('rising wave');
+----
+rising 6
+wave   4
+
+statement ok
+drop function split;
