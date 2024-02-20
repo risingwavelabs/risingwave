@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use super::LocalBarrierManager;
-use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;
-use crate::task::barrier_manager::LocalBarrierWorker;
+use crate::task::barrier_manager::{LocalBarrierEvent, LocalBarrierWorker};
 use crate::task::ActorId;
 
 type ConsumedEpoch = u64;
@@ -48,7 +47,7 @@ impl LocalBarrierManager {
         actor: ActorId,
         state: BackfillState,
     ) {
-        self.send_event(ReportCreateProgress {
+        self.send_event(LocalBarrierEvent::ReportCreateProgress {
             current_epoch,
             actor,
             state,

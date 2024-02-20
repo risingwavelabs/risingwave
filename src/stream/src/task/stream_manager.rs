@@ -37,7 +37,7 @@ use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::{dispatch_state_store, StateStore};
 use rw_futures_util::AttachedFuture;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
@@ -48,7 +48,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::*;
 use crate::from_proto::create_executor;
-use crate::task::barrier_manager::{LocalBarrierEvent, LocalBarrierWorker};
+use crate::task::barrier_manager::{LocalActorOperation, LocalBarrierWorker};
 use crate::task::{
     ActorId, FragmentId, LocalBarrierManager, SharedContext, StreamActorManager,
     StreamActorManagerState, StreamEnvironment, UpDownActorIds,
@@ -69,7 +69,7 @@ pub struct LocalStreamManager {
 
     pub env: StreamEnvironment,
 
-    event_sender: UnboundedSender<LocalBarrierEvent>,
+    actor_op_tx: UnboundedSender<LocalActorOperation>,
 }
 
 /// Report expression evaluation errors to the actor context.
@@ -143,15 +143,15 @@ impl Debug for ExecutorParams {
 }
 
 impl LocalStreamManager {
-    pub(super) fn send_event(&self, event: LocalBarrierEvent) {
-        self.event_sender
+    pub(super) fn send_event(&self, event: LocalActorOperation) {
+        self.actor_op_tx
             .send(event)
             .expect("should be able to send event")
     }
 
     pub(super) async fn send_and_await<RSP>(
         &self,
-        make_event: impl FnOnce(oneshot::Sender<RSP>) -> LocalBarrierEvent,
+        make_event: impl FnOnce(oneshot::Sender<RSP>) -> LocalActorOperation,
     ) -> StreamResult<RSP> {
         let (tx, rx) = oneshot::channel();
         let event = make_event(tx);
@@ -170,16 +170,20 @@ impl LocalStreamManager {
     ) -> Self {
         let await_tree_reg =
             await_tree_config.map(|config| Arc::new(Mutex::new(await_tree::Registry::new(config))));
-        let local_barrier_manager = LocalBarrierManager::new(
+
+        let (actor_op_tx, actor_op_rx) = unbounded_channel();
+
+        let _join_handle = LocalBarrierWorker::spawn(
             env.clone(),
             streaming_metrics,
             await_tree_reg.clone(),
             watermark_epoch,
+            actor_op_rx,
         );
         Self {
             await_tree_reg,
             env,
-            event_sender: local_barrier_manager.sender().clone(),
+            actor_op_tx,
         }
     }
 
@@ -219,7 +223,7 @@ impl LocalStreamManager {
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
     ) -> StreamResult<()> {
-        self.send_and_await(move |result_sender| LocalBarrierEvent::InjectBarrier {
+        self.send_and_await(move |result_sender| LocalActorOperation::InjectBarrier {
             barrier,
             actor_ids_to_send: actor_ids_to_send.into_iter().collect(),
             actor_ids_to_collect: actor_ids_to_collect.into_iter().collect(),
@@ -230,7 +234,7 @@ impl LocalStreamManager {
 
     /// Use `prev_epoch` to remove collect rx and return rx.
     pub async fn collect_barrier(&self, prev_epoch: u64) -> StreamResult<BarrierCompleteResult> {
-        self.send_and_await(|result_sender| LocalBarrierEvent::AwaitEpochCompleted {
+        self.send_and_await(|result_sender| LocalActorOperation::AwaitEpochCompleted {
             epoch: prev_epoch,
             result_sender,
         })
@@ -239,7 +243,7 @@ impl LocalStreamManager {
 
     /// Drop the resources of the given actors.
     pub async fn drop_actors(&self, actors: Vec<ActorId>) -> StreamResult<()> {
-        self.send_and_await(|result_sender| LocalBarrierEvent::DropActors {
+        self.send_and_await(|result_sender| LocalActorOperation::DropActors {
             actors,
             result_sender,
         })
@@ -248,7 +252,7 @@ impl LocalStreamManager {
 
     /// Force stop all actors on this worker, and then drop their resources.
     pub async fn reset(&self, prev_epoch: u64) {
-        self.send_and_await(|result_sender| LocalBarrierEvent::Reset {
+        self.send_and_await(|result_sender| LocalActorOperation::Reset {
             result_sender,
             prev_epoch,
         })
@@ -257,7 +261,7 @@ impl LocalStreamManager {
     }
 
     pub async fn update_actors(&self, actors: Vec<stream_plan::StreamActor>) -> StreamResult<()> {
-        self.send_and_await(|result_sender| LocalBarrierEvent::UpdateActors {
+        self.send_and_await(|result_sender| LocalActorOperation::UpdateActors {
             actors,
             result_sender,
         })
@@ -265,7 +269,7 @@ impl LocalStreamManager {
     }
 
     pub async fn build_actors(&self, actors: Vec<ActorId>) -> StreamResult<()> {
-        self.send_and_await(|result_sender| LocalBarrierEvent::BuildActors {
+        self.send_and_await(|result_sender| LocalActorOperation::BuildActors {
             actors,
             result_sender,
         })
@@ -273,7 +277,7 @@ impl LocalStreamManager {
     }
 
     pub async fn update_actor_info(&self, new_actor_infos: Vec<ActorInfo>) -> StreamResult<()> {
-        self.send_and_await(|result_sender| LocalBarrierEvent::UpdateActorInfo {
+        self.send_and_await(|result_sender| LocalActorOperation::UpdateActorInfo {
             new_actor_infos,
             result_sender,
         })
@@ -281,8 +285,11 @@ impl LocalStreamManager {
     }
 
     pub async fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver> {
-        self.send_and_await(|result_sender| LocalBarrierEvent::TakeReceiver { ids, result_sender })
-            .await?
+        self.send_and_await(|result_sender| LocalActorOperation::TakeReceiver {
+            ids,
+            result_sender,
+        })
+        .await?
     }
 }
 
@@ -297,11 +304,7 @@ impl LocalBarrierWorker {
     }
 
     /// Force stop all actors on this worker, and then drop their resources.
-    pub(super) async fn reset(
-        &mut self,
-        prev_epoch: u64,
-        local_barrier_manager: LocalBarrierManager,
-    ) {
+    pub(super) async fn reset(&mut self, prev_epoch: u64) {
         let actor_handles = self.actor_manager_state.drain_actor_handles();
         for (actor_id, handle) in &actor_handles {
             tracing::debug!("force stopping actor {}", actor_id);
@@ -328,7 +331,7 @@ impl LocalBarrierWorker {
         dispatch_state_store!(&self.actor_manager.env.state_store(), store, {
             store.clear_shared_buffer(prev_epoch).await;
         });
-        self.reset_state(local_barrier_manager);
+        self.reset_state();
         self.actor_manager.env.dml_manager_ref().clear();
     }
 
