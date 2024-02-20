@@ -919,6 +919,27 @@ impl CommandContext {
                                 init_split_assignment,
                             )
                             .await?;
+
+                        if let Some(ReplaceTablePlan {
+                            new_table_fragments,
+                            dispatchers,
+                            init_split_assignment,
+                            old_table_fragments,
+                            ..
+                        }) = replace_table
+                        {
+                            // Tell compute nodes to drop actors.
+                            self.clean_up(old_table_fragments.actor_ids()).await?;
+
+                            mgr.catalog_controller
+                                .post_collect_table_fragments(
+                                    new_table_fragments.table_id().table_id as _,
+                                    new_table_fragments.actor_ids(),
+                                    dispatchers.clone(),
+                                    init_split_assignment,
+                                )
+                                .await?;
+                        }
                     }
                 }
 
