@@ -250,13 +250,9 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         self.inner.seal_epoch(epoch, is_checkpoint);
     }
 
-    async fn clear_shared_buffer(&self) -> StorageResult<()> {
-        let span = TraceSpan::new_clear_shared_buffer_span();
-        let res = self.inner.clear_shared_buffer().await;
-        span.may_send_result(OperationResult::ClearSharedBuffer(
-            res.as_ref().map(|o| *o).into(),
-        ));
-        res
+    async fn clear_shared_buffer(&self, prev_epoch: u64) {
+        let _span = TraceSpan::new_clear_shared_buffer_span(prev_epoch);
+        self.inner.clear_shared_buffer(prev_epoch).await;
     }
 
     async fn new_local(&self, options: NewLocalOptions) -> Self::Local {
