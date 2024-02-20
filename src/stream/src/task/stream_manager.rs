@@ -37,7 +37,7 @@ use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::{dispatch_state_store, StateStore};
 use rw_futures_util::AttachedFuture;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
@@ -48,7 +48,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::*;
 use crate::from_proto::create_executor;
-use crate::task::barrier_manager::{LocalActorOperation, LocalBarrierWorker};
+use crate::task::barrier_manager::{EventSender, LocalActorOperation, LocalBarrierWorker};
 use crate::task::{
     ActorId, FragmentId, LocalBarrierManager, SharedContext, StreamActorManager,
     StreamActorManagerState, StreamEnvironment, UpDownActorIds,
@@ -69,7 +69,7 @@ pub struct LocalStreamManager {
 
     pub env: StreamEnvironment,
 
-    actor_op_tx: UnboundedSender<LocalActorOperation>,
+    actor_op_tx: EventSender<LocalActorOperation>,
 }
 
 /// Report expression evaluation errors to the actor context.
@@ -143,25 +143,6 @@ impl Debug for ExecutorParams {
 }
 
 impl LocalStreamManager {
-    pub(super) fn send_event(&self, event: LocalActorOperation) {
-        self.actor_op_tx
-            .send(event)
-            .expect("should be able to send event")
-    }
-
-    pub(super) async fn send_and_await<RSP>(
-        &self,
-        make_event: impl FnOnce(oneshot::Sender<RSP>) -> LocalActorOperation,
-    ) -> StreamResult<RSP> {
-        let (tx, rx) = oneshot::channel();
-        let event = make_event(tx);
-        self.send_event(event);
-        rx.await
-            .map_err(|_| anyhow!("barrier manager maybe reset").into())
-    }
-}
-
-impl LocalStreamManager {
     pub fn new(
         env: StreamEnvironment,
         streaming_metrics: Arc<StreamingMetrics>,
@@ -183,7 +164,7 @@ impl LocalStreamManager {
         Self {
             await_tree_reg,
             env,
-            actor_op_tx,
+            actor_op_tx: EventSender(actor_op_tx),
         }
     }
 
@@ -215,81 +196,88 @@ impl LocalStreamManager {
         }
     }
 
-    /// Broadcast a barrier to all senders. Save a receiver which will get notified when this
-    /// barrier is finished, in managed mode.
+    /// Broadcast a barrier to all senders. Save a receiver in barrier manager
     pub async fn send_barrier(
         &self,
         barrier: Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
     ) -> StreamResult<()> {
-        self.send_and_await(move |result_sender| LocalActorOperation::InjectBarrier {
-            barrier,
-            actor_ids_to_send: actor_ids_to_send.into_iter().collect(),
-            actor_ids_to_collect: actor_ids_to_collect.into_iter().collect(),
-            result_sender,
-        })
-        .await?
+        self.actor_op_tx
+            .send_and_await(move |result_sender| LocalActorOperation::InjectBarrier {
+                barrier,
+                actor_ids_to_send: actor_ids_to_send.into_iter().collect(),
+                actor_ids_to_collect: actor_ids_to_collect.into_iter().collect(),
+                result_sender,
+            })
+            .await?
     }
 
     /// Use `prev_epoch` to remove collect rx and return rx.
     pub async fn collect_barrier(&self, prev_epoch: u64) -> StreamResult<BarrierCompleteResult> {
-        self.send_and_await(|result_sender| LocalActorOperation::AwaitEpochCompleted {
-            epoch: prev_epoch,
-            result_sender,
-        })
-        .await?
+        self.actor_op_tx
+            .send_and_await(|result_sender| LocalActorOperation::AwaitEpochCompleted {
+                epoch: prev_epoch,
+                result_sender,
+            })
+            .await?
     }
 
     /// Drop the resources of the given actors.
     pub async fn drop_actors(&self, actors: Vec<ActorId>) -> StreamResult<()> {
-        self.send_and_await(|result_sender| LocalActorOperation::DropActors {
-            actors,
-            result_sender,
-        })
-        .await
+        self.actor_op_tx
+            .send_and_await(|result_sender| LocalActorOperation::DropActors {
+                actors,
+                result_sender,
+            })
+            .await
     }
 
     /// Force stop all actors on this worker, and then drop their resources.
     pub async fn reset(&self, prev_epoch: u64) {
-        self.send_and_await(|result_sender| LocalActorOperation::Reset {
-            result_sender,
-            prev_epoch,
-        })
-        .await
-        .expect("should receive reset")
+        self.actor_op_tx
+            .send_and_await(|result_sender| LocalActorOperation::Reset {
+                result_sender,
+                prev_epoch,
+            })
+            .await
+            .expect("should receive reset")
     }
 
     pub async fn update_actors(&self, actors: Vec<stream_plan::StreamActor>) -> StreamResult<()> {
-        self.send_and_await(|result_sender| LocalActorOperation::UpdateActors {
-            actors,
-            result_sender,
-        })
-        .await?
+        self.actor_op_tx
+            .send_and_await(|result_sender| LocalActorOperation::UpdateActors {
+                actors,
+                result_sender,
+            })
+            .await?
     }
 
     pub async fn build_actors(&self, actors: Vec<ActorId>) -> StreamResult<()> {
-        self.send_and_await(|result_sender| LocalActorOperation::BuildActors {
-            actors,
-            result_sender,
-        })
-        .await?
+        self.actor_op_tx
+            .send_and_await(|result_sender| LocalActorOperation::BuildActors {
+                actors,
+                result_sender,
+            })
+            .await?
     }
 
     pub async fn update_actor_info(&self, new_actor_infos: Vec<ActorInfo>) -> StreamResult<()> {
-        self.send_and_await(|result_sender| LocalActorOperation::UpdateActorInfo {
-            new_actor_infos,
-            result_sender,
-        })
-        .await?
+        self.actor_op_tx
+            .send_and_await(|result_sender| LocalActorOperation::UpdateActorInfo {
+                new_actor_infos,
+                result_sender,
+            })
+            .await?
     }
 
     pub async fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver> {
-        self.send_and_await(|result_sender| LocalActorOperation::TakeReceiver {
-            ids,
-            result_sender,
-        })
-        .await?
+        self.actor_op_tx
+            .send_and_await(|result_sender| LocalActorOperation::TakeReceiver {
+                ids,
+                result_sender,
+            })
+            .await?
     }
 }
 

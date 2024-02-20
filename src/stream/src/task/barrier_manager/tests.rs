@@ -47,19 +47,16 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
     let barrier = Barrier::new_test_barrier(curr_epoch);
     let epoch = barrier.epoch.prev;
 
-    {
-        let (tx, rx) = oneshot::channel();
-        actor_op_tx
-            .send(LocalActorOperation::InjectBarrier {
-                barrier,
-                actor_ids_to_send: actor_ids.clone().into_iter().collect(),
-                actor_ids_to_collect: actor_ids.clone().into_iter().collect(),
-                result_sender: tx,
-            })
-            .unwrap();
-
-        rx.await.unwrap().unwrap();
-    }
+    actor_op_tx
+        .send_and_await(|tx| LocalActorOperation::InjectBarrier {
+            barrier,
+            actor_ids_to_send: actor_ids.clone().into_iter().collect(),
+            actor_ids_to_collect: actor_ids.clone().into_iter().collect(),
+            result_sender: tx,
+        })
+        .await
+        .unwrap()
+        .unwrap();
 
     // Collect barriers from actors
     let collected_barriers = rxs
@@ -71,17 +68,12 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
         })
         .collect_vec();
 
-    let mut await_epoch_future = pin!({
-        let (tx, rx) = oneshot::channel();
-        actor_op_tx
-            .send(LocalActorOperation::AwaitEpochCompleted {
-                epoch,
-                result_sender: tx,
-            })
-            .unwrap();
-
-        rx.map(|result| result.unwrap().unwrap())
-    });
+    let mut await_epoch_future = pin!(actor_op_tx
+        .send_and_await(|tx| LocalActorOperation::AwaitEpochCompleted {
+            epoch,
+            result_sender: tx,
+        })
+        .map(|result| result.unwrap().unwrap()));
 
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
@@ -129,19 +121,16 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
     // Collect a barrier before sending
     manager.collect(extra_actor_id, &barrier);
 
-    {
-        let (tx, rx) = oneshot::channel();
-        actor_op_tx
-            .send(LocalActorOperation::InjectBarrier {
-                barrier,
-                actor_ids_to_send: actor_ids_to_send.clone().into_iter().collect(),
-                actor_ids_to_collect: actor_ids_to_collect.clone().into_iter().collect(),
-                result_sender: tx,
-            })
-            .unwrap();
-
-        rx.await.unwrap().unwrap();
-    }
+    actor_op_tx
+        .send_and_await(|tx| LocalActorOperation::InjectBarrier {
+            barrier,
+            actor_ids_to_send: actor_ids_to_send.clone().into_iter().collect(),
+            actor_ids_to_collect: actor_ids_to_collect.clone().into_iter().collect(),
+            result_sender: tx,
+        })
+        .await
+        .unwrap()
+        .unwrap();
 
     // Collect barriers from actors
     let collected_barriers = rxs
@@ -153,17 +142,12 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
         })
         .collect_vec();
 
-    let mut await_epoch_future = pin!({
-        let (tx, rx) = oneshot::channel();
-        actor_op_tx
-            .send(LocalActorOperation::AwaitEpochCompleted {
-                epoch,
-                result_sender: tx,
-            })
-            .unwrap();
-
-        rx.map(|result| result.unwrap().unwrap())
-    });
+    let mut await_epoch_future = pin!(actor_op_tx
+        .send_and_await(|tx| LocalActorOperation::AwaitEpochCompleted {
+            epoch,
+            result_sender: tx,
+        })
+        .map(|result| result.unwrap().unwrap()));
 
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
