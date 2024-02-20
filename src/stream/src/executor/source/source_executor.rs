@@ -424,6 +424,7 @@ impl<S: StateStore> SourceExecutor<S> {
         if barrier.is_pause_on_startup() {
             stream.pause_stream();
         }
+        // TODO: for backfill-able source, pause until there's a MV.
 
         yield Message::Barrier(barrier);
 

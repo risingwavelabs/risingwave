@@ -22,6 +22,7 @@ use futures::stream::{select_with_strategy, AbortHandle, Abortable, PollNext};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::types::JsonbVal;
@@ -32,6 +33,7 @@ use risingwave_connector::source::{
 use risingwave_connector::ConnectorParams;
 use risingwave_storage::StateStore;
 use serde::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
 
 use super::executor_core::StreamSourceCore;
 use super::kafka_backfill_state_table::BackfillStateTableHandler;
@@ -283,29 +285,46 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = core;
 
-        // If the first barrier requires us to pause on startup, pause the stream.
-        if barrier.is_pause_on_startup() {
-            // TODO: support pause on startup
-        }
-
-        yield Message::Barrier(barrier);
-
         let (source_chunk_reader, abort_handles) = self
             .build_stream_source_reader(&source_desc, unfinished_splits.clone())
             .instrument_await("source_build_reader")
             .await?;
 
-        // XXX:
-        // - What's the best poll strategy?
-        // - Should we also add a barrier stream for backfill executor?
-        fn closure() -> impl FnMut(&mut ()) -> PollNext {
-            |_: &mut ()| futures::stream::PollNext::Left
+        fn select_strategy(_: &mut ()) -> PollNext {
+            futures::stream::PollNext::Left
         }
-        let mut backfill_stream = Some(select_with_strategy(
+        // XXX:
+        // - What's the best poll strategy? We should prefer backfill, but also consider barrier from input.
+        // - Should we also add a barrier stream for backfill executor?
+        let mut backfill_stream = select_with_strategy(
             input.by_ref().map(Either::Left),
             source_chunk_reader.map(Either::Right),
-            closure(),
-        ));
+            select_strategy,
+        );
+
+        type PausedReader = Option<impl Stream>;
+        let mut paused_reader: PausedReader = None;
+
+        macro_rules! pause_reader {
+            () => {
+                let (left, right) = backfill_stream.into_inner();
+                backfill_stream = select_with_strategy(
+                    left,
+                    futures::stream::pending().boxed().map(Either::Right),
+                    select_strategy,
+                );
+                // XXX: do we have to store the original reader? Can we simply rebuild the reader later?
+                paused_reader = Some(right);
+            };
+        }
+
+        // If the first barrier requires us to pause on startup, pause the stream.
+        if barrier.is_pause_on_startup() {
+            pause_reader!();
+        }
+
+        yield Message::Barrier(barrier);
+
         let mut backfill_stage = BackfillStage {
             abort_handles,
             states: backfill_states,
@@ -313,22 +332,58 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
         };
 
         if !self.backfill_finished(&backfill_stage.states).await? {
-            'backfill_loop: while let Some(either) = backfill_stream.as_mut().unwrap().next().await
-            {
+            'backfill_loop: while let Some(either) = backfill_stream.next().await {
                 match either {
                     // Upstream
                     Either::Left(msg) => {
                         let Ok(msg) = msg else {
-                            todo!("rebuild stream reader from error")
+                            let e = msg.unwrap_err();
+                            let core = &self.stream_source_core;
+                            tracing::warn!(
+                                error = ?e.as_report(),
+                                actor_id = self.actor_ctx.id,
+                                source_id = %core.source_id,
+                                "stream source reader error",
+                            );
+                            GLOBAL_ERROR_METRICS.user_source_reader_error.report([
+                                "SourceReaderError".to_owned(),
+                                e.to_report_string(),
+                                "SourceExecutor".to_owned(),
+                                self.actor_ctx.id.to_string(),
+                                core.source_id.to_string(),
+                            ]);
+
+                            let (reader, new_abort_handles) = self
+                                .build_stream_source_reader(
+                                    &source_desc,
+                                    backfill_stage.unfinished_splits.clone(),
+                                )
+                                .await?;
+                            backfill_stage.abort_handles = new_abort_handles;
+
+                            backfill_stream = select_with_strategy(
+                                input.by_ref().map(Either::Left),
+                                reader.map(Either::Right),
+                                select_strategy,
+                            );
+                            continue;
                         };
                         match msg {
                             Message::Barrier(barrier) => {
                                 let mut split_changed = false;
                                 if let Some(ref mutation) = barrier.mutation.as_deref() {
                                     match mutation {
-                                        Mutation::Pause => { // TODO:
+                                        Mutation::Pause => {
+                                            pause_reader!();
                                         }
-                                        Mutation::Resume => { // TODO:
+                                        Mutation::Resume => {
+                                            backfill_stream = select_with_strategy(
+                                                input.by_ref().map(Either::Left),
+                                                paused_reader
+                                                    .take()
+                                                    .expect("no paused reader to resume"),
+                                                select_strategy,
+                                            );
                                         }
                                         Mutation::SourceChangeSplit(actor_splits) => {
                                             tracing::info!(
@@ -392,11 +447,11 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
                                         .await?;
                                     backfill_stage.abort_handles = new_abort_handles;
 
-                                    backfill_stream = Some(select_with_strategy(
+                                    backfill_stream = select_with_strategy(
                                         input.by_ref().map(Either::Left),
                                         reader.map(Either::Right),
-                                        closure(),
-                                    ));
+                                        select_strategy,
+                                    );
                                 }
 
                                 self.backfill_state_store
