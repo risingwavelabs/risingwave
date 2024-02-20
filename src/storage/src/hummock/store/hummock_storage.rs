@@ -79,8 +79,6 @@ impl Drop for HummockStorageShutdownGuard {
 #[derive(Clone)]
 pub struct HummockStorage {
     hummock_event_sender: UnboundedSender<HummockEvent>,
-    // only used in test for setting hummock version in uploader
-    _version_update_sender: UnboundedSender<HummockVersionUpdate>,
 
     context: CompactorContext,
 
@@ -153,22 +151,22 @@ impl HummockStorage {
         .await
         .map_err(HummockError::read_backup_error)?;
         let write_limiter = Arc::new(WriteLimiter::default());
-        let (version_update_tx, mut version_update_rx) = unbounded_channel();
+        let (event_tx, mut event_rx) = unbounded_channel();
 
         let observer_manager = ObserverManager::new(
             notification_client,
             HummockObserverNode::new(
                 filter_key_extractor_manager.clone(),
                 backup_reader.clone(),
-                version_update_tx.clone(),
+                event_tx.clone(),
                 write_limiter.clone(),
             ),
         )
         .await;
         observer_manager.start().await;
 
-        let hummock_version = match version_update_rx.recv().await {
-            Some(HummockVersionUpdate::PinnedVersion(version)) => version,
+        let hummock_version = match event_rx.recv().await {
+            Some(HummockEvent::VersionUpdate(HummockVersionUpdate::PinnedVersion(version))) => version,
             _ => unreachable!("the hummock observer manager is the first one to take the event tx. Should be full hummock version")
         };
 
@@ -191,15 +189,14 @@ impl HummockStorage {
         let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
         let min_current_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
         let hummock_event_handler = HummockEventHandler::new(
-            version_update_rx,
+            event_tx.clone(),
+            event_rx,
             pinned_version,
             compactor_context.clone(),
             filter_key_extractor_manager.clone(),
             sstable_object_id_manager.clone(),
             state_store_metrics.clone(),
         );
-
-        let event_tx = hummock_event_handler.event_sender();
 
         let instance = Self {
             context: compactor_context,
@@ -209,7 +206,6 @@ impl HummockStorage {
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
             seal_epoch,
             hummock_event_sender: event_tx.clone(),
-            _version_update_sender: version_update_tx,
             pinned_version: hummock_event_handler.pinned_version(),
             hummock_version_reader: HummockVersionReader::new(
                 sstable_store,
@@ -471,10 +467,10 @@ impl StateStore for HummockStorage {
         StoreLocalStatistic::flush_all();
     }
 
-    async fn clear_shared_buffer(&self, prev_epoch: u64) {
+    async fn clear_shared_buffer(&self) -> StorageResult<()> {
         let (tx, rx) = oneshot::channel();
         self.hummock_event_sender
-            .send(HummockEvent::Clear(tx, prev_epoch))
+            .send(HummockEvent::Clear(tx))
             .expect("should send success");
         rx.await.expect("should wait success");
 
@@ -482,6 +478,8 @@ impl StateStore for HummockStorage {
         self.min_current_epoch
             .store(HummockEpoch::MAX, MemOrdering::SeqCst);
         self.seal_epoch.store(epoch, MemOrdering::SeqCst);
+
+        Ok(())
     }
 
     fn new_local(&self, option: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_ {
@@ -529,12 +527,13 @@ impl HummockStorage {
     }
 
     /// Used in the compaction test tool
-    #[cfg(any(test, feature = "test"))]
     pub async fn update_version_and_wait(&self, version: HummockVersion) {
         use tokio::task::yield_now;
         let version_id = version.id;
-        self._version_update_sender
-            .send(HummockVersionUpdate::PinnedVersion(version))
+        self.hummock_event_sender
+            .send(HummockEvent::VersionUpdate(
+                HummockVersionUpdate::PinnedVersion(version),
+            ))
             .unwrap();
         loop {
             if self.pinned_version.load().id() >= version_id {

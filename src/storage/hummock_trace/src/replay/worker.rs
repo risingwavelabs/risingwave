@@ -327,9 +327,22 @@ impl ReplayWorker {
                     );
                 }
             }
-            Operation::ClearSharedBuffer(prev_epoch) => {
+            Operation::ClearSharedBuffer => {
                 assert_eq!(storage_type, StorageType::Global);
-                replay.clear_shared_buffer(prev_epoch).await;
+                let res = res_rx.recv().await.expect("recv result failed");
+                if let OperationResult::ClearSharedBuffer(expected) = res {
+                    let actual = replay.clear_shared_buffer().await;
+                    assert_eq!(
+                        TraceResult::from(actual),
+                        expected,
+                        "clear_shared_buffer wrong"
+                    );
+                } else {
+                    panic!(
+                        "wrong clear_shared_buffer result, expect epoch result, but got {:?}",
+                        res
+                    );
+                }
             }
             Operation::SealCurrentEpoch { epoch, opts } => {
                 assert_ne!(storage_type, StorageType::Global);

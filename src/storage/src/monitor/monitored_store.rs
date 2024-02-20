@@ -331,10 +331,11 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         panic!("the state store is already monitored")
     }
 
-    fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_ {
+    fn clear_shared_buffer(&self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
         self.inner
-            .clear_shared_buffer(prev_epoch)
+            .clear_shared_buffer()
             .verbose_instrument_await("store_clear_shared_buffer")
+            .inspect_err(|e| error!(error = %e.as_report(), "Failed in clear_shared_buffer"))
     }
 
     async fn new_local(&self, option: NewLocalOptions) -> Self::Local {

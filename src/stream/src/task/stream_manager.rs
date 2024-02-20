@@ -231,12 +231,9 @@ impl LocalStreamManager {
     }
 
     /// Force stop all actors on this worker, and then drop their resources.
-    pub async fn reset(&self, prev_epoch: u64) {
+    pub async fn reset(&self) {
         self.local_barrier_manager
-            .send_and_await(|result_sender| LocalBarrierEvent::Reset {
-                result_sender,
-                prev_epoch,
-            })
+            .send_and_await(LocalBarrierEvent::Reset)
             .await
             .expect("should receive reset")
     }
@@ -271,7 +268,7 @@ impl LocalBarrierWorker {
     }
 
     /// Force stop all actors on this worker, and then drop their resources.
-    pub(super) async fn reset(&mut self, prev_epoch: u64) {
+    pub(super) async fn reset(&mut self) {
         let actor_handles = self.actor_manager_state.drain_actor_handles();
         for (actor_id, handle) in &actor_handles {
             tracing::debug!("force stopping actor {}", actor_id);
@@ -298,7 +295,7 @@ impl LocalBarrierWorker {
             m.lock().clear();
         }
         dispatch_state_store!(&self.actor_manager.env.state_store(), store, {
-            store.clear_shared_buffer(prev_epoch).await;
+            store.clear_shared_buffer().await.unwrap();
         });
         self.reset_state();
         self.actor_manager.env.dml_manager_ref().clear();

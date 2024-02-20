@@ -34,7 +34,7 @@ use risingwave_storage::filter_key_extractor::{
     RpcFilterKeyExtractorManager,
 };
 use risingwave_storage::hummock::backup_reader::BackupReader;
-use risingwave_storage::hummock::event_handler::HummockVersionUpdate;
+use risingwave_storage::hummock::event_handler::{HummockEvent, HummockVersionUpdate};
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
@@ -53,8 +53,8 @@ pub async fn prepare_first_valid_version(
     worker_node: WorkerNode,
 ) -> (
     PinnedVersion,
-    UnboundedSender<HummockVersionUpdate>,
-    UnboundedReceiver<HummockVersionUpdate>,
+    UnboundedSender<HummockEvent>,
+    UnboundedReceiver<HummockEvent>,
 ) {
     let (tx, mut rx) = unbounded_channel();
     let notification_client =
@@ -73,7 +73,7 @@ pub async fn prepare_first_valid_version(
     .await;
     observer_manager.start().await;
     let hummock_version = match rx.recv().await {
-        Some(HummockVersionUpdate::PinnedVersion(version)) => version,
+        Some(HummockEvent::VersionUpdate(HummockVersionUpdate::PinnedVersion(version))) => version,
         _ => unreachable!("should be full version"),
     };
 

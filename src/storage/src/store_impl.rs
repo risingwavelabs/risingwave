@@ -482,8 +482,8 @@ pub mod verify {
             self.actual.seal_epoch(epoch, is_checkpoint)
         }
 
-        fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_ {
-            self.actual.clear_shared_buffer(prev_epoch)
+        fn clear_shared_buffer(&self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+            self.actual.clear_shared_buffer()
         }
 
         async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
@@ -927,7 +927,7 @@ pub mod boxed_state_store {
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
 
-        async fn clear_shared_buffer(&self, prev_epoch: u64);
+        async fn clear_shared_buffer(&self) -> StorageResult<()>;
 
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore;
 
@@ -948,8 +948,8 @@ pub mod boxed_state_store {
             self.seal_epoch(epoch, is_checkpoint);
         }
 
-        async fn clear_shared_buffer(&self, prev_epoch: u64) {
-            self.clear_shared_buffer(prev_epoch).await
+        async fn clear_shared_buffer(&self) -> StorageResult<()> {
+            self.clear_shared_buffer().await
         }
 
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore {
@@ -1018,8 +1018,8 @@ pub mod boxed_state_store {
             self.deref().sync(epoch)
         }
 
-        fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_ {
-            self.deref().clear_shared_buffer(prev_epoch)
+        fn clear_shared_buffer(&self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+            self.deref().clear_shared_buffer()
         }
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {

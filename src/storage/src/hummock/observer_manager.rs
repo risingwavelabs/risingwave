@@ -26,14 +26,14 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManagerRef};
 use crate::hummock::backup_reader::BackupReaderRef;
-use crate::hummock::event_handler::HummockVersionUpdate;
+use crate::hummock::event_handler::{HummockEvent, HummockVersionUpdate};
 use crate::hummock::write_limiter::WriteLimiterRef;
 
 pub struct HummockObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     backup_reader: BackupReaderRef,
     write_limiter: WriteLimiterRef,
-    version_update_sender: UnboundedSender<HummockVersionUpdate>,
+    version_update_sender: UnboundedSender<HummockEvent>,
     version: u64,
 }
 
@@ -71,12 +71,14 @@ impl ObserverState for HummockObserverNode {
             Info::HummockVersionDeltas(hummock_version_deltas) => {
                 let _ = self
                     .version_update_sender
-                    .send(HummockVersionUpdate::VersionDeltas(
-                        hummock_version_deltas
-                            .version_deltas
-                            .iter()
-                            .map(HummockVersionDelta::from_rpc_protobuf)
-                            .collect(),
+                    .send(HummockEvent::VersionUpdate(
+                        HummockVersionUpdate::VersionDeltas(
+                            hummock_version_deltas
+                                .version_deltas
+                                .iter()
+                                .map(HummockVersionDelta::from_rpc_protobuf)
+                                .collect(),
+                        ),
                     ))
                     .inspect_err(|e| {
                         tracing::error!(event = ?e.0, "unable to send version delta");
@@ -121,12 +123,12 @@ impl ObserverState for HummockObserverNode {
         );
         let _ = self
             .version_update_sender
-            .send(HummockVersionUpdate::PinnedVersion(
-                HummockVersion::from_rpc_protobuf(
+            .send(HummockEvent::VersionUpdate(
+                HummockVersionUpdate::PinnedVersion(HummockVersion::from_rpc_protobuf(
                     &snapshot
                         .hummock_version
                         .expect("should get hummock version"),
-                ),
+                )),
             ))
             .inspect_err(|e| {
                 tracing::error!(event = ?e.0, "unable to send full version");
@@ -140,7 +142,7 @@ impl HummockObserverNode {
     pub fn new(
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
         backup_reader: BackupReaderRef,
-        version_update_sender: UnboundedSender<HummockVersionUpdate>,
+        version_update_sender: UnboundedSender<HummockEvent>,
         write_limiter: WriteLimiterRef,
     ) -> Self {
         Self {

@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::future::poll_fn;
-use std::ops::{Deref, Range};
+use std::ops::{Deref, DerefMut, Range};
+use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
-use std::task::{ready, Poll};
+use std::task::{ready, Context, Poll};
 use std::time::{Duration, Instant};
 
 use foyer::common::code::Key;
@@ -223,30 +223,16 @@ struct Item {
     event: CacheRefillerEvent,
 }
 
-pub(crate) type SpawnRefillTask = Arc<
-    // first current version, second new version
-    dyn Fn(Vec<SstDeltaInfo>, CacheRefillContext, PinnedVersion, PinnedVersion) -> JoinHandle<()>
-        + Send
-        + Sync
-        + 'static,
->;
-
 /// A cache refiller for hummock data.
-pub(crate) struct CacheRefiller {
+pub struct CacheRefiller {
     /// order: old => new
     queue: VecDeque<Item>,
 
     context: CacheRefillContext,
-
-    spawn_refill_task: SpawnRefillTask,
 }
 
 impl CacheRefiller {
-    pub(crate) fn new(
-        config: CacheRefillConfig,
-        sstable_store: SstableStoreRef,
-        spawn_refill_task: SpawnRefillTask,
-    ) -> Self {
+    pub fn new(config: CacheRefillConfig, sstable_store: SstableStoreRef) -> Self {
         let config = Arc::new(config);
         let concurrency = Arc::new(Semaphore::new(config.concurrency));
         Self {
@@ -256,87 +242,71 @@ impl CacheRefiller {
                 concurrency,
                 sstable_store,
             },
-            spawn_refill_task,
         }
     }
 
-    pub(crate) fn default_spawn_refill_task() -> SpawnRefillTask {
-        Arc::new(|deltas, context, _, _| {
-            let task = CacheRefillTask { deltas, context };
-            tokio::spawn(task.run())
-        })
-    }
-
-    pub(crate) fn start_cache_refill(
+    pub fn start_cache_refill(
         &mut self,
         deltas: Vec<SstDeltaInfo>,
-        pinned_version: PinnedVersion,
+        pinned_version: Arc<PinnedVersion>,
         new_pinned_version: PinnedVersion,
     ) {
-        let handle = (self.spawn_refill_task)(
+        let task = CacheRefillTask {
             deltas,
-            self.context.clone(),
-            pinned_version.clone(),
-            new_pinned_version.clone(),
-        );
+            context: self.context.clone(),
+        };
         let event = CacheRefillerEvent {
             pinned_version,
             new_pinned_version,
         };
+        let handle = tokio::spawn(task.run());
         let item = Item { handle, event };
         self.queue.push_back(item);
         GLOBAL_CACHE_REFILL_METRICS.refill_queue_total.add(1);
     }
 
-    pub(crate) fn last_new_pinned_version(&self) -> Option<&PinnedVersion> {
+    pub fn last_new_pinned_version(&self) -> Option<&PinnedVersion> {
         self.queue.back().map(|item| &item.event.new_pinned_version)
     }
 
-    /// Clear the queue for cache refill and return an event that merges all pending cache refill events
-    /// into a single event that takes the earliest and latest version.
-    pub(crate) fn clear(&mut self) -> Option<CacheRefillerEvent> {
-        let Some(last_item) = self.queue.pop_back() else {
-            return None;
-        };
-        let mut event = last_item.event;
-        while let Some(item) = self.queue.pop_back() {
-            assert_eq!(
-                event.pinned_version.id(),
-                item.event.new_pinned_version.id()
-            );
-            event.pinned_version = item.event.pinned_version;
-        }
-        Some(event)
+    pub fn next_event(&mut self) -> NextCacheRefillerEvent<'_> {
+        NextCacheRefillerEvent { refiller: self }
     }
 }
 
-impl CacheRefiller {
-    pub(crate) fn next_event(&mut self) -> impl Future<Output = CacheRefillerEvent> + '_ {
-        poll_fn(|cx| {
-            if let Some(item) = self.queue.front_mut() {
-                ready!(item.handle.poll_unpin(cx)).unwrap();
-                let item = self.queue.pop_front().unwrap();
-                GLOBAL_CACHE_REFILL_METRICS.refill_queue_total.sub(1);
-                return Poll::Ready(item.event);
-            }
-            Poll::Pending
-        })
+pub struct NextCacheRefillerEvent<'a> {
+    refiller: &'a mut CacheRefiller,
+}
+
+impl<'a> Future for NextCacheRefillerEvent<'a> {
+    type Output = CacheRefillerEvent;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let refiller = &mut self.deref_mut().refiller;
+
+        if let Some(item) = refiller.queue.front_mut() {
+            ready!(item.handle.poll_unpin(cx)).unwrap();
+            let item = refiller.queue.pop_front().unwrap();
+            GLOBAL_CACHE_REFILL_METRICS.refill_queue_total.sub(1);
+            return Poll::Ready(item.event);
+        }
+        Poll::Pending
     }
 }
 
 pub struct CacheRefillerEvent {
-    pub pinned_version: PinnedVersion,
+    pub pinned_version: Arc<PinnedVersion>,
     pub new_pinned_version: PinnedVersion,
 }
 
 #[derive(Clone)]
-pub(crate) struct CacheRefillContext {
+struct CacheRefillContext {
     config: Arc<CacheRefillConfig>,
     concurrency: Arc<Semaphore>,
     sstable_store: SstableStoreRef,
 }
 
-struct CacheRefillTask {
+pub struct CacheRefillTask {
     deltas: Vec<SstDeltaInfo>,
     context: CacheRefillContext,
 }

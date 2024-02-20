@@ -116,7 +116,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<ForceStopActorsRequest>,
     ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
         let req = request.into_inner();
-        self.mgr.reset(req.prev_epoch).await;
+        self.mgr.reset().await;
         Ok(Response::new(ForceStopActorsResponse {
             request_id: req.request_id,
             status: None,
