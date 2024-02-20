@@ -489,9 +489,6 @@ impl PredicatePushdown for LogicalSource {
 
 impl ToBatch for LogicalSource {
     fn to_batch(&self) -> Result<PlanRef> {
-        if self.core.is_new_fs_connector() {
-            bail_not_implemented!("New fs connector for batch");
-        }
         let mut plan: PlanRef = BatchSource::new(self.core.clone()).into();
 
         if let Some(exprs) = &self.output_exprs {
