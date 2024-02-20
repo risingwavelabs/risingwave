@@ -25,8 +25,6 @@ use risingwave_common::catalog::{
     is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, INITIAL_SOURCE_VERSION_ID,
     KAFKA_TIMESTAMP_COLUMN_NAME,
 };
-use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, NotSupported, ProtocolError};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::additional_columns::{
     build_additional_column_catalog, COMPATIBLE_ADDITIONAL_COLUMNS,
@@ -66,6 +64,8 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
+use crate::error::ErrorCode::{self, InvalidInputSyntax, NotSupported, ProtocolError};
+use crate::error::{Result, RwError};
 use crate::expr::Expr;
 use crate::handler::create_table::{
     bind_pk_on_relation, bind_sql_column_constraints, bind_sql_columns, bind_sql_pk_names,
@@ -685,7 +685,7 @@ pub(crate) async fn bind_source_pk(
         // return the key column names if exists
         columns.iter().find_map(|catalog| {
             if matches!(
-                catalog.column_desc.additional_columns.column_type,
+                catalog.column_desc.additional_column.column_type,
                 Some(AdditionalColumnType::Key(_))
             ) {
                 Some(catalog.name().to_string())
@@ -697,7 +697,7 @@ pub(crate) async fn bind_source_pk(
     let additional_column_names = columns
         .iter()
         .filter_map(|col| {
-            if col.column_desc.additional_columns.column_type.is_some() {
+            if col.column_desc.additional_column.column_type.is_some() {
                 Some(col.name().to_string())
             } else {
                 None
@@ -848,7 +848,7 @@ fn check_and_add_timestamp_column(
     if is_kafka_connector(with_properties) {
         if columns.iter().any(|col| {
             matches!(
-                col.column_desc.additional_columns.column_type,
+                col.column_desc.additional_column.column_type,
                 Some(AdditionalColumnType::Timestamp(_))
             )
         }) {

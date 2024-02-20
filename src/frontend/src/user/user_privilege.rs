@@ -16,10 +16,11 @@ use itertools::Itertools;
 use risingwave_common::acl;
 use risingwave_common::acl::{AclMode, AclModeSet};
 use risingwave_common::catalog::DEFAULT_SUPER_USER_ID;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, PbAction, PbObject};
 use risingwave_pb::user::PbGrantPrivilege;
 use risingwave_sqlparser::ast::{Action, GrantObjects, Privileges};
+
+use crate::error::{ErrorCode, Result};
 
 pub fn check_privilege_type(privilege: &Privileges, objects: &GrantObjects) -> Result<()> {
     match privilege {

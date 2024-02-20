@@ -12,61 +12,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
-
-use itertools::Itertools;
-use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::user::grant_privilege::Object;
 
-use crate::catalog::system_catalog::{get_acl_items, BuiltinTable, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
+use crate::error::Result;
 
 /// `rw_system_tables` stores all system tables in the database.
-pub static RW_SYSTEM_TABLES: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
-    name: "rw_system_tables",
-    schema: RW_CATALOG_SCHEMA_NAME,
-    columns: &[
-        (DataType::Int32, "id"),
-        (DataType::Varchar, "name"),
-        (DataType::Int32, "schema_id"),
-        (DataType::Int32, "owner"),
-        (DataType::Varchar, "definition"),
-        (DataType::Varchar, "acl"),
-    ],
-    pk: &[0],
-});
+#[derive(Fields)]
+struct SystemTable {
+    #[primary_key]
+    id: i32,
+    name: String,
+    schema_id: i32,
+    owner: i32,
+    definition: Option<String>,
+    acl: String,
+}
 
-impl SysCatalogReaderImpl {
-    pub fn read_system_table_info(&self) -> Result<Vec<OwnedRow>> {
-        let reader = self.catalog_reader.read_guard();
-        let schemas = reader.iter_schemas(&self.auth_context.database)?;
-        let user_reader = self.user_info_reader.read_guard();
-        let users = user_reader.get_all_users();
-        let username_map = user_reader.get_user_name_map();
+#[system_catalog(table, "rw_catalog.rw_system_tables")]
+fn read_system_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<SystemTable>> {
+    let catalog_reader = reader.catalog_reader.read_guard();
+    let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
+    let user_reader = reader.user_info_reader.read_guard();
+    let users = user_reader.get_all_users();
+    let username_map = user_reader.get_user_name_map();
 
-        Ok(schemas
-            .flat_map(|schema| {
-                schema.iter_system_tables().map(|table| {
-                    OwnedRow::new(vec![
-                        Some(ScalarImpl::Int32(table.id.table_id as i32)),
-                        Some(ScalarImpl::Utf8(table.name().into())),
-                        Some(ScalarImpl::Int32(schema.id() as i32)),
-                        Some(ScalarImpl::Int32(table.owner as i32)),
-                        None,
-                        Some(ScalarImpl::Utf8(
-                            get_acl_items(
-                                &Object::TableId(table.id.table_id),
-                                false,
-                                &users,
-                                username_map,
-                            )
-                            .into(),
-                        )),
-                    ])
-                })
+    Ok(schemas
+        .flat_map(|schema| {
+            schema.iter_system_tables().map(|table| SystemTable {
+                id: table.id.table_id as i32,
+                name: table.name().to_string(),
+                schema_id: schema.id() as i32,
+                owner: table.owner as i32,
+                definition: None,
+                acl: get_acl_items(
+                    &Object::TableId(table.id.table_id),
+                    false,
+                    &users,
+                    username_map,
+                ),
             })
-            .collect_vec())
-    }
+        })
+        .collect())
 }

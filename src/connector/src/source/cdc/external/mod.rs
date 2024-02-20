@@ -17,7 +17,7 @@ mod postgres;
 
 use std::collections::HashMap;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
@@ -32,14 +32,11 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
 
-use crate::error::ConnectorError;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::mysql_row_to_owned_row;
 use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
 use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
 
-pub type ConnectorResult<T> = std::result::Result<T, ConnectorError>;
-
-// TODO: may replace with `CdcSourceType`
 #[derive(Debug)]
 pub enum CdcTableType {
     Undefined,
@@ -78,10 +75,7 @@ impl CdcTableType {
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
                 PostgresExternalTableReader::new(with_properties, schema).await?,
             )),
-            _ => bail!(ConnectorError::Config(anyhow!(
-                "invalid external table type: {:?}",
-                *self
-            ))),
+            _ => bail!("invalid external table type: {:?}", *self),
         }
     }
 }
@@ -192,19 +186,18 @@ pub struct DebeziumSourceOffset {
 
 impl MySqlOffset {
     pub fn parse_debezium_offset(offset: &str) -> ConnectorResult<Self> {
-        let dbz_offset: DebeziumOffset = serde_json::from_str(offset).map_err(|e| {
-            ConnectorError::Internal(anyhow!("invalid upstream offset: {}, error: {}", offset, e))
-        })?;
+        let dbz_offset: DebeziumOffset = serde_json::from_str(offset)
+            .with_context(|| format!("invalid upstream offset: {}", offset))?;
 
         Ok(Self {
             filename: dbz_offset
                 .source_offset
                 .file
-                .ok_or_else(|| anyhow!("binlog file not found in offset"))?,
+                .context("binlog file not found in offset")?,
             position: dbz_offset
                 .source_offset
                 .pos
-                .ok_or_else(|| anyhow!("binlog position not found in offset"))?,
+                .context("binlog position not found in offset")?,
         })
     }
 }
@@ -269,7 +262,8 @@ impl ExternalTableReader for MySqlExternalTableReader {
         let row = rs
             .iter_mut()
             .exactly_one()
-            .map_err(|e| ConnectorError::Internal(anyhow!("read binlog error: {}", e)))?;
+            .ok()
+            .context("expect exactly one row when reading binlog offset")?;
 
         Ok(CdcOffset::MySql(MySqlOffset {
             filename: row.take("File").unwrap(),
@@ -297,9 +291,7 @@ impl MySqlExternalTableReader {
         let config = serde_json::from_value::<ExternalTableConfig>(
             serde_json::to_value(with_properties).unwrap(),
         )
-        .map_err(|e| {
-            ConnectorError::Config(anyhow!("fail to extract mysql connector properties: {}", e))
-        })?;
+        .context("failed to extract mysql connector properties")?;
 
         let database_url = format!(
             "mysql://{}:{}@{}:{}/{}",
@@ -408,19 +400,11 @@ impl MySqlExternalTableReader {
                             DataType::Date => Value::from(value.into_date().0),
                             DataType::Time => Value::from(value.into_time().0),
                             DataType::Timestamp => Value::from(value.into_timestamp().0),
-                            _ => {
-                                return Err(ConnectorError::Internal(anyhow!(
-                                    "unsupported primary key data type: {}",
-                                    ty
-                                )))
-                            }
+                            _ => bail!("unsupported primary key data type: {}", ty),
                         };
-                        Ok((pk.clone(), val))
+                        ConnectorResult::Ok((pk.clone(), val))
                     } else {
-                        Err(ConnectorError::Internal(anyhow!(
-                            "primary key {} cannot be null",
-                            pk
-                        )))
+                        bail!("primary key {} cannot be null", pk);
                     }
                 })
                 .try_collect()?;

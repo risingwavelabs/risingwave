@@ -18,7 +18,6 @@ use std::ops::Deref;
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{
     Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor,
 };
@@ -28,6 +27,7 @@ use thiserror_ext::AsReport;
 use super::bind_context::ColumnBinding;
 use super::statement::RewriteExprsRecursive;
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef};
 
 mod join;

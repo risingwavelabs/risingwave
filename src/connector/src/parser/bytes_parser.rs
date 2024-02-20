@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 
 use super::unified::bytes::BytesAccess;
@@ -26,7 +25,7 @@ pub struct BytesAccessBuilder {
 
 impl AccessBuilder for BytesAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>> {
         Ok(AccessImpl::Bytes(BytesAccess::new(
             &self.column_name,
             payload,
@@ -35,7 +34,7 @@ impl AccessBuilder for BytesAccessBuilder {
 }
 
 impl BytesAccessBuilder {
-    pub fn new(encoding_properties: EncodingProperties) -> Result<Self> {
+    pub fn new(encoding_properties: EncodingProperties) -> anyhow::Result<Self> {
         let config = try_match_expand!(encoding_properties, EncodingProperties::Bytes)?;
         Ok(Self {
             column_name: config.column_name,

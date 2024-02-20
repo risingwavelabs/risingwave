@@ -17,13 +17,13 @@ use std::collections::BTreeMap;
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Scalar};
 
 use super::utils::impl_distill_by_unit;
 use super::{
     ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream,
 };
+use crate::error::Result;
 use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;

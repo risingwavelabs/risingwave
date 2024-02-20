@@ -13,60 +13,55 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{Fields, JsonbVal};
+use risingwave_frontend_macro::system_catalog;
 use serde_json::json;
 
-use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::error::Result;
 
-pub const RW_HUMMOCK_COMPACTION_GROUP_CONFIGS: BuiltinTable = BuiltinTable {
-    name: "rw_hummock_compaction_group_configs",
-    schema: RW_CATALOG_SCHEMA_NAME,
-    columns: &[
-        (DataType::Int64, "id"),
-        (DataType::Int64, "parent_id"),
-        (DataType::Jsonb, "member_tables"),
-        (DataType::Jsonb, "compaction_config"),
-        (DataType::Jsonb, "active_write_limit"),
-    ],
-    pk: &[0],
-};
+#[derive(Fields)]
+struct RwHummockCompactionGroupConfig {
+    #[primary_key]
+    id: i64,
+    parent_id: Option<i64>,
+    member_tables: Option<JsonbVal>,
+    compaction_config: Option<JsonbVal>,
+    active_write_limit: Option<JsonbVal>,
+}
 
-impl SysCatalogReaderImpl {
-    pub async fn read_hummock_compaction_group_configs(&self) -> Result<Vec<OwnedRow>> {
-        let info = self
-            .meta_client
-            .list_hummock_compaction_group_configs()
-            .await?;
-        let mut write_limits = self.meta_client.list_hummock_active_write_limits().await?;
-        let mut rows = info
+#[system_catalog(table, "rw_catalog.rw_hummock_compaction_group_configs")]
+async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockCompactionGroupConfig>> {
+    let info = reader
+        .meta_client
+        .list_hummock_compaction_group_configs()
+        .await?;
+    let mut write_limits = reader
+        .meta_client
+        .list_hummock_active_write_limits()
+        .await?;
+    let mut rows = info
+        .into_iter()
+        .map(|i| RwHummockCompactionGroupConfig {
+            id: i.id as _,
+            parent_id: Some(i.parent_id as _),
+            member_tables: Some(json!(i.member_table_ids).into()),
+            compaction_config: Some(json!(i.compaction_config).into()),
+            active_write_limit: write_limits.remove(&i.id).map(|w| json!(w).into()),
+        })
+        .collect_vec();
+    // As compaction group configs and active write limits are fetched via two RPCs, it's possible there's inconsistency.
+    // Just leave unknown field blank.
+    rows.extend(
+        write_limits
             .into_iter()
-            .map(|i| {
-                let active_write_limit = write_limits
-                    .remove(&i.id)
-                    .map(|w| ScalarImpl::Jsonb(json!(w).into()));
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Int64(i.id as _)),
-                    Some(ScalarImpl::Int64(i.parent_id as _)),
-                    Some(ScalarImpl::Jsonb(json!(i.member_table_ids).into())),
-                    Some(ScalarImpl::Jsonb(json!(i.compaction_config).into())),
-                    active_write_limit,
-                ])
-            })
-            .collect_vec();
-        // As compaction group configs and active write limits are fetched via two RPCs, it's possible there's inconsistency.
-        // Just leave unknown field blank.
-        rows.extend(write_limits.into_iter().map(|(cg, w)| {
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(cg as _)),
-                None,
-                None,
-                None,
-                Some(ScalarImpl::Jsonb(json!(w).into())),
-            ])
-        }));
-        Ok(rows)
-    }
+            .map(|(cg, w)| RwHummockCompactionGroupConfig {
+                id: cg as _,
+                parent_id: None,
+                member_tables: None,
+                compaction_config: None,
+                active_write_limit: Some(json!(w).into()),
+            }),
+    );
+    Ok(rows)
 }
