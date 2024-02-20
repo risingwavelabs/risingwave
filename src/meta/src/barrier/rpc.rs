@@ -362,11 +362,13 @@ impl StreamRpcManager {
     pub async fn force_stop_actors(
         &self,
         nodes: impl Iterator<Item = &WorkerNode>,
+        prev_epoch: u64,
     ) -> MetaResult<()> {
         self.broadcast(nodes, |client| async move {
             client
                 .force_stop_actors(ForceStopActorsRequest {
                     request_id: Self::new_request_id(),
+                    prev_epoch,
                 })
                 .await
         })
