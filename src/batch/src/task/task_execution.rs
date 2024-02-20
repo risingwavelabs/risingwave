@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,24 +20,28 @@ use std::sync::Arc;
 #[cfg(enable_task_local_alloc)]
 use std::time::Duration;
 
+use anyhow::Context;
 use futures::StreamExt;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tracing::TracingContext;
+use risingwave_expr::expr_context::expr_context_scope;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
+use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
+use risingwave_pb::PbFieldNotFound;
+use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::task::JoinHandle;
 use tokio_metrics::TaskMonitor;
 use tracing::Instrument;
 
 use crate::error::BatchError::SenderError;
-use crate::error::{to_rw_error, BatchError, Result as BatchResult};
+use crate::error::{BatchError, Result, SharedResult};
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
 use crate::rpc::service::exchange::ExchangeWriter;
 use crate::rpc::service::task_service::TaskInfoResponseResult;
@@ -107,7 +111,7 @@ pub enum StateReporter {
 }
 
 impl StateReporter {
-    pub async fn send(&mut self, val: TaskInfoResponse) -> BatchResult<()> {
+    pub async fn send(&mut self, val: TaskInfoResponse) -> Result<()> {
         match self {
             Self::Distributed(s) => s.send(Ok(val)).await.map_err(|_| SenderError),
             Self::Mock() => Ok(()),
@@ -167,9 +171,9 @@ impl TaskId {
 }
 
 impl TryFrom<&PbTaskOutputId> for TaskOutputId {
-    type Error = RwError;
+    type Error = PbFieldNotFound;
 
-    fn try_from(prost: &PbTaskOutputId) -> Result<Self> {
+    fn try_from(prost: &PbTaskOutputId) -> std::result::Result<Self, PbFieldNotFound> {
         Ok(TaskOutputId {
             task_id: TaskId::from(prost.get_task_id()?),
             output_id: prost.get_output_id(),
@@ -189,7 +193,16 @@ impl TaskOutputId {
 pub struct TaskOutput {
     receiver: ChanReceiverImpl,
     output_id: TaskOutputId,
-    failure: Arc<Mutex<Option<RwError>>>,
+    failure: Arc<Mutex<Option<Arc<BatchError>>>>,
+}
+
+impl std::fmt::Debug for TaskOutput {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TaskOutput")
+            .field("output_id", &self.output_id)
+            .field("failure", &self.failure)
+            .finish_non_exhaustive()
+    }
 }
 
 impl TaskOutput {
@@ -254,13 +267,8 @@ impl TaskOutput {
     }
 
     /// Directly takes data without serialization.
-    pub async fn direct_take_data(&mut self) -> Result<Option<DataChunk>> {
-        Ok(self
-            .receiver
-            .recv()
-            .await
-            .map_err(to_rw_error)?
-            .map(|c| c.into_data_chunk()))
+    pub async fn direct_take_data(&mut self) -> SharedResult<Option<DataChunk>> {
+        Ok(self.receiver.recv().await?.map(|c| c.into_data_chunk()))
     }
 
     pub fn id(&self) -> &TaskOutputId {
@@ -311,9 +319,7 @@ impl ShutdownToken {
     pub fn check(&self) -> Result<()> {
         match &*self.0.borrow() {
             ShutdownMsg::Init => Ok(()),
-            msg => {
-                Err(ErrorCode::BatchError(format!("Receive shutdown msg: {msg:?}").into()).into())
-            }
+            msg => bail!("Receive shutdown msg: {msg:?}"),
         }
     }
 
@@ -361,7 +367,7 @@ pub struct BatchTaskExecution<C> {
     context: C,
 
     /// The execution failure.
-    failure: Arc<Mutex<Option<RwError>>>,
+    failure: Arc<Mutex<Option<Arc<BatchError>>>>,
 
     epoch: BatchQueryEpoch,
 
@@ -422,6 +428,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         self: Arc<Self>,
         state_tx: Option<StateReporter>,
         tracing_context: TracingContext,
+        expr_context: ExprContext,
     ) -> Result<()> {
         let mut state_tx = state_tx;
         trace!(
@@ -430,14 +437,17 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             serde_json::to_string_pretty(self.plan.get_root()?).unwrap()
         );
 
-        let exec = ExecutorBuilder::new(
-            self.plan.root.as_ref().unwrap(),
-            &self.task_id,
-            self.context.clone(),
-            self.epoch.clone(),
-            self.shutdown_rx.clone(),
+        let exec = expr_context_scope(
+            expr_context.clone(),
+            ExecutorBuilder::new(
+                self.plan.root.as_ref().unwrap(),
+                &self.task_id,
+                self.context.clone(),
+                self.epoch.clone(),
+                self.shutdown_rx.clone(),
+            )
+            .build(),
         )
-        .build()
         .await?;
 
         let sender = self.sender.clone();
@@ -469,9 +479,11 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                t_1.run(exec, sender, state_tx.as_mut())
-                    .instrument(span)
-                    .await;
+                expr_context_scope(
+                    expr_context,
+                    t_1.run(exec, sender, state_tx.as_mut()).instrument(span),
+                )
+                .await;
             };
 
             if let Some(batch_metrics) = batch_metrics {
@@ -482,31 +494,23 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     error!("Batch task {:?} panic: {:?}", task_id, error);
                 }
                 let cumulative = monitor.cumulative();
-                let labels = &batch_metrics.task_labels();
-                let task_metrics = batch_metrics.get_task_metrics();
-                task_metrics
+                batch_metrics
                     .task_first_poll_delay
-                    .with_label_values(labels)
                     .set(cumulative.total_first_poll_delay.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_fast_poll_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_fast_poll_duration.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_idle_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_idle_duration.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_poll_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_poll_duration.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_scheduled_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_scheduled_duration.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_slow_poll_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_slow_poll_duration.as_secs_f64());
             } else if let Err(error) = AssertUnwindSafe(task(task_id.clone()))
                 .rw_catch_unwind()
@@ -547,7 +551,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         task_status: TaskStatus,
         state_tx: Option<&mut StateReporter>,
         err_str: Option<String>,
-    ) -> BatchResult<()> {
+    ) -> Result<()> {
         self.change_state(task_status);
         // Notify frontend the task status.
         if let Some(reporter) = state_tx {
@@ -578,6 +582,10 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         mut sender: ChanSenderImpl,
         state_tx: Option<&mut StateReporter>,
     ) {
+        self.context
+            .batch_metrics()
+            .as_ref()
+            .inspect(|m| m.batch_manager_metrics().task_num.inc());
         let mut data_chunk_stream = root.execute();
         let mut state;
         let mut error = None;
@@ -629,13 +637,13 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                             ShutdownMsg::Init => {
                                 // There is no message received from shutdown channel, which means it caused
                                 // task failed.
-                                error!("Batch task failed: {:?}", e);
-                                error = Some(BatchError::from(e));
+                                error!(error = %e.as_report(), "Batch task failed");
+                                error = Some(e);
                                 state = TaskStatus::Failed;
                                 break;
                             }
                             ShutdownMsg::Abort(_) => {
-                                error = Some(BatchError::from(e));
+                                error = Some(e);
                                 state = TaskStatus::Aborted;
                                 break;
                             }
@@ -655,8 +663,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         }
 
         let error = error.map(Arc::new);
-        *self.failure.lock() = error.clone().map(to_rw_error);
-        let err_str = error.as_ref().map(|e| e.to_string());
+        *self.failure.lock() = error.clone();
+        let err_str = error.as_ref().map(|e| e.to_report_string());
         if let Err(e) = sender.close(error).await {
             match e {
                 SenderError => {
@@ -674,10 +682,15 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
         if let Err(e) = self.change_state_notify(state, state_tx, err_str).await {
             warn!(
-                "The status receiver in FE has closed so the status push is failed {:}",
-                e
+                error = %e.as_report(),
+                "The status receiver in FE has closed so the status push is failed",
             );
         }
+
+        self.context
+            .batch_metrics()
+            .as_ref()
+            .inspect(|m| m.batch_manager_metrics().task_num.dec());
     }
 
     pub fn abort(&self, err_msg: String) {
@@ -700,12 +713,12 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         let task_id = TaskId::from(output_id.get_task_id()?);
         let receiver = self.receivers.lock()[output_id.get_output_id() as usize]
             .take()
-            .ok_or_else(|| {
-                ErrorCode::InternalError(format!(
+            .with_context(|| {
+                format!(
                     "Task{:?}'s output{} has already been taken.",
                     task_id,
                     output_id.get_output_id(),
-                ))
+                )
             })?;
         let task_output = TaskOutput {
             receiver,
@@ -717,11 +730,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
     pub fn check_if_running(&self) -> Result<()> {
         if *self.state.lock() != TaskStatus::Running {
-            return Err(ErrorCode::InternalError(format!(
-                "task {:?} is not running",
-                self.get_task_id()
-            ))
-            .into());
+            bail!("task {:?} is not running", self.get_task_id());
         }
         Ok(())
     }
@@ -729,11 +738,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     pub fn check_if_aborted(&self) -> Result<bool> {
         match *self.state.lock() {
             TaskStatus::Aborted => Ok(true),
-            TaskStatus::Finished => Err(ErrorCode::InternalError(format!(
-                "task {:?} has been finished",
-                self.get_task_id()
-            ))
-            .into()),
+            TaskStatus::Finished => bail!("task {:?} has been finished", self.get_task_id()),
             _ => Ok(false),
         }
     }

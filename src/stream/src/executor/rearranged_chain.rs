@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ use super::error::StreamExecutorError;
 use super::{
     expect_first_barrier, Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, MessageStream,
 };
-use crate::executor::PkIndices;
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// `ChainExecutor` is an executor that enables synchronization between the existing stream and
@@ -36,6 +35,8 @@ use crate::task::{ActorId, CreateMviewProgress};
 /// [`RearrangedChainExecutor`] resolves the latency problem when creating MV with a huge amount of
 /// existing data, by rearranging the barrier from the upstream. Check the design doc for details.
 pub struct RearrangedChainExecutor {
+    info: ExecutorInfo,
+
     snapshot: BoxedExecutor,
 
     upstream: BoxedExecutor,
@@ -43,8 +44,6 @@ pub struct RearrangedChainExecutor {
     progress: CreateMviewProgress,
 
     actor_id: ActorId,
-
-    info: ExecutorInfo,
 }
 
 #[derive(Debug)]
@@ -86,18 +85,13 @@ impl RearrangedMessage {
 
 impl RearrangedChainExecutor {
     pub fn new(
+        info: ExecutorInfo,
         snapshot: BoxedExecutor,
         upstream: BoxedExecutor,
         progress: CreateMviewProgress,
-        schema: Schema,
-        pk_indices: PkIndices,
     ) -> Self {
         Self {
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "RearrangedChain".to_owned(),
-            },
+            info,
             snapshot,
             upstream,
             actor_id: progress.actor_id(),

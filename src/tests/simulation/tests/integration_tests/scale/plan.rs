@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -175,7 +175,7 @@ async fn test_resize_single() -> Result<()> {
 
 #[tokio::test]
 async fn test_resize_single_failed() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale_no_shuffle()).await?;
     let mut session = cluster.start_session();
 
     session.run("create table t (v int);").await?;
@@ -197,7 +197,10 @@ async fn test_resize_single_failed() -> Result<()> {
     let upstream_fragment_id = upstream_fragment.inner.fragment_id;
 
     let downstream_fragment = cluster
-        .locate_one_fragment([identity_contains("chain"), identity_contains("materialize")])
+        .locate_one_fragment([
+            identity_contains("StreamTableScan"),
+            identity_contains("materialize"),
+        ])
         .await?;
 
     let downstream_fragment_id = downstream_fragment.inner.fragment_id;
@@ -242,7 +245,7 @@ async fn test_resize_single_failed() -> Result<()> {
 }
 #[tokio::test]
 async fn test_resize_no_shuffle() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale_no_shuffle()).await?;
     let mut session = cluster.start_session();
 
     session.run("create table t (v int);").await?;
@@ -272,7 +275,7 @@ join mv5 on mv1.v = mv5.v limit 1;",
         .await?;
 
     let chain_fragments: [_; 8] = cluster
-        .locate_fragments([identity_contains("chain")])
+        .locate_fragments([identity_contains("StreamTableScan")])
         .await?
         .try_into()
         .unwrap();
@@ -314,7 +317,7 @@ join mv5 on mv1.v = mv5.v limit 1;",
         .locate_one_fragment([
             identity_contains("materialize"),
             no_identity_contains("topn"),
-            no_identity_contains("chain"),
+            no_identity_contains("StreamTableScan"),
             no_identity_contains("hashJoin"),
         ])
         .await?;

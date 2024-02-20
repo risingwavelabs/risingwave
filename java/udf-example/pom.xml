@@ -15,7 +15,7 @@
 
   <groupId>com.risingwave</groupId>
   <artifactId>risingwave-udf-example</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
+  <version>0.1.1-SNAPSHOT</version>
 
   <name>udf-example</name>
   <url>https://docs.risingwave.com/docs/current/udf-java</url>
@@ -24,13 +24,14 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.source>11</maven.compiler.source>
     <maven.compiler.target>11</maven.compiler.target>
+    <maven.javadoc.skip>true</maven.javadoc.skip>
   </properties>
 
   <dependencies>
     <dependency>
       <groupId>com.risingwave</groupId>
       <artifactId>risingwave-udf</artifactId>
-      <version>0.1.0-SNAPSHOT</version>
+      <version>0.1.3-SNAPSHOT</version>
     </dependency>
     <dependency>
       <groupId>com.google.code.gson</groupId>

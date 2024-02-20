@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,8 @@ use std::sync::LazyLock;
 
 use anyhow::Result;
 use clap::Parser;
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use tempfile::TempPath;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
 use tokio::signal;
 
 use crate::common::{osstrs as common_osstrs, RisingWaveService};
@@ -62,7 +61,6 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
             ])),
             RisingWaveService::Compute(osstrs([])),
             RisingWaveService::Frontend(osstrs([])),
-            RisingWaveService::ConnectorNode(osstrs([])),
         ],
         "playground-3cn" => vec![
             RisingWaveService::Meta(osstrs([
@@ -120,7 +118,6 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "--advertise-addr",
                 "127.0.0.1:4566",
             ])),
-            RisingWaveService::ConnectorNode(osstrs([])),
         ],
         _ => {
             tracing::warn!("Unknown playground profile. All components will be started using the default command line options.");
@@ -140,11 +137,21 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
 }
 
 #[derive(Debug, Clone, Parser)]
-#[command(about = "The quick way to start a RisingWave cluster for playing around")]
+#[command(about = "The quick way to start an in-memory RisingWave cluster for playing around")]
 pub struct PlaygroundOpts {
     /// The profile to use.
     #[clap(short, long, env = "PLAYGROUND_PROFILE", default_value = "playground")]
     profile: String,
+}
+
+impl risingwave_common::opts::Opts for PlaygroundOpts {
+    fn name() -> &'static str {
+        "playground"
+    }
+
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        "http://0.0.0.0:5690".parse().unwrap() // hard-coded
+    }
 }
 
 pub async fn playground(opts: PlaygroundOpts) -> Result<()> {
@@ -195,44 +202,6 @@ pub async fn playground(opts: PlaygroundOpts) -> Result<()> {
                 let opts = risingwave_compactor::CompactorOpts::parse_from(opts);
                 let _compactor_handle =
                     tokio::spawn(async move { risingwave_compactor::start(opts).await });
-            }
-            // connector node only supports in docker-playground profile
-            RisingWaveService::ConnectorNode(_) => {
-                let prefix_bin = match profile.as_str() {
-                    "docker-playground" | "online-docker-playground" => {
-                        "/risingwave/bin".to_string()
-                    }
-                    "playground" => std::env::var("PREFIX_BIN").unwrap_or_default(),
-                    _ => "".to_string(),
-                };
-                let cmd_path = Path::new(&prefix_bin)
-                    .join("connector-node")
-                    .join("start-service.sh");
-                if cmd_path.exists() {
-                    tracing::info!("start connector-node with prefix_bin {}", prefix_bin);
-                    let mut child = Command::new(cmd_path)
-                        .arg("-p")
-                        .arg("50051")
-                        .stderr(std::process::Stdio::piped())
-                        .spawn()?;
-                    let stderr = child.stderr.take().unwrap();
-
-                    let _child_handle = tokio::spawn(async move {
-                        signal::ctrl_c().await.unwrap();
-                        let _ = child.start_kill();
-                    });
-                    let _stderr_handle = tokio::spawn(async move {
-                        let mut reader = BufReader::new(stderr).lines();
-                        while let Ok(Some(line)) = reader.next_line().await {
-                            tracing::info!(target: "risingwave_connector_node", "{}", line);
-                        }
-                    });
-                } else {
-                    tracing::warn!(
-                        "Will not start connector node since `{}` does not exist.",
-                        cmd_path.display()
-                    );
-                }
             }
         }
     }

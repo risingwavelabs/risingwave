@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_pb::stream_plan::DedupNode;
 use risingwave_storage::StateStore;
 
@@ -22,11 +21,10 @@ use super::ExecutorBuilder;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::{AppendOnlyDedupExecutor, BoxedExecutor};
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::task::ExecutorParams;
 
 pub struct AppendOnlyDedupExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for AppendOnlyDedupExecutorBuilder {
     type Node = DedupNode;
 
@@ -34,25 +32,18 @@ impl ExecutorBuilder for AppendOnlyDedupExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let table = node.get_state_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
-        let pk_indices = node
-            .dedup_column_indices
-            .iter()
-            .map(|idx| *idx as _)
-            .collect_vec();
         Ok(Box::new(AppendOnlyDedupExecutor::new(
             input,
             state_table,
-            pk_indices,
-            params.executor_id,
+            params.info,
             params.actor_context,
-            stream.get_watermark_epoch(),
-            stream.streaming_metrics.clone(),
+            params.watermark_epoch,
+            params.executor_stats.clone(),
         )))
     }
 }

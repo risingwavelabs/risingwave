@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,13 +16,13 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::{Buf, BufMut, Bytes};
-use foyer::common::code::{Key, Value};
+use foyer::common::code::{CodingResult, Cursor, Key, Value};
 use foyer::intrusive::eviction::lfu::LfuConfig;
 use foyer::storage::admission::rated_ticket::RatedTicketAdmissionPolicy;
 use foyer::storage::admission::AdmissionPolicy;
+use foyer::storage::compress::Compression;
 use foyer::storage::device::fs::FsDeviceConfig;
 pub use foyer::storage::metrics::set_metrics_registry as set_foyer_metrics_registry;
 use foyer::storage::reinsertion::ReinsertionPolicy;
@@ -33,7 +33,7 @@ use foyer::storage::storage::{Storage, StorageWriter};
 use foyer::storage::store::{LfuFsStoreConfig, NoneStore, NoneStoreWriter};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 
-use crate::hummock::{Block, Sstable, SstableMeta};
+use crate::hummock::{Block, HummockResult, Sstable, SstableMeta};
 
 pub mod preclude {
     pub use foyer::storage::storage::{
@@ -48,6 +48,13 @@ pub type DeviceConfig = foyer::storage::device::fs::FsDeviceConfig;
 
 pub type FileCacheResult<T> = foyer::storage::error::Result<T>;
 pub type FileCacheError = foyer::storage::error::Error;
+pub type FileCacheCompression = foyer::storage::compress::Compression;
+
+fn copy(src: impl AsRef<[u8]>, mut dst: impl BufMut + AsRef<[u8]>) -> usize {
+    let n = std::cmp::min(src.as_ref().len(), dst.as_ref().len());
+    dst.put_slice(&src.as_ref()[..n]);
+    n
+}
 
 #[derive(Debug)]
 pub struct FileCacheConfig<K, V>
@@ -59,21 +66,19 @@ where
     pub dir: PathBuf,
     pub capacity: usize,
     pub file_capacity: usize,
-    pub buffer_pool_size: usize,
     pub device_align: usize,
     pub device_io_size: usize,
     pub flushers: usize,
-    pub flush_rate_limit: usize,
     pub reclaimers: usize,
-    pub reclaim_rate_limit: usize,
     pub recover_concurrency: usize,
     pub lfu_window_to_cache_size_ratio: usize,
     pub lfu_tiny_lru_capacity_ratio: f64,
     pub insert_rate_limit: usize,
-    pub allocator_bits: usize,
-    pub allocation_timeout: Duration,
+    pub ring_buffer_capacity: usize,
+    pub catalog_bits: usize,
     pub admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
     pub reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
+    pub compression: Compression,
 }
 
 impl<K, V> Clone for FileCacheConfig<K, V>
@@ -87,21 +92,19 @@ where
             dir: self.dir.clone(),
             capacity: self.capacity,
             file_capacity: self.file_capacity,
-            buffer_pool_size: self.buffer_pool_size,
             device_align: self.device_align,
             device_io_size: self.device_io_size,
             flushers: self.flushers,
-            flush_rate_limit: self.flush_rate_limit,
             reclaimers: self.reclaimers,
-            reclaim_rate_limit: self.reclaim_rate_limit,
             recover_concurrency: self.recover_concurrency,
             lfu_window_to_cache_size_ratio: self.lfu_window_to_cache_size_ratio,
             lfu_tiny_lru_capacity_ratio: self.lfu_tiny_lru_capacity_ratio,
             insert_rate_limit: self.insert_rate_limit,
-            allocator_bits: self.allocator_bits,
-            allocation_timeout: self.allocation_timeout,
+            ring_buffer_capacity: self.ring_buffer_capacity,
+            catalog_bits: self.catalog_bits,
             admissions: self.admissions.clone(),
             reinsertions: self.reinsertions.clone(),
+            compression: self.compression,
         }
     }
 }
@@ -182,6 +185,20 @@ where
             FileCacheWriter::None { writer } => writer.finish(value).await,
         }
     }
+
+    fn compression(&self) -> Compression {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.compression(),
+            FileCacheWriter::None { writer } => writer.compression(),
+        }
+    }
+
+    fn set_compression(&mut self, compression: Compression) {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.set_compression(compression),
+            FileCacheWriter::None { writer } => writer.set_compression(compression),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -221,6 +238,10 @@ where
             store: NoneStore::default(),
         }
     }
+
+    pub fn is_none(&self) -> bool {
+        matches!(self, FileCache::None { .. })
+    }
 }
 
 impl<K, V> Storage for FileCache<K, V>
@@ -255,18 +276,15 @@ where
                     align: config.device_align,
                     io_size: config.device_io_size,
                 },
-                allocator_bits: config.allocator_bits,
-                catalog_bits: 6,
+                catalog_bits: config.catalog_bits,
                 admissions,
                 reinsertions: config.reinsertions,
-                buffer_pool_size: config.buffer_pool_size,
+                flusher_buffer_size: 131072, // TODO: make it configurable
                 flushers: config.flushers,
-                flush_rate_limit: config.flush_rate_limit,
                 reclaimers: config.reclaimers,
-                reclaim_rate_limit: config.reclaim_rate_limit,
-                allocation_timeout: config.allocation_timeout,
                 clean_region_threshold: config.reclaimers + config.reclaimers / 2,
                 recover_concurrency: config.recover_concurrency,
+                compression: config.compression,
             }
             .into(),
             runtime: RuntimeConfig {
@@ -335,55 +353,323 @@ pub struct SstableBlockIndex {
 }
 
 impl Key for SstableBlockIndex {
+    type Cursor = SstableBlockIndexCursor;
+
     fn serialized_len(&self) -> usize {
         8 + 8 // sst_id (8B) + block_idx (8B)
     }
 
-    fn write(&self, mut buf: &mut [u8]) {
-        buf.put_u64(self.sst_id);
-        buf.put_u64(self.block_idx);
-    }
-
-    fn read(mut buf: &[u8]) -> Self {
+    fn read(mut buf: &[u8]) -> CodingResult<Self> {
         let sst_id = buf.get_u64();
         let block_idx = buf.get_u64();
-        Self { sst_id, block_idx }
+        Ok(Self { sst_id, block_idx })
+    }
+
+    fn into_cursor(self) -> Self::Cursor {
+        SstableBlockIndexCursor::new(self)
+    }
+}
+
+#[derive(Debug)]
+pub struct SstableBlockIndexCursor {
+    inner: SstableBlockIndex,
+    pos: u8,
+}
+
+impl SstableBlockIndexCursor {
+    pub fn new(inner: SstableBlockIndex) -> Self {
+        Self { inner, pos: 0 }
+    }
+}
+
+impl std::io::Read for SstableBlockIndexCursor {
+    fn read(&mut self, mut buf: &mut [u8]) -> std::io::Result<usize> {
+        let pos = self.pos;
+        if self.pos < 8 {
+            self.pos += copy(
+                &self.inner.sst_id.to_be_bytes()[self.pos as usize..],
+                &mut buf,
+            ) as u8;
+        }
+        if self.pos < 16 {
+            self.pos += copy(
+                &self.inner.block_idx.to_be_bytes()[self.pos as usize - 8..],
+                &mut buf,
+            ) as u8;
+        }
+        let n = (self.pos - pos) as usize;
+        Ok(n)
+    }
+}
+
+impl Cursor for SstableBlockIndexCursor {
+    type T = SstableBlockIndex;
+
+    fn into_inner(self) -> Self::T {
+        self.inner
+    }
+}
+
+/// [`CachedBlock`] uses different coding for writing to use/bypass compression.
+///
+/// But when reading, it will always be `Loaded`.
+#[derive(Debug, Clone)]
+pub enum CachedBlock {
+    Loaded {
+        block: Box<Block>,
+    },
+    Fetched {
+        bytes: Bytes,
+        uncompressed_capacity: usize,
+    },
+}
+
+impl CachedBlock {
+    pub fn should_compress(&self) -> bool {
+        match self {
+            CachedBlock::Loaded { .. } => true,
+            // TODO(MrCroxx): based on block original compression algorithm?
+            CachedBlock::Fetched { .. } => false,
+        }
+    }
+
+    pub fn try_into_block(self) -> HummockResult<Box<Block>> {
+        let block = match self {
+            CachedBlock::Loaded { block } => block,
+            // for the block was not loaded yet (refill + inflight), we need to decode it.
+            // TODO(MrCroxx): avoid decode twice?
+            CachedBlock::Fetched {
+                bytes,
+                uncompressed_capacity,
+            } => {
+                let block = Block::decode(bytes, uncompressed_capacity)?;
+                Box::new(block)
+            }
+        };
+        Ok(block)
+    }
+}
+
+impl Value for CachedBlock {
+    type Cursor = CachedBlockCursor;
+
+    fn serialized_len(&self) -> usize {
+        1 /* type */ + match self {
+            CachedBlock::Loaded { block } => block.raw().len(),
+            CachedBlock::Fetched { bytes, uncompressed_capacity: _ } => 8 + bytes.len(),
+        }
+    }
+
+    fn read(mut buf: &[u8]) -> CodingResult<Self> {
+        let v = buf.get_u8();
+        let res = match v {
+            0 => {
+                let data = Bytes::copy_from_slice(buf);
+                let block = Block::decode_from_raw(data);
+                let block = Box::new(block);
+                Self::Loaded { block }
+            }
+            1 => {
+                let uncompressed_capacity = buf.get_u64() as usize;
+                let data = Bytes::copy_from_slice(buf);
+                let block = Block::decode(data, uncompressed_capacity)?;
+                let block = Box::new(block);
+                Self::Loaded { block }
+            }
+            _ => unreachable!(),
+        };
+        Ok(res)
+    }
+
+    fn into_cursor(self) -> Self::Cursor {
+        CachedBlockCursor::new(self)
+    }
+}
+
+#[derive(Debug)]
+pub struct CachedBlockCursor {
+    inner: CachedBlock,
+    pos: usize,
+}
+
+impl CachedBlockCursor {
+    pub fn new(inner: CachedBlock) -> Self {
+        Self { inner, pos: 0 }
+    }
+}
+
+impl std::io::Read for CachedBlockCursor {
+    fn read(&mut self, mut buf: &mut [u8]) -> std::io::Result<usize> {
+        let pos = self.pos;
+        match &self.inner {
+            CachedBlock::Loaded { block } => {
+                if self.pos < 1 {
+                    self.pos += copy([0], &mut buf);
+                }
+                self.pos += copy(&block.raw()[self.pos - 1..], &mut buf);
+            }
+            CachedBlock::Fetched {
+                bytes,
+                uncompressed_capacity,
+            } => {
+                if self.pos < 1 {
+                    self.pos += copy([1], &mut buf);
+                }
+                if self.pos < 9 {
+                    self.pos += copy(
+                        &uncompressed_capacity.to_be_bytes()[self.pos - 1..],
+                        &mut buf,
+                    );
+                }
+                self.pos += copy(&bytes[self.pos - 9..], &mut buf);
+            }
+        }
+        let n = self.pos - pos;
+        Ok(n)
+    }
+}
+
+impl Cursor for CachedBlockCursor {
+    type T = CachedBlock;
+
+    fn into_inner(self) -> Self::T {
+        self.inner
     }
 }
 
 impl Value for Box<Block> {
+    type Cursor = BoxBlockCursor;
+
     fn serialized_len(&self) -> usize {
-        self.raw_data().len()
+        self.raw().len()
     }
 
-    fn write(&self, mut buf: &mut [u8]) {
-        buf.put_slice(self.raw_data())
-    }
-
-    fn read(buf: &[u8]) -> Self {
+    fn read(buf: &[u8]) -> CodingResult<Self> {
         let data = Bytes::copy_from_slice(buf);
         let block = Block::decode_from_raw(data);
-        Box::new(block)
+        let block = Box::new(block);
+        Ok(block)
+    }
+
+    fn into_cursor(self) -> Self::Cursor {
+        BoxBlockCursor::new(self)
     }
 }
 
-impl Value for Box<Sstable> {
+#[derive(Debug)]
+pub struct BoxBlockCursor {
+    inner: Box<Block>,
+    pos: usize,
+}
+
+impl BoxBlockCursor {
+    pub fn new(inner: Box<Block>) -> Self {
+        Self { inner, pos: 0 }
+    }
+}
+
+impl std::io::Read for BoxBlockCursor {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let pos = self.pos;
+        self.pos += copy(&self.inner.raw()[self.pos..], buf);
+        let n = self.pos - pos;
+        Ok(n)
+    }
+}
+
+impl Cursor for BoxBlockCursor {
+    type T = Box<Block>;
+
+    fn into_inner(self) -> Self::T {
+        self.inner
+    }
+}
+
+#[derive(Debug)]
+pub struct CachedSstable(Arc<Sstable>);
+
+impl Clone for CachedSstable {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl From<Box<Sstable>> for CachedSstable {
+    fn from(value: Box<Sstable>) -> Self {
+        Self(Arc::new(*value))
+    }
+}
+
+impl From<CachedSstable> for Box<Sstable> {
+    fn from(value: CachedSstable) -> Self {
+        Box::new(Arc::unwrap_or_clone(value.0))
+    }
+}
+
+impl CachedSstable {
+    pub fn into_inner(self) -> Arc<Sstable> {
+        self.0
+    }
+}
+
+impl Value for CachedSstable {
+    type Cursor = CachedSstableCursor;
+
+    fn weight(&self) -> usize {
+        self.0.estimate_size()
+    }
+
     fn serialized_len(&self) -> usize {
-        8 + self.meta.encoded_size() // id (8B) + meta size
+        8 + self.0.meta.encoded_size() // id (8B) + meta size
     }
 
-    fn write(&self, mut buf: &mut [u8]) {
-        buf.put_u64(self.id);
-        // TODO(MrCroxx): avoid buffer copy
-        let mut buffer = vec![];
-        self.meta.encode_to(&mut buffer);
-        buf.put_slice(&buffer[..])
-    }
-
-    fn read(mut buf: &[u8]) -> Self {
+    fn read(mut buf: &[u8]) -> CodingResult<Self> {
         let id = buf.get_u64();
         let meta = SstableMeta::decode(buf).unwrap();
-        Box::new(Sstable::new(id, meta))
+        let sstable = Arc::new(Sstable::new(id, meta));
+        Ok(Self(sstable))
+    }
+
+    fn into_cursor(self) -> Self::Cursor {
+        CachedSstableCursor::new(self)
+    }
+}
+
+#[derive(Debug)]
+pub struct CachedSstableCursor {
+    inner: CachedSstable,
+    pos: usize,
+    /// store pre-encoded bytes here, for it's hard to encode JIT
+    bytes: Vec<u8>,
+}
+
+impl CachedSstableCursor {
+    pub fn new(inner: CachedSstable) -> Self {
+        let mut bytes = vec![];
+        bytes.put_u64(inner.0.id);
+        inner.0.meta.encode_to(&mut bytes);
+        Self {
+            inner,
+            bytes,
+            pos: 0,
+        }
+    }
+}
+
+impl std::io::Read for CachedSstableCursor {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let pos = self.pos;
+        self.pos += copy(&self.bytes[self.pos..], buf);
+        let n = self.pos - pos;
+        Ok(n)
+    }
+}
+
+impl Cursor for CachedSstableCursor {
+    type T = CachedSstable;
+
+    fn into_inner(self) -> Self::T {
+        self.inner
     }
 }
 
@@ -393,12 +679,17 @@ mod tests {
     use risingwave_hummock_sdk::key::FullKey;
 
     use super::*;
-    use crate::hummock::{
-        BlockBuilder, BlockBuilderOptions, BlockHolder, BlockIterator, CompressionAlgorithm,
-    };
+    use crate::hummock::{BlockBuilder, BlockBuilderOptions, BlockMeta, CompressionAlgorithm};
 
-    #[test]
-    fn test_enc_dec() {
+    pub fn construct_full_key_struct(
+        table_id: u32,
+        table_key: &[u8],
+        epoch: u64,
+    ) -> FullKey<&[u8]> {
+        FullKey::for_test(TableId::new(table_id), table_key, epoch)
+    }
+
+    fn block_for_test() -> Box<Block> {
         let options = BlockBuilderOptions {
             compression_algorithm: CompressionAlgorithm::Lz4,
             ..Default::default()
@@ -410,50 +701,98 @@ mod tests {
         builder.add_for_test(construct_full_key_struct(0, b"k3", 3), b"v03");
         builder.add_for_test(construct_full_key_struct(0, b"k4", 4), b"v04");
 
-        let block = Box::new(
+        Box::new(
             Block::decode(
                 builder.build().to_vec().into(),
                 builder.uncompressed_block_size(),
             )
             .unwrap(),
-        );
-
-        let mut buf = vec![0; block.serialized_len()];
-        block.write(&mut buf[..]);
-
-        let block = <Box<Block> as Value>::read(&buf[..]);
-
-        let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
-
-        bi.seek_to_first();
-        assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k1", 1), bi.key());
-        assert_eq!(b"v01", bi.value());
-
-        bi.next();
-        assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k2", 2), bi.key());
-        assert_eq!(b"v02", bi.value());
-
-        bi.next();
-        assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k3", 3), bi.key());
-        assert_eq!(b"v03", bi.value());
-
-        bi.next();
-        assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k4", 4), bi.key());
-        assert_eq!(b"v04", bi.value());
-
-        bi.next();
-        assert!(!bi.is_valid());
+        )
     }
 
-    pub fn construct_full_key_struct(
-        table_id: u32,
-        table_key: &[u8],
-        epoch: u64,
-    ) -> FullKey<&[u8]> {
-        FullKey::for_test(TableId::new(table_id), table_key, epoch)
+    fn sstable_for_test() -> Sstable {
+        Sstable::new(
+            114514,
+            SstableMeta {
+                block_metas: vec![
+                    BlockMeta {
+                        smallest_key: b"0-smallest-key".to_vec(),
+                        len: 100,
+                        ..Default::default()
+                    },
+                    BlockMeta {
+                        smallest_key: b"5-some-key".to_vec(),
+                        offset: 100,
+                        len: 100,
+                        ..Default::default()
+                    },
+                ],
+                bloom_filter: b"0123456789012345".to_vec(),
+                estimated_size: 123,
+                key_count: 123,
+                smallest_key: b"0-smallest-key".to_vec(),
+                largest_key: b"9-largest-key".to_vec(),
+                meta_offset: 123,
+                monotonic_tombstone_events: vec![],
+                version: 2,
+            },
+        )
+    }
+
+    #[test]
+    fn test_cursor() {
+        {
+            let block = block_for_test();
+            let mut cursor = block.into_cursor();
+            let mut buf = vec![];
+            std::io::copy(&mut cursor, &mut buf).unwrap();
+            let target = cursor.into_inner();
+            let block = Box::<Block>::read(&buf[..]).unwrap();
+            assert_eq!(target.raw(), block.raw());
+        }
+
+        {
+            let sstable: CachedSstable = Box::new(sstable_for_test()).into();
+            let mut cursor = sstable.into_cursor();
+            let mut buf = vec![];
+            std::io::copy(&mut cursor, &mut buf).unwrap();
+            let target = cursor.into_inner();
+            let sstable = CachedSstable::read(&buf[..]).unwrap();
+            assert_eq!(target.0.id, sstable.0.id);
+            assert_eq!(target.0.meta, sstable.0.meta);
+        }
+
+        {
+            let cached = CachedBlock::Loaded {
+                block: block_for_test(),
+            };
+            let mut cursor = cached.into_cursor();
+            let mut buf = vec![];
+            std::io::copy(&mut cursor, &mut buf).unwrap();
+            let target = cursor.into_inner();
+            let cached = CachedBlock::read(&buf[..]).unwrap();
+            let target = match target {
+                CachedBlock::Loaded { block } => block,
+                CachedBlock::Fetched { .. } => panic!(),
+            };
+            let block = match cached {
+                CachedBlock::Loaded { block } => block,
+                CachedBlock::Fetched { .. } => panic!(),
+            };
+            assert_eq!(target.raw(), block.raw());
+        }
+
+        {
+            let index = SstableBlockIndex {
+                sst_id: 114,
+                block_idx: 514,
+            };
+            let mut cursor = index.into_cursor();
+            let mut buf = vec![];
+            std::io::copy(&mut cursor, &mut buf).unwrap();
+            let target = cursor.into_inner();
+            let index = SstableBlockIndex::read(&buf[..]).unwrap();
+            assert_eq!(target, index);
+        }
     }
 }

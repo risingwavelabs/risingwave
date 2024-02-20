@@ -3,9 +3,13 @@
   batch_plan: 'BatchValues { rows: [[11:Int32, 22:Int32], [36:Int32, 44:Int32]] }'
   stream_plan: |-
     StreamMaterialize { columns: [*VALUES*_0.column_0, *VALUES*_0.column_1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-    └─StreamValues { rows: [[11:Int32, 22:Int32, 0:Int64], [(33:Int32 + (1:Int32 + 2:Int32)), 44:Int32, 1:Int64]] }
+    └─StreamValues { rows: [[11:Int32, 22:Int32, 0:Int64], [36:Int32, 44:Int32, 1:Int64]] }
 - sql: select * from t
-  binder_error: 'Catalog error: table or source not found: t'
+  binder_error: |
+    Catalog error
+
+    Caused by:
+      table or source not found: t
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t;
@@ -24,8 +28,7 @@
     select * from t where 1>2 and 1=1 and 3<1 and 4<>1 or 1=1 and 2>=1 and 1<=2;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: true }
-      └─BatchScan { table: t, columns: [], distribution: SomeShard }
+    └─BatchScan { table: t, columns: [], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamFilter { predicate: true }
@@ -126,7 +129,7 @@
 - sql: |
     create table t (v1 int, v2 int);
     delete from t where v1;
-  binder_error: 'internal error: argument of WHERE must be boolean, not type Int32'
+  binder_error: argument of WHERE must be boolean, not type Int32
 - sql: |
     select * from generate_series('2'::INT,'10'::INT,'2'::INT);
   batch_plan: |-
@@ -148,8 +151,8 @@
 - sql: |
     create table t1 (x int);
     select * from t1 where EXISTS(select * where t1.x=1);
-  binder_error: |-
-    Bind error: failed to bind expression: EXISTS (SELECT * WHERE t1.x = 1)
+  binder_error: |
+    Failed to bind expression: EXISTS (SELECT * WHERE t1.x = 1)
 
     Caused by:
       Bind error: SELECT * with no tables specified is not valid
@@ -175,8 +178,8 @@
   sql: |
     create table t(v1 int);
     select v1 from t where exists (values(v1));
-  binder_error: |-
-    Bind error: failed to bind expression: EXISTS (VALUES (v1))
+  binder_error: |
+    Failed to bind expression: EXISTS (VALUES (v1))
 
     Caused by:
       Feature is not yet implemented: CorrelatedInputRef in VALUES
@@ -186,9 +189,9 @@
     select * from t limit 1
   batch_plan: |-
     BatchLimit { limit: 1, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    └─BatchExchange { order: [], dist: Single, sequential: true }
       └─BatchLimit { limit: 1, offset: 0 }
-        └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+        └─BatchScan { table: t, columns: [t.v1, t.v2], limit: 1, distribution: SomeShard }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v1 limit 1

@@ -47,7 +47,7 @@ EOF
 setup_old_cluster() {
   echo "--- Setting up old cluster"
   LATEST_BRANCH=$(git branch --show-current)
-  git checkout "v${OLD_VERSION}-rc"
+  git checkout "v${OLD_VERSION}"
 }
 
 setup_new_cluster() {

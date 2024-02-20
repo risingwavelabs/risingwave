@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::catalog::PbSinkType;
+use risingwave_pb::catalog::{PbSink, PbSinkType};
 use sea_orm::entity::prelude::*;
+use sea_orm::ActiveValue::Set;
 
 use crate::{
-    ColumnCatalogArray, ColumnOrderArray, ConnectionId, I32Array, JobStatus, Property,
-    SinkFormatDesc, SinkId,
+    ColumnCatalogArray, ColumnOrderArray, ConnectionId, I32Array, Property, SinkFormatDesc, SinkId,
+    TableId,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
@@ -41,6 +42,17 @@ impl From<SinkType> for PbSinkType {
     }
 }
 
+impl From<PbSinkType> for SinkType {
+    fn from(sink_type: PbSinkType) -> Self {
+        match sink_type {
+            PbSinkType::AppendOnly => Self::AppendOnly,
+            PbSinkType::ForceAppendOnly => Self::ForceAppendOnly,
+            PbSinkType::Upsert => Self::Upsert,
+            PbSinkType::Unspecified => unreachable!("Unspecified sink type"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "sink")]
 pub struct Model {
@@ -58,7 +70,7 @@ pub struct Model {
     pub db_name: String,
     pub sink_from_name: String,
     pub sink_format_desc: Option<SinkFormatDesc>,
-    pub job_status: JobStatus,
+    pub target_table: Option<TableId>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -94,3 +106,26 @@ impl Related<super::object::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<PbSink> for ActiveModel {
+    fn from(pb_sink: PbSink) -> Self {
+        let sink_type = pb_sink.sink_type();
+
+        Self {
+            sink_id: Set(pb_sink.id as _),
+            name: Set(pb_sink.name),
+            columns: Set(pb_sink.columns.into()),
+            plan_pk: Set(pb_sink.plan_pk.into()),
+            distribution_key: Set(pb_sink.distribution_key.into()),
+            downstream_pk: Set(pb_sink.downstream_pk.into()),
+            sink_type: Set(sink_type.into()),
+            properties: Set(pb_sink.properties.into()),
+            definition: Set(pb_sink.definition),
+            connection_id: Set(pb_sink.connection_id.map(|x| x as _)),
+            db_name: Set(pb_sink.db_name),
+            sink_from_name: Set(pb_sink.sink_from_name),
+            sink_format_desc: Set(pb_sink.format_desc.map(|x| x.into())),
+            target_table: Set(pb_sink.target_table.map(|x| x as _)),
+        }
+    }
+}

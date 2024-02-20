@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,10 +16,12 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
+use pgwire::pg_protocol::truncated_fmt;
 use pgwire::pg_response::{PgResponse, StatementType};
+use pgwire::pg_server::Session;
 use pgwire::types::Row;
-use risingwave_common::catalog::{ColumnCatalog, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail_not_implemented;
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
@@ -33,6 +35,7 @@ use serde_json;
 use super::RwPgResponse;
 use crate::binder::{Binder, Relation};
 use crate::catalog::{CatalogError, IndexCatalog};
+use crate::error::Result;
 use crate::handler::util::{col_descs_to_rows, indexes_to_rows};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
@@ -46,7 +49,7 @@ pub fn get_columns_from_table(
     let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
     let column_catalogs = match relation {
         Relation::Source(s) => s.catalog.columns,
-        Relation::BaseTable(t) => t.table_catalog.columns,
+        Relation::BaseTable(t) => t.table_catalog.columns.clone(),
         Relation::SystemTable(t) => t.sys_table_catalog.columns.clone(),
         _ => {
             return Err(CatalogError::NotFound("table or source", table_name.to_string()).into());
@@ -54,6 +57,34 @@ pub fn get_columns_from_table(
     };
 
     Ok(column_catalogs)
+}
+
+pub fn get_columns_from_sink(
+    session: &SessionImpl,
+    sink_name: ObjectName,
+) -> Result<Vec<ColumnCatalog>> {
+    let binder = Binder::new_for_system(session);
+    let sink = binder.bind_sink_by_name(sink_name.clone())?;
+    Ok(sink.sink_catalog.full_columns().to_vec())
+}
+
+pub fn get_columns_from_view(
+    session: &SessionImpl,
+    view_name: ObjectName,
+) -> Result<Vec<ColumnCatalog>> {
+    let binder = Binder::new_for_system(session);
+    let view = binder.bind_view_by_name(view_name.clone())?;
+
+    Ok(view
+        .view_catalog
+        .columns
+        .iter()
+        .enumerate()
+        .map(|(idx, field)| ColumnCatalog {
+            column_desc: ColumnDesc::from_field_with_column_id(field, idx as _),
+            is_hidden: false,
+        })
+        .collect())
 }
 
 pub fn get_indexes_from_table(
@@ -86,11 +117,7 @@ pub async fn handle_show_object(
     let session = handler_args.session;
 
     if let Some(ShowStatementFilter::Where(..)) = filter {
-        return Err(ErrorCode::NotImplemented(
-            "WHERE clause in SHOW statement".to_string(),
-            None.into(),
-        )
-        .into());
+        bail_not_implemented!("WHERE clause in SHOW statement");
     }
     let row_desc = infer_show_object(&command);
 
@@ -140,7 +167,17 @@ pub async fn handle_show_object(
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::Columns { table } => {
-            let columns = get_columns_from_table(&session, table)?;
+            let Ok(columns) = get_columns_from_table(&session, table.clone())
+                .or(get_columns_from_sink(&session, table.clone()))
+                .or(get_columns_from_view(&session, table.clone()))
+            else {
+                return Err(CatalogError::NotFound(
+                    "table, source, sink or view",
+                    table.to_string(),
+                )
+                .into());
+            };
+
             let rows = col_descs_to_rows(columns);
 
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
@@ -215,7 +252,7 @@ pub async fn handle_show_object(
                         Some(t.arg_types.iter().map(|t| t.to_string()).join(", ").into()),
                         Some(t.return_type.to_string().into()),
                         Some(t.language.clone().into()),
-                        Some(t.link.clone().into()),
+                        t.link.clone().map(Into::into),
                     ])
                 })
                 .collect_vec();
@@ -263,6 +300,33 @@ pub async fn handle_show_object(
                     ])
                 })
                 .collect_vec();
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(rows.into(), row_desc)
+                .into());
+        }
+        ShowObject::ProcessList => {
+            let rows = {
+                let sessions_map = session.env().sessions_map();
+                sessions_map
+                    .read()
+                    .values()
+                    .map(|s| {
+                        Row::new(vec![
+                            // Since process id and the secret id in the session id are the same in RisingWave, just display the process id.
+                            Some(format!("{}", s.id().0).into()),
+                            Some(s.user_name().to_owned().into()),
+                            Some(format!("{}", s.peer_addr()).into()),
+                            Some(s.database().to_owned().into()),
+                            s.elapse_since_running_sql()
+                                .map(|mills| format!("{}ms", mills).into()),
+                            s.running_sql().map(|sql| {
+                                format!("{}", truncated_fmt::TruncatedFmt(&sql, 1024)).into()
+                            }),
+                        ])
+                    })
+                    .collect_vec()
+            };
+
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
                 .values(rows.into(), row_desc)
                 .into());
@@ -345,11 +409,7 @@ pub fn handle_show_create_object(
             index.create_sql()
         }
         ShowCreateType::Function => {
-            return Err(ErrorCode::NotImplemented(
-                format!("show create on: {}", show_create_type),
-                None.into(),
-            )
-            .into());
+            bail_not_implemented!("show create on: {}", show_create_type);
         }
     };
     let name = format!("{}.{}", schema_name, object_name);

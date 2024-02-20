@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -129,13 +129,13 @@ impl ExprCorrelatedIdFinder {
     pub fn contains(&self, correlated_id: &CorrelatedId) -> bool {
         self.correlated_id_set.contains(correlated_id)
     }
+
+    pub fn has_correlated_input_ref(&self) -> bool {
+        !self.correlated_id_set.is_empty()
+    }
 }
 
 impl ExprVisitor for ExprCorrelatedIdFinder {
-    type Result = ();
-
-    fn merge(_: (), _: ()) {}
-
     fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
         self.correlated_id_set
             .insert(correlated_input_ref.correlated_id());

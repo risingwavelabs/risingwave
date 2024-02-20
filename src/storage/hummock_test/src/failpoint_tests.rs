@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -86,7 +86,6 @@ async fn test_failpoints_state_store_read_upload() {
     local
         .ingest_batch(
             batch1,
-            vec![],
             WriteOptions {
                 epoch: 1,
                 table_id: Default::default(),
@@ -95,7 +94,10 @@ async fn test_failpoints_state_store_read_upload() {
         .await
         .unwrap();
 
-    local.seal_current_epoch(3);
+    local.seal_current_epoch(
+        3,
+        risingwave_storage::store::SealCurrentEpochOptions::for_test(),
+    );
 
     // Get the value after flushing to remote.
     let anchor_prefix_hint = {
@@ -122,7 +124,6 @@ async fn test_failpoints_state_store_read_upload() {
     local
         .ingest_batch(
             batch2,
-            vec![],
             WriteOptions {
                 epoch: 3,
                 table_id: Default::default(),
@@ -131,7 +132,10 @@ async fn test_failpoints_state_store_read_upload() {
         .await
         .unwrap();
 
-    local.seal_current_epoch(u64::MAX);
+    local.seal_current_epoch(
+        u64::MAX,
+        risingwave_storage::store::SealCurrentEpochOptions::for_test(),
+    );
 
     // sync epoch1 test the read_error
     let ssts = hummock_storage
@@ -249,7 +253,7 @@ async fn test_failpoints_state_store_read_upload() {
             ),
             5,
             ReadOptions {
-                prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                prefetch_options: PrefetchOptions::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
                 ..Default::default()
             },

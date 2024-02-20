@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ use super::generic::{GenericPlanNode, PlanWindowFunction};
 use super::stream::prelude::*;
 use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
@@ -50,8 +51,7 @@ impl StreamOverWindow {
     }
 
     fn infer_state_table(&self) -> TableCatalog {
-        let mut tbl_builder =
-            TableCatalogBuilder::new(self.ctx().with_options().internal_table_subset());
+        let mut tbl_builder = TableCatalogBuilder::default();
 
         let out_schema = self.core.schema();
         for field in out_schema.fields() {
@@ -127,7 +127,7 @@ impl StreamNode for StreamOverWindow {
             .ctx()
             .session_ctx()
             .config()
-            .get_streaming_over_window_cache_policy();
+            .streaming_over_window_cache_policy();
 
         PbNodeBody::OverWindow(OverWindowNode {
             calls,
@@ -140,3 +140,5 @@ impl StreamNode for StreamOverWindow {
 }
 
 impl ExprRewritable for StreamOverWindow {}
+
+impl ExprVisitable for StreamOverWindow {}

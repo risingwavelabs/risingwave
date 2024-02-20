@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ use risingwave_pb::stream_plan::{PbStreamFsFetch, StreamFsFetchNode};
 use super::stream::prelude::*;
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary};
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{childless_record, Distill};
 use crate::optimizer::plan_node::{generic, ExprRewritable, StreamNode};
 use crate::optimizer::property::Distribution;
@@ -90,6 +91,8 @@ impl Distill for StreamFsFetch {
 
 impl ExprRewritable for StreamFsFetch {}
 
+impl ExprVisitable for StreamFsFetch {}
+
 impl StreamNode for StreamFsFetch {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         // `StreamFsFetch` is same as source in proto def, so the following code is the same as `StreamSource`
@@ -98,7 +101,9 @@ impl StreamNode for StreamFsFetch {
             source_id: source_catalog.id,
             source_name: source_catalog.name.clone(),
             state_table: Some(
-                generic::Source::infer_internal_table_catalog()
+                // `StreamFsSource` will do range scan according to assigned vnodes, so we need to set
+                // the key for distributing data to different vnodes.
+                generic::Source::infer_internal_table_catalog(true)
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
@@ -110,13 +115,8 @@ impl StreamNode for StreamFsFetch {
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
-            properties: source_catalog.properties.clone().into_iter().collect(),
-            rate_limit: self
-                .base
-                .ctx()
-                .session_ctx()
-                .config()
-                .get_streaming_rate_limit(),
+            with_properties: source_catalog.with_properties.clone().into_iter().collect(),
+            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
         });
         NodeBody::StreamFsFetch(StreamFsFetchNode {
             node_inner: source_inner,

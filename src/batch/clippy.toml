@@ -1,0 +1,18 @@
+disallowed-methods = []
+
+disallowed-types = []
+
+doc-valid-idents = [
+    "RisingWave",
+    "MinIO",
+    "ProtoBuf",
+    "BloomFilter",
+    "gRPC",
+    "PostgreSQL",
+    "MySQL",
+    "TopN",
+    "VNode",
+]
+avoid-breaking-exported-api = false
+upper-case-acronyms-aggressive = true
+too-many-arguments-threshold = 10

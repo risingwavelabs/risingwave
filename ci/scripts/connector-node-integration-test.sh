@@ -99,10 +99,9 @@ else
   exit 1
 fi
 
-sink_input_feature=("" "--input_binary_file=./data/sink_input --data_format_use_json=False")
-upsert_sink_input_feature=("--input_file=./data/upsert_sink_input.json"
-                           "--input_binary_file=./data/upsert_sink_input --data_format_use_json=False")
-type=("Json format" "StreamChunk format")
+sink_input_feature=("--input_binary_file=./data/sink_input --data_format_use_json=False")
+upsert_sink_input_feature=("--input_binary_file=./data/upsert_sink_input --data_format_use_json=False")
+type=("StreamChunk format")
 
 ${MC_PATH} mb minio/bucket
 for ((i=0; i<${#type[@]}; i++)); do
@@ -114,54 +113,6 @@ for ((i=0; i<${#type[@]}; i++)); do
       echo "File sink ${type[i]} test failed"
       exit 1
     fi
-
-    echo "--- running jdbc ${type[i]} integration tests"
-    cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
-    if python3 integration_tests.py --jdbc_sink ${sink_input_feature[i]}; then
-      echo "Jdbc sink ${type[i]} test passed"
-    else
-      echo "Jdbc sink ${type[i]} test failed"
-      exit 1
-    fi
-
-    # test upsert mode
-    echo "--- running iceberg upsert mode ${type[i]} integration tests"
-    cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
-    python3 pyspark-util.py create_iceberg
-    if python3 integration_tests.py --upsert_iceberg_sink ${upsert_sink_input_feature[i]}; then
-      python3 pyspark-util.py test_upsert_iceberg --input_file="./data/upsert_sink_input.json"
-      echo "Upsert iceberg sink ${type[i]} test passed"
-    else
-      echo "Upsert iceberg sink ${type[i]} test failed"
-      exit 1
-    fi
-    python3 pyspark-util.py drop_iceberg
-
-    # test append-only mode
-    echo "--- running iceberg append-only mode ${type[i]} integration tests"
-    cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
-    python3 pyspark-util.py create_iceberg
-    if python3 integration_tests.py --iceberg_sink ${sink_input_feature[i]}; then
-      python3 pyspark-util.py test_iceberg
-      echo "Iceberg sink ${type[i]} test passed"
-    else
-      echo "Iceberg sink ${type[i]} test failed"
-      exit 1
-    fi
-    python3 pyspark-util.py drop_iceberg
-
-    # test append-only mode
-    echo "--- running deltalake append-only mod ${type[i]} integration tests"
-    cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
-    python3 pyspark-util.py create_deltalake
-    if python3 integration_tests.py --deltalake_sink ${sink_input_feature[i]}; then
-      python3 pyspark-util.py test_deltalake
-      echo "Deltalake sink ${type[i]} test passed"
-    else
-      echo "Deltalake sink ${type[i]} test failed"
-      exit 1
-    fi
-    python3 pyspark-util.py clean_deltalake
 done
 
 

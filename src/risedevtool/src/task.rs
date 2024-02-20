@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,9 +42,9 @@ use std::process::{Command, Output};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use indicatif::ProgressBar;
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, Response};
 use tempfile::TempDir;
 pub use utils::*;
 
@@ -172,7 +172,9 @@ where
         let addr = server.as_ref().parse()?;
         wait(
             || {
-                TcpStream::connect_timeout(&addr, Duration::from_secs(1))?;
+                TcpStream::connect_timeout(&addr, Duration::from_secs(1)).with_context(|| {
+                    format!("failed to establish tcp connection to {}", server.as_ref())
+                })?;
                 Ok(())
             },
             &mut self.log,
@@ -184,7 +186,11 @@ where
         Ok(())
     }
 
-    pub fn wait_http(&mut self, server: impl AsRef<str>) -> anyhow::Result<()> {
+    fn wait_http_with_response_cb(
+        &mut self,
+        server: impl AsRef<str>,
+        cb: impl Fn(Response) -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
         let server = server.as_ref();
         wait(
             || {
@@ -192,12 +198,13 @@ where
                     .get(server)
                     .timeout(Duration::from_secs(1))
                     .body("")
-                    .send()?;
-                if resp.status().is_success() {
-                    Ok(())
-                } else {
-                    Err(anyhow!("http failed with status: {}", resp.status()))
-                }
+                    .send()?
+                    .error_for_status()
+                    .with_context(|| {
+                        format!("failed to establish http connection to {}", server)
+                    })?;
+
+                cb(resp)
             },
             &mut self.log,
             self.status_file.as_ref().unwrap(),
@@ -207,39 +214,26 @@ where
         )
     }
 
-    pub fn wait_http_with_cb(
+    pub fn wait_http(&mut self, server: impl AsRef<str>) -> anyhow::Result<()> {
+        self.wait_http_with_response_cb(server, |_| Ok(()))
+    }
+
+    pub fn wait_http_with_text_cb(
         &mut self,
         server: impl AsRef<str>,
         cb: impl Fn(&str) -> bool,
     ) -> anyhow::Result<()> {
-        let server = server.as_ref();
-        wait(
-            || {
-                let resp = Client::new()
-                    .get(server)
-                    .timeout(Duration::from_secs(1))
-                    .body("")
-                    .send()?;
-                if resp.status().is_success() {
-                    let data = resp.text()?;
-                    if cb(&data) {
-                        Ok(())
-                    } else {
-                        Err(anyhow!(
-                            "http health check callback failed with body: {:?}",
-                            data
-                        ))
-                    }
-                } else {
-                    Err(anyhow!("http failed with status: {}", resp.status()))
-                }
-            },
-            &mut self.log,
-            self.status_file.as_ref().unwrap(),
-            self.id.as_ref().unwrap(),
-            Some(Duration::from_secs(30)),
-            true,
-        )
+        self.wait_http_with_response_cb(server, |resp| {
+            let data = resp.text()?;
+            if cb(&data) {
+                Ok(())
+            } else {
+                Err(anyhow!(
+                    "http health check callback failed with body: {:?}",
+                    data
+                ))
+            }
+        })
     }
 
     pub fn wait(&mut self, wait_func: impl FnMut() -> Result<()>) -> anyhow::Result<()> {

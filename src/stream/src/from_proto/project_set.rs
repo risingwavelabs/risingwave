@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ use crate::executor::ProjectSetExecutor;
 
 pub struct ProjectSetExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for ProjectSetExecutorBuilder {
     type Node = ProjectSetNode;
 
@@ -30,7 +29,6 @@ impl ExecutorBuilder for ProjectSetExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let select_list: Vec<_> = node
@@ -59,10 +57,9 @@ impl ExecutorBuilder for ProjectSetExecutorBuilder {
         let chunk_size = params.env.config().developer.chunk_size;
         Ok(ProjectSetExecutor::new(
             params.actor_context,
+            params.info,
             input,
-            params.pk_indices,
             select_list,
-            params.executor_id,
             chunk_size,
             watermark_derivations,
             nondecreasing_expr_indices,

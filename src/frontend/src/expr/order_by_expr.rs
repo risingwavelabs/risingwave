@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -71,12 +71,10 @@ impl OrderBy {
         }
     }
 
-    pub fn visit_expr<V: ExprVisitor + ?Sized>(&self, visitor: &mut V) -> V::Result {
+    pub fn visit_expr<V: ExprVisitor + ?Sized>(&self, visitor: &mut V) {
         self.sort_exprs
             .iter()
-            .map(|expr| visitor.visit_expr(&expr.expr))
-            .reduce(V::merge)
-            .unwrap_or_default()
+            .for_each(|expr| visitor.visit_expr(&expr.expr));
     }
 
     pub fn visit_expr_mut(&mut self, mutator: &mut (impl ExprMutator + ?Sized)) {

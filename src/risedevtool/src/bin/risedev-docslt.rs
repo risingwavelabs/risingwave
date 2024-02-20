@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use itertools::Itertools;
+use thiserror_ext::AsReport;
 use tracing::*;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -53,11 +54,12 @@ fn extract_slt(filepath: &Path) -> Vec<SltBlock> {
             if !(line.starts_with("///") || line.starts_with("//!")) {
                 panic!("expect /// or //! at {}:{}", filepath.display(), i + 1);
             }
-            line = line[3..].trim();
-            if line == "```" {
+            line = &line[3..];
+            if line.trim() == "```" {
                 break;
             }
-            content += line;
+            // strip one leading space
+            content += line.strip_prefix(' ').unwrap_or(line);
             content += "\n";
         }
         blocks.push(SltBlock {
@@ -88,7 +90,7 @@ fn main() -> Result<()> {
         let path = match entry {
             Ok(path) => path,
             Err(e) => {
-                error!("{:?}", e);
+                error!("{}", e.as_report());
                 continue;
             }
         };

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,25 +13,27 @@
 // limitations under the License.
 
 mod column;
+mod external_table;
 mod internal_table;
 mod physical_table;
 mod schema;
 pub mod test_utils;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 pub use column::*;
+pub use external_table::*;
 pub use internal_table::*;
 use parse_display::Display;
 pub use physical_table::*;
 use risingwave_pb::catalog::HandleConflictBehavior as PbHandleConflictBehavior;
+use risingwave_pb::plan_common::ColumnDescVersion;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
 
+use crate::array::DataChunk;
 pub use crate::constants::hummock;
-use crate::error::Result;
-use crate::row::OwnedRow;
+use crate::error::BoxedError;
 use crate::types::DataType;
 
 /// The global version of the catalog.
@@ -61,6 +63,8 @@ pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 pub const NON_RESERVED_USER_ID: i32 = 11;
 pub const NON_RESERVED_SYS_CATALOG_ID: i32 = 1001;
 
+pub const OBJECT_ID_PLACEHOLDER: u32 = u32::MAX - 1;
+
 pub const SYSTEM_SCHEMAS: [&str; 3] = [
     PG_CATALOG_SCHEMA_NAME,
     INFORMATION_SCHEMA_SCHEMA_NAME,
@@ -71,7 +75,15 @@ pub const RW_RESERVED_COLUMN_NAME_PREFIX: &str = "_rw_";
 
 // When there is no primary key specified while creating source, will use the
 // the message key as primary key in `BYTEA` type with this name.
+// Note: the field has version to track, please refer to `default_key_column_name_version_mapping`
 pub const DEFAULT_KEY_COLUMN_NAME: &str = "_rw_key";
+
+pub fn default_key_column_name_version_mapping(version: &ColumnDescVersion) -> &str {
+    match version {
+        ColumnDescVersion::Unspecified => DEFAULT_KEY_COLUMN_NAME,
+        _ => DEFAULT_KEY_COLUMN_NAME,
+    }
+}
 
 /// For kafka source, we attach a hidden column [`KAFKA_TIMESTAMP_COLUMN_NAME`] to it, so that we
 /// can limit the timestamp range when querying it directly with batch query. The column type is
@@ -84,10 +96,6 @@ pub fn is_system_schema(schema_name: &str) -> bool {
 }
 
 pub const ROWID_PREFIX: &str = "_row_id";
-
-pub fn row_id_column_name() -> String {
-    ROWID_PREFIX.to_string()
-}
 
 pub fn is_row_id_column_name(name: &str) -> bool {
     name.starts_with(ROWID_PREFIX)
@@ -103,43 +111,42 @@ pub const USER_COLUMN_ID_OFFSET: i32 = ROW_ID_COLUMN_ID.next().get_id();
 
 /// Creates a row ID column (for implicit primary key). It'll always have the ID `0` for now.
 pub fn row_id_column_desc() -> ColumnDesc {
-    ColumnDesc {
-        data_type: DataType::Serial,
-        column_id: ROW_ID_COLUMN_ID,
-        name: row_id_column_name(),
-        field_descs: vec![],
-        type_name: "".to_string(),
-        generated_or_default_column: None,
-        description: None,
-    }
+    ColumnDesc::named(ROWID_PREFIX, ROW_ID_COLUMN_ID, DataType::Serial)
 }
 
 pub const OFFSET_COLUMN_NAME: &str = "_rw_offset";
 
-pub fn offset_column_name() -> String {
-    OFFSET_COLUMN_NAME.to_string()
-}
+// The number of columns output by the cdc source job
+// see `debezium_cdc_source_schema()` for details
+pub const CDC_SOURCE_COLUMN_NUM: u32 = 3;
+pub const TABLE_NAME_COLUMN_NAME: &str = "_rw_table_name";
 
 pub fn is_offset_column_name(name: &str) -> bool {
     name.starts_with(OFFSET_COLUMN_NAME)
 }
 /// Creates a offset column for storing upstream offset
+/// Used in cdc source currently
 pub fn offset_column_desc() -> ColumnDesc {
-    ColumnDesc {
-        data_type: DataType::Varchar,
-        column_id: ColumnId::placeholder(),
-        name: offset_column_name(),
-        field_descs: vec![],
-        type_name: "".to_string(),
-        generated_or_default_column: None,
-        description: None,
-    }
+    ColumnDesc::named(
+        OFFSET_COLUMN_NAME,
+        ColumnId::placeholder(),
+        DataType::Varchar,
+    )
+}
+
+/// A column to store the upstream table name of the cdc table
+pub fn cdc_table_name_column_desc() -> ColumnDesc {
+    ColumnDesc::named(
+        TABLE_NAME_COLUMN_NAME,
+        ColumnId::placeholder(),
+        DataType::Varchar,
+    )
 }
 
 /// The local system catalog reader in the frontend node.
 #[async_trait]
 pub trait SysCatalogReader: Sync + Send + 'static {
-    async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>>;
+    async fn read_table(&self, table_id: &TableId) -> Result<DataChunk, BoxedError>;
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
@@ -157,7 +164,7 @@ impl DatabaseId {
 
     pub fn placeholder() -> Self {
         DatabaseId {
-            database_id: u32::MAX - 1,
+            database_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 }
@@ -193,7 +200,7 @@ impl SchemaId {
 
     pub fn placeholder() -> Self {
         SchemaId {
-            schema_id: u32::MAX - 1,
+            schema_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 }
@@ -230,7 +237,7 @@ impl TableId {
     /// Sometimes the id field is filled later, we use this value for better debugging.
     pub const fn placeholder() -> Self {
         TableId {
-            table_id: u32::MAX - 1,
+            table_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 
@@ -264,46 +271,24 @@ pub struct TableOption {
 
 impl From<&risingwave_pb::hummock::TableOption> for TableOption {
     fn from(table_option: &risingwave_pb::hummock::TableOption) -> Self {
-        let retention_seconds =
-            if table_option.retention_seconds == hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND {
-                None
-            } else {
-                Some(table_option.retention_seconds)
-            };
-
-        Self { retention_seconds }
+        Self {
+            retention_seconds: table_option.retention_seconds,
+        }
     }
 }
 
 impl From<&TableOption> for risingwave_pb::hummock::TableOption {
     fn from(table_option: &TableOption) -> Self {
         Self {
-            retention_seconds: table_option
-                .retention_seconds
-                .unwrap_or(hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND),
+            retention_seconds: table_option.retention_seconds,
         }
     }
 }
 
 impl TableOption {
-    pub fn build_table_option(table_properties: &HashMap<String, String>) -> Self {
+    pub fn new(retention_seconds: Option<u32>) -> Self {
         // now we only support ttl for TableOption
-        let mut result = TableOption::default();
-        if let Some(ttl_string) = table_properties.get(hummock::PROPERTIES_RETENTION_SECOND_KEY) {
-            match ttl_string.trim().parse::<u32>() {
-                Ok(retention_seconds_u32) => result.retention_seconds = Some(retention_seconds_u32),
-                Err(e) => {
-                    tracing::info!(
-                        "build_table_option parse option ttl_string {} fail {}",
-                        ttl_string,
-                        e
-                    );
-                    result.retention_seconds = None;
-                }
-            };
-        }
-
-        result
+        TableOption { retention_seconds }
     }
 }
 
@@ -321,7 +306,7 @@ impl IndexId {
     /// Sometimes the id field is filled later, we use this value for better debugging.
     pub const fn placeholder() -> Self {
         IndexId {
-            index_id: u32::MAX - 1,
+            index_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 
@@ -350,7 +335,7 @@ impl FunctionId {
     }
 
     pub const fn placeholder() -> Self {
-        FunctionId(u32::MAX - 1)
+        FunctionId(OBJECT_ID_PLACEHOLDER)
     }
 
     pub fn function_id(&self) -> u32 {
@@ -389,7 +374,7 @@ impl UserId {
 
     pub const fn placeholder() -> Self {
         UserId {
-            user_id: u32::MAX - 1,
+            user_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 }
@@ -421,7 +406,7 @@ impl ConnectionId {
     }
 
     pub const fn placeholder() -> Self {
-        ConnectionId(u32::MAX - 1)
+        ConnectionId(OBJECT_ID_PLACEHOLDER)
     }
 
     pub fn connection_id(&self) -> u32 {
@@ -461,9 +446,10 @@ impl ConflictBehavior {
             PbHandleConflictBehavior::Overwrite => ConflictBehavior::Overwrite,
             PbHandleConflictBehavior::Ignore => ConflictBehavior::IgnoreConflict,
             // This is for backward compatibility, in the previous version
-            // `ConflictBehaviorUnspecified' represented `NoCheck`, so just treat it as `NoCheck`.
-            PbHandleConflictBehavior::NoCheck
-            | PbHandleConflictBehavior::ConflictBehaviorUnspecified => ConflictBehavior::NoCheck,
+            // `HandleConflictBehavior::Unspecified` represented `NoCheck`, so just treat it as `NoCheck`.
+            PbHandleConflictBehavior::NoCheck | PbHandleConflictBehavior::Unspecified => {
+                ConflictBehavior::NoCheck
+            }
         }
     }
 

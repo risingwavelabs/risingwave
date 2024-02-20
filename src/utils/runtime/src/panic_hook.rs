@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,9 @@
 /// Set panic hook to abort the process if we're not catching unwind, without losing the information
 /// of stack trace and await-tree.
 pub fn set_panic_hook() {
-    if let Ok(limit) = rlimit::Resource::CORE.get_soft() && limit > 0 {
+    if let Ok(limit) = rlimit::Resource::CORE.get_soft()
+        && limit > 0
+    {
         tracing::info!(limit, "coredump on panic is likely to be enabled");
     };
 

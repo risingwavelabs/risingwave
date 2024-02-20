@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ use risingwave_expr::expr::*;
 use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_expr::ExprError;
 use risingwave_pb::expr::expr_node::PbType;
+use thiserror_ext::AsReport;
 
 criterion_group!(benches, bench_expr, bench_raw);
 criterion_main!(benches);
@@ -170,7 +171,7 @@ fn bench_expr(c: &mut Criterion) {
             // 25: serial array
             SerialArray::from_iter((1..=CHUNK_SIZE).map(|i| Serial::from(i as i64))).into_ref(),
             // 26: jsonb array
-            JsonbArray::from_iter((1..=CHUNK_SIZE).map(|i| JsonbVal::from(i as i64))).into_ref(),
+            JsonbArray::from_iter((1..=CHUNK_SIZE).map(|i| JsonbVal::from(i as f64))).into_ref(),
             // 27: int256 array
             Int256Array::from_iter((1..=CHUNK_SIZE).map(|_| Int256::from(1))).into_ref(),
             // 28: extract field for interval
@@ -203,10 +204,27 @@ fn bench_expr(c: &mut Criterion) {
                     .take(CHUNK_SIZE),
             )
             .into_ref(),
+            // 30: position sub
+            Utf8Array::from_iter_display(
+                // One success, one fail
+                [Some("hawaii"), Some("datum")]
+                    .into_iter()
+                    .cycle()
+                    .take(CHUNK_SIZE),
+            )
+            .into_ref(),
+            // 31: position target
+            Utf8Array::from_iter_display(
+                [Some("hello, hawaii guitar"), Some("Here are some data")]
+                    .into_iter()
+                    .cycle()
+                    .take(CHUNK_SIZE),
+            )
+            .into_ref(),
         ],
         CHUNK_SIZE,
     ));
-    let inputrefs = [
+    let input_refs = [
         InputRefExpression::new(DataType::Boolean, 0),
         InputRefExpression::new(DataType::Int16, 1),
         InputRefExpression::new(DataType::Int32, 2),
@@ -226,7 +244,7 @@ fn bench_expr(c: &mut Criterion) {
         InputRefExpression::new(DataType::Int256, 27),
     ];
     let input_index_for_type = |ty: &DataType| {
-        inputrefs
+        input_refs
             .iter()
             .find(|r| &r.return_type() == ty)
             .unwrap_or_else(|| panic!("expression not found for {ty:?}"))
@@ -247,12 +265,14 @@ fn bench_expr(c: &mut Criterion) {
     const TIMESTAMPTZ_STRING: usize = 23;
     const INTERVAL_STRING: usize = 24;
     const TIMESTAMP_FORMATTED_STRING: usize = 29;
+    const POSITION_SUB: usize = 30;
+    const POSITION_TARGET: usize = 31;
 
-    c.bench_function("inputref", |bencher| {
-        let inputref = inputrefs[0].clone().boxed();
+    c.bench_function("input_ref", |bencher| {
+        let input_ref = input_refs[0].clone().boxed();
         bencher
             .to_async(FuturesExecutor)
-            .iter(|| inputref.eval(&input))
+            .iter(|| input_ref.eval(&input))
     });
     c.bench_function("constant", |bencher| {
         let constant = LiteralExpression::new(DataType::Int32, Some(1_i32.into()));
@@ -339,6 +359,8 @@ fn bench_expr(c: &mut Criterion) {
                     Interval => EXTRACT_FIELD_INTERVAL,
                     t => panic!("unexpected type: {t:?}"),
                 },
+                (PbType::Position, 0) => POSITION_SUB,
+                (PbType::Position, 1) => POSITION_TARGET,
                 _ => input_index_for_type(t.as_exact()),
             };
             children.push(InputRefExpression::new(t.as_exact().clone(), idx).boxed());
@@ -353,6 +375,11 @@ fn bench_expr(c: &mut Criterion) {
             bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
         });
     }
+
+    c.bench_function("cast(character varying) -> int8[]", |bencher| {
+        let expr = build_from_pretty(r#"(cast:int8[] {1,"2"}:varchar)"#);
+        bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
+    });
 
     let sigs = FUNCTION_REGISTRY
         .iter_aggregates()
@@ -393,7 +420,7 @@ fn bench_expr(c: &mut Criterion) {
         }) {
             Ok(agg) => agg,
             Err(e) => {
-                println!("error: {e}");
+                println!("error: {}", e.as_report());
                 continue;
             }
         };

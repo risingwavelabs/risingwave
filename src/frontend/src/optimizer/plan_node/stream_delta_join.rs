@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,11 +23,13 @@ use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 use super::generic::{self, GenericPlanRef};
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
-use crate::expr::{Expr, ExprRewriter};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary};
+use crate::expr::{Expr, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
-use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
+use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay, TryToStreamPb};
 use crate::optimizer::property::Distribution;
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -132,8 +134,11 @@ impl PlanTreeNodeBinary for StreamDeltaJoin {
 
 impl_plan_tree_node_for_binary! { StreamDeltaJoin }
 
-impl StreamNode for StreamDeltaJoin {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
+impl TryToStreamPb for StreamDeltaJoin {
+    fn try_to_stream_prost_body(
+        &self,
+        _state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<NodeBody> {
         let left = self.left();
         let right = self.right();
 
@@ -153,7 +158,7 @@ impl StreamNode for StreamDeltaJoin {
         // TODO: add a separate delta join node in proto, or move fragmenter to frontend so that we
         // don't need an intermediate representation.
         let eq_join_predicate = &self.eq_join_predicate;
-        NodeBody::DeltaIndexJoin(DeltaIndexJoinNode {
+        Ok(NodeBody::DeltaIndexJoin(DeltaIndexJoinNode {
             join_type: self.core.join_type as i32,
             left_key: eq_join_predicate
                 .left_eq_indexes()
@@ -180,7 +185,12 @@ impl StreamNode for StreamDeltaJoin {
                     .iter()
                     .map(ColumnDesc::to_protobuf)
                     .collect(),
-                table_desc: Some(left_table_desc.to_protobuf()),
+                table_desc: Some(left_table_desc.try_to_protobuf()?),
+                output_col_idx: left_table
+                    .output_col_idx
+                    .iter()
+                    .map(|&v| v as u32)
+                    .collect(),
             }),
             right_info: Some(ArrangementInfo {
                 // TODO: remove it
@@ -191,10 +201,15 @@ impl StreamNode for StreamDeltaJoin {
                     .iter()
                     .map(ColumnDesc::to_protobuf)
                     .collect(),
-                table_desc: Some(right_table_desc.to_protobuf()),
+                table_desc: Some(right_table_desc.try_to_protobuf()?),
+                output_col_idx: right_table
+                    .output_col_idx
+                    .iter()
+                    .map(|&v| v as u32)
+                    .collect(),
             }),
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
-        })
+        }))
     }
 }
 
@@ -207,5 +222,10 @@ impl ExprRewritable for StreamDeltaJoin {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core, self.eq_join_predicate.rewrite_exprs(r)).into()
+    }
+}
+impl ExprVisitable for StreamDeltaJoin {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

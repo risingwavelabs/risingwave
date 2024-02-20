@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,11 +18,11 @@ use risingwave_common::config::BatchConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::worker_util::WorkerNodeId;
 use risingwave_connector::source::monitor::SourceMetrics;
+use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_rpc_client::ComputeClientPoolRef;
-use risingwave_source::dml_manager::DmlManagerRef;
 use risingwave_storage::StateStoreImpl;
 
-use crate::monitor::{BatchExecutorMetrics, BatchTaskMetrics};
+use crate::monitor::{BatchExecutorMetrics, BatchManagerMetrics, BatchTaskMetrics};
 use crate::task::BatchManager;
 
 /// The global environment for task execution.
@@ -91,11 +91,9 @@ impl BatchEnvironment {
     // Create an instance for testing purpose.
     #[cfg(test)]
     pub fn for_test() -> Self {
+        use risingwave_dml::dml_manager::DmlManager;
         use risingwave_rpc_client::ComputeClientPool;
-        use risingwave_source::dml_manager::DmlManager;
         use risingwave_storage::monitor::MonitoredStorageMetrics;
-
-        use crate::monitor::BatchManagerMetrics;
 
         BatchEnvironment {
             task_manager: Arc::new(BatchManager::new(
@@ -134,6 +132,10 @@ impl BatchEnvironment {
 
     pub fn state_store(&self) -> StateStoreImpl {
         self.state_store.clone()
+    }
+
+    pub fn manager_metrics(&self) -> Arc<BatchManagerMetrics> {
+        self.task_manager.metrics()
     }
 
     pub fn task_metrics(&self) -> Arc<BatchTaskMetrics> {

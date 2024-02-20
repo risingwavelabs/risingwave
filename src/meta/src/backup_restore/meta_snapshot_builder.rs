@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,13 +17,13 @@ use std::future::Future;
 
 use anyhow::anyhow;
 use risingwave_backup::error::{BackupError, BackupResult};
-use risingwave_backup::meta_snapshot::{ClusterMetadata, MetaSnapshot};
+use risingwave_backup::meta_snapshot_v1::{ClusterMetadata, MetaSnapshotV1};
 use risingwave_backup::MetaSnapshotId;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::catalog::{
     Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
 };
-use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, HummockVersionStats};
+use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::UserInfo;
 
@@ -33,23 +33,23 @@ use crate::storage::{MetaStore, Snapshot, DEFAULT_COLUMN_FAMILY};
 
 const VERSION: u32 = 1;
 
-pub struct MetaSnapshotBuilder<S> {
-    snapshot: MetaSnapshot,
+pub struct MetaSnapshotV1Builder<S> {
+    snapshot: MetaSnapshotV1,
     meta_store: S,
 }
 
-impl<S: MetaStore> MetaSnapshotBuilder<S> {
+impl<S: MetaStore> MetaSnapshotV1Builder<S> {
     pub fn new(meta_store: S) -> Self {
         Self {
-            snapshot: MetaSnapshot::default(),
+            snapshot: MetaSnapshotV1::default(),
             meta_store,
         }
     }
 
-    pub async fn build<D: Future<Output = HummockVersion>>(
+    pub async fn build(
         &mut self,
         id: MetaSnapshotId,
-        hummock_version_builder: D,
+        hummock_version_builder: impl Future<Output = HummockVersion>,
     ) -> BackupResult<()> {
         self.snapshot.format_version = VERSION;
         self.snapshot.id = id;
@@ -90,7 +90,7 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
             .await?
             .into_iter()
             .next()
-            .ok_or_else(|| anyhow!("hummock version stats not found in meta store"))?;
+            .unwrap_or_else(HummockVersionStats::default);
         let compaction_groups =
             crate::hummock::model::CompactionGroup::list_at_snapshot::<S>(&meta_store_snapshot)
                 .await?
@@ -146,7 +146,7 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
         Ok(())
     }
 
-    pub fn finish(self) -> BackupResult<MetaSnapshot> {
+    pub fn finish(self) -> BackupResult<MetaSnapshotV1> {
         // Any sanity check goes here.
         Ok(self.snapshot)
     }
@@ -164,19 +164,21 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
 
 #[cfg(test)]
 mod tests {
-
     use assert_matches::assert_matches;
     use itertools::Itertools;
     use risingwave_backup::error::BackupError;
-    use risingwave_backup::meta_snapshot::MetaSnapshot;
-    use risingwave_common::error::ToErrorStr;
+    use risingwave_backup::meta_snapshot_v1::MetaSnapshotV1;
     use risingwave_common::system_param::system_params_for_test;
-    use risingwave_pb::hummock::{HummockVersion, HummockVersionStats};
+    use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_pb::hummock::HummockVersionStats;
 
-    use crate::backup_restore::meta_snapshot_builder::MetaSnapshotBuilder;
+    use crate::backup_restore::meta_snapshot_builder;
     use crate::manager::model::SystemParamsModel;
     use crate::model::{ClusterId, MetadataModel};
     use crate::storage::{MemStore, MetaStore, DEFAULT_COLUMN_FAMILY};
+
+    type MetaSnapshot = MetaSnapshotV1;
+    type MetaSnapshotBuilder<S> = meta_snapshot_builder::MetaSnapshotV1Builder<S>;
 
     #[tokio::test]
     async fn test_snapshot_builder() {
@@ -191,16 +193,6 @@ mod tests {
             let v_ = v.clone();
             async move { v_ }
         };
-        let err = builder
-            .build(1, get_ckpt_builder(&hummock_version))
-            .await
-            .unwrap_err();
-        let err = assert_matches!(err, BackupError::Other(e) => e);
-        assert_eq!(
-            "hummock version stats not found in meta store",
-            err.to_error_str()
-        );
-
         let hummock_version_stats = HummockVersionStats {
             hummock_version_id: hummock_version.id,
             ..Default::default()
@@ -211,7 +203,7 @@ mod tests {
             .await
             .unwrap_err();
         let err = assert_matches!(err, BackupError::Other(e) => e);
-        assert_eq!("system params not found in meta store", err.to_error_str());
+        assert_eq!("system params not found in meta store", err.to_string());
 
         system_params_for_test().insert(&meta_store).await.unwrap();
 
@@ -220,7 +212,7 @@ mod tests {
             .await
             .unwrap_err();
         let err = assert_matches!(err, BackupError::Other(e) => e);
-        assert_eq!("cluster id not found in meta store", err.to_error_str());
+        assert_eq!("cluster id not found in meta store", err.to_string());
 
         ClusterId::new()
             .put_at_meta_store(&meta_store)
@@ -244,7 +236,7 @@ mod tests {
             .await
             .unwrap();
         let snapshot = builder.finish().unwrap();
-        let encoded = snapshot.encode();
+        let encoded = snapshot.encode().unwrap();
         let decoded = MetaSnapshot::decode(&encoded).unwrap();
         assert_eq!(snapshot, decoded);
         assert_eq!(snapshot.id, 1);

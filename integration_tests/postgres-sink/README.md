@@ -5,9 +5,8 @@ This demo showcases how to sink RisingWave's data to an external Postgres. The d
 Here's what this demo does:
 
 1. `docker compose up -d`: Start the cluster.
-2. After 20-30s: `create_source.sql`.
-3. After 10s: `create_mv.sql`.
-4. After another 10s, the tester will check if the source has ingested some data by creating a materialized view upon the source. It also checks if the MV created in the 3rd step has some data.
+2. After 20-30s: `create_source.sql`, `create_mv.sql`, `create_sink.sql`.
+3. After another 30s, the tester will check if the ingestion is successful by `SELECT COUNT(*) FROM target_count;` in Postgres.
 
 To connect to the Postgres on your local PC:
 

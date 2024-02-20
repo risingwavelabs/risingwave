@@ -1,4 +1,4 @@
-//  Copyright 2023 RisingWave Labs
+//  Copyright 2024 RisingWave Labs
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
 // (found in the LICENSE.Apache file in the root directory).
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
@@ -29,7 +30,9 @@ use super::{CompactionSelector, DynamicLevelSelectorCore, LocalSelectorStatistic
 use crate::hummock::compaction::picker::{
     CompactionPicker, LocalPickerStatistic, ManualCompactionPicker,
 };
-use crate::hummock::compaction::{create_compaction_task, create_overlap_strategy, CompactionTask};
+use crate::hummock::compaction::{
+    create_compaction_task, create_overlap_strategy, CompactionDeveloperConfig, CompactionTask,
+};
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 
@@ -79,8 +82,10 @@ impl CompactionSelector for ManualCompactionSelector {
         level_handlers: &mut [LevelHandler],
         _selector_stats: &mut LocalSelectorStatistic,
         _table_id_to_options: HashMap<u32, TableOption>,
+        developer_config: Arc<CompactionDeveloperConfig>,
     ) -> Option<CompactionTask> {
-        let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
+        let dynamic_level_core =
+            DynamicLevelSelectorCore::new(group.compaction_config.clone(), developer_config);
         let overlap_strategy = create_overlap_strategy(group.compaction_config.compaction_mode());
         let ctx = dynamic_level_core.calculate_level_base_size(levels);
         let (mut picker, base_level) = {

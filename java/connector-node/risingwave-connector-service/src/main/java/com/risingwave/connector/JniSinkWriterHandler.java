@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 package com.risingwave.connector;
 
 import com.risingwave.java.binding.Binding;
-import com.risingwave.proto.ConnectorServiceProto;
+import com.risingwave.java.binding.JniSinkWriterStreamRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,11 +31,14 @@ public class JniSinkWriterHandler {
         SinkWriterStreamObserver sinkWriterStreamObserver =
                 new SinkWriterStreamObserver(responseObserver);
         try {
-            byte[] requestBytes;
-            while ((requestBytes = Binding.recvSinkWriterRequestFromChannel(requestRxPtr))
-                    != null) {
-                var request = ConnectorServiceProto.SinkWriterStreamRequest.parseFrom(requestBytes);
-                sinkWriterStreamObserver.onNext(request);
+            while (true) {
+                try (JniSinkWriterStreamRequest request =
+                        Binding.recvSinkWriterRequestFromChannel(requestRxPtr)) {
+                    if (request == null) {
+                        break;
+                    }
+                    sinkWriterStreamObserver.onNext(request.asPbRequest());
+                }
                 if (!responseObserver.isSuccess()) {
                     throw new RuntimeException("fail to sendSinkWriterResponseToChannel");
                 }

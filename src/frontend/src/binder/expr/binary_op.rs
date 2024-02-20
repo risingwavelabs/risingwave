@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::bail_not_implemented;
+use risingwave_common::types::{DataType, JsonbVal};
 use risingwave_sqlparser::ast::{BinaryOperator, Expr};
 
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
 
 impl Binder {
@@ -43,6 +44,26 @@ impl Binder {
         };
 
         let bound_right = self.bind_expr_inner(right)?;
+
+        if matches!(op, BinaryOperator::PathMatch | BinaryOperator::PathExists) {
+            // jsonb @? jsonpath => jsonb_path_exists(jsonb, jsonpath, '{}', silent => true)
+            // jsonb @@ jsonpath => jsonb_path_match(jsonb, jsonpath, '{}', silent => true)
+            return Ok(FunctionCall::new_unchecked(
+                match op {
+                    BinaryOperator::PathMatch => ExprType::JsonbPathMatch,
+                    BinaryOperator::PathExists => ExprType::JsonbPathExists,
+                    _ => unreachable!(),
+                },
+                vec![
+                    bound_left,
+                    bound_right,
+                    ExprImpl::literal_jsonb(JsonbVal::empty_object()), // vars
+                    ExprImpl::literal_bool(true),                      // silent
+                ],
+                DataType::Boolean,
+            )
+            .into());
+        }
 
         func_types.extend(Self::resolve_binary_operator(
             op,
@@ -89,9 +110,55 @@ impl Binder {
             BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
             BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
-            BinaryOperator::Arrow => ExprType::JsonbAccessInner,
+            BinaryOperator::Arrow => ExprType::JsonbAccess,
             BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
+            BinaryOperator::HashMinus => ExprType::JsonbDeletePath,
+            BinaryOperator::HashArrow => ExprType::JsonbExtractPath,
+            BinaryOperator::HashLongArrow => ExprType::JsonbExtractPathText,
             BinaryOperator::Prefix => ExprType::StartsWith,
+            BinaryOperator::Contains => {
+                let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
+                let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
+                match (left_type, right_type) {
+                    (Some(DataType::List { .. }), Some(DataType::List { .. }))
+                    | (Some(DataType::List { .. }), None)
+                    | (None, Some(DataType::List { .. })) => ExprType::ArrayContains,
+                    (Some(DataType::Jsonb), Some(DataType::Jsonb))
+                    | (Some(DataType::Jsonb), None)
+                    | (None, Some(DataType::Jsonb)) => ExprType::JsonbContains,
+                    (left, right) => {
+                        return Err(ErrorCode::BindError(format!(
+                            "operator does not exist: {} @> {}",
+                            left.map_or_else(|| String::from("unknown"), |x| x.to_string()),
+                            right.map_or_else(|| String::from("unknown"), |x| x.to_string()),
+                        ))
+                        .into());
+                    }
+                }
+            }
+            BinaryOperator::Contained => {
+                let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
+                let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
+                match (left_type, right_type) {
+                    (Some(DataType::List { .. }), Some(DataType::List { .. }))
+                    | (Some(DataType::List { .. }), None)
+                    | (None, Some(DataType::List { .. })) => ExprType::ArrayContained,
+                    (Some(DataType::Jsonb), Some(DataType::Jsonb))
+                    | (Some(DataType::Jsonb), None)
+                    | (None, Some(DataType::Jsonb)) => ExprType::JsonbContained,
+                    (left, right) => {
+                        return Err(ErrorCode::BindError(format!(
+                            "operator does not exist: {} <@ {}",
+                            left.map_or_else(|| String::from("unknown"), |x| x.to_string()),
+                            right.map_or_else(|| String::from("unknown"), |x| x.to_string()),
+                        ))
+                        .into());
+                    }
+                }
+            }
+            BinaryOperator::Exists => ExprType::JsonbExists,
+            BinaryOperator::ExistsAny => ExprType::JsonbExistsAny,
+            BinaryOperator::ExistsAll => ExprType::JsonbExistsAll,
             BinaryOperator::Concat => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
@@ -110,7 +177,7 @@ impl Binder {
 
                     (Some(DataType::Jsonb), Some(DataType::Jsonb))
                     | (Some(DataType::Jsonb), None)
-                    | (None, Some(DataType::Jsonb)) => ExprType::JsonbCat,
+                    | (None, Some(DataType::Jsonb)) => ExprType::JsonbConcat,
 
                     // bytea (and varbit, tsvector, tsquery)
                     (Some(t @ DataType::Bytea), Some(DataType::Bytea))
@@ -135,19 +202,12 @@ impl Binder {
                     }
                 }
             }
-            BinaryOperator::PGRegexMatch => {
-                func_types.push(ExprType::IsNotNull);
-                ExprType::RegexpMatch
-            }
+            BinaryOperator::PGRegexMatch => ExprType::RegexpEq,
             BinaryOperator::PGRegexNotMatch => {
-                func_types.push(ExprType::IsNull);
-                ExprType::RegexpMatch
+                func_types.push(ExprType::Not);
+                ExprType::RegexpEq
             }
-            _ => {
-                return Err(
-                    ErrorCode::NotImplemented(format!("binary op: {:?}", op), 112.into()).into(),
-                )
-            }
+            _ => bail_not_implemented!(issue = 112, "binary op: {:?}", op),
         };
         func_types.push(final_type);
         Ok(func_types)

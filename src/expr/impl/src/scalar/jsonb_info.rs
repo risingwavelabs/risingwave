@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -51,4 +51,25 @@ pub fn is_json_type(s: &str, t: &str) -> bool {
             _ => unreachable!(),
         }
     })
+}
+
+/// Converts the given JSON value to pretty-printed, indented text.
+///
+/// # Examples
+// TODO: enable docslt after sqllogictest supports multiline output
+/// ```text
+/// query T
+/// select jsonb_pretty('[{"f1":1,"f2":null}, 2]');
+/// ----
+/// [
+///     {
+///         "f1": 1,
+///         "f2": null
+///     },
+///     2
+/// ]
+/// ```
+#[function("jsonb_pretty(jsonb) -> varchar")]
+pub fn jsonb_pretty(v: JsonbRef<'_>, writer: &mut impl Write) {
+    v.pretty(writer).unwrap()
 }

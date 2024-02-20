@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,8 +28,8 @@ use crate::common::StreamChunkBuilder;
 
 pub struct HopWindowExecutor {
     _ctx: ActorContextRef,
-    pub input: BoxedExecutor,
     pub info: ExecutorInfo,
+    pub input: BoxedExecutor,
     pub time_col_idx: usize,
     pub window_slide: Interval,
     pub window_size: Interval,
@@ -43,8 +43,8 @@ impl HopWindowExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        input: BoxedExecutor,
         info: ExecutorInfo,
+        input: BoxedExecutor,
         time_col_idx: usize,
         window_slide: Interval,
         window_size: Interval,
@@ -55,8 +55,8 @@ impl HopWindowExecutor {
     ) -> Self {
         HopWindowExecutor {
             _ctx: ctx,
-            input,
             info,
+            input,
             time_col_idx,
             window_slide,
             window_size,
@@ -214,7 +214,7 @@ impl HopWindowExecutor {
                 Message::Watermark(w) => {
                     if w.col_idx == time_col_idx {
                         if let (Some(out_start_idx), Some(start_expr)) =
-                            (out_window_start_col_idx, self.window_start_exprs.get(0))
+                            (out_window_start_col_idx, self.window_start_exprs.first())
                         {
                             let w = w
                                 .clone()
@@ -225,7 +225,7 @@ impl HopWindowExecutor {
                             }
                         }
                         if let (Some(out_end_idx), Some(end_expr)) =
-                            (out_window_end_col_idx, self.window_end_exprs.get(0))
+                            (out_window_end_col_idx, self.window_end_exprs.first())
                         {
                             let w = w.transform_with_expr(end_expr, out_end_idx).await;
                             if let Some(w) = w {
@@ -292,14 +292,14 @@ mod tests {
         .unwrap();
 
         super::HopWindowExecutor::new(
-            ActorContext::create(123),
-            input,
+            ActorContext::for_test(123),
             ExecutorInfo {
                 // TODO: the schema is incorrect, but it seems useless here.
                 schema,
                 pk_indices,
-                identity: "test".to_string(),
+                identity: "HopWindowExecutor".to_string(),
             },
+            input,
             2,
             window_slide,
             window_size,
@@ -316,6 +316,7 @@ mod tests {
         )
         .boxed()
     }
+
     #[tokio::test]
     async fn test_execute() {
         let default_indices: Vec<_> = (0..5).collect();

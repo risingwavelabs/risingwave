@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,19 +14,18 @@
 
 //! Handle creation of logical (non-materialized) views.
 
+use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::PbView;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, Statement};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::CatalogError;
+use crate::error::Result;
 use crate::handler::HandlerArgs;
 use crate::optimizer::OptimizerContext;
-use crate::session::CheckRelationError;
 
 pub async fn handle_create_view(
     handler_args: HandlerArgs,
@@ -43,15 +42,13 @@ pub async fn handle_create_view(
 
     let properties = handler_args.with_options.clone();
 
-    match session.check_relation_name_duplicated(name.clone()) {
-        Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
-            return Ok(PgResponse::builder(StatementType::CREATE_VIEW)
-                .notice(format!("relation \"{}\" already exists, skipping", name))
-                .into());
-        }
-        Err(e) => return Err(e.into()),
-        Ok(_) => {}
-    };
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        name.clone(),
+        StatementType::CREATE_VIEW,
+        if_not_exists,
+    )? {
+        return Ok(resp);
+    }
 
     // plan the query to validate it and resolve dependencies
     let (dependent_relations, schema) = {
@@ -73,7 +70,7 @@ pub async fn handle_create_view(
         schema.fields().to_vec()
     } else {
         if columns.len() != schema.fields().len() {
-            return Err(risingwave_common::error::ErrorCode::InternalError(
+            return Err(crate::error::ErrorCode::InternalError(
                 "view has different number of columns than the query's columns".to_string(),
             )
             .into());

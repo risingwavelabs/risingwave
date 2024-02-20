@@ -37,6 +37,6 @@ scrape_configs:
     static_configs:
       - targets: ["message_queue:9644"]
 
-  - job_name: connector-node
+  - job_name: standalone
     static_configs:
-      - targets: ["connector-node:50052"]
+      - targets: ["risingwave-standalone:1250"]

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,19 +18,8 @@ public class StreamChunkIterator implements AutoCloseable {
     private final long pointer;
     private boolean isClosed;
 
-    public StreamChunkIterator(byte[] streamChunkPayload) {
-        this.pointer = Binding.iteratorNewFromStreamChunkPayload(streamChunkPayload);
-        this.isClosed = false;
-    }
-
-    /**
-     * This method generate the StreamChunkIterator
-     *
-     * @param str A string that represent table format, content and operation. Example:"I I\n + 199
-     *     40"
-     */
-    public StreamChunkIterator(String str) {
-        this.pointer = Binding.iteratorNewFromStreamChunkPretty(str);
+    public StreamChunkIterator(StreamChunk chunk) {
+        this.pointer = Binding.iteratorNewStreamChunk(chunk.getPointer());
         this.isClosed = false;
     }
 

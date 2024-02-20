@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,8 +28,8 @@ use crate::executor::{BoxedMessageStream, ExecutorInfo};
 
 /// `UnionExecutor` merges data from multiple inputs.
 pub struct UnionExecutor {
-    inputs: Vec<BoxedExecutor>,
     info: ExecutorInfo,
+    inputs: Vec<BoxedExecutor>,
 }
 
 impl std::fmt::Debug for UnionExecutor {
@@ -42,15 +42,8 @@ impl std::fmt::Debug for UnionExecutor {
 }
 
 impl UnionExecutor {
-    pub fn new(pk_indices: PkIndices, inputs: Vec<BoxedExecutor>) -> Self {
-        Self {
-            info: ExecutorInfo {
-                schema: inputs[0].schema().clone(),
-                pk_indices,
-                identity: "UnionExecutor".to_string(),
-            },
-            inputs,
-        }
+    pub fn new(info: ExecutorInfo, inputs: Vec<BoxedExecutor>) -> Self {
+        Self { info, inputs }
     }
 }
 

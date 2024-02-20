@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use bincode::Error;
 use risingwave_common::error::BoxedError;
 use thiserror::Error;
 
@@ -54,5 +55,16 @@ pub enum BackupError {
     #[error("Meta storage is not empty before being restored")]
     NonemptyMetaStorage,
     #[error(transparent)]
-    Other(#[from] anyhow::Error),
+    Other(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
+}
+
+impl From<bincode::Error> for BackupError {
+    fn from(value: Error) -> Self {
+        // TODO: match error
+        BackupError::Other(value.into())
+    }
 }

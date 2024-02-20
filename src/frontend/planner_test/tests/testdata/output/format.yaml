@@ -18,17 +18,29 @@
       └─BatchScan { table: t1, columns: [t1.v1, t1.v2, t1.v3], distribution: SomeShard }
 - sql: |
     SELECT format('Testing %s, %s, %s, %%', 'one', 'two');
-  batch_error: 'Expr error: too few arguments for format()'
+  batch_error: |
+    Expr error
+
+    Caused by:
+      too few arguments for format()
 - sql: |
     SELECT format('Testing %s, %s, %s, %', 'one', 'two', 'three');
-  batch_error: 'Expr error: Parse error: unterminated format() type specifier'
+  batch_error: |
+    Expr error
+
+    Caused by:
+      Parse error: unterminated format() type specifier
 - sql: |
     SELECT format('Testing %s, %f, %d, %', 'one', 'two', 'three');
-  batch_error: 'Expr error: Parse error: unrecognized format() type specifier "f"'
+  batch_error: |
+    Expr error
+
+    Caused by:
+      Parse error: unrecognized format() type specifier "f"
 - sql: |
     SELECT format();
-  binder_error: |-
-    Bind error: failed to bind expression: format()
+  binder_error: |
+    Failed to bind expression: format()
 
     Caused by:
       Bind error: Function `format` takes at least 1 arguments (0 given)

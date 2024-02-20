@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::HashKey;
@@ -157,7 +156,6 @@ impl<K: HashKey, const WITH_TIES: bool> DerefMut for GroupTopNCache<K, WITH_TIES
     }
 }
 
-#[async_trait]
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool> TopNExecutorBase
     for InnerGroupTopNExecutor<K, S, WITH_TIES>
 where
@@ -167,7 +165,7 @@ where
         let mut res_ops = Vec::with_capacity(self.limit);
         let mut res_rows = Vec::with_capacity(self.limit);
         let keys = K::build(&self.group_by, chunk.data_chunk())?;
-        let table_id_str = self.managed_state.state_table.table_id().to_string();
+        let table_id_str = self.managed_state.table().table_id().to_string();
         let actor_id_str = self.ctx.id.to_string();
         let fragment_id_str = self.ctx.fragment_id.to_string();
         for (r, group_cache_key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
@@ -193,7 +191,7 @@ where
                     .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                     .inc();
                 let mut topn_cache =
-                    TopNCache::new(self.offset, self.limit, self.schema().data_types());
+                    TopNCache::new(self.offset, self.limit, self.info().schema.data_types());
                 self.managed_state
                     .init_topn_cache(Some(group_key), &mut topn_cache)
                     .await?;
@@ -229,11 +227,15 @@ where
             .group_top_n_cached_entry_count
             .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(self.caches.len() as i64);
-        generate_output(res_rows, res_ops, self.schema())
+        generate_output(res_rows, res_ops, &self.info().schema)
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.flush(epoch).await
+    }
+
+    async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
+        self.managed_state.try_flush().await
     }
 
     fn info(&self) -> &ExecutorInfo {
@@ -245,11 +247,7 @@ where
     }
 
     fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
-        let (_previous_vnode_bitmap, cache_may_stale) = self
-            .managed_state
-            .state_table
-            .update_vnode_bitmap(vnode_bitmap);
-
+        let cache_may_stale = self.managed_state.update_vnode_bitmap(vnode_bitmap);
         if cache_may_stale {
             self.caches.clear();
         }
@@ -260,14 +258,13 @@ where
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.managed_state.state_table.init_epoch(epoch);
+        self.managed_state.init_epoch(epoch);
         Ok(())
     }
 
     async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark> {
         if watermark.col_idx == self.group_by[0] {
             self.managed_state
-                .state_table
                 .update_watermark(watermark.val.clone(), false);
             Some(watermark)
         } else {
@@ -399,7 +396,7 @@ mod tests {
         let top_n_executor = Box::new(
             GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
-                ActorContext::create(0),
+                ActorContext::for_test(0),
                 info,
                 storage_key(),
                 (0, 2),
@@ -501,7 +498,7 @@ mod tests {
         let top_n_executor = Box::new(
             GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
-                ActorContext::create(0),
+                ActorContext::for_test(0),
                 info,
                 storage_key(),
                 (1, 2),
@@ -596,7 +593,7 @@ mod tests {
         let top_n_executor = Box::new(
             GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
-                ActorContext::create(0),
+                ActorContext::for_test(0),
                 info,
                 storage_key(),
                 (0, 2),

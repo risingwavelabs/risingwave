@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -24,11 +24,12 @@ use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::JoinType;
 
 use crate::binder::{BoundDistinct, BoundSelect};
+use crate::error::{ErrorCode, Result};
 use crate::expr::{
     CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Subquery,
     SubqueryKind,
 };
-use crate::optimizer::plan_node::generic::{Agg, Project, ProjectBuilder};
+use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef, Project, ProjectBuilder};
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalDedup, LogicalOverWindow, LogicalProject, LogicalProjectSet,
@@ -37,6 +38,7 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::Order;
 use crate::planner::Planner;
 use crate::utils::{Condition, IndexSet};
+use crate::OptimizerContextRef;
 
 impl Planner {
     pub(super) fn plan_select(
@@ -67,7 +69,9 @@ impl Planner {
                 exprs.iter().map(|expr| (expr.clone(), false)).collect();
             let mut uncovered_distinct_on_exprs_cnt = distinct_on_exprs.len();
             let mut order_iter = order.iter().map(|o| &select_items[o.column_index]);
-            while uncovered_distinct_on_exprs_cnt > 0 && let Some(order_expr) = order_iter.next() {
+            while uncovered_distinct_on_exprs_cnt > 0
+                && let Some(order_expr) = order_iter.next()
+            {
                 match distinct_on_exprs.get_mut(order_expr) {
                     Some(has_been_covered) => {
                         if !*has_been_covered {
@@ -179,7 +183,9 @@ impl Planner {
 
         if let BoundDistinct::Distinct = distinct {
             let fields = root.schema().fields();
-            let group_key = if let Some(field) = fields.get(0) && field.name == "projected_row_id" {
+            let group_key = if let Some(field) = fields.first()
+                && field.name == "projected_row_id"
+            {
                 // Do not group by projected_row_id hidden column.
                 (1..fields.len()).collect()
             } else {
@@ -285,20 +291,14 @@ impl Planner {
         let correlated_indices =
             subquery.collect_correlated_indices_by_depth_and_assign_id(0, correlated_id);
         let output_column_type = subquery.query.data_types()[0].clone();
-        let right_plan = self.plan_query(subquery.query)?.into_subplan();
+        let right_plan = self.plan_query(subquery.query)?.into_unordered_subplan();
         let on = match subquery.kind {
             SubqueryKind::Existential => ExprImpl::literal_bool(true),
             SubqueryKind::In(left_expr) => {
                 let right_expr = InputRef::new(input.schema().len(), output_column_type);
                 FunctionCall::new(ExprType::Equal, vec![left_expr, right_expr.into()])?.into()
             }
-            kind => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("Not supported subquery kind: {:?}", kind),
-                    1343.into(),
-                )
-                .into())
-            }
+            kind => bail_not_implemented!(issue = 1343, "Not supported subquery kind: {:?}", kind),
         };
         *input = Self::create_apply(
             correlated_id,
@@ -329,55 +329,53 @@ impl Planner {
             input_col_num: usize,
             subqueries: Vec<Subquery>,
             correlated_indices_collection: Vec<Vec<usize>>,
-            correlated_id: CorrelatedId,
+            correlated_ids: Vec<CorrelatedId>,
+            ctx: OptimizerContextRef,
         }
 
         // TODO: consider the multi-subquery case for normal predicate.
         impl ExprRewriter for SubstituteSubQueries {
             fn rewrite_subquery(&mut self, mut subquery: Subquery) -> ExprImpl {
+                let correlated_id = self.ctx.next_correlated_id();
+                self.correlated_ids.push(correlated_id);
                 let input_ref = InputRef::new(self.input_col_num, subquery.return_type()).into();
                 self.input_col_num += 1;
                 self.correlated_indices_collection.push(
-                    subquery
-                        .collect_correlated_indices_by_depth_and_assign_id(0, self.correlated_id),
+                    subquery.collect_correlated_indices_by_depth_and_assign_id(0, correlated_id),
                 );
                 self.subqueries.push(subquery);
                 input_ref
             }
         }
 
-        let correlated_id = self.ctx.next_correlated_id();
         let mut rewriter = SubstituteSubQueries {
             input_col_num: root.schema().len(),
             subqueries: vec![],
             correlated_indices_collection: vec![],
-            correlated_id,
+            correlated_ids: vec![],
+            ctx: self.ctx.clone(),
         };
         exprs = exprs
             .into_iter()
             .map(|e| rewriter.rewrite_expr(e))
             .collect();
 
-        for (subquery, correlated_indices) in rewriter
+        for ((subquery, correlated_indices), correlated_id) in rewriter
             .subqueries
             .into_iter()
             .zip_eq_fast(rewriter.correlated_indices_collection)
+            .zip_eq_fast(rewriter.correlated_ids)
         {
-            let mut right = self.plan_query(subquery.query)?.into_subplan();
+            let subroot = self.plan_query(subquery.query)?;
 
-            match subquery.kind {
-                SubqueryKind::Scalar => {}
+            let right = match subquery.kind {
+                SubqueryKind::Scalar => subroot.into_unordered_subplan(),
                 SubqueryKind::Existential => {
-                    right = self.create_exists(right)?;
+                    self.create_exists(subroot.into_unordered_subplan())?
                 }
-                _ => {
-                    return Err(ErrorCode::NotImplemented(
-                        format!("{:?}", subquery.kind),
-                        1343.into(),
-                    )
-                    .into())
-                }
-            }
+                SubqueryKind::Array => subroot.into_array_agg()?,
+                _ => bail_not_implemented!(issue = 1343, "{:?}", subquery.kind),
+            };
 
             root = Self::create_apply(
                 correlated_id,

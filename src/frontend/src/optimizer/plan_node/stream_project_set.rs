@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,8 @@ use risingwave_pb::stream_plan::ProjectSetNode;
 use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{try_derive_watermark, ExprRewriter, WatermarkDerivation};
+use crate::expr::{try_derive_watermark, ExprRewriter, ExprVisitor, WatermarkDerivation};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -127,5 +128,11 @@ impl ExprRewritable for StreamProjectSet {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core).into()
+    }
+}
+
+impl ExprVisitable for StreamProjectSet {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

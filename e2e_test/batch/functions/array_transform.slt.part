@@ -43,7 +43,7 @@ insert into t values (4, '{1,2,3}'), (5, '{4,5,6,8}');
 
 # this makes sure `x + 1` is not extracted as common sub-expression by accident. See #11766
 query TT
-select array_transform(arr, |x| x + 1), array_transform(arr, |x| x + 1 + 2) from t;
+select array_transform(arr, |x| x + 1), array_transform(arr, |x| x + 1 + 2) from t order by v;
 ----
 {2,3,4} {4,5,6}
 {5,6,7,9} {7,8,9,11}

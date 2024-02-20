@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ use risingwave_pb::stream_plan::NowNode;
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, LogicalNow, PlanBase, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -74,8 +75,7 @@ impl StreamNode for StreamNow {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         let schema = self.base.schema();
         let dist_keys = self.base.distribution().dist_column_indices().to_vec();
-        let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(self.base.ctx().with_options().internal_table_subset());
+        let mut internal_table_catalog_builder = TableCatalogBuilder::default();
         schema.fields().iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
         });
@@ -90,3 +90,5 @@ impl StreamNode for StreamNow {
 }
 
 impl ExprRewritable for StreamNow {}
+
+impl ExprVisitable for StreamNow {}

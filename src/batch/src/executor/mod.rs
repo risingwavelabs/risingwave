@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,10 +20,12 @@ mod generic_exchange;
 mod group_top_n;
 mod hash_agg;
 mod hop_window;
+mod iceberg_scan;
 mod insert;
 mod join;
 mod limit;
 mod managed;
+mod max_one_row;
 mod merge_sort_exchange;
 mod order_by;
 mod project;
@@ -41,7 +43,7 @@ mod update;
 mod utils;
 mod values;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use async_recursion::async_recursion;
 pub use delete::*;
 pub use expand::*;
@@ -51,17 +53,18 @@ pub use generic_exchange::*;
 pub use group_top_n::*;
 pub use hash_agg::*;
 pub use hop_window::*;
+pub use iceberg_scan::*;
 pub use insert::*;
 pub use join::*;
 pub use limit::*;
 pub use managed::*;
+pub use max_one_row::*;
 pub use merge_sort_exchange::*;
 pub use order_by::*;
 pub use project::*;
 pub use project_set::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
 use risingwave_pb::common::BatchQueryEpoch;
@@ -70,13 +73,15 @@ pub use sort_agg::*;
 pub use sort_over_window::SortOverWindowExecutor;
 pub use source::*;
 pub use table_function::*;
+use thiserror_ext::AsReport;
 pub use top_n::TopNExecutor;
 pub use union::*;
 pub use update::*;
 pub use utils::*;
 pub use values::*;
 
-use self::test_utils::{BlockExecutorBuidler, BusyLoopExecutorBuidler};
+use self::test_utils::{BlockExecutorBuilder, BusyLoopExecutorBuilder};
+use crate::error::Result;
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
@@ -183,12 +188,14 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
 
 impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
     pub async fn build(&self) -> Result<BoxedExecutor> {
-        self.try_build().await.map_err(|e| {
-            let err_msg = format!("Failed to build executor: {e}");
-            let plan_node_body = self.plan_node.get_node_body();
-            error!("{err_msg}, plan node is: \n {plan_node_body:?}");
-            anyhow!(err_msg).into()
-        })
+        self.try_build()
+            .await
+            .inspect_err(|e| {
+                let plan_node = self.plan_node.get_node_body();
+                error!(error = %e.as_report(), ?plan_node, "failed to build executor");
+            })
+            .context("failed to build executor")
+            .map_err(Into::into)
     }
 
     #[async_recursion]
@@ -228,9 +235,10 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::Union => UnionExecutor,
             NodeBody::Source => SourceExecutor,
             NodeBody::SortOverWindow => SortOverWindowExecutor,
+            NodeBody::MaxOneRow => MaxOneRowExecutor,
             // Follow NodeBody only used for test
-            NodeBody::BlockExecutor => BlockExecutorBuidler,
-            NodeBody::BusyLoopExecutor => BusyLoopExecutorBuidler,
+            NodeBody::BlockExecutor => BlockExecutorBuilder,
+            NodeBody::BusyLoopExecutor => BusyLoopExecutorBuilder,
         }
         .await?;
 

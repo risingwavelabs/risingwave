@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,9 +50,14 @@ impl TemplateEncoder {
             ));
         }
         for capture in re.captures_iter(format) {
-            if let Some(inner_content) = capture.get(1) && !set.contains(inner_content.as_str()){
-                    return Err(SinkError::Redis(format!("Can't find field({:?}) in key_format or value_format",inner_content.as_str())))
-                }
+            if let Some(inner_content) = capture.get(1)
+                && !set.contains(inner_content.as_str())
+            {
+                return Err(SinkError::Redis(format!(
+                    "Can't find field({:?}) in key_format or value_format",
+                    inner_content.as_str()
+                )));
+            }
         }
         Ok(())
     }

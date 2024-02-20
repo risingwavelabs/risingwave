@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,36 +13,29 @@
 // limitations under the License.
 
 use aws_sdk_kinesis::types::Record;
+use aws_smithy_types_convert::date_time::DateTimeExt;
 
 use crate::source::{SourceMessage, SourceMeta, SplitId};
 
 #[derive(Clone, Debug)]
-pub struct KinesisMessage {
-    pub shard_id: SplitId,
-    pub sequence_number: String,
-    pub partition_key: String,
-    pub payload: Vec<u8>,
+pub struct KinesisMessage {}
+
+#[derive(Clone, Debug)]
+pub struct KinesisMeta {
+    // from `approximate_arrival_timestamp` of type `Option<aws_smithy_types::DateTime>`
+    timestamp: Option<i64>,
 }
 
-impl From<KinesisMessage> for SourceMessage {
-    fn from(msg: KinesisMessage) -> Self {
-        SourceMessage {
-            key: Some(msg.partition_key.into_bytes()),
-            payload: Some(msg.payload),
-            offset: msg.sequence_number.clone(),
-            split_id: msg.shard_id,
-            meta: SourceMeta::Empty,
-        }
-    }
-}
-
-impl KinesisMessage {
-    pub fn new(shard_id: SplitId, message: Record) -> Self {
-        KinesisMessage {
-            shard_id,
-            sequence_number: message.sequence_number.unwrap(),
-            partition_key: message.partition_key.unwrap(),
-            payload: message.data.unwrap().into_inner(),
-        }
+pub fn from_kinesis_record(value: &Record, split_id: SplitId) -> SourceMessage {
+    SourceMessage {
+        key: Some(value.partition_key.clone().into_bytes()),
+        payload: Some(value.data.clone().into_inner()),
+        offset: value.sequence_number.clone(),
+        split_id,
+        meta: SourceMeta::Kinesis(KinesisMeta {
+            timestamp: value
+                .approximate_arrival_timestamp
+                .map(|dt| dt.to_chrono_utc().unwrap().timestamp_millis()),
+        }),
     }
 }

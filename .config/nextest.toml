@@ -19,3 +19,22 @@ fail-fast = false
 [profile.ci.junit]
 path = "junit-nextest.xml"
 report-name = "nextest-run"
+
+[test-groups]
+failpoint-limited = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'test(failpoint_limited::)'
+test-group = 'failpoint-limited'
+
+[[profile.ci.overrides]]
+filter = 'test(failpoint_limited::)'
+test-group = 'failpoint-limited'
+
+[[profile.ci-sim.overrides]]
+filter = 'test(failpoint_limited::)'
+test-group = 'failpoint-limited'
+
+[[profile.ci.junit.overrides]]
+filter = 'test(failpoint_limited::)'
+test-group = 'failpoint-limited'

@@ -1,3 +1,9 @@
+#############################################################################################
+#                                     !!! IMPORTANT !!!                                     #
+# If you want to bump CI Docker image, please update BUILD_ENV_VERSION in build-ci-image.sh #
+# and corresponding rw-build-env version in docker-compose.yml.                             #
+#############################################################################################
+
 FROM ubuntu:22.04 AS risingwave-build-env
 
 ENV LANG en_US.utf8
@@ -23,6 +29,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-mo
 ENV PATH /root/.cargo/bin/:$PATH
 
 RUN rustup show
+RUN rustup default `rustup show active-toolchain | awk '{print $1}'`
 
 RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.4.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
     tar -xvzf - -C /usr/local --strip-components 1
@@ -35,17 +42,19 @@ RUN curl -sSL https://install.python-poetry.org | python3 -
 
 # add required rustup components
 RUN rustup component add rustfmt llvm-tools-preview clippy
+RUN rustup target add wasm32-wasi
 
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
 # install build tools
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 RUN cargo binstall -y --no-symlinks cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-cache cargo-audit \
-    cargo-make@0.36.10 \
-    sqllogictest-bin@0.17.0 \
-    && cargo install sccache \
+    cargo-make@0.37.9 \
+    sqllogictest-bin@0.19.1 \
+    sccache@0.7.4 \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \
     && rm -rf "/root/.cargo/registry/cache" \
     && rm -rf "/root/.cargo/git/db"
+RUN cargo install cargo-dylint@2.6.0 dylint-link@2.6.0
 RUN cargo uninstall cargo-binstall cargo-cache

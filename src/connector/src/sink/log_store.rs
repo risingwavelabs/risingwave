@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -62,6 +62,18 @@ impl TruncateOffset {
         }
     }
 
+    pub fn check_next_offset(&self, next_offset: TruncateOffset) -> anyhow::Result<()> {
+        if *self >= next_offset {
+            Err(anyhow!(
+                "next offset {:?} should be later than current offset {:?}",
+                next_offset,
+                self
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn check_next_item_epoch(&self, epoch: u64) -> LogStoreResult<()> {
         match self {
             TruncateOffset::Chunk {
@@ -106,7 +118,11 @@ pub enum LogStoreReadItem {
 
 pub trait LogWriter: Send {
     /// Initialize the log writer with an epoch
-    fn init(&mut self, epoch: EpochPair) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+    fn init(
+        &mut self,
+        epoch: EpochPair,
+        pause_read_on_bootstrap: bool,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 
     /// Write a stream chunk to the log writer
     fn write_chunk(
@@ -126,6 +142,10 @@ pub trait LogWriter: Send {
         &mut self,
         new_vnodes: Arc<Bitmap>,
     ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+
+    fn pause(&mut self) -> LogStoreResult<()>;
+
+    fn resume(&mut self) -> LogStoreResult<()>;
 }
 
 pub trait LogReader: Send + Sized + 'static {
@@ -145,11 +165,18 @@ pub trait LogReader: Send + Sized + 'static {
         &mut self,
         offset: TruncateOffset,
     ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+
+    /// Reset the log reader to after the latest truncate offset
+    ///
+    /// The return flag means whether the log store support rewind
+    fn rewind(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_;
 }
 
-pub trait LogStoreFactory: 'static {
-    type Reader: LogReader + Send + 'static;
-    type Writer: LogWriter + Send + 'static;
+pub trait LogStoreFactory: Send + 'static {
+    type Reader: LogReader;
+    type Writer: LogWriter;
 
     fn build(self) -> impl Future<Output = (Self::Reader, Self::Writer)> + Send;
 }
@@ -184,6 +211,12 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
     ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.inner.truncate(offset)
     }
+
+    fn rewind(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
+        self.inner.rewind()
+    }
 }
 
 pub struct MonitoredLogReader<R: LogReader> {
@@ -214,6 +247,12 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
     async fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
         self.inner.truncate(offset).await
     }
+
+    fn rewind(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
+        self.inner.rewind()
+    }
 }
 
 #[easy_ext::ext(LogReaderExt)]
@@ -243,14 +282,18 @@ pub struct MonitoredLogWriter<W: LogWriter> {
 }
 
 impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
-    async fn init(&mut self, epoch: EpochPair) -> LogStoreResult<()> {
+    async fn init(
+        &mut self,
+        epoch: EpochPair,
+        pause_read_on_bootstrap: bool,
+    ) -> LogStoreResult<()> {
         self.metrics
             .log_store_first_write_epoch
             .set(epoch.curr as _);
         self.metrics
             .log_store_latest_write_epoch
             .set(epoch.curr as _);
-        self.inner.init(epoch).await
+        self.inner.init(epoch, pause_read_on_bootstrap).await
     }
 
     async fn write_chunk(&mut self, chunk: StreamChunk) -> LogStoreResult<()> {
@@ -276,6 +319,14 @@ impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
 
     async fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> LogStoreResult<()> {
         self.inner.update_vnode_bitmap(new_vnodes).await
+    }
+
+    fn pause(&mut self) -> LogStoreResult<()> {
+        self.inner.pause()
+    }
+
+    fn resume(&mut self) -> LogStoreResult<()> {
+        self.inner.resume()
     }
 }
 
@@ -400,7 +451,9 @@ impl<'a, F: TryFuture<Ok = ()> + Unpin + 'static> DeliveryFutureManagerAddFuture
 
     pub async fn await_one_delivery(&mut self) -> Result<(), F::Error> {
         for (_, item) in &mut self.0.items {
-            if let DeliveryFutureManagerItem::Chunk {futures, ..} = item && let Some(mut delivery_future) = futures.pop_front() {
+            if let DeliveryFutureManagerItem::Chunk { futures, .. } = item
+                && let Some(mut delivery_future) = futures.pop_front()
+            {
                 self.0.future_count -= 1;
                 return poll_fn(|cx| delivery_future.try_poll_unpin(cx)).await;
             } else {

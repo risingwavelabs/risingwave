@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{ListRef, ListValue};
-use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
+use risingwave_common::array::{I32Array, ListRef, ListValue};
+use risingwave_common::types::ScalarRefImpl;
 use risingwave_expr::{function, ExprError, Result};
 
 /// Returns the subscript of the first occurrence of the second argument in the array, or `NULL` if
@@ -66,10 +66,7 @@ use risingwave_expr::{function, ExprError, Result};
 /// 2
 /// ```
 #[function("array_position(anyarray, any) -> int4")]
-fn array_position(
-    array: Option<ListRef<'_>>,
-    element: Option<ScalarRefImpl<'_>>,
-) -> Result<Option<i32>> {
+fn array_position(array: ListRef<'_>, element: Option<ScalarRefImpl<'_>>) -> Result<Option<i32>> {
     array_position_common(array, element, 0)
 }
 
@@ -98,7 +95,7 @@ fn array_position(
 /// ```
 #[function("array_position(anyarray, any, int4) -> int4")]
 fn array_position_start(
-    array: Option<ListRef<'_>>,
+    array: ListRef<'_>,
     element: Option<ScalarRefImpl<'_>>,
     start: Option<i32>,
 ) -> Result<Option<i32>> {
@@ -115,16 +112,15 @@ fn array_position_start(
 }
 
 fn array_position_common(
-    array: Option<ListRef<'_>>,
+    array: ListRef<'_>,
     element: Option<ScalarRefImpl<'_>>,
     skip: usize,
 ) -> Result<Option<i32>> {
-    let Some(left) = array else { return Ok(None) };
-    if i32::try_from(left.len()).is_err() {
+    if i32::try_from(array.len()).is_err() {
         return Err(ExprError::CastOutOfRange("invalid array length"));
     }
 
-    Ok(left
+    Ok(array
         .iter()
         .skip(skip)
         .position(|item| item == element)
@@ -197,7 +193,8 @@ fn array_positions(
         values
             .enumerate()
             .filter(|(_, item)| item == &element)
-            .map(|(idx, _)| Some(ScalarImpl::Int32((idx + 1) as _)))
-            .collect(),
+            .map(|(idx, _)| idx as i32 + 1)
+            .collect::<I32Array>()
+            .into(),
     )))
 }

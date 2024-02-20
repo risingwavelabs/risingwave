@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::AggKind;
-use risingwave_expr::sig::FUNCTION_REGISTRY;
 
-use super::{Expr, ExprImpl, Literal, OrderBy};
+use super::{infer_type, Expr, ExprImpl, Literal, OrderBy};
+use crate::error::Result;
 use crate::utils::Condition;
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -52,57 +50,17 @@ impl std::fmt::Debug for AggCall {
 }
 
 impl AggCall {
-    /// Infer the return type for the given agg call.
-    /// Returns error if not supported or the arguments are invalid.
-    pub fn infer_return_type(agg_kind: AggKind, args: &[DataType]) -> Result<DataType> {
-        // The function signatures are aligned with postgres, see
-        // https://www.postgresql.org/docs/current/functions-aggregate.html.
-        use DataType::*;
-        let err = || {
-            RwError::from(ErrorCode::InvalidInputSyntax(format!(
-                "Invalid aggregation: {}({})",
-                agg_kind,
-                args.iter().map(|t| format!("{}", t)).join(", ")
-            )))
-        };
-        Ok(match (agg_kind, args) {
-            // XXX: some special cases that can not be handled by signature map.
-
-            // min/max allowed for all types except for bool and jsonb (#7981)
-            (AggKind::Min | AggKind::Max, [DataType::Jsonb]) => return Err(err()),
-            // functions that are rewritten in the frontend and don't exist in the expr crate
-            (AggKind::Avg, [input]) => match input {
-                Int16 | Int32 | Int64 | Decimal => Decimal,
-                Float32 | Float64 | Int256 => Float64,
-                Interval => Interval,
-                _ => return Err(err()),
-            },
-            (
-                AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp,
-                [input],
-            ) => match input {
-                Int16 | Int32 | Int64 | Decimal => Decimal,
-                Float32 | Float64 | Int256 => Float64,
-                _ => return Err(err()),
-            },
-            (AggKind::Grouping, _) => Int32,
-            // other functions are handled by signature map
-            _ => FUNCTION_REGISTRY.get_return_type(agg_kind, args)?,
-        })
-    }
-
     /// Returns error if the function name matches with an existing function
     /// but with illegal arguments.
     pub fn new(
         agg_kind: AggKind,
-        args: Vec<ExprImpl>,
+        mut args: Vec<ExprImpl>,
         distinct: bool,
         order_by: OrderBy,
         filter: Condition,
         direct_args: Vec<Literal>,
     ) -> Result<Self> {
-        let data_types = args.iter().map(ExprImpl::return_type).collect_vec();
-        let return_type = Self::infer_return_type(agg_kind, &data_types)?;
+        let return_type = infer_type(agg_kind.into(), &mut args)?;
         Ok(AggCall {
             agg_kind,
             return_type,
@@ -111,6 +69,23 @@ impl AggCall {
             order_by,
             filter,
             direct_args,
+        })
+    }
+
+    /// Constructs an `AggCall` without type inference.
+    pub fn new_unchecked(
+        agg_kind: AggKind,
+        args: Vec<ExprImpl>,
+        return_type: DataType,
+    ) -> Result<Self> {
+        Ok(AggCall {
+            agg_kind,
+            return_type,
+            args,
+            distinct: false,
+            order_by: OrderBy::any(),
+            filter: Condition::true_cond(),
+            direct_args: vec![],
         })
     }
 

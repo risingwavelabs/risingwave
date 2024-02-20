@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -155,6 +155,12 @@ impl LogStoreBufferInner {
             );
         }
     }
+
+    fn rewind(&mut self) {
+        while let Some((epoch, item)) = self.consumed_queue.pop_front() {
+            self.unconsumed_queue.push_back((epoch, item))
+        }
+    }
 }
 
 struct SharedMutex<T>(Arc<Mutex<T>>);
@@ -250,7 +256,9 @@ impl LogStoreBufferSender {
     pub(crate) fn pop_truncation(&self, curr_epoch: u64) -> Option<ReaderTruncationOffsetType> {
         let mut inner = self.buffer.inner();
         let mut ret = None;
-        while let Some((epoch, _)) = inner.truncation_list.front() && *epoch < curr_epoch {
+        while let Some((epoch, _)) = inner.truncation_list.front()
+            && *epoch < curr_epoch
+        {
             ret = inner.truncation_list.pop_front();
         }
         ret
@@ -380,12 +388,18 @@ impl LogStoreBufferReceiver {
             }
         }
         if let Some((epoch, seq_id)) = latest_offset {
-            if let Some((prev_epoch, ref mut prev_seq_id)) = inner.truncation_list.back_mut() && *prev_epoch == epoch {
+            if let Some((prev_epoch, ref mut prev_seq_id)) = inner.truncation_list.back_mut()
+                && *prev_epoch == epoch
+            {
                 *prev_seq_id = seq_id;
             } else {
                 inner.truncation_list.push_back((epoch, seq_id));
             }
         }
+    }
+
+    pub(crate) fn rewind(&self) {
+        self.buffer.inner().rewind()
     }
 }
 

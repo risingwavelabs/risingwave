@@ -33,6 +33,12 @@ null
 true
 NULL
 
+# typed string
+query TT
+select jsonb 'true', JsonB '{}';
+----
+true {}
+
 query T
 select 'true'::jsonb::bool;
 ----
@@ -153,119 +159,113 @@ SELECT '{
 
 # jsonb_array_elements
 query T
-select * from jsonb_array_elements('[1,true, [2,false]]'::jsonb);
+select * from jsonb_array_elements('[1,true, [2,false]]');
 ----
 1
 true
 [2, false]
 
 statement error cannot extract elements
-select * from jsonb_array_elements('null'::jsonb)
+select * from jsonb_array_elements('null');
 
 statement error cannot extract elements
-select * from jsonb_array_elements('1'::jsonb)
+select * from jsonb_array_elements('1');
 
 statement error cannot extract elements
-select * from jsonb_array_elements('"string"'::jsonb)
+select * from jsonb_array_elements('"string"');
 
 statement error cannot extract elements
-select * from jsonb_array_elements('{}'::jsonb)
+select * from jsonb_array_elements('{}');
 
 
 # jsonb_array_elements_text
 query T
-select * from jsonb_array_elements_text('["foo", "bar"]'::jsonb);
+select * from jsonb_array_elements_text('["foo", "bar"]');
 ----
 foo
 bar
 
 statement error cannot extract elements
-select * from jsonb_array_elements_text('null'::jsonb)
+select * from jsonb_array_elements_text('null');
 
 statement error cannot extract elements
-select * from jsonb_array_elements_text('1'::jsonb)
+select * from jsonb_array_elements_text('1');
 
 statement error cannot extract elements
-select * from jsonb_array_elements_text('"string"'::jsonb)
+select * from jsonb_array_elements_text('"string"');
 
 statement error cannot extract elements
-select * from jsonb_array_elements_text('{}'::jsonb)
+select * from jsonb_array_elements_text('{}');
 
 # jsonb_object_keys
 query T
-select * from jsonb_object_keys('{"f1":"abc","f2":{"f3":"a", "f4":"b"}}'::jsonb);
+select * from jsonb_object_keys('{"f1":"abc","f2":{"f3":"a", "f4":"b"}}');
 ----
 f1
 f2
 
 statement error cannot call jsonb_object_keys
-select * from jsonb_object_keys('null'::jsonb)
+select * from jsonb_object_keys('null');
 
 statement error cannot call jsonb_object_keys
-select * from jsonb_object_keys('1'::jsonb)
+select * from jsonb_object_keys('1');
 
 statement error cannot call jsonb_object_keys
-select * from jsonb_object_keys('"string"'::jsonb)
+select * from jsonb_object_keys('"string"');
 
 statement error cannot call jsonb_object_keys
-select * from jsonb_object_keys('[]'::jsonb)
+select * from jsonb_object_keys('[]');
 
 
 # jsonb_each
 query TT
-select * from jsonb_each('{"a":"foo", "b":"bar"}'::jsonb);
+select * from jsonb_each('{"a":"foo", "b":"bar"}');
 ----
 a "foo"
 b "bar"
 
 query T
-select jsonb_each('{"a":"foo", "b":"bar"}'::jsonb);
+select jsonb_each('{"a":"foo", "b":"bar"}');
 ----
-(a,"foo")
-(b,"bar")
-
-# FIXME: the output format is inconsistent with pg
-# https://github.com/risingwavelabs/risingwave/issues/4769
-#
-# (a,"""foo""")
-# (b,"""bar""")
+(a,"""foo""")
+(b,"""bar""")
 
 statement error cannot deconstruct
-select * from jsonb_each('null'::jsonb)
+select * from jsonb_each('null');
 
 statement error cannot deconstruct
-select * from jsonb_each('1'::jsonb)
+select * from jsonb_each('1');
 
 statement error cannot deconstruct
-select * from jsonb_each('"string"'::jsonb)
+select * from jsonb_each('"string"');
 
 statement error cannot deconstruct
-select * from jsonb_each('[]'::jsonb)
+select * from jsonb_each('[]');
 
 # jsonb_each_text
 query TT
-select * from jsonb_each_text('{"a":"foo", "b":"bar"}'::jsonb);
+select * from jsonb_each_text('{"a":"foo", "b":"bar"}');
 ----
 a foo
 b bar
 
 query T
-select jsonb_each_text('{"a":"foo", "b":"bar"}'::jsonb);
+select jsonb_each_text('{"a":"foo", "b":"bar"}');
 ----
 (a,foo)
 (b,bar)
 
 statement error cannot deconstruct
-select * from jsonb_each_text('null'::jsonb)
+select * from jsonb_each_text('null');
 
 statement error cannot deconstruct
-select * from jsonb_each_text('1'::jsonb)
+select * from jsonb_each_text('1');
 
 statement error cannot deconstruct
-select * from jsonb_each_text('"string"'::jsonb)
+select * from jsonb_each_text('"string"');
 
 statement error cannot deconstruct
-select * from jsonb_each_text('[]'::jsonb)
+select * from jsonb_each_text('[]');
 
 query TTTTT
 SELECT js,

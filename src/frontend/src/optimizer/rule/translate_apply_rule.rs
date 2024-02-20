@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -59,8 +59,7 @@ impl Rule for TranslateApplyRule {
         let apply_left_len = left.schema().len();
         let correlated_indices = apply.correlated_indices();
 
-        let mut index_mapping =
-            ColIndexMapping::with_target_size(vec![None; apply_left_len], apply_left_len);
+        let mut index_mapping = ColIndexMapping::new(vec![None; apply_left_len], apply_left_len);
         let mut data_types = HashMap::new();
         let mut index = 0;
 

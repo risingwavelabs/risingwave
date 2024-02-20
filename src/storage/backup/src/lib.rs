@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@
 #![feature(map_try_insert)]
 #![feature(hash_extract_if)]
 #![feature(btree_extract_if)]
-#![feature(result_option_inspect)]
 #![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
@@ -29,16 +28,17 @@
 
 pub mod error;
 pub mod meta_snapshot;
+pub mod meta_snapshot_v1;
+pub mod meta_snapshot_v2;
 pub mod storage;
 
 use std::collections::HashSet;
 use std::hash::Hasher;
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
 use risingwave_pb::backup_service::{PbMetaSnapshotManifest, PbMetaSnapshotMetadata};
-use risingwave_pb::hummock::HummockVersion;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{BackupError, BackupResult};
@@ -54,10 +54,18 @@ pub struct MetaSnapshotMetadata {
     pub ssts: Vec<HummockSstableObjectId>,
     pub max_committed_epoch: u64,
     pub safe_epoch: u64,
+    #[serde(default)]
+    pub format_version: u32,
+    pub remarks: Option<String>,
 }
 
 impl MetaSnapshotMetadata {
-    pub fn new(id: MetaSnapshotId, v: &HummockVersion) -> Self {
+    pub fn new(
+        id: MetaSnapshotId,
+        v: &HummockVersion,
+        format_version: u32,
+        remarks: Option<String>,
+    ) -> Self {
         Self {
             id,
             hummock_version_id: v.id,
@@ -66,6 +74,8 @@ impl MetaSnapshotMetadata {
                 .collect_vec(),
             max_committed_epoch: v.max_committed_epoch,
             safe_epoch: v.safe_epoch,
+            format_version,
+            remarks,
         }
     }
 }
@@ -102,6 +112,8 @@ impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
             hummock_version_id: m.hummock_version_id,
             max_committed_epoch: m.max_committed_epoch,
             safe_epoch: m.safe_epoch,
+            format_version: Some(m.format_version),
+            remarks: m.remarks.clone(),
         }
     }
 }

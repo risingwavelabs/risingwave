@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,6 +43,10 @@ impl Expression for InputRefExpression {
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let cell = input.index(self.idx).as_ref().cloned();
         Ok(cell)
+    }
+
+    fn input_ref_index(&self) -> Option<usize> {
+        Some(self.idx)
     }
 }
 

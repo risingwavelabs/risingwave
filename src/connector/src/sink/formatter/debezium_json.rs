@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,10 @@ use serde_json::{json, Map, Value};
 use tracing::warn;
 
 use super::{Result, SinkFormatter, StreamChunk};
-use crate::sink::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
+use crate::sink::encoder::{
+    DateHandlingMode, JsonEncoder, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
+    TimestamptzHandlingMode,
+};
 use crate::tri;
 
 const DEBEZIUM_NAME_FIELD_PREFIX: &str = "RisingWave";
@@ -62,9 +65,19 @@ impl DebeziumJsonFormatter {
         let key_encoder = JsonEncoder::new(
             schema.clone(),
             Some(pk_indices.clone()),
+            DateHandlingMode::FromEpoch,
             TimestampHandlingMode::Milli,
+            TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
         );
-        let val_encoder = JsonEncoder::new(schema.clone(), None, TimestampHandlingMode::Milli);
+        let val_encoder = JsonEncoder::new(
+            schema.clone(),
+            None,
+            DateHandlingMode::FromEpoch,
+            TimestampHandlingMode::Milli,
+            TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
+        );
         Self {
             schema,
             pk_indices,
@@ -217,7 +230,7 @@ pub(crate) fn schema_to_json(schema: &Schema, db_name: &str, sink_from_name: &st
             json!({
                 "type": "int64",
                 "optional": false,
-                "field": "table"
+                "field": "ts_ms"
             }),
         ],
 
@@ -262,39 +275,56 @@ pub(crate) fn fields_to_json(fields: &[Field]) -> Value {
 
 pub(crate) fn field_to_json(field: &Field) -> Value {
     // mapping from 'https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-data-types'
-    let r#type = match field.data_type() {
-        risingwave_common::types::DataType::Boolean => "boolean",
-        risingwave_common::types::DataType::Int16 => "int16",
-        risingwave_common::types::DataType::Int32 => "int32",
-        risingwave_common::types::DataType::Int64 => "int64",
-        risingwave_common::types::DataType::Int256 => "string",
-        risingwave_common::types::DataType::Float32 => "float",
-        risingwave_common::types::DataType::Float64 => "double",
+    let (r#type, name) = match field.data_type() {
+        risingwave_common::types::DataType::Boolean => ("boolean", ""),
+        risingwave_common::types::DataType::Int16 => ("int16", ""),
+        risingwave_common::types::DataType::Int32 => ("int32", ""),
+        risingwave_common::types::DataType::Int64 => ("int64", ""),
+        risingwave_common::types::DataType::Int256 => ("string", ""),
+        risingwave_common::types::DataType::Float32 => ("float", ""),
+        risingwave_common::types::DataType::Float64 => ("double", ""),
         // currently, we only support handling decimal as string.
         // https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-decimal-types
-        risingwave_common::types::DataType::Decimal => "string",
+        risingwave_common::types::DataType::Decimal => ("string", ""),
 
-        risingwave_common::types::DataType::Varchar => "string",
+        risingwave_common::types::DataType::Varchar => ("string", ""),
 
-        risingwave_common::types::DataType::Date => "int32",
-        risingwave_common::types::DataType::Time => "int64",
-        risingwave_common::types::DataType::Timestamp => "int64",
-        risingwave_common::types::DataType::Timestamptz => "string",
-        risingwave_common::types::DataType::Interval => "string",
+        // use built-in Kafka Connect logical types.
+        risingwave_common::types::DataType::Date => ("int32", "org.apache.kafka.connect.data.Date"),
+        // may lose precision when Time/Timestamp has a fractional second precision value that is greater than 3. But for TimestampHandlingMode:Milli, it is sufficient.
+        risingwave_common::types::DataType::Time => ("int64", "org.apache.kafka.connect.data.Time"),
+        risingwave_common::types::DataType::Timestamp => {
+            ("int64", "org.apache.kafka.connect.data.Timestamp")
+        }
 
-        risingwave_common::types::DataType::Bytea => "bytes",
-        risingwave_common::types::DataType::Jsonb => "string",
-        risingwave_common::types::DataType::Serial => "int32",
+        risingwave_common::types::DataType::Timestamptz => {
+            ("string", "io.debezium.time.ZonedTimestamp")
+        }
+        risingwave_common::types::DataType::Interval => ("string", "io.debezium.time.Interval"),
+
+        risingwave_common::types::DataType::Bytea => ("bytes", ""),
+        risingwave_common::types::DataType::Jsonb => ("string", "io.debezium.data.Json"),
+        risingwave_common::types::DataType::Serial => ("int32", ""),
         // since the original debezium pg support HSTORE via encoded as json string by default,
         // we do the same here
-        risingwave_common::types::DataType::Struct(_) => "string",
-        risingwave_common::types::DataType::List { .. } => "string",
+        risingwave_common::types::DataType::Struct(_) => ("string", ""),
+        risingwave_common::types::DataType::List { .. } => ("string", ""),
     };
-    json!({
-        "field": field.name,
-        "optional": true,
-        "type": r#type,
-    })
+
+    if name.is_empty() {
+        json!({
+            "field": field.name,
+            "optional": true,
+            "type": r#type
+        })
+    } else {
+        json!({
+            "field": field.name,
+            "optional": true,
+            "type": r#type,
+            "name": name
+        })
+    }
 }
 
 #[cfg(test)]
@@ -305,22 +335,22 @@ mod tests {
     use super::*;
     use crate::sink::utils::chunk_to_json;
 
-    const SCHEMA_JSON_RESULT: &str = r#"{"fields":[{"field":"before","fields":[{"field":"v1","optional":true,"type":"int32"},{"field":"v2","optional":true,"type":"float"},{"field":"v3","optional":true,"type":"string"}],"name":"RisingWave.test_db.test_table.Key","optional":true,"type":"struct"},{"field":"after","fields":[{"field":"v1","optional":true,"type":"int32"},{"field":"v2","optional":true,"type":"float"},{"field":"v3","optional":true,"type":"string"}],"name":"RisingWave.test_db.test_table.Key","optional":true,"type":"struct"},{"field":"source","fields":[{"field":"db","optional":false,"type":"string"},{"field":"table","optional":true,"type":"string"},{"field":"table","optional":false,"type":"int64"}],"name":"RisingWave.test_db.test_table.Source","optional":false,"type":"struct"},{"field":"op","optional":false,"type":"string"},{"field":"ts_ms","optional":false,"type":"int64"}],"name":"RisingWave.test_db.test_table.Envelope","optional":false,"type":"struct"}"#;
+    const SCHEMA_JSON_RESULT: &str = r#"{"fields":[{"field":"before","fields":[{"field":"v1","optional":true,"type":"int32"},{"field":"v2","optional":true,"type":"float"},{"field":"v3","optional":true,"type":"string"}],"name":"RisingWave.test_db.test_table.Key","optional":true,"type":"struct"},{"field":"after","fields":[{"field":"v1","optional":true,"type":"int32"},{"field":"v2","optional":true,"type":"float"},{"field":"v3","optional":true,"type":"string"}],"name":"RisingWave.test_db.test_table.Key","optional":true,"type":"struct"},{"field":"source","fields":[{"field":"db","optional":false,"type":"string"},{"field":"table","optional":true,"type":"string"},{"field":"ts_ms","optional":false,"type":"int64"}],"name":"RisingWave.test_db.test_table.Source","optional":false,"type":"struct"},{"field":"op","optional":false,"type":"string"},{"field":"ts_ms","optional":false,"type":"int64"}],"name":"RisingWave.test_db.test_table.Envelope","optional":false,"type":"struct"}"#;
 
     #[test]
     fn test_chunk_to_json() -> Result<()> {
         let chunk = StreamChunk::from_pretty(
-            " i   f   {i,f}
-            + 0 0.0 {0,0.0}
-            + 1 1.0 {1,1.0}
-            + 2 2.0 {2,2.0}
-            + 3 3.0 {3,3.0}
-            + 4 4.0 {4,4.0}
-            + 5 5.0 {5,5.0}
-            + 6 6.0 {6,6.0}
-            + 7 7.0 {7,7.0}
-            + 8 8.0 {8,8.0}
-            + 9 9.0 {9,9.0}",
+            " i   f   <i,f>
+            + 0 0.0 (0,0.0)
+            + 1 1.0 (1,1.0)
+            + 2 2.0 (2,2.0)
+            + 3 3.0 (3,3.0)
+            + 4 4.0 (4,4.0)
+            + 5 5.0 (5,5.0)
+            + 6 6.0 (6,6.0)
+            + 7 7.0 (7,7.0)
+            + 8 8.0 (8,8.0)
+            + 9 9.0 (9,9.0)",
         );
 
         let schema = Schema::new(vec![
@@ -360,7 +390,14 @@ mod tests {
             },
         ]);
 
-        let encoder = JsonEncoder::new(schema.clone(), None, TimestampHandlingMode::Milli);
+        let encoder = JsonEncoder::new(
+            schema.clone(),
+            None,
+            DateHandlingMode::FromEpoch,
+            TimestampHandlingMode::Milli,
+            TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
+        );
         let json_chunk = chunk_to_json(chunk, &encoder).unwrap();
         let schema_json = schema_to_json(&schema, "test_db", "test_table");
         assert_eq!(

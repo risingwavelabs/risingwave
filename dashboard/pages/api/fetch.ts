@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,31 +15,44 @@
  *
  */
 
-import { useToast } from "@chakra-ui/react"
 import { useEffect, useState } from "react"
+import useErrorToast from "../../hook/useErrorToast"
 
-export default function useFetch<T>(fetchFn: () => Promise<T>) {
+/**
+ * Fetch data from the server and return the response.
+ * @param fetchFn The function to fetch data from the server.
+ * @param intervalMs The interval in milliseconds to fetch data from the server. If null, the data is fetched only once.
+ * @param when If true, fetch data from the server. If false, do nothing.
+ * @returns The response from the server.
+ */
+export default function useFetch<T>(
+  fetchFn: () => Promise<T>,
+  intervalMs: number | null = null,
+  when: boolean = true
+) {
   const [response, setResponse] = useState<T>()
-  const toast = useToast()
+  const toast = useErrorToast()
 
   useEffect(() => {
     const fetchData = async () => {
-      try {
-        const res = await fetchFn()
-        setResponse(res)
-      } catch (e: any) {
-        toast({
-          title: "Error Occurred",
-          description: e.toString(),
-          status: "error",
-          duration: 5000,
-          isClosable: true,
-        })
-        console.error(e)
+      if (when) {
+        try {
+          const res = await fetchFn()
+          setResponse(res)
+        } catch (e: any) {
+          toast(e)
+        }
       }
     }
     fetchData()
-  }, [toast, fetchFn])
+
+    if (!intervalMs) {
+      return
+    }
+
+    const timer = setInterval(fetchData, intervalMs)
+    return () => clearInterval(timer)
+  }, [toast, fetchFn, intervalMs, when])
 
   return { response }
 }

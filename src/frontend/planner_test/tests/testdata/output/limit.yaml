@@ -158,9 +158,9 @@
     select * from t limit 1;
   batch_plan: |-
     BatchLimit { limit: 1, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    └─BatchExchange { order: [], dist: Single, sequential: true }
       └─BatchLimit { limit: 1, offset: 0 }
-        └─BatchScan { table: t, columns: [t.a], distribution: UpstreamHashShard(t.a) }
+        └─BatchScan { table: t, columns: [t.a], limit: 1, distribution: UpstreamHashShard(t.a) }
   stream_plan: |-
     StreamMaterialize { columns: [a], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.a] }

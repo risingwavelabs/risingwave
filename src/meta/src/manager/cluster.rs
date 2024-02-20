@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,24 +15,31 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
+use std::iter;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
 use risingwave_common::hash::ParallelUnitId;
+use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::resource_util::cpu::total_cpu_available;
+use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
+use risingwave_common::RW_VERSION;
 use risingwave_pb::common::worker_node::{Property, State};
 use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
+use thiserror_ext::AsReport;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{MetadataModel, ValTransaction, VarTransaction, Worker, INVALID_EXPIRE_AT};
-use crate::storage::{MetaStore, MetaStoreRef, Transaction};
+use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};
 
 pub type WorkerId = u32;
@@ -71,7 +78,7 @@ pub struct ClusterManager {
 
 impl ClusterManager {
     pub async fn new(env: MetaSrvEnv, max_heartbeat_interval: Duration) -> MetaResult<Self> {
-        let core = ClusterManagerCore::new(env.meta_store_ref()).await?;
+        let core = ClusterManagerCore::new(env.clone()).await?;
 
         Ok(Self {
             env,
@@ -99,12 +106,16 @@ impl ClusterManager {
         r#type: WorkerType,
         host_address: HostAddress,
         property: AddNodeProperty,
+        resource: risingwave_pb::common::worker_node::Resource,
     ) -> MetaResult<WorkerNode> {
-        let worker_node_parallelism = property.worker_node_parallelism as usize;
+        let new_worker_parallelism = property.worker_node_parallelism as usize;
         let mut property = self.parse_property(r#type, property);
         let mut core = self.core.write().await;
 
         if let Some(worker) = core.get_worker_by_host_mut(host_address.clone()) {
+            tracing::info!("worker {} re-joined the cluster", worker.worker_id());
+            worker.update_resource(Some(resource));
+            worker.update_started_at(timestamp_now_sec());
             if let Some(property) = &mut property {
                 property.is_unschedulable = worker
                     .worker_node
@@ -114,40 +125,54 @@ impl ClusterManager {
                     .unwrap_or_default();
             }
 
-            let current_parallelism = worker.worker_node.parallel_units.len();
-            if current_parallelism == worker_node_parallelism
+            let old_worker_parallelism = worker.worker_node.parallel_units.len();
+            if old_worker_parallelism == new_worker_parallelism
                 && worker.worker_node.property == property
             {
-                worker.update_ttl(self.max_heartbeat_interval);
+                worker.update_expire_at(self.max_heartbeat_interval);
                 return Ok(worker.to_protobuf());
             }
 
             let mut new_worker = worker.clone();
-            match current_parallelism.cmp(&worker_node_parallelism) {
+            match old_worker_parallelism.cmp(&new_worker_parallelism) {
                 Ordering::Less => {
                     tracing::info!(
                         "worker {} parallelism updated from {} to {}",
                         new_worker.worker_node.id,
-                        current_parallelism,
-                        worker_node_parallelism
+                        old_worker_parallelism,
+                        new_worker_parallelism
                     );
                     let parallel_units = self
                         .generate_cn_parallel_units(
-                            worker_node_parallelism - current_parallelism,
+                            new_worker_parallelism - old_worker_parallelism,
                             new_worker.worker_id(),
                         )
                         .await?;
                     new_worker.worker_node.parallel_units.extend(parallel_units);
                 }
                 Ordering::Greater => {
-                    // Warn and keep the original parallelism if the worker registered with a
-                    // smaller parallelism.
-                    tracing::warn!(
-                        "worker {} parallelism is less than current, current is {}, but received {}",
-                        new_worker.worker_id(),
-                        current_parallelism,
-                        worker_node_parallelism
-                    );
+                    if !self.env.opts.disable_automatic_parallelism_control {
+                        // Handing over to the subsequent recovery loop for a forced reschedule.
+                        tracing::info!(
+                            "worker {} parallelism reduced from {} to {}",
+                            new_worker.worker_node.id,
+                            old_worker_parallelism,
+                            new_worker_parallelism
+                        );
+                        new_worker
+                            .worker_node
+                            .parallel_units
+                            .truncate(new_worker_parallelism)
+                    } else {
+                        // Warn and keep the original parallelism if the worker registered with a
+                        // smaller parallelism, entering compatibility mode.
+                        tracing::warn!(
+                            "worker {} parallelism is less than current, current is {}, but received {}",
+                            new_worker.worker_id(),
+                            new_worker_parallelism,
+                            old_worker_parallelism,
+                        );
+                    }
                 }
                 Ordering::Equal => {}
             }
@@ -162,8 +187,8 @@ impl ClusterManager {
                 new_worker.worker_node.property = property;
             }
 
-            new_worker.update_ttl(self.max_heartbeat_interval);
-            new_worker.insert(self.env.meta_store()).await?;
+            new_worker.update_expire_at(self.max_heartbeat_interval);
+            new_worker.insert(self.env.meta_store_checked()).await?;
             *worker = new_worker;
             return Ok(worker.to_protobuf());
         }
@@ -176,11 +201,7 @@ impl ClusterManager {
             .await? as WorkerId;
 
         let transactional_id = match (core.available_transactional_ids.front(), r#type) {
-            (None, _) => {
-                return Err(MetaError::unavailable(
-                    "no available reusable machine id".to_string(),
-                ))
-            }
+            (None, _) => return Err(MetaError::unavailable("no available reusable machine id")),
             // We only assign transactional id to compute node and frontend.
             (Some(id), WorkerType::ComputeNode | WorkerType::Frontend) => Some(*id),
             _ => None,
@@ -188,7 +209,7 @@ impl ClusterManager {
 
         // Generate parallel units.
         let parallel_units = if r#type == WorkerType::ComputeNode {
-            self.generate_cn_parallel_units(worker_node_parallelism, worker_id)
+            self.generate_cn_parallel_units(new_worker_parallelism, worker_id)
                 .await?
         } else {
             vec![]
@@ -202,22 +223,40 @@ impl ClusterManager {
             parallel_units,
             property,
             transactional_id,
+            // resource doesn't need persist
+            resource: None,
+            started_at: None,
         };
 
-        let worker = Worker::from_protobuf(worker_node.clone());
+        let mut worker = Worker::from_protobuf(worker_node.clone());
+        worker.update_started_at(timestamp_now_sec());
+        worker.update_resource(Some(resource));
         // Persist worker node.
-        worker.insert(self.env.meta_store()).await?;
+        worker.insert(self.env.meta_store_checked()).await?;
         // Update core.
         core.add_worker_node(worker);
+
+        tracing::info!(
+            "new worker {} from {}:{} joined cluster",
+            worker_id,
+            host_address.get_host(),
+            host_address.get_port()
+        );
+
         Ok(worker_node)
     }
 
     pub async fn activate_worker_node(&self, host_address: HostAddress) -> MetaResult<()> {
         let mut core = self.core.write().await;
         let mut worker = core.get_worker_by_host_checked(host_address.clone())?;
+
+        let worker_id = worker.worker_id();
+
+        tracing::info!("worker {} activating", worker_id);
+
         if worker.worker_node.state != State::Running as i32 {
             worker.worker_node.state = State::Running as i32;
-            worker.insert(self.env.meta_store()).await?;
+            worker.insert(self.env.meta_store_checked()).await?;
             core.update_worker_node(worker.clone());
         }
 
@@ -233,6 +272,8 @@ impl ClusterManager {
             .notification_manager()
             .notify_local_subscribers(LocalNotification::WorkerNodeActivated(worker.worker_node))
             .await;
+
+        tracing::info!("worker {} activated", worker_id);
 
         Ok(())
     }
@@ -268,7 +309,7 @@ impl ClusterManager {
             }
         }
 
-        self.env.meta_store().txn(txn).await?;
+        self.env.meta_store_checked().txn(txn).await?;
 
         for var_txn in var_txns {
             var_txn.commit();
@@ -284,7 +325,7 @@ impl ClusterManager {
         let worker_node = worker.to_protobuf();
 
         // Persist deletion.
-        Worker::delete(self.env.meta_store(), &host_address).await?;
+        Worker::delete(self.env.meta_store_checked(), &host_address).await?;
 
         // Update core.
         core.delete_worker_node(worker);
@@ -318,15 +359,12 @@ impl ClusterManager {
         let mut core = self.core.write().await;
         for worker in core.workers.values_mut() {
             if worker.worker_id() == worker_id {
-                worker.update_ttl(self.max_heartbeat_interval);
+                worker.update_expire_at(self.max_heartbeat_interval);
                 worker.update_info(info);
                 return Ok(());
             }
         }
-        Err(MetaError::invalid_worker(
-            worker_id,
-            "worker not found".into(),
-        ))
+        Err(MetaError::invalid_worker(worker_id, "worker not found"))
     }
 
     pub fn start_heartbeat_checker(
@@ -353,19 +391,16 @@ impl ClusterManager {
                     // 1. Initialize new workers' TTL.
                     for worker in workers
                         .values_mut()
-                        .filter(|worker| worker.expire_at() == INVALID_EXPIRE_AT)
+                        .filter(|worker| worker.expire_at == INVALID_EXPIRE_AT)
                     {
-                        worker.update_ttl(cluster_manager.max_heartbeat_interval);
+                        worker.update_expire_at(cluster_manager.max_heartbeat_interval);
                     }
                     // 2. Collect expired workers.
-                    let now = SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .expect("Clock may have gone backwards")
-                        .as_secs();
+                    let now = timestamp_now_sec();
                     (
                         workers
                             .values()
-                            .filter(|worker| worker.expire_at() < now)
+                            .filter(|worker| worker.expire_at < now)
                             .map(|worker| (worker.worker_id(), worker.key().unwrap()))
                             .collect_vec(),
                         now,
@@ -397,11 +432,11 @@ impl ClusterManager {
                         }
                         Err(err) => {
                             tracing::warn!(
-                                "Failed to delete expired worker {} {:#?}, current timestamp {}. {:?}",
+                                error = %err.as_report(),
+                                "Failed to delete expired worker {} {:#?}, current timestamp {}",
                                 worker_id,
                                 key,
                                 now,
-                                err,
                             );
                         }
                     }
@@ -413,15 +448,31 @@ impl ClusterManager {
 
     /// Get live nodes with the specified type and state.
     /// # Arguments
-    /// * `worker_type` `WorkerType` of the nodes
+    /// * `worker_type` `WorkerType` of the nodes if it is not None.
     /// * `worker_state` Filter by this state if it is not None.
     pub async fn list_worker_node(
         &self,
-        worker_type: WorkerType,
+        worker_type: Option<WorkerType>,
         worker_state: Option<State>,
     ) -> Vec<WorkerNode> {
         let core = self.core.read().await;
         core.list_worker_node(worker_type, worker_state)
+    }
+
+    pub async fn subscribe_active_streaming_compute_nodes(
+        &self,
+    ) -> (Vec<WorkerNode>, UnboundedReceiver<LocalNotification>) {
+        let core = self.core.read().await;
+        let worker_nodes = core.list_streaming_worker_node(Some(State::Running));
+        let (tx, rx) = unbounded_channel();
+
+        // insert before release the read lock to ensure that we don't lose any update in between
+        self.env
+            .notification_manager()
+            .insert_local_sender(tx)
+            .await;
+        drop(core);
+        (worker_nodes, rx)
     }
 
     /// A convenient method to get all running compute nodes that may have running actors on them
@@ -429,11 +480,6 @@ impl ClusterManager {
     pub async fn list_active_streaming_compute_nodes(&self) -> Vec<WorkerNode> {
         let core = self.core.read().await;
         core.list_streaming_worker_node(Some(State::Running))
-    }
-
-    pub async fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
-        let core = self.core.read().await;
-        core.list_active_streaming_parallel_units()
     }
 
     /// Get the cluster info used for scheduling a streaming job, containing all nodes that are
@@ -504,19 +550,22 @@ pub struct StreamingClusterInfo {
 }
 
 pub struct ClusterManagerCore {
+    env: MetaSrvEnv,
     /// Record for workers in the cluster.
     workers: HashMap<WorkerKey, Worker>,
-
     /// Record for tracking available machine ids, one is available.
     available_transactional_ids: VecDeque<u32>,
+    /// Used as timestamp when meta node starts in sec.
+    started_at: u64,
 }
 
 impl ClusterManagerCore {
     pub const MAX_WORKER_REUSABLE_ID_BITS: usize = 10;
     pub const MAX_WORKER_REUSABLE_ID_COUNT: usize = 1 << Self::MAX_WORKER_REUSABLE_ID_BITS;
 
-    async fn new(meta_store: MetaStoreRef) -> MetaResult<Self> {
-        let mut workers = Worker::list(&meta_store).await?;
+    async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
+        let meta_store = env.meta_store_checked();
+        let mut workers = Worker::list(meta_store).await?;
 
         let used_transactional_ids: HashSet<_> = workers
             .iter()
@@ -542,8 +591,8 @@ impl ClusterManagerCore {
                 let transactional_id = match available_transactional_ids.pop_front() {
                     None => {
                         return Err(MetaError::unavailable(
-                            "no available transactional id for worker".to_string(),
-                        ))
+                            "no available transactional id for worker",
+                        ));
                     }
                     Some(id) => id,
                 };
@@ -569,11 +618,13 @@ impl ClusterManagerCore {
         }
 
         Ok(Self {
+            env,
             workers: workers
                 .into_iter()
                 .map(|w| (WorkerKey(w.key().unwrap()), w))
                 .collect(),
             available_transactional_ids,
+            started_at: timestamp_now_sec(),
         })
     }
 
@@ -623,24 +674,34 @@ impl ClusterManagerCore {
 
     pub fn list_worker_node(
         &self,
-        worker_type: WorkerType,
+        worker_type: Option<WorkerType>,
         worker_state: Option<State>,
     ) -> Vec<WorkerNode> {
         let worker_state = worker_state.map(|worker_state| worker_state as i32);
-
         self.workers
             .values()
-            .map(|worker| worker.to_protobuf())
-            .filter(|w| w.r#type == worker_type as i32)
+            .map(|worker| WorkerNode {
+                resource: worker.resource.to_owned(),
+                started_at: worker.started_at,
+                ..worker.to_protobuf()
+            })
+            .chain(iter::once(meta_node_info(
+                &self.env.opts.advertise_addr,
+                Some(self.started_at),
+            )))
+            .filter(|w| match worker_type {
+                None => true,
+                Some(worker_type) => w.r#type == worker_type as i32,
+            })
             .filter(|w| match worker_state {
                 None => true,
                 Some(state) => state == w.state,
             })
-            .collect_vec()
+            .collect()
     }
 
     pub fn list_streaming_worker_node(&self, worker_state: Option<State>) -> Vec<WorkerNode> {
-        self.list_worker_node(WorkerType::ComputeNode, worker_state)
+        self.list_worker_node(Some(WorkerType::ComputeNode), worker_state)
             .into_iter()
             .filter(|w| w.property.as_ref().map_or(false, |p| p.is_streaming))
             .collect()
@@ -648,16 +709,9 @@ impl ClusterManagerCore {
 
     // List all parallel units on running nodes
     pub fn list_serving_worker_node(&self, worker_state: Option<State>) -> Vec<WorkerNode> {
-        self.list_worker_node(WorkerType::ComputeNode, worker_state)
+        self.list_worker_node(Some(WorkerType::ComputeNode), worker_state)
             .into_iter()
             .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
-            .collect()
-    }
-
-    fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
-        self.list_streaming_worker_node(Some(State::Running))
-            .into_iter()
-            .flat_map(|w| w.parallel_units)
             .collect()
     }
 
@@ -697,10 +751,11 @@ impl ClusterManagerCore {
     }
 
     fn count_worker_node(&self) -> HashMap<WorkerType, u64> {
-        const MONITORED_WORKER_TYPES: [WorkerType; 3] = [
+        const MONITORED_WORKER_TYPES: [WorkerType; 4] = [
             WorkerType::Compactor,
             WorkerType::ComputeNode,
             WorkerType::Frontend,
+            WorkerType::Meta,
         ];
         let mut ret = HashMap::new();
         self.workers
@@ -720,6 +775,34 @@ impl ClusterManagerCore {
     }
 }
 
+fn timestamp_now_sec() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("Clock may have gone backwards")
+        .as_secs()
+}
+
+fn meta_node_info(host: &str, started_at: Option<u64>) -> WorkerNode {
+    WorkerNode {
+        id: META_NODE_ID,
+        r#type: WorkerType::Meta as _,
+        host: HostAddr::try_from(host)
+            .as_ref()
+            .map(HostAddr::to_protobuf)
+            .ok(),
+        state: State::Running as _,
+        parallel_units: vec![],
+        property: None,
+        transactional_id: None,
+        resource: Some(risingwave_pb::common::worker_node::Resource {
+            rw_version: RW_VERSION.to_string(),
+            total_memory_bytes: system_memory_available_bytes() as _,
+            total_cpu_cores: total_cpu_available() as _,
+        }),
+        started_at,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -728,8 +811,11 @@ mod tests {
     async fn test_cluster_manager() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
 
-        let cluster_manager =
-            Arc::new(ClusterManager::new(env, Duration::new(0, 0)).await.unwrap());
+        let cluster_manager = Arc::new(
+            ClusterManager::new(env.clone(), Duration::new(0, 0))
+                .await
+                .unwrap(),
+        );
 
         let mut worker_nodes = Vec::new();
         let worker_count = 5usize;
@@ -749,6 +835,7 @@ mod tests {
                         is_serving: true,
                         is_unschedulable: false,
                     },
+                    Default::default(),
                 )
                 .await
                 .unwrap();
@@ -789,6 +876,7 @@ mod tests {
                     is_serving: true,
                     is_unschedulable: false,
                 },
+                Default::default(),
             )
             .await
             .unwrap();
@@ -810,11 +898,19 @@ mod tests {
                     is_serving: true,
                     is_unschedulable: false,
                 },
+                Default::default(),
             )
             .await
             .unwrap();
-        assert_eq!(worker_node.parallel_units.len(), fake_parallelism + 4);
-        assert_cluster_manager(&cluster_manager, parallel_count + 4).await;
+
+        if !env.opts.disable_automatic_parallelism_control {
+            assert_eq!(worker_node.parallel_units.len(), fake_parallelism - 2);
+            assert_cluster_manager(&cluster_manager, parallel_count - 2).await;
+        } else {
+            // compatibility mode
+            assert_eq!(worker_node.parallel_units.len(), fake_parallelism + 4);
+            assert_cluster_manager(&cluster_manager, parallel_count + 4).await;
+        }
 
         let worker_to_delete_count = 4usize;
         for i in 0..worker_to_delete_count {
@@ -851,6 +947,7 @@ mod tests {
                     is_serving: true,
                     is_unschedulable: false,
                 },
+                Default::default(),
             )
             .await
             .unwrap();
@@ -877,7 +974,12 @@ mod tests {
     }
 
     async fn assert_cluster_manager(cluster_manager: &ClusterManager, parallel_count: usize) {
-        let parallel_units = cluster_manager.list_active_streaming_parallel_units().await;
+        let parallel_units = cluster_manager
+            .list_active_serving_compute_nodes()
+            .await
+            .into_iter()
+            .flat_map(|w| w.parallel_units)
+            .collect_vec();
         assert_eq!(parallel_units.len(), parallel_count);
     }
 
@@ -903,13 +1005,14 @@ mod tests {
                     is_serving: true,
                     is_unschedulable: false,
                 },
+                Default::default(),
             )
             .await
             .unwrap();
         // Two live nodes
         assert_eq!(
             cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None)
+                .list_worker_node(Some(WorkerType::ComputeNode), None)
                 .await
                 .len(),
             2
@@ -936,7 +1039,7 @@ mod tests {
         // started.
         assert_eq!(
             cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None)
+                .list_worker_node(Some(WorkerType::ComputeNode), None)
                 .await
                 .len(),
             2
@@ -949,7 +1052,7 @@ mod tests {
         // One live node left.
         assert_eq!(
             cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None)
+                .list_worker_node(Some(WorkerType::ComputeNode), None)
                 .await
                 .len(),
             1

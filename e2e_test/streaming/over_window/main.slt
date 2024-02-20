@@ -1,5 +1,24 @@
-statement ok
-SET RW_IMPLICIT_FLUSH TO true;
+# Run generated streaming e2e tests with different cache policies.
 
-include ./special_cases/mod.slt.part
-include ./over_window/mod.slt.part
+statement ok
+set rw_streaming_over_window_cache_policy = full;
+
+include ./generated/main.slt.part
+
+statement ok
+set rw_streaming_over_window_cache_policy = recent;
+
+include ./generated/main.slt.part
+
+statement ok
+set rw_streaming_over_window_cache_policy = recent_first_n;
+
+include ./generated/main.slt.part
+
+statement ok
+set rw_streaming_over_window_cache_policy = recent_last_n;
+
+include ./generated/main.slt.part
+
+statement ok
+set rw_streaming_over_window_cache_policy = default;

@@ -1,30 +1,18 @@
 ---
 version: "3"
 services:
-  compactor-0:
+  risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml
-      service: compactor-0
-  compute-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: compute-node-0
+      service: risingwave-standalone
   etcd-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: etcd-0
-  frontend-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: frontend-node-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: grafana-0
-  meta-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: meta-node-0
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -33,10 +21,6 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
-  connector-node:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: connector-node
   citus-master:
     container_name: citus-master
     image: "citusdata/citus:10.2.5"
@@ -104,7 +88,7 @@ services:
     command: tpch prepare --sf 1 --threads 4 -d postgres -U myuser -p '123456' -H citus-master -D mydb -P 5432 --conn-params sslmode=disable
     restart: on-failure
 volumes:
-  compute-node-0:
+  risingwave-standalone:
     external: false
   etcd-0:
     external: false

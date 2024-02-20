@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,15 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{BTreeSet, HashMap, HashSet};
+
 use anyhow::anyhow;
+use itertools::Itertools;
 use risingwave_meta_model_migration::WithQuery;
+use risingwave_meta_model_v2::actor::ActorStatus;
+use risingwave_meta_model_v2::fragment::{DistributionType, StreamNode};
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
-    connection, function, index, object, object_dependency, schema, sink, source, table, view,
-    DataTypeArray, DatabaseId, ObjectId, SchemaId, UserId,
+    actor, actor_dispatcher, connection, database, fragment, function, index, object,
+    object_dependency, schema, sink, source, table, user, user_privilege, view, ActorId,
+    DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, PrivilegeId,
+    SchemaId, SourceId, UserId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
+use risingwave_pb::meta::PbFragmentParallelUnitMapping;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
+use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
+use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
 use sea_orm::sea_query::{
     Alias, CommonTableExpression, Expr, Query, QueryStatementBuilder, SelectStatement, UnionType,
     WithClause,
@@ -115,6 +127,34 @@ pub struct PartialObject {
     pub database_id: Option<DatabaseId>,
 }
 
+#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[sea_orm(entity = "Fragment")]
+pub struct PartialFragmentStateTables {
+    pub fragment_id: FragmentId,
+    pub job_id: ObjectId,
+    pub state_table_ids: I32Array,
+}
+
+#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[sea_orm(entity = "Actor")]
+pub struct PartialActorLocation {
+    pub actor_id: ActorId,
+    pub fragment_id: FragmentId,
+    pub parallel_unit_id: i32,
+    pub status: ActorStatus,
+}
+
+#[derive(FromQueryResult)]
+pub struct FragmentDesc {
+    pub fragment_id: FragmentId,
+    pub job_id: ObjectId,
+    pub fragment_type_mask: i32,
+    pub distribution_type: DistributionType,
+    pub state_table_ids: I32Array,
+    pub upstream_fragment_id: I32Array,
+    pub parallelism: i64,
+}
+
 /// List all objects that are using the given one in a cascade way. It runs a recursive CTE to find all the dependencies.
 pub async fn get_referring_objects_cascade<C>(
     obj_id: ObjectId,
@@ -162,6 +202,22 @@ where
     let count = User::find_by_id(user_id).count(db).await?;
     if count == 0 {
         return Err(anyhow!("user {} was concurrently dropped", user_id).into());
+    }
+    Ok(())
+}
+
+/// `check_database_name_duplicate` checks whether the database name is already used in the cluster.
+pub async fn check_database_name_duplicate<C>(name: &str, db: &C) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    let count = Database::find()
+        .filter(database::Column::Name.eq(name))
+        .count(db)
+        .await?;
+    if count > 0 {
+        assert_eq!(count, 1);
+        return Err(MetaError::catalog_duplicated("database", name));
     }
     Ok(())
 }
@@ -216,6 +272,22 @@ where
             "connection",
             &pb_connection.name,
         ));
+    }
+    Ok(())
+}
+
+/// `check_user_name_duplicate` checks whether the user is already existed in the cluster.
+pub async fn check_user_name_duplicate<C>(name: &str, db: &C) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    let count = User::find()
+        .filter(user::Column::Name.eq(name))
+        .count(db)
+        .await?;
+    if count > 0 {
+        assert_eq!(count, 1);
+        return Err(MetaError::catalog_duplicated("user", name));
     }
     Ok(())
 }
@@ -349,8 +421,353 @@ where
         .count(db)
         .await?;
     if count != 0 {
-        return Err(MetaError::permission_denied("schema is not empty".into()));
+        return Err(MetaError::permission_denied("schema is not empty"));
     }
 
     Ok(())
+}
+
+/// `list_user_info_by_ids` lists all users' info by their ids.
+pub async fn list_user_info_by_ids<C>(user_ids: Vec<UserId>, db: &C) -> MetaResult<Vec<PbUserInfo>>
+where
+    C: ConnectionTrait,
+{
+    let mut user_infos = vec![];
+    for user_id in user_ids {
+        let user = User::find_by_id(user_id)
+            .one(db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("user", user_id))?;
+        let mut user_info: PbUserInfo = user.into();
+        user_info.grant_privileges = get_user_privilege(user_id, db).await?;
+        user_infos.push(user_info);
+    }
+    Ok(user_infos)
+}
+
+/// `construct_privilege_dependency_query` constructs a query to find all privileges that are dependent on the given one.
+///
+/// # Examples
+///
+/// ```
+/// use risingwave_meta::controller::utils::construct_privilege_dependency_query;
+/// use sea_orm::sea_query::*;
+/// use sea_orm::*;
+///
+/// let query = construct_privilege_dependency_query(vec![1, 2, 3]);
+///
+/// assert_eq!(
+///    query.to_string(MysqlQueryBuilder),
+///   r#"WITH RECURSIVE `granted_privilege_ids` (`id`, `user_id`) AS (SELECT `id`, `user_id` FROM `user_privilege` WHERE `user_privilege`.`id` IN (1, 2, 3) UNION ALL (SELECT `user_privilege`.`id`, `user_privilege`.`user_id` FROM `user_privilege` INNER JOIN `granted_privilege_ids` ON `granted_privilege_ids`.`id` = `dependent_id`)) SELECT `id`, `user_id` FROM `granted_privilege_ids`"#
+/// );
+/// assert_eq!(
+///   query.to_string(PostgresQueryBuilder),
+///  r#"WITH RECURSIVE "granted_privilege_ids" ("id", "user_id") AS (SELECT "id", "user_id" FROM "user_privilege" WHERE "user_privilege"."id" IN (1, 2, 3) UNION ALL (SELECT "user_privilege"."id", "user_privilege"."user_id" FROM "user_privilege" INNER JOIN "granted_privilege_ids" ON "granted_privilege_ids"."id" = "dependent_id")) SELECT "id", "user_id" FROM "granted_privilege_ids""#
+/// );
+/// assert_eq!(
+///  query.to_string(SqliteQueryBuilder),
+///  r#"WITH RECURSIVE "granted_privilege_ids" ("id", "user_id") AS (SELECT "id", "user_id" FROM "user_privilege" WHERE "user_privilege"."id" IN (1, 2, 3) UNION ALL SELECT "user_privilege"."id", "user_privilege"."user_id" FROM "user_privilege" INNER JOIN "granted_privilege_ids" ON "granted_privilege_ids"."id" = "dependent_id") SELECT "id", "user_id" FROM "granted_privilege_ids""#
+/// );
+/// ```
+pub fn construct_privilege_dependency_query(ids: Vec<PrivilegeId>) -> WithQuery {
+    let cte_alias = Alias::new("granted_privilege_ids");
+    let cte_return_privilege_alias = Alias::new("id");
+    let cte_return_user_alias = Alias::new("user_id");
+
+    let mut base_query = SelectStatement::new()
+        .columns([user_privilege::Column::Id, user_privilege::Column::UserId])
+        .from(UserPrivilege)
+        .and_where(user_privilege::Column::Id.is_in(ids))
+        .to_owned();
+
+    let cte_referencing = Query::select()
+        .columns([
+            (UserPrivilege, user_privilege::Column::Id),
+            (UserPrivilege, user_privilege::Column::UserId),
+        ])
+        .from(UserPrivilege)
+        .inner_join(
+            cte_alias.clone(),
+            Expr::col((cte_alias.clone(), cte_return_privilege_alias.clone()))
+                .equals(user_privilege::Column::DependentId),
+        )
+        .to_owned();
+
+    let common_table_expr = CommonTableExpression::new()
+        .query(base_query.union(UnionType::All, cte_referencing).to_owned())
+        .columns([
+            cte_return_privilege_alias.clone(),
+            cte_return_user_alias.clone(),
+        ])
+        .table_name(cte_alias.clone())
+        .to_owned();
+
+    SelectStatement::new()
+        .columns([cte_return_privilege_alias, cte_return_user_alias])
+        .from(cte_alias.clone())
+        .to_owned()
+        .with(
+            WithClause::new()
+                .recursive(true)
+                .cte(common_table_expr)
+                .to_owned(),
+        )
+        .to_owned()
+}
+
+#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[sea_orm(entity = "UserPrivilege")]
+pub struct PartialUserPrivilege {
+    pub id: PrivilegeId,
+    pub user_id: UserId,
+}
+
+pub async fn get_referring_privileges_cascade<C>(
+    ids: Vec<PrivilegeId>,
+    db: &C,
+) -> MetaResult<Vec<PartialUserPrivilege>>
+where
+    C: ConnectionTrait,
+{
+    let query = construct_privilege_dependency_query(ids);
+    let (sql, values) = query.build_any(&*db.get_database_backend().get_query_builder());
+    let privileges = PartialUserPrivilege::find_by_statement(Statement::from_sql_and_values(
+        db.get_database_backend(),
+        sql,
+        values,
+    ))
+    .all(db)
+    .await?;
+
+    Ok(privileges)
+}
+
+/// `ensure_privileges_not_referred` ensures that the privileges are not granted to any other users.
+pub async fn ensure_privileges_not_referred<C>(ids: Vec<PrivilegeId>, db: &C) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    let count = UserPrivilege::find()
+        .filter(user_privilege::Column::DependentId.is_in(ids))
+        .count(db)
+        .await?;
+    if count != 0 {
+        return Err(MetaError::permission_denied(format!(
+            "privileges granted to {} other ones.",
+            count
+        )));
+    }
+    Ok(())
+}
+
+/// `get_user_privilege` returns the privileges of the given user.
+pub async fn get_user_privilege<C>(user_id: UserId, db: &C) -> MetaResult<Vec<PbGrantPrivilege>>
+where
+    C: ConnectionTrait,
+{
+    let user_privileges = UserPrivilege::find()
+        .find_also_related(Object)
+        .filter(user_privilege::Column::UserId.eq(user_id))
+        .all(db)
+        .await?;
+    Ok(user_privileges
+        .into_iter()
+        .map(|(privilege, object)| {
+            let object = object.unwrap();
+            let oid = object.oid as _;
+            let obj = match object.obj_type {
+                ObjectType::Database => PbObject::DatabaseId(oid),
+                ObjectType::Schema => PbObject::SchemaId(oid),
+                ObjectType::Table => PbObject::TableId(oid),
+                ObjectType::Source => PbObject::SourceId(oid),
+                ObjectType::Sink => PbObject::SinkId(oid),
+                ObjectType::View => PbObject::ViewId(oid),
+                ObjectType::Function => PbObject::FunctionId(oid),
+                ObjectType::Index => unreachable!("index is not supported yet"),
+                ObjectType::Connection => unreachable!("connection is not supported yet"),
+            };
+            PbGrantPrivilege {
+                action_with_opts: vec![PbActionWithGrantOption {
+                    action: PbAction::from(privilege.action) as _,
+                    with_grant_option: privilege.with_grant_option,
+                    granted_by: privilege.granted_by as _,
+                }],
+                object: Some(obj),
+            }
+        })
+        .collect())
+}
+
+// todo: remove it after migrated to sql backend.
+pub fn extract_grant_obj_id(object: &PbObject) -> ObjectId {
+    match object {
+        PbObject::DatabaseId(id)
+        | PbObject::SchemaId(id)
+        | PbObject::TableId(id)
+        | PbObject::SourceId(id)
+        | PbObject::SinkId(id)
+        | PbObject::ViewId(id)
+        | PbObject::FunctionId(id) => *id as _,
+        _ => unreachable!("invalid object type: {:?}", object),
+    }
+}
+
+pub async fn get_actor_dispatchers<C>(
+    db: &C,
+    actor_ids: Vec<ActorId>,
+) -> MetaResult<HashMap<ActorId, Vec<actor_dispatcher::Model>>>
+where
+    C: ConnectionTrait,
+{
+    let actor_dispatchers = ActorDispatcher::find()
+        .filter(actor_dispatcher::Column::ActorId.is_in(actor_ids))
+        .all(db)
+        .await?;
+
+    let mut actor_dispatchers_map = HashMap::new();
+    for actor_dispatcher in actor_dispatchers {
+        actor_dispatchers_map
+            .entry(actor_dispatcher.actor_id)
+            .or_insert_with(Vec::new)
+            .push(actor_dispatcher);
+    }
+    Ok(actor_dispatchers_map)
+}
+
+/// `get_fragment_mappings` returns the fragment vnode mappings of the given job.
+pub async fn get_fragment_mappings<C>(
+    db: &C,
+    job_id: ObjectId,
+) -> MetaResult<Vec<PbFragmentParallelUnitMapping>>
+where
+    C: ConnectionTrait,
+{
+    let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
+        .select_only()
+        .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
+        .filter(fragment::Column::JobId.eq(job_id))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    Ok(fragment_mappings
+        .into_iter()
+        .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
+            fragment_id: fragment_id as _,
+            mapping: Some(mapping.into_inner()),
+        })
+        .collect())
+}
+
+/// `get_fragment_mappings_by_jobs` returns the fragment vnode mappings of the given job list.
+pub async fn get_fragment_mappings_by_jobs<C>(
+    db: &C,
+    job_ids: Vec<ObjectId>,
+) -> MetaResult<Vec<PbFragmentParallelUnitMapping>>
+where
+    C: ConnectionTrait,
+{
+    if job_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
+        .select_only()
+        .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
+        .filter(fragment::Column::JobId.is_in(job_ids))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    Ok(fragment_mappings
+        .into_iter()
+        .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
+            fragment_id: fragment_id as _,
+            mapping: Some(mapping.into_inner()),
+        })
+        .collect())
+}
+
+/// `get_fragment_actor_ids` returns the fragment actor ids of the given fragments.
+pub async fn get_fragment_actor_ids<C>(
+    db: &C,
+    fragment_ids: Vec<FragmentId>,
+) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>>
+where
+    C: ConnectionTrait,
+{
+    let fragment_actors: Vec<(FragmentId, ActorId)> = Actor::find()
+        .select_only()
+        .columns([actor::Column::FragmentId, actor::Column::ActorId])
+        .filter(actor::Column::FragmentId.is_in(fragment_ids))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    Ok(fragment_actors.into_iter().into_group_map())
+}
+
+/// Find the external stream source info inside the stream node, if any.
+pub fn find_stream_source(stream_node: &PbStreamNode) -> Option<&StreamSource> {
+    if let Some(NodeBody::Source(source)) = &stream_node.node_body {
+        if let Some(inner) = &source.source_inner {
+            return Some(inner);
+        }
+    }
+
+    for child in &stream_node.input {
+        if let Some(source) = find_stream_source(child) {
+            return Some(source);
+        }
+    }
+
+    None
+}
+
+/// Resolve fragment list that are subscribing to sources and actor lists.
+pub async fn resolve_source_register_info_for_jobs<C>(
+    db: &C,
+    streaming_jobs: Vec<ObjectId>,
+) -> MetaResult<(HashMap<SourceId, BTreeSet<FragmentId>>, HashSet<ActorId>)>
+where
+    C: ConnectionTrait,
+{
+    if streaming_jobs.is_empty() {
+        return Ok((HashMap::default(), HashSet::default()));
+    }
+
+    let mut fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+        .select_only()
+        .columns([
+            fragment::Column::FragmentId,
+            fragment::Column::FragmentTypeMask,
+            fragment::Column::StreamNode,
+        ])
+        .filter(fragment::Column::JobId.is_in(streaming_jobs))
+        .into_tuple()
+        .all(db)
+        .await?;
+    let actors: Vec<ActorId> = Actor::find()
+        .select_only()
+        .column(actor::Column::ActorId)
+        .filter(
+            actor::Column::FragmentId.is_in(fragments.iter().map(|(id, _, _)| *id).collect_vec()),
+        )
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    fragments.retain(|(_, mask, _)| *mask & PbFragmentTypeFlag::Source as i32 != 0);
+
+    let mut source_fragment_ids = HashMap::new();
+    for (fragment_id, _, stream_node) in fragments {
+        if let Some(source) = find_stream_source(&stream_node.to_protobuf()) {
+            source_fragment_ids
+                .entry(source.source_id as SourceId)
+                .or_insert_with(BTreeSet::new)
+                .insert(fragment_id);
+        }
+    }
+
+    Ok((source_fragment_ids, actors.into_iter().collect()))
 }

@@ -13,12 +13,12 @@ SELECT ROW(1,2)::STRUCT<i BIGINT, j VARCHAR>;
 query I
 SELECT (NULL, 'hello')::STRUCT<i BIGINT, j VARCHAR>;
 ----
-(NULL,hello)
+(,hello)
 
 query I
 SELECT (NULL, NULL)::STRUCT<i BIGINT, j VARCHAR>;
 ----
-(NULL,NULL)
+(,)
 
 query I
 SELECT NULL::STRUCT<i BIGINT, j VARCHAR>;
@@ -29,7 +29,7 @@ NULL
 query I
 SELECT (NULL, NULL)::STRUCT<i BIGINT, j VARCHAR>;
 ----
-(NULL,NULL)
+(,)
 
 query I
 SELECT ((NULL, NULL)::STRUCT<i BIGINT, j VARCHAR>).i;
@@ -45,22 +45,22 @@ NULL
 query I
 SELECT (1, (2, 3))::STRUCT<i BIGINT, j STRUCT<a BIGINT, b VARCHAR>>;
 ----
-(1,(2,3))
+(1,"(2,3)")
 
 query I
 SELECT (1, (NULL, 3))::STRUCT<i BIGINT, j STRUCT<a BIGINT, b VARCHAR>>;
 ----
-(1,(NULL,3))
+(1,"(,3)")
 
 query I
 SELECT (1, (2, NULL))::STRUCT<i BIGINT, j STRUCT<a BIGINT, b VARCHAR>>;
 ----
-(1,(2,NULL))
+(1,"(2,)")
 
 query I
 SELECT (1, NULL)::STRUCT<i BIGINT, j STRUCT<a BIGINT, b VARCHAR>>;
 ----
-(1,NULL)
+(1,)
 
 # cast and extract
 query I
@@ -83,9 +83,9 @@ INSERT INTO structs VALUES ((1,2)), ((null, 2)), ((1, null)), (NULL)
 query I rowsort
 SELECT s FROM structs;
 ----
+(,2)
+(1,)
 (1,2)
-(1,NULL)
-(NULL,2)
 NULL
 
 statement ok

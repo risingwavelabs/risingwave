@@ -6,7 +6,7 @@
   <groupId>com.risingwave</groupId>
   <artifactId>risingwave-udf</artifactId>
   <packaging>jar</packaging>
-  <version>0.1.0-SNAPSHOT</version>
+  <version>0.1.3-SNAPSHOT</version>
 
   <parent>
     <artifactId>risingwave-java-root</artifactId>
@@ -28,12 +28,12 @@
     <dependency>
       <groupId>org.apache.arrow</groupId>
       <artifactId>arrow-vector</artifactId>
-      <version>13.0.0</version>
+      <version>14.0.0</version>
     </dependency>
     <dependency>
       <groupId>org.apache.arrow</groupId>
       <artifactId>flight-core</artifactId>
-      <version>13.0.0</version>
+      <version>14.0.0</version>
     </dependency>
     <dependency>
       <groupId>org.slf4j</groupId>

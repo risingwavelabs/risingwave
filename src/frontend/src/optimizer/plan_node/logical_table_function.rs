@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::utils::{childless_record, Distill};
@@ -22,8 +21,10 @@ use super::{
     ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalProject, PlanBase, PlanRef,
     PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprRewriter, TableFunction};
+use crate::error::Result;
+use crate::expr::{Expr, ExprRewriter, ExprVisitor, TableFunction};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -108,6 +109,15 @@ impl ExprRewritable for LogicalTableFunction {
             .collect();
         new.base = self.base.clone_with_new_plan_id();
         new.into()
+    }
+}
+
+impl ExprVisitable for LogicalTableFunction {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.table_function
+            .args
+            .iter()
+            .for_each(|e| v.visit_expr(e));
     }
 }
 

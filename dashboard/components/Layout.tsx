@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ import { UrlObject } from "url"
 import {
   IconArrowRightCircle,
   IconArrowRightCircleFill,
+  IconBoxArrowUpRight,
   IconServer,
 } from "../components/utils/icons"
 
@@ -41,11 +42,13 @@ function NavButton({
   children,
   leftIcon,
   leftIconActive,
+  external,
 }: {
   href: string | UrlObject
   children?: React.ReactNode
   leftIcon?: React.ReactElement
   leftIconActive?: React.ReactElement
+  external?: boolean
 }) {
   const router = useRouter()
   const [match, setMatch] = useState(false)
@@ -55,19 +58,22 @@ function NavButton({
     return () => {}
   }, [href, router.asPath])
 
+  const icon =
+    leftIcon || (external ? <IconBoxArrowUpRight /> : <IconArrowRightCircle />)
+  const activeIcon =
+    leftIconActive ||
+    leftIcon ||
+    (external ? undefined : <IconArrowRightCircleFill />)
+
   return (
-    <Link href={href}>
+    <Link href={href} target={external ? "_blank" : undefined}>
       <Button
-        colorScheme={match ? "teal" : "gray"}
-        color={match ? "teal.600" : "gray.500"}
+        colorScheme={match ? "blue" : "gray"}
+        color={match ? "blue.600" : "gray.500"}
         variant={match ? "outline" : "ghost"}
         width="full"
         justifyContent="flex-start"
-        leftIcon={
-          match
-            ? leftIconActive || leftIcon || <IconArrowRightCircleFill />
-            : leftIcon || <IconArrowRightCircle />
-        }
+        leftIcon={match ? activeIcon : icon}
       >
         {children}
       </Button>
@@ -77,9 +83,17 @@ function NavButton({
 
 function NavTitle({ children }: { children: React.ReactNode }) {
   return (
-    <Text mt={3} textColor="teal.500" fontWeight="semibold" lineHeight="6">
+    <Text mt={3} textColor="blue.500" fontWeight="semibold" lineHeight="6">
       {children}
     </Text>
+  )
+}
+
+function Section({ children }: { children: React.ReactNode }) {
+  return (
+    <VStack width="full" alignItems="flex-start" px={3}>
+      {children}
+    </VStack>
   )
 }
 
@@ -110,12 +124,14 @@ function Layout({ children }: { children: React.ReactNode }) {
               </Text>
             </HStack>
           </Box>
-          <NavButton href="/cluster/" leftIcon={<IconServer />}>
-            Cluster Overview
-          </NavButton>
-          <VStack width="full" alignItems="flex-start" px={3}>
+          <Section>
+            <NavButton href="/cluster/" leftIcon={<IconServer />}>
+              Cluster Overview
+            </NavButton>
+          </Section>
+          <Section>
             <NavTitle>Catalog</NavTitle>
-            <NavButton href="/data_sources/">Data Sources</NavButton>
+            <NavButton href="/sources/">Sources</NavButton>
             <NavButton href="/tables/">Tables</NavButton>
             <NavButton href="/materialized_views/">
               Materialized Views
@@ -123,27 +139,36 @@ function Layout({ children }: { children: React.ReactNode }) {
             <NavButton href="/indexes/">Indexes</NavButton>
             <NavButton href="/internal_tables/">Internal Tables</NavButton>
             <NavButton href="/sinks/">Sinks</NavButton>
-          </VStack>
-          <VStack width="full" alignItems="flex-start" px={3}>
+            <NavButton href="/views/">Views</NavButton>
+          </Section>
+          <Section>
             <NavTitle>Streaming</NavTitle>
-            <NavButton href="/streaming_graph/">Graph</NavButton>
-            <NavButton href="/streaming_plan/">Fragments</NavButton>
-          </VStack>
-          <VStack width="full" alignItems="flex-start" px={3}>
+            <NavButton href="/dependency_graph/">Dependency Graph</NavButton>
+            <NavButton href="/fragment_graph/">Fragment Graph</NavButton>
+          </Section>
+          <Section>
             <NavTitle>Batch</NavTitle>
             <NavButton href="/batch_tasks/">Batch Tasks</NavButton>
-          </VStack>
-          <VStack width="full" alignItems="flex-start" px={3}>
+          </Section>
+          <Section>
             <NavTitle>Explain</NavTitle>
             <NavButton href="/explain_distsql/">Distributed Plan</NavButton>
-          </VStack>
-          <VStack width="full" alignItems="flex-start" px={3}>
+          </Section>
+          <Section>
             <NavTitle>Debug</NavTitle>
             <NavButton href="/await_tree/">Await Tree Dump</NavButton>
             <NavButton href="/heap_profiling/">Heap Profiling</NavButton>
-          </VStack>
-          <VStack mb={3}></VStack>
-          <NavButton href="/settings/">Settings</NavButton>
+            <NavButton href="/api/monitor/diagnose" external>
+              Diagnose
+            </NavButton>
+            <NavButton href="/trace/search" external>
+              Traces
+            </NavButton>
+          </Section>
+          <Section>
+            <NavTitle>Settings</NavTitle>
+            <NavButton href="/settings/">Settings</NavButton>
+          </Section>
         </VStack>
       </Box>
       <Box flex={1} overflowY="scroll">

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,80 +12,130 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use chrono::NaiveDate;
 use mysql_async::Row as MysqlRow;
-use risingwave_common::catalog::{Schema, OFFSET_COLUMN_NAME};
+use risingwave_common::catalog::Schema;
+use risingwave_common::log::LogSuppresser;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, Date, Datum, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
+    DataType, Date, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
 use rust_decimal::Decimal as RustDecimal;
+use thiserror_ext::AsReport;
 
-pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Datum> {
+static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
+
+macro_rules! handle_data_type {
+    ($row:expr, $i:expr, $name:expr, $type:ty) => {{
+        let res = $row.take_opt::<Option<$type>, _>($i).unwrap_or(Ok(None));
+        match res {
+            Ok(val) => val.map(|v| ScalarImpl::from(v)),
+            Err(err) => {
+                if let Ok(sc) = LOG_SUPPERSSER.check() {
+                    tracing::error!("parse column `{}` fail: {} ({} suppressed)", $name, err, sc);
+                }
+                None
+            }
+        }
+    }};
+    ($row:expr, $i:expr, $name:expr, $type:ty, $rw_type:ty) => {{
+        let res = $row.take_opt::<Option<$type>, _>($i).unwrap_or(Ok(None));
+        match res {
+            Ok(val) => val.map(|v| ScalarImpl::from(<$rw_type>::from(v))),
+            Err(err) => {
+                if let Ok(sc) = LOG_SUPPERSSER.check() {
+                    tracing::error!("parse column `{}` fail: {} ({} suppressed)", $name, err, sc);
+                }
+                None
+            }
+        }
+    }};
+}
+
+pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> OwnedRow {
     let mut datums = vec![];
     for i in 0..schema.fields.len() {
         let rw_field = &schema.fields[i];
+        let name = rw_field.name.as_str();
         let datum = {
             match rw_field.data_type {
                 DataType::Boolean => {
-                    let v = mysql_row.take::<bool, _>(i);
-                    v.map(ScalarImpl::from)
+                    handle_data_type!(mysql_row, i, name, bool)
                 }
                 DataType::Int16 => {
-                    let v = mysql_row.take::<i16, _>(i);
-                    v.map(ScalarImpl::from)
+                    handle_data_type!(mysql_row, i, name, i16)
                 }
                 DataType::Int32 => {
-                    let v = mysql_row.take::<i32, _>(i);
-                    v.map(ScalarImpl::from)
+                    handle_data_type!(mysql_row, i, name, i32)
                 }
                 DataType::Int64 => {
-                    let v = mysql_row.take::<i64, _>(i);
-                    v.map(ScalarImpl::from)
+                    handle_data_type!(mysql_row, i, name, i64)
                 }
                 DataType::Float32 => {
-                    let v = mysql_row.take::<f32, _>(i);
-                    v.map(ScalarImpl::from)
+                    handle_data_type!(mysql_row, i, name, f32)
                 }
                 DataType::Float64 => {
-                    let v = mysql_row.take::<f64, _>(i);
-                    v.map(ScalarImpl::from)
+                    handle_data_type!(mysql_row, i, name, f64)
                 }
                 DataType::Decimal => {
-                    let v = mysql_row.take::<RustDecimal, _>(i);
-                    v.map(|v| ScalarImpl::from(Decimal::from(v)))
+                    handle_data_type!(mysql_row, i, name, RustDecimal, Decimal)
                 }
                 DataType::Varchar => {
-                    // snapshot data doesn't contain offset, just fill None
-                    if rw_field.name.as_str() == OFFSET_COLUMN_NAME {
-                        None
-                    } else {
-                        let v = mysql_row.take::<String, _>(i);
-                        v.map(ScalarImpl::from)
-                    }
+                    handle_data_type!(mysql_row, i, name, String)
                 }
                 DataType::Date => {
-                    let v = mysql_row.take::<NaiveDate, _>(i);
-                    v.map(|v| ScalarImpl::from(Date::from(v)))
+                    handle_data_type!(mysql_row, i, name, NaiveDate, Date)
                 }
                 DataType::Time => {
-                    let v = mysql_row.take::<chrono::NaiveTime, _>(i);
-                    v.map(|v| ScalarImpl::from(Time::from(v)))
+                    handle_data_type!(mysql_row, i, name, chrono::NaiveTime, Time)
                 }
                 DataType::Timestamp => {
-                    let v = mysql_row.take::<chrono::NaiveDateTime, _>(i);
-                    v.map(|v| ScalarImpl::from(Timestamp::from(v)))
+                    handle_data_type!(mysql_row, i, name, chrono::NaiveDateTime, Timestamp)
                 }
                 DataType::Timestamptz => {
-                    let v = mysql_row.take::<chrono::NaiveDateTime, _>(i);
-                    v.map(|v| ScalarImpl::from(Timestamptz::from_micros(v.timestamp_micros())))
+                    let res = mysql_row
+                        .take_opt::<Option<chrono::NaiveDateTime>, _>(i)
+                        .unwrap_or(Ok(None));
+                    match res {
+                        Ok(val) => val.map(|v| {
+                            ScalarImpl::from(Timestamptz::from_micros(v.timestamp_micros()))
+                        }),
+                        Err(err) => {
+                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                tracing::error!(
+                                    suppressed_count,
+                                    column_name = name,
+                                    error = %err.as_report(),
+                                    "parse column failed",
+                                );
+                            }
+                            None
+                        }
+                    }
                 }
                 DataType::Bytea => {
-                    let v = mysql_row.take::<Vec<u8>, _>(i);
-                    v.map(|v| ScalarImpl::from(v.into_boxed_slice()))
+                    let res = mysql_row
+                        .take_opt::<Option<Vec<u8>>, _>(i)
+                        .unwrap_or(Ok(None));
+                    match res {
+                        Ok(val) => val.map(|v| ScalarImpl::from(v.into_boxed_slice())),
+                        Err(err) => {
+                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                tracing::error!(
+                                    suppressed_count,
+                                    column_name = name,
+                                    error = %err.as_report(),
+                                    "parse column failed",
+                                );
+                            }
+                            None
+                        }
+                    }
                 }
                 DataType::Jsonb => {
-                    let v = mysql_row.take::<serde_json::Value, _>(i);
-                    v.map(|v| ScalarImpl::from(JsonbVal::from(v)))
+                    handle_data_type!(mysql_row, i, name, serde_json::Value, JsonbVal)
                 }
                 DataType::Interval
                 | DataType::Struct(_)
@@ -93,14 +143,16 @@ pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Dat
                 | DataType::Int256
                 | DataType::Serial => {
                     // Interval, Struct, List, Int256 are not supported
-                    tracing::warn!(rw_field.name, ?rw_field.data_type, "unsupported data type, set to Null");
+                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                        tracing::warn!(column = rw_field.name, ?rw_field.data_type, suppressed_count, "unsupported data type, set to null");
+                    }
                     None
                 }
             }
         };
         datums.push(datum);
     }
-    datums
+    OwnedRow::new(datums)
 }
 
 #[cfg(test)]
@@ -110,11 +162,11 @@ mod tests {
     use mysql_async::prelude::*;
     use mysql_async::Row as MySqlRow;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::row::{OwnedRow, Row};
+    use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ToText};
     use tokio_stream::StreamExt;
 
-    use crate::parser::mysql_row_to_datums;
+    use crate::parser::mysql_row_to_owned_row;
 
     // manual test case
     #[ignore]
@@ -138,12 +190,13 @@ mod tests {
         let row_stream = s.map(|row| {
             // convert mysql row into OwnedRow
             let mut mysql_row = row.unwrap();
-            let datums = mysql_row_to_datums(&mut mysql_row, &t1schema);
-            Ok::<_, anyhow::Error>(Some(OwnedRow::new(datums)))
+            Ok::<_, anyhow::Error>(Some(mysql_row_to_owned_row(&mut mysql_row, &t1schema)))
         });
         pin_mut!(row_stream);
         while let Some(row) = row_stream.next().await {
-            if let Ok(ro) = row && ro.is_some() {
+            if let Ok(ro) = row
+                && ro.is_some()
+            {
                 let owned_row = ro.unwrap();
                 let d = owned_row.datum_at(2);
                 if let Some(scalar) = d {

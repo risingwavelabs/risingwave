@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,12 +21,13 @@ pub mod hdfs;
 pub use hdfs::*;
 
 pub mod webhdfs;
-pub use webhdfs::*;
+
 pub mod gcs;
-pub use gcs::*;
+
+pub mod obs;
+
 pub mod oss;
-pub use oss::*;
+
 pub mod azblob;
-pub use azblob::*;
+
 pub mod fs;
-pub use fs::*;

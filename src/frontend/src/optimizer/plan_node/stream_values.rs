@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,8 @@ use risingwave_pb::stream_plan::ValuesNode;
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, LogicalValues, PlanBase, StreamNode};
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::{Expr, ExprImpl, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -88,4 +89,29 @@ impl StreamNode for StreamValues {
     }
 }
 
-impl ExprRewritable for StreamValues {}
+impl ExprRewritable for StreamValues {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn crate::expr::ExprRewriter) -> crate::PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_values()
+                .unwrap()
+                .clone(),
+        )
+        .into()
+    }
+}
+
+impl ExprVisitable for StreamValues {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.logical
+            .rows()
+            .iter()
+            .flatten()
+            .for_each(|e| v.visit_expr(e));
+    }
+}

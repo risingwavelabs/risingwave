@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ public class DeserializerTest extends TestCase {
                 ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch.newBuilder()
                         .setJsonPayload(jsonPayload)
                         .build();
-        SinkRow outcome = deserializer.deserialize(writeBatch).next();
+        SinkRow outcome = deserializer.deserialize(writeBatch).iterator().next();
         assertEquals(outcome.get(0), 1);
         assertEquals(outcome.get(1), "John");
     }

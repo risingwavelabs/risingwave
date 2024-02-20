@@ -21,8 +21,10 @@ clap = { version = "4", features = ["derive"] }
 comfy-table = "7"
 etcd-client = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+hex = "0.4"
 inquire = "0.6.2"
-itertools = "0.11"
+itertools = "0.12"
+prost = { workspace = true }
 regex = "1.10.0"
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
@@ -38,6 +40,7 @@ serde = "1"
 serde_json = "1"
 serde_yaml = "0.9.25"
 size = "0.4"
+thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -53,5 +56,11 @@ uuid = { version = "1", features = ["v4"] }
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
+[dev-dependencies]
+risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
+
 [lints]
 workspace = true
+
+[lib]
+test = false

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,29 +15,26 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
-use risingwave_common::error::ErrorCode::ConnectorError;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::SpecificParserConfig;
 use risingwave_connector::source::monitor::SourceMetrics;
+use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
     ConnectorProperties, SourceColumnDesc, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_source::connector_source::ConnectorSource;
 
 use super::Executor;
-use crate::error::BatchError;
+use crate::error::{BatchError, Result};
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 use crate::task::BatchTaskContext;
 
 pub struct SourceExecutor {
-    connector_source: ConnectorSource,
+    source: SourceReader,
 
     // used to create reader
     column_ids: Vec<ColumnId>,
@@ -65,12 +62,12 @@ impl BoxedExecutorBuilder for SourceExecutor {
 
         // prepare connector source
         let source_props: HashMap<String, String> =
-            HashMap::from_iter(source_node.properties.clone());
-        let config = ConnectorProperties::extract(source_props)
-            .map_err(|e| RwError::from(ConnectorError(e.into())))?;
+            HashMap::from_iter(source_node.with_properties.clone());
+        let config =
+            ConnectorProperties::extract(source_props, false).map_err(BatchError::connector)?;
 
         let info = source_node.get_info().unwrap();
-        let parser_config = SpecificParserConfig::new(info, &source_node.properties)?;
+        let parser_config = SpecificParserConfig::new(info, &source_node.with_properties)?;
 
         let columns: Vec<_> = source_node
             .columns
@@ -78,7 +75,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
             .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
 
-        let connector_source = ConnectorSource {
+        let source_reader = SourceReader {
             config,
             columns,
             parser_config,
@@ -113,7 +110,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
         let schema = Schema::new(fields);
 
         Ok(Box::new(SourceExecutor {
-            connector_source,
+            source: source_reader,
             column_ids,
             metrics: source.context().source_metrics(),
             source_id: TableId::new(source_node.source_id),
@@ -140,7 +137,7 @@ impl Executor for SourceExecutor {
 }
 
 impl SourceExecutor {
-    #[try_stream(ok = DataChunk, error = RwError)]
+    #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let source_ctx = Arc::new(SourceContext::new(
             u32::MAX,
@@ -149,24 +146,20 @@ impl SourceExecutor {
             self.metrics,
             self.source_ctrl_opts.clone(),
             None,
+            ConnectorProperties::default(),
+            "NA".to_owned(), // FIXME: source name was not passed in batch plan
         ));
         let stream = self
-            .connector_source
-            .stream_reader(Some(vec![self.split]), self.column_ids, source_ctx)
+            .source
+            .to_stream(Some(vec![self.split]), self.column_ids, source_ctx)
             .await?;
 
         #[for_await]
         for chunk in stream {
-            match chunk {
-                Ok(chunk) => {
-                    let data_chunk = covert_stream_chunk_to_batch_chunk(chunk.chunk)?;
-                    if data_chunk.capacity() > 0 {
-                        yield data_chunk;
-                    }
-                }
-                Err(e) => {
-                    return Err(e);
-                }
+            let chunk = chunk.map_err(BatchError::connector)?;
+            let data_chunk = covert_stream_chunk_to_batch_chunk(chunk)?;
+            if data_chunk.capacity() > 0 {
+                yield data_chunk;
             }
         }
     }
@@ -177,9 +170,7 @@ fn covert_stream_chunk_to_batch_chunk(chunk: StreamChunk) -> Result<DataChunk> {
     assert!(chunk.data_chunk().is_compacted());
 
     if chunk.ops().iter().any(|op| *op != Op::Insert) {
-        return Err(RwError::from(BatchError::Internal(anyhow!(
-            "Only support insert op in batch source executor"
-        ))));
+        bail!("Only support insert op in batch source executor");
     }
 
     Ok(chunk.data_chunk().clone())

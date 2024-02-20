@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,13 +17,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
-use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{FileCache, HummockStorage, SstableStore};
+use risingwave_storage::hummock::{FileCache, HummockStorage, SstableStore, SstableStoreConfig};
 use risingwave_storage::monitor::{
-    CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
-    MonitoredStorageMetrics, ObjectStoreMetrics,
+    global_hummock_state_store_metrics, CompactorMetrics, HummockMetrics, HummockStateStoreMetrics,
+    MonitoredStateStore, MonitoredStorageMetrics, ObjectStoreMetrics,
 };
 use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::{StateStore, StateStoreImpl};
@@ -66,16 +67,15 @@ impl HummockServiceOpts {
             }
             Err(_) => {
                 const MESSAGE: &str = "env variable `RW_HUMMOCK_URL` not found.
+                    For `./risedev d` use cases, please do the following.
+                    * start the cluster with shared storage:
+                    - consider adding `use: minio` in the risedev config,
+                    - or directly use `./risedev d for-ctl` to start the cluster.
+                    * use `./risedev ctl` to use risectl.
 
-For `./risedev d` use cases, please do the following.
-* start the cluster with shared storage:
-  - consider adding `use: minio` in the risedev config,
-  - or directly use `./risedev d for-ctl` to start the cluster.
-* use `./risedev ctl` to use risectl.
-
-For `./risedev apply-compose-deploy` users,
-* `RW_HUMMOCK_URL` will be printed out when deploying. Please copy the bash exports to your console.
-";
+                    For `./risedev apply-compose-deploy` users,
+                    * `RW_HUMMOCK_URL` will be printed out when deploying. Please copy the bash exports to your console.
+                ";
                 bail!(MESSAGE);
             }
         };
@@ -152,24 +152,30 @@ For `./risedev apply-compose-deploy` users,
     }
 
     pub async fn create_sstable_store(&self) -> Result<Arc<SstableStore>> {
-        let object_store = parse_remote_object_store(
+        let object_store = build_remote_object_store(
             self.hummock_url.strip_prefix("hummock+").unwrap(),
             Arc::new(ObjectStoreMetrics::unused()),
             "Hummock",
+            ObjectStoreConfig::default(),
         )
         .await;
 
         let opts = self.get_storage_opts();
 
-        Ok(Arc::new(SstableStore::new(
-            Arc::new(object_store),
-            opts.data_directory,
-            opts.block_cache_capacity_mb * (1 << 20),
-            opts.meta_cache_capacity_mb * (1 << 20),
-            0,
-            FileCache::none(),
-            FileCache::none(),
-            None,
-        )))
+        Ok(Arc::new(SstableStore::new(SstableStoreConfig {
+            store: Arc::new(object_store),
+            path: opts.data_directory,
+            block_cache_capacity: opts.block_cache_capacity_mb * (1 << 20),
+            meta_cache_capacity: opts.meta_cache_capacity_mb * (1 << 20),
+            high_priority_ratio: 0,
+            prefetch_buffer_capacity: opts.block_cache_capacity_mb * (1 << 20),
+            max_prefetch_block_number: opts.max_prefetch_block_number,
+            data_file_cache: FileCache::none(),
+            meta_file_cache: FileCache::none(),
+            recent_filter: None,
+            state_store_metrics: Arc::new(global_hummock_state_store_metrics(
+                MetricLevel::Disabled,
+            )),
+        })))
     }
 }

@@ -68,6 +68,22 @@ create table products ( id INT,
  server.id = '5085'
 );
 
+# empty table name
+statement error
+create table products ( id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'my@db',
+ server.id = '5085'
+);
+
 # invalid primary key
 statement error
 create table orders (

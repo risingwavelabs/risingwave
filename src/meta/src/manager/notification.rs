@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,12 +23,15 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{
     MetaSnapshot, Relation, RelationGroup, SubscribeResponse, SubscribeType,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::Mutex;
 use tonic::Status;
 
+use crate::controller::SqlMetaStore;
 use crate::manager::cluster::WorkerKey;
-use crate::model::{FragmentId, NotificationVersion as Version};
+use crate::manager::notification_version::NotificationVersionGenerator;
+use crate::model::FragmentId;
 use crate::storage::MetaStoreRef;
 
 pub type MessageStatus = Status;
@@ -76,17 +79,22 @@ pub struct NotificationManager {
     core: Arc<Mutex<NotificationManagerCore>>,
     /// Sender used to add a notification into the waiting queue.
     task_tx: UnboundedSender<Task>,
-    /// The current notification version.
-    current_version: Mutex<Version>,
-    meta_store: MetaStoreRef,
+    /// The current notification version generator.
+    version_generator: Mutex<NotificationVersionGenerator>,
 }
 
 impl NotificationManager {
-    pub async fn new(meta_store: MetaStoreRef) -> Self {
+    pub async fn new(
+        meta_store: Option<MetaStoreRef>,
+        meta_store_sql: Option<SqlMetaStore>,
+    ) -> Self {
         // notification waiting queue.
         let (task_tx, mut task_rx) = mpsc::unbounded_channel::<Task>();
         let core = Arc::new(Mutex::new(NotificationManagerCore::new()));
         let core_clone = core.clone();
+        let version_generator = NotificationVersionGenerator::new(meta_store, meta_store_sql)
+            .await
+            .unwrap();
 
         tokio::spawn(async move {
             while let Some(task) = task_rx.recv().await {
@@ -104,8 +112,7 @@ impl NotificationManager {
         Self {
             core: core_clone,
             task_tx,
-            current_version: Mutex::new(Version::new(&meta_store).await),
-            meta_store,
+            version_generator: Mutex::new(version_generator),
         }
     }
 
@@ -139,9 +146,9 @@ impl NotificationManager {
         operation: Operation,
         info: Info,
     ) -> NotificationVersion {
-        let mut version_guard = self.current_version.lock().await;
-        version_guard.increase_version(&self.meta_store).await;
-        let version = version_guard.version();
+        let mut version_guard = self.version_generator.lock().await;
+        version_guard.increase_version().await;
+        let version = version_guard.current_version();
         self.notify(target, operation, info, Some(version));
         version
     }
@@ -251,6 +258,10 @@ impl NotificationManager {
         self.notify_without_version(SubscribeType::Hummock.into(), operation, info)
     }
 
+    pub fn notify_compactor_without_version(&self, operation: Operation, info: Info) {
+        self.notify_without_version(SubscribeType::Compactor.into(), operation, info)
+    }
+
     #[cfg(any(test, feature = "test"))]
     pub fn notify_hummock_with_version(
         &self,
@@ -265,7 +276,7 @@ impl NotificationManager {
         let mut core_guard = self.core.lock().await;
         core_guard.local_senders.retain(|sender| {
             if let Err(err) = sender.send(notification.clone()) {
-                tracing::warn!("Failed to notify local subscriber. {}", err);
+                tracing::warn!(error = %err.as_report(), "Failed to notify local subscriber");
                 return false;
             }
             true
@@ -319,8 +330,8 @@ impl NotificationManager {
     }
 
     pub async fn current_version(&self) -> NotificationVersion {
-        let version_guard = self.current_version.lock().await;
-        version_guard.version()
+        let version_guard = self.version_generator.lock().await;
+        version_guard.current_version()
     }
 }
 
@@ -410,7 +421,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_subscribers_one_worker() {
-        let mgr = NotificationManager::new(MemStore::new().into_ref()).await;
+        let mgr = NotificationManager::new(Some(MemStore::new().into_ref()), None).await;
         let worker_key1 = WorkerKey(HostAddress {
             host: "a".to_string(),
             port: 1,

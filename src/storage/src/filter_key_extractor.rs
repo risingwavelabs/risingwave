@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,8 +25,9 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::info_in_release;
 use risingwave_hummock_sdk::key::{get_table_id, TABLE_PREFIX_LEN};
 use risingwave_pb::catalog::Table;
-use risingwave_rpc_client::error::{anyhow, Result as RpcResult, RpcError};
+use risingwave_rpc_client::error::{Result as RpcResult, RpcError};
 use risingwave_rpc_client::MetaClient;
+use thiserror_ext::AsReport;
 
 use crate::hummock::{HummockError, HummockResult};
 
@@ -253,7 +254,7 @@ impl StateTableAccessor for RemoteTableAccessor {
 #[async_trait::async_trait]
 impl StateTableAccessor for FakeRemoteTableAccessor {
     async fn get_tables(&self, _table_ids: &[u32]) -> RpcResult<HashMap<u32, Table>> {
-        Err(RpcError::Internal(anyhow!(
+        Err(RpcError::Internal(anyhow::anyhow!(
             "fake accessor does not support fetch remote table"
         )))
     }
@@ -315,8 +316,8 @@ impl FilterKeyExtractorManagerInner {
                     .await
                     .map_err(|e| {
                         HummockError::other(format!(
-                            "request rpc list_tables for meta failed because {:?}",
-                            e
+                            "request rpc list_tables for meta failed: {}",
+                            e.as_report()
                         ))
                     })?;
             let mut guard = self.table_id_to_filter_key_extractor.write();
@@ -432,14 +433,13 @@ pub type FilterKeyExtractorManagerRef = Arc<RpcFilterKeyExtractorManager>;
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
     use std::mem;
     use std::sync::Arc;
 
     use bytes::{BufMut, BytesMut};
     use itertools::Itertools;
     use risingwave_common::catalog::ColumnDesc;
-    use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::DataType;
@@ -530,10 +530,7 @@ mod tests {
             optional_associated_source_id: None,
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            properties: HashMap::from([(
-                String::from(PROPERTIES_RETENTION_SECOND_KEY),
-                String::from("300"),
-            )]),
+            retention_seconds: Some(300),
             fragment_id: 0,
             dml_fragment_id: None,
             initialized_at_epoch: None,
@@ -552,6 +549,9 @@ mod tests {
             stream_job_status: PbStreamJobStatus::Created.into(),
             create_type: PbCreateType::Foreground.into(),
             description: None,
+            incoming_sinks: vec![],
+            initialized_at_cluster_version: None,
+            created_at_cluster_version: None,
         }
     }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,12 +13,14 @@
 // limitations under the License.
 
 mod join_entry_state;
+mod join_row_set;
 
 use std::alloc::Global;
 use std::ops::{Bound, Deref, DerefMut};
 use std::sync::Arc;
 
-use futures::future::try_join;
+use anyhow::Context;
+use futures::future::{join, try_join};
 use futures::StreamExt;
 use futures_async_stream::for_await;
 pub(super) use join_entry_state::JoinEntryState;
@@ -26,6 +28,7 @@ use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row;
 use risingwave_common::row::{CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -157,73 +160,74 @@ type JoinHashMapInner<K> =
     ManagedLruCache<K, HashValueWrapper, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
 
 pub struct JoinHashMapMetrics {
-    /// Metrics used by join executor
-    metrics: Arc<StreamingMetrics>,
     /// Basic information
-    actor_id: String,
-    fragment_id: String,
-    join_table_id: String,
-    degree_table_id: String,
-    side: &'static str,
     /// How many times have we hit the cache of join executor
     lookup_miss_count: usize,
     total_lookup_count: usize,
     /// How many times have we miss the cache when insert row
     insert_cache_miss_count: usize,
+
+    // Metrics
+    join_lookup_total_count_metric: LabelGuardedIntCounter<5>,
+    join_lookup_miss_count_metric: LabelGuardedIntCounter<5>,
+    join_insert_cache_miss_count_metrics: LabelGuardedIntCounter<5>,
 }
 
 impl JoinHashMapMetrics {
     pub fn new(
-        metrics: Arc<StreamingMetrics>,
+        metrics: &StreamingMetrics,
         actor_id: ActorId,
         fragment_id: FragmentId,
         side: &'static str,
         join_table_id: u32,
         degree_table_id: u32,
     ) -> Self {
+        let actor_id = actor_id.to_string();
+        let fragment_id = fragment_id.to_string();
+        let join_table_id = join_table_id.to_string();
+        let degree_table_id = degree_table_id.to_string();
+        let join_lookup_total_count_metric =
+            metrics.join_lookup_total_count.with_guarded_label_values(&[
+                (side),
+                &join_table_id,
+                &degree_table_id,
+                &actor_id,
+                &fragment_id,
+            ]);
+        let join_lookup_miss_count_metric =
+            metrics.join_lookup_miss_count.with_guarded_label_values(&[
+                (side),
+                &join_table_id,
+                &degree_table_id,
+                &actor_id,
+                &fragment_id,
+            ]);
+        let join_insert_cache_miss_count_metrics = metrics
+            .join_insert_cache_miss_count
+            .with_guarded_label_values(&[
+                (side),
+                &join_table_id,
+                &degree_table_id,
+                &actor_id,
+                &fragment_id,
+            ]);
+
         Self {
-            metrics,
-            actor_id: actor_id.to_string(),
-            fragment_id: fragment_id.to_string(),
-            join_table_id: join_table_id.to_string(),
-            degree_table_id: degree_table_id.to_string(),
-            side,
             lookup_miss_count: 0,
             total_lookup_count: 0,
             insert_cache_miss_count: 0,
+            join_lookup_total_count_metric,
+            join_lookup_miss_count_metric,
+            join_insert_cache_miss_count_metrics,
         }
     }
 
     pub fn flush(&mut self) {
-        self.metrics
-            .join_lookup_total_count
-            .with_label_values(&[
-                (self.side),
-                &self.join_table_id,
-                &self.degree_table_id,
-                &self.actor_id,
-                &self.fragment_id,
-            ])
+        self.join_lookup_total_count_metric
             .inc_by(self.total_lookup_count as u64);
-        self.metrics
-            .join_lookup_miss_count
-            .with_label_values(&[
-                (self.side),
-                &self.join_table_id,
-                &self.degree_table_id,
-                &self.actor_id,
-                &self.fragment_id,
-            ])
+        self.join_lookup_miss_count_metric
             .inc_by(self.lookup_miss_count as u64);
-        self.metrics
-            .join_insert_cache_miss_count
-            .with_label_values(&[
-                (self.side),
-                &self.join_table_id,
-                &self.degree_table_id,
-                &self.actor_id,
-                &self.fragment_id,
-            ])
+        self.join_insert_cache_miss_count_metrics
             .inc_by(self.insert_cache_miss_count as u64);
         self.total_lookup_count = 0;
         self.lookup_miss_count = 0;
@@ -264,7 +268,10 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
 }
 
 struct TableInner<S: StateStore> {
+    /// Indices of the (cache) pk in a state row
     pk_indices: Vec<usize>,
+    /// Indices of the join key in a state row
+    join_key_indices: Vec<usize>,
     // This should be identical to the pk in state table.
     order_key_indices: Vec<usize>,
     // This should be identical to the data types in table schema.
@@ -273,15 +280,31 @@ struct TableInner<S: StateStore> {
     pub(crate) table: StateTable<S>,
 }
 
+impl<S: StateStore> TableInner<S> {
+    fn error_context(&self, row: &impl Row) -> String {
+        let pk = row.project(&self.pk_indices);
+        let jk = row.project(&self.join_key_indices);
+        format!(
+            "join key: {}, pk: {}, row: {}, state_table_id: {}",
+            jk.display(),
+            pk.display(),
+            row.display(),
+            self.table.table_id()
+        )
+    }
+}
+
 impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Create a [`JoinHashMap`] with the given LRU capacity.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         watermark_epoch: AtomicU64Ref,
         join_key_data_types: Vec<DataType>,
+        state_join_key_indices: Vec<usize>,
         state_all_data_types: Vec<DataType>,
         state_table: StateTable<S>,
         state_pk_indices: Vec<usize>,
+        degree_join_key_indices: Vec<usize>,
         degree_all_data_types: Vec<DataType>,
         degree_table: StateTable<S>,
         degree_pk_indices: Vec<usize>,
@@ -308,6 +331,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let degree_table_id = degree_table.table_id();
         let state = TableInner {
             pk_indices: state_pk_indices,
+            join_key_indices: state_join_key_indices,
             order_key_indices: state_table.pk_indices().to_vec(),
             all_data_types: state_all_data_types,
             table: state_table,
@@ -315,6 +339,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
         let degree_state = TableInner {
             pk_indices: degree_pk_indices,
+            join_key_indices: degree_join_key_indices,
             order_key_indices: degree_table.pk_indices().to_vec(),
             all_data_types: degree_all_data_types,
             table: degree_table,
@@ -340,7 +365,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             need_degree_table,
             pk_contained_in_jk,
             metrics: JoinHashMapMetrics::new(
-                metrics,
+                &metrics,
                 actor_id,
                 fragment_id,
                 side,
@@ -412,22 +437,33 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         if self.need_degree_table {
             let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
                 &(Bound::Unbounded, Bound::Unbounded);
-            let table_iter_fut = self.state.table.iter_with_prefix(
-                &key,
-                sub_range,
-                PrefetchOptions::new_for_exhaust_iter(),
-            );
+            let table_iter_fut =
+                self.state
+                    .table
+                    .iter_with_prefix(&key, sub_range, PrefetchOptions::default());
             let degree_table_iter_fut = self.degree_state.table.iter_with_prefix(
                 &key,
                 sub_range,
-                PrefetchOptions::new_for_exhaust_iter(),
+                PrefetchOptions::default(),
             );
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
 
-            #[for_await]
-            for (row, degree) in table_iter.zip(degree_table_iter) {
+            let mut pinned_table_iter = std::pin::pin!(table_iter);
+            let mut pinned_degree_table_iter = std::pin::pin!(degree_table_iter);
+            loop {
+                // Iterate on both iterators and ensure they have same size. Basically `zip_eq()`.
+                let (row, degree) =
+                    join(pinned_table_iter.next(), pinned_degree_table_iter.next()).await;
+                let (row, degree) = match (row, degree) {
+                    (None, None) => break,
+                    (None, Some(_)) | (Some(_), None) => {
+                        panic!("mismatched row and degree table of join key: {:?}", &key)
+                    }
+                    (Some(r), Some(d)) => (r, d),
+                };
+
                 let row = row?;
                 let degree_row = degree?;
                 let pk1 = row.key();
@@ -443,10 +479,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                 let degree_i64 = degree_row
                     .datum_at(degree_row.len() - 1)
                     .expect("degree should not be NULL");
-                entry_state.insert(
-                    pk,
-                    JoinRow::new(row.into_owned_row(), degree_i64.into_int64() as u64).encode(),
-                );
+                entry_state
+                    .insert(
+                        pk,
+                        JoinRow::new(row.row(), degree_i64.into_int64() as u64).encode(),
+                    )
+                    .with_context(|| self.state.error_context(row.row()))?;
             }
         } else {
             let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
@@ -454,7 +492,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             let table_iter = self
                 .state
                 .table
-                .iter_with_prefix(&key, sub_range, PrefetchOptions::new_for_exhaust_iter())
+                .iter_with_prefix(&key, sub_range, PrefetchOptions::default())
                 .await?;
 
             #[for_await]
@@ -464,7 +502,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                     .as_ref()
                     .project(&self.state.pk_indices)
                     .memcmp_serialize(&self.pk_serializer);
-                entry_state.insert(pk, JoinRow::new(row.into_owned_row(), 0).encode());
+                entry_state
+                    .insert(pk, JoinRow::new(row.row(), 0).encode())
+                    .with_context(|| self.state.error_context(row.row()))?;
             }
         };
 
@@ -475,6 +515,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.metrics.flush();
         self.state.table.commit(epoch).await?;
         self.degree_state.table.commit(epoch).await?;
+        Ok(())
+    }
+
+    pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
+        self.state.table.try_flush().await?;
+        self.degree_state.table.try_flush().await?;
         Ok(())
     }
 
@@ -490,12 +536,16 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         if self.inner.contains(key) {
             // Update cache
             let mut entry = self.inner.get_mut(key).unwrap();
-            entry.insert(pk, value.encode());
+            entry
+                .insert(pk, value.encode())
+                .with_context(|| self.state.error_context(&value.row))?;
         } else if self.pk_contained_in_jk {
             // Refill cache when the join key exist in neither cache or storage.
             self.metrics.insert_cache_miss_count += 1;
             let mut state = JoinEntryState::default();
-            state.insert(pk, value.encode());
+            state
+                .insert(pk, value.encode())
+                .with_context(|| self.state.error_context(&value.row))?;
             self.update_state(key, state.into());
         }
 
@@ -520,12 +570,16 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         if self.inner.contains(key) {
             // Update cache
             let mut entry = self.inner.get_mut(key).unwrap();
-            entry.insert(pk, join_row.encode());
+            entry
+                .insert(pk, join_row.encode())
+                .with_context(|| self.state.error_context(&value))?;
         } else if self.pk_contained_in_jk {
             // Refill cache when the join key exist in neither cache or storage.
             self.metrics.insert_cache_miss_count += 1;
             let mut state = JoinEntryState::default();
-            state.insert(pk, join_row.encode());
+            state
+                .insert(pk, join_row.encode())
+                .with_context(|| self.state.error_context(&value))?;
             self.update_state(key, state.into());
         }
 
@@ -535,32 +589,38 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Delete a join row
-    pub fn delete(&mut self, key: &K, value: JoinRow<impl Row>) {
+    pub fn delete(&mut self, key: &K, value: JoinRow<impl Row>) -> StreamExecutorResult<()> {
         if let Some(mut entry) = self.inner.get_mut(key) {
             let pk = (&value.row)
                 .project(&self.state.pk_indices)
                 .memcmp_serialize(&self.pk_serializer);
-            entry.remove(pk);
+            entry
+                .remove(pk)
+                .with_context(|| self.state.error_context(&value.row))?;
         }
 
         // If no cache maintained, only update the state table.
         let (row, degree) = value.to_table_rows(&self.state.order_key_indices);
         self.state.table.delete(row);
         self.degree_state.table.delete(degree);
+        Ok(())
     }
 
     /// Delete a row
     /// Used when the side does not need to update degree.
-    pub fn delete_row(&mut self, key: &K, value: impl Row) {
+    pub fn delete_row(&mut self, key: &K, value: impl Row) -> StreamExecutorResult<()> {
         if let Some(mut entry) = self.inner.get_mut(key) {
             let pk = (&value)
                 .project(&self.state.pk_indices)
                 .memcmp_serialize(&self.pk_serializer);
-            entry.remove(pk);
+            entry
+                .remove(pk)
+                .with_context(|| self.state.error_context(&value))?;
         }
 
         // If no cache maintained, only update the state table.
         self.state.table.delete(value);
+        Ok(())
     }
 
     /// Update a [`JoinEntryState`] into the hash table.

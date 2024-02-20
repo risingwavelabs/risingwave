@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -56,7 +56,7 @@ where
             .batch_iter(
                 HummockReadEpoch::Committed(epoch),
                 false,
-                PrefetchOptions::new_for_exhaust_iter(),
+                PrefetchOptions::prefetch_for_large_range_scan(),
             )
             .await?;
         pin_mut!(iter);

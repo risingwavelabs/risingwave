@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ use crate::executor::UnionExecutor;
 
 pub struct UnionExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for UnionExecutorBuilder {
     type Node = UnionNode;
 
@@ -27,8 +26,7 @@ impl ExecutorBuilder for UnionExecutorBuilder {
         params: ExecutorParams,
         _node: &Self::Node,
         _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        Ok(UnionExecutor::new(params.pk_indices, params.input).boxed())
+        Ok(UnionExecutor::new(params.info, params.input).boxed())
     }
 }

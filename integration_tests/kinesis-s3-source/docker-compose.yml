@@ -1,30 +1,18 @@
 ---
 version: "3"
 services:
-  compactor-0:
+  risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml
-      service: compactor-0
-  compute-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: compute-node-0
+      service: risingwave-standalone
   etcd-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: etcd-0
-  frontend-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: frontend-node-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: grafana-0
-  meta-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: meta-node-0
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -35,7 +23,7 @@ services:
       service: prometheus-0
   localstack:
     container_name: localstack
-    image: localstack/localstack:2.2
+    image: localstack/localstack:3.0
     networks:
       default:
         aliases:
@@ -55,12 +43,12 @@ services:
         export AWS_DEFAULT_REGION="us-east-1"
         aws --endpoint-url=http://localstack:4566 kinesis create-stream --stream-name ad-impression
         aws --endpoint-url=http://localstack:4566 s3api create-bucket --bucket ad-click
-        /datagen --mode ad-ctr --topic ad_impression --qps 10 kinesis --region us-east-1 --name ad-impression --endpoint http://localstack:4566 &
-        /datagen --mode ad-ctr --topic ad_click --qps 10 s3 --region us-east-1 --bucket ad-click --endpoint http://localstack:4566
+        /datagen --mode ad-ctr --topic ad_impression --qps 100 kinesis --region us-east-1 --name ad-impression --endpoint http://localstack:4566 &
+        /datagen --mode ad-ctr --topic ad_click --qps 100 s3 --region us-east-1 --bucket ad-click --endpoint http://localstack:4566
     restart: always
     container_name: datagen
 volumes:
-  compute-node-0:
+  risingwave-standalone:
     external: false
   etcd-0:
     external: false

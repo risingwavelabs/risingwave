@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,33 +13,31 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::mem;
 
 use either::Either;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
-use risingwave_source::dml_manager::DmlManagerRef;
+use risingwave_dml::dml_manager::DmlManagerRef;
 
 use super::error::StreamExecutorError;
 use super::{
-    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, Message, Mutation,
-    PkIndices, PkIndicesRef,
+    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
+    Mutation, PkIndicesRef,
 };
+use crate::common::StreamChunkBuilder;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
 /// [`DmlExecutor`] accepts both stream data and batch data for data manipulation on a specific
 /// table. The two streams will be merged into one and then sent to downstream.
 pub struct DmlExecutor {
+    info: ExecutorInfo,
+
     upstream: BoxedExecutor,
-
-    schema: Schema,
-
-    pk_indices: PkIndices,
-
-    identity: String,
 
     /// Stores the information of batch data channels.
     dml_manager: DmlManagerRef,
@@ -52,6 +50,8 @@ pub struct DmlExecutor {
 
     // Column descriptions of the table.
     column_descs: Vec<ColumnDesc>,
+
+    chunk_size: usize,
 }
 
 /// If a transaction's data is less than `MAX_CHUNK_FOR_ATOMICITY` * `CHUNK_SIZE`, we can provide
@@ -73,24 +73,22 @@ struct TxnBuffer {
 impl DmlExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        info: ExecutorInfo,
         upstream: BoxedExecutor,
-        schema: Schema,
-        pk_indices: PkIndices,
-        executor_id: u64,
         dml_manager: DmlManagerRef,
         table_id: TableId,
         table_version_id: TableVersionId,
         column_descs: Vec<ColumnDesc>,
+        chunk_size: usize,
     ) -> Self {
         Self {
+            info,
             upstream,
-            schema,
-            pk_indices,
-            identity: format!("DmlExecutor {:X}", executor_id),
             dml_manager,
             table_id,
             table_version_id,
             column_descs,
+            chunk_size,
         }
     }
 
@@ -108,16 +106,21 @@ impl DmlExecutor {
         // Note(bugen): Only register after the first barrier message is received, which means the
         // current executor is activated. This avoids the new reader overwriting the old one during
         // the preparation of schema change.
-        let batch_reader = self
-            .dml_manager
-            .register_reader(self.table_id, self.table_version_id, &self.column_descs)
-            .map_err(StreamExecutorError::connector_error)?;
-        let batch_reader = batch_reader.stream_reader().into_stream();
+        let handle = self.dml_manager.register_reader(
+            self.table_id,
+            self.table_version_id,
+            &self.column_descs,
+        )?;
+        let reader = handle
+            .stream_reader()
+            .into_stream()
+            .map_err(StreamExecutorError::from)
+            .boxed();
 
         // Merge the two streams using `StreamReaderWithPause` because when we receive a pause
         // barrier, we should stop receiving the data from DML. We poll data from the two streams in
         // a round robin way.
-        let mut stream = StreamReaderWithPause::<false, TxnMsg>::new(upstream, batch_reader);
+        let mut stream = StreamReaderWithPause::<false, TxnMsg>::new(upstream, reader);
 
         // If the first barrier requires us to pause on startup, pause the stream.
         if barrier.is_pause_on_startup() {
@@ -128,6 +131,16 @@ impl DmlExecutor {
 
         // Active transactions: txn_id -> TxnBuffer with transaction chunks.
         let mut active_txn_map: BTreeMap<TxnId, TxnBuffer> = Default::default();
+        // A batch group of small chunks.
+        let mut batch_group: Vec<StreamChunk> = vec![];
+
+        let mut builder = StreamChunkBuilder::new(
+            self.chunk_size,
+            self.column_descs
+                .iter()
+                .map(|c| c.data_type.clone())
+                .collect(),
+        );
 
         while let Some(input_msg) = stream.next().await {
             match input_msg? {
@@ -141,6 +154,21 @@ impl DmlExecutor {
                                 Mutation::Pause => stream.pause_stream(),
                                 Mutation::Resume => stream.resume_stream(),
                                 _ => {}
+                            }
+                        }
+
+                        // Flush the remaining batch group
+                        if !batch_group.is_empty() {
+                            let vec = mem::take(&mut batch_group);
+                            for chunk in vec {
+                                for (op, row) in chunk.rows() {
+                                    if let Some(chunk) = builder.append_row(op, row) {
+                                        yield Message::Chunk(chunk);
+                                    }
+                                }
+                            }
+                            if let Some(chunk) = builder.take() {
+                                yield Message::Chunk(chunk);
                             }
                         }
                     }
@@ -159,8 +187,58 @@ impl DmlExecutor {
                         TxnMsg::End(txn_id) => {
                             let mut txn_buffer = active_txn_map.remove(&txn_id)
                                 .unwrap_or_else(|| panic!("Receive an unexpected transaction end message. Active transaction map doesn't contain this transaction txn_id = {}.", txn_id));
-                            for chunk in txn_buffer.vec.drain(..) {
-                                yield Message::Chunk(chunk);
+
+                            let txn_buffer_cardinality = txn_buffer
+                                .vec
+                                .iter()
+                                .map(|c| c.cardinality())
+                                .sum::<usize>();
+                            let batch_group_cardinality =
+                                batch_group.iter().map(|c| c.cardinality()).sum::<usize>();
+
+                            if txn_buffer_cardinality >= self.chunk_size {
+                                // txn buffer is too large, so yield batch group first to preserve the transaction order in the same session.
+                                if !batch_group.is_empty() {
+                                    let vec = mem::take(&mut batch_group);
+                                    for chunk in vec {
+                                        for (op, row) in chunk.rows() {
+                                            if let Some(chunk) = builder.append_row(op, row) {
+                                                yield Message::Chunk(chunk);
+                                            }
+                                        }
+                                    }
+                                    if let Some(chunk) = builder.take() {
+                                        yield Message::Chunk(chunk);
+                                    }
+                                }
+
+                                // txn buffer isn't small, so yield.
+                                for chunk in txn_buffer.vec {
+                                    yield Message::Chunk(chunk);
+                                }
+                            } else if txn_buffer_cardinality + batch_group_cardinality
+                                <= self.chunk_size
+                            {
+                                // txn buffer is small and batch group has space.
+                                batch_group.extend(txn_buffer.vec);
+                            } else {
+                                // txn buffer is small and batch group has no space, so yield the batch group first to preserve the transaction order in the same session.
+                                if !batch_group.is_empty() {
+                                    let vec = mem::take(&mut batch_group);
+                                    for chunk in vec {
+                                        for (op, row) in chunk.rows() {
+                                            if let Some(chunk) = builder.append_row(op, row) {
+                                                yield Message::Chunk(chunk);
+                                            }
+                                        }
+                                    }
+                                    if let Some(chunk) = builder.take() {
+                                        yield Message::Chunk(chunk);
+                                    }
+                                }
+
+                                // put txn buffer into the batch group
+                                mem::swap(&mut txn_buffer.vec, &mut batch_group);
                             }
                         }
                         TxnMsg::Rollback(txn_id) => {
@@ -205,15 +283,15 @@ impl Executor for DmlExecutor {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        &self.identity
+        &self.info.identity
     }
 }
 
@@ -226,12 +304,13 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::transaction::transaction_id::TxnId;
     use risingwave_common::types::DataType;
-    use risingwave_source::dml_manager::DmlManager;
+    use risingwave_dml::dml_manager::DmlManager;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
 
     const TEST_TRANSACTION_ID: TxnId = 0;
+    const TEST_SESSION_ID: u32 = 0;
 
     #[tokio::test]
     async fn test_dml_executor() {
@@ -248,16 +327,20 @@ mod tests {
         let dml_manager = Arc::new(DmlManager::for_test());
 
         let (mut tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
-
-        let dml_executor = Box::new(DmlExecutor::new(
-            Box::new(source),
+        let info = ExecutorInfo {
             schema,
             pk_indices,
-            1,
+            identity: "DmlExecutor".to_string(),
+        };
+
+        let dml_executor = Box::new(DmlExecutor::new(
+            info,
+            Box::new(source),
             dml_manager.clone(),
             table_id,
             INITIAL_TABLE_VERSION_ID,
             column_descs,
+            1024,
         ));
         let mut dml_executor = dml_executor.execute();
 
@@ -286,7 +369,8 @@ mod tests {
 
         // The first barrier
         tx.push_barrier(1, false);
-        dml_executor.next().await.unwrap().unwrap();
+        let msg = dml_executor.next().await.unwrap().unwrap();
+        assert!(matches!(msg, Message::Barrier(_)));
 
         // Messages from upstream streaming executor
         tx.push_chunk(stream_chunk1);
@@ -296,7 +380,9 @@ mod tests {
         let table_dml_handle = dml_manager
             .table_dml_handle(table_id, INITIAL_TABLE_VERSION_ID)
             .unwrap();
-        let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        let mut write_handle = table_dml_handle
+            .write_handle(TEST_SESSION_ID, TEST_TRANSACTION_ID)
+            .unwrap();
 
         // Message from batch
         write_handle.begin().unwrap();
@@ -305,6 +391,8 @@ mod tests {
         // we need to spawn a task here to avoid dead lock.
         tokio::spawn(async move {
             write_handle.end().await.unwrap();
+            // a barrier to trigger batch group flush
+            tx.push_barrier(2, false);
         });
 
         // Consume the 1st message from upstream executor
@@ -359,5 +447,8 @@ mod tests {
                 U+ 2 22",
             )
         );
+
+        let msg = dml_executor.next().await.unwrap().unwrap();
+        assert!(matches!(msg, Message::Barrier(_)));
     }
 }

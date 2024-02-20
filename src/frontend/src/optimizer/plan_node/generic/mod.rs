@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,6 +42,12 @@ mod source;
 pub use source::*;
 mod scan;
 pub use scan::*;
+mod sys_scan;
+pub use sys_scan::*;
+
+mod cdc_scan;
+pub use cdc_scan::*;
+
 mod union;
 pub use union::*;
 mod top_n;
@@ -64,6 +70,8 @@ mod insert;
 pub use insert::*;
 mod limit;
 pub use limit::*;
+mod max_one_row;
+pub use max_one_row::*;
 
 pub trait DistillUnit {
     fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> XmlNode<'a>;

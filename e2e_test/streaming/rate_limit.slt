@@ -1,15 +1,19 @@
 statement ok
+set streaming_parallelism = 2;
+
+statement ok
 CREATE TABLE t1(v1 int, v2 int);
 
 statement ok
-SET STREAMING_RATE_LIMIT TO 10000;
+SET STREAMING_RATE_LIMIT TO 2000;
 
 statement ok
 CREATE MATERIALIZED VIEW m AS SELECT * FROM t1;
 
-# Should take around 5s due to rate limit.
+# Throughput on source is limited to 2000 * 2 (parallelism)
+# Should take around 3s due to rate limit
 statement ok
-INSERT INTO t1 select * from generate_series(1,50000);
+INSERT INTO t1 select * from generate_series(1,10000);
 
 statement ok
 FLUSH;
@@ -17,7 +21,34 @@ FLUSH;
 query I
 select count(*) from m;
 ----
-50000
+10000
+
+statement ok
+DROP MATERIALIZED VIEW m;
+
+statement ok
+delete from t1;
+
+# Test with small rate_limit. In this case, the stream chunk needs to be split
+
+statement ok
+SET STREAMING_RATE_LIMIT TO 1;
+
+statement ok
+CREATE MATERIALIZED VIEW m AS SELECT * FROM t1;
+
+# Throughput on source is limited to 1 * 2 (parallelism)
+# Should take around 3s due to rate limit
+statement ok
+INSERT INTO t1 select * from generate_series(1,5);
+
+statement ok
+FLUSH;
+
+query I
+select count(*) from m;
+----
+5
 
 statement ok
 DROP MATERIALIZED VIEW m;

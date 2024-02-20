@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,90 +18,142 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::error::Result;
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
 use super::RwPgResponse;
 use crate::binder::{Binder, Relation};
 use crate::catalog::CatalogError;
+use crate::error::Result;
 use crate::handler::util::col_descs_to_rows;
 use crate::handler::HandlerArgs;
 
-pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Result<RwPgResponse> {
+pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let mut binder = Binder::new_for_system(&session);
-    let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
-    // For Source, it doesn't have table catalog so use get source to get column descs.
+    let not_found_err =
+        CatalogError::NotFound("table, source, sink or view", object_name.to_string());
 
     // Vec<ColumnCatalog>, Vec<ColumnDesc>, Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>, String, Option<String>
-    let (columns, pk_columns, dist_columns, indices, relname, description) = match relation {
-        Relation::Source(s) => {
-            let pk_column_catalogs = s
-                .catalog
-                .pk_col_ids
-                .iter()
-                .map(|&column_id| {
-                    s.catalog
-                        .columns
+    let (columns, pk_columns, dist_columns, indices, relname, description) =
+        if let Ok(relation) = binder.bind_relation_by_name(object_name.clone(), None, false) {
+            match relation {
+                Relation::Source(s) => {
+                    let pk_column_catalogs = s
+                        .catalog
+                        .pk_col_ids
                         .iter()
-                        .filter(|x| x.column_id() == column_id)
-                        .map(|x| x.column_desc.clone())
-                        .exactly_one()
-                        .unwrap()
-                })
+                        .map(|&column_id| {
+                            s.catalog
+                                .columns
+                                .iter()
+                                .filter(|x| x.column_id() == column_id)
+                                .map(|x| x.column_desc.clone())
+                                .exactly_one()
+                                .unwrap()
+                        })
+                        .collect_vec();
+                    (
+                        s.catalog.columns,
+                        pk_column_catalogs,
+                        vec![],
+                        vec![],
+                        s.catalog.name,
+                        None, // Description
+                    )
+                }
+                Relation::BaseTable(t) => {
+                    let pk_column_catalogs = t
+                        .table_catalog
+                        .pk()
+                        .iter()
+                        .map(|x| t.table_catalog.columns[x.column_index].column_desc.clone())
+                        .collect_vec();
+                    let dist_columns = t
+                        .table_catalog
+                        .distribution_key()
+                        .iter()
+                        .map(|idx| t.table_catalog.columns[*idx].column_desc.clone())
+                        .collect_vec();
+                    (
+                        t.table_catalog.columns.clone(),
+                        pk_column_catalogs,
+                        dist_columns,
+                        t.table_indexes,
+                        t.table_catalog.name.clone(),
+                        t.table_catalog.description.clone(),
+                    )
+                }
+                Relation::SystemTable(t) => {
+                    let pk_column_catalogs = t
+                        .sys_table_catalog
+                        .pk
+                        .iter()
+                        .map(|idx| t.sys_table_catalog.columns[*idx].column_desc.clone())
+                        .collect_vec();
+                    (
+                        t.sys_table_catalog.columns.clone(),
+                        pk_column_catalogs,
+                        vec![],
+                        vec![],
+                        t.sys_table_catalog.name.clone(),
+                        None, // Description
+                    )
+                }
+                Relation::Share(_) => {
+                    if let Ok(view) = binder.bind_view_by_name(object_name.clone()) {
+                        let columns = view
+                            .view_catalog
+                            .columns
+                            .iter()
+                            .enumerate()
+                            .map(|(idx, field)| ColumnCatalog {
+                                column_desc: ColumnDesc::from_field_with_column_id(field, idx as _),
+                                is_hidden: false,
+                            })
+                            .collect();
+                        (
+                            columns,
+                            vec![],
+                            vec![],
+                            vec![],
+                            view.view_catalog.name.clone(),
+                            None,
+                        )
+                    } else {
+                        return Err(not_found_err.into());
+                    }
+                }
+                _ => {
+                    return Err(not_found_err.into());
+                }
+            }
+        } else if let Ok(sink) = binder.bind_sink_by_name(object_name.clone()) {
+            let columns = sink.sink_catalog.full_columns().to_vec();
+            let pk_columns = sink
+                .sink_catalog
+                .downstream_pk_indices()
+                .into_iter()
+                .map(|idx| columns[idx].column_desc.clone())
+                .collect_vec();
+            let dist_columns = sink
+                .sink_catalog
+                .distribution_key
+                .iter()
+                .map(|idx| columns[*idx].column_desc.clone())
                 .collect_vec();
             (
-                s.catalog.columns,
-                pk_column_catalogs,
-                vec![],
-                vec![],
-                s.catalog.name,
-                None, // Description
-            )
-        }
-        Relation::BaseTable(t) => {
-            let pk_column_catalogs = t
-                .table_catalog
-                .pk()
-                .iter()
-                .map(|x| t.table_catalog.columns[x.column_index].column_desc.clone())
-                .collect_vec();
-            let dist_columns = t
-                .table_catalog
-                .distribution_key()
-                .iter()
-                .map(|idx| t.table_catalog.columns[*idx].column_desc.clone())
-                .collect_vec();
-            (
-                t.table_catalog.columns,
-                pk_column_catalogs,
+                columns,
+                pk_columns,
                 dist_columns,
-                t.table_indexes,
-                t.table_catalog.name,
-                t.table_catalog.description,
-            )
-        }
-        Relation::SystemTable(t) => {
-            let pk_column_catalogs = t
-                .sys_table_catalog
-                .pk
-                .iter()
-                .map(|idx| t.sys_table_catalog.columns[*idx].column_desc.clone())
-                .collect_vec();
-            (
-                t.sys_table_catalog.columns.clone(),
-                pk_column_catalogs,
                 vec![],
-                vec![],
-                t.sys_table_catalog.name.clone(),
-                None, // Description
+                sink.sink_catalog.name.clone(),
+                None,
             )
-        }
-        _ => {
-            return Err(CatalogError::NotFound("table or source", table_name.to_string()).into());
-        }
-    };
+        } else {
+            return Err(not_found_err.into());
+        };
 
     // Convert all column descs to rows
     let mut rows = col_descs_to_rows(columns);

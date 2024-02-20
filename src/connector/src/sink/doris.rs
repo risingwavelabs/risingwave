@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
+use base64::engine::general_purpose;
+use base64::Engine;
+use bytes::{BufMut, Bytes, BytesMut};
+use hyper::body::Body;
+use hyper::{body, Client, Request};
+use hyper_tls::HttpsConnector;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -25,20 +31,21 @@ use serde::Deserialize;
 use serde_derive::Serialize;
 use serde_json::Value;
 use serde_with::serde_as;
+use thiserror_ext::AsReport;
+use with_options::WithOptions;
 
-use super::doris_connector::{
-    DorisField, DorisGet, DorisInsert, DorisInsertClient, DORIS_DELETE_SIGN,
+use super::doris_starrocks_connector::{
+    HeaderBuilder, InserterInner, InserterInnerBuilder, DORIS_DELETE_SIGN, DORIS_SUCCESS_STATUS,
+    POOL_IDLE_TIMEOUT,
 };
-use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
+use super::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::sink::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
-use crate::sink::{
-    DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriter, SinkWriterParam,
-};
+use crate::sink::{DummySinkCommitCoordinator, Sink, SinkParam, SinkWriter, SinkWriterParam};
 
 pub const DORIS_SINK: &str = "doris";
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct DorisCommon {
     #[serde(rename = "doris.url")]
     pub url: String,
@@ -53,8 +60,8 @@ pub struct DorisCommon {
 }
 
 impl DorisCommon {
-    pub(crate) fn build_get_client(&self) -> DorisGet {
-        DorisGet::new(
+    pub(crate) fn build_get_client(&self) -> DorisSchemaClient {
+        DorisSchemaClient::new(
             self.url.clone(),
             self.table.clone(),
             self.database.clone(),
@@ -65,7 +72,7 @@ impl DorisCommon {
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct DorisConfig {
     #[serde(flatten)]
     pub common: DorisCommon,
@@ -164,7 +171,7 @@ impl DorisSink {
                 Ok(doris_data_type.contains("DATETIME"))
             }
             risingwave_common::types::DataType::Timestamptz => Err(SinkError::Doris(
-                "doris can not support Timestamptz".to_string(),
+                "TIMESTAMP WITH TIMEZONE is not supported for Doris sink as Doris doesn't store time values with timezone information. Please convert to TIMESTAMP first.".to_string(),
             )),
             risingwave_common::types::DataType::Interval => Err(SinkError::Doris(
                 "doris can not support Interval".to_string(),
@@ -223,9 +230,9 @@ pub struct DorisSinkWriter {
     pub config: DorisConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
-    client: DorisInsertClient,
+    inserter_inner_builder: InserterInnerBuilder,
     is_append_only: bool,
-    insert: Option<DorisInsert>,
+    client: Option<DorisClient>,
     row_encoder: JsonEncoder,
 }
 
@@ -262,30 +269,31 @@ impl DorisSinkWriter {
                 decimal_map.insert(s.name.clone(), v);
             }
         });
-        let mut map = HashMap::new();
-        map.insert("format".to_string(), "json".to_string());
-        map.insert("read_json_by_line".to_string(), "true".to_string());
-        let doris_insert_client = DorisInsertClient::new(
+
+        let header_builder = HeaderBuilder::new()
+            .add_common_header()
+            .set_user_password(config.common.user.clone(), config.common.password.clone())
+            .add_json_format()
+            .add_read_json_by_line();
+        let header = if !is_append_only {
+            header_builder.add_hidden_column().build()
+        } else {
+            header_builder.build()
+        };
+
+        let doris_insert_builder = InserterInnerBuilder::new(
             config.common.url.clone(),
             config.common.database.clone(),
             config.common.table.clone(),
-        )
-        .add_common_header()
-        .set_user_password(config.common.user.clone(), config.common.password.clone())
-        .set_properties(map);
-        let mut doris_insert_client = if !is_append_only {
-            doris_insert_client.add_hidden_column()
-        } else {
-            doris_insert_client
-        };
-        let insert = Some(doris_insert_client.build().await?);
+            header,
+        );
         Ok(Self {
             config,
             schema: schema.clone(),
             pk_indices,
-            client: doris_insert_client,
+            inserter_inner_builder: doris_insert_builder,
             is_append_only,
-            insert,
+            client: None,
             row_encoder: JsonEncoder::new_with_doris(
                 schema,
                 None,
@@ -301,7 +309,7 @@ impl DorisSinkWriter {
                 continue;
             }
             let row_json_string = Value::Object(self.row_encoder.encode(row)?).to_string();
-            self.insert
+            self.client
                 .as_mut()
                 .ok_or_else(|| SinkError::Doris("Can't find doris sink insert".to_string()))?
                 .write(row_json_string.into())
@@ -319,9 +327,10 @@ impl DorisSinkWriter {
                         DORIS_DELETE_SIGN.to_string(),
                         Value::String("0".to_string()),
                     );
-                    let row_json_string = serde_json::to_string(&row_json_value)
-                        .map_err(|e| SinkError::Doris(format!("Json derialize error {:?}", e)))?;
-                    self.insert
+                    let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
+                        SinkError::Doris(format!("Json derialize error: {}", e.as_report()))
+                    })?;
+                    self.client
                         .as_mut()
                         .ok_or_else(|| {
                             SinkError::Doris("Can't find doris sink insert".to_string())
@@ -335,9 +344,10 @@ impl DorisSinkWriter {
                         DORIS_DELETE_SIGN.to_string(),
                         Value::String("1".to_string()),
                     );
-                    let row_json_string = serde_json::to_string(&row_json_value)
-                        .map_err(|e| SinkError::Doris(format!("Json derialize error {:?}", e)))?;
-                    self.insert
+                    let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
+                        SinkError::Doris(format!("Json derialize error: {}", e.as_report()))
+                    })?;
+                    self.client
                         .as_mut()
                         .ok_or_else(|| {
                             SinkError::Doris("Can't find doris sink insert".to_string())
@@ -352,9 +362,10 @@ impl DorisSinkWriter {
                         DORIS_DELETE_SIGN.to_string(),
                         Value::String("0".to_string()),
                     );
-                    let row_json_string = serde_json::to_string(&row_json_value)
-                        .map_err(|e| SinkError::Doris(format!("Json derialize error {:?}", e)))?;
-                    self.insert
+                    let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
+                        SinkError::Doris(format!("Json derialize error: {}", e.as_report()))
+                    })?;
+                    self.client
                         .as_mut()
                         .ok_or_else(|| {
                             SinkError::Doris("Can't find doris sink insert".to_string())
@@ -371,8 +382,8 @@ impl DorisSinkWriter {
 #[async_trait]
 impl SinkWriter for DorisSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.insert.is_none() {
-            self.insert = Some(self.client.build().await?);
+        if self.client.is_none() {
+            self.client = Some(DorisClient::new(self.inserter_inner_builder.build().await?));
         }
         if self.is_append_only {
             self.append_only(chunk).await
@@ -390,17 +401,188 @@ impl SinkWriter for DorisSinkWriter {
     }
 
     async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
-        if self.insert.is_some() {
-            let insert = self
-                .insert
+        if self.client.is_some() {
+            let client = self
+                .client
                 .take()
                 .ok_or_else(|| SinkError::Doris("Can't find doris inserter".to_string()))?;
-            insert.finish().await?;
+            client.finish().await?;
         }
         Ok(())
     }
 
     async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
         Ok(())
+    }
+}
+
+pub struct DorisSchemaClient {
+    url: String,
+    table: String,
+    db: String,
+    user: String,
+    password: String,
+}
+impl DorisSchemaClient {
+    pub fn new(url: String, table: String, db: String, user: String, password: String) -> Self {
+        Self {
+            url,
+            table,
+            db,
+            user,
+            password,
+        }
+    }
+
+    pub async fn get_schema_from_doris(&self) -> Result<DorisSchema> {
+        let uri = format!("{}/api/{}/{}/_schema", self.url, self.db, self.table);
+        let builder = Request::get(uri);
+
+        let connector = HttpsConnector::new();
+        let client = Client::builder()
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+            .build(connector);
+
+        let request = builder
+            .header(
+                "Authorization",
+                format!(
+                    "Basic {}",
+                    general_purpose::STANDARD.encode(format!("{}:{}", self.user, self.password))
+                ),
+            )
+            .body(Body::empty())
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+
+        let response = client
+            .request(request)
+            .await
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+
+        let raw_bytes = String::from_utf8(match body::to_bytes(response.into_body()).await {
+            Ok(bytes) => bytes.to_vec(),
+            Err(err) => return Err(SinkError::DorisStarrocksConnect(err.into())),
+        })
+        .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+
+        let json_map: HashMap<String, Value> = serde_json::from_str(&raw_bytes)
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+        let json_data = if json_map.contains_key("code") && json_map.contains_key("msg") {
+            let data = json_map.get("data").ok_or_else(|| {
+                SinkError::DorisStarrocksConnect(anyhow::anyhow!("Can't find data"))
+            })?;
+            data.to_string()
+        } else {
+            raw_bytes
+        };
+        let schema: DorisSchema = serde_json::from_str(&json_data)
+            .context("Can't get schema from json")
+            .map_err(SinkError::DorisStarrocksConnect)?;
+        Ok(schema)
+    }
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DorisSchema {
+    status: i32,
+    #[serde(rename = "keysType")]
+    pub keys_type: String,
+    pub properties: Vec<DorisField>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DorisField {
+    pub name: String,
+    pub r#type: String,
+    comment: String,
+    pub precision: Option<String>,
+    pub scale: Option<String>,
+    aggregation_type: String,
+}
+impl DorisField {
+    pub fn get_decimal_pre_scale(&self) -> Option<(u8, u8)> {
+        if self.r#type.contains("DECIMAL") {
+            let a = self.precision.clone().unwrap().parse::<u8>().unwrap();
+            let b = self.scale.clone().unwrap().parse::<u8>().unwrap();
+            Some((a, b))
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DorisInsertResultResponse {
+    #[serde(rename = "TxnId")]
+    txn_id: i64,
+    #[serde(rename = "Label")]
+    label: String,
+    #[serde(rename = "Status")]
+    status: String,
+    #[serde(rename = "TwoPhaseCommit")]
+    two_phase_commit: String,
+    #[serde(rename = "Message")]
+    message: String,
+    #[serde(rename = "NumberTotalRows")]
+    number_total_rows: i64,
+    #[serde(rename = "NumberLoadedRows")]
+    number_loaded_rows: i64,
+    #[serde(rename = "NumberFilteredRows")]
+    number_filtered_rows: i32,
+    #[serde(rename = "NumberUnselectedRows")]
+    number_unselected_rows: i32,
+    #[serde(rename = "LoadBytes")]
+    load_bytes: i64,
+    #[serde(rename = "LoadTimeMs")]
+    load_time_ms: i32,
+    #[serde(rename = "BeginTxnTimeMs")]
+    begin_txn_time_ms: i32,
+    #[serde(rename = "StreamLoadPutTimeMs")]
+    stream_load_put_time_ms: i32,
+    #[serde(rename = "ReadDataTimeMs")]
+    read_data_time_ms: i32,
+    #[serde(rename = "WriteDataTimeMs")]
+    write_data_time_ms: i32,
+    #[serde(rename = "CommitAndPublishTimeMs")]
+    commit_and_publish_time_ms: i32,
+    #[serde(rename = "ErrorURL")]
+    err_url: Option<String>,
+}
+
+pub struct DorisClient {
+    insert: InserterInner,
+    is_first_record: bool,
+}
+impl DorisClient {
+    pub fn new(insert: InserterInner) -> Self {
+        Self {
+            insert,
+            is_first_record: true,
+        }
+    }
+
+    pub async fn write(&mut self, data: Bytes) -> Result<()> {
+        let mut data_build = BytesMut::new();
+        if self.is_first_record {
+            self.is_first_record = false;
+        } else {
+            data_build.put_slice("\n".as_bytes());
+        }
+        data_build.put_slice(&data);
+        self.insert.write(data_build.into()).await?;
+        Ok(())
+    }
+
+    pub async fn finish(self) -> Result<DorisInsertResultResponse> {
+        let raw = self.insert.finish().await?;
+        let res: DorisInsertResultResponse = serde_json::from_slice(&raw)
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+
+        if !DORIS_SUCCESS_STATUS.contains(&res.status.as_str()) {
+            return Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
+                "Insert error: {:?}, error url: {:?}",
+                res.message,
+                res.err_url
+            )));
+        };
+        Ok(res)
     }
 }

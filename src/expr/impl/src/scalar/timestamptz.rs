@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use std::fmt::Write;
 use num_traits::CheckedNeg;
 use risingwave_common::types::{CheckedAdd, Interval, IntoOrdered, Timestamp, Timestamptz, F64};
 use risingwave_expr::{function, ExprError, Result};
+use thiserror_ext::AsReport;
 
 /// Just a wrapper to reuse the `map_err` logic.
 #[inline(always)]
@@ -87,7 +88,7 @@ pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<Timestamptz> {
     elem.parse().or_else(|_| {
         timestamp_at_time_zone(
             elem.parse::<Timestamp>()
-                .map_err(|err| ExprError::Parse(err.to_string().into()))?,
+                .map_err(|err| ExprError::Parse(err.to_report_string().into()))?,
             time_zone,
         )
     })
@@ -133,19 +134,24 @@ pub fn timestamptz_interval_add(
     interval: Interval,
     time_zone: &str,
 ) -> Result<Timestamptz> {
+    use num_traits::Zero as _;
+
     // A month may have 28-31 days, a day may have 23 or 25 hours during Daylight Saving switch.
     // So their interpretation depends on the local time of a specific zone.
     let qualitative = interval.truncate_day();
     // Units smaller than `day` are zone agnostic.
     let quantitative = interval - qualitative;
 
-    // Note the current implementation simply follows the frontend-rewrite chains of exprs before
-    // refactor. There may be chances to improve.
-    let t = timestamptz_at_time_zone(input, time_zone)?;
-    let t = t
-        .checked_add(qualitative)
-        .ok_or(ExprError::NumericOverflow)?;
-    let t = timestamp_at_time_zone(t, time_zone)?;
+    let mut t = input;
+    if !qualitative.is_zero() {
+        // Only convert into and from naive local when necessary because it is lossy.
+        // See `e2e_test/batch/functions/issue_12072.slt.part` for the difference.
+        let naive = timestamptz_at_time_zone(t, time_zone)?;
+        let naive = naive
+            .checked_add(qualitative)
+            .ok_or(ExprError::NumericOverflow)?;
+        t = timestamp_at_time_zone(naive, time_zone)?;
+    }
     let t = timestamptz_interval_quantitative(t, quantitative, i64::checked_add)?;
     Ok(t)
 }

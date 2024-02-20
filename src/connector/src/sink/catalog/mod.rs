@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
+    OBJECT_ID_PLACEHOLDER,
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -43,7 +44,7 @@ impl SinkId {
     /// Sometimes the id field is filled later, we use this value for better debugging.
     pub const fn placeholder() -> Self {
         SinkId {
-            sink_id: u32::MAX - 1,
+            sink_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 
@@ -296,6 +297,11 @@ pub struct SinkCatalog {
 
     /// Name for the table info for Debezium sink
     pub sink_from_name: String,
+
+    pub target_table: Option<TableId>,
+
+    pub created_at_cluster_version: Option<String>,
+    pub initialized_at_cluster_version: Option<String>,
 }
 
 impl SinkCatalog {
@@ -333,6 +339,9 @@ impl SinkCatalog {
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
             stream_job_status: PbStreamJobStatus::Creating.into(),
+            target_table: self.target_table.map(|table_id| table_id.table_id()),
+            created_at_cluster_version: self.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
         }
     }
 
@@ -421,6 +430,9 @@ impl From<PbSink> for SinkCatalog {
             initialized_at_epoch: pb.initialized_at_epoch.map(Epoch::from),
             db_name: pb.db_name,
             sink_from_name: pb.sink_from_name,
+            target_table: pb.target_table.map(TableId::new),
+            initialized_at_cluster_version: pb.initialized_at_cluster_version,
+            created_at_cluster_version: pb.created_at_cluster_version,
         }
     }
 }

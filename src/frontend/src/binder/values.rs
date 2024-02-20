@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::Values;
@@ -22,6 +22,7 @@ use risingwave_sqlparser::ast::Values;
 use super::bind_context::Clause;
 use super::statement::RewriteExprsRecursive;
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{align_types, CorrelatedId, Depth, ExprImpl};
 
 #[derive(Debug, Clone)]
@@ -142,14 +143,10 @@ impl Binder {
             .flatten()
             .any(|expr| expr.has_subquery())
         {
-            return Err(ErrorCode::NotImplemented("Subquery in VALUES".into(), None.into()).into());
+            bail_not_implemented!("Subquery in VALUES");
         }
         if bound_values.is_correlated(1) {
-            return Err(ErrorCode::NotImplemented(
-                "CorrelatedInputRef in VALUES".into(),
-                None.into(),
-            )
-            .into());
+            bail_not_implemented!("CorrelatedInputRef in VALUES");
         }
         Ok(bound_values)
     }

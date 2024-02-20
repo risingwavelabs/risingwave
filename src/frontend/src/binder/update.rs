@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,14 +17,15 @@ use std::collections::{BTreeMap, HashMap};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Schema, TableVersionId};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Assignment, AssignmentValue, Expr, ObjectName, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
 use super::{Binder, BoundBaseTable};
 use crate::catalog::TableId;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr as _, ExprImpl, InputRef};
 use crate::user::UserId;
 use crate::TableCatalog;
@@ -135,11 +136,7 @@ impl Binder {
 
                 // (col1, col2) = (subquery)
                 (_ids, AssignmentValue::Expr(Expr::Subquery(_))) => {
-                    return Err(ErrorCode::NotImplemented(
-                        "subquery on the right side of multi-assignment".to_owned(),
-                        None.into(),
-                    )
-                    .into())
+                    bail_not_implemented!("subquery on the right side of multi-assignment");
                 }
                 // (col1, col2) = (expr1, expr2)
                 // TODO: support `DEFAULT` in multiple assignments

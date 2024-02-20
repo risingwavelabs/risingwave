@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,13 +46,13 @@ fn create_executor(output_indices: Vec<usize>) -> (MessageSender, BoxedMessageSt
     (
         tx,
         HopWindowExecutor::new(
-            ActorContext::create(123),
-            Box::new(source),
+            ActorContext::for_test(123),
             ExecutorInfo {
                 schema,
                 pk_indices,
-                identity: "test".to_string(),
+                identity: "HopWindowExecutor".to_string(),
             },
+            Box::new(source),
             TIME_COL_IDX,
             window_slide,
             window_size,

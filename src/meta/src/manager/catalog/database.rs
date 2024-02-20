@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ use risingwave_pb::catalog::{
     Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source,
     StreamJobStatus, Table, View,
 };
+use risingwave_pb::data::DataType;
 
 use super::{ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, ViewId};
 use crate::manager::{IndexId, MetaSrvEnv, TableId};
@@ -44,6 +45,7 @@ pub type Catalog = (
 type DatabaseKey = String;
 type SchemaKey = (DatabaseId, String);
 type RelationKey = (DatabaseId, SchemaId, String);
+type FunctionKey = (DatabaseId, SchemaId, String, Vec<DataType>);
 
 /// [`DatabaseManager`] caches meta catalog information and maintains dependent relationship
 /// between tables.
@@ -81,15 +83,15 @@ pub struct DatabaseManager {
 
 impl DatabaseManager {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let databases = Database::list(env.meta_store()).await?;
-        let schemas = Schema::list(env.meta_store()).await?;
-        let sources = Source::list(env.meta_store()).await?;
-        let sinks = Sink::list(env.meta_store()).await?;
-        let tables = Table::list(env.meta_store()).await?;
-        let indexes = Index::list(env.meta_store()).await?;
-        let views = View::list(env.meta_store()).await?;
-        let functions = Function::list(env.meta_store()).await?;
-        let connections = Connection::list(env.meta_store()).await?;
+        let databases = Database::list(env.meta_store_checked()).await?;
+        let schemas = Schema::list(env.meta_store_checked()).await?;
+        let sources = Source::list(env.meta_store_checked()).await?;
+        let sinks = Sink::list(env.meta_store_checked()).await?;
+        let tables = Table::list(env.meta_store_checked()).await?;
+        let indexes = Index::list(env.meta_store_checked()).await?;
+        let views = View::list(env.meta_store_checked()).await?;
+        let functions = Function::list(env.meta_store_checked()).await?;
+        let connections = Connection::list(env.meta_store_checked()).await?;
 
         let mut relation_ref_count = HashMap::new();
 
@@ -235,14 +237,14 @@ impl DatabaseManager {
         }
     }
 
-    pub fn check_function_duplicated(&self, function: &Function) -> MetaResult<()> {
+    pub fn check_function_duplicated(&self, function_key: &FunctionKey) -> MetaResult<()> {
         if self.functions.values().any(|x| {
-            x.database_id == function.database_id
-                && x.schema_id == function.schema_id
-                && x.name.eq(&function.name)
-                && x.arg_types == function.arg_types
+            x.database_id == function_key.0
+                && x.schema_id == function_key.1
+                && x.name.eq(&function_key.2)
+                && x.arg_types == function_key.3
         }) {
-            Err(MetaError::catalog_duplicated("function", &function.name))
+            Err(MetaError::catalog_duplicated("function", &function_key.2))
         } else {
             Ok(())
         }
@@ -292,10 +294,14 @@ impl DatabaseManager {
         self.tables.get(&table_id)
     }
 
+    pub fn get_sink(&self, sink_id: SinkId) -> Option<&Sink> {
+        self.sinks.get(&sink_id)
+    }
+
     pub fn get_all_table_options(&self) -> HashMap<TableId, TableOption> {
         self.tables
             .iter()
-            .map(|(id, table)| (*id, TableOption::build_table_option(&table.properties)))
+            .map(|(id, table)| (*id, TableOption::new(table.retention_seconds)))
             .collect()
     }
 
@@ -323,6 +329,14 @@ impl DatabaseManager {
         self.sources.values().cloned().collect_vec()
     }
 
+    pub fn list_sinks(&self) -> Vec<Sink> {
+        self.sinks.values().cloned().collect_vec()
+    }
+
+    pub fn list_views(&self) -> Vec<View> {
+        self.views.values().cloned().collect_vec()
+    }
+
     pub fn list_source_ids(&self, schema_id: SchemaId) -> Vec<SourceId> {
         self.sources
             .values()
@@ -345,6 +359,17 @@ impl DatabaseManager {
             .copied()
             .chain(self.sinks.keys().copied())
             .chain(self.indexes.keys().copied())
+            .chain(self.sources.keys().copied())
+            .chain(
+                // filter cdc source jobs
+                self.sources
+                    .iter()
+                    .filter(|(_, source)| {
+                        source.info.as_ref().is_some_and(|info| info.cdc_source_job)
+                    })
+                    .map(|(id, _)| id)
+                    .copied(),
+            )
     }
 
     pub fn check_database_duplicated(&self, database_key: &DatabaseKey) -> MetaResult<()> {
@@ -404,8 +429,7 @@ impl DatabaseManager {
     }
 
     pub fn has_in_progress_creation(&self, relation: &RelationKey) -> bool {
-        self.in_progress_creation_tracker
-            .contains(&relation.clone())
+        self.in_progress_creation_tracker.contains(relation)
     }
 
     /// For all types of DDL
@@ -420,7 +444,7 @@ impl DatabaseManager {
     }
 
     pub fn unmark_creating(&mut self, relation: &RelationKey) {
-        self.in_progress_creation_tracker.remove(&relation.clone());
+        self.in_progress_creation_tracker.remove(relation);
     }
 
     pub fn unmark_creating_streaming_job(&mut self, table_id: TableId) {
@@ -434,13 +458,20 @@ impl DatabaseManager {
             .map(|(k, _)| *k)
     }
 
-    pub fn all_creating_streaming_jobs(&self) -> impl Iterator<Item = TableId> + '_ {
-        self.in_progress_creation_streaming_job.keys().cloned()
+    pub fn find_persisted_creating_table_id(&self, key: &RelationKey) -> Option<TableId> {
+        self.tables
+            .iter()
+            .find(|(_, t)| {
+                t.stream_job_status == PbStreamJobStatus::Creating as i32
+                    && t.database_id == key.0
+                    && t.schema_id == key.1
+                    && t.name == key.2
+            })
+            .map(|(k, _)| *k)
     }
 
-    pub fn clear_creating_stream_jobs(&mut self) {
-        self.in_progress_creation_tracker.clear();
-        self.in_progress_creation_streaming_job.clear();
+    pub fn all_creating_streaming_jobs(&self) -> impl Iterator<Item = TableId> + '_ {
+        self.in_progress_creation_streaming_job.keys().cloned()
     }
 
     pub fn mark_creating_tables(&mut self, tables: &[Table]) {
@@ -515,6 +546,14 @@ impl DatabaseManager {
             Ok(())
         } else {
             Err(MetaError::catalog_id_not_found("connection", connection_id))
+        }
+    }
+
+    pub fn ensure_function_id(&self, function_id: FunctionId) -> MetaResult<()> {
+        if self.functions.contains_key(&function_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("function", function_id))
         }
     }
 

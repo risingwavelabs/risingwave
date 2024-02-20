@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,9 @@ use redis::aio::Connection;
 use redis::{Client as RedisClient, Pipeline};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::Deserialize;
 use serde_with::serde_as;
+use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
 use super::encoder::template::TemplateEncoder;
@@ -38,7 +39,8 @@ use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriterParam};
 pub const REDIS_SINK: &str = "redis";
 pub const KEY_FORMAT: &str = "key_format";
 pub const VALUE_FORMAT: &str = "value_format";
-#[derive(Deserialize, Serialize, Debug, Clone)]
+
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct RedisCommon {
     #[serde(rename = "redis.url")]
     pub url: String,
@@ -51,7 +53,7 @@ impl RedisCommon {
     }
 }
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct RedisConfig {
     #[serde(flatten)]
     pub common: RedisCommon,
@@ -61,7 +63,7 @@ impl RedisConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<RedisConfig>(serde_json::to_value(properties).unwrap())
-                .map_err(|e| SinkError::Config(anyhow!("{:?}", e)))?;
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
         Ok(config)
     }
 }
@@ -188,6 +190,12 @@ impl RedisSinkPayloadWriter {
     }
 
     pub async fn commit(&mut self) -> Result<()> {
+        #[cfg(test)]
+        {
+            if self.conn.is_none() {
+                return Ok(());
+            }
+        }
         self.pipe.query_async(self.conn.as_mut().unwrap()).await?;
         self.pipe.clear();
         Ok(())
@@ -269,7 +277,8 @@ impl AsyncTruncateSinkWriter for RedisSinkWriter {
         _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
         dispatch_sink_formatter_str_key_impl!(&self.formatter, formatter, {
-            self.payload_writer.write_chunk(chunk, formatter).await
+            self.payload_writer.write_chunk(chunk, formatter).await?;
+            self.payload_writer.commit().await
         })
     }
 }

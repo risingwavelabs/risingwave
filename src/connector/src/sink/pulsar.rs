@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,10 +24,11 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
+use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam, SinkWriterParam};
-use crate::common::PulsarCommon;
+use crate::common::{AwsAuthProps, PulsarCommon, PulsarOauthCommon};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::encoder::SerTo;
 use crate::sink::formatter::{SinkFormatter, SinkFormatterImpl};
@@ -83,7 +84,7 @@ async fn build_pulsar_producer(
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct PulsarPropertiesProducer {
     #[serde(rename = "properties.batch.size", default = "_default_batch_size")]
     #[serde_as(as = "DisplayFromStr")]
@@ -98,7 +99,7 @@ pub struct PulsarPropertiesProducer {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct PulsarConfig {
     #[serde(rename = "properties.retry.max", default = "_default_max_retries")]
     #[serde_as(as = "DisplayFromStr")]
@@ -113,6 +114,12 @@ pub struct PulsarConfig {
 
     #[serde(flatten)]
     pub common: PulsarCommon,
+
+    #[serde(flatten)]
+    pub oauth: Option<PulsarOauthCommon>,
+
+    #[serde(flatten)]
+    pub aws_auth_props: AwsAuthProps,
 
     #[serde(flatten)]
     pub producer_properties: PulsarPropertiesProducer,
@@ -199,7 +206,11 @@ impl Sink for PulsarSink {
         .await?;
 
         // Validate pulsar connection.
-        let pulsar = self.config.common.build_client().await?;
+        let pulsar = self
+            .config
+            .common
+            .build_client(&self.config.oauth, &self.config.aws_auth_props)
+            .await?;
         build_pulsar_producer(&pulsar, &self.config).await?;
 
         Ok(())
@@ -247,7 +258,10 @@ impl PulsarSinkWriter {
             &config.common.topic,
         )
         .await?;
-        let pulsar = config.common.build_client().await?;
+        let pulsar = config
+            .common
+            .build_client(&config.oauth, &config.aws_auth_props)
+            .await?;
         let producer = build_pulsar_producer(&pulsar, &config).await?;
         Ok(Self {
             formatter,
@@ -263,7 +277,10 @@ impl<'w> PulsarPayloadWriter<'w> {
         let mut success_flag = false;
         let mut connection_err = None;
 
-        for _ in 0..self.config.max_retry_num {
+        for retry_num in 0..self.config.max_retry_num {
+            if retry_num > 0 {
+                tracing::warn!("Failed to send message, at retry no. {retry_num}");
+            }
             match self.producer.send(message.clone()).await {
                 // If the message is sent successfully,
                 // a SendFuture holding the message receipt
@@ -349,5 +366,16 @@ impl AsyncTruncateSinkWriter for PulsarSinkWriter {
             }
             Ok(())
         })
+    }
+
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
+        if is_checkpoint {
+            self.producer
+                .send_batch()
+                .map_err(pulsar_to_sink_err)
+                .await?;
+        }
+
+        Ok(())
     }
 }

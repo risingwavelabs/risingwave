@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ use clap::Parser;
 use risingwave_common::config::{
     AsyncStackTraceOption, CompactorMode, MetricLevel, OverrideConfig,
 };
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 
 use crate::server::{compactor_serve, shared_compactor_serve};
 
@@ -48,6 +49,8 @@ pub struct CompactorOpts {
     #[clap(long, env = "RW_PORT")]
     pub port: Option<u16>,
 
+    /// We will start a http server at this address via `MetricsManager`.
+    /// Then the prometheus instance will poll the metrics from this address.
     #[clap(
         long,
         env = "RW_PROMETHEUS_LISTENER_ADDR",
@@ -56,7 +59,7 @@ pub struct CompactorOpts {
     pub prometheus_listener_addr: String,
 
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
-    pub meta_address: String,
+    pub meta_address: MetaAddressStrategy,
 
     #[clap(long, env = "RW_COMPACTION_WORKER_THREADS_NUMBER")]
     pub compaction_worker_threads_number: Option<usize>,
@@ -82,24 +85,21 @@ pub struct CompactorOpts {
     #[override_opts(path = server.heap_profiling.dir)]
     pub heap_profiling_dir: Option<String>,
 
-    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_READ_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_streaming_read_timeout_ms)]
-    pub object_store_streaming_read_timeout_ms: Option<u64>,
-    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_UPLOAD_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_streaming_upload_timeout_ms)]
-    pub object_store_streaming_upload_timeout_ms: Option<u64>,
-    #[clap(long, env = "RW_OBJECT_STORE_UPLOAD_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_upload_timeout_ms)]
-    pub object_store_upload_timeout_ms: Option<u64>,
-    #[clap(long, env = "RW_OBJECT_STORE_READ_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_read_timeout_ms)]
-    pub object_store_read_timeout_ms: Option<u64>,
-
     #[clap(long, env = "RW_COMPACTOR_MODE", value_enum)]
     pub compactor_mode: Option<CompactorMode>,
 
     #[clap(long, env = "RW_PROXY_RPC_ENDPOINT", default_value = "")]
     pub proxy_rpc_endpoint: String,
+}
+
+impl risingwave_common::opts::Opts for CompactorOpts {
+    fn name() -> &'static str {
+        "compactor"
+    }
+
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        self.meta_address.clone()
+    }
 }
 
 use std::future::Future;

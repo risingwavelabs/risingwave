@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ use crate::executor::DynamicFilterExecutor;
 
 pub struct DynamicFilterExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for DynamicFilterExecutorBuilder {
     type Node = DynamicFilterNode;
 
@@ -33,7 +32,6 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
         let key_l = node.get_left_key() as usize;
@@ -56,11 +54,15 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             );
         }
 
+        let condition_always_relax = node.get_condition_always_relax();
+
         let state_table_r =
             StateTable::from_table_catalog(node.get_right_table()?, store.clone(), None).await;
 
         let left_table = node.get_left_table()?;
-        if left_table.get_cleaned_by_watermark() {
+        let cleaned_by_watermark = left_table.get_cleaned_by_watermark();
+
+        if cleaned_by_watermark {
             let state_table_l = WatermarkCacheStateTable::from_table_catalog(
                 node.get_left_table()?,
                 store,
@@ -70,16 +72,17 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
 
             Ok(Box::new(DynamicFilterExecutor::new(
                 params.actor_context,
+                params.info,
                 source_l,
                 source_r,
                 key_l,
-                params.pk_indices,
-                params.executor_id,
                 comparator,
                 state_table_l,
                 state_table_r,
                 params.executor_stats,
                 params.env.config().developer.chunk_size,
+                condition_always_relax,
+                cleaned_by_watermark,
             )))
         } else {
             let state_table_l =
@@ -87,16 +90,17 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
 
             Ok(Box::new(DynamicFilterExecutor::new(
                 params.actor_context,
+                params.info,
                 source_l,
                 source_r,
                 key_l,
-                params.pk_indices,
-                params.executor_id,
                 comparator,
                 state_table_l,
                 state_table_r,
                 params.executor_stats,
                 params.env.config().developer.chunk_size,
+                condition_always_relax,
+                cleaned_by_watermark,
             )))
         }
     }

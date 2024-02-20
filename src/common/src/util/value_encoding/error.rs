@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,9 +31,17 @@ pub enum ValueEncodingError {
     #[error("Invalid jsonb encoding")]
     InvalidJsonbEncoding,
     #[error("Invalid struct encoding: {0}")]
-    InvalidStructEncoding(crate::array::ArrayError),
+    InvalidStructEncoding(
+        #[source]
+        #[backtrace]
+        crate::array::ArrayError,
+    ),
     #[error("Invalid list encoding: {0}")]
-    InvalidListEncoding(crate::array::ArrayError),
+    InvalidListEncoding(
+        #[source]
+        #[backtrace]
+        crate::array::ArrayError,
+    ),
     #[error("Invalid flag: {0}")]
     InvalidFlag(u8),
 }

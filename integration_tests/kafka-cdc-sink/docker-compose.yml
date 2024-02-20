@@ -1,30 +1,18 @@
 ---
 version: "3"
 services:
-  compactor-0:
+  risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml
-      service: compactor-0
-  compute-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: compute-node-0
+      service: risingwave-standalone
   etcd-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: etcd-0
-  frontend-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: frontend-node-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: grafana-0
-  meta-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: meta-node-0
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -54,6 +42,19 @@ services:
     command: [ "postgres", "-c", "wal_level=logical" ]
     restart: always
     container_name: postgres
+
+  prepare_postgres:
+    image: postgres
+    depends_on:
+      - postgres
+    command:
+      - /bin/sh
+      - -c
+      - "psql postgresql://myuser:123456@postgres:5432/mydb < postgres_prepare.sql"
+    volumes:
+      - "./postgres_prepare.sql:/postgres_prepare.sql"
+    container_name: prepare_postgres
+    restart: on-failure
 
   mysql:
     image: mysql
@@ -111,11 +112,11 @@ services:
     container_name: flink-sql-client
 
   connect:
-    image: debezium/connect:2.2
+    image: debezium/connect:2.4.0.Final
     build:
       context: debezium-jdbc
       args:
-        DEBEZIUM_VERSION: 2.2
+        DEBEZIUM_VERSION: 2.4.0.Final
     ports:
      - 8083:8083
      - 5005:5005
@@ -130,7 +131,7 @@ services:
     container_name: connect
 
 volumes:
-  compute-node-0:
+  risingwave-standalone:
     external: false
   etcd-0:
     external: false

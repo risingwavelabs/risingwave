@@ -392,7 +392,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: vec![SetVariableValue::Ident("b".into())],
+            value: SetVariableValueSingle::Ident("b".into()).into(),
         }
     );
 
@@ -402,9 +402,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: vec![SetVariableValue::Literal(Value::SingleQuotedString(
-                "b".into()
-            ))],
+            value: SetVariableValueSingle::Literal(Value::SingleQuotedString("b".into())).into(),
         }
     );
 
@@ -414,7 +412,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: vec![SetVariableValue::Literal(number("0"))],
+            value: SetVariableValueSingle::Literal(number("0")).into(),
         }
     );
 
@@ -424,7 +422,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: vec![SetVariableValue::Default],
+            value: SetVariableValue::Default,
         }
     );
 
@@ -434,7 +432,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: true,
             variable: "a".into(),
-            value: vec![SetVariableValue::Ident("b".into())],
+            value: SetVariableValueSingle::Ident("b".into()).into(),
         }
     );
 
@@ -443,7 +441,7 @@ fn parse_set() {
     for (sql, err_msg) in [
         ("SET", "Expected identifier, found: EOF"),
         ("SET a b", "Expected equals sign or TO, found: b"),
-        ("SET a =", "Expected variable value, found: EOF"),
+        ("SET a =", "Expected parameter value, found: EOF"),
     ] {
         let res = parse_sql_statements(sql);
         assert!(format!("{}", res.unwrap_err()).contains(err_msg));
@@ -770,6 +768,53 @@ fn parse_create_function() {
         }
     );
 
+    let sql = "CREATE FUNCTION sub(INT, INT) RETURNS INT LANGUAGE SQL AS $$select $1 - $2;$$";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::CreateFunction {
+            or_replace: false,
+            temporary: false,
+            name: ObjectName(vec![Ident::new_unchecked("sub")]),
+            args: Some(vec![
+                OperateFunctionArg::unnamed(DataType::Int),
+                OperateFunctionArg::unnamed(DataType::Int),
+            ]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some("SQL".into()),
+                as_: Some(FunctionDefinition::DoubleDollarDef(
+                    "select $1 - $2;".into()
+                )),
+                ..Default::default()
+            }
+        },
+    );
+
+    // Anonymous return sql udf parsing test
+    let sql = "CREATE FUNCTION return_test(INT, INT) RETURNS INT LANGUAGE SQL RETURN $1 + $2";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::CreateFunction {
+            or_replace: false,
+            temporary: false,
+            name: ObjectName(vec![Ident::new_unchecked("return_test")]),
+            args: Some(vec![
+                OperateFunctionArg::unnamed(DataType::Int),
+                OperateFunctionArg::unnamed(DataType::Int),
+            ]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some("SQL".into()),
+                return_: Some(Expr::BinaryOp {
+                    left: Box::new(Expr::Parameter { index: 1 }),
+                    op: BinaryOperator::Plus,
+                    right: Box::new(Expr::Parameter { index: 2 }),
+                }),
+                ..Default::default()
+            }
+        },
+    );
+
     let sql = "CREATE OR REPLACE FUNCTION add(a INT, IN b INT = 1) RETURNS INT LANGUAGE SQL IMMUTABLE RETURN a + b";
     assert_eq!(
         verified_stmt(sql),
@@ -853,7 +898,7 @@ fn parse_drop_function() {
         verified_stmt(sql),
         Statement::DropFunction {
             if_exists: true,
-            func_desc: vec![DropFunctionDesc {
+            func_desc: vec![FunctionDesc {
                 name: ObjectName(vec![Ident::new_unchecked("test_func")]),
                 args: None
             }],
@@ -866,7 +911,7 @@ fn parse_drop_function() {
         verified_stmt(sql),
         Statement::DropFunction {
             if_exists: true,
-            func_desc: vec![DropFunctionDesc {
+            func_desc: vec![FunctionDesc {
                 name: ObjectName(vec![Ident::new_unchecked("test_func")]),
                 args: Some(vec![
                     OperateFunctionArg::with_name("a", DataType::Int),
@@ -888,7 +933,7 @@ fn parse_drop_function() {
         Statement::DropFunction {
             if_exists: true,
             func_desc: vec![
-                DropFunctionDesc {
+                FunctionDesc {
                     name: ObjectName(vec![Ident::new_unchecked("test_func1")]),
                     args: Some(vec![
                         OperateFunctionArg::with_name("a", DataType::Int),
@@ -900,7 +945,7 @@ fn parse_drop_function() {
                         }
                     ]),
                 },
-                DropFunctionDesc {
+                FunctionDesc {
                     name: ObjectName(vec![Ident::new_unchecked("test_func2")]),
                     args: Some(vec![
                         OperateFunctionArg::with_name("a", DataType::Varchar),
@@ -1137,7 +1182,7 @@ fn parse_dollar_quoted_string() {
 
     let stmt = parse_sql_statements(sql).unwrap();
 
-    let projection = match stmt.get(0).unwrap() {
+    let projection = match stmt.first().unwrap() {
         Statement::Query(query) => match &query.body {
             SetExpr::Select(select) => &select.projection,
             _ => unreachable!(),

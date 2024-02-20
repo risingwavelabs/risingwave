@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 use pretty_xmlish::XmlNode;
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::generic::GenericPlanRef;
@@ -24,6 +23,8 @@ use super::{
     ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalFilter, PlanBase, PlanRef,
     PredicatePushdown, RewriteStreamContext, StreamNow, ToBatch, ToStream, ToStreamContext,
 };
+use crate::error::Result;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMapping;
@@ -65,7 +66,11 @@ impl Distill for LogicalNow {
 }
 
 impl_plan_tree_node_for_leaf! { LogicalNow }
+
 impl ExprRewritable for LogicalNow {}
+
+impl ExprVisitable for LogicalNow {}
+
 impl PredicatePushdown for LogicalNow {
     fn predicate_pushdown(
         &self,
@@ -81,10 +86,7 @@ impl ToStream for LogicalNow {
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        Ok((
-            self.clone().into(),
-            ColIndexMapping::with_target_size(vec![Some(0)], 1),
-        ))
+        Ok((self.clone().into(), ColIndexMapping::new(vec![Some(0)], 1)))
     }
 
     /// `to_stream` is equivalent to `to_stream_with_dist_required(RequiredDist::Any)`

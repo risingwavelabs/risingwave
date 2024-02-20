@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,13 +16,13 @@ use std::alloc::{Allocator, Global};
 use std::borrow::Borrow;
 use std::hash::{BuildHasher, Hash};
 
-use lru::{DefaultHasher, KeyRef, LruCache};
+use lru::{DefaultHasher, LruCache};
 
 use super::{AtomicMutGuard, MutGuard};
 use crate::estimate_size::{EstimateSize, KvSize};
 
 /// The managed cache is a lru cache that bounds the memory usage by epoch.
-/// Should be used with `GlobalMemoryManager`.
+/// Should be used with `MemoryManager`.
 pub struct EstimatedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
     inner: LruCache<K, V, S, A>,
     kv_heap_size: KvSize,
@@ -66,7 +66,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
 
     pub fn get<Q>(&mut self, k: &Q) -> Option<&V>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.inner.get(k)
@@ -100,7 +100,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
 
     pub fn contains<Q>(&self, k: &Q) -> bool
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.inner.contains(k)

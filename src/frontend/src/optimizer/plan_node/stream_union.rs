@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,8 +24,10 @@ use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanRef};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNode, StreamNode};
+use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamUnion` implements [`super::LogicalUnion`]
@@ -40,6 +42,12 @@ impl StreamUnion {
         let inputs = &core.inputs;
         let dist = inputs[0].distribution().clone();
         assert!(inputs.iter().all(|input| *input.distribution() == dist));
+        Self::new_with_dist(core, dist)
+    }
+
+    pub fn new_with_dist(core: generic::Union<PlanRef>, dist: Distribution) -> Self {
+        let inputs = &core.inputs;
+
         let watermark_columns = inputs.iter().fold(
             {
                 let mut bitset = FixedBitSet::with_capacity(core.schema().len());
@@ -56,6 +64,7 @@ impl StreamUnion {
             inputs.iter().all(|x| x.emit_on_window_close()),
             watermark_columns,
         );
+
         StreamUnion { base, core }
     }
 }
@@ -78,7 +87,8 @@ impl PlanTreeNode for StreamUnion {
     fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
         let mut new = self.core.clone();
         new.inputs = inputs.to_vec();
-        Self::new(new).into()
+        let dist = self.distribution().clone();
+        Self::new_with_dist(new, dist).into()
     }
 }
 
@@ -89,3 +99,5 @@ impl StreamNode for StreamUnion {
 }
 
 impl ExprRewritable for StreamUnion {}
+
+impl ExprVisitable for StreamUnion {}

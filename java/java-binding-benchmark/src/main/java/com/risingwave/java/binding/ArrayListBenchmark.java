@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@ import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.*;
 
-@Warmup(iterations = 2, time = 1, timeUnit = TimeUnit.MILLISECONDS, batchSize = 10)
-@Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.MILLISECONDS, batchSize = 10)
+@Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.MILLISECONDS, batchSize = 10)
+@Measurement(iterations = 20, time = 1, timeUnit = TimeUnit.MILLISECONDS, batchSize = 10)
 @Fork(value = 1)
 @BenchmarkMode(org.openjdk.jmh.annotations.Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MICROSECONDS)

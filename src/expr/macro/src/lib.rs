@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +15,12 @@
 #![feature(lint_reasons)]
 #![feature(let_chains)]
 
-use context::DefineContextAttr;
+use std::vec;
+
+use context::{generate_captured_function, CaptureContextAttr, DefineContextAttr};
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use syn::{Error, ItemFn, Result};
-
-use crate::context::{generate_captured_function, CaptureContextAttr};
 
 mod context;
 mod gen;
@@ -187,11 +187,10 @@ mod utils;
 ///
 /// ```ignore
 /// #[function("trim_array(anyarray, int32) -> anyarray")]
-/// fn trim_array(array: Option<ListRef<'_>>, n: Option<i32>) -> ListValue {...}
+/// fn trim_array(array: ListRef<'_>, n: Option<i32>) -> ListValue {...}
 /// ```
 ///
-/// Note that we currently only support all arguments being either `Option` or non-`Option`. Mixed
-/// cases are not supported.
+/// This function will be called when `n` is null, but not when `array` is null.
 ///
 /// ## Return Value
 ///
@@ -278,11 +277,11 @@ mod utils;
 /// }
 /// ```
 ///
-/// The `prebuild` argument can be specified, and its value is a Rust expression used to construct a
-/// new variable from the input arguments of the function. Here `$1`, `$2` represent the second and
-/// third arguments of the function (indexed from 0), and their types are `&str`. In the Rust
-/// function signature, these positions of parameters will be omitted, replaced by an extra new
-/// variable at the end.
+/// The `prebuild` argument can be specified, and its value is a Rust expression `Type::method(...)`
+/// used to construct a new variable of `Type` from the input arguments of the function.
+/// Here `$1`, `$2` represent the second and third arguments of the function (indexed from 0),
+/// and their types are `&str`. In the Rust function signature, these positions of parameters will
+/// be omitted, replaced by an extra new variable at the end.
 ///
 /// This macro generates two versions of the function. If all the input parameters that `prebuild`
 /// depends on are constants, it will precompute them during the build function. Otherwise, it will
@@ -397,7 +396,7 @@ mod utils;
 /// | anyarray               | `any[]`              | `ListValue`   | `ListRef<'_>`      |
 /// | struct                 | `record`             | `StructValue` | `StructRef<'_>`    |
 /// | T[^1][]                | `T[]`                | `ListValue`   | `ListRef<'_>`      |
-/// | struct<name T[^1], ..> | `struct<name T, ..>` | `(T, ..)`     | `(&T, ..)`         |
+/// | struct<`name_T`[^1], ..> | `struct<name T, ..>` | `(T, ..)`     | `(&T, ..)`         |
 ///
 /// [^1]: `T` could be any base type
 ///
@@ -503,8 +502,10 @@ struct FunctionAttr {
     generic: Option<String>,
     /// Whether the function is volatile.
     volatile: bool,
-    /// Whether the function is deprecated.
+    /// If true, the function is unavailable on the frontend.
     deprecated: bool,
+    /// If true, the function is not implemented on the backend, but its signature is defined.
+    rewritten: bool,
 }
 
 /// Attributes from function signature `fn(..)`
@@ -520,8 +521,8 @@ struct UserFunctionAttr {
     write: bool,
     /// Whether the last argument type is `retract: bool`.
     retract: bool,
-    /// The argument type are `Option`s.
-    arg_option: bool,
+    /// Whether each argument type is `Option<T>`.
+    args_option: Vec<bool>,
     /// If the first argument type is `&mut T`, then `Some(T)`.
     first_mut_ref_arg: Option<String>,
     /// The return type kind.
@@ -608,7 +609,7 @@ impl UserFunctionAttr {
         !self.async_
             && !self.write
             && !self.context
-            && !self.arg_option
+            && self.args_option.iter().all(|b| !b)
             && self.return_type_kind == ReturnTypeKind::T
     }
 }
