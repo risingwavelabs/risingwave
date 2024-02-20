@@ -34,7 +34,7 @@ pub(super) async fn handle_cancel(
         .await?;
     let rows = canceled_jobs
         .into_iter()
-        .map(|id| CancelRow { id: id as i32 });
+        .map(|id| CancelRow { id: id.to_string() });
     Ok(PgResponse::builder(StatementType::CANCEL_COMMAND)
         .rows(rows)
         .into())
@@ -43,5 +43,5 @@ pub(super) async fn handle_cancel(
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct CancelRow {
-    id: i32,
+    id: String,
 }

@@ -117,7 +117,7 @@ struct ShowObjectRow {
 pub struct ShowColumnRow {
     pub name: String,
     pub r#type: String,
-    pub is_hidden: Option<bool>,
+    pub is_hidden: Option<String>,
     pub description: Option<String>,
 }
 
@@ -135,7 +135,7 @@ impl ShowColumnRow {
                 ShowColumnRow {
                     name: c.name,
                     r#type: type_name,
-                    is_hidden: Some(col.is_hidden),
+                    is_hidden: Some(col.is_hidden.to_string()),
                     description: c.description,
                 }
             })
