@@ -37,11 +37,13 @@ use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::{dispatch_state_store, StateStore};
 use rw_futures_util::AttachedFuture;
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, BarrierCompleteResult};
 use crate::error::StreamResult;
+use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::*;
@@ -49,7 +51,7 @@ use crate::from_proto::create_executor;
 use crate::task::barrier_manager::{LocalBarrierEvent, LocalBarrierWorker};
 use crate::task::{
     ActorId, FragmentId, LocalBarrierManager, SharedContext, StreamActorManager,
-    StreamActorManagerState, StreamEnvironment,
+    StreamActorManagerState, StreamEnvironment, UpDownActorIds,
 };
 
 #[cfg(test)]
@@ -65,9 +67,9 @@ pub type AtomicU64Ref = Arc<AtomicU64>;
 pub struct LocalStreamManager {
     await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
 
-    context: Arc<SharedContext>,
+    pub env: StreamEnvironment,
 
-    local_barrier_manager: LocalBarrierManager,
+    event_sender: UnboundedSender<LocalBarrierEvent>,
 }
 
 /// Report expression evaluation errors to the actor context.
@@ -141,29 +143,43 @@ impl Debug for ExecutorParams {
 }
 
 impl LocalStreamManager {
+    pub(super) fn send_event(&self, event: LocalBarrierEvent) {
+        self.event_sender
+            .send(event)
+            .expect("should be able to send event")
+    }
+
+    pub(super) async fn send_and_await<RSP>(
+        &self,
+        make_event: impl FnOnce(oneshot::Sender<RSP>) -> LocalBarrierEvent,
+    ) -> StreamResult<RSP> {
+        let (tx, rx) = oneshot::channel();
+        let event = make_event(tx);
+        self.send_event(event);
+        rx.await
+            .map_err(|_| anyhow!("barrier manager maybe reset").into())
+    }
+}
+
+impl LocalStreamManager {
     pub fn new(
         env: StreamEnvironment,
         streaming_metrics: Arc<StreamingMetrics>,
         await_tree_config: Option<await_tree::Config>,
         watermark_epoch: AtomicU64Ref,
     ) -> Self {
-        let context = Arc::new(SharedContext::new(
-            env.server_address().clone(),
-            env.config(),
-        ));
         let await_tree_reg =
             await_tree_config.map(|config| Arc::new(Mutex::new(await_tree::Registry::new(config))));
         let local_barrier_manager = LocalBarrierManager::new(
-            context.clone(),
-            env,
+            env.clone(),
             streaming_metrics,
             await_tree_reg.clone(),
             watermark_epoch,
         );
         Self {
             await_tree_reg,
-            context,
-            local_barrier_manager,
+            env,
+            event_sender: local_barrier_manager.sender().clone(),
         }
     }
 
@@ -195,67 +211,77 @@ impl LocalStreamManager {
         }
     }
 
-    /// Broadcast a barrier to all senders. Save a receiver in barrier manager
+    /// Broadcast a barrier to all senders. Save a receiver which will get notified when this
+    /// barrier is finished, in managed mode.
     pub async fn send_barrier(
         &self,
         barrier: Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
     ) -> StreamResult<()> {
-        self.local_barrier_manager
-            .send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)
-            .await?;
-        Ok(())
+        self.send_and_await(move |result_sender| LocalBarrierEvent::InjectBarrier {
+            barrier,
+            actor_ids_to_send: actor_ids_to_send.into_iter().collect(),
+            actor_ids_to_collect: actor_ids_to_collect.into_iter().collect(),
+            result_sender,
+        })
+        .await?
     }
 
-    /// Use `epoch` to find collect rx. And wait for all actor to be collected before
-    /// returning.
-    pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<BarrierCompleteResult> {
-        self.local_barrier_manager
-            .await_epoch_completed(epoch)
-            .await
-    }
-
-    pub fn context(&self) -> &Arc<SharedContext> {
-        &self.context
+    /// Use `prev_epoch` to remove collect rx and return rx.
+    pub async fn collect_barrier(&self, prev_epoch: u64) -> StreamResult<BarrierCompleteResult> {
+        self.send_and_await(|result_sender| LocalBarrierEvent::AwaitEpochCompleted {
+            epoch: prev_epoch,
+            result_sender,
+        })
+        .await?
     }
 
     /// Drop the resources of the given actors.
     pub async fn drop_actors(&self, actors: Vec<ActorId>) -> StreamResult<()> {
-        self.local_barrier_manager
-            .send_and_await(|result_sender| LocalBarrierEvent::DropActors {
-                actors,
-                result_sender,
-            })
-            .await
+        self.send_and_await(|result_sender| LocalBarrierEvent::DropActors {
+            actors,
+            result_sender,
+        })
+        .await
     }
 
     /// Force stop all actors on this worker, and then drop their resources.
     pub async fn reset(&self, prev_epoch: u64) {
-        self.local_barrier_manager
-            .send_and_await(|result_sender| LocalBarrierEvent::Reset {
-                result_sender,
-                prev_epoch,
-            })
-            .await
-            .expect("should receive reset")
+        self.send_and_await(|result_sender| LocalBarrierEvent::Reset {
+            result_sender,
+            prev_epoch,
+        })
+        .await
+        .expect("should receive reset")
     }
 
     pub async fn update_actors(&self, actors: Vec<stream_plan::StreamActor>) -> StreamResult<()> {
-        self.local_barrier_manager
-            .send_and_await(|result_sender| LocalBarrierEvent::UpdateActors {
-                actors,
-                result_sender,
-            })
-            .await?
+        self.send_and_await(|result_sender| LocalBarrierEvent::UpdateActors {
+            actors,
+            result_sender,
+        })
+        .await?
     }
 
     pub async fn build_actors(&self, actors: Vec<ActorId>) -> StreamResult<()> {
-        self.local_barrier_manager
-            .send_and_await(|result_sender| LocalBarrierEvent::BuildActors {
-                actors,
-                result_sender,
-            })
+        self.send_and_await(|result_sender| LocalBarrierEvent::BuildActors {
+            actors,
+            result_sender,
+        })
+        .await?
+    }
+
+    pub async fn update_actor_info(&self, new_actor_infos: Vec<ActorInfo>) -> StreamResult<()> {
+        self.send_and_await(|result_sender| LocalBarrierEvent::UpdateActorInfo {
+            new_actor_infos,
+            result_sender,
+        })
+        .await?
+    }
+
+    pub async fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver> {
+        self.send_and_await(|result_sender| LocalBarrierEvent::TakeReceiver { ids, result_sender })
             .await?
     }
 }
@@ -263,7 +289,7 @@ impl LocalStreamManager {
 impl LocalBarrierWorker {
     /// Drop the resources of the given actors.
     pub(super) fn drop_actors(&mut self, actors: &[ActorId]) {
-        self.actor_manager.context.drop_actors(actors);
+        self.current_shared_context.drop_actors(actors);
         for &id in actors {
             self.actor_manager_state.drop_actor(id);
         }
@@ -291,8 +317,10 @@ impl LocalBarrierWorker {
             let result = handle.await;
             assert!(result.is_ok() || result.err().unwrap().is_cancelled());
         }
-        self.actor_manager.context.clear_channels();
-        self.actor_manager.context.actor_infos.write().clear();
+        self.current_shared_context = Arc::new(SharedContext::new(
+            self.actor_manager.env.server_address().clone(),
+            self.actor_manager.env.config(),
+        ));
         self.actor_manager_state.clear_state();
         if let Some(m) = self.actor_manager.await_tree_reg.as_ref() {
             m.lock().clear();
@@ -340,7 +368,7 @@ impl LocalBarrierWorker {
         let join_handle = self
             .actor_manager
             .runtime
-            .spawn(actor_manager.create_actors(actors));
+            .spawn(actor_manager.create_actors(actors, self.current_shared_context.clone()));
         self.actor_manager_state
             .creating_actors
             .push(AttachedFuture::new(join_handle, result_sender));
@@ -355,10 +383,11 @@ impl StreamActorManager {
         dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
         fragment_id: FragmentId,
+        shared_context: &Arc<SharedContext>,
     ) -> StreamResult<DispatchExecutor> {
         let dispatcher_impls = dispatchers
             .iter()
-            .map(|dispatcher| DispatcherImpl::new(&self.context, actor_id, dispatcher))
+            .map(|dispatcher| DispatcherImpl::new(shared_context, actor_id, dispatcher))
             .try_collect()?;
 
         Ok(DispatchExecutor::new(
@@ -366,7 +395,7 @@ impl StreamActorManager {
             dispatcher_impls,
             actor_id,
             fragment_id,
-            self.context.clone(),
+            shared_context.clone(),
             self.streaming_metrics.clone(),
         ))
     }
@@ -384,6 +413,7 @@ impl StreamActorManager {
         vnode_bitmap: Option<Bitmap>,
         has_stateful: bool,
         subtasks: &mut Vec<SubtaskHandle>,
+        shared_context: &Arc<SharedContext>,
     ) -> StreamResult<BoxedExecutor> {
         // The "stateful" here means that the executor may issue read operations to the state store
         // massively and continuously. Used to decide whether to apply the optimization of subtasks.
@@ -416,6 +446,7 @@ impl StreamActorManager {
                     vnode_bitmap.clone(),
                     has_stateful || is_stateful,
                     subtasks,
+                    shared_context,
                 )
                 .await?,
             );
@@ -460,7 +491,7 @@ impl StreamActorManager {
             vnode_bitmap,
             eval_error_report,
             watermark_epoch: self.watermark_epoch.clone(),
-            shared_context: self.context.clone(),
+            shared_context: shared_context.clone(),
             local_barrier_manager: self.local_barrier_manager.clone(),
         };
 
@@ -510,6 +541,7 @@ impl StreamActorManager {
         env: StreamEnvironment,
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
+        shared_context: &Arc<SharedContext>,
     ) -> StreamResult<(BoxedExecutor, Vec<SubtaskHandle>)> {
         let mut subtasks = vec![];
 
@@ -523,6 +555,7 @@ impl StreamActorManager {
                 vnode_bitmap,
                 false,
                 &mut subtasks,
+                shared_context,
             )
             .await
         })?;
@@ -533,6 +566,7 @@ impl StreamActorManager {
     async fn create_actors(
         self: Arc<Self>,
         actors: Vec<StreamActor>,
+        shared_context: Arc<SharedContext>,
     ) -> StreamResult<Vec<Actor<DispatchExecutor>>> {
         let mut ret = Vec::with_capacity(actors.len());
         for actor in actors {
@@ -554,13 +588,19 @@ impl StreamActorManager {
                     self.env.clone(),
                     &actor_context,
                     vnode_bitmap,
+                    &shared_context,
                 )
                 // If hummock tracing is not enabled, it directly returns wrapped future.
                 .may_trace_hummock()
                 .await?;
 
-            let dispatcher =
-                self.create_dispatcher(executor, &actor.dispatcher, actor_id, actor.fragment_id)?;
+            let dispatcher = self.create_dispatcher(
+                executor,
+                &actor.dispatcher,
+                actor_id,
+                actor.fragment_id,
+                &shared_context,
+            )?;
             let actor = Actor::new(
                 dispatcher,
                 subtasks,
@@ -691,21 +731,21 @@ impl LocalBarrierWorker {
     }
 }
 
-impl LocalStreamManager {
+impl LocalBarrierWorker {
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
     /// now.
-    pub fn update_actor_info(&self, new_actor_infos: &[ActorInfo]) -> StreamResult<()> {
-        let mut actor_infos = self.context.actor_infos.write();
+    pub fn update_actor_info(&self, new_actor_infos: Vec<ActorInfo>) -> StreamResult<()> {
+        let mut actor_infos = self.current_shared_context.actor_infos.write();
         for actor in new_actor_infos {
-            let ret = actor_infos.insert(actor.get_actor_id(), actor.clone());
-            if let Some(prev_actor) = ret
-                && actor != &prev_actor
+            if let Some(prev_actor) = actor_infos.get(&actor.get_actor_id())
+                && &actor != prev_actor
             {
                 bail!(
                     "actor info mismatch when broadcasting {}",
                     actor.get_actor_id()
                 );
             }
+            actor_infos.insert(actor.get_actor_id(), actor);
         }
         Ok(())
     }

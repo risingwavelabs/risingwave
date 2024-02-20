@@ -29,7 +29,9 @@ use tokio::task::JoinHandle;
 
 use self::managed_state::ManagedBarrierState;
 use crate::error::{IntoUnexpectedExit, StreamError, StreamResult};
-use crate::task::{ActorHandle, ActorId, AtomicU64Ref, SharedContext, StreamEnvironment};
+use crate::task::{
+    ActorHandle, ActorId, AtomicU64Ref, SharedContext, StreamEnvironment, UpDownActorIds,
+};
 
 mod managed_state;
 mod progress;
@@ -38,10 +40,12 @@ mod tests;
 
 pub use progress::CreateMviewProgress;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_storage::store::SyncResult;
 
+use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Actor, Barrier, DispatchExecutor};
 use crate::task::barrier_manager::progress::BackfillState;
@@ -105,6 +109,14 @@ pub(super) enum LocalBarrierEvent {
         actors: Vec<ActorId>,
         result_sender: oneshot::Sender<StreamResult<()>>,
     },
+    UpdateActorInfo {
+        new_actor_infos: Vec<ActorInfo>,
+        result_sender: oneshot::Sender<StreamResult<()>>,
+    },
+    TakeReceiver {
+        ids: UpDownActorIds,
+        result_sender: oneshot::Sender<StreamResult<Receiver>>,
+    },
     #[cfg(test)]
     Flush(oneshot::Sender<()>),
 }
@@ -164,7 +176,6 @@ impl StreamActorManagerState {
 
 pub(crate) struct StreamActorManager {
     pub(super) env: StreamEnvironment,
-    pub(super) context: Arc<SharedContext>,
     pub(super) streaming_metrics: Arc<StreamingMetrics>,
 
     /// Watermark epoch number.
@@ -197,10 +208,16 @@ pub(super) struct LocalBarrierWorker {
     pub(super) actor_manager: Arc<StreamActorManager>,
 
     pub(super) actor_manager_state: StreamActorManagerState,
+
+    pub(super) current_shared_context: Arc<SharedContext>,
 }
 
 impl LocalBarrierWorker {
     pub(super) fn new(actor_manager: Arc<StreamActorManager>) -> Self {
+        let shared_context = Arc::new(SharedContext::new(
+            actor_manager.env.server_address().clone(),
+            actor_manager.env.config(),
+        ));
         Self {
             barrier_senders: HashMap::new(),
             failure_actors: HashMap::default(),
@@ -211,6 +228,7 @@ impl LocalBarrierWorker {
             epoch_result_sender: HashMap::default(),
             actor_manager,
             actor_manager_state: StreamActorManagerState::new(),
+            current_shared_context: shared_context,
         }
     }
 
@@ -312,6 +330,15 @@ impl LocalBarrierWorker {
                 actors,
                 result_sender,
             } => self.start_create_actors(&actors, result_sender),
+            LocalBarrierEvent::UpdateActorInfo {
+                new_actor_infos,
+                result_sender,
+            } => {
+                let _ = result_sender.send(self.update_actor_info(new_actor_infos));
+            }
+            LocalBarrierEvent::TakeReceiver { ids, result_sender } => {
+                let _ = result_sender.send(self.current_shared_context.take_receiver(ids));
+            }
         }
     }
 }
@@ -508,7 +535,6 @@ pub struct LocalBarrierManager {
 impl LocalBarrierManager {
     /// Create a [`LocalBarrierWorker`] with managed mode.
     pub fn new(
-        context: Arc<SharedContext>,
         env: StreamEnvironment,
         streaming_metrics: Arc<StreamingMetrics>,
         await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
@@ -516,7 +542,7 @@ impl LocalBarrierManager {
     ) -> Self {
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
-            if let Some(worker_threads_num) = context.config.actor_runtime_worker_threads_num {
+            if let Some(worker_threads_num) = env.config().actor_runtime_worker_threads_num {
                 builder.worker_threads(worker_threads_num);
             }
             builder
@@ -530,8 +556,8 @@ impl LocalBarrierManager {
         let local_barrier_manager = Self {
             barrier_event_sender: tx,
         };
+
         let actor_manager = Arc::new(StreamActorManager {
-            context: context.clone(),
             env: env.clone(),
             streaming_metrics,
             watermark_epoch,
@@ -544,12 +570,17 @@ impl LocalBarrierManager {
         local_barrier_manager
     }
 
+    pub(super) fn sender(&self) -> &UnboundedSender<LocalBarrierEvent> {
+        &self.barrier_event_sender
+    }
+
     pub(super) fn send_event(&self, event: LocalBarrierEvent) {
         self.barrier_event_sender
             .send(event)
             .expect("should be able to send event")
     }
 
+    #[cfg(test)]
     pub(super) async fn send_and_await<RSP>(
         &self,
         make_event: impl FnOnce(oneshot::Sender<RSP>) -> LocalBarrierEvent,
@@ -568,9 +599,8 @@ impl LocalBarrierManager {
         self.send_event(LocalBarrierEvent::RegisterSender { actor_id, sender });
     }
 
-    /// Broadcast a barrier to all senders. Save a receiver which will get notified when this
-    /// barrier is finished, in managed mode.
-    pub async fn send_barrier(
+    #[cfg(test)]
+    pub(super) async fn send_barrier(
         &self,
         barrier: Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
@@ -585,8 +615,8 @@ impl LocalBarrierManager {
         .await?
     }
 
-    /// Use `prev_epoch` to remove collect rx and return rx.
-    pub async fn await_epoch_completed(
+    #[cfg(test)]
+    pub(super) async fn await_epoch_completed(
         &self,
         prev_epoch: u64,
     ) -> StreamResult<BarrierCompleteResult> {
@@ -618,7 +648,6 @@ impl LocalBarrierManager {
     pub fn for_test() -> Self {
         use std::sync::atomic::AtomicU64;
         Self::new(
-            Arc::new(SharedContext::for_test()),
             StreamEnvironment::for_test(),
             Arc::new(StreamingMetrics::unused()),
             None,
