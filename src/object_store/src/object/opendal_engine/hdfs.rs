@@ -26,7 +26,7 @@ impl OpendalObjectStore {
         // Set the name node for hdfs.
         builder.name_node(&namenode);
         builder.root(&root);
-
+        builder.atomic_write_dir(&root);
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())

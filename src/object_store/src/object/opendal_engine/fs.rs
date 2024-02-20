@@ -25,6 +25,7 @@ impl OpendalObjectStore {
         let mut builder = Fs::default();
 
         builder.root(&root);
+        builder.atomic_write_dir(&root);
 
         let op: Operator = Operator::new(builder)?
             .layer(RetryLayer::default())
