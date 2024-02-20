@@ -66,7 +66,9 @@ fn find_target(input: &str, target: &str) -> Option<usize> {
     // The pattern uses negative lookbehind (?<!...) and lookahead (?!...) to ensure
     // the target is not surrounded by ASCII alphabetic characters
     let pattern = format!(r"(?<![A-Za-z]){0}(?![A-Za-z])", fancy_regex::escape(target));
-    let re = Regex::new(&pattern).unwrap();
+    let Ok(re) = Regex::new(&pattern) else {
+        return None;
+    };
 
     let Ok(Some(ma)) = re.find(input) else {
         return None;
