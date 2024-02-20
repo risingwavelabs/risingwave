@@ -40,6 +40,11 @@ pub type UpDownActorIds = (ActorId, ActorId);
 pub type UpDownFragmentIds = (FragmentId, FragmentId);
 
 /// Stores the information which may be modified from the data plane.
+///
+/// The data structure is created in `LocalBarrierWorker` and is shared by actors created
+/// between two recoveries. In every recovery, the `LocalBarrierWorker` will create a new instance of
+/// `SharedContext`, and the original one becomes stale. The new one is shared by actors created after
+/// recovery.
 pub struct SharedContext {
     /// Stores the senders and receivers for later `Processor`'s usage.
     ///
@@ -156,10 +161,6 @@ impl SharedContext {
             .1
             .take()
             .ok_or_else(|| anyhow!("receiver for {ids:?} has already been taken").into())
-    }
-
-    pub fn clear_channels(&self) {
-        self.channel_map.lock().clear()
     }
 
     pub fn get_actor_info(&self, actor_id: &ActorId) -> StreamResult<ActorInfo> {
