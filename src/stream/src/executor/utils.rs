@@ -20,21 +20,9 @@ use crate::executor::{BoxedMessageStream, Execute, ExecutorInfo};
 use crate::task::{ActorId, FragmentId};
 
 #[derive(Default)]
-pub struct DummyExecutor {
-    pub info: ExecutorInfo,
-}
-
-impl DummyExecutor {
-    pub fn new(info: ExecutorInfo) -> Self {
-        Self { info }
-    }
-}
+pub struct DummyExecutor;
 
 impl Execute for DummyExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         futures::stream::pending().boxed()
     }

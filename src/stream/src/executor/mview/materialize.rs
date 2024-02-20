@@ -24,7 +24,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Schema, TableId};
 use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -42,16 +42,16 @@ use crate::common::table::state_table::StateTableInner;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, ActorContext, ActorContextRef, AddMutation, BoxedExecutor,
-    BoxedMessageStream, Execute, ExecutorInfo, Message, Mutation, StreamExecutorResult,
-    UpdateMutation,
+    expect_first_barrier, ActorContext, ActorContextRef, AddMutation, BoxedMessageStream, Execute,
+    Executor, Message, Mutation, StreamExecutorResult, UpdateMutation,
 };
 use crate::task::{ActorId, AtomicU64Ref};
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
-    input: BoxedExecutor,
-    info: ExecutorInfo,
+    input: Executor,
+
+    schema: Schema,
 
     state_table: StateTableInner<S, SD>,
 
@@ -71,8 +71,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     /// should be `None`.
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
-        input: BoxedExecutor,
-        info: ExecutorInfo,
+        input: Executor,
+        schema: Schema,
         store: S,
         arrange_key: Vec<ColumnOrder>,
         actor_context: ActorContextRef,
@@ -99,7 +99,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
         Self {
             input,
-            info,
+            schema,
             state_table,
             arrange_key_indices,
             actor_context,
@@ -115,7 +115,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         let actor_id_str = self.actor_context.id.to_string();
         let fragment_id_str = self.actor_context.fragment_id.to_string();
 
-        let data_types = self.schema().data_types().clone();
+        let data_types = self.schema.data_types();
         let mut input = self.input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
@@ -264,7 +264,8 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
     /// Create a new `MaterializeExecutor` without distribution info for test purpose.
     #[allow(clippy::too_many_arguments)]
     pub async fn for_test(
-        input: BoxedExecutor,
+        input: Executor,
+        schema: Schema,
         store: S,
         table_id: TableId,
         keys: Vec<ColumnOrder>,
@@ -293,14 +294,10 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
 
         Self {
             input,
+            schema,
             state_table,
             arrange_key_indices: arrange_columns.clone(),
             actor_context: ActorContext::for_test(0),
-            info: ExecutorInfo {
-                schema,
-                pk_indices: arrange_columns,
-                identity: format!("MaterializeExecutor {:X}", executor_id),
-            },
             materialize_cache: MaterializeCache::new(watermark_epoch, MetricsInfo::for_test()),
             conflict_behavior,
         }
@@ -430,19 +427,16 @@ impl MaterializeBuffer {
     }
 }
 impl<S: StateStore, SD: ValueRowSerde> Execute for MaterializeExecutor<S, SD> {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
 }
 
+// TODO()
 impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S, SD> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MaterializeExecutor")
-            .field("info", &self.info)
+            // .field("info", &self.info)
             .field("arrange_key_indices", &self.arrange_key_indices)
             .finish()
     }

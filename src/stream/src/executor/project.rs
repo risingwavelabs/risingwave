@@ -14,26 +14,30 @@
 
 use std::fmt::{Debug, Formatter};
 
+use futures::StreamExt;
+use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::row::{Row, RowExt};
-use risingwave_common::types::ToOwnedDatum;
+use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 
-use super::*;
+use super::{
+    ActorContextRef, BoxedMessageStream, Execute, Executor, Message, StreamExecutorError,
+    StreamExecutorResult, Watermark,
+};
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
 /// or update element into next operator according to the result of the expression.
 pub struct ProjectExecutor {
-    input: BoxedExecutor,
+    input: Executor,
     inner: Inner,
 }
 
 struct Inner {
     _ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// Expressions of the current projection.
     exprs: Vec<NonStrictExpression>,
@@ -54,8 +58,7 @@ impl ProjectExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
-        input: Box<dyn Execute>,
+        input: Executor,
         exprs: Vec<NonStrictExpression>,
         watermark_derivations: MultiMap<usize, usize>,
         nondecreasing_expr_indices: Vec<usize>,
@@ -66,7 +69,6 @@ impl ProjectExecutor {
             input,
             inner: Inner {
                 _ctx: ctx,
-                info,
                 exprs,
                 watermark_derivations,
                 nondecreasing_expr_indices,
@@ -86,10 +88,6 @@ impl Debug for ProjectExecutor {
 }
 
 impl Execute for ProjectExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        &self.inner.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.inner.execute(self.input).boxed()
     }
@@ -133,8 +131,8 @@ impl Inner {
                 ret.push(derived_watermark);
             } else {
                 warn!(
-                    "{} derive a NULL watermark with the expression {}!",
-                    self.info.identity, out_col_idx
+                    "a NULL watermark is derived with the expression {}!",
+                    out_col_idx
                 );
             }
         }
@@ -142,7 +140,7 @@ impl Inner {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute(mut self, input: BoxedExecutor) {
+    async fn execute(mut self, input: Executor) {
         #[for_await]
         for msg in input.execute() {
             let msg = msg?;

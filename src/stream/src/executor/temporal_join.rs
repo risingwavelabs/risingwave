@@ -47,14 +47,14 @@ use crate::cache::{cache_may_stale, new_with_hasher_in, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, BoxedExecutor, Watermark};
+use crate::executor::{ActorContextRef, Executor, Watermark};
 use crate::task::AtomicU64Ref;
 
 pub struct TemporalJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitive> {
     ctx: ActorContextRef,
     info: ExecutorInfo,
-    left: BoxedExecutor,
-    right: BoxedExecutor,
+    left: Executor,
+    right: Executor,
     right_table: TemporalSide<K, S>,
     left_join_keys: Vec<usize>,
     right_join_keys: Vec<usize>,
@@ -280,7 +280,7 @@ async fn internal_messages_until_barrier(stream: impl MessageStream, expected_ba
 // any number of `InternalMessage::Chunk(left_chunk)` and followed by
 // `InternalMessage::Barrier(right_chunks, barrier)`.
 #[try_stream(ok = InternalMessage, error = StreamExecutorError)]
-async fn align_input(left: Box<dyn Execute>, right: Box<dyn Execute>) {
+async fn align_input(left: Executor, right: Executor) {
     let mut left = pin!(left.execute());
     let mut right = pin!(right.execute());
     // Keep producing intervals until stream exhaustion or errors.
@@ -332,8 +332,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
     pub fn new(
         ctx: ActorContextRef,
         info: ExecutorInfo,
-        left: BoxedExecutor,
-        right: BoxedExecutor,
+        left: Executor,
+        right: Executor,
         table: StorageTable<S>,
         left_join_keys: Vec<usize>,
         right_join_keys: Vec<usize>,
@@ -491,10 +491,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Execute
     for TemporalJoinExecutor<K, S, T>
 {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.into_stream().boxed()
     }

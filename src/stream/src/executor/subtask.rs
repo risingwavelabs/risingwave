@@ -20,7 +20,7 @@ use tokio::sync::mpsc::error::SendError;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::actor::spawn_blocking_drop_stream;
-use super::{BoxedExecutor, Execute, ExecutorInfo, Message, MessageStreamItem};
+use super::{Execute, Executor, ExecutorInfo, Message, MessageStreamItem};
 use crate::task::ActorId;
 
 /// Handle used to drive the subtask.
@@ -35,10 +35,6 @@ pub struct SubtaskRxExecutor {
 }
 
 impl Execute for SubtaskRxExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         ReceiverStream::new(self.rx).boxed()
     }
@@ -50,7 +46,7 @@ impl Execute for SubtaskRxExecutor {
 /// Used when there're multiple stateful executors in an actor. These subtasks can be concurrently
 /// executed to improve the I/O performance, while the computing resource can be still bounded to a
 /// single thread.
-pub fn wrap(input: BoxedExecutor, actor_id: ActorId) -> (SubtaskHandle, SubtaskRxExecutor) {
+pub fn wrap(input: Executor, actor_id: ActorId) -> (SubtaskHandle, SubtaskRxExecutor) {
     let (tx, rx) = mpsc::channel(1);
     let rx_executor = SubtaskRxExecutor {
         info: ExecutorInfo {

@@ -34,7 +34,7 @@ use risingwave_connector::sink::{
 use thiserror_ext::AsReport;
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
-use super::{BoxedExecutor, Execute, ExecutorInfo, Message, PkIndices};
+use super::{Execute, Executor, ExecutorInfo, Message, PkIndices};
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedMessageStream, MessageStream, Mutation,
 };
@@ -43,7 +43,7 @@ use crate::task::ActorId;
 pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
     info: ExecutorInfo,
-    input: BoxedExecutor,
+    input: Executor,
     sink: SinkImpl,
     input_columns: Vec<ColumnCatalog>,
     sink_param: SinkParam,
@@ -83,7 +83,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     pub async fn new(
         actor_context: ActorContextRef,
         info: ExecutorInfo,
-        input: BoxedExecutor,
+        input: Executor,
         sink_writer_param: SinkWriterParam,
         sink_param: SinkParam,
         columns: Vec<ColumnCatalog>,
@@ -413,10 +413,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 }
 
 impl<F: LogStoreFactory> Execute for SinkExecutor<F> {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner()
     }

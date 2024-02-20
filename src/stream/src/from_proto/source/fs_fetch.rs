@@ -25,7 +25,7 @@ use risingwave_storage::StateStore;
 
 use crate::error::StreamResult;
 use crate::executor::{
-    BoxedExecutor, Execute, FlowControlExecutor, FsFetchExecutor, SourceStateTableHandler,
+    Execute, Executor, FlowControlExecutor, FsFetchExecutor, SourceStateTableHandler,
     StreamSourceCore,
 };
 use crate::from_proto::ExecutorBuilder;
@@ -40,7 +40,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
 
         let source = node.node_inner.as_ref().unwrap();
@@ -88,11 +88,10 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             state_table_handler,
         );
 
-        let executor = match properties {
+        let exec = match properties {
             risingwave_connector::source::ConnectorProperties::Gcs(_) => {
                 FsFetchExecutor::<_, OpendalGcs>::new(
                     params.actor_context.clone(),
-                    params.info,
                     stream_source_core,
                     upstream,
                     source_ctrl_opts,
@@ -103,7 +102,6 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             risingwave_connector::source::ConnectorProperties::OpendalS3(_) => {
                 FsFetchExecutor::<_, OpendalS3>::new(
                     params.actor_context.clone(),
-                    params.info,
                     stream_source_core,
                     upstream,
                     source_ctrl_opts,
@@ -114,7 +112,6 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             risingwave_connector::source::ConnectorProperties::PosixFs(_) => {
                 FsFetchExecutor::<_, OpendalPosixFs>::new(
                     params.actor_context.clone(),
-                    params.info,
                     stream_source_core,
                     upstream,
                     source_ctrl_opts,
@@ -124,7 +121,11 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             }
             _ => unreachable!(),
         };
+        let mut info = params.info.clone();
+        info.identity = format!("{} (flow controlled)", info.identity);
+
         let rate_limit = source.rate_limit.map(|x| x as _);
-        Ok(FlowControlExecutor::new(executor, params.actor_context, rate_limit).boxed())
+        let exec = FlowControlExecutor::new((info, exec).into(), params.actor_context, rate_limit);
+        Ok((params.info, exec).into())
     }
 }

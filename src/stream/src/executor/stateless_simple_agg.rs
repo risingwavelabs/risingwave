@@ -28,17 +28,13 @@ use crate::error::StreamResult;
 
 pub struct StatelessSimpleAggExecutor {
     _ctx: ActorContextRef,
-    pub(super) info: ExecutorInfo,
-    pub(super) input: Box<dyn Execute>,
+    pub(super) input: Executor,
+    pub(super) schema: Schema,
     pub(super) aggs: Vec<BoxedAggregateFunction>,
     pub(super) agg_calls: Vec<AggCall>,
 }
 
 impl Execute for StatelessSimpleAggExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -64,7 +60,7 @@ impl StatelessSimpleAggExecutor {
         let StatelessSimpleAggExecutor {
             _ctx,
             input,
-            info,
+            schema,
             aggs,
             agg_calls,
         } = self;
@@ -85,7 +81,7 @@ impl StatelessSimpleAggExecutor {
                     if is_dirty {
                         is_dirty = false;
 
-                        let mut builders = info.schema.create_array_builders(1);
+                        let mut builders = schema.create_array_builders(1);
                         for ((agg, state), builder) in aggs
                             .iter()
                             .zip_eq_fast(states.iter_mut())
@@ -115,15 +111,15 @@ impl StatelessSimpleAggExecutor {
 impl StatelessSimpleAggExecutor {
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
-        input: Box<dyn Execute>,
+        input: Executor,
+        schema: Schema,
         agg_calls: Vec<AggCall>,
     ) -> StreamResult<Self> {
         let aggs = agg_calls.iter().map(build_retractable).try_collect()?;
         Ok(StatelessSimpleAggExecutor {
             _ctx: ctx,
-            info,
             input,
+            schema,
             aggs,
             agg_calls,
         })

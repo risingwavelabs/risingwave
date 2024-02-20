@@ -27,7 +27,7 @@ mod impl_;
 
 pub use impl_::LookupExecutorParams;
 
-use super::{ActorContextRef, ExecutorInfo};
+use super::{ActorContextRef, Executor, ExecutorInfo};
 
 #[cfg(test)]
 mod tests;
@@ -53,10 +53,10 @@ pub struct LookupExecutor<S: StateStore> {
     stream: StreamJoinSide,
 
     /// The executor for arrangement.
-    arrangement_executor: Option<Box<dyn Execute>>,
+    arrangement_executor: Option<Executor>,
 
     /// The executor for stream.
-    stream_executor: Option<Box<dyn Execute>>,
+    stream_executor: Option<Executor>,
 
     /// The last received barrier.
     last_barrier: Option<Barrier>,
@@ -83,10 +83,6 @@ pub struct LookupExecutor<S: StateStore> {
 
 #[async_trait]
 impl<S: StateStore> Execute for LookupExecutor<S> {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

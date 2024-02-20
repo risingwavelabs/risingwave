@@ -30,9 +30,6 @@ use crate::task::{FragmentId, SharedContext};
 /// there should be a `ReceiverExecutor` running in the background, so as to push
 /// messages down to the executors.
 pub struct ReceiverExecutor {
-    /// Logical Operator Info
-    info: ExecutorInfo,
-
     /// Input from upstream.
     input: BoxedInput,
 
@@ -52,11 +49,12 @@ pub struct ReceiverExecutor {
     metrics: Arc<StreamingMetrics>,
 }
 
+// TODO()
 impl std::fmt::Debug for ReceiverExecutor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ReceiverExecutor")
-            .field("schema", &self.info.schema)
-            .field("pk_indices", &self.info.pk_indices)
+            // .field("schema", &self.info.schema)
+            // .field("pk_indices", &self.info.pk_indices)
             .finish()
     }
 }
@@ -65,7 +63,6 @@ impl ReceiverExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
         input: BoxedInput,
@@ -75,7 +72,6 @@ impl ReceiverExecutor {
     ) -> Self {
         Self {
             input,
-            info,
             actor_context: ctx,
             upstream_fragment_id,
             metrics,
@@ -86,19 +82,12 @@ impl ReceiverExecutor {
 
     #[cfg(test)]
     pub fn for_test(input: super::exchange::permit::Receiver) -> Self {
-        use risingwave_common::catalog::Schema;
-
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::Input;
         use crate::executor::ActorContext;
 
         Self::new(
             ActorContext::for_test(114),
-            ExecutorInfo {
-                schema: Schema::default(),
-                pk_indices: vec![],
-                identity: "ReceiverExecutor".to_string(),
-            },
             514,
             1919,
             LocalInput::new(input, 0).boxed_input(),
@@ -110,10 +99,6 @@ impl ReceiverExecutor {
 }
 
 impl Execute for ReceiverExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(mut self: Box<Self>) -> BoxedMessageStream {
         let actor_id = self.actor_context.id;
 

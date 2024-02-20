@@ -232,7 +232,7 @@ async fn test_merger_sum_aggr() {
 }
 
 struct MockConsumer {
-    input: BoxedExecutor,
+    input: Box<dyn Execute>,
     data: Arc<Mutex<Vec<StreamChunk>>>,
 }
 
@@ -259,7 +259,7 @@ impl StreamConsumer for MockConsumer {
 
 /// `SenderConsumer` consumes data from input executor and send it into a channel.
 pub struct SenderConsumer {
-    input: BoxedExecutor,
+    input: Box<dyn Execute>,
     channel: BoxedOutput,
 }
 

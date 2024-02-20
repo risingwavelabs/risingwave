@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 
-use super::*;
+use super::{ActorContextRef, BoxedMessageStream, Execute, Executor, ExecutorInfo, MessageStream};
 
 mod epoch_check;
 mod epoch_provide;
@@ -26,7 +26,7 @@ mod update_check;
 
 /// [`WrapperExecutor`] will do some sanity checks and logging for the wrapped executor.
 pub struct WrapperExecutor {
-    input: BoxedExecutor,
+    input: Executor,
 
     actor_ctx: ActorContextRef,
 
@@ -35,7 +35,7 @@ pub struct WrapperExecutor {
 
 impl WrapperExecutor {
     pub fn new(
-        input: BoxedExecutor,
+        input: Executor,
         actor_ctx: ActorContextRef,
         enable_executor_row_count: bool,
     ) -> Self {
@@ -88,10 +88,6 @@ impl WrapperExecutor {
 }
 
 impl Execute for WrapperExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        self.input.info()
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         let info = Arc::new(self.input.info().clone());
         Self::wrap(

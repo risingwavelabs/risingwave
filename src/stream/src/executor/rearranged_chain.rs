@@ -21,9 +21,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 
 use super::error::StreamExecutorError;
-use super::{
-    expect_first_barrier, Barrier, BoxedExecutor, Execute, ExecutorInfo, Message, MessageStream,
-};
+use super::{expect_first_barrier, Barrier, Execute, Executor, Message, MessageStream};
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// `ChainExecutor` is an executor that enables synchronization between the existing stream and
@@ -34,11 +32,9 @@ use crate::task::{ActorId, CreateMviewProgress};
 /// [`RearrangedChainExecutor`] resolves the latency problem when creating MV with a huge amount of
 /// existing data, by rearranging the barrier from the upstream. Check the design doc for details.
 pub struct RearrangedChainExecutor {
-    info: ExecutorInfo,
+    snapshot: Executor,
 
-    snapshot: BoxedExecutor,
-
-    upstream: BoxedExecutor,
+    upstream: Executor,
 
     progress: CreateMviewProgress,
 
@@ -83,14 +79,8 @@ impl RearrangedMessage {
 }
 
 impl RearrangedChainExecutor {
-    pub fn new(
-        info: ExecutorInfo,
-        snapshot: BoxedExecutor,
-        upstream: BoxedExecutor,
-        progress: CreateMviewProgress,
-    ) -> Self {
+    pub fn new(snapshot: Executor, upstream: Executor, progress: CreateMviewProgress) -> Self {
         Self {
-            info,
             snapshot,
             upstream,
             actor_id: progress.actor_id(),
@@ -288,10 +278,6 @@ impl RearrangedChainExecutor {
 }
 
 impl Execute for RearrangedChainExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
     }

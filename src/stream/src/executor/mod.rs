@@ -20,7 +20,6 @@ use await_tree::InstrumentAwait;
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
-use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
@@ -154,7 +153,6 @@ pub use wrapper::WrapperExecutor;
 
 use self::barrier_align::AlignedMessageStream;
 
-pub type BoxedExecutor = Box<dyn Execute>;
 pub type MessageStreamItem = StreamExecutorResult<Message>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
@@ -180,27 +178,13 @@ pub struct ExecutorInfo {
 
 /// `Executor` supports handling of control messages.
 pub trait Execute: Send + 'static {
-    fn info(&self) -> &ExecutorInfo;
-
-    fn schema(&self) -> &Schema {
-        &self.info().schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info().pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info().identity
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream;
 
     fn execute_with_epoch(self: Box<Self>, _epoch: u64) -> BoxedMessageStream {
         self.execute()
     }
 
-    fn boxed(self) -> BoxedExecutor
+    fn boxed(self) -> Box<dyn Execute>
     where
         Self: Sized + Send + 'static,
     {
@@ -208,9 +192,59 @@ pub trait Execute: Send + 'static {
     }
 }
 
-impl std::fmt::Debug for BoxedExecutor {
+pub struct Executor {
+    info: ExecutorInfo,
+    execute: Box<dyn Execute>,
+}
+
+impl Executor {
+    pub fn new(info: ExecutorInfo, execute: Box<dyn Execute>) -> Self {
+        Self { info, execute }
+    }
+
+    pub fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
+
+    pub fn schema(&self) -> &Schema {
+        &self.info.schema
+    }
+
+    pub fn pk_indices(&self) -> PkIndicesRef<'_> {
+        &self.info.pk_indices
+    }
+
+    pub fn identity(&self) -> &str {
+        &self.info.identity
+    }
+
+    pub fn execute(self) -> BoxedMessageStream {
+        self.execute.execute()
+    }
+
+    pub fn execute_with_epoch(self, epoch: u64) -> BoxedMessageStream {
+        self.execute.execute_with_epoch(epoch)
+    }
+}
+
+impl std::fmt::Debug for Executor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.identity())
+    }
+}
+
+impl From<(ExecutorInfo, Box<dyn Execute>)> for Executor {
+    fn from((info, execute): (ExecutorInfo, Box<dyn Execute>)) -> Self {
+        Self::new(info, execute)
+    }
+}
+
+impl<E> From<(ExecutorInfo, E)> for Executor
+where
+    E: Execute,
+{
+    fn from((info, execute): (ExecutorInfo, E)) -> Self {
+        Self::new(info, execute.boxed())
     }
 }
 

@@ -23,13 +23,12 @@ use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::ExprError;
 
 use super::error::StreamExecutorError;
-use super::{ActorContextRef, BoxedExecutor, Execute, ExecutorInfo, Message};
+use super::{ActorContextRef, Execute, Executor, Message};
 use crate::common::StreamChunkBuilder;
 
 pub struct HopWindowExecutor {
     _ctx: ActorContextRef,
-    pub info: ExecutorInfo,
-    pub input: BoxedExecutor,
+    pub input: Executor,
     pub time_col_idx: usize,
     pub window_slide: Interval,
     pub window_size: Interval,
@@ -43,8 +42,7 @@ impl HopWindowExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
-        input: BoxedExecutor,
+        input: Executor,
         time_col_idx: usize,
         window_slide: Interval,
         window_size: Interval,
@@ -55,7 +53,6 @@ impl HopWindowExecutor {
     ) -> Self {
         HopWindowExecutor {
             _ctx: ctx,
-            info,
             input,
             time_col_idx,
             window_slide,
@@ -69,10 +66,6 @@ impl HopWindowExecutor {
 }
 
 impl Execute for HopWindowExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
     }

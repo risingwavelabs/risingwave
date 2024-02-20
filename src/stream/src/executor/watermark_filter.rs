@@ -36,7 +36,7 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::filter::FilterExecutor;
-use super::{ActorContextRef, BoxedExecutor, Execute, ExecutorInfo, Message, StreamExecutorResult};
+use super::{ActorContextRef, Execute, Executor, ExecutorInfo, Message, StreamExecutorResult};
 use crate::common::table::state_table::StateTable;
 use crate::executor::{expect_first_barrier, Watermark};
 use crate::task::ActorEvalErrorReport;
@@ -46,44 +46,46 @@ use crate::task::ActorEvalErrorReport;
 /// filtered.
 pub struct WatermarkFilterExecutor<S: StateStore> {
     ctx: ActorContextRef,
-    info: ExecutorInfo,
 
-    input: BoxedExecutor,
+    input: Executor,
     /// The expression used to calculate the watermark value.
     watermark_expr: NonStrictExpression,
     /// The column we should generate watermark and filter on.
     event_time_col_idx: usize,
     table: StateTable<S>,
     global_watermark_table: StorageTable<S>,
+
+    eval_error_report: ActorEvalErrorReport,
 }
 
 impl<S: StateStore> WatermarkFilterExecutor<S> {
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
-        input: BoxedExecutor,
+        info: &ExecutorInfo,
+        input: Executor,
         watermark_expr: NonStrictExpression,
         event_time_col_idx: usize,
         table: StateTable<S>,
         global_watermark_table: StorageTable<S>,
     ) -> Self {
+        let eval_error_report = ActorEvalErrorReport {
+            actor_context: ctx.clone(),
+            identity: Arc::from(info.identity.as_ref()),
+        };
+
         Self {
             ctx,
-            info,
             input,
             watermark_expr,
             event_time_col_idx,
             table,
             global_watermark_table,
+            eval_error_report,
         }
     }
 }
 
 impl<S: StateStore> Execute for WatermarkFilterExecutor<S> {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -97,15 +99,10 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             event_time_col_idx,
             watermark_expr,
             ctx,
-            info,
             mut table,
             mut global_watermark_table,
+            eval_error_report,
         } = *self;
-
-        let eval_error_report = ActorEvalErrorReport {
-            actor_context: ctx.clone(),
-            identity: info.identity.into(),
-        };
 
         let watermark_type = watermark_expr.return_type();
         assert_eq!(
@@ -442,7 +439,7 @@ mod tests {
 
     async fn create_watermark_filter_executor(
         mem_state: MemoryStateStore,
-    ) -> (BoxedExecutor, MessageSender) {
+    ) -> (Box<dyn Execute>, MessageSender) {
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int16),        // pk

@@ -28,39 +28,39 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Execute,
-    ExecutorInfo, Message, StreamExecutorResult,
+    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
+    StreamExecutorResult,
 };
 use crate::task::AtomicU64Ref;
 
 /// [`AppendOnlyDedupExecutor`] drops any message that has duplicate pk columns with previous
 /// messages. It only accepts append-only input, and its output will be append-only as well.
 pub struct AppendOnlyDedupExecutor<S: StateStore> {
-    input: Option<BoxedExecutor>,
+    ctx: ActorContextRef,
+
+    input: Option<Executor>,
+    dedup_cols: Vec<usize>,
     state_table: StateTable<S>,
     cache: DedupCache<OwnedRow>,
-
-    info: ExecutorInfo,
-    ctx: ActorContextRef,
 }
 
 impl<S: StateStore> AppendOnlyDedupExecutor<S> {
     pub fn new(
-        input: BoxedExecutor,
-        state_table: StateTable<S>,
-        info: ExecutorInfo,
         ctx: ActorContextRef,
+        input: Executor,
+        dedup_cols: Vec<usize>,
+        state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         let metrics_info =
             MetricsInfo::new(metrics, state_table.table_id(), ctx.id, "AppendOnly Dedup");
         Self {
+            ctx,
             input: Some(input),
+            dedup_cols,
             state_table,
             cache: DedupCache::new(watermark_epoch, metrics_info),
-            info,
-            ctx,
         }
     }
 
@@ -89,7 +89,7 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                         .data_chunk()
                         .rows_with_holes()
                         .map(|row_ref| {
-                            row_ref.map(|row| row.project(self.pk_indices()).to_owned_row())
+                            row_ref.map(|row| row.project(&self.dedup_cols).to_owned_row())
                         })
                         .collect_vec();
 
@@ -185,10 +185,6 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
 }
 
 impl<S: StateStore> Execute for AppendOnlyDedupExecutor<S> {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.executor_inner().boxed()
     }

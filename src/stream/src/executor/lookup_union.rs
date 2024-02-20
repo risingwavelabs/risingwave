@@ -20,32 +20,30 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 
 use super::error::StreamExecutorError;
-use super::*;
-use crate::executor::{BoxedMessageStream, ExecutorInfo};
+use super::{Barrier, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message};
 
 /// Merges data from multiple inputs with order. If `order = [2, 1, 0]`, then
 /// it will first pipe data from the third input; after the third input gets a barrier, it will then
 /// pipe the second, and finally the first. In the future we could have more efficient
 /// implementation.
 pub struct LookupUnionExecutor {
-    info: ExecutorInfo,
-    inputs: Vec<BoxedExecutor>,
+    inputs: Vec<Executor>,
     order: Vec<usize>,
 }
 
-impl std::fmt::Debug for LookupUnionExecutor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LookupUnionExecutor")
-            .field("schema", &self.info.schema)
-            .field("pk_indices", &self.info.pk_indices)
-            .finish()
-    }
-}
+// TODO()
+// impl std::fmt::Debug for LookupUnionExecutor {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         f.debug_struct("LookupUnionExecutor")
+//             .field("schema", &self.info.schema)
+//             .field("pk_indices", &self.info.pk_indices)
+//             .finish()
+//     }
+// }
 
 impl LookupUnionExecutor {
-    pub fn new(info: ExecutorInfo, inputs: Vec<BoxedExecutor>, order: Vec<u32>) -> Self {
+    pub fn new(inputs: Vec<Executor>, order: Vec<u32>) -> Self {
         Self {
-            info,
             inputs,
             order: order.iter().map(|x| *x as _).collect(),
         }
@@ -54,10 +52,6 @@ impl LookupUnionExecutor {
 
 #[async_trait]
 impl Execute for LookupUnionExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

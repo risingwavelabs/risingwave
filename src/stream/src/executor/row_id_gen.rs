@@ -24,15 +24,14 @@ use risingwave_common::types::Serial;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_id::RowIdGenerator;
 
-use super::{expect_first_barrier, ActorContextRef, BoxedExecutor, Execute, ExecutorInfo};
+use super::{expect_first_barrier, ActorContextRef, Execute, Executor};
 use crate::executor::{Message, StreamExecutorError};
 
 /// [`RowIdGenExecutor`] generates row id for data, where the user has not specified a pk.
 pub struct RowIdGenExecutor {
     ctx: ActorContextRef,
-    info: ExecutorInfo,
 
-    upstream: Option<BoxedExecutor>,
+    upstream: Option<Executor>,
 
     row_id_index: usize,
 
@@ -42,14 +41,12 @@ pub struct RowIdGenExecutor {
 impl RowIdGenExecutor {
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
-        upstream: BoxedExecutor,
+        upstream: Executor,
         row_id_index: usize,
         vnodes: Bitmap,
     ) -> Self {
         Self {
             ctx,
-            info,
             upstream: Some(upstream),
             row_id_index,
             row_id_generator: Self::new_generator(&vnodes),
@@ -124,10 +121,6 @@ impl RowIdGenExecutor {
 }
 
 impl Execute for RowIdGenExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
     }

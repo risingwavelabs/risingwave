@@ -43,7 +43,6 @@ const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// Streaming source for external
     stream_source_core: Option<StreamSourceCore<S>>,
@@ -68,7 +67,6 @@ impl<S: StateStore> SourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        info: ExecutorInfo,
         stream_source_core: Option<StreamSourceCore<S>>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
@@ -78,7 +76,6 @@ impl<S: StateStore> SourceExecutor<S> {
     ) -> Self {
         Self {
             actor_ctx,
-            info,
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
@@ -554,8 +551,7 @@ impl<S: StateStore> SourceExecutor<S> {
                         // chunks.
                         self_paused = true;
                         tracing::warn!(
-                            "source {} paused, wait barrier for {:?}",
-                            self.info.identity,
+                            "source paused, wait barrier for {:?}",
                             last_barrier_time.elapsed()
                         );
                         stream.pause_stream();
@@ -643,10 +639,6 @@ impl<S: StateStore> SourceExecutor<S> {
 }
 
 impl<S: StateStore> Execute for SourceExecutor<S> {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         if self.stream_source_core.is_some() {
             self.execute_with_stream_source().boxed()
@@ -656,13 +648,14 @@ impl<S: StateStore> Execute for SourceExecutor<S> {
     }
 }
 
+// TODO()
 impl<S: StateStore> Debug for SourceExecutor<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(core) = &self.stream_source_core {
             f.debug_struct("SourceExecutor")
                 .field("source_id", &core.source_id)
                 .field("column_ids", &core.column_ids)
-                .field("pk_indices", &self.info.pk_indices)
+                // .field("pk_indices", &self.info.pk_indices)
                 .finish()
         } else {
             f.debug_struct("SourceExecutor").finish()

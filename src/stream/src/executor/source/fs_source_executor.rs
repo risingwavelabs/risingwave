@@ -48,7 +48,6 @@ const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 /// such as s3.
 pub struct FsSourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// Streaming source  for external
     stream_source_core: StreamSourceCore<S>,
@@ -69,7 +68,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        info: ExecutorInfo,
         stream_source_core: StreamSourceCore<S>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
@@ -78,7 +76,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
     ) -> StreamResult<Self> {
         Ok(Self {
             actor_ctx,
-            info,
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
@@ -479,21 +476,18 @@ impl<S: StateStore> FsSourceExecutor<S> {
 }
 
 impl<S: StateStore> Execute for FsSourceExecutor<S> {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }
 }
 
+// TODO()
 impl<S: StateStore> Debug for FsSourceExecutor<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FsSourceExecutor")
             .field("source_id", &self.stream_source_core.source_id)
             .field("column_ids", &self.stream_source_core.column_ids)
-            .field("pk_indices", &self.info.pk_indices)
+            // .field("pk_indices", &self.info.pk_indices)
             .finish()
     }
 }

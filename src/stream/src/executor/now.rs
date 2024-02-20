@@ -25,13 +25,12 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{
-    Barrier, BoxedMessageStream, Execute, ExecutorInfo, Message, Mutation, StreamExecutorError,
-    Watermark,
+    Barrier, BoxedMessageStream, Execute, Message, Mutation, StreamExecutorError, Watermark,
 };
 use crate::common::table::state_table::StateTable;
 
 pub struct NowExecutor<S: StateStore> {
-    info: ExecutorInfo,
+    data_types: Vec<DataType>,
 
     /// Receiver of barrier channel.
     barrier_receiver: UnboundedReceiver<Barrier>,
@@ -41,12 +40,12 @@ pub struct NowExecutor<S: StateStore> {
 
 impl<S: StateStore> NowExecutor<S> {
     pub fn new(
-        info: ExecutorInfo,
+        data_types: Vec<DataType>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         state_table: StateTable<S>,
     ) -> Self {
         Self {
-            info,
+            data_types,
             barrier_receiver,
             state_table,
         }
@@ -55,10 +54,9 @@ impl<S: StateStore> NowExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(self) {
         let Self {
+            data_types,
             barrier_receiver,
             mut state_table,
-            info,
-            ..
         } = self;
 
         // Whether the executor is paused.
@@ -130,15 +128,12 @@ impl<S: StateStore> NowExecutor<S> {
                 let row = row::once(&timestamp);
                 state_table.update(last_row, row);
 
-                StreamChunk::from_rows(
-                    &[(Op::Delete, last_row), (Op::Insert, row)],
-                    &info.schema.data_types(),
-                )
+                StreamChunk::from_rows(&[(Op::Delete, last_row), (Op::Insert, row)], &data_types)
             } else {
                 let row = row::once(&timestamp);
                 state_table.insert(row);
 
-                StreamChunk::from_rows(&[(Op::Insert, row)], &info.schema.data_types())
+                StreamChunk::from_rows(&[(Op::Insert, row)], &data_types)
             };
 
             yield Message::Chunk(stream_chunk);
@@ -155,10 +150,6 @@ impl<S: StateStore> NowExecutor<S> {
 }
 
 impl<S: StateStore> Execute for NowExecutor<S> {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }

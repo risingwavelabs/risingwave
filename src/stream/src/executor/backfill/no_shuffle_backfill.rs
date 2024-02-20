@@ -38,8 +38,8 @@ use crate::executor::backfill::utils::{
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, Barrier, BoxedExecutor, BoxedMessageStream, Execute, ExecutorInfo,
-    Message, Mutation, StreamExecutorError, StreamExecutorResult,
+    expect_first_barrier, Barrier, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message,
+    Mutation, StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
@@ -75,12 +75,10 @@ pub struct BackfillState {
 /// in the same worker, so that we can read uncommitted data from the upstream table without
 /// waiting.
 pub struct BackfillExecutor<S: StateStore> {
-    info: ExecutorInfo,
-
     /// Upstream table
     upstream_table: StorageTable<S>,
     /// Upstream with the same schema with the upstream table.
-    upstream: BoxedExecutor,
+    upstream: Executor,
 
     /// Internal state table for persisting state of backfill state.
     state_table: Option<StateTable<S>>,
@@ -109,9 +107,8 @@ where
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        info: ExecutorInfo,
         upstream_table: StorageTable<S>,
-        upstream: BoxedExecutor,
+        upstream: Executor,
         state_table: Option<StateTable<S>>,
         output_indices: Vec<usize>,
         progress: CreateMviewProgress,
@@ -121,7 +118,6 @@ where
     ) -> Self {
         let actor_id = progress.actor_id();
         Self {
-            info,
             upstream_table,
             upstream,
             state_table,
@@ -745,10 +741,6 @@ impl<S> Execute for BackfillExecutor<S>
 where
     S: StateStore,
 {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

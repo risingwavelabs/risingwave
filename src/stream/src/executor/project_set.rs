@@ -27,9 +27,7 @@ use risingwave_expr::expr::{LogReport, NonStrictExpression};
 use risingwave_expr::table_function::ProjectSetSelectItem;
 
 use super::error::StreamExecutorError;
-use super::{
-    ActorContextRef, BoxedExecutor, Execute, ExecutorInfo, Message, StreamExecutorResult, Watermark,
-};
+use super::{ActorContextRef, Execute, Executor, Message, StreamExecutorResult, Watermark};
 use crate::common::StreamChunkBuilder;
 
 const PROJ_ROW_ID_OFFSET: usize = 1;
@@ -38,13 +36,12 @@ const PROJ_ROW_ID_OFFSET: usize = 1;
 /// and returns a new data chunk. And then, `ProjectSetExecutor` will insert, delete
 /// or update element into next operator according to the result of the expression.
 pub struct ProjectSetExecutor {
-    input: BoxedExecutor,
+    input: Executor,
     inner: Inner,
 }
 
 struct Inner {
     _ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// Expressions of the current project_section.
     select_list: Vec<ProjectSetSelectItem>,
@@ -60,8 +57,7 @@ impl ProjectSetExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
-        input: Box<dyn Execute>,
+        input: Executor,
         select_list: Vec<ProjectSetSelectItem>,
         chunk_size: usize,
         watermark_derivations: MultiMap<usize, usize>,
@@ -69,7 +65,6 @@ impl ProjectSetExecutor {
     ) -> Self {
         let inner = Inner {
             _ctx: ctx,
-            info,
             select_list,
             chunk_size,
             watermark_derivations,
@@ -89,10 +84,6 @@ impl Debug for ProjectSetExecutor {
 }
 
 impl Execute for ProjectSetExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        &self.inner.info
-    }
-
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.inner.execute(self.input).boxed()
     }
@@ -100,7 +91,7 @@ impl Execute for ProjectSetExecutor {
 
 impl Inner {
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute(self, input: BoxedExecutor) {
+    async fn execute(self, input: Executor) {
         assert!(!self.select_list.is_empty());
         // First column will be `projected_row_id`, which represents the index in the
         // output table
@@ -260,8 +251,8 @@ impl Inner {
                 ret.push(derived_watermark);
             } else {
                 warn!(
-                    "{} derive a NULL watermark with the expression {}!",
-                    self.info.identity, expr_idx
+                    "a NULL watermark is derived with the expression {}!",
+                    expr_idx
                 );
             }
         }

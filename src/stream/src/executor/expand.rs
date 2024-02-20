@@ -16,25 +16,19 @@ use std::fmt::Debug;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Array, I64Array};
+use risingwave_common::array::{Array, I64Array, StreamChunk};
 
 use super::error::StreamExecutorError;
-use super::*;
+use super::{BoxedMessageStream, Execute, Executor, ExecutorInfo, Message};
 
 pub struct ExpandExecutor {
-    info: ExecutorInfo,
-    input: BoxedExecutor,
+    input: Executor,
     column_subsets: Vec<Vec<usize>>,
 }
 
 impl ExpandExecutor {
-    pub fn new(
-        info: ExecutorInfo,
-        input: Box<dyn Execute>,
-        column_subsets: Vec<Vec<usize>>,
-    ) -> Self {
+    pub fn new(input: Executor, column_subsets: Vec<Vec<usize>>) -> Self {
         Self {
-            info,
             input,
             column_subsets,
         }
@@ -73,10 +67,6 @@ impl Debug for ExpandExecutor {
 }
 
 impl Execute for ExpandExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

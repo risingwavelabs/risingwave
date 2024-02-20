@@ -38,7 +38,6 @@ const CHUNK_SIZE: usize = 1024;
 #[allow(dead_code)]
 pub struct FsListExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// Streaming source for external
     stream_source_core: Option<StreamSourceCore<S>>,
@@ -63,7 +62,6 @@ impl<S: StateStore> FsListExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        info: ExecutorInfo,
         stream_source_core: Option<StreamSourceCore<S>>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
@@ -73,7 +71,6 @@ impl<S: StateStore> FsListExecutor<S> {
     ) -> Self {
         Self {
             actor_ctx,
-            info,
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
@@ -193,22 +190,19 @@ impl<S: StateStore> FsListExecutor<S> {
 }
 
 impl<S: StateStore> Execute for FsListExecutor<S> {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }
 }
 
+// TODO()
 impl<S: StateStore> Debug for FsListExecutor<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(core) = &self.stream_source_core {
             f.debug_struct("FsListExecutor")
                 .field("source_id", &core.source_id)
                 .field("column_ids", &core.column_ids)
-                .field("pk_indices", &self.info.pk_indices)
+                // .field("pk_indices", &self.info.pk_indices)
                 .finish()
         } else {
             f.debug_struct("FsListExecutor").finish()

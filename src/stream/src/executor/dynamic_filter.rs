@@ -20,6 +20,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, once, OwnedRow, OwnedRow as RowData, Row};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
@@ -37,7 +38,7 @@ use risingwave_storage::StateStore;
 use super::barrier_align::*;
 use super::error::StreamExecutorError;
 use super::monitor::StreamingMetrics;
-use super::{ActorContextRef, BoxedExecutor, BoxedMessageStream, Execute, ExecutorInfo, Message};
+use super::{ActorContextRef, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message};
 use crate::common::table::state_table::{StateTable, WatermarkCacheParameterizedStateTable};
 use crate::common::StreamChunkBuilder;
 use crate::executor::expect_first_barrier_from_aligned_stream;
@@ -45,10 +46,12 @@ use crate::task::ActorEvalErrorReport;
 
 pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool> {
     ctx: ActorContextRef,
-    info: ExecutorInfo,
 
-    source_l: Option<BoxedExecutor>,
-    source_r: Option<BoxedExecutor>,
+    eval_error_report: ActorEvalErrorReport,
+
+    schema: Schema,
+    source_l: Option<Executor>,
+    source_r: Option<Executor>,
     key_l: usize,
     comparator: ExprNodeType,
     left_table: WatermarkCacheParameterizedStateTable<S, USE_WATERMARK_CACHE>,
@@ -67,9 +70,9 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
-        source_l: BoxedExecutor,
-        source_r: BoxedExecutor,
+        info: &ExecutorInfo,
+        source_l: Executor,
+        source_r: Executor,
         key_l: usize,
         comparator: ExprNodeType,
         state_table_l: WatermarkCacheParameterizedStateTable<S, USE_WATERMARK_CACHE>,
@@ -79,9 +82,14 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         condition_always_relax: bool,
         cleaned_by_watermark: bool,
     ) -> Self {
+        let eval_error_report = ActorEvalErrorReport {
+            actor_context: ctx.clone(),
+            identity: Arc::from(info.identity.as_str()),
+        };
         Self {
             ctx,
-            info,
+            eval_error_report,
+            schema: info.schema.clone(),
             source_l: Some(source_l),
             source_r: Some(source_r),
             key_l,
@@ -259,7 +267,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn into_stream(mut self) {
+    async fn execute_inner(mut self) {
         let input_l = self.source_l.take().unwrap();
         let input_r = self.source_r.take().unwrap();
 
@@ -269,10 +277,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         // The types are aligned by frontend.
         assert_eq!(l_data_type, r_data_type);
         let dynamic_cond = {
-            let eval_error_report = ActorEvalErrorReport {
-                actor_context: self.ctx.clone(),
-                identity: Arc::from(self.info.identity.as_str()),
-            };
+            let eval_error_report = self.eval_error_report.clone();
             move |literal: Datum| {
                 literal.map(|scalar| {
                     build_func_non_strict(
@@ -315,7 +320,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         yield Message::Barrier(barrier);
 
         let mut stream_chunk_builder =
-            StreamChunkBuilder::new(self.chunk_size, self.info.schema.data_types());
+            StreamChunkBuilder::new(self.chunk_size, self.schema.data_types());
 
         let watermark_can_clean_state = !matches!(self.comparator, LessThan | LessThanOrEqual);
         let mut unused_clean_hint = None;
@@ -486,12 +491,8 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
 impl<S: StateStore, const USE_WATERMARK_CACHE: bool> Execute
     for DynamicFilterExecutor<S, USE_WATERMARK_CACHE>
 {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.into_stream().boxed()
+        self.execute_inner().boxed()
     }
 }
 

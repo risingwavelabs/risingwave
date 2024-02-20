@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::catalog::Schema;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -23,7 +24,7 @@ use super::{ManagedTopNState, TopNCache, TopNCacheTrait};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::{ActorContextRef, Execute, ExecutorInfo, PkIndices, Watermark};
+use crate::executor::{ActorContextRef, Execute, Executor, PkIndices, Watermark};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
@@ -33,9 +34,9 @@ pub type TopNExecutor<S, const WITH_TIES: bool> =
 impl<S: StateStore, const WITH_TIES: bool> TopNExecutor<S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        input: Box<dyn Execute>,
+        input: Executor,
         ctx: ActorContextRef,
-        info: ExecutorInfo,
+        schema: Schema,
         storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
         order_by: Vec<ColumnOrder>,
@@ -45,7 +46,7 @@ impl<S: StateStore, const WITH_TIES: bool> TopNExecutor<S, WITH_TIES> {
             input,
             ctx,
             inner: InnerTopNExecutor::new(
-                info,
+                schema,
                 storage_key,
                 offset_and_limit,
                 order_by,
@@ -79,7 +80,7 @@ impl<S: StateStore> TopNExecutor<S, true> {
 }
 
 pub struct InnerTopNExecutor<S: StateStore, const WITH_TIES: bool> {
-    info: ExecutorInfo,
+    schema: Schema,
 
     /// The storage key indices of the `TopNExecutor`
     storage_key_indices: PkIndices,
@@ -103,7 +104,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutor<S, WITH_TIES> {
     /// into `CacheKey`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        info: ExecutorInfo,
+        schema: Schema,
         storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
         order_by: Vec<ColumnOrder>,
@@ -112,12 +113,12 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutor<S, WITH_TIES> {
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;
 
-        let cache_key_serde = create_cache_key_serde(&storage_key, &info.schema, &order_by, &[]);
+        let cache_key_serde = create_cache_key_serde(&storage_key, &schema, &order_by, &[]);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
-        let data_types = info.schema.data_types();
+        let data_types = schema.data_types();
 
         Ok(Self {
-            info,
+            schema,
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             cache: TopNCache::new(num_offset, num_limit, data_types),
@@ -162,7 +163,7 @@ where
                 }
             }
         }
-        generate_output(res_rows, res_ops, &self.info().schema)
+        generate_output(res_rows, res_ops, &self.schema)
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
@@ -171,10 +172,6 @@ where
 
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         self.managed_state.try_flush().await
-    }
-
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {

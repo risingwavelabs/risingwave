@@ -27,7 +27,7 @@ use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, JoinType};
+use crate::executor::{ActorContextRef, Executor, JoinType};
 use crate::task::AtomicU64Ref;
 
 pub struct HashJoinExecutorBuilder;
@@ -39,7 +39,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let is_append_only = node.is_append_only;
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash join"));
 
@@ -136,7 +136,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
 
         let args = HashJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
-            info: params.info,
+            info: params.info.clone(),
             source_l,
             source_r,
             params_l,
@@ -157,15 +157,16 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             chunk_size: params.env.config().developer.chunk_size,
         };
 
-        args.dispatch()
+        let exec = args.dispatch()?;
+        Ok((params.info, exec).into())
     }
 }
 
 struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     ctx: ActorContextRef,
     info: ExecutorInfo,
-    source_l: BoxedExecutor,
-    source_r: BoxedExecutor,
+    source_l: Executor,
+    source_r: Executor,
     params_l: JoinParams,
     params_r: JoinParams,
     null_safe: Vec<bool>,
@@ -185,34 +186,33 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
-    type Output = StreamResult<BoxedExecutor>;
+    type Output = StreamResult<Box<dyn Execute>>;
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         /// This macro helps to fill the const generic type parameter.
         macro_rules! build {
             ($join_type:ident) => {
-                Ok(Box::new(
-                    HashJoinExecutor::<K, S, { JoinType::$join_type }>::new(
-                        self.ctx,
-                        self.info,
-                        self.source_l,
-                        self.source_r,
-                        self.params_l,
-                        self.params_r,
-                        self.null_safe,
-                        self.output_indices,
-                        self.cond,
-                        self.inequality_pairs,
-                        self.state_table_l,
-                        self.degree_state_table_l,
-                        self.state_table_r,
-                        self.degree_state_table_r,
-                        self.lru_manager,
-                        self.is_append_only,
-                        self.metrics,
-                        self.chunk_size,
-                    ),
-                ))
+                Ok(HashJoinExecutor::<K, S, { JoinType::$join_type }>::new(
+                    self.ctx,
+                    self.info,
+                    self.source_l,
+                    self.source_r,
+                    self.params_l,
+                    self.params_r,
+                    self.null_safe,
+                    self.output_indices,
+                    self.cond,
+                    self.inequality_pairs,
+                    self.state_table_l,
+                    self.degree_state_table_l,
+                    self.state_table_r,
+                    self.degree_state_table_r,
+                    self.lru_manager,
+                    self.is_append_only,
+                    self.metrics,
+                    self.chunk_size,
+                )
+                .boxed())
             };
         }
         match self.join_type_proto {

@@ -41,7 +41,7 @@ use super::join::{JoinTypePrimitive, SideTypePrimitive, *};
 use super::monitor::StreamingMetrics;
 use super::watermark::*;
 use super::{
-    ActorContextRef, BoxedExecutor, BoxedMessageStream, Execute, ExecutorInfo, Message, Watermark,
+    ActorContextRef, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message, Watermark,
 };
 use crate::common::table::state_table::StateTable;
 use crate::executor::expect_first_barrier_from_aligned_stream;
@@ -141,9 +141,9 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     info: ExecutorInfo,
 
     /// Left input executor
-    input_l: Option<BoxedExecutor>,
+    input_l: Option<Executor>,
     /// Right input executor
-    input_r: Option<BoxedExecutor>,
+    input_r: Option<Executor>,
     /// The data types of the formed new columns
     actual_output_data_types: Vec<DataType>,
     /// The parameters of the left join executor
@@ -190,10 +190,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Execute for HashJoinExecutor<K, S, T> {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }
@@ -217,8 +213,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     pub fn new(
         ctx: ActorContextRef,
         info: ExecutorInfo,
-        input_l: BoxedExecutor,
-        input_r: BoxedExecutor,
+        input_l: Executor,
+        input_r: Executor,
         params_l: JoinParams,
         params_r: JoinParams,
         null_safe: Vec<bool>,

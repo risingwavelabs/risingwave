@@ -36,7 +36,7 @@ use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
-use crate::executor::{ActorContextRef, Barrier, Execute, ExecutorInfo, Message};
+use crate::executor::{ActorContextRef, Barrier, Executor, ExecutorInfo, Message};
 use crate::task::AtomicU64Ref;
 
 /// Parameters for [`LookupExecutor`].
@@ -46,11 +46,11 @@ pub struct LookupExecutorParams<S: StateStore> {
 
     /// The side for arrangement. Currently, it should be a
     /// `MaterializeExecutor`.
-    pub arrangement: Box<dyn Execute>,
+    pub arrangement: Executor,
 
     /// The side for stream. It can be any stream, but it will generally be a
     /// `MaterializeExecutor`.
-    pub stream: Box<dyn Execute>,
+    pub stream: Executor,
 
     /// Should be the same as [`ColumnDesc`] in the arrangement.
     ///

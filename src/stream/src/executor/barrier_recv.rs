@@ -26,43 +26,25 @@ use super::{
 /// of the streaming graph.
 pub struct BarrierRecvExecutor {
     _ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// The barrier receiver registered in the local barrier manager.
     barrier_receiver: UnboundedReceiver<Barrier>,
 }
 
 impl BarrierRecvExecutor {
-    pub fn new(
-        ctx: ActorContextRef,
-        info: ExecutorInfo,
-        barrier_receiver: UnboundedReceiver<Barrier>,
-    ) -> Self {
+    pub fn new(ctx: ActorContextRef, barrier_receiver: UnboundedReceiver<Barrier>) -> Self {
         Self {
             _ctx: ctx,
-            info,
             barrier_receiver,
         }
     }
 
     pub fn for_test(barrier_receiver: UnboundedReceiver<Barrier>) -> Self {
-        Self::new(
-            ActorContext::for_test(0),
-            ExecutorInfo {
-                schema: Schema::empty().clone(),
-                pk_indices: PkIndices::new(),
-                identity: "BarrierRecvExecutor".to_string(),
-            },
-            barrier_receiver,
-        )
+        Self::new(ActorContext::for_test(0), barrier_receiver)
     }
 }
 
 impl Execute for BarrierRecvExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         UnboundedReceiverStream::new(self.barrier_receiver)
             .map(|barrier| Ok(Message::Barrier(barrier)))

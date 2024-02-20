@@ -30,8 +30,8 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use super::CacheKey;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Execute,
-    ExecutorInfo, Message, Watermark,
+    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, ExecutorInfo,
+    Message, Watermark,
 };
 
 pub trait TopNExecutorBase: Send + 'static {
@@ -49,8 +49,6 @@ pub trait TopNExecutorBase: Send + 'static {
 
     /// Flush the buffered chunk to the storage backend.
     fn try_flush_data(&mut self) -> impl Future<Output = StreamExecutorResult<()>> + Send;
-
-    fn info(&self) -> &ExecutorInfo;
 
     /// Update the vnode bitmap for the state table and manipulate the cache if necessary, only used
     /// by Group Top-N since it's distributed.
@@ -72,7 +70,7 @@ pub trait TopNExecutorBase: Send + 'static {
 
 /// The struct wraps a [`TopNExecutorBase`]
 pub struct TopNExecutorWrapper<E> {
-    pub(super) input: BoxedExecutor,
+    pub(super) input: Executor,
     pub(super) ctx: ActorContextRef,
     pub(super) inner: E,
 }
@@ -81,10 +79,6 @@ impl<E> Execute for TopNExecutorWrapper<E>
 where
     E: TopNExecutorBase,
 {
-    fn info(&self) -> &ExecutorInfo {
-        self.inner.info()
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.top_n_executor_execute().boxed()
     }

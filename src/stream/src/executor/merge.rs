@@ -37,9 +37,6 @@ pub struct MergeExecutor {
     /// The context of the actor.
     actor_context: ActorContextRef,
 
-    /// Logical Operator Info
-    info: ExecutorInfo,
-
     /// Upstream channels.
     upstreams: Vec<BoxedInput>,
 
@@ -60,7 +57,6 @@ impl MergeExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
         inputs: Vec<BoxedInput>,
@@ -70,7 +66,6 @@ impl MergeExecutor {
     ) -> Self {
         Self {
             actor_context: ctx,
-            info,
             upstreams: inputs,
             fragment_id,
             upstream_fragment_id,
@@ -86,11 +81,6 @@ impl MergeExecutor {
 
         Self::new(
             ActorContext::for_test(114),
-            ExecutorInfo {
-                schema,
-                pk_indices: vec![],
-                identity: "MergeExecutor".to_string(),
-            },
             514,
             1919,
             inputs
@@ -245,10 +235,6 @@ impl MergeExecutor {
 }
 
 impl Execute for MergeExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

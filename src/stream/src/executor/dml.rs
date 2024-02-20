@@ -26,8 +26,7 @@ use risingwave_dml::dml_manager::DmlManagerRef;
 
 use super::error::StreamExecutorError;
 use super::{
-    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Execute, ExecutorInfo, Message,
-    Mutation,
+    expect_first_barrier, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message, Mutation,
 };
 use crate::common::StreamChunkBuilder;
 use crate::executor::stream_reader::StreamReaderWithPause;
@@ -35,9 +34,7 @@ use crate::executor::stream_reader::StreamReaderWithPause;
 /// [`DmlExecutor`] accepts both stream data and batch data for data manipulation on a specific
 /// table. The two streams will be merged into one and then sent to downstream.
 pub struct DmlExecutor {
-    info: ExecutorInfo,
-
-    upstream: BoxedExecutor,
+    upstream: Executor,
 
     /// Stores the information of batch data channels.
     dml_manager: DmlManagerRef,
@@ -71,10 +68,8 @@ struct TxnBuffer {
 }
 
 impl DmlExecutor {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        info: ExecutorInfo,
-        upstream: BoxedExecutor,
+        upstream: Executor,
         dml_manager: DmlManagerRef,
         table_id: TableId,
         table_version_id: TableVersionId,
@@ -82,7 +77,6 @@ impl DmlExecutor {
         chunk_size: usize,
     ) -> Self {
         Self {
-            info,
             upstream,
             dml_manager,
             table_id,
@@ -278,10 +272,6 @@ impl DmlExecutor {
 }
 
 impl Execute for DmlExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

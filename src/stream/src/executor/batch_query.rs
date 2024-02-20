@@ -16,6 +16,7 @@ use await_tree::InstrumentAwait;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::catalog::Schema;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -23,7 +24,7 @@ use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
-use super::{Execute, ExecutorInfo, Message};
+use super::{Execute, Message};
 use crate::executor::BoxedMessageStream;
 
 pub struct BatchQueryExecutor<S: StateStore> {
@@ -33,18 +34,18 @@ pub struct BatchQueryExecutor<S: StateStore> {
     /// The number of tuples in one [`StreamChunk`]
     batch_size: usize,
 
-    info: ExecutorInfo,
+    schema: Schema,
 }
 
 impl<S> BatchQueryExecutor<S>
 where
     S: StateStore,
 {
-    pub fn new(table: StorageTable<S>, batch_size: usize, info: ExecutorInfo) -> Self {
+    pub fn new(table: StorageTable<S>, batch_size: usize, schema: Schema) -> Self {
         Self {
             table,
             batch_size,
-            info,
+            schema,
         }
     }
 
@@ -61,7 +62,7 @@ where
         pin_mut!(iter);
 
         while let Some(data_chunk) =
-            collect_data_chunk(&mut iter, self.schema(), Some(self.batch_size))
+            collect_data_chunk(&mut iter, &self.schema, Some(self.batch_size))
                 .instrument_await("batch_query_executor_collect_chunk")
                 .await?
         {
@@ -76,10 +77,6 @@ impl<S> Execute for BatchQueryExecutor<S>
 where
     S: StateStore,
 {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         unreachable!("should call `execute_with_epoch`")
     }

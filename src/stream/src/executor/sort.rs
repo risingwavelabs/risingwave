@@ -15,27 +15,28 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
+use risingwave_common::catalog::Schema;
 use risingwave_storage::StateStore;
 
 use super::sort_buffer::SortBuffer;
 use super::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Execute,
-    ExecutorInfo, Message, StreamExecutorError, Watermark,
+    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
+    StreamExecutorError, Watermark,
 };
 use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
 
 pub struct SortExecutor<S: StateStore> {
-    input: BoxedExecutor,
+    input: Executor,
     inner: ExecutorInner<S>,
 }
 
 pub struct SortExecutorArgs<S: StateStore> {
     pub actor_ctx: ActorContextRef,
-    pub info: ExecutorInfo,
 
-    pub input: BoxedExecutor,
+    pub input: Executor,
 
+    pub schema: Schema,
     pub buffer_table: StateTable<S>,
     pub chunk_size: usize,
     pub sort_column_index: usize,
@@ -43,8 +44,8 @@ pub struct SortExecutorArgs<S: StateStore> {
 
 struct ExecutorInner<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
+    schema: Schema,
     buffer_table: StateTable<S>,
     chunk_size: usize,
     sort_column_index: usize,
@@ -55,10 +56,6 @@ struct ExecutionVars<S: StateStore> {
 }
 
 impl<S: StateStore> Execute for SortExecutor<S> {
-    fn info(&self) -> &ExecutorInfo {
-        &self.inner.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.executor_inner().boxed()
     }
@@ -70,7 +67,7 @@ impl<S: StateStore> SortExecutor<S> {
             input: args.input,
             inner: ExecutorInner {
                 actor_ctx: args.actor_ctx,
-                info: args.info,
+                schema: args.schema,
                 buffer_table: args.buffer_table,
                 chunk_size: args.chunk_size,
                 sort_column_index: args.sort_column_index,
@@ -105,7 +102,7 @@ impl<S: StateStore> SortExecutor<S> {
                     if col_idx == this.sort_column_index =>
                 {
                     let mut chunk_builder =
-                        StreamChunkBuilder::new(this.chunk_size, this.info.schema.data_types());
+                        StreamChunkBuilder::new(this.chunk_size, this.schema.data_types());
 
                     #[for_await]
                     for row in vars

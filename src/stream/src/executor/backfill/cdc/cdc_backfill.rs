@@ -45,8 +45,8 @@ use crate::executor::backfill::utils::{
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Execute,
-    ExecutorInfo, Message, StreamExecutorError, StreamExecutorResult,
+    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
+    StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::CreateMviewProgress;
 
@@ -55,13 +55,12 @@ const METADATA_STATE_LEN: usize = 4;
 
 pub struct CdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// The external table to be backfilled
     external_table: ExternalStorageTable,
 
     /// Upstream changelog stream which may contain metadata columns, e.g. `_rw_offset`
-    upstream: BoxedExecutor,
+    upstream: Executor,
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     /// User may select a subset of columns from the upstream table.
@@ -83,9 +82,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        info: ExecutorInfo,
         external_table: ExternalStorageTable,
-        upstream: BoxedExecutor,
+        upstream: Executor,
         output_indices: Vec<usize>,
         progress: Option<CreateMviewProgress>,
         metrics: Arc<StreamingMetrics>,
@@ -95,7 +93,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
     ) -> Self {
         Self {
             actor_ctx,
-            info,
             external_table,
             upstream,
             output_indices,
@@ -610,10 +607,6 @@ fn get_rw_columns(schema: &Schema) -> Vec<SourceColumnDesc> {
 }
 
 impl<S: StateStore> Execute for CdcBackfillExecutor<S> {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

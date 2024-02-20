@@ -22,8 +22,8 @@ use risingwave_storage::store::LocalStateStore;
 use tokio::time::Instant;
 
 use super::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Execute,
-    ExecutorInfo, Message, StreamExecutorError, StreamExecutorResult,
+    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, ExecutorInfo,
+    Message, StreamExecutorError, StreamExecutorResult,
 };
 use crate::common::log_store_impl::kv_log_store::ReaderTruncationOffsetType;
 use crate::common::log_store_impl::subscription_log_store::SubscriptionLogStoreWriter;
@@ -32,8 +32,7 @@ const EXECUTE_GC_INTERVAL: u64 = 3600;
 
 pub struct SubscriptionExecutor<LS: LocalStateStore> {
     actor_context: ActorContextRef,
-    info: ExecutorInfo,
-    input: BoxedExecutor,
+    input: Executor,
     log_store: SubscriptionLogStoreWriter<LS>,
     retention_seconds: u64,
 }
@@ -43,14 +42,12 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
     #[expect(clippy::unused_async)]
     pub async fn new(
         actor_context: ActorContextRef,
-        info: ExecutorInfo,
-        input: BoxedExecutor,
+        input: Executor,
         log_store: SubscriptionLogStoreWriter<LS>,
         retention_seconds: u64,
     ) -> StreamExecutorResult<Self> {
         Ok(Self {
             actor_context,
-            info,
             input,
             log_store,
             retention_seconds,
@@ -115,10 +112,6 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
     }
 }
 impl<LS: LocalStateStore> Execute for SubscriptionExecutor<LS> {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

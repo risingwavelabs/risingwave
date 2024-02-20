@@ -47,7 +47,7 @@ use crate::task::AtomicU64Ref;
 /// Therefore, we "automatically" implemented a window function inside
 /// `SimpleAggExecutor`.
 pub struct SimpleAggExecutor<S: StateStore> {
-    input: Box<dyn Execute>,
+    input: Executor,
     inner: ExecutorInner<S>,
 }
 
@@ -112,10 +112,6 @@ struct ExecutionVars<S: StateStore> {
 }
 
 impl<S: StateStore> Execute for SimpleAggExecutor<S> {
-    fn info(&self) -> &ExecutorInfo {
-        &self.inner.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

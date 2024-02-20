@@ -39,8 +39,8 @@ use crate::executor::backfill::utils::{
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, Barrier, BoxedExecutor, BoxedMessageStream, Execute, ExecutorInfo,
-    HashMap, Message, StreamExecutorError, StreamExecutorResult,
+    expect_first_barrier, Barrier, BoxedMessageStream, Execute, Executor, ExecutorInfo, HashMap,
+    Message, StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
@@ -56,7 +56,7 @@ pub struct ArrangementBackfillExecutor<S: StateStore, SD: ValueRowSerde> {
     upstream_table: ReplicatedStateTable<S, SD>,
 
     /// Upstream with the same schema with the upstream table.
-    upstream: BoxedExecutor,
+    upstream: Executor,
 
     /// Internal state table for persisting state of backfill state.
     state_table: StateTable<S>,
@@ -67,8 +67,6 @@ pub struct ArrangementBackfillExecutor<S: StateStore, SD: ValueRowSerde> {
     progress: CreateMviewProgress,
 
     actor_id: ActorId,
-
-    info: ExecutorInfo,
 
     metrics: Arc<StreamingMetrics>,
 
@@ -85,9 +83,8 @@ where
     #[allow(clippy::too_many_arguments)]
     #[allow(dead_code)]
     pub fn new(
-        info: ExecutorInfo,
         upstream_table: ReplicatedStateTable<S, SD>,
-        upstream: BoxedExecutor,
+        upstream: Executor,
         state_table: StateTable<S>,
         output_indices: Vec<usize>,
         progress: CreateMviewProgress,
@@ -96,7 +93,6 @@ where
         rate_limit: Option<usize>,
     ) -> Self {
         Self {
-            info,
             upstream_table,
             upstream,
             state_table,
@@ -714,10 +710,6 @@ where
     S: StateStore,
     SD: ValueRowSerde,
 {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

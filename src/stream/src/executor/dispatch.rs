@@ -35,17 +35,17 @@ use tokio::time::Instant;
 use tracing::{event, Instrument};
 
 use super::exchange::output::{new_output, BoxedOutput};
-use super::{AddMutation, UpdateMutation, Watermark};
+use super::{AddMutation, Executor, UpdateMutation, Watermark};
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Barrier, BoxedExecutor, Message, Mutation, StreamConsumer};
+use crate::executor::{Barrier, Message, Mutation, StreamConsumer};
 use crate::task::{ActorId, DispatcherId, SharedContext};
 
 /// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
 /// such as barriers will be distributed to all receivers.
 pub struct DispatchExecutor {
-    input: BoxedExecutor,
+    input: Executor,
     inner: DispatchExecutorInner,
 }
 
@@ -341,7 +341,7 @@ impl DispatchExecutorInner {
 
 impl DispatchExecutor {
     pub fn new(
-        input: BoxedExecutor,
+        input: Executor,
         dispatchers: Vec<DispatcherImpl>,
         actor_id: u32,
         fragment_id: u32,

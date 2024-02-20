@@ -19,7 +19,7 @@ use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
 use super::aggregation::AggStateStorage;
-use super::{Execute, ExecutorInfo};
+use super::{Executor, ExecutorInfo};
 use crate::common::table::state_table::StateTable;
 use crate::executor::ActorContextRef;
 use crate::task::AtomicU64Ref;
@@ -29,7 +29,7 @@ pub struct AggExecutorArgs<S: StateStore, E: AggExecutorExtraArgs> {
     pub version: PbAggNodeVersion,
 
     // basic
-    pub input: Box<dyn Execute>,
+    pub input: Executor,
     pub actor_ctx: ActorContextRef,
     pub info: ExecutorInfo,
 

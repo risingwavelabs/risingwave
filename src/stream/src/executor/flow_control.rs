@@ -15,10 +15,14 @@
 use std::fmt::{Debug, Formatter};
 use std::num::NonZeroU32;
 
+use futures::StreamExt;
+use futures_async_stream::try_stream;
 use governor::clock::MonotonicClock;
 use governor::{Quota, RateLimiter};
 
-use super::*;
+use super::{
+    ActorContextRef, BoxedMessageStream, Execute, Executor, Message, Mutation, StreamExecutorError,
+};
 
 /// Flow Control Executor is used to control the rate of the input executor.
 ///
@@ -30,28 +34,14 @@ use super::*;
 ///
 /// It is used to throttle problematic MVs that are consuming too much resources.
 pub struct FlowControlExecutor {
-    info: ExecutorInfo,
-    input: BoxedExecutor,
+    input: Executor,
     actor_ctx: ActorContextRef,
     rate_limit: Option<u32>,
 }
 
 impl FlowControlExecutor {
-    pub fn new(
-        input: Box<dyn Execute>,
-        actor_ctx: ActorContextRef,
-        rate_limit: Option<u32>,
-    ) -> Self {
-        let identity = if rate_limit.is_some() {
-            format!("{} (flow controlled)", input.identity())
-        } else {
-            input.identity().to_owned()
-        };
+    pub fn new(input: Executor, actor_ctx: ActorContextRef, rate_limit: Option<u32>) -> Self {
         Self {
-            info: ExecutorInfo {
-                identity,
-                ..input.info().clone()
-            },
             input,
             actor_ctx,
             rate_limit,
@@ -131,10 +121,6 @@ impl Debug for FlowControlExecutor {
 }
 
 impl Execute for FlowControlExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

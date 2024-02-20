@@ -23,7 +23,7 @@ use risingwave_storage::StateStore;
 use super::ExecutorBuilder;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::{BoxedExecutor, Execute, OverWindowExecutor, OverWindowExecutorArgs};
+use crate::executor::{Execute, Executor, OverWindowExecutor, OverWindowExecutorArgs};
 use crate::task::ExecutorParams;
 
 pub struct OverWindowExecutorBuilder;
@@ -35,7 +35,7 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let calls: Vec<_> = node
             .get_calls()
@@ -60,12 +60,12 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
         ));
         let state_table =
             StateTable::from_table_catalog(node.get_state_table()?, store, vnodes).await;
-        Ok(OverWindowExecutor::new(OverWindowExecutorArgs {
+        let exec = OverWindowExecutor::new(OverWindowExecutorArgs {
             actor_ctx: params.actor_context,
-            info: params.info,
 
             input,
 
+            schema: params.info.schema.clone(),
             calls,
             partition_key_indices,
             order_key_indices,
@@ -79,7 +79,7 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
             cache_policy: OverWindowCachePolicy::from_protobuf(
                 node.get_cache_policy().unwrap_or_default(),
             ),
-        })
-        .boxed())
+        });
+        Ok((params.info, exec).into())
     }
 }

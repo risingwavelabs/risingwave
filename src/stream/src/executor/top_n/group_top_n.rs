@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
@@ -32,7 +33,7 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::{ActorContextRef, Execute, ExecutorInfo, PkIndices, Watermark};
+use crate::executor::{ActorContextRef, Executor, PkIndices, Watermark};
 use crate::task::AtomicU64Ref;
 
 pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
@@ -41,9 +42,9 @@ pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        input: Box<dyn Execute>,
+        input: Executor,
         ctx: ActorContextRef,
-        info: ExecutorInfo,
+        schema: Schema,
         storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
         order_by: Vec<ColumnOrder>,
@@ -55,7 +56,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
             input,
             ctx: ctx.clone(),
             inner: InnerGroupTopNExecutor::new(
-                info,
+                schema,
                 storage_key,
                 offset_and_limit,
                 order_by,
@@ -69,7 +70,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
 }
 
 pub struct InnerGroupTopNExecutor<K: HashKey, S: StateStore, const WITH_TIES: bool> {
-    info: ExecutorInfo,
+    schema: Schema,
 
     /// `LIMIT XXX`. None means no limit.
     limit: usize,
@@ -97,7 +98,7 @@ pub struct InnerGroupTopNExecutor<K: HashKey, S: StateStore, const WITH_TIES: bo
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K, S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        info: ExecutorInfo,
+        schema: Schema,
         storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
         order_by: Vec<ColumnOrder>,
@@ -113,12 +114,11 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K,
             "GroupTopN",
         );
 
-        let cache_key_serde =
-            create_cache_key_serde(&storage_key, &info.schema, &order_by, &group_by);
+        let cache_key_serde = create_cache_key_serde(&storage_key, &schema, &order_by, &group_by);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
 
         Ok(Self {
-            info,
+            schema,
             offset: offset_and_limit.0,
             limit: offset_and_limit.1,
             managed_state,
@@ -191,7 +191,7 @@ where
                     .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                     .inc();
                 let mut topn_cache =
-                    TopNCache::new(self.offset, self.limit, self.info().schema.data_types());
+                    TopNCache::new(self.offset, self.limit, self.schema.data_types());
                 self.managed_state
                     .init_topn_cache(Some(group_key), &mut topn_cache)
                     .await?;
@@ -227,7 +227,7 @@ where
             .group_top_n_cached_entry_count
             .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(self.caches.len() as i64);
-        generate_output(res_rows, res_ops, &self.info().schema)
+        generate_output(res_rows, res_ops, &self.schema)
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
@@ -236,10 +236,6 @@ where
 
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         self.managed_state.try_flush().await
-    }
-
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
     }
 
     fn update_epoch(&mut self, epoch: u64) {

@@ -16,7 +16,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 
 use super::error::StreamExecutorError;
-use super::{expect_first_barrier, BoxedExecutor, Execute, ExecutorInfo, Message};
+use super::{expect_first_barrier, Execute, Executor, Message};
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
@@ -24,11 +24,9 @@ use crate::task::{ActorId, CreateMviewProgress};
 /// feature. It pipes new data of existing MVs to newly created MV only all of the old data in the
 /// existing MVs are dispatched.
 pub struct ChainExecutor {
-    info: ExecutorInfo,
+    snapshot: Executor,
 
-    snapshot: BoxedExecutor,
-
-    upstream: BoxedExecutor,
+    upstream: Executor,
 
     progress: CreateMviewProgress,
 
@@ -40,14 +38,12 @@ pub struct ChainExecutor {
 
 impl ChainExecutor {
     pub fn new(
-        info: ExecutorInfo,
-        snapshot: BoxedExecutor,
-        upstream: BoxedExecutor,
+        snapshot: Executor,
+        upstream: Executor,
         progress: CreateMviewProgress,
         upstream_only: bool,
     ) -> Self {
         Self {
-            info,
             snapshot,
             upstream,
             actor_id: progress.actor_id(),
@@ -104,10 +100,6 @@ impl ChainExecutor {
 }
 
 impl Execute for ChainExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
     }

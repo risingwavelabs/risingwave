@@ -12,31 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{ActorContextRef, BoxedExecutor, BoxedMessageStream, Execute, ExecutorInfo};
+use super::{ActorContextRef, BoxedMessageStream, Execute, Executor};
 
 /// No-op executor directly forwards the input stream. Currently used to break the multiple edges in
 /// the fragment graph.
 pub struct NoOpExecutor {
     _ctx: ActorContextRef,
-    info: ExecutorInfo,
-    input: BoxedExecutor,
+    input: Executor,
 }
 
 impl NoOpExecutor {
-    pub fn new(ctx: ActorContextRef, info: ExecutorInfo, input: BoxedExecutor) -> Self {
-        Self {
-            _ctx: ctx,
-            info,
-            input,
-        }
+    pub fn new(ctx: ActorContextRef, input: Executor) -> Self {
+        Self { _ctx: ctx, input }
     }
 }
 
 impl Execute for NoOpExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.input.execute()
     }

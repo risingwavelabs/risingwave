@@ -15,12 +15,17 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
+use futures::StreamExt;
+use futures_async_stream::try_stream;
 use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 
-use super::*;
+use super::{
+    ActorContextRef, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message,
+    StreamExecutorError, StreamExecutorResult,
+};
 
 /// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a boolean array on whether each item should be retained. And then,
@@ -28,8 +33,7 @@ use super::*;
 /// to the result of the expression.
 pub struct FilterExecutor {
     _ctx: ActorContextRef,
-    info: ExecutorInfo,
-    input: BoxedExecutor,
+    input: Executor,
 
     /// Expression of the current filter, note that the filter must always have the same output for
     /// the same input.
@@ -37,15 +41,9 @@ pub struct FilterExecutor {
 }
 
 impl FilterExecutor {
-    pub fn new(
-        ctx: ActorContextRef,
-        info: ExecutorInfo,
-        input: Box<dyn Execute>,
-        expr: NonStrictExpression,
-    ) -> Self {
+    pub fn new(ctx: ActorContextRef, input: Executor, expr: NonStrictExpression) -> Self {
         Self {
             _ctx: ctx,
-            info,
             input,
             expr,
         }
@@ -135,10 +133,6 @@ impl Debug for FilterExecutor {
 }
 
 impl Execute for FilterExecutor {
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
-
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
