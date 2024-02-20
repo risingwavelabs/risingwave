@@ -18,7 +18,7 @@ The cluster contains a RisingWave cluster and its necessary dependencies, a data
 - create_mv.sql
 - create_sink.sql
 
-3. Check the contents in Http Server:
+4. Check the contents in Http Server:
 On the Http Server side it will receive the json string, something like:
 ```
 {"user_id":5,"target_id":"siFqrkdlCn"}
