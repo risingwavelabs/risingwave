@@ -26,7 +26,6 @@ updates:
         - "prost*"
     opentelemetry:
       patterns:
-        - "opentelemetry"
         - "opentelemetry*"
         - "tracing-opentelemetry"
     mysql:

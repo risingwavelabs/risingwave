@@ -61,8 +61,7 @@ memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"
 num-traits = "0.2"
 number_prefix = "0.4.0"
-opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true }
+opentelemetry = { version = "0.20", default-features = false }
 parking_lot = "0.12"
 parse-display = "0.9"
 paste = "1"
@@ -111,7 +110,7 @@ toml = "0.8"
 tonic = { workspace = true }
 tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
-tracing-opentelemetry = { workspace = true }
+tracing-opentelemetry = "0.21"
 tracing-subscriber = "0.3.17"
 twox-hash = "1"
 url = "2"

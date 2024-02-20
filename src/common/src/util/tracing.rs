@@ -19,7 +19,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry_sdk::propagation::TraceContextPropagator;
+use opentelemetry::sdk::propagation::TraceContextPropagator;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// Context for tracing used for propagating tracing information in a distributed system.

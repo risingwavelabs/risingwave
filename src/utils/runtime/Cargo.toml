@@ -21,6 +21,8 @@ console-subscriber = "0.2.0"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hostname = "0.3"
+opentelemetry-otlp = { version = "0.13" }
+opentelemetry-semantic-conventions = "0.12"
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 pprof = { version = "0.13", features = ["flamegraph"] }
 risingwave_common = { workspace = true }
@@ -38,14 +40,11 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs"
 ] }
 tracing = "0.1"
-tracing-opentelemetry = { workspace = true }
+tracing-opentelemetry = "0.21"
 tracing-subscriber = { version = "0.3", features = ["fmt", "parking_lot", "std", "time", "local-time", "json"] }
 
 [target.'cfg(not(madsim))'.dependencies]
-opentelemetry = { workspace = true }
-opentelemetry-otlp = { workspace = true }
-opentelemetry-semantic-conventions = { workspace = true }
-opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] } # only enable `rt-tokio` feature under non-madsim target
+opentelemetry = { version = "0.20", default-features = false, features = ["rt-tokio"] }
 workspace-hack = { path = "../../workspace-hack" }
 
 [lints]
