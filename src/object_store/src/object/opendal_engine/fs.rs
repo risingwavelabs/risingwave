@@ -17,7 +17,9 @@ use opendal::services::Fs;
 use opendal::Operator;
 
 use super::{EngineType, OpendalObjectStore};
+use crate::object::opendal_engine::ATOMIC_WRITE_DIR;
 use crate::object::ObjectResult;
+
 impl OpendalObjectStore {
     /// create opendal fs engine.
     pub fn new_fs_engine(root: String) -> ObjectResult<Self> {
@@ -25,7 +27,8 @@ impl OpendalObjectStore {
         let mut builder = Fs::default();
 
         builder.root(&root);
-        builder.atomic_write_dir(&root);
+        let atomic_write_dir = format!("{}{}", root, ATOMIC_WRITE_DIR);
+        builder.atomic_write_dir(&atomic_write_dir);
 
         let op: Operator = Operator::new(builder)?
             .layer(RetryLayer::default())

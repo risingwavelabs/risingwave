@@ -17,7 +17,9 @@ use opendal::services::Hdfs;
 use opendal::Operator;
 
 use super::{EngineType, OpendalObjectStore};
+use crate::object::opendal_engine::ATOMIC_WRITE_DIR;
 use crate::object::ObjectResult;
+
 impl OpendalObjectStore {
     /// create opendal hdfs engine.
     pub fn new_hdfs_engine(namenode: String, root: String) -> ObjectResult<Self> {
@@ -26,7 +28,7 @@ impl OpendalObjectStore {
         // Set the name node for hdfs.
         builder.name_node(&namenode);
         builder.root(&root);
-        builder.atomic_write_dir(&root);
+        builder.atomic_write_dir(ATOMIC_WRITE_DIR);
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
