@@ -31,8 +31,7 @@ impl OpendalObjectStore {
         // NOTE: the root must be absolute path.
         builder.root(&root);
 
-        let atomic_write_dir = format!("{}{}", root, ATOMIC_WRITE_DIR);
-        builder.atomic_write_dir(&atomic_write_dir);
+        builder.atomic_write_dir(ATOMIC_WRITE_DIR);
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
