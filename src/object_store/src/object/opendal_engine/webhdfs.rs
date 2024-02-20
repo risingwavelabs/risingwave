@@ -29,7 +29,7 @@ impl OpendalObjectStore {
         // Set the root for hdfs, all operations will happen under this root.
         // NOTE: the root must be absolute path.
         builder.root(&root);
-
+        builder.atomic_write_dir(&root);
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
