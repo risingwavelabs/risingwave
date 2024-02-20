@@ -73,10 +73,6 @@ pub(super) enum LocalBarrierEvent {
         actor_id: ActorId,
         barrier: Barrier,
     },
-    ReportActorFailure {
-        actor_id: ActorId,
-        err: StreamError,
-    },
     ReportCreateProgress {
         current_epoch: u64,
         actor: ActorId,
@@ -214,16 +210,20 @@ pub(super) struct LocalBarrierWorker {
     pub(super) current_shared_context: Arc<SharedContext>,
 
     barrier_event_rx: UnboundedReceiver<LocalBarrierEvent>,
+
+    actor_failure_rx: UnboundedReceiver<(ActorId, StreamError)>,
 }
 
 impl LocalBarrierWorker {
     pub(super) fn new(actor_manager: Arc<StreamActorManager>) -> Self {
-        let (tx, rx) = unbounded_channel();
+        let (event_tx, event_rx) = unbounded_channel();
+        let (failure_tx, failure_rx) = unbounded_channel();
         let shared_context = Arc::new(SharedContext::new(
             actor_manager.env.server_address().clone(),
             actor_manager.env.config(),
             LocalBarrierManager {
-                barrier_event_sender: EventSender(tx),
+                barrier_event_sender: event_tx,
+                actor_failure_sender: failure_tx,
             },
         ));
         Self {
@@ -237,7 +237,8 @@ impl LocalBarrierWorker {
             actor_manager,
             actor_manager_state: StreamActorManagerState::new(),
             current_shared_context: shared_context,
-            barrier_event_rx: rx,
+            barrier_event_rx: event_rx,
+            actor_failure_rx: failure_rx,
         }
     }
 
@@ -256,6 +257,10 @@ impl LocalBarrierWorker {
                 // that register sender is handled before inject barrier.
                 event = self.barrier_event_rx.recv() => {
                     self.handle_barrier_event(event.expect("should not be none"));
+                },
+                failure = self.actor_failure_rx.recv() => {
+                    let (actor_id, err) = failure.unwrap();
+                    self.notify_failure(actor_id, err);
                 },
                 actor_op = actor_op_rx.recv() => {
                     if let Some(actor_op) = actor_op {
@@ -297,9 +302,6 @@ impl LocalBarrierWorker {
             }
             LocalBarrierEvent::ReportActorCollected { actor_id, barrier } => {
                 self.collect(actor_id, &barrier)
-            }
-            LocalBarrierEvent::ReportActorFailure { actor_id, err } => {
-                self.notify_failure(actor_id, err);
             }
             LocalBarrierEvent::ReportCreateProgress {
                 current_epoch,
@@ -565,7 +567,8 @@ impl<T> Clone for EventSender<T> {
 
 #[derive(Clone)]
 pub struct LocalBarrierManager {
-    barrier_event_sender: EventSender<LocalBarrierEvent>,
+    barrier_event_sender: UnboundedSender<LocalBarrierEvent>,
+    actor_failure_sender: UnboundedSender<(ActorId, StreamError)>,
 }
 
 impl LocalBarrierWorker {
@@ -619,29 +622,29 @@ impl<T> EventSender<T> {
 }
 
 impl LocalBarrierManager {
+    fn send_event(&self, event: LocalBarrierEvent) {
+        // ignore error, because the current barrier manager maybe a stale one
+        let _ = self.barrier_event_sender.send(event);
+    }
+
     /// Register sender for source actors, used to send barriers.
     pub fn register_sender(&self, actor_id: ActorId, sender: UnboundedSender<Barrier>) {
-        self.barrier_event_sender
-            .send_event(LocalBarrierEvent::RegisterSender { actor_id, sender });
+        self.send_event(LocalBarrierEvent::RegisterSender { actor_id, sender });
     }
-}
 
-impl LocalBarrierManager {
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
     /// and collect this barrier with its own `actor_id` using this function.
     pub fn collect(&self, actor_id: ActorId, barrier: &Barrier) {
-        self.barrier_event_sender
-            .send_event(LocalBarrierEvent::ReportActorCollected {
-                actor_id,
-                barrier: barrier.clone(),
-            })
+        self.send_event(LocalBarrierEvent::ReportActorCollected {
+            actor_id,
+            barrier: barrier.clone(),
+        })
     }
 
     /// When a actor exit unexpectedly, it should report this event using this function, so meta
     /// will notice actor's exit while collecting.
     pub fn notify_failure(&self, actor_id: ActorId, err: StreamError) {
-        self.barrier_event_sender
-            .send_event(LocalBarrierEvent::ReportActorFailure { actor_id, err })
+        let _ = self.actor_failure_sender.send((actor_id, err));
     }
 }
 
@@ -668,16 +671,20 @@ impl LocalBarrierManager {
 
     pub fn for_test() -> Self {
         let (tx, mut rx) = unbounded_channel();
-        let _join_handle = tokio::spawn(async move { while rx.recv().await.is_some() {} });
+        let (failure_tx, failure_rx) = unbounded_channel();
+        let _join_handle = tokio::spawn(async move {
+            let _failure_rx = failure_rx;
+            while rx.recv().await.is_some() {}
+        });
         Self {
-            barrier_event_sender: EventSender(tx),
+            barrier_event_sender: tx,
+            actor_failure_sender: failure_tx,
         }
     }
 
     pub async fn flush_all_events(&self) {
         let (tx, rx) = oneshot::channel();
-        self.barrier_event_sender
-            .send_event(LocalBarrierEvent::Flush(tx));
+        self.send_event(LocalBarrierEvent::Flush(tx));
         rx.await.unwrap()
     }
 }

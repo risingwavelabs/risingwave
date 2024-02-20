@@ -47,12 +47,11 @@ impl LocalBarrierManager {
         actor: ActorId,
         state: BackfillState,
     ) {
-        self.barrier_event_sender
-            .send_event(LocalBarrierEvent::ReportCreateProgress {
-                current_epoch,
-                actor,
-                state,
-            })
+        self.send_event(LocalBarrierEvent::ReportCreateProgress {
+            current_epoch,
+            actor,
+            state,
+        })
     }
 }
 
