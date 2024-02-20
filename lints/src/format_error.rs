@@ -144,7 +144,10 @@ fn check_fmt_arg_in_anyhow_error(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
     check_fmt_arg_with_help(
         cx,
         arg_expr,
-        "consider directly wrapping the error with `anyhow::anyhow!(..)` instead of formatting it",
+        (
+            "consider directly wrapping the error with `anyhow::anyhow!(..)` instead of formatting it",
+            "consider removing the redundant wrapping of `anyhow::anyhow!(..)`",
+        ),
     );
 }
 
@@ -152,12 +155,16 @@ fn check_fmt_arg_in_anyhow_context(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
     check_fmt_arg_with_help(
         cx,
         arg_expr,
-        "consider using `anyhow::Error::context`, `anyhow::Context::(with_)context` to \
+        (
+            "consider using `anyhow::Context::(with_)context` to \
         attach additional message to the error and make it an error source instead",
+            "consider using `.context(..)` to \
+        attach additional message to the error and make it an error source instead",
+        ),
     );
 }
 
-fn check_fmt_arg_with_help(cx: &LateContext<'_>, arg_expr: &Expr<'_>, help: &str) {
+fn check_fmt_arg_with_help(cx: &LateContext<'_>, arg_expr: &Expr<'_>, help: impl Help) {
     check_arg(cx, arg_expr, arg_expr.span, help);
 }
 
@@ -170,30 +177,56 @@ fn check_to_string_call(cx: &LateContext<'_>, receiver: &Expr<'_>, to_string_spa
     );
 }
 
-fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>, span: Span, help: &str) {
+fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>, span: Span, help: impl Help) {
     let Some(error_trait_id) = cx.tcx.get_diagnostic_item(sym::Error) else {
         return;
     };
 
     let ty = cx.typeck_results().expr_ty(arg_expr).peel_refs();
 
-    let is_error = || implements_trait(cx, ty, error_trait_id, &[]);
-    let is_anyhow = || match_type(cx, ty, &ANYHOW_ERROR);
+    let help = if implements_trait(cx, ty, error_trait_id, &[]) {
+        help.normal_help()
+    } else if match_type(cx, ty, &ANYHOW_ERROR) {
+        help.anyhow_help()
+    } else {
+        return;
+    };
 
-    if is_error() || is_anyhow() {
-        if let Some(span) = core::iter::successors(Some(span), |s| s.parent_callsite())
-            .find(|s| s.can_be_used_for_suggestions())
-        {
-            // TODO: applicable suggestions
-            span_lint_and_help(
-                cx,
-                FORMAT_ERROR,
-                span,
-                "should not format error directly",
-                None,
-                help,
-            );
-        }
+    if let Some(span) = core::iter::successors(Some(span), |s| s.parent_callsite())
+        .find(|s| s.can_be_used_for_suggestions())
+    {
+        // TODO: applicable suggestions
+        span_lint_and_help(
+            cx,
+            FORMAT_ERROR,
+            span,
+            "should not format error directly",
+            None,
+            help,
+        );
+    }
+}
+
+trait Help {
+    fn normal_help(&self) -> &str;
+    fn anyhow_help(&self) -> &str {
+        self.normal_help()
+    }
+}
+
+impl Help for &str {
+    fn normal_help(&self) -> &str {
+        self
+    }
+}
+
+impl Help for (&str, &str) {
+    fn normal_help(&self) -> &str {
+        self.0
+    }
+
+    fn anyhow_help(&self) -> &str {
+        self.1
     }
 }
 

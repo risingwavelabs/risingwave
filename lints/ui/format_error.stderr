@@ -262,7 +262,7 @@ error: should not format error directly
 LL |     let _ = anyhow!("some error occurred: {}", err);
    |                                                ^^^
    |
-   = help: consider using `anyhow::Error::context`, `anyhow::Context::(with_)context` to attach additional message to the error and make it an error source instead
+   = help: consider using `anyhow::Context::(with_)context` to attach additional message to the error and make it an error source instead
 
 error: should not format error directly
   --> $DIR/format_error.rs:57:50
@@ -270,7 +270,7 @@ error: should not format error directly
 LL |     let _ = anyhow!("some error occurred: {:?}", err);
    |                                                  ^^^
    |
-   = help: consider using `anyhow::Error::context`, `anyhow::Context::(with_)context` to attach additional message to the error and make it an error source instead
+   = help: consider using `anyhow::Context::(with_)context` to attach additional message to the error and make it an error source instead
 
 error: should not format error directly
   --> $DIR/format_error.rs:63:27
@@ -334,7 +334,7 @@ error: should not format error directly
 LL |     let _ = anyhow!("{}", anyhow_err);
    |                           ^^^^^^^^^^
    |
-   = help: consider directly wrapping the error with `anyhow::anyhow!(..)` instead of formatting it
+   = help: consider removing the redundant wrapping of `anyhow::anyhow!(..)`
 
 error: should not format error directly
   --> $DIR/format_error.rs:75:50
@@ -342,7 +342,7 @@ error: should not format error directly
 LL |     let _ = anyhow!("some error occurred: {:?}", anyhow_err);
    |                                                  ^^^^^^^^^^
    |
-   = help: consider using `anyhow::Error::context`, `anyhow::Context::(with_)context` to attach additional message to the error and make it an error source instead
+   = help: consider using `.context(..)` to attach additional message to the error and make it an error source instead
 
 error: aborting due to 43 previous errors
 
