@@ -25,8 +25,6 @@ use risingwave_common::catalog::{
     is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, INITIAL_SOURCE_VERSION_ID,
     KAFKA_TIMESTAMP_COLUMN_NAME,
 };
-use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, NotSupported, ProtocolError};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::additional_columns::{
     build_additional_column_catalog, COMPATIBLE_ADDITIONAL_COLUMNS,
@@ -40,8 +38,8 @@ use risingwave_connector::schema::schema_registry::{
 };
 use risingwave_connector::source::cdc::external::CdcTableType;
 use risingwave_connector::source::cdc::{
-    CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CITUS_CDC_CONNECTOR,
-    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+    CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
+    CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
@@ -66,6 +64,8 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
+use crate::error::ErrorCode::{self, InvalidInputSyntax, NotSupported, ProtocolError};
+use crate::error::{Result, RwError};
 use crate::expr::Expr;
 use crate::handler::create_table::{
     bind_pk_on_relation, bind_sql_column_constraints, bind_sql_columns, bind_sql_pk_names,
@@ -685,7 +685,7 @@ pub(crate) async fn bind_source_pk(
         // return the key column names if exists
         columns.iter().find_map(|catalog| {
             if matches!(
-                catalog.column_desc.additional_columns.column_type,
+                catalog.column_desc.additional_column.column_type,
                 Some(AdditionalColumnType::Key(_))
             ) {
                 Some(catalog.name().to_string())
@@ -697,7 +697,7 @@ pub(crate) async fn bind_source_pk(
     let additional_column_names = columns
         .iter()
         .filter_map(|col| {
-            if col.column_desc.additional_columns.column_type.is_some() {
+            if col.column_desc.additional_column.column_type.is_some() {
                 Some(col.name().to_string())
             } else {
                 None
@@ -848,7 +848,7 @@ fn check_and_add_timestamp_column(
     if is_kafka_connector(with_properties) {
         if columns.iter().any(|col| {
             matches!(
-                col.column_desc.additional_columns.column_type,
+                col.column_desc.additional_column.column_type,
                 Some(AdditionalColumnType::Timestamp(_))
             )
         }) {
@@ -1196,6 +1196,8 @@ pub async fn handle_create_source(
         with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
         // enable cdc sharing mode, which will capture all tables in the given `database.name`
         with_properties.insert(CDC_SHARING_MODE_KEY.into(), "true".into());
+        // enable transactional cdc
+        with_properties.insert(CDC_TRANSACTIONAL_KEY.into(), "true".into());
     }
 
     // must behind `handle_addition_columns`

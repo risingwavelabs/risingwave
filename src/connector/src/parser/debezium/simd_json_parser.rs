@@ -14,7 +14,6 @@
 
 use std::fmt::Debug;
 
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use simd_json::prelude::MutableObject;
 use simd_json::BorrowedValue;
 
@@ -28,18 +27,17 @@ pub struct DebeziumJsonAccessBuilder {
 }
 
 impl DebeziumJsonAccessBuilder {
-    pub fn new() -> Result<Self> {
+    pub fn new() -> anyhow::Result<Self> {
         Ok(Self { value: None })
     }
 }
 
 impl AccessBuilder for DebeziumJsonAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>> {
         self.value = Some(payload);
         let mut event: BorrowedValue<'_> =
-            simd_json::to_borrowed_value(self.value.as_mut().unwrap())
-                .map_err(|e| RwError::from(ErrorCode::ProtocolError(e.to_string())))?;
+            simd_json::to_borrowed_value(self.value.as_mut().unwrap())?;
 
         let payload = if let Some(payload) = event.get_mut("payload") {
             std::mem::take(payload)
@@ -567,7 +565,7 @@ mod tests {
                     column_type: SourceColumnType::Normal,
                     is_pk: false,
                     is_hidden_addition_col: false,
-                    additional_column_type: AdditionalColumn { column_type: None },
+                    additional_column: AdditionalColumn { column_type: None },
                 },
                 SourceColumnDesc::simple("o_enum", DataType::Varchar, ColumnId::from(8)),
                 SourceColumnDesc::simple("o_char", DataType::Varchar, ColumnId::from(9)),

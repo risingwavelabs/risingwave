@@ -12,37 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
-use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::error::Result;
 
-pub const RW_HUMMOCK_BRANCHED_OBJECTS: BuiltinTable = BuiltinTable {
-    name: "rw_hummock_branched_objects",
-    schema: RW_CATALOG_SCHEMA_NAME,
-    columns: &[
-        (DataType::Int64, "object_id"),
-        (DataType::Int64, "sst_id"),
-        (DataType::Int64, "compaction_group_id"),
-    ],
-    pk: &[],
-};
+#[derive(Fields)]
+struct RwHummockBranchedObject {
+    object_id: i64,
+    sst_id: i64,
+    compaction_group_id: i64,
+}
 
-impl SysCatalogReaderImpl {
-    pub async fn read_hummock_branched_objects(&self) -> Result<Vec<OwnedRow>> {
-        let branched_objects = self.meta_client.list_branched_objects().await?;
-        let rows = branched_objects
-            .into_iter()
-            .map(|o| {
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Int64(o.object_id as _)),
-                    Some(ScalarImpl::Int64(o.sst_id as _)),
-                    Some(ScalarImpl::Int64(o.compaction_group_id as _)),
-                ])
-            })
-            .collect();
-        Ok(rows)
-    }
+#[system_catalog(table, "rw_catalog.rw_hummock_branched_objects")]
+async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockBranchedObject>> {
+    let branched_objects = reader.meta_client.list_branched_objects().await?;
+    let rows = branched_objects
+        .into_iter()
+        .map(|o| RwHummockBranchedObject {
+            object_id: o.object_id as _,
+            sst_id: o.sst_id as _,
+            compaction_group_id: o.compaction_group_id as _,
+        })
+        .collect();
+    Ok(rows)
 }

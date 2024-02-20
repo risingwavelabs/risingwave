@@ -16,7 +16,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use risingwave_common::error::{Result, RwError};
 use risingwave_connector::source::kafka::private_link::insert_privatelink_broker_rewrite_map;
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
@@ -24,6 +23,7 @@ use risingwave_pb::catalog::connection::Info;
 use risingwave_pb::catalog::{connection, PbConnection};
 
 use crate::catalog::{ConnectionId, OwnedByUserCatalog};
+use crate::error::{Result, RwError};
 use crate::user::UserId;
 
 #[derive(Clone, Debug, PartialEq)]

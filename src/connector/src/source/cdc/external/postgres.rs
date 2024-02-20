@@ -15,7 +15,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
@@ -24,14 +24,15 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::DatumRef;
 use serde_derive::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
 use tokio_postgres::types::PgLsn;
 use tokio_postgres::NoTls;
 
-use crate::error::ConnectorError;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::postgres_row_to_owned_row;
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, ConnectorResult, DebeziumOffset, ExternalTableConfig,
-    ExternalTableReader, SchemaTableName,
+    CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
+    SchemaTableName,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -51,19 +52,18 @@ impl PartialOrd for PostgresOffset {
 
 impl PostgresOffset {
     pub fn parse_debezium_offset(offset: &str) -> ConnectorResult<Self> {
-        let dbz_offset: DebeziumOffset = serde_json::from_str(offset).map_err(|e| {
-            ConnectorError::Internal(anyhow!("invalid upstream offset: {}, error: {}", offset, e))
-        })?;
+        let dbz_offset: DebeziumOffset = serde_json::from_str(offset)
+            .with_context(|| format!("invalid upstream offset: {}", offset))?;
 
         Ok(Self {
             txid: dbz_offset
                 .source_offset
                 .txid
-                .ok_or_else(|| anyhow!("invalid postgres txid"))?,
+                .context("invalid postgres txid")?,
             lsn: dbz_offset
                 .source_offset
                 .lsn
-                .ok_or_else(|| anyhow!("invalid postgres lsn"))?,
+                .context("invalid postgres lsn")?,
         })
     }
 }
@@ -125,12 +125,7 @@ impl PostgresExternalTableReader {
         let config = serde_json::from_value::<ExternalTableConfig>(
             serde_json::to_value(properties).unwrap(),
         )
-        .map_err(|e| {
-            ConnectorError::Config(anyhow!(
-                "fail to extract postgres connector properties: {}",
-                e
-            ))
-        })?;
+        .context("failed to extract postgres connector properties")?;
 
         let database_url = format!(
             "postgresql://{}:{}@{}:{}/{}",
@@ -141,7 +136,7 @@ impl PostgresExternalTableReader {
 
         tokio::spawn(async move {
             if let Err(e) = connection.await {
-                tracing::error!("connection error: {}", e);
+                tracing::error!(error = %e.as_report(), "postgres connection error");
             }
         });
 

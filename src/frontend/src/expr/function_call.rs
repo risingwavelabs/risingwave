@@ -14,13 +14,13 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use thiserror::Error;
 use thiserror_ext::AsReport;
 
 use super::{cast_ok, infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
+use crate::error::{ErrorCode, Result as RwResult};
 use crate::expr::{ExprDisplay, ExprType, ExprVisitor, ImpureAnalyzer};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -425,7 +425,7 @@ pub fn is_row_function(expr: &ExprImpl) -> bool {
 
 #[derive(Debug, Error)]
 #[error("{0}")]
-pub struct CastError(String);
+pub struct CastError(pub(super) String);
 
 impl From<CastError> for ErrorCode {
     fn from(value: CastError) -> Self {

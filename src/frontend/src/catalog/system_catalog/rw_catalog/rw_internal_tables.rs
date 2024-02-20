@@ -12,72 +12,55 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{Fields, Timestamptz};
+use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::user::grant_privilege::Object;
 
-use crate::catalog::system_catalog::{get_acl_items, BuiltinTable, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
+use crate::error::Result;
 
-pub const RW_INTERNAL_TABLES: BuiltinTable = BuiltinTable {
-    name: "rw_internal_tables",
-    schema: RW_CATALOG_SCHEMA_NAME,
-    columns: &[
-        (DataType::Int32, "id"),
-        (DataType::Varchar, "name"),
-        (DataType::Int32, "schema_id"),
-        (DataType::Int32, "owner"),
-        (DataType::Varchar, "definition"),
-        (DataType::Varchar, "acl"),
-        (DataType::Timestamptz, "initialized_at"),
-        (DataType::Timestamptz, "created_at"),
-        (DataType::Varchar, "initialized_at_cluster_version"),
-        (DataType::Varchar, "created_at_cluster_version"),
-    ],
-    pk: &[0],
-};
+#[derive(Fields)]
+struct RwInternalTable {
+    #[primary_key]
+    id: i32,
+    name: String,
+    schema_id: i32,
+    owner: i32,
+    definition: String,
+    acl: String,
+    initialized_at: Option<Timestamptz>,
+    created_at: Option<Timestamptz>,
+    initialized_at_cluster_version: Option<String>,
+    created_at_cluster_version: Option<String>,
+}
 
-impl SysCatalogReaderImpl {
-    pub fn read_rw_internal_table_info(&self) -> Result<Vec<OwnedRow>> {
-        let reader = self.catalog_reader.read_guard();
-        let schemas = reader.iter_schemas(&self.auth_context.database)?;
-        let user_reader = self.user_info_reader.read_guard();
-        let users = user_reader.get_all_users();
-        let username_map = user_reader.get_user_name_map();
+#[system_catalog(table, "rw_catalog.rw_internal_tables")]
+fn read_rw_internal_tables(reader: &SysCatalogReaderImpl) -> Result<Vec<RwInternalTable>> {
+    let catalog_reader = reader.catalog_reader.read_guard();
+    let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
+    let user_reader = reader.user_info_reader.read_guard();
+    let users = user_reader.get_all_users();
+    let username_map = user_reader.get_user_name_map();
 
-        Ok(schemas
-            .flat_map(|schema| {
-                schema.iter_internal_table().map(|table| {
-                    OwnedRow::new(vec![
-                        Some(ScalarImpl::Int32(table.id.table_id as i32)),
-                        Some(ScalarImpl::Utf8(table.name().into())),
-                        Some(ScalarImpl::Int32(schema.id() as i32)),
-                        Some(ScalarImpl::Int32(table.owner as i32)),
-                        Some(ScalarImpl::Utf8(table.create_sql().into())),
-                        Some(ScalarImpl::Utf8(
-                            get_acl_items(
-                                &Object::TableId(table.id.table_id),
-                                true,
-                                &users,
-                                username_map,
-                            )
-                            .into(),
-                        )),
-                        table.initialized_at_epoch.map(|e| e.as_scalar()),
-                        table.created_at_epoch.map(|e| e.as_scalar()),
-                        table
-                            .initialized_at_cluster_version
-                            .clone()
-                            .map(|v| ScalarImpl::Utf8(v.into())),
-                        table
-                            .created_at_cluster_version
-                            .clone()
-                            .map(|v| ScalarImpl::Utf8(v.into())),
-                    ])
-                })
+    Ok(schemas
+        .flat_map(|schema| {
+            schema.iter_internal_table().map(|table| RwInternalTable {
+                id: table.id.table_id as i32,
+                name: table.name().into(),
+                schema_id: schema.id() as i32,
+                owner: table.owner as i32,
+                definition: table.create_sql(),
+                acl: get_acl_items(
+                    &Object::TableId(table.id.table_id),
+                    true,
+                    &users,
+                    username_map,
+                ),
+                initialized_at: table.initialized_at_epoch.map(|e| e.as_timestamptz()),
+                created_at: table.created_at_epoch.map(|e| e.as_timestamptz()),
+                initialized_at_cluster_version: table.initialized_at_cluster_version.clone(),
+                created_at_cluster_version: table.created_at_cluster_version.clone(),
             })
-            .collect_vec())
-    }
+        })
+        .collect())
 }

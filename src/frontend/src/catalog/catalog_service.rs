@@ -18,7 +18,6 @@ use anyhow::anyhow;
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId};
-use risingwave_common::error::Result;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
@@ -36,6 +35,7 @@ use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
 use super::{DatabaseId, TableId};
+use crate::error::Result;
 use crate::user::UserId;
 
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;

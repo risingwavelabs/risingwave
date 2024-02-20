@@ -137,7 +137,7 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
 }
 
 #[derive(Debug, Clone, Parser)]
-#[command(about = "The quick way to start a RisingWave cluster for playing around")]
+#[command(about = "The quick way to start an in-memory RisingWave cluster for playing around")]
 pub struct PlaygroundOpts {
     /// The profile to use.
     #[clap(short, long, env = "PLAYGROUND_PROFILE", default_value = "playground")]

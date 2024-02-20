@@ -293,6 +293,36 @@ impl From<DataTypeName> for PbTypeName {
     }
 }
 
+/// Convenient macros to generate match arms for [`DataType`](crate::types::DataType).
+pub mod data_types {
+    /// Numeric [`DataType`](crate::types::DataType)s supported to be `offset` of `RANGE` frame.
+    #[macro_export]
+    macro_rules! range_frame_numeric {
+        () => {
+            DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::Float32
+                | DataType::Float64
+                | DataType::Decimal
+        };
+    }
+    pub use range_frame_numeric;
+
+    /// Date/time [`DataType`](crate::types::DataType)s supported to be `offset` of `RANGE` frame.
+    #[macro_export]
+    macro_rules! range_frame_datetime {
+        () => {
+            DataType::Date
+                | DataType::Time
+                | DataType::Timestamp
+                | DataType::Timestamptz
+                | DataType::Interval
+        };
+    }
+    pub use range_frame_datetime;
+}
+
 impl DataType {
     pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         use crate::array::*;
@@ -374,7 +404,7 @@ impl DataType {
         matches!(self, DataType::Int16 | DataType::Int32 | DataType::Int64)
     }
 
-    /// Returns the output type of window function on a given input type.
+    /// Returns the output type of time window function on a given input type.
     pub fn window_of(input: &DataType) -> Option<DataType> {
         match input {
             DataType::Timestamptz => Some(DataType::Timestamptz),
@@ -570,10 +600,24 @@ pub trait ToOwnedDatum {
     fn to_owned_datum(self) -> Datum;
 }
 
-impl ToOwnedDatum for DatumRef<'_> {
+impl ToOwnedDatum for &Datum {
     #[inline(always)]
     fn to_owned_datum(self) -> Datum {
-        self.map(ScalarRefImpl::into_scalar_impl)
+        self.clone()
+    }
+}
+
+impl<T: Into<ScalarImpl>> ToOwnedDatum for T {
+    #[inline(always)]
+    fn to_owned_datum(self) -> Datum {
+        Some(self.into())
+    }
+}
+
+impl<T: Into<ScalarImpl>> ToOwnedDatum for Option<T> {
+    #[inline(always)]
+    fn to_owned_datum(self) -> Datum {
+        self.map(Into::into)
     }
 }
 
@@ -762,6 +806,36 @@ impl From<&[u8]> for ScalarImpl {
 impl From<JsonbRef<'_>> for ScalarImpl {
     fn from(jsonb: JsonbRef<'_>) -> Self {
         Self::Jsonb(jsonb.to_owned_scalar())
+    }
+}
+
+impl<T: PrimitiveArrayItemType> From<Vec<T>> for ScalarImpl {
+    fn from(v: Vec<T>) -> Self {
+        Self::List(v.into_iter().collect())
+    }
+}
+
+impl<T: PrimitiveArrayItemType> From<Vec<Option<T>>> for ScalarImpl {
+    fn from(v: Vec<Option<T>>) -> Self {
+        Self::List(v.into_iter().collect())
+    }
+}
+
+impl From<Vec<String>> for ScalarImpl {
+    fn from(v: Vec<String>) -> Self {
+        Self::List(v.iter().map(|s| s.as_str()).collect())
+    }
+}
+
+impl From<Vec<u8>> for ScalarImpl {
+    fn from(v: Vec<u8>) -> Self {
+        Self::Bytea(v.into())
+    }
+}
+
+impl From<Bytes> for ScalarImpl {
+    fn from(v: Bytes) -> Self {
+        Self::Bytea(v.as_ref().into())
     }
 }
 

@@ -22,7 +22,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, must_match};
 use smallvec::SmallVec;
 
-use super::buffer::{RowsWindow, WindowBuffer, WindowImpl};
+use super::buffer::{RangeWindow, RowsWindow, WindowBuffer, WindowImpl};
 use super::{BoxedWindowState, StateEvictHint, StateKey, StatePos, WindowState};
 use crate::aggregate::{
     AggArgs, AggCall, AggregateFunction, AggregateState as AggImplState, BoxedAggregateFunction,
@@ -85,6 +85,17 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
             arg_data_types,
             buffer: WindowBuffer::<RowsWindow<StateKey, StateValue>>::new(
                 RowsWindow::new(frame_bounds.clone()),
+                call.frame.exclusion,
+                enable_delta,
+            ),
+            buffer_heap_size: KvSize::new(),
+        }) as BoxedWindowState,
+        FrameBounds::Range(frame_bounds) => Box::new(AggregateState {
+            agg_func,
+            agg_impl,
+            arg_data_types,
+            buffer: WindowBuffer::<RangeWindow<StateValue>>::new(
+                RangeWindow::new(frame_bounds.clone()),
                 call.frame.exclusion,
                 enable_delta,
             ),
