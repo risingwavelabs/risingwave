@@ -54,7 +54,7 @@ use self::notifier::Notifier;
 use self::progress::TrackingCommand;
 use crate::barrier::info::InflightActorInfo;
 use crate::barrier::notifier::BarrierInfo;
-use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
+use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::BarrierCollectFuture;
 use crate::barrier::state::BarrierManagerState;
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
@@ -214,55 +214,7 @@ impl CheckpointControl {
             context,
         }
     }
-}
 
-impl CreateMviewProgressTracker {
-    /// Stash a command to finish later.
-    fn stash_command_to_finish(&mut self, finished_job: TrackingJob) {
-        self.finished_jobs.push(finished_job);
-    }
-
-    /// Finish stashed jobs.
-    /// If checkpoint, means all jobs can be finished.
-    /// If not checkpoint, jobs which do not require checkpoint can be finished.
-    ///
-    /// Returns whether there are still remaining stashed jobs to finish.
-    async fn finish_jobs(&mut self, checkpoint: bool) -> MetaResult<bool> {
-        for job in self
-            .finished_jobs
-            .extract_if(|job| checkpoint || !job.is_checkpoint_required())
-        {
-            // The command is ready to finish. We can now call `pre_finish`.
-            job.pre_finish().await?;
-            job.notify_finished();
-        }
-        Ok(!self.finished_jobs.is_empty())
-    }
-}
-
-impl CheckpointControl {
-    fn cancel_command(&mut self, cancelled_job: TrackingJob) {
-        if let TrackingJob::New(cancelled_command) = cancelled_job {
-            if let Some(index) = self.inflight_command_ctx_queue.iter().position(|command| {
-                command.command_ctx.prev_epoch.value()
-                    == cancelled_command.context.prev_epoch.value()
-            }) {
-                self.inflight_command_ctx_queue.remove(index);
-            }
-        } else {
-            // Recovered jobs do not need to be cancelled since only `RUNNING` actors will get recovered.
-        }
-    }
-}
-
-impl CreateMviewProgressTracker {
-    fn cancel_stashed_command(&mut self, id: TableId) {
-        self.finished_jobs
-            .retain(|x| x.table_to_create() != Some(id));
-    }
-}
-
-impl CheckpointControl {
     /// Update the metrics of barrier nums.
     fn update_barrier_nums_metrics(&self) {
         self.context
@@ -357,15 +309,10 @@ struct InflightCommand {
     notifiers: Vec<Notifier>,
 }
 
-struct CompleteBarrierOutput {
-    cancelled_job: Option<TrackingJob>,
-    has_remaining_job: bool,
-}
-
 struct CompletingCommand {
     command_ctx: Arc<CommandContext>,
 
-    join_handle: JoinHandle<MetaResult<CompleteBarrierOutput>>,
+    join_handle: JoinHandle<MetaResult<bool>>,
 }
 
 /// The result of barrier collect.
@@ -735,7 +682,7 @@ impl GlobalBarrierManagerContext {
         resps: Vec<BarrierCompleteResponse>,
         mut notifiers: Vec<Notifier>,
         enqueue_time: HistogramTimer,
-    ) -> MetaResult<CompleteBarrierOutput> {
+    ) -> MetaResult<bool> {
         let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
         let (commit_info, create_mview_progress) = collect_commit_epoch_info(resps);
         if let Err(e) = self.update_snapshot(&command_ctx, commit_info).await {
@@ -814,21 +761,12 @@ impl GlobalBarrierManagerContext {
         notifiers: Vec<Notifier>,
         command_ctx: Arc<CommandContext>,
         create_mview_progress: Vec<CreateMviewProgress>,
-    ) -> MetaResult<CompleteBarrierOutput> {
+    ) -> MetaResult<bool> {
         {
             {
                 // Notify about collected.
                 let version_stats = self.hummock_manager.get_version_stats().await;
-
                 let mut tracker = self.tracker.lock().await;
-
-                // Save `cancelled_command` for Create MVs.
-                let actors_to_cancel = command_ctx.actors_to_cancel();
-                let cancelled_job = if !actors_to_cancel.is_empty() {
-                    tracker.find_cancelled_command(actors_to_cancel)
-                } else {
-                    None
-                };
 
                 // Save `finished_commands` for Create MVs.
                 let finished_commands = {
@@ -864,17 +802,14 @@ impl GlobalBarrierManagerContext {
                 if let Some(table_id) = command_ctx.table_to_cancel() {
                     // the cancelled command is possibly stashed in `finished_commands` and waiting
                     // for checkpoint, we should also clear it.
-                    tracker.cancel_stashed_command(table_id);
+                    tracker.cancel_command(table_id);
                 }
 
                 let has_remaining_job = tracker
                     .finish_jobs(command_ctx.kind.is_checkpoint())
                     .await?;
 
-                Ok(CompleteBarrierOutput {
-                    cancelled_job,
-                    has_remaining_job,
-                })
+                Ok(has_remaining_job)
             }
         }
     }
@@ -952,12 +887,9 @@ impl CheckpointControl {
                 })
                 .and_then(|result| result);
             let completed_command = self.completing_command.take().expect("non-empty");
-            let result = join_result.map(|output| {
+            let result = join_result.map(|has_remaining| {
                 let command_ctx = completed_command.command_ctx.clone();
-                if let Some(job) = output.cancelled_job {
-                    self.cancel_command(job);
-                }
-                (command_ctx, output.has_remaining_job)
+                (command_ctx, has_remaining)
             });
 
             Poll::Ready(result)
