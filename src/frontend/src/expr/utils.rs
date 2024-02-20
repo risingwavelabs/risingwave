@@ -577,8 +577,8 @@ impl WatermarkAnalyzer {
                 },
                 _ => unreachable!(),
             },
-            ExprType::ToTimestamp => self.visit_unary_op(func_call.inputs()),
-            ExprType::ToTimestamp1 => WatermarkDerivation::None,
+            ExprType::SecToTimestamptz => self.visit_unary_op(func_call.inputs()),
+            ExprType::CharToTimestamptz => WatermarkDerivation::None,
             ExprType::Cast => {
                 // TODO: need more derivation
                 WatermarkDerivation::None

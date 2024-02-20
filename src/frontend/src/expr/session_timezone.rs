@@ -218,7 +218,7 @@ impl SessionTimezone {
             }
             // `to_timestamp1(input_string, format_string)`
             // => `to_timestamp1(input_string, format_string, zone_string)`
-            ExprType::ToTimestamp1 => {
+            ExprType::CharToTimestamptz => {
                 if !(inputs.len() == 2
                     && inputs[0].return_type() == DataType::Varchar
                     && inputs[1].return_type() == DataType::Varchar)

@@ -321,12 +321,12 @@ fn bench_expr(c: &mut Criterion) {
         for (i, t) in sig.inputs_type.iter().enumerate() {
             use DataType::*;
             let idx = match (sig.name.as_scalar(), i) {
-                (PbType::ToTimestamp1, 0) => TIMESTAMP_FORMATTED_STRING,
-                (PbType::ToChar | PbType::ToTimestamp1, 1) => {
+                (PbType::CharToTimestamptz, 0) => TIMESTAMP_FORMATTED_STRING,
+                (PbType::ToChar | PbType::CharToTimestamptz, 1) => {
                     children.push(string_literal("YYYY/MM/DD HH:MM:SS"));
                     continue;
                 }
-                (PbType::ToChar | PbType::ToTimestamp1, 2) => {
+                (PbType::ToChar | PbType::CharToTimestamptz, 2) => {
                     children.push(string_literal("Australia/Sydney"));
                     continue;
                 }
