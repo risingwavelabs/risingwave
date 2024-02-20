@@ -76,6 +76,8 @@ pub struct SharedContext {
     pub(crate) compute_client_pool: ComputeClientPool,
 
     pub(crate) config: StreamingConfig,
+
+    pub(super) local_barrier_manager: LocalBarrierManager,
 }
 
 impl std::fmt::Debug for SharedContext {
@@ -87,13 +89,18 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(addr: HostAddr, config: &StreamingConfig) -> Self {
+    pub fn new(
+        addr: HostAddr,
+        config: &StreamingConfig,
+        local_barrier_manager: LocalBarrierManager,
+    ) -> Self {
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr,
             compute_client_pool: ComputeClientPool::default(),
             config: config.clone(),
+            local_barrier_manager,
         }
     }
 
@@ -115,6 +122,7 @@ impl SharedContext {
                 },
                 ..Default::default()
             },
+            local_barrier_manager: LocalBarrierManager::for_test(),
         }
     }
 

@@ -181,8 +181,6 @@ pub(crate) struct StreamActorManager {
     /// Watermark epoch number.
     pub(super) watermark_epoch: AtomicU64Ref,
 
-    pub(super) local_barrier_manager: LocalBarrierManager,
-
     /// Manages the await-trees of all actors.
     pub(super) await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
 
@@ -213,10 +211,14 @@ pub(super) struct LocalBarrierWorker {
 }
 
 impl LocalBarrierWorker {
-    pub(super) fn new(actor_manager: Arc<StreamActorManager>) -> Self {
+    pub(super) fn new(
+        actor_manager: Arc<StreamActorManager>,
+        local_barrier_manager: LocalBarrierManager,
+    ) -> Self {
         let shared_context = Arc::new(SharedContext::new(
             actor_manager.env.server_address().clone(),
             actor_manager.env.config(),
+            local_barrier_manager,
         ));
         Self {
             barrier_senders: HashMap::new(),
@@ -246,7 +248,7 @@ impl LocalBarrierWorker {
                         match event {
                             LocalBarrierEvent::Reset {
                                 result_sender, prev_epoch} => {
-                                self.reset(prev_epoch).await;
+                                self.reset(prev_epoch, self.current_shared_context.local_barrier_manager.clone()).await;
                                 let _ = result_sender.send(());
                             }
                             event => {
@@ -496,8 +498,8 @@ impl LocalBarrierWorker {
     }
 
     /// Reset all internal states.
-    pub(super) fn reset_state(&mut self) {
-        *self = Self::new(self.actor_manager.clone());
+    pub(super) fn reset_state(&mut self, local_barrier_manager: LocalBarrierManager) {
+        *self = Self::new(self.actor_manager.clone(), local_barrier_manager);
     }
 
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
@@ -561,11 +563,10 @@ impl LocalBarrierManager {
             env: env.clone(),
             streaming_metrics,
             watermark_epoch,
-            local_barrier_manager: local_barrier_manager.clone(),
             await_tree_reg,
             runtime: runtime.into(),
         });
-        let worker = LocalBarrierWorker::new(actor_manager);
+        let worker = LocalBarrierWorker::new(actor_manager, local_barrier_manager.clone());
         let _join_handle = tokio::spawn(worker.run(rx));
         local_barrier_manager
     }

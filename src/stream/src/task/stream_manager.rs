@@ -297,7 +297,11 @@ impl LocalBarrierWorker {
     }
 
     /// Force stop all actors on this worker, and then drop their resources.
-    pub(super) async fn reset(&mut self, prev_epoch: u64) {
+    pub(super) async fn reset(
+        &mut self,
+        prev_epoch: u64,
+        local_barrier_manager: LocalBarrierManager,
+    ) {
         let actor_handles = self.actor_manager_state.drain_actor_handles();
         for (actor_id, handle) in &actor_handles {
             tracing::debug!("force stopping actor {}", actor_id);
@@ -317,10 +321,6 @@ impl LocalBarrierWorker {
             let result = handle.await;
             assert!(result.is_ok() || result.err().unwrap().is_cancelled());
         }
-        self.current_shared_context = Arc::new(SharedContext::new(
-            self.actor_manager.env.server_address().clone(),
-            self.actor_manager.env.config(),
-        ));
         self.actor_manager_state.clear_state();
         if let Some(m) = self.actor_manager.await_tree_reg.as_ref() {
             m.lock().clear();
@@ -328,7 +328,7 @@ impl LocalBarrierWorker {
         dispatch_state_store!(&self.actor_manager.env.state_store(), store, {
             store.clear_shared_buffer(prev_epoch).await;
         });
-        self.reset_state();
+        self.reset_state(local_barrier_manager);
         self.actor_manager.env.dml_manager_ref().clear();
     }
 
@@ -492,7 +492,7 @@ impl StreamActorManager {
             eval_error_report,
             watermark_epoch: self.watermark_epoch.clone(),
             shared_context: shared_context.clone(),
-            local_barrier_manager: self.local_barrier_manager.clone(),
+            local_barrier_manager: shared_context.local_barrier_manager.clone(),
         };
 
         let executor = create_executor(executor_params, node, store).await?;
@@ -607,7 +607,7 @@ impl StreamActorManager {
                 self.streaming_metrics.clone(),
                 actor_context.clone(),
                 expr_context,
-                self.local_barrier_manager.clone(),
+                shared_context.local_barrier_manager.clone(),
             );
 
             ret.push(actor);
@@ -625,7 +625,7 @@ impl LocalBarrierWorker {
 
             let handle = {
                 let trace_span = format!("Actor {actor_id}: `{}`", actor_context.mview_definition);
-                let barrier_manager = self.actor_manager.local_barrier_manager.clone();
+                let barrier_manager = self.current_shared_context.local_barrier_manager.clone();
                 let actor = actor.run().map(move |result| {
                     if let Err(err) = result {
                         // TODO: check error type and panic if it's unexpected.
