@@ -304,7 +304,7 @@ fn bench_expr(c: &mut Criterion) {
         }
         if [
             "date_trunc(character varying, timestamp with time zone) -> timestamp with time zone",
-            "to_timestamp1(character varying, character varying) -> timestamp with time zone",
+            "char_to_timestamptz(character varying, character varying) -> timestamp with time zone",
             "to_char(timestamp with time zone, character varying) -> character varying",
         ]
         .contains(&format!("{sig:?}").as_str())
