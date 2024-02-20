@@ -84,6 +84,9 @@
         <datastax.version>4.15.0</datastax.version>
         <flink.version>1.18.0</flink.version>
         <testcontainers.version>1.17.6</testcontainers.version>
+        <postgresql.version>42.5.1</postgresql.version>
+        <mysql.connector.java.version>8.0.28</mysql.connector.java.version>
+        <mongodb.driver.sync.version>4.11.1</mongodb.driver.sync.version>
     </properties>
 
     <dependencyManagement>
@@ -169,12 +172,17 @@
             <dependency>
                 <groupId>org.postgresql</groupId>
                 <artifactId>postgresql</artifactId>
-                <version>42.5.1</version>
+                <version>${postgresql.version}</version>
             </dependency>
             <dependency>
                 <groupId>mysql</groupId>
                 <artifactId>mysql-connector-java</artifactId>
-                <version>8.0.28</version>
+                <version>${mysql.connector.java.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.mongodb</groupId>
+                <artifactId>mongodb-driver-sync</artifactId>
+                <version>${mongodb.driver.sync.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.elasticsearch</groupId>
