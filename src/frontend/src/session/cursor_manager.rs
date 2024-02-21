@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use core::ops::Index;
+use core::time::Duration;
 use std::collections::{HashMap, VecDeque};
+use std::time::Instant;
 
 use bytes::Bytes;
 use futures::StreamExt;
@@ -34,6 +36,8 @@ pub struct Cursor {
     is_snapshot: bool,
     subscription_name: ObjectName,
     pg_desc: Vec<PgFieldDescriptor>,
+    cursor_need_drop_time: Instant,
+    cursor_retention_secs: Duration,
 }
 
 impl Cursor {
@@ -44,6 +48,7 @@ impl Cursor {
         is_snapshot: bool,
         need_check_timestamp: bool,
         subscription_name: ObjectName,
+        cursor_retention_secs: Duration,
     ) -> Result<Self> {
         let (rw_timestamp, data_chunk_cache) = if is_snapshot {
             (start_timestamp, vec![])
@@ -62,7 +67,6 @@ impl Cursor {
             let query_timestamp = data_chunk_cache
                 .get(0)
                 .map(|row| {
-                    println!("123");
                     row.index(0)
                         .as_ref()
                         .map(|bytes| std::str::from_utf8(bytes).unwrap().parse().unwrap())
@@ -79,7 +83,7 @@ impl Cursor {
             (query_timestamp, data_chunk_cache)
         };
         let pg_desc = build_desc(rw_pg_response.row_desc(), is_snapshot);
-        // check timestamp.
+        let cursor_need_drop_time = Instant::now() + cursor_retention_secs;
         Ok(Self {
             cursor_name,
             rw_pg_response,
@@ -87,11 +91,19 @@ impl Cursor {
             rw_timestamp,
             is_snapshot,
             subscription_name,
+            cursor_need_drop_time,
+            cursor_retention_secs,
             pg_desc,
         })
     }
 
     pub async fn next(&mut self) -> Result<CursorRowValue> {
+        if Instant::now() > self.cursor_need_drop_time {
+            return Err(ErrorCode::InternalError(
+                "The cursor has exceeded its maximum lifetime, please recreate it.".to_string(),
+            )
+            .into());
+        }
         let stream = self.rw_pg_response.values_stream();
         loop {
             if self.data_chunk_cache.is_empty() {
@@ -106,11 +118,10 @@ impl Cursor {
                     return Ok(CursorRowValue::QueryWithStartRwTimestamp(
                         self.rw_timestamp,
                         self.subscription_name.clone(),
+                        self.cursor_retention_secs,
                     ));
                 }
             }
-            println!("desc:{:?}", self.pg_desc);
-            println!("data_chunk_cache:{:?}", self.data_chunk_cache);
             if let Some(row) = self.data_chunk_cache.pop_front() {
                 let new_row = row.take();
                 if self.is_snapshot {
@@ -127,14 +138,11 @@ impl Cursor {
                     .map(|bytes| std::str::from_utf8(bytes).unwrap().parse().unwrap())
                     .unwrap();
 
-                println!(
-                    "timestamp_row:{:?},self.rw_timestamp{:?}",
-                    timestamp_row, self.rw_timestamp
-                );
                 if timestamp_row != self.rw_timestamp {
                     return Ok(CursorRowValue::QueryWithNextRwTimestamp(
                         timestamp_row,
                         self.subscription_name.clone(),
+                        self.cursor_retention_secs,
                     ));
                 } else {
                     return Ok(CursorRowValue::Row((
@@ -193,8 +201,8 @@ pub fn build_desc(mut descs: Vec<PgFieldDescriptor>, is_snapshot: bool) -> Vec<P
 
 pub enum CursorRowValue {
     Row((Row, Vec<PgFieldDescriptor>)),
-    QueryWithNextRwTimestamp(i64, ObjectName),
-    QueryWithStartRwTimestamp(i64, ObjectName),
+    QueryWithNextRwTimestamp(i64, ObjectName, Duration),
+    QueryWithStartRwTimestamp(i64, ObjectName, Duration),
 }
 #[derive(Default)]
 pub struct CursorManager {

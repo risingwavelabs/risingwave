@@ -667,6 +667,30 @@ impl fmt::Display for FetchCursorStatement {
     }
 }
 
+// sql_grammar!(CloseCursorStatement {
+//     cursor_name: Ident,
+// });
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CloseCursorStatement {
+    pub cursor_name: ObjectName,
+}
+
+impl ParseTo for CloseCursorStatement {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(cursor_name: ObjectName, p);
+
+        Ok(Self { cursor_name })
+    }
+}
+impl fmt::Display for CloseCursorStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!(cursor_name, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
 // sql_grammar!(CreateConnectionStatement {
 //     if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
 //     connection_name: Ident,

@@ -242,6 +242,7 @@ impl Parser {
                 }
                 Keyword::DECLARE => Ok(self.parse_declare()?),
                 Keyword::FETCH => Ok(self.parse_fetch_cursor()?),
+                Keyword::CLOSE => Ok(self.parse_close_cursor()?),
                 Keyword::TRUNCATE => Ok(self.parse_truncate()?),
                 Keyword::CREATE => Ok(self.parse_create()?),
                 Keyword::DROP => Ok(self.parse_drop()?),
@@ -2304,6 +2305,12 @@ impl Parser {
     pub fn parse_fetch_cursor(&mut self) -> Result<Statement, ParserError> {
         Ok(Statement::FetchCursor {
             stmt: FetchCursorStatement::parse_to(self)?,
+        })
+    }
+
+    pub fn parse_close_cursor(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::CloseCursor {
+            stmt: CloseCursorStatement::parse_to(self)?,
         })
     }
 

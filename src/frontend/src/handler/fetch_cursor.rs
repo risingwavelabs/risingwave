@@ -42,7 +42,11 @@ pub async fn handle_fetch_cursor(
         CursorRowValue::Row((row, pg_descs)) => {
             return Ok(build_fetch_cursor_response(vec![row], pg_descs));
         }
-        CursorRowValue::QueryWithNextRwTimestamp(rw_timestamp, subscription_name) => {
+        CursorRowValue::QueryWithNextRwTimestamp(
+            rw_timestamp,
+            subscription_name,
+            cursor_retention_secs,
+        ) => {
             let query_stmt =
                 gen_query_from_logstore_ge_rw_timestamp(subscription_name.clone(), rw_timestamp)?;
             let res = handle_query(handle_args, query_stmt, formats).await?;
@@ -54,11 +58,16 @@ pub async fn handle_fetch_cursor(
                 false,
                 true,
                 subscription_name.clone(),
+                cursor_retention_secs,
             )
             .await?;
             cursor_manager.update_cursor(cursor)?;
         }
-        CursorRowValue::QueryWithStartRwTimestamp(rw_timestamp, subscription_name) => {
+        CursorRowValue::QueryWithStartRwTimestamp(
+            rw_timestamp,
+            subscription_name,
+            cursor_retention_secs,
+        ) => {
             let query_stmt = gen_query_from_logstore_ge_rw_timestamp(
                 subscription_name.clone(),
                 rw_timestamp + 1,
@@ -72,6 +81,7 @@ pub async fn handle_fetch_cursor(
                 false,
                 false,
                 subscription_name.clone(),
+                cursor_retention_secs,
             )
             .await?;
             cursor_manager.update_cursor(cursor)?;
@@ -82,10 +92,10 @@ pub async fn handle_fetch_cursor(
         CursorRowValue::Row((row, pg_descs)) => {
             Ok(build_fetch_cursor_response(vec![row], pg_descs))
         }
-        CursorRowValue::QueryWithStartRwTimestamp(_, _) => {
+        CursorRowValue::QueryWithStartRwTimestamp(_, _, _) => {
             Ok(build_fetch_cursor_response(vec![], vec![]))
         }
-        CursorRowValue::QueryWithNextRwTimestamp(_, _) => Err(ErrorCode::InternalError(
+        CursorRowValue::QueryWithNextRwTimestamp(_, _, _) => Err(ErrorCode::InternalError(
             "Fetch cursor, one must get a row or null".to_string(),
         )
         .into()),

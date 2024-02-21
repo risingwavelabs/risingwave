@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::time::Duration;
+
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
 use risingwave_sqlparser::ast::{DeclareCursorStatement, Ident, ObjectName, Statement};
@@ -45,7 +47,10 @@ pub async fn handle_declare_cursor(
     let is_snapshot = start_rw_timestamp == 0;
     let subscription =
         session.get_subscription_by_name(schema_name, &cursor_from_subscription_name)?;
-    // let retention_seconds = subscription.get_retention_seconds()?;
+    let cursor_retention_secs = std::cmp::min(
+        session.statement_timeout(),
+        Duration::from_secs(subscription.get_retention_seconds()?),
+    );
     let (start_rw_timestamp, res) = if is_snapshot {
         let subscription_from_table_name = ObjectName(vec![Ident::from(
             subscription.subscription_from_name.as_ref(),
@@ -72,6 +77,7 @@ pub async fn handle_declare_cursor(
         is_snapshot,
         true,
         stmt.cursor_from.clone(),
+        cursor_retention_secs,
     )
     .await?;
     session

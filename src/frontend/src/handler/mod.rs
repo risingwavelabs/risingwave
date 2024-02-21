@@ -45,6 +45,7 @@ mod alter_system;
 mod alter_table_column;
 pub mod alter_user;
 pub mod cancel_job;
+pub mod close_cursor;
 mod comment;
 pub mod create_connection;
 mod create_database;
@@ -317,6 +318,9 @@ pub async fn handle(
         }
         Statement::FetchCursor { stmt } => {
             fetch_cursor::handle_fetch_cursor(handler_args, stmt, formats).await
+        }
+        Statement::CloseCursor { stmt } => {
+            close_cursor::handle_close_cursor(handler_args, stmt).await
         }
         Statement::AlterUser(stmt) => alter_user::handle_alter_user(handler_args, stmt).await,
         Statement::Grant { .. } => {

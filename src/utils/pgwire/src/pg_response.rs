@@ -42,6 +42,7 @@ pub enum StatementType {
     FETCH,
     COPY,
     EXPLAIN,
+    CLOSE_CURSOR,
     CREATE_TABLE,
     CREATE_MATERIALIZED_VIEW,
     CREATE_VIEW,
