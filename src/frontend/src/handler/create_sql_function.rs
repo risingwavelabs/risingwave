@@ -279,8 +279,6 @@ pub async fn handle_create_sql_function(
                     if let ErrorCode::BindErrorRoot { expr: _, error } = e.inner() {
                         let invalid_msg = error.to_string();
 
-                        println!("invalid_msg: {}", invalid_msg);
-
                         // First validate the message
                         let err_msg_type = validate_err_msg(invalid_msg.as_str());
 
