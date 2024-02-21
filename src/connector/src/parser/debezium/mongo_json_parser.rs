@@ -14,8 +14,8 @@
 
 use std::fmt::Debug;
 
-use risingwave_common::error::ErrorCode::{self, ProtocolError};
-use risingwave_common::error::{Result, RwError};
+use anyhow::Context;
+use risingwave_common::bail;
 use risingwave_common::types::DataType;
 use simd_json::prelude::MutableObject;
 use simd_json::BorrowedValue;
@@ -36,7 +36,10 @@ pub struct DebeziumMongoJsonParser {
 }
 
 impl DebeziumMongoJsonParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>, source_ctx: SourceContextRef) -> Result<Self> {
+    pub fn new(
+        rw_columns: Vec<SourceColumnDesc>,
+        source_ctx: SourceContextRef,
+    ) -> anyhow::Result<Self> {
         let id_column = rw_columns
             .iter()
             .find(|desc| {
@@ -49,25 +52,16 @@ impl DebeziumMongoJsonParser {
                             | DataType::Int64
                     )
             })
-            .ok_or_else(|| RwError::from(ProtocolError(
-                "Debezuim Mongo needs a `_id` column with supported types (Varchar Jsonb int32 int64) in table".into(),
-            )))?.clone();
+            .context("Debezium Mongo needs a `_id` column with supported types (Varchar Jsonb int32 int64) in table")?.clone();
         let payload_column = rw_columns
             .iter()
             .find(|desc| desc.name == "payload" && matches!(desc.data_type, DataType::Jsonb))
-            .ok_or_else(|| {
-                RwError::from(ProtocolError(
-                    "Debezuim Mongo needs a `payload` column with supported types Jsonb in table"
-                        .into(),
-                ))
-            })?
+            .context("Debezium Mongo needs a `payload` column with supported types Jsonb in table")?
             .clone();
 
         // _rw_{connector}_file/partition & _rw_{connector}_offset are created automatically.
         if rw_columns.iter().filter(|desc| desc.is_visible()).count() != 2 {
-            return Err(RwError::from(ProtocolError(
-                "Debezuim Mongo needs no more columns except `_id` and `payload` in table".into(),
-            )));
+            bail!("Debezium Mongo needs no more columns except `_id` and `payload` in table");
         }
 
         Ok(Self {
@@ -84,13 +78,11 @@ impl DebeziumMongoJsonParser {
         &self,
         mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<()> {
-        let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+    ) -> anyhow::Result<()> {
+        let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)?;
 
         // Event can be configured with and without the "payload" field present.
         // See https://github.com/risingwavelabs/risingwave/issues/10178
-
         let payload = if let Some(payload) = event.get_mut("payload") {
             std::mem::take(payload)
         } else {
@@ -123,7 +115,7 @@ impl ByteStreamSourceParser for DebeziumMongoJsonParser {
         _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         only_parse_payload!(self, payload, writer)
     }
 }

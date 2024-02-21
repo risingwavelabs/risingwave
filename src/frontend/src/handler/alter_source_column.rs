@@ -15,7 +15,6 @@
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::ColumnId;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_connector::source::{extract_source_struct, SourceEncode, SourceStruct};
 use risingwave_sqlparser::ast::{
     AlterSourceOperation, ColumnDef, CreateSourceStatement, ObjectName, Statement,
@@ -25,6 +24,7 @@ use risingwave_sqlparser::parser::Parser;
 use super::create_table::bind_sql_columns;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::Binder;
 
 // Note for future drop column:
@@ -56,6 +56,13 @@ pub async fn handle_alter_source_column(
         session.check_privilege_for_drop_alter(schema_name, &**source)?;
 
         (db.id(), schema.id(), (**source).clone())
+    };
+
+    if catalog.associated_table_id.is_some() {
+        Err(ErrorCode::NotSupported(
+            "alter table with connector with ALTER SOURCE statement".to_string(),
+            "try to use ALTER TABLE instead".to_string(),
+        ))?
     };
 
     // Currently only allow source without schema registry

@@ -32,7 +32,7 @@ risingwave_meta_model_migration = { workspace = true }
 risingwave_meta_service = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
-sea-orm = { version = "0.12.0", features = [
+sea-orm = { version = "0.12.14", features = [
     "sqlx-mysql",
     "sqlx-postgres",
     "sqlx-sqlite",

@@ -20,6 +20,7 @@ members = [
   "src/expr/macro",
   "src/expr/udf",
   "src/frontend",
+  "src/frontend/macro",
   "src/frontend/planner_test",
   "src/java_binding",
   "src/jni_core",
@@ -121,7 +122,7 @@ tonic = { package = "madsim-tonic", version = "0.4.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "58c1f003484449d7c6dd693b348bf19dd44889cb" }
 prost = { version = "0.12" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "32c0bbf242f5c47b1e743f10577012fe7436c770", features = [
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "56943d203464d32701c20d74b278b6b3ef2eefc7", features = [
   "prometheus",
 ] }
 arrow-array = "50"
@@ -133,8 +134,8 @@ arrow-flight = "50"
 arrow-select = "50"
 arrow-ord = "50"
 arrow-row = "50"
-arrow-udf-js = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "7ba1c22" }
-arrow-udf-wasm = "0.1"
+arrow-udf-js = "0.1"
+arrow-udf-wasm = { version = "0.1.2", features = ["build"] }
 arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
 arrow-buffer-deltalake = { package = "arrow-buffer", version = "48.0.1" }
 arrow-cast-deltalake = { package = "arrow-cast", version = "48.0.1" }
@@ -152,7 +153,12 @@ tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git"
   "profiling",
   "stats",
 ], rev = "64a2d9" }
+opentelemetry = "0.21"
+opentelemetry-otlp = "0.14"
+opentelemetry_sdk = { version = "0.21", default-features = false }
+opentelemetry-semantic-conventions = "0.13"
 tokio-util = "0.7"
+tracing-opentelemetry = "0.22"
 
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
@@ -282,8 +288,6 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
-# need binding on aarch64-unknown-linux-gnu, waiting for new release
-rquickjs-sys = { git = "https://github.com/DelSkayn/rquickjs.git", rev = "60696e8" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]

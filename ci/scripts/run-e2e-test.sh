@@ -133,22 +133,6 @@ RUST_BACKTRACE=1 target/debug/risingwave_e2e_extended_mode_test --host 127.0.0.1
 echo "--- Kill cluster"
 cluster_stop
 
-if [[ "$RUN_DELETE_RANGE" -eq "1" ]]; then
-    echo "--- e2e, ci-delete-range-test"
-    cargo make clean-data
-    RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-    cargo make ci-start ci-delete-range-test
-    download-and-decompress-artifact delete-range-test-"$profile" target/debug/
-    mv target/debug/delete-range-test-"$profile" target/debug/delete-range-test
-    chmod +x ./target/debug/delete-range-test
-
-    config_path=".risingwave/config/risingwave.toml"
-    ./target/debug/delete-range-test --ci-mode --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
-
-    echo "--- Kill cluster"
-    cluster_stop
-fi
-
 if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     echo "--- e2e, ci-compaction-test, nexmark_q7"
     RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \

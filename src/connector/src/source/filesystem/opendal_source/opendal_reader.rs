@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{Ok, Result};
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use opendal::Operator;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::error::RwError;
 use tokio::io::BufReader;
 use tokio_util::io::{ReaderStream, StreamReader};
 
@@ -52,7 +50,7 @@ impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         let connector = Src::new_enumerator(properties)?;
         let opendal_reader = OpendalReader {
             connector,
@@ -69,11 +67,13 @@ impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
 }
 
 impl<Src: OpendalSource> OpendalReader<Src> {
-    #[try_stream(boxed, ok = StreamChunk, error = RwError)]
+    #[try_stream(boxed, ok = StreamChunk, error = anyhow::Error)]
     async fn into_chunk_stream(self) {
         for split in self.splits {
             let actor_id = self.source_ctx.source_info.actor_id.to_string();
+            let fragment_id = self.source_ctx.source_info.fragment_id.to_string();
             let source_id = self.source_ctx.source_info.source_id.to_string();
+            let source_name = self.source_ctx.source_info.source_name.to_string();
             let source_ctx = self.source_ctx.clone();
 
             let split_id = split.id();
@@ -94,7 +94,13 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 self.source_ctx
                     .metrics
                     .partition_input_count
-                    .with_label_values(&[&actor_id, &source_id, &split_id])
+                    .with_label_values(&[
+                        &actor_id,
+                        &source_id,
+                        &split_id,
+                        &source_name,
+                        &fragment_id,
+                    ])
                     .inc_by(msg.cardinality() as u64);
                 yield msg;
             }
@@ -108,7 +114,9 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         source_ctx: SourceContextRef,
     ) {
         let actor_id = source_ctx.source_info.actor_id.to_string();
+        let fragment_id = source_ctx.source_info.fragment_id.to_string();
         let source_id = source_ctx.source_info.source_id.to_string();
+        let source_name = source_ctx.source_info.source_name.to_string();
         let max_chunk_size = source_ctx.source_ctrl_opts.chunk_size;
         let split_id = split.id();
 
@@ -146,7 +154,13 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 source_ctx
                     .metrics
                     .partition_input_bytes
-                    .with_label_values(&[&actor_id, &source_id, &split_id])
+                    .with_label_values(&[
+                        &actor_id,
+                        &source_id,
+                        &split_id,
+                        &source_name,
+                        &fragment_id,
+                    ])
                     .inc_by(batch_size as u64);
                 let yield_batch = std::mem::take(&mut batch);
                 batch_size = 0;
@@ -157,7 +171,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             source_ctx
                 .metrics
                 .partition_input_bytes
-                .with_label_values(&[&actor_id, &source_id, &split_id])
+                .with_label_values(&[&actor_id, &source_id, &split_id, &source_name, &fragment_id])
                 .inc_by(batch_size as u64);
             yield batch;
         }

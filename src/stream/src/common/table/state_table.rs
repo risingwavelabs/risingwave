@@ -357,7 +357,7 @@ where
             OpConsistencyLevel::Inconsistent
         };
 
-        let table_option = TableOption::build_table_option(table_catalog.get_properties());
+        let table_option = TableOption::new(table_catalog.retention_seconds);
         let new_local_options = if IS_REPLICATED {
             NewLocalOptions::new_replicated(table_id, op_consistency_level, table_option)
         } else {
@@ -1125,24 +1125,6 @@ where
         }
 
         Ok(())
-    }
-
-    // TODO(st1page): maybe we should extract a pub struct to do it
-    /// just specially used by those state table read-only and after the call the data
-    /// in the epoch will be visible
-    pub fn commit_no_data_expected(&mut self, new_epoch: EpochPair) {
-        assert_eq!(self.epoch(), new_epoch.prev);
-        assert!(!self.is_dirty());
-        // Tick the watermark buffer here because state table is expected to be committed once
-        // per epoch.
-        self.watermark_buffer_strategy.tick();
-        self.local_store.seal_current_epoch(
-            new_epoch.curr,
-            SealCurrentEpochOptions {
-                table_watermarks: None,
-                switch_op_consistency_level: None,
-            },
-        );
     }
 
     /// Write to state store.

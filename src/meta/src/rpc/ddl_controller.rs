@@ -64,7 +64,6 @@ use tracing::log::warn;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
-use crate::controller::catalog::{CatalogControllerRef, ReleaseContext};
 use crate::manager::{
     CatalogManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId, IdCategory,
     IdCategoryType, IndexId, LocalNotification, MetaSrvEnv, MetadataManager, MetadataManagerV1,
@@ -75,8 +74,8 @@ use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
     validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
-    CreateStreamingJobContext, GlobalStreamManagerRef, ReplaceTableContext, SourceManagerRef,
-    StreamFragmentGraph,
+    CreateStreamingJobContext, CreateStreamingJobOption, GlobalStreamManagerRef,
+    ReplaceTableContext, SourceManagerRef, StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -270,7 +269,7 @@ impl DdlController {
     /// would be a huge hassle and pain if we don't spawn here.
     pub async fn run_command(&self, command: DdlCommand) -> MetaResult<NotificationVersion> {
         if !command.allow_in_recovery() {
-            self.barrier_manager.check_status_running().await?;
+            self.barrier_manager.check_status_running()?;
         }
         let ctrl = self.clone();
         let fut = async move {
@@ -354,9 +353,10 @@ impl DdlController {
         &self,
         table_id: u32,
         parallelism: PbTableParallelism,
+        deferred: bool,
     ) -> MetaResult<()> {
         self.stream_manager
-            .alter_table_parallelism(table_id, parallelism.into())
+            .alter_table_parallelism(table_id, parallelism.into(), deferred)
             .await
     }
 
@@ -382,46 +382,20 @@ impl DdlController {
         Ok(version)
     }
 
-    async fn drop_database_v2(
-        &self,
-        catalog_controller: &CatalogControllerRef,
-        database_id: DatabaseId,
-    ) -> MetaResult<NotificationVersion> {
-        let (
-            ReleaseContext {
-                streaming_jobs,
-                source_ids,
-                connections,
-                ..
-            },
-            version,
-        ) = catalog_controller.drop_database(database_id as _).await?;
-        self.source_manager
-            .unregister_sources(source_ids.into_iter().map(|id| id as _).collect())
-            .await;
-        self.stream_manager
-            .drop_streaming_jobs(
-                streaming_jobs
-                    .into_iter()
-                    .map(|id| (id as u32).into())
-                    .collect(),
-            )
-            .await;
-        for svc in connections {
-            self.delete_vpc_endpoint_v2(svc.into_inner()).await?;
-        }
-        Ok(version)
-    }
-
     async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 self.drop_database_v1(&mgr.catalog_manager, database_id)
                     .await
             }
-            MetadataManager::V2(mgr) => {
-                self.drop_database_v2(&mgr.catalog_controller, database_id)
-                    .await
+            MetadataManager::V2(_) => {
+                self.drop_object(
+                    ObjectType::Database,
+                    database_id as _,
+                    DropMode::Cascade,
+                    None,
+                )
+                .await
             }
         }
     }
@@ -439,9 +413,8 @@ impl DdlController {
     async fn drop_schema(&self, schema_id: SchemaId) -> MetaResult<NotificationVersion> {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => mgr.catalog_manager.drop_schema(schema_id).await,
-            MetadataManager::V2(mgr) => {
-                mgr.catalog_controller
-                    .drop_schema(schema_id as _, DropMode::Restrict)
+            MetadataManager::V2(_) => {
+                self.drop_object(ObjectType::Schema, schema_id as _, DropMode::Restrict, None)
                     .await
             }
         }
@@ -484,7 +457,9 @@ impl DdlController {
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
         let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unimplemented!("support drop source in v2");
+            return self
+                .drop_object(ObjectType::Source, source_id as _, drop_mode, None)
+                .await;
         };
         // 1. Drop source in catalog.
         let (version, streaming_job_ids) = mgr
@@ -552,7 +527,9 @@ impl DdlController {
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
         let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unimplemented!("support drop view in v2");
+            return self
+                .drop_object(ObjectType::View, view_id as _, drop_mode, None)
+                .await;
         };
         let (version, streaming_job_ids) = mgr
             .catalog_manager
@@ -585,20 +562,26 @@ impl DdlController {
         &self,
         connection_id: ConnectionId,
     ) -> MetaResult<NotificationVersion> {
-        let (version, connection) = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.drop_connection(connection_id).await?,
-            MetadataManager::V2(mgr) => {
-                mgr.catalog_controller
-                    .drop_connection(connection_id as _)
-                    .await?
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                let (version, connection) =
+                    mgr.catalog_manager.drop_connection(connection_id).await?;
+                self.delete_vpc_endpoint(&connection).await?;
+                Ok(version)
             }
-        };
-
-        self.delete_vpc_endpoint(&connection).await?;
-        Ok(version)
+            MetadataManager::V2(_) => {
+                self.drop_object(
+                    ObjectType::Connection,
+                    connection_id as _,
+                    DropMode::Restrict,
+                    None,
+                )
+                .await
+            }
+        }
     }
 
-    async fn delete_vpc_endpoint(&self, connection: &Connection) -> MetaResult<()> {
+    pub(crate) async fn delete_vpc_endpoint(&self, connection: &Connection) -> MetaResult<()> {
         // delete AWS vpc endpoint
         if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info
             && svc.get_provider()? == PbPrivateLinkProvider::Aws
@@ -615,7 +598,7 @@ impl DdlController {
         Ok(())
     }
 
-    async fn delete_vpc_endpoint_v2(&self, svc: PrivateLinkService) -> MetaResult<()> {
+    pub(crate) async fn delete_vpc_endpoint_v2(&self, svc: PrivateLinkService) -> MetaResult<()> {
         // delete AWS vpc endpoint
         if svc.get_provider()? == PbPrivateLinkProvider::Aws {
             if let Some(aws_cli) = self.aws_client.as_ref() {
@@ -639,7 +622,7 @@ impl DdlController {
     ) -> MetaResult<NotificationVersion> {
         let MetadataManager::V1(mgr) = &self.metadata_manager else {
             return self
-                .create_streaming_job_v2(stream_job, fragment_graph)
+                .create_streaming_job_v2(stream_job, fragment_graph, affected_table_replace_info)
                 .await;
         };
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
@@ -677,7 +660,7 @@ impl DdlController {
             .acquire()
             .await
             .unwrap();
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
         let stream_ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
 
@@ -697,9 +680,32 @@ impl DdlController {
         mgr.catalog_manager
             .start_create_stream_job_procedure(&stream_job, internal_tables.clone())
             .await?;
+        let affected_table_replace_info = match affected_table_replace_info {
+            Some(replace_table_info) => {
+                let MetadataManager::V1(mgr) = &self.metadata_manager else {
+                    unimplemented!("support replace table in v2");
+                };
+
+                let ReplaceTableInfo {
+                    mut streaming_job,
+                    fragment_graph,
+                    ..
+                } = replace_table_info;
+                let fragment_graph = self
+                    .prepare_replace_table(
+                        mgr.catalog_manager.clone(),
+                        &mut streaming_job,
+                        fragment_graph,
+                    )
+                    .await?;
+
+                Some((streaming_job, fragment_graph))
+            }
+            None => None,
+        };
 
         // 4. Build and persist stream job.
-        let result = try {
+        let result: MetaResult<_> = try {
             tracing::debug!(id = stream_job.id(), "building stream job");
             let (ctx, table_fragments) = self
                 .build_stream_job(
@@ -747,6 +753,7 @@ impl DdlController {
         let (ctx, table_fragments) = match result {
             Ok(r) => r,
             Err(e) => {
+                tracing::error!(error = %e.as_report(), id = stream_job.id(), "failed to create streaming job");
                 self.cancel_stream_job(&stream_job, internal_tables, Some(&e))
                     .await?;
                 return Err(e);
@@ -842,34 +849,19 @@ impl DdlController {
     // Here we modify the union node of the downstream table by the TableFragments of the to-be-created sink upstream.
     // The merge in the union has already been set up in the frontend and will be filled with specific upstream actors in this function.
     // Meanwhile, the Dispatcher corresponding to the upstream of the merge will also be added to the replace table context here.
-    async fn inject_replace_table_job_for_table_sink(
+    pub(crate) async fn inject_replace_table_job_for_table_sink(
         &self,
-        mgr: &MetadataManagerV1,
+        dummy_id: u32,
+        mgr: &MetadataManager,
         stream_ctx: StreamContext,
         sink: Option<&Sink>,
         creating_sink_table_fragments: Option<&TableFragments>,
         dropping_sink_id: Option<SinkId>,
-        ReplaceTableInfo {
-            mut streaming_job,
-            fragment_graph,
-            ..
-        }: ReplaceTableInfo,
-    ) -> MetaResult<(StreamingJob, ReplaceTableContext, TableFragments)> {
-        let fragment_graph = self
-            .prepare_replace_table(
-                mgr.catalog_manager.clone(),
-                &mut streaming_job,
-                fragment_graph,
-            )
-            .await?;
-        let dummy_id = self
-            .env
-            .id_gen_manager()
-            .generate::<{ IdCategory::Table }>()
-            .await? as u32;
-
+        streaming_job: &StreamingJob,
+        fragment_graph: StreamFragmentGraph,
+    ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
         let (mut replace_table_ctx, mut table_fragments) = self
-            .build_replace_table(stream_ctx, &streaming_job, fragment_graph, None, dummy_id)
+            .build_replace_table(stream_ctx, streaming_job, fragment_graph, None, dummy_id)
             .await?;
 
         let mut union_fragment_id = None;
@@ -910,17 +902,14 @@ impl DdlController {
         }
 
         let [table_catalog]: [_; 1] = mgr
-            .catalog_manager
-            .get_tables(&[table.id])
-            .await
+            .get_table_catalog_by_ids(vec![table.id])
+            .await?
             .try_into()
             .expect("Target table should exist in sink into table");
 
         assert_eq!(table_catalog.incoming_sinks, table.incoming_sinks);
 
         {
-            let guard = mgr.fragment_manager.get_fragment_read_guard().await;
-
             for sink_id in &table_catalog.incoming_sinks {
                 if let Some(dropping_sink_id) = dropping_sink_id
                     && *sink_id == dropping_sink_id
@@ -928,10 +917,9 @@ impl DdlController {
                     continue;
                 };
 
-                let sink_table_fragments = guard
-                    .table_fragments()
-                    .get(&risingwave_common::catalog::TableId::new(*sink_id))
-                    .unwrap();
+                let sink_table_fragments = mgr
+                    .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(*sink_id))
+                    .await?;
 
                 let sink_fragment = sink_table_fragments.sink_fragment().unwrap();
 
@@ -959,7 +947,7 @@ impl DdlController {
             }
         }
 
-        Ok((streaming_job, replace_table_ctx, table_fragments))
+        Ok((replace_table_ctx, table_fragments))
     }
 
     fn inject_replace_table_plan_for_sink(
@@ -1136,10 +1124,36 @@ impl DdlController {
         drop_mode: DropMode,
         target_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<NotificationVersion> {
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unimplemented!("support drop streaming job in v2");
-        };
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        match &self.metadata_manager {
+            MetadataManager::V1(_) => {
+                self.drop_streaming_job_v1(job_id, drop_mode, target_replace_info)
+                    .await
+            }
+            MetadataManager::V2(_) => {
+                let (object_id, object_type) = match job_id {
+                    StreamingJobId::MaterializedView(id) => (id as _, ObjectType::Table),
+                    StreamingJobId::Sink(id) => (id as _, ObjectType::Sink),
+                    StreamingJobId::Table(_, id) => (id as _, ObjectType::Table),
+                    StreamingJobId::Index(idx) => (idx as _, ObjectType::Index),
+                };
+
+                let version = self
+                    .drop_object(object_type, object_id, drop_mode, target_replace_info)
+                    .await?;
+
+                Ok(version)
+            }
+        }
+    }
+
+    async fn drop_streaming_job_v1(
+        &self,
+        job_id: StreamingJobId,
+        drop_mode: DropMode,
+        target_replace_info: Option<ReplaceTableInfo>,
+    ) -> MetaResult<NotificationVersion> {
+        let mgr = self.metadata_manager.as_v1_ref();
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
         let (mut version, streaming_job_ids) = match job_id {
             StreamingJobId::MaterializedView(table_id) => {
                 mgr.catalog_manager
@@ -1188,35 +1202,69 @@ impl DdlController {
                 panic!("additional replace table event only occurs when dropping sink into table")
             };
 
-            let (streaming_job, context, table_fragments) = self
-                .inject_replace_table_job_for_table_sink(
-                    mgr,
-                    stream_ctx,
-                    None,
-                    None,
-                    Some(sink_id),
-                    replace_table_info,
-                )
-                .await?;
-
-            // Add table fragments to meta store with state: `State::Initial`.
-            mgr.fragment_manager
-                .start_create_table_fragments(table_fragments.clone())
-                .await?;
-
-            self.stream_manager
-                .replace_table(table_fragments, context)
-                .await?;
-
-            version = self
-                .finish_replace_table(
+            let ReplaceTableInfo {
+                mut streaming_job,
+                fragment_graph,
+                ..
+            } = replace_table_info;
+            let fragment_graph = self
+                .prepare_replace_table(
                     mgr.catalog_manager.clone(),
-                    &streaming_job,
-                    None,
-                    None,
-                    Some(sink_id),
+                    &mut streaming_job,
+                    fragment_graph,
                 )
                 .await?;
+
+            let result: MetaResult<()> = try {
+                tracing::debug!(id = streaming_job.id(), "replacing table for dropped sink");
+
+                let dummy_id = self
+                    .env
+                    .id_gen_manager()
+                    .generate::<{ IdCategory::Table }>()
+                    .await? as u32;
+
+                let (context, table_fragments) = self
+                    .inject_replace_table_job_for_table_sink(
+                        dummy_id,
+                        &self.metadata_manager,
+                        stream_ctx,
+                        None,
+                        None,
+                        Some(sink_id),
+                        &streaming_job,
+                        fragment_graph,
+                    )
+                    .await?;
+
+                // Add table fragments to meta store with state: `State::Initial`.
+                mgr.fragment_manager
+                    .start_create_table_fragments(table_fragments.clone())
+                    .await?;
+
+                self.stream_manager
+                    .replace_table(table_fragments, context)
+                    .await?;
+            };
+
+            match result {
+                Ok(_) => {
+                    version = self
+                        .finish_replace_table(
+                            mgr.catalog_manager.clone(),
+                            &streaming_job,
+                            None,
+                            None,
+                            Some(sink_id),
+                        )
+                        .await?;
+                }
+                Err(err) => {
+                    tracing::error!(error = %err.as_report(), "failed to replace table for dropped sink");
+                    self.cancel_replace_table(mgr.catalog_manager.clone(), &streaming_job)
+                        .await?;
+                }
+            }
         }
 
         self.stream_manager
@@ -1274,7 +1322,7 @@ impl DdlController {
         stream_ctx: StreamContext,
         stream_job: &StreamingJob,
         fragment_graph: StreamFragmentGraph,
-        affected_table_replace_info: Option<ReplaceTableInfo>,
+        affected_table_replace_info: Option<(StreamingJob, StreamFragmentGraph)>,
     ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
         let id = stream_job.id();
         let default_parallelism = fragment_graph.default_parallelism();
@@ -1329,7 +1377,7 @@ impl DdlController {
         // actors on the compute nodes.
 
         let table_parallelism = match default_parallelism {
-            None => TableParallelism::Auto,
+            None => TableParallelism::Adaptive,
             Some(parallelism) => TableParallelism::Fixed(parallelism.get()),
         };
 
@@ -1342,25 +1390,45 @@ impl DdlController {
         );
 
         let replace_table_job_info = match affected_table_replace_info {
-            Some(replace_table_info) => {
+            Some((streaming_job, fragment_graph)) => {
                 let StreamingJob::Sink(s, _) = stream_job else {
                     bail!("additional replace table event only occurs when sinking into table");
                 };
-                let MetadataManager::V1(mgr) = &self.metadata_manager else {
-                    unimplemented!("support replace table in v2");
+
+                let dummy_id = match &self.metadata_manager {
+                    MetadataManager::V1(_) => {
+                        self.env
+                            .id_gen_manager()
+                            .generate::<{ IdCategory::Table }>()
+                            .await? as u32
+                    }
+                    MetadataManager::V2(mgr) => {
+                        let table = streaming_job.table().unwrap();
+                        mgr.catalog_controller
+                            .create_job_catalog_for_replace(
+                                &streaming_job,
+                                &stream_ctx,
+                                table.get_version()?,
+                                &fragment_graph.default_parallelism(),
+                            )
+                            .await? as u32
+                    }
                 };
 
-                Some(
-                    self.inject_replace_table_job_for_table_sink(
-                        mgr,
+                let (context, table_fragments) = self
+                    .inject_replace_table_job_for_table_sink(
+                        dummy_id,
+                        &self.metadata_manager,
                         stream_ctx,
                         Some(s),
                         Some(&table_fragments),
                         None,
-                        replace_table_info,
+                        &streaming_job,
+                        fragment_graph,
                     )
-                    .await?,
-                )
+                    .await?;
+
+                Some((streaming_job, context, table_fragments))
             }
             None => None,
         };
@@ -1371,12 +1439,15 @@ impl DdlController {
             internal_tables,
             building_locations,
             existing_locations,
-            table_properties: stream_job.properties(),
             definition: stream_job.definition(),
             mv_table_id: stream_job.mv_table(),
             create_type: stream_job.create_type(),
             ddl_type: stream_job.into(),
             replace_table_job_info,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/14793
+            option: CreateStreamingJobOption {
+                new_independent_compaction_group: false,
+            },
         };
 
         // 4. Mark tables as creating, including internal tables and the table of the stream job.
@@ -1403,9 +1474,7 @@ impl DdlController {
         internal_tables: Vec<Table>,
         error: Option<&impl ToString>,
     ) -> MetaResult<()> {
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unimplemented!("support cancel streaming job in v2");
-        };
+        let mgr = self.metadata_manager.as_v1_ref();
         let error = error.map(ToString::to_string).unwrap_or_default();
         let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
             id: stream_job.id(),
@@ -1603,7 +1672,7 @@ impl DdlController {
                 .replace_table_v2(stream_job, fragment_graph, table_col_index_mapping)
                 .await;
         };
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
         let stream_ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
 
         let fragment_graph = self
@@ -1615,7 +1684,7 @@ impl DdlController {
             .generate::<{ IdCategory::Table }>()
             .await? as u32;
 
-        let result = try {
+        let result: MetaResult<()> = try {
             let (ctx, table_fragments) = self
                 .build_replace_table(
                     stream_ctx,
@@ -1648,6 +1717,7 @@ impl DdlController {
                 .await
             }
             Err(err) => {
+                tracing::error!(error = %err.as_report(), "failed to replace table");
                 self.cancel_replace_table(mgr.catalog_manager.clone(), &stream_job)
                     .await?;
                 Err(err)
@@ -1759,7 +1829,7 @@ impl DdlController {
         assert!(dispatchers.is_empty());
 
         let table_parallelism = match default_parallelism {
-            None => TableParallelism::Auto,
+            None => TableParallelism::Adaptive,
             Some(parallelism) => TableParallelism::Fixed(parallelism.get()),
         };
 
@@ -1781,7 +1851,6 @@ impl DdlController {
             dispatchers,
             building_locations,
             existing_locations,
-            table_properties: stream_job.properties(),
         };
 
         Ok((ctx, table_fragments))

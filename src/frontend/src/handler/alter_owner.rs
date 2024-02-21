@@ -16,8 +16,6 @@ use std::sync::Arc;
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::acl::AclMode;
-use risingwave_common::error::ErrorCode::PermissionDenied;
-use risingwave_common::error::Result;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::user::grant_privilege;
 use risingwave_sqlparser::ast::{Ident, ObjectName};
@@ -25,6 +23,8 @@ use risingwave_sqlparser::ast::{Ident, ObjectName};
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::{CatalogError, OwnedByUserCatalog};
+use crate::error::ErrorCode::PermissionDenied;
+use crate::error::Result;
 use crate::session::SessionImpl;
 use crate::user::user_catalog::UserCatalog;
 use crate::Binder;

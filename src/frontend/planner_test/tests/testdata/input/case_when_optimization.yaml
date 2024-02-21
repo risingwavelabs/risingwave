@@ -1,0 +1,205 @@
+- id: create_table
+  sql: |
+    CREATE TABLE t1 (c1 INT, c2 INT, c3 INT);
+  expected_outputs: []
+- id: basic_optimization_pattern
+  before:
+    - create_table
+  sql: |
+    SELECT
+      CASE c1
+        WHEN 1 THEN 'one'
+        WHEN 2 THEN 'two'
+        WHEN 3 THEN 'three'
+        WHEN 4 THEN 'four'
+        WHEN 5 THEN 'five'
+        WHEN 6 THEN 'six'
+        WHEN 7 THEN 'seven'
+        WHEN 8 THEN 'eight'
+        WHEN 9 THEN 'nine'
+        WHEN 10 THEN 'ten'
+        WHEN 11 THEN 'eleven'
+        WHEN 12 THEN 'twelve'
+        WHEN 13 THEN 'thirteen'
+        WHEN 14 THEN 'fourteen'
+        WHEN 15 THEN 'fifteen'
+        WHEN 16 THEN 'sixteen'
+        WHEN 17 THEN 'seventeen'
+        WHEN 18 THEN 'eighteen'
+        WHEN 19 THEN 'nineteen'
+        WHEN 20 THEN 'twenty'
+        WHEN 21 THEN 'twenty-one'
+        WHEN 22 THEN 'twenty-two'
+        WHEN 23 THEN 'twenty-three'
+        WHEN 24 THEN 'twenty-four'
+        WHEN 25 THEN 'twenty-five'
+        WHEN 26 THEN 'twenty-six'
+        WHEN 27 THEN 'twenty-seven'
+        WHEN 28 THEN 'twenty-eight'
+        WHEN 29 THEN 'twenty-nine'
+        WHEN 30 THEN 'thirty'
+        WHEN 31 THEN 'thirty-one'
+        WHEN 32 THEN 'thirty-two'
+        WHEN 33 THEN 'thirty-three'
+        WHEN 34 THEN 'thirty-four'
+        WHEN 35 THEN 'thirty-five'
+        WHEN 36 THEN 'thirty-six'
+        WHEN 37 THEN 'thirty-seven'
+        WHEN 38 THEN 'thirty-eight'
+        WHEN 39 THEN 'thirty-nine'
+        WHEN 40 THEN 'forty'
+        WHEN 41 THEN 'forty-one'
+        WHEN 42 THEN 'forty-two'
+        WHEN 43 THEN 'forty-three'
+        WHEN 44 THEN 'forty-four'
+        WHEN 45 THEN 'forty-five'
+        WHEN 46 THEN 'forty-six'
+        WHEN 47 THEN 'forty-seven'
+        WHEN 48 THEN 'forty-eight'
+        WHEN 49 THEN 'forty-nine'
+        WHEN 50 THEN 'fifty'
+        WHEN 51 THEN 'fifty-one'
+        WHEN 52 THEN 'fifty-two'
+        WHEN 53 THEN 'fifty-three'
+        WHEN 54 THEN 'fifty-four'
+        WHEN 55 THEN 'fifty-five'
+        WHEN 56 THEN 'fifty-six'
+        WHEN 57 THEN 'fifty-seven'
+        WHEN 58 THEN 'fifty-eight'
+        WHEN 59 THEN 'fifty-nine'
+        WHEN 60 THEN 'sixty'
+        WHEN 61 THEN 'sixty-one'
+        WHEN 62 THEN 'sixty-two'
+        WHEN 63 THEN 'sixty-three'
+        WHEN 64 THEN 'sixty-four'
+        WHEN 65 THEN 'sixty-five'
+        WHEN 66 THEN 'sixty-six'
+        WHEN 67 THEN 'sixty-seven'
+        WHEN 68 THEN 'sixty-eight'
+        WHEN 69 THEN 'sixty-nine'
+        WHEN 70 THEN 'seventy'
+        WHEN 71 THEN 'seventy-one'
+        WHEN 72 THEN 'seventy-two'
+        WHEN 73 THEN 'seventy-three'
+        WHEN 74 THEN 'seventy-four'
+        WHEN 75 THEN 'seventy-five'
+        WHEN 76 THEN 'seventy-six'
+        WHEN 77 THEN 'seventy-seven'
+        WHEN 78 THEN 'seventy-eight'
+        WHEN 79 THEN 'seventy-nine'
+        WHEN 80 THEN 'eighty'
+        WHEN 81 THEN 'eighty-one'
+        WHEN 82 THEN 'eighty-two'
+        WHEN 83 THEN 'eighty-three'
+        WHEN 84 THEN 'eighty-four'
+        WHEN 85 THEN 'eighty-five'
+        WHEN 86 THEN 'eighty-six'
+        WHEN 87 THEN 'eighty-seven'
+        WHEN 88 THEN 'eighty-eight'
+        WHEN 89 THEN 'eighty-nine'
+        WHEN 90 THEN 'ninety'
+        WHEN 91 THEN 'ninety-one'
+        WHEN 92 THEN 'ninety-two'
+        WHEN 93 THEN 'ninety-three'
+        WHEN 94 THEN 'ninety-four'
+        WHEN 95 THEN 'ninety-five'
+        WHEN 96 THEN 'ninety-six'
+        WHEN 97 THEN 'ninety-seven'
+        WHEN 98 THEN 'ninety-eight'
+        WHEN 99 THEN 'ninety-nine'
+        WHEN 100 THEN 'one hundred'
+      ELSE
+        '114514'
+      END
+    FROM t1;
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+- id: then_arm_could_be_expression_pattern
+  before:
+  - create_table
+  sql: |
+    SELECT
+      CASE c1
+        WHEN 1 THEN c1 + 1
+        WHEN 2 THEN c2 + 1
+        WHEN 3 THEN c3 + 1
+        WHEN 4 THEN c1 + 2
+        WHEN 5 THEN c2 + 2
+        WHEN 6 THEN c3 + 2
+        WHEN 7 THEN c1 + 3
+        WHEN 8 THEN c2 + 3
+        WHEN 9 THEN c3 + 3
+        WHEN 10 THEN c1 + c2 + 1
+        WHEN 11 THEN c2 + c3 + 2
+        WHEN 12 THEN c3 + c1 + 2
+        WHEN 13 THEN c1 + c3
+        WHEN 14 THEN c2 + c2
+        WHEN 15 THEN c3 + c1
+        WHEN 16 THEN c1 + c2 + 2
+        WHEN 17 THEN c2 + c3 + 2
+        WHEN 18 THEN c3 + c1 + 2
+        WHEN 19 THEN c1 + c2 + c3 + 1
+        WHEN 20 THEN c2 + c3 + c1 + 1
+        WHEN 21 THEN c3 + c1 + c2 + 1
+        WHEN 22 THEN c1 + c2 + c3 + c1
+        WHEN 23 THEN c2 + c3 + c1 + c2
+        WHEN 24 THEN c3 + c1 + c2 + c3
+        WHEN 25 THEN c1 + 1
+        WHEN 26 THEN c2 + 1
+        WHEN 27 THEN c3 + 1
+        WHEN 28 THEN c1 + 2
+        WHEN 29 THEN c2 + 2
+        WHEN 30 THEN c3 + 2
+        WHEN 31 THEN c1 + 1030
+      ELSE
+        114514 + c1 + c2 + c3 + 1919810
+      END
+    FROM t1;
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+- id: use_with_built_in_functions_pattern
+  before:
+  - create_table
+  sql: |
+    SELECT
+      CASE c1
+        WHEN 1 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 2 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 3 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 4 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 5 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 6 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 7 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 8 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 9 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 10 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 11 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 12 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 13 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 14 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 15 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 16 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 17 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 18 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 19 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 20 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 21 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 22 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 23 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 24 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 25 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 26 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 27 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 28 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 29 THEN regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 30 THEN regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        WHEN 31 THEN '😡😡😡这是爱情😭😭😭'
+      ELSE
+        '❤️‍🔥❤️‍🔥❤️‍🔥❤️‍🔥❤️‍🔥❤️‍🔥'
+      END
+    FROM t1;
+  expected_outputs:
+  - logical_plan
+  - batch_plan

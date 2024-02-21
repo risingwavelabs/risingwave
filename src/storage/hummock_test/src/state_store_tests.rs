@@ -1328,14 +1328,10 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         min_object_id_epoch2,
     );
 
-    hummock_storage.clear_shared_buffer().await.unwrap();
+    drop(local_hummock_storage);
 
-    let read_version = local_hummock_storage.read_version();
+    hummock_storage.clear_shared_buffer(epoch1).await;
 
-    let read_version = read_version.read();
-    assert!(read_version.staging().imm.is_empty());
-    assert!(read_version.staging().sst.is_empty());
-    assert_eq!(read_version.committed().max_committed_epoch(), epoch1);
     assert_eq!(
         hummock_storage
             .sstable_object_id_manager()

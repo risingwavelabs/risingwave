@@ -170,7 +170,7 @@ pub enum Operation {
     TryWaitEpoch(TracedHummockReadEpoch),
 
     /// clear shared buffer
-    ClearSharedBuffer,
+    ClearSharedBuffer(u64),
 
     /// Seal current epoch
     SealCurrentEpoch {
@@ -299,7 +299,6 @@ pub enum OperationResult {
     Sync(TraceResult<usize>),
     NotifyHummock(TraceResult<()>),
     TryWaitEpoch(TraceResult<()>),
-    ClearSharedBuffer(TraceResult<()>),
     ValidateReadEpoch(TraceResult<()>),
     LocalStorageEpoch(TraceResult<u64>),
     LocalStorageIsDirty(TraceResult<bool>),

@@ -19,6 +19,7 @@ use std::mem::take;
 use std::sync::Arc;
 use std::time::Duration;
 
+use arc_swap::ArcSwap;
 use fail::fail_point;
 use itertools::Itertools;
 use prometheus::HistogramTimer;
@@ -32,6 +33,7 @@ use risingwave_hummock_sdk::table_watermark::{
 };
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::catalog::table::TableType;
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::PausedReason;
@@ -41,7 +43,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-use tracing::Instrument;
+use tracing::{info, warn, Instrument};
 
 use self::command::CommandContext;
 use self::notifier::Notifier;
@@ -54,10 +56,12 @@ use crate::barrier::state::BarrierManagerState;
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
-use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager, WorkerId};
+use crate::manager::{
+    ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv, MetadataManager, WorkerId,
+};
 use crate::model::{ActorId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
-use crate::stream::{ScaleController, ScaleControllerRef, SourceManagerRef};
+use crate::stream::{ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 mod command;
@@ -71,6 +75,7 @@ mod state;
 mod trace;
 
 pub use self::command::{Command, ReplaceTablePlan, Reschedule};
+pub use self::rpc::StreamRpcManager;
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
 
@@ -133,7 +138,7 @@ struct Scheduled {
 
 #[derive(Clone)]
 pub struct GlobalBarrierManagerContext {
-    status: Arc<Mutex<BarrierManagerStatus>>,
+    status: Arc<ArcSwap<BarrierManagerStatus>>,
 
     tracker: Arc<Mutex<CreateMviewProgressTracker>>,
 
@@ -143,11 +148,13 @@ pub struct GlobalBarrierManagerContext {
 
     source_manager: SourceManagerRef,
 
-    scale_controller: Option<ScaleControllerRef>,
+    scale_controller: ScaleControllerRef,
 
     sink_manager: SinkCoordinatorManager,
 
     metrics: Arc<MetaMetrics>,
+
+    stream_rpc_manager: StreamRpcManager,
 
     env: MetaSrvEnv,
 }
@@ -180,6 +187,8 @@ pub struct GlobalBarrierManager {
     checkpoint_control: CheckpointControl,
 
     rpc_manager: BarrierRpcManager,
+
+    active_streaming_nodes: ActiveStreamingWorkerNodes,
 }
 
 /// Controls the concurrent execution of commands.
@@ -381,6 +390,8 @@ impl GlobalBarrierManager {
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         metrics: Arc<MetaMetrics>,
+        stream_rpc_manager: StreamRpcManager,
+        scale_controller: ScaleControllerRef,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
@@ -392,18 +403,12 @@ impl GlobalBarrierManager {
         );
         let checkpoint_control = CheckpointControl::new(metrics.clone());
 
+        let active_streaming_nodes = ActiveStreamingWorkerNodes::uninitialized();
+
         let tracker = CreateMviewProgressTracker::new();
 
-        let scale_controller = match &metadata_manager {
-            MetadataManager::V1(_) => Some(Arc::new(ScaleController::new(
-                &metadata_manager,
-                source_manager.clone(),
-                env.clone(),
-            ))),
-            MetadataManager::V2(_) => None,
-        };
         let context = GlobalBarrierManagerContext {
-            status: Arc::new(Mutex::new(BarrierManagerStatus::Starting)),
+            status: Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting))),
             metadata_manager,
             hummock_manager,
             source_manager,
@@ -411,6 +416,7 @@ impl GlobalBarrierManager {
             sink_manager,
             metrics,
             tracker: Arc::new(Mutex::new(tracker)),
+            stream_rpc_manager,
             env: env.clone(),
         };
 
@@ -425,6 +431,7 @@ impl GlobalBarrierManager {
             state: initial_invalid_state,
             checkpoint_control,
             rpc_manager,
+            active_streaming_nodes,
         }
     }
 
@@ -449,7 +456,7 @@ impl GlobalBarrierManager {
             .await
             .pause_on_next_bootstrap();
         if paused {
-            tracing::warn!(
+            warn!(
                 "The cluster will bootstrap with all data sources paused as specified by the system parameter `{}`. \
                  It will now be reset to `false`. \
                  To resume the data sources, either restart the cluster again or use `risectl meta resume`.",
@@ -462,6 +469,7 @@ impl GlobalBarrierManager {
             } else {
                 self.env
                     .system_params_manager()
+                    .unwrap()
                     .set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
                     .await?;
             }
@@ -475,6 +483,7 @@ impl GlobalBarrierManager {
         let interval = Duration::from_millis(
             self.env.system_params_reader().await.barrier_interval_ms() as u64,
         );
+        self.scheduled_barriers.set_min_interval(interval);
         tracing::info!(
             "Starting barrier manager with: interval={:?}, enable_recovery={}, in_flight_barrier_nums={}",
             interval,
@@ -499,7 +508,7 @@ impl GlobalBarrierManager {
             }
         }
 
-        self.state = {
+        {
             let latest_snapshot = self.context.hummock_manager.latest_snapshot();
             assert_eq!(
                 latest_snapshot.committed_epoch, latest_snapshot.current_epoch,
@@ -512,23 +521,17 @@ impl GlobalBarrierManager {
             // Even if there's no actor to recover, we still go through the recovery process to
             // inject the first `Initial` barrier.
             self.context
-                .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap))
-                .await;
+                .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap));
             let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
             let paused_reason = paused.then_some(PausedReason::Manual);
 
-            self.context
-                .recovery(prev_epoch, paused_reason, &self.scheduled_barriers)
-                .instrument(span)
-                .await
-        };
+            self.recovery(paused_reason).instrument(span).await;
+        }
 
-        self.context.set_status(BarrierManagerStatus::Running).await;
+        self.context.set_status(BarrierManagerStatus::Running);
 
-        let mut min_interval = tokio::time::interval(interval);
-        min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
         self.env
@@ -546,16 +549,65 @@ impl GlobalBarrierManager {
                     tracing::info!("Barrier manager is stopped");
                     break;
                 }
+
+                changed_worker = self.active_streaming_nodes.changed() => {
+                    #[cfg(debug_assertions)]
+                    {
+                        match self
+                            .context
+                            .metadata_manager
+                            .list_active_streaming_compute_nodes()
+                            .await
+                        {
+                            Ok(worker_nodes) => {
+                                let ignore_irrelevant_info = |node: &WorkerNode| {
+                                    (
+                                        node.id,
+                                        WorkerNode {
+                                            id: node.id,
+                                            r#type: node.r#type,
+                                            host: node.host.clone(),
+                                            parallel_units: node.parallel_units.clone(),
+                                            property: node.property.clone(),
+                                            resource: node.resource.clone(),
+                                            ..Default::default()
+                                        },
+                                    )
+                                };
+                                let worker_nodes: HashMap<_, _> =
+                                    worker_nodes.iter().map(ignore_irrelevant_info).collect();
+                                let curr_worker_nodes: HashMap<_, _> = self
+                                    .active_streaming_nodes
+                                    .current()
+                                    .values()
+                                    .map(ignore_irrelevant_info)
+                                    .collect();
+                                if worker_nodes != curr_worker_nodes {
+                                    warn!(
+                                        ?worker_nodes,
+                                        ?curr_worker_nodes,
+                                        "different to global snapshot"
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                warn!(e = ?e.as_report(), "fail to list_active_streaming_compute_nodes to compare with local snapshot");
+                            }
+                        }
+                    }
+
+                    info!(?changed_worker, "worker changed");
+
+                    self.state
+                        .resolve_worker_nodes(self.active_streaming_nodes.current().values().cloned());
+                }
+
                 // Checkpoint frequency changes.
                 notification = local_notification_rx.recv() => {
                     let notification = notification.unwrap();
                     // Handle barrier interval and checkpoint frequency changes
                     if let LocalNotification::SystemParamsChange(p) = &notification {
-                        let new_interval = Duration::from_millis(p.barrier_interval_ms() as u64);
-                        if new_interval != min_interval.period() {
-                            min_interval = tokio::time::interval(new_interval);
-                            min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                        }
+                        self.scheduled_barriers.set_min_interval(Duration::from_millis(p.barrier_interval_ms() as u64));
                         self.scheduled_barriers
                             .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
                     }
@@ -567,15 +619,11 @@ impl GlobalBarrierManager {
                     )
                     .await;
                 }
-
-                // There's barrier scheduled.
-                _ = self.scheduled_barriers.wait_one(), if self.checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums) => {
-                    min_interval.reset(); // Reset the interval as we have a new barrier.
-                    self.handle_new_barrier().await;
-                }
-                // Minimum interval reached.
-                _ = min_interval.tick(), if self.checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums) => {
-                    self.handle_new_barrier().await;
+                scheduled = self.scheduled_barriers.next_barrier(),
+                    if self
+                        .checkpoint_control
+                        .can_inject_barrier(self.in_flight_barrier_nums) => {
+                    self.handle_new_barrier(scheduled);
                 }
             }
             self.checkpoint_control.update_barrier_nums_metrics();
@@ -583,26 +631,15 @@ impl GlobalBarrierManager {
     }
 
     /// Handle the new barrier from the scheduled queue and inject it.
-    async fn handle_new_barrier(&mut self) {
-        assert!(self
-            .checkpoint_control
-            .can_inject_barrier(self.in_flight_barrier_nums));
-
+    fn handle_new_barrier(&mut self, scheduled: Scheduled) {
         let Scheduled {
             command,
             mut notifiers,
             send_latency_timer,
             checkpoint,
             span,
-        } = self.scheduled_barriers.pop_or_default().await;
+        } = scheduled;
 
-        let all_nodes = self
-            .context
-            .metadata_manager
-            .list_active_streaming_compute_nodes()
-            .await
-            .unwrap();
-        self.state.resolve_worker_nodes(all_nodes);
         let info = self.state.apply_command(&command);
 
         let (prev_epoch, curr_epoch) = self.state.next_epoch_pair();
@@ -624,15 +661,12 @@ impl GlobalBarrierManager {
             command,
             kind,
             self.context.clone(),
-            span.clone(),
+            span,
         ));
 
         send_latency_timer.observe_duration();
 
-        self.rpc_manager
-            .inject_barrier(command_ctx.clone())
-            .instrument(span)
-            .await;
+        self.rpc_manager.inject_barrier(command_ctx.clone());
 
         // Notify about the injection.
         let prev_paused_reason = self.state.paused_reason();
@@ -644,7 +678,7 @@ impl GlobalBarrierManager {
             prev_paused_reason,
             curr_paused_reason,
         };
-        notifiers.iter_mut().for_each(|n| n.notify_injected(info));
+        notifiers.iter_mut().for_each(|n| n.notify_started(info));
 
         // Update the paused state after the barrier is injected.
         self.state.set_paused_reason(curr_paused_reason);
@@ -669,7 +703,7 @@ impl GlobalBarrierManager {
             // back to frontend
             fail_point!("inject_barrier_err_success");
             let fail_node = self.checkpoint_control.barrier_failed();
-            tracing::warn!(%prev_epoch, error = %err.as_report(), "Failed to complete epoch");
+            warn!(%prev_epoch, error = %err.as_report(), "Failed to complete epoch");
             self.failure_recovery(err, fail_node).await;
             return;
         }
@@ -694,7 +728,7 @@ impl GlobalBarrierManager {
                 .drain(index..)
                 .chain(self.checkpoint_control.barrier_failed().into_iter())
                 .collect_vec();
-            tracing::warn!(%prev_epoch, error = %err.as_report(), "Failed to commit epoch");
+            warn!(%prev_epoch, error = %err.as_report(), "Failed to commit epoch");
             self.failure_recovery(err, fail_nodes).await;
         }
     }
@@ -723,8 +757,7 @@ impl GlobalBarrierManager {
             self.context
                 .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Failover(
                     err.clone(),
-                )))
-                .await;
+                )));
             let latest_snapshot = self.context.hummock_manager.latest_snapshot();
             let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch
             let span = tracing::info_span!(
@@ -735,12 +768,8 @@ impl GlobalBarrierManager {
 
             // No need to clean dirty tables for barrier recovery,
             // The foreground stream job should cleanup their own tables.
-            self.state = self
-                .context
-                .recovery(prev_epoch, None, &self.scheduled_barriers)
-                .instrument(span)
-                .await;
-            self.context.set_status(BarrierManagerStatus::Running).await;
+            self.recovery(None).instrument(span).await;
+            self.context.set_status(BarrierManagerStatus::Running);
         } else {
             panic!("failed to execute barrier: {}", err.as_report());
         }
@@ -892,9 +921,9 @@ impl GlobalBarrierManager {
 
 impl GlobalBarrierManagerContext {
     /// Check the status of barrier manager, return error if it is not `Running`.
-    pub async fn check_status_running(&self) -> MetaResult<()> {
-        let status = self.status.lock().await;
-        match &*status {
+    pub fn check_status_running(&self) -> MetaResult<()> {
+        let status = self.status.load();
+        match &**status {
             BarrierManagerStatus::Starting
             | BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap) => {
                 bail!("The cluster is bootstrapping")
@@ -907,46 +936,31 @@ impl GlobalBarrierManagerContext {
     }
 
     /// Set barrier manager status.
-    async fn set_status(&self, new_status: BarrierManagerStatus) {
-        let mut status = self.status.lock().await;
-        *status = new_status;
+    fn set_status(&self, new_status: BarrierManagerStatus) {
+        self.status.store(Arc::new(new_status));
     }
 
     /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
     /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
     /// will create or drop before this barrier flow through them.
-    async fn resolve_actor_info(&self) -> InflightActorInfo {
+    async fn resolve_actor_info(
+        &self,
+        all_nodes: Vec<WorkerNode>,
+    ) -> MetaResult<InflightActorInfo> {
         let info = match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
-                let all_nodes = mgr
-                    .cluster_manager
-                    .list_active_streaming_compute_nodes()
-                    .await;
                 let all_actor_infos = mgr.fragment_manager.load_all_actors().await;
 
                 InflightActorInfo::resolve(all_nodes, all_actor_infos)
             }
             MetadataManager::V2(mgr) => {
-                let all_nodes = mgr
-                    .cluster_controller
-                    .list_active_streaming_workers()
-                    .await
-                    .unwrap();
-                let pu_mappings = all_nodes
-                    .iter()
-                    .flat_map(|node| node.parallel_units.iter().map(|pu| (pu.id, pu.clone())))
-                    .collect();
-                let all_actor_infos = mgr
-                    .catalog_controller
-                    .load_all_actors(&pu_mappings)
-                    .await
-                    .unwrap();
+                let all_actor_infos = mgr.catalog_controller.load_all_actors().await?;
 
                 InflightActorInfo::resolve(all_nodes, all_actor_infos)
             }
         };
 
-        info
+        Ok(info)
     }
 
     pub async fn get_ddl_progress(&self) -> Vec<DdlProgress> {

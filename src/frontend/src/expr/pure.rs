@@ -60,10 +60,13 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Extract
             | expr_node::Type::DatePart
             | expr_node::Type::TumbleStart
-            | expr_node::Type::ToTimestamp
+            | expr_node::Type::SecToTimestamptz
             | expr_node::Type::AtTimeZone
             | expr_node::Type::DateTrunc
-            | expr_node::Type::ToTimestamp1
+            | expr_node::Type::MakeDate
+            | expr_node::Type::MakeTime
+            | expr_node::Type::MakeTimestamp
+            | expr_node::Type::CharToTimestamptz
             | expr_node::Type::CharToDate
             | expr_node::Type::CastWithTimeZone
             | expr_node::Type::AddWithTimeZone
@@ -82,6 +85,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Ltrim
             | expr_node::Type::Rtrim
             | expr_node::Type::Case
+            | expr_node::Type::ConstantLookup
             | expr_node::Type::RoundDigit
             | expr_node::Type::Round
             | expr_node::Type::Ascii
@@ -215,6 +219,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Sha256
             | expr_node::Type::Sha384
             | expr_node::Type::Sha512
+            | expr_node::Type::Decrypt
+            | expr_node::Type::Encrypt
             | expr_node::Type::Tand
             | expr_node::Type::ArrayPositions
             | expr_node::Type::StringToArray
@@ -244,6 +250,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::PgGetIndexdef
             | expr_node::Type::ColDescription
             | expr_node::Type::PgGetViewdef
+            | expr_node::Type::PgGetUserbyid
+            | expr_node::Type::PgIndexesSize
+            | expr_node::Type::PgRelationSize
             | expr_node::Type::MakeTimestamptz => self.impure = true,
         }
     }

@@ -49,6 +49,8 @@ pub struct CompactorOpts {
     #[clap(long, env = "RW_PORT")]
     pub port: Option<u16>,
 
+    /// We will start a http server at this address via `MetricsManager`.
+    /// Then the prometheus instance will poll the metrics from this address.
     #[clap(
         long,
         env = "RW_PROMETHEUS_LISTENER_ADDR",

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use await_tree::InstrumentAwait;
 use itertools::Itertools;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
@@ -26,16 +24,16 @@ use risingwave_stream::error::StreamError;
 use risingwave_stream::executor::Barrier;
 use risingwave_stream::task::{BarrierCompleteResult, LocalStreamManager, StreamEnvironment};
 use thiserror_ext::AsReport;
-use tonic::{Code, Request, Response, Status};
+use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
-    mgr: Arc<LocalStreamManager>,
+    mgr: LocalStreamManager,
     env: StreamEnvironment,
 }
 
 impl StreamServiceImpl {
-    pub fn new(mgr: Arc<LocalStreamManager>, env: StreamEnvironment) -> Self {
+    pub fn new(mgr: LocalStreamManager, env: StreamEnvironment) -> Self {
         StreamServiceImpl { mgr, env }
     }
 }
@@ -48,7 +46,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<UpdateActorsRequest>,
     ) -> std::result::Result<Response<UpdateActorsResponse>, Status> {
         let req = request.into_inner();
-        let res = self.mgr.update_actors(&req.actors);
+        let res = self.mgr.update_actors(req.actors).await;
         match res {
             Err(e) => {
                 error!(error = %e.as_report(), "failed to update stream actor");
@@ -66,10 +64,7 @@ impl StreamService for StreamServiceImpl {
         let req = request.into_inner();
 
         let actor_id = req.actor_id;
-        let res = self
-            .mgr
-            .build_actors(actor_id.as_slice(), self.env.clone())
-            .await;
+        let res = self.mgr.build_actors(actor_id).await;
         match res {
             Err(e) => {
                 error!(error = %e.as_report(), "failed to build actors");
@@ -108,7 +103,7 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<DropActorsResponse>, Status> {
         let req = request.into_inner();
         let actors = req.actor_ids;
-        self.mgr.drop_actors(&actors)?;
+        self.mgr.drop_actors(actors).await?;
         Ok(Response::new(DropActorsResponse {
             request_id: req.request_id,
             status: None,
@@ -121,8 +116,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<ForceStopActorsRequest>,
     ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
         let req = request.into_inner();
-        self.mgr.stop_all_actors().await?;
-        self.env.dml_manager_ref().clear();
+        self.mgr.reset(req.prev_epoch).await;
         Ok(Response::new(ForceStopActorsResponse {
             request_id: req.request_id,
             status: None,
@@ -137,28 +131,6 @@ impl StreamService for StreamServiceImpl {
         let req = request.into_inner();
         let barrier =
             Barrier::from_protobuf(req.get_barrier().unwrap()).map_err(StreamError::from)?;
-
-        // The barrier might be outdated and been injected after recovery in some certain extreme
-        // scenarios. So some newly creating actors in the barrier are possibly not rebuilt during
-        // recovery. Check it here and return an error here if some actors are not found to
-        // avoid collection hang. We need some refine in meta side to remove this workaround since
-        // it will cause another round of unnecessary recovery.
-        let actor_ids = self.mgr.all_actor_ids();
-        let missing_actor_ids = req
-            .actor_ids_to_collect
-            .iter()
-            .filter(|id| !actor_ids.contains(id))
-            .collect_vec();
-        if !missing_actor_ids.is_empty() {
-            tracing::warn!(
-                "to collect actors not found, they should be cleaned when recovering: {:?}",
-                missing_actor_ids
-            );
-            return Err(Status::new(
-                Code::InvalidArgument,
-                "to collect actors not found",
-            ));
-        }
 
         self.mgr
             .send_barrier(barrier, req.actor_ids_to_send, req.actor_ids_to_collect)

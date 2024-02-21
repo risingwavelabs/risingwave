@@ -43,6 +43,9 @@ pub enum ObjectErrorInner {
     #[error("Internal error: {0}")]
     #[construct(skip)]
     Internal(String),
+    #[cfg(madsim)]
+    #[error(transparent)]
+    Sim(#[from] crate::object::sim::SimError),
 }
 
 impl ObjectError {
@@ -80,6 +83,10 @@ impl ObjectError {
             ObjectErrorInner::Mem(e) => {
                 return e.is_object_not_found_error();
             }
+            #[cfg(madsim)]
+            ObjectErrorInner::Sim(e) => {
+                return e.is_object_not_found_error();
+            }
             _ => {}
         };
         false
@@ -105,6 +112,13 @@ impl From<RecvError> for ObjectError {
 impl From<ByteStreamError> for ObjectError {
     fn from(e: ByteStreamError) -> Self {
         ObjectErrorInner::Internal(e.to_report_string()).into()
+    }
+}
+
+#[cfg(madsim)]
+impl From<std::io::Error> for ObjectError {
+    fn from(e: std::io::Error) -> Self {
+        ObjectErrorInner::Internal(e.to_string()).into()
     }
 }
 

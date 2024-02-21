@@ -570,7 +570,7 @@ profile:
     steps:
       - use: minio
         api-requests-max: 30
-        api-requests-deadline: 2s
+        api-requests-deadline: 3s
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
@@ -809,6 +809,28 @@ profile:
       - use: frontend
       - use: compactor
 
+  ci-3cn-1fe-with-recovery:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: etcd
+        unsafe-no-fsync: true
+      - use: meta-node
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
   ci-1cn-1fe-kafka-with-recovery:
     config-path: src/config/ci-recovery.toml
     steps:
@@ -838,11 +860,6 @@ profile:
     config-path: src/config/ci-meta-backup-test.toml
     steps:
       - use: etcd
-      - use: minio
-
-  ci-delete-range-test:
-    config-path: src/config/ci-delete-range-test.toml
-    steps:
       - use: minio
 
   ci-iceberg-test:

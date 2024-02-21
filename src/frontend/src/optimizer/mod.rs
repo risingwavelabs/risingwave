@@ -49,7 +49,6 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId,
 };
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::SinkFormatDesc;
@@ -60,8 +59,8 @@ use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::generic::{self, PhysicalPlanRef};
 use self::plan_node::{
     stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject, LogicalSource,
-    StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
-    ToStreamContext,
+    PartitionComputeInfo, StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink,
+    StreamWatermarkFilter, ToStreamContext,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
@@ -69,6 +68,7 @@ use self::plan_visitor::{has_batch_exchange, CardinalityVisitor, StreamKeyChecke
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
+use crate::error::{ErrorCode, Result};
 use crate::expr::TimestamptzExprFinder;
 use crate::optimizer::plan_node::generic::{SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
@@ -774,6 +774,7 @@ impl PlanRoot {
     }
 
     /// Optimize and generate a create sink plan.
+    #[allow(clippy::too_many_arguments)]
     pub fn gen_sink_plan(
         &mut self,
         sink_name: String,
@@ -785,6 +786,7 @@ impl PlanRoot {
         format_desc: Option<SinkFormatDesc>,
         without_backfill: bool,
         target_table: Option<TableId>,
+        partition_info: Option<PartitionComputeInfo>,
     ) -> Result<StreamSink> {
         let stream_scan_type = if without_backfill {
             StreamScanType::UpstreamOnly
@@ -815,6 +817,7 @@ impl PlanRoot {
             definition,
             properties,
             format_desc,
+            partition_info,
         )
     }
 

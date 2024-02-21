@@ -12,4 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod join;
+use risingwave_expr::{capture_context, function, Result};
+
+use super::context::USER_INFO_READER;
+use crate::user::user_service::UserInfoReader;
+
+#[function("pg_get_userbyid(int4) -> varchar")]
+fn pg_get_userbyid(oid: i32) -> Result<Option<Box<str>>> {
+    pg_get_userbyid_impl_captured(oid)
+}
+
+#[capture_context(USER_INFO_READER)]
+fn pg_get_userbyid_impl(reader: &UserInfoReader, oid: i32) -> Result<Option<Box<str>>> {
+    Ok(reader
+        .read_guard()
+        .get_user_name_by_id(oid as u32)
+        .map(|s| s.into_boxed_str()))
+}
