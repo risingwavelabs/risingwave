@@ -586,6 +586,10 @@ impl StreamPlanRef for PlanRef {
     fn watermark_columns(&self) -> &FixedBitSet {
         self.plan_base().watermark_columns()
     }
+
+    fn monotonic_columns(&self) -> &[(usize, super::property::Monotonicity)] {
+        self.plan_base().monotonic_columns()
+    }
 }
 
 /// Allow access to all fields defined in [`BatchPlanRef`] for the type-erased plan node.

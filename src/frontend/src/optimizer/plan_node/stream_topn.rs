@@ -42,7 +42,15 @@ impl StreamTopN {
         };
         let watermark_columns = FixedBitSet::with_capacity(input.schema().len());
 
-        let base = PlanBase::new_stream_with_core(&core, dist, false, false, watermark_columns);
+        let base = PlanBase::new_stream_with_core(
+            &core,
+            dist,
+            false,
+            false,
+            watermark_columns,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+            vec![],
+        );
         StreamTopN { base, core }
     }
 

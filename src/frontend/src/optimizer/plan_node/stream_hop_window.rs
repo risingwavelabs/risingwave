@@ -66,6 +66,8 @@ impl StreamHopWindow {
             input.append_only(),
             input.emit_on_window_close(),
             watermark_columns,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+            vec![],
         );
         Self {
             base,

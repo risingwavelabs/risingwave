@@ -55,6 +55,8 @@ impl StreamFsFetch {
             source.catalog.as_ref().map_or(true, |s| s.append_only),
             false,
             FixedBitSet::with_capacity(source.column_catalog.len()),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+            vec![],
         );
 
         Self {

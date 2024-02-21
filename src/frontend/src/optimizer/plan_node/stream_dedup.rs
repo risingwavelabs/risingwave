@@ -44,6 +44,8 @@ impl StreamDedup {
             true,
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+            vec![],
         );
         StreamDedup { base, core }
     }

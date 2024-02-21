@@ -72,6 +72,8 @@ impl StreamTemporalJoin {
             true,
             false, // TODO(rc): derive EOWC property from input
             watermark_columns,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+            vec![],
         );
 
         Self {
