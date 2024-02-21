@@ -72,7 +72,10 @@ pub(super) enum LocalBarrierEvent {
         actor_ids_to_collect: HashSet<ActorId>,
         result_sender: oneshot::Sender<StreamResult<()>>,
     },
-    Reset(oneshot::Sender<()>),
+    Reset {
+        prev_epoch: u64,
+        result_sender: oneshot::Sender<()>,
+    },
     ReportActorCollected {
         actor_id: ActorId,
         barrier: Barrier,
@@ -223,9 +226,10 @@ impl LocalBarrierWorker {
                 event = event_rx.recv() => {
                     if let Some(event) = event {
                         match event {
-                            LocalBarrierEvent::Reset(finish_sender) => {
-                                self.reset().await;
-                                let _ = finish_sender.send(());
+                            LocalBarrierEvent::Reset {
+                                result_sender, prev_epoch} => {
+                                self.reset(prev_epoch).await;
+                                let _ = result_sender.send(());
                             }
                             event => {
                                 self.handle_event(event);
@@ -268,7 +272,7 @@ impl LocalBarrierWorker {
                     warn!(err=?e, "fail to send inject barrier result");
                 });
             }
-            LocalBarrierEvent::Reset(_) => {
+            LocalBarrierEvent::Reset { .. } => {
                 unreachable!("Reset event should be handled separately in async context")
             }
             ReportActorCollected { actor_id, barrier } => self.collect(actor_id, &barrier),

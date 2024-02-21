@@ -58,12 +58,12 @@ message ExprNode {
     MAKE_TIMESTAMP = 115;
     // From f64 to timestamp.
     // e.g. `select to_timestamp(1672044740.0)`
-    TO_TIMESTAMP = 104;
+    SEC_TO_TIMESTAMPTZ = 104;
     AT_TIME_ZONE = 105;
     DATE_TRUNC = 106;
     // Parse text to timestamp by format string.
     // e.g. `select to_timestamp('2022 08 21', 'YYYY MM DD')`
-    TO_TIMESTAMP1 = 107;
+    CHAR_TO_TIMESTAMPTZ = 107;
     CHAR_TO_DATE = 111;
     // Performs a cast with additional timezone information.
     CAST_WITH_TIME_ZONE = 108;
@@ -283,6 +283,9 @@ message ExprNode {
     PG_GET_INDEXDEF = 2400;
     COL_DESCRIPTION = 2401;
     PG_GET_VIEWDEF = 2402;
+    PG_GET_USERBYID = 2403;
+    PG_INDEXES_SIZE = 2404;
+    PG_RELATION_SIZE = 2405;
 
     // EXTERNAL
     ICEBERG_TRANSFORM = 2201;

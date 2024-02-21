@@ -301,10 +301,7 @@ impl GlobalBarrierManagerContext {
 impl GlobalBarrierManager {
     /// Pre buffered drop and cancel command, return true if any.
     async fn pre_apply_drop_cancel(&self) -> MetaResult<bool> {
-        let (dropped_actors, cancelled) = self
-            .scheduled_barriers
-            .pre_apply_drop_cancel_scheduled()
-            .await;
+        let (dropped_actors, cancelled) = self.scheduled_barriers.pre_apply_drop_cancel_scheduled();
         let applied = !dropped_actors.is_empty() || !cancelled.is_empty();
         if !cancelled.is_empty() {
             match &self.context.metadata_manager {
@@ -332,11 +329,17 @@ impl GlobalBarrierManager {
     /// the cluster or `risectl` command. Used for debugging purpose.
     ///
     /// Returns the new state of the barrier manager after recovery.
-    pub async fn recovery(&mut self, prev_epoch: TracedEpoch, paused_reason: Option<PausedReason>) {
+    pub async fn recovery(&mut self, paused_reason: Option<PausedReason>) {
+        let prev_epoch = TracedEpoch::new(
+            self.context
+                .hummock_manager
+                .latest_snapshot()
+                .committed_epoch
+                .into(),
+        );
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
-            .abort_and_mark_blocked("cluster is under recovering")
-            .await;
+            .abort_and_mark_blocked("cluster is under recovering");
 
         tracing::info!("recovery start!");
         self.context
@@ -403,9 +406,11 @@ impl GlobalBarrierManager {
                     };
 
                     // Reset all compute nodes, stop and drop existing actors.
-                    self.reset_compute_nodes(&info).await.inspect_err(|err| {
-                        warn!(error = %err.as_report(), "reset compute nodes failed");
-                    })?;
+                    self.reset_compute_nodes(&info, prev_epoch.value().0)
+                        .await
+                        .inspect_err(|err| {
+                            warn!(error = %err.as_report(), "reset compute nodes failed");
+                        })?;
 
                     if self.pre_apply_drop_cancel().await? {
                         info = self
@@ -451,23 +456,12 @@ impl GlobalBarrierManager {
                         tracing::Span::current(), // recovery span
                     ));
 
-                    #[cfg(not(all(test, feature = "failpoints")))]
+                    let res = match self
+                        .context
+                        .inject_barrier(command_ctx.clone(), None, None)
+                        .await
+                        .result
                     {
-                        use risingwave_common::util::epoch::INVALID_EPOCH;
-
-                        let mce = self
-                            .context
-                            .hummock_manager
-                            .get_current_max_committed_epoch()
-                            .await;
-
-                        if mce != INVALID_EPOCH {
-                            command_ctx.wait_epoch_commit(mce).await?;
-                        }
-                    };
-                    let await_barrier_complete =
-                        self.context.inject_barrier(command_ctx.clone()).await;
-                    let res = match await_barrier_complete.await.result {
                         Ok(response) => {
                             if let Err(err) = command_ctx.post_collect().await {
                                 warn!(error = %err.as_report(), "post_collect failed");
@@ -499,7 +493,7 @@ impl GlobalBarrierManager {
         .expect("Retry until recovery success.");
 
         recovery_timer.observe_duration();
-        self.scheduled_barriers.mark_ready().await;
+        self.scheduled_barriers.mark_ready();
 
         tracing::info!(
             epoch = state.in_flight_prev_epoch().value().0,
@@ -1055,14 +1049,18 @@ impl GlobalBarrierManager {
     }
 
     /// Reset all compute nodes by calling `force_stop_actors`.
-    async fn reset_compute_nodes(&self, info: &InflightActorInfo) -> MetaResult<()> {
-        debug!(worker = ?info.node_map.keys().collect_vec(), "force stop actors");
+    async fn reset_compute_nodes(
+        &self,
+        info: &InflightActorInfo,
+        prev_epoch: u64,
+    ) -> MetaResult<()> {
+        debug!(prev_epoch, worker = ?info.node_map.keys().collect_vec(), "force stop actors");
         self.context
             .stream_rpc_manager
-            .force_stop_actors(info.node_map.values())
+            .force_stop_actors(info.node_map.values(), prev_epoch)
             .await?;
 
-        debug!("all compute nodes have been reset.");
+        debug!(prev_epoch, "all compute nodes have been reset.");
 
         Ok(())
     }
