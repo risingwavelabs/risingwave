@@ -16,8 +16,16 @@ use std::borrow::Borrow;
 
 use risingwave_pb::meta::PbSystemParams;
 
-use super::{default, system_params_to_kv, ParamValue};
+use super::{default, ParamValue};
 use crate::for_all_params;
+
+/// Information about a system parameter.
+pub struct ParameterInfo {
+    pub name: &'static str,
+    pub mutable: bool,
+    pub value: String,
+    pub description: &'static str,
+}
 
 macro_rules! define_system_params_read_trait {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $doc:literal, $($rest:tt)* },)*) => {
@@ -32,6 +40,20 @@ macro_rules! define_system_params_read_trait {
                 #[doc = $doc]
                 fn $field(&self) -> <$type as ParamValue>::Borrowed<'_>;
             )*
+
+            /// Return the information of all parameters.
+            fn get_all(&self) -> Vec<ParameterInfo> {
+                vec![
+                    $(
+                        ParameterInfo {
+                            name: stringify!($field),
+                            mutable: $is_mutable,
+                            value: self.$field().to_string(),
+                            description: $doc,
+                        },
+                    )*
+                ]
+            }
         }
     };
 }
@@ -68,10 +90,6 @@ where
         SystemParamsReader {
             inner: self.inner(),
         }
-    }
-
-    pub fn to_kv(&self) -> Vec<(String, String)> {
-        system_params_to_kv(self.inner()).unwrap()
     }
 
     fn inner(&self) -> &PbSystemParams {

@@ -10,6 +10,7 @@ STATE_STORE_PATH="${HOME}/.risingwave/state_store"
 META_STORE_PATH="${HOME}/.risingwave/meta_store"
 
 VERSION="v1.7.0-single-node-2"
+HOMEBREW_VERSION="1.7-single-node"
 # TODO(kwannoel): re-enable it once we have stable release in latest for single node mode.
 #VERSION=$(curl -s https://api.github.com/repos/risingwavelabs/risingwave/releases/latest \
 # | grep '.tag_name' \
@@ -30,8 +31,7 @@ if [ "${OS}" = "Linux" ]; then
   fi
 elif [ "${OS}" = "Darwin" ]; then
   if [ "${ARCH}" = "x86_64" ] || [ "${ARCH}" = "amd64" ] || [ "${ARCH}" = "aarch64" ] || [ "${ARCH}" = "arm64" ]; then
-    echo "Brew installation is not supported yet."
-    # USE_BREW=1
+    USE_BREW=1
   fi
 fi
 
@@ -39,8 +39,7 @@ if [ -z "$USE_BREW" ]; then
   echo
   echo "Unsupported OS or Architecture: ${OS}-${ARCH}"
   echo
-  echo "Supported OSes: Linux"
-  # echo "Supported OSes: Linux, macOS"
+  echo "Supported OSes: Linux, macOS"
   echo "Supported architectures: x86_64"
   echo
   echo "Please open an issue at <https://github.com/risingwavelabs/risingwave/issues/new/choose>,"
@@ -60,17 +59,17 @@ echo
 
 ############# BREW INSTALL
 if [ "${USE_BREW}" -eq 1 ]; then
-  echo "Installing RisingWave@${VERSION} using Homebrew."
+  echo "Installing RisingWave@${HOMEBREW_VERSION} using Homebrew."
   brew tap risingwavelabs/risingwave
-  brew install risingwave@${VERSION}
-  echo "Successfully installed RisingWave@${VERSION} using Homebrew."
+  brew install risingwave@${HOMEBREW_VERSION}
+  echo "Successfully installed RisingWave@${HOMEBREW_VERSION} using Homebrew."
   echo
   echo "You can run it as:"
   echo
   echo "  risingwave >risingwave.log 2>&1 &"
   echo
   echo
-  echo "In a separate terminal, you can attach a psql client to the standalone server using:"
+  echo "You can attach a psql client to the standalone server using:"
   echo
   echo "  psql -h localhost -p 4566 -d dev -U root"
   echo
@@ -83,7 +82,7 @@ if [ "${USE_BREW}" -eq 1 ]; then
   echo
   echo "To view available options, run:"
   echo
-  echo "  ./risingwave single-node --help"
+  echo "  risingwave single-node --help"
   echo
   echo
   exit 0
@@ -101,7 +100,7 @@ echo
 echo "  ./risingwave >risingwave.log 2>&1 &"
 echo
 echo
-echo "In a separate terminal, you can connect a psql client to the standalone server using:"
+echo "You can connect a psql client to the standalone server using:"
 echo
 echo "  psql -h localhost -p 4566 -d dev -U root"
 echo

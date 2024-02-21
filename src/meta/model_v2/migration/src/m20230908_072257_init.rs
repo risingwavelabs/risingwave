@@ -519,6 +519,14 @@ impl MigrationTrait for Migration {
                             .to(Connection::Table, Connection::ConnectionId)
                             .to_owned(),
                     )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_source_optional_associated_table_id")
+                            .from(Source::Table, Source::OptionalAssociatedTableId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -563,6 +571,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Table::Description).string())
                     .col(ColumnDef::new(Table::Version).json())
                     .col(ColumnDef::new(Table::RetentionSeconds).integer())
+                    .col(ColumnDef::new(Table::IncomingSinks).json().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_table_object_id")
@@ -620,6 +629,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Sink::DbName).string().not_null())
                     .col(ColumnDef::new(Sink::SinkFromName).string().not_null())
                     .col(ColumnDef::new(Sink::SinkFormatDesc).json())
+                    .col(ColumnDef::new(Sink::TargetTable).integer())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_sink_object_id")
@@ -633,6 +643,13 @@ impl MigrationTrait for Migration {
                             .name("FK_sink_connection_id")
                             .from(Sink::Table, Sink::ConnectionId)
                             .to(Connection::Table, Connection::ConnectionId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_sink_target_table_id")
+                            .from(Sink::Table, Sink::TargetTable)
+                            .to(Table::Table, Table::TableId)
                             .to_owned(),
                     )
                     .to_owned(),
@@ -1026,6 +1043,7 @@ enum Table {
     Description,
     Version,
     RetentionSeconds,
+    IncomingSinks,
 }
 
 #[derive(DeriveIden)]
@@ -1061,6 +1079,7 @@ enum Sink {
     DbName,
     SinkFromName,
     SinkFormatDesc,
+    TargetTable,
 }
 
 #[derive(DeriveIden)]
