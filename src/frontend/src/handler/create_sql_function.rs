@@ -33,7 +33,7 @@ use crate::expr::{Expr, ExprImpl, Literal};
 use crate::{bind_data_type, Binder};
 
 /// The error type for hint display
-/// Currently we will try invalid item first
+/// Currently we will try invalid parameter first
 /// Then try to find non-existent functions
 enum ErrMsgType {
     Parameter,
