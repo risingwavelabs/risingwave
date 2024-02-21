@@ -331,7 +331,7 @@ async fn test_high_barrier_latency_cancel(config: Configuration) -> Result<()> {
         let mut session2 = cluster.start_session();
         let handle = tokio::spawn(async move {
             let result = cancel_stream_jobs(&mut session2).await;
-            assert!(result.is_err(), "{:?}", result)
+            assert!(result.is_ok(), "{:?}", result)
         });
 
         sleep(Duration::from_millis(500)).await;
