@@ -35,17 +35,16 @@ pub struct StreamSourceCore<S: StateStore> {
 
     /// Split info for stream source. A source executor might read data from several splits of
     /// external connector.
-    pub(crate) latest_split_info: HashMap<SplitId, SplitImpl>,
+    pub(crate) stream_source_splits: HashMap<SplitId, SplitImpl>,
 
     /// Stores information of the splits.
     pub(crate) split_state_store: SourceStateTableHandler<S>,
 
-    /// Contains the latests offsets for the splits that are updated *in the current epoch*.
-    /// It is cleared after each barrier.
+    /// In-memory cache for the splits.
     ///
     /// Source messages will only write the cache.
     /// It is read on split change and rebuild stream reader on error.
-    pub(crate) updated_splits_in_epoch: HashMap<SplitId, SplitImpl>,
+    pub(crate) state_cache: HashMap<SplitId, SplitImpl>,
 }
 
 impl<S> StreamSourceCore<S>
@@ -64,14 +63,14 @@ where
             source_name,
             column_ids,
             source_desc_builder: Some(source_desc_builder),
-            latest_split_info: HashMap::new(),
+            stream_source_splits: HashMap::new(),
             split_state_store,
-            updated_splits_in_epoch: HashMap::new(),
+            state_cache: HashMap::new(),
         }
     }
 
     pub fn init_split_state(&mut self, splits: Vec<SplitImpl>) {
-        self.latest_split_info = splits
+        self.stream_source_splits = splits
             .into_iter()
             .map(|split| (split.id(), split))
             .collect();
