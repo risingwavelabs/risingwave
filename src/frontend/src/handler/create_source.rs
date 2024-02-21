@@ -1081,7 +1081,7 @@ pub(super) async fn check_source_schema(
     } else if connector == ICEBERG_CONNECTOR {
         Ok(check_iceberg_source(props, columns)
             .await
-            .map_err(|err| ProtocolError(err.to_string().into()))?)
+            .map_err(|err| ProtocolError(err.to_string()))?)
     } else {
         Ok(())
     }
