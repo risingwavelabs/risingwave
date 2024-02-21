@@ -336,7 +336,7 @@ In SQL UDF definition: `select i_am_valid + _this_is_invalid_please_properly_mar
 statement error
 create function call_non_existent_function(INT) returns int language sql as 'select 1 + non_existent(1) + 1';
 ----
-db error: ERROR:  Failed to run the query
+db error: ERROR: Failed to run the query
 
 Caused by:
   Invalid input syntax: Failed to conduct semantic check
@@ -351,7 +351,7 @@ In SQL UDF definition: `select 1 + non_existent(1) + 1`
 statement error
 create function param_func_mix(a INT, b INT) returns int language sql as 'select a + b + c + not_be_displayed(c)';
 ----
-db error: ERROR:  Failed to run the query
+db error: ERROR: Failed to run the query
 
 Caused by:
   Invalid input syntax: Failed to conduct semantic check
@@ -367,7 +367,7 @@ create function call_regexp_replace() returns varchar language sql as 'select re
 statement error
 create function recursive(INT, INT) returns int language sql as 'select recursive($1, $2) + recursive($1, $2)';
 ----
-ERROR:  Failed to run the query
+db error: ERROR: Failed to run the query
 
 Caused by:
   Invalid input syntax: Failed to conduct semantic check
