@@ -1553,7 +1553,7 @@ impl fmt::Display for Statement {
                     write!(f, " {}", return_type)?;
                 }
                 write!(f, "{params}")?;
-                write!(f, " WITH ({})", with_options)?;
+                write!(f, "{with_options}")?;
                 Ok(())
             }
             Statement::CreateAggregate {
@@ -2788,7 +2788,7 @@ impl Display for CreateFunctionWithOptions {
                 always_retry_on_network_error
             ));
         }
-        write!(f, "( {} )", display_comma_separated(&options))
+        write!(f, " WITH ( {} )", display_comma_separated(&options))
     }
 }
 
@@ -3012,7 +3012,7 @@ mod tests {
             },
         };
         assert_eq!(
-            "CREATE FUNCTION foo() RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1'",
+            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1'",
             format!("{}", create_function)
         );
         let create_function = Statement::CreateFunction {
@@ -3033,7 +3033,7 @@ mod tests {
             },
         };
         assert_eq!(
-            "CREATE FUNCTION foo() RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( ALWAYS_RETRY_NETWORK_ERRORS = true )",
+            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( ALWAYS_RETRY_NETWORK_ERRORS = true )",
             format!("{}", create_function)
         );
     }
