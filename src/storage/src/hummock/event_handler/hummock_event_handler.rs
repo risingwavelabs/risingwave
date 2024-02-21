@@ -22,10 +22,12 @@ use await_tree::InstrumentAwait;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use thiserror_ext::AsReport;
 use tokio::spawn;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot;
 use tracing::{debug, error, info, trace, warn};
 
 use super::refiller::{CacheRefillConfig, CacheRefiller};
@@ -33,7 +35,7 @@ use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::filter_key_extractor::FilterKeyExtractorManager;
 use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::event_handler::refiller::CacheRefillerEvent;
+use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
 use crate::hummock::event_handler::uploader::{
     default_spawn_merging_task, HummockUploader, SpawnMergingTask, SpawnUploadTask, SyncedData,
     UploadTaskInfo, UploadTaskPayload, UploaderEvent,
@@ -117,8 +119,9 @@ impl BufferTracker {
 }
 
 pub struct HummockEventHandler {
-    hummock_event_tx: mpsc::UnboundedSender<HummockEvent>,
-    hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
+    hummock_event_tx: UnboundedSender<HummockEvent>,
+    hummock_event_rx: UnboundedReceiver<HummockEvent>,
+    version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
     pending_sync_requests: BTreeMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
     read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
     /// A copy of `read_version_mapping` but owned by event handler
@@ -164,8 +167,7 @@ async fn flush_imms(
 
 impl HummockEventHandler {
     pub fn new(
-        hummock_event_tx: mpsc::UnboundedSender<HummockEvent>,
-        hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
+        version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
         pinned_version: PinnedVersion,
         compactor_context: CompactorContext,
         filter_key_extractor_manager: FilterKeyExtractorManager,
@@ -175,8 +177,7 @@ impl HummockEventHandler {
         let upload_compactor_context = compactor_context.clone();
         let cloned_sstable_object_id_manager = sstable_object_id_manager.clone();
         Self::new_inner(
-            hummock_event_tx,
-            hummock_event_rx,
+            version_update_rx,
             pinned_version,
             Some(sstable_object_id_manager),
             compactor_context.sstable_store.clone(),
@@ -192,12 +193,12 @@ impl HummockEventHandler {
                 ))
             }),
             default_spawn_merging_task(compactor_context.compaction_executor.clone()),
+            CacheRefiller::default_spawn_refill_task(),
         )
     }
 
     fn new_inner(
-        hummock_event_tx: mpsc::UnboundedSender<HummockEvent>,
-        hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
+        version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
         pinned_version: PinnedVersion,
         sstable_object_id_manager: Option<Arc<SstableObjectIdManager>>,
         sstable_store: SstableStoreRef,
@@ -205,7 +206,9 @@ impl HummockEventHandler {
         storage_opts: &StorageOpts,
         spawn_upload_task: SpawnUploadTask,
         spawn_merging_task: SpawnMergingTask,
+        spawn_refill_task: SpawnRefillTask,
     ) -> Self {
+        let (hummock_event_tx, hummock_event_rx) = unbounded_channel();
         let (version_update_notifier_tx, _) =
             tokio::sync::watch::channel(pinned_version.max_committed_epoch());
         let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
@@ -227,11 +230,13 @@ impl HummockEventHandler {
         let refiller = CacheRefiller::new(
             CacheRefillConfig::from_storage_opts(storage_opts),
             sstable_store,
+            spawn_refill_task,
         );
 
         Self {
             hummock_event_tx,
             hummock_event_rx,
+            version_update_rx,
             pending_sync_requests: Default::default(),
             version_update_notifier_tx,
             pinned_version: Arc::new(ArcSwap::from_pointee(pinned_version)),
@@ -255,6 +260,10 @@ impl HummockEventHandler {
 
     pub fn read_version_mapping(&self) -> ReadOnlyReadVersionMapping {
         ReadOnlyRwLockRef::new(self.read_version_mapping.clone())
+    }
+
+    pub fn event_sender(&self) -> UnboundedSender<HummockEvent> {
+        self.hummock_event_tx.clone()
     }
 
     pub fn buffer_tracker(&self) -> &BufferTracker {
@@ -395,15 +404,73 @@ impl HummockEventHandler {
         }
     }
 
-    fn handle_clear(&mut self, notifier: oneshot::Sender<()>) {
+    async fn handle_clear(&mut self, notifier: oneshot::Sender<()>, prev_epoch: u64) {
         info!(
-            "handle clear event. max_committed_epoch: {}, max_synced_epoch: {}, max_sealed_epoch: {}",
-            self.uploader.max_committed_epoch(),
-            self.uploader.max_synced_epoch(),
-            self.uploader.max_sealed_epoch(),
+            prev_epoch,
+            max_committed_epoch = self.uploader.max_committed_epoch(),
+            max_synced_epoch = self.uploader.max_synced_epoch(),
+            max_sealed_epoch = self.uploader.max_sealed_epoch(),
+            "handle clear event"
         );
 
         self.uploader.clear();
+
+        let current_version = self.uploader.hummock_version();
+
+        if current_version.max_committed_epoch() < prev_epoch {
+            let mut latest_version = if let Some(CacheRefillerEvent {
+                pinned_version,
+                new_pinned_version,
+            }) = self.refiller.clear()
+            {
+                assert_eq!(
+                    current_version.id(),
+                    pinned_version.id(),
+                    "refiller earliest version {:?} not equal to current version {:?}",
+                    pinned_version.version(),
+                    current_version.version()
+                );
+
+                info!(
+                    prev_epoch,
+                    current_mce = current_version.max_committed_epoch(),
+                    refiller_mce = new_pinned_version.max_committed_epoch(),
+                    "refiller is clear in recovery"
+                );
+
+                Some(new_pinned_version)
+            } else {
+                None
+            };
+
+            while let latest_version_ref = latest_version.as_ref().unwrap_or(current_version)
+                && latest_version_ref.max_committed_epoch() < prev_epoch
+            {
+                let version_update = self
+                    .version_update_rx
+                    .recv()
+                    .await
+                    .expect("should not be empty");
+                latest_version = Some(Self::resolve_version_update_info(
+                    latest_version_ref.clone(),
+                    version_update,
+                    None,
+                ));
+            }
+
+            self.apply_version_update(
+                current_version.clone(),
+                latest_version.expect("must have some version update to raise the mce"),
+            );
+        }
+
+        assert!(self.uploader.max_committed_epoch() >= prev_epoch);
+        if self.uploader.max_committed_epoch() > prev_epoch {
+            warn!(
+                mce = self.uploader.max_committed_epoch(),
+                prev_epoch, "mce higher than clear prev_epoch"
+            );
+        }
 
         for (epoch, result_sender) in self.pending_sync_requests.extract_if(|_, _| true) {
             send_sync_result(
@@ -433,6 +500,8 @@ impl HummockEventHandler {
         let _ = notifier.send(()).inspect_err(|e| {
             error!("failed to notify completion of clear event: {:?}", e);
         });
+
+        info!(prev_epoch, "clear finished");
     }
 
     fn handle_version_update(&mut self, version_payload: HummockVersionUpdate) {
@@ -440,17 +509,34 @@ impl HummockEventHandler {
             .refiller
             .last_new_pinned_version()
             .cloned()
-            .map(Arc::new)
-            .unwrap_or_else(|| self.pinned_version.load().clone());
+            .unwrap_or_else(|| self.uploader.hummock_version().clone());
 
         let mut sst_delta_infos = vec![];
+        let new_pinned_version = Self::resolve_version_update_info(
+            pinned_version.clone(),
+            version_payload,
+            Some(&mut sst_delta_infos),
+        );
+
+        self.refiller
+            .start_cache_refill(sst_delta_infos, pinned_version, new_pinned_version);
+    }
+
+    fn resolve_version_update_info(
+        pinned_version: PinnedVersion,
+        version_payload: HummockVersionUpdate,
+        mut sst_delta_infos: Option<&mut Vec<SstDeltaInfo>>,
+    ) -> PinnedVersion {
         let newly_pinned_version = match version_payload {
             HummockVersionUpdate::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = pinned_version.version().clone();
                 for version_delta in &version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
                     if version_to_apply.max_committed_epoch == version_delta.max_committed_epoch {
-                        sst_delta_infos = version_to_apply.build_sst_delta_infos(version_delta);
+                        if let Some(sst_delta_infos) = &mut sst_delta_infos {
+                            **sst_delta_infos =
+                                version_to_apply.build_sst_delta_infos(version_delta);
+                        }
                     }
                     version_to_apply.apply_version_delta(version_delta);
                 }
@@ -462,15 +548,12 @@ impl HummockEventHandler {
 
         validate_table_key_range(&newly_pinned_version);
 
-        let new_pinned_version = pinned_version.new_pin_version(newly_pinned_version);
-
-        self.refiller
-            .start_cache_refill(sst_delta_infos, pinned_version, new_pinned_version);
+        pinned_version.new_pin_version(newly_pinned_version)
     }
 
     fn apply_version_update(
         &mut self,
-        pinned_version: Arc<PinnedVersion>,
+        pinned_version: PinnedVersion,
         new_pinned_version: PinnedVersion,
     ) {
         self.pinned_version
@@ -529,9 +612,25 @@ impl HummockEventHandler {
                 }
                 event = pin!(self.hummock_event_rx.recv()) => {
                     let Some(event) = event else { break };
-                    if self.handle_hummock_event(event) {
-                        break;
+                    match event {
+                        HummockEvent::Clear(notifier, prev_epoch) => {
+                            self.handle_clear(notifier, prev_epoch).await
+                        },
+                        HummockEvent::Shutdown => {
+                            info!("event handler shutdown");
+                            return;
+                        },
+                        event => {
+                            self.handle_hummock_event(event);
+                        }
                     }
+                }
+                version_update = pin!(self.version_update_rx.recv()) => {
+                    let Some(version_update) = version_update else {
+                        warn!("version update stream ends. event handle shutdown");
+                        return;
+                    };
+                    self.handle_version_update(version_update);
                 }
             }
         }
@@ -570,7 +669,7 @@ impl HummockEventHandler {
     }
 
     /// Gracefully shutdown if returns `true`.
-    fn handle_hummock_event(&mut self, event: HummockEvent) -> bool {
+    fn handle_hummock_event(&mut self, event: HummockEvent) {
         match event {
             HummockEvent::BufferMayFlush => {
                 self.uploader.may_flush();
@@ -581,18 +680,12 @@ impl HummockEventHandler {
             } => {
                 self.handle_await_sync_epoch(new_sync_epoch, sync_result_sender);
             }
-            HummockEvent::Clear(notifier) => {
-                self.handle_clear(notifier);
+            HummockEvent::Clear(_, _) => {
+                unreachable!("clear is handled in separated async context")
             }
             HummockEvent::Shutdown => {
-                info!("buffer tracker shutdown");
-                return true;
+                unreachable!("shutdown is handled specially")
             }
-
-            HummockEvent::VersionUpdate(version_payload) => {
-                self.handle_version_update(version_payload);
-            }
-
             HummockEvent::ImmToUploader(imm) => {
                 assert!(
                     self.local_read_version_mapping
@@ -730,7 +823,6 @@ impl HummockEventHandler {
                 }
             }
         }
-        false
     }
 
     fn generate_instance_id(&mut self) -> LocalInstanceId {
@@ -775,7 +867,7 @@ fn to_sync_result(result: &HummockResult<SyncedData>) -> HummockResult<SyncResul
 
 #[cfg(test)]
 mod tests {
-    use std::future::poll_fn;
+    use std::future::{poll_fn, Future};
     use std::iter::once;
     use std::sync::Arc;
     use std::task::Poll;
@@ -793,7 +885,8 @@ mod tests {
     use tokio::sync::oneshot;
     use tokio::task::yield_now;
 
-    use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
+    use crate::hummock::event_handler::refiller::CacheRefiller;
+    use crate::hummock::event_handler::{HummockEvent, HummockEventHandler, HummockVersionUpdate};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -804,8 +897,7 @@ mod tests {
     use crate::monitor::HummockStateStoreMetrics;
 
     #[tokio::test]
-    async fn test_event_handler() {
-        let (tx, rx) = unbounded_channel();
+    async fn test_event_handler_merging_task() {
         let table_id = TableId::new(123);
         let epoch0 = 233;
         let pinned_version = PinnedVersion::new(
@@ -820,11 +912,12 @@ mod tests {
         let mut storage_opts = default_opts_for_test();
         storage_opts.imm_merge_threshold = 5;
 
+        let (_version_update_tx, version_update_rx) = unbounded_channel();
+
         let (spawn_upload_task_tx, mut spawn_upload_task_rx) = unbounded_channel();
         let (spawn_merging_task_tx, mut spawn_merging_task_rx) = unbounded_channel();
         let event_handler = HummockEventHandler::new_inner(
-            tx.clone(),
-            rx,
+            version_update_rx,
             pinned_version,
             None,
             mock_sstable_store(),
@@ -849,7 +942,10 @@ mod tests {
                     imms[0].clone()
                 })
             }),
+            CacheRefiller::default_spawn_refill_task(),
         );
+
+        let tx = event_handler.event_sender();
 
         let _join_handle = spawn(event_handler.start_hummock_event_handler_worker());
 
@@ -967,5 +1063,130 @@ mod tests {
                 .collect_vec(),
             vec![*imm_ids.last().unwrap(), imm1.batch_id()]
         );
+    }
+
+    #[tokio::test]
+    async fn test_clear_shared_buffer() {
+        let epoch0 = 233;
+        let mut next_version_id = 1;
+        let mut make_new_version = |max_committed_epoch| {
+            let id = next_version_id;
+            next_version_id += 1;
+            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
+                id,
+                max_committed_epoch,
+                ..Default::default()
+            })
+        };
+
+        let initial_version = PinnedVersion::new(make_new_version(epoch0), unbounded_channel().0);
+
+        let (version_update_tx, version_update_rx) = unbounded_channel();
+        let (refill_task_tx, mut refill_task_rx) = unbounded_channel();
+
+        let refill_task_tx_clone = refill_task_tx.clone();
+
+        let event_handler = HummockEventHandler::new_inner(
+            version_update_rx,
+            initial_version.clone(),
+            None,
+            mock_sstable_store(),
+            Arc::new(HummockStateStoreMetrics::unused()),
+            &default_opts_for_test(),
+            Arc::new(|_, _| unreachable!("should not spawn upload task")),
+            Arc::new(|_, _, _, _| unreachable!("should not spawn merging task")),
+            Arc::new(move |_, _, old_version, new_version| {
+                let (tx, rx) = oneshot::channel();
+                refill_task_tx_clone
+                    .send((old_version, new_version, tx))
+                    .unwrap();
+                spawn(async move {
+                    let _ = rx.await;
+                })
+            }),
+        );
+
+        let event_tx = event_handler.event_sender();
+        let latest_version = event_handler.pinned_version.clone();
+        let latest_version_update_tx = event_handler.version_update_notifier_tx.clone();
+
+        let send_clear = |epoch| {
+            let (tx, rx) = oneshot::channel();
+            event_tx.send(HummockEvent::Clear(tx, epoch)).unwrap();
+            rx
+        };
+
+        let _join_handle = spawn(event_handler.start_hummock_event_handler_worker());
+
+        // test normal recovery
+        send_clear(epoch0).await.unwrap();
+
+        // test normal refill finish
+        let epoch1 = epoch0 + 1;
+        let version1 = make_new_version(epoch1);
+        {
+            version_update_tx
+                .send(HummockVersionUpdate::PinnedVersion(version1.clone()))
+                .unwrap();
+            let (old_version, new_version, refill_finish_tx) = refill_task_rx.recv().await.unwrap();
+            assert_eq!(old_version.version(), initial_version.version());
+            assert_eq!(new_version.version(), &version1);
+            assert_eq!(latest_version.load().version(), initial_version.version());
+
+            let mut changed = latest_version_update_tx.subscribe();
+            refill_finish_tx.send(()).unwrap();
+            changed.changed().await.unwrap();
+            assert_eq!(latest_version.load().version(), &version1);
+        }
+
+        // test recovery with pending refill task
+        let epoch2 = epoch1 + 1;
+        let version2 = make_new_version(epoch2);
+        let epoch3 = epoch2 + 1;
+        let version3 = make_new_version(epoch3);
+        {
+            version_update_tx
+                .send(HummockVersionUpdate::PinnedVersion(version2.clone()))
+                .unwrap();
+            version_update_tx
+                .send(HummockVersionUpdate::PinnedVersion(version3.clone()))
+                .unwrap();
+            let (old_version2, new_version2, _refill_finish_tx2) =
+                refill_task_rx.recv().await.unwrap();
+            assert_eq!(old_version2.version(), &version1);
+            assert_eq!(new_version2.version(), &version2);
+            let (old_version3, new_version3, _refill_finish_tx3) =
+                refill_task_rx.recv().await.unwrap();
+            assert_eq!(old_version3.version(), &version2);
+            assert_eq!(new_version3.version(), &version3);
+            assert_eq!(latest_version.load().version(), &version1);
+
+            let rx = send_clear(epoch3);
+            rx.await.unwrap();
+            assert_eq!(latest_version.load().version(), &version3);
+        }
+
+        async fn assert_pending(fut: &mut (impl Future + Unpin)) {
+            assert!(poll_fn(|cx| Poll::Ready(fut.poll_unpin(cx).is_pending())).await);
+        }
+
+        // test recovery with later arriving version update
+        let epoch4 = epoch3 + 1;
+        let version4 = make_new_version(epoch4);
+        let epoch5 = epoch4 + 1;
+        let version5 = make_new_version(epoch5);
+        {
+            let mut rx = send_clear(epoch5);
+            assert_pending(&mut rx).await;
+            version_update_tx
+                .send(HummockVersionUpdate::PinnedVersion(version4.clone()))
+                .unwrap();
+            assert_pending(&mut rx).await;
+            version_update_tx
+                .send(HummockVersionUpdate::PinnedVersion(version5.clone()))
+                .unwrap();
+            rx.await.unwrap();
+            assert_eq!(latest_version.load().version(), &version5);
+        }
     }
 }

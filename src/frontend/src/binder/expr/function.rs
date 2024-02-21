@@ -959,8 +959,8 @@ impl Binder {
                 (
                     "to_timestamp",
                     dispatch_by_len(vec![
-                        (1, raw_call(ExprType::ToTimestamp)),
-                        (2, raw_call(ExprType::ToTimestamp1)),
+                        (1, raw_call(ExprType::SecToTimestamptz)),
+                        (2, raw_call(ExprType::CharToTimestamptz)),
                     ]),
                 ),
                 ("date_trunc", raw_call(ExprType::DateTrunc)),
