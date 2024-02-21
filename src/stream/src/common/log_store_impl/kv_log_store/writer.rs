@@ -81,7 +81,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         pause_read_on_bootstrap: bool,
     ) -> LogStoreResult<()> {
         self.state_store
-            .init(InitOptions::new_with_epoch(epoch))
+            .init(InitOptions::new(epoch, self.serde.vnodes().clone()))
             .await?;
         if pause_read_on_bootstrap {
             self.pause()?;
@@ -173,6 +173,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
 
     async fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> LogStoreResult<()> {
         self.serde.update_vnode_bitmap(new_vnodes.clone());
+        self.state_store.update_vnode_bitmap(new_vnodes.clone());
         self.tx.update_vnode(self.state_store.epoch(), new_vnodes);
         Ok(())
     }

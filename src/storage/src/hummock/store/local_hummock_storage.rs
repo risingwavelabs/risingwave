@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{is_empty_key_range, TableKey, TableKeyRange};
@@ -386,6 +387,14 @@ impl LocalStateStore for LocalHummockStorage {
             "local state store of table id {:?} is init for more than once",
             self.table_id
         );
+        let prev_vnodes = self
+            .read_version
+            .write()
+            .update_vnode_bitmap(options.vnodes);
+        assert!(
+            prev_vnodes.is_none(),
+            "Vnode bitmap should be empty during init"
+        );
 
         Ok(())
     }
@@ -426,6 +435,19 @@ impl LocalStateStore for LocalHummockStorage {
                 opts,
             })
             .expect("should be able to send")
+    }
+
+    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+        let mut read_version = self.read_version.write();
+        assert!(read_version.staging().is_empty(), "There is uncommitted staging data in read version table_id {:?} instance_id {:?} on vnode bitmap update",
+            self.table_id(), self.instance_id()
+        );
+        let prev_vnodes = read_version.update_vnode_bitmap(vnodes);
+        assert!(
+            prev_vnodes.is_some(),
+            "Previous vnode bitmap should not be none"
+        );
+        prev_vnodes.unwrap()
     }
 }
 
