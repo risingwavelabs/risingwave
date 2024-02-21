@@ -222,7 +222,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
 
 
     // TODO: add trace span
-    fn update_vnode_bitmap(&self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         self.inner.update_vnode_bitmap()
     }
 }
