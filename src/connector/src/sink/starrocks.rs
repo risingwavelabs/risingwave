@@ -29,6 +29,7 @@ use serde::Deserialize;
 use serde_derive::Serialize;
 use serde_json::Value;
 use serde_with::serde_as;
+use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
 use super::doris_starrocks_connector::{
@@ -68,6 +69,8 @@ pub struct StarrocksCommon {
     /// The StarRocks table you want to sink data to.
     #[serde(rename = "starrocks.table")]
     pub table: String,
+    #[serde(rename = "starrocks.partial_update")]
+    pub partial_update: Option<String>,
 }
 
 #[serde_as]
@@ -125,8 +128,8 @@ impl StarrocksSink {
         starrocks_columns_desc: HashMap<String, String>,
     ) -> Result<()> {
         let rw_fields_name = self.schema.fields();
-        if rw_fields_name.len().ne(&starrocks_columns_desc.len()) {
-            return Err(SinkError::Starrocks("The length of the RisingWave column must be equal to the length of the starrocks column".to_string()));
+        if rw_fields_name.len() > starrocks_columns_desc.len() {
+            return Err(SinkError::Starrocks("The length of the RisingWave column must be equal or less to the length of the starrocks column".to_string()));
         }
 
         for i in rw_fields_name {
@@ -178,7 +181,7 @@ impl StarrocksSink {
                 Ok(starrocks_data_type.contains("datetime"))
             }
             risingwave_common::types::DataType::Timestamptz => Err(SinkError::Starrocks(
-                "starrocks can not support Timestamptz".to_string(),
+                "TIMESTAMP WITH TIMEZONE is not supported for Starrocks sink as Starrocks doesn't store time values with timezone information. Please convert to TIMESTAMP first.".to_string(),
             )),
             risingwave_common::types::DataType::Interval => Err(SinkError::Starrocks(
                 "starrocks can not support Interval".to_string(),
@@ -193,9 +196,7 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Bytea => Err(SinkError::Starrocks(
                 "starrocks can not support Bytea".to_string(),
             )),
-            risingwave_common::types::DataType::Jsonb => Err(SinkError::Starrocks(
-                "starrocks can not support import json".to_string(),
-            )),
+            risingwave_common::types::DataType::Jsonb => Ok(starrocks_data_type.contains("json")),
             risingwave_common::types::DataType::Serial => {
                 Ok(starrocks_data_type.contains("bigint"))
             }
@@ -322,28 +323,32 @@ impl StarrocksSinkWriter {
                     .first()
                     .ok_or_else(|| SinkError::Starrocks("must have next".to_string()))?
                     .parse::<u8>()
-                    .map_err(|e| SinkError::Starrocks(format!("starrocks sink error {}", e)))?;
+                    .map_err(|e| {
+                        SinkError::Starrocks(format!("starrocks sink error: {}", e.as_report()))
+                    })?;
 
                 let scale = decimal_all
                     .last()
                     .ok_or_else(|| SinkError::Starrocks("must have next".to_string()))?
                     .parse::<u8>()
-                    .map_err(|e| SinkError::Starrocks(format!("starrocks sink error {}", e)))?;
+                    .map_err(|e| {
+                        SinkError::Starrocks(format!("starrocks sink error: {}", e.as_report()))
+                    })?;
                 decimal_map.insert(name.to_string(), (length, scale));
             }
         }
+        let mut fields_name = schema.names_str();
+        if !is_append_only {
+            fields_name.push(STARROCKS_DELETE_SIGN);
+        };
 
-        let builder = HeaderBuilder::new()
+        let header = HeaderBuilder::new()
             .add_common_header()
             .set_user_password(config.common.user.clone(), config.common.password.clone())
-            .add_json_format();
-        let header = if !is_append_only {
-            let mut fields_name = schema.names_str();
-            fields_name.push(STARROCKS_DELETE_SIGN);
-            builder.set_columns_name(fields_name).build()
-        } else {
-            builder.build()
-        };
+            .add_json_format()
+            .set_partial_update(config.common.partial_update.clone())
+            .set_columns_name(fields_name)
+            .build();
 
         let starrocks_insert_builder = InserterInnerBuilder::new(
             format!("http://{}:{}", config.common.host, config.common.http_port),
@@ -358,7 +363,7 @@ impl StarrocksSinkWriter {
             inserter_innet_builder: starrocks_insert_builder,
             is_append_only,
             client: None,
-            row_encoder: JsonEncoder::new_with_doris(
+            row_encoder: JsonEncoder::new_with_starrocks(
                 schema,
                 None,
                 TimestampHandlingMode::String,
@@ -394,7 +399,7 @@ impl StarrocksSinkWriter {
                         Value::String("0".to_string()),
                     );
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
-                        SinkError::Starrocks(format!("Json derialize error {:?}", e))
+                        SinkError::Starrocks(format!("Json derialize error: {}", e.as_report()))
                     })?;
                     self.client
                         .as_mut()
@@ -411,7 +416,7 @@ impl StarrocksSinkWriter {
                         Value::String("1".to_string()),
                     );
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
-                        SinkError::Starrocks(format!("Json derialize error {:?}", e))
+                        SinkError::Starrocks(format!("Json derialize error: {}", e.as_report()))
                     })?;
                     self.client
                         .as_mut()
@@ -429,7 +434,7 @@ impl StarrocksSinkWriter {
                         Value::String("0".to_string()),
                     );
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
-                        SinkError::Starrocks(format!("Json derialize error {:?}", e))
+                        SinkError::Starrocks(format!("Json derialize error: {}", e.as_report()))
                     })?;
                     self.client
                         .as_mut()

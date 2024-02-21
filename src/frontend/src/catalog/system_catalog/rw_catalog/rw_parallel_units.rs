@@ -12,35 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
-use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
 
-pub const RW_PARALLEL_UNITS: BuiltinTable = BuiltinTable {
-    name: "rw_parallel_units",
-    schema: RW_CATALOG_SCHEMA_NAME,
-    columns: &[(DataType::Int32, "id"), (DataType::Int32, "worker_id")],
-    pk: &[0],
-};
+#[derive(Fields)]
+struct RwParallelUnit {
+    #[primary_key]
+    id: i32,
+    worker_id: i32,
+}
 
-impl SysCatalogReaderImpl {
-    pub fn read_rw_parallel_units_info(&self) -> Result<Vec<OwnedRow>> {
-        let workers = self.worker_node_manager.list_worker_nodes();
+#[system_catalog(table, "rw_catalog.rw_parallel_units")]
+fn read_rw_parallel_units(reader: &SysCatalogReaderImpl) -> Result<Vec<RwParallelUnit>> {
+    let workers = reader.worker_node_manager.list_worker_nodes();
 
-        Ok(workers
-            .into_iter()
-            .flat_map(|worker| {
-                worker.parallel_units.into_iter().map(|unit| {
-                    OwnedRow::new(vec![
-                        Some(ScalarImpl::Int32(unit.id as i32)),
-                        Some(ScalarImpl::Int32(unit.worker_node_id as i32)),
-                    ])
+    Ok(workers
+        .into_iter()
+        .flat_map(|worker| {
+            worker
+                .parallel_units
+                .into_iter()
+                .map(move |unit| RwParallelUnit {
+                    id: unit.id as i32,
+                    worker_id: worker.id as i32,
                 })
-            })
-            .collect_vec())
-    }
+        })
+        .collect())
 }

@@ -468,6 +468,7 @@ impl CatalogController {
             .clone()
             .into_iter()
             .chain(state_table_ids.clone().into_iter())
+            .chain(associated_source_ids.clone().into_iter())
             .collect();
 
         let res = Object::delete_many()
@@ -656,7 +657,7 @@ impl CatalogController {
         .await?;
         pb_source.id = source_obj.oid as _;
         let source: source::ActiveModel = pb_source.clone().into();
-        source.insert(&txn).await?;
+        Source::insert(source).exec(&txn).await?;
 
         if let Some(src_manager) = source_manager_ref {
             let ret = src_manager.register_source(&pb_source).await;
@@ -698,7 +699,7 @@ impl CatalogController {
         .await?;
         pb_function.id = function_obj.oid as _;
         let function: function::ActiveModel = pb_function.clone().into();
-        function.insert(&txn).await?;
+        Function::insert(function).exec(&txn).await?;
         txn.commit().await?;
 
         let version = self
@@ -774,7 +775,7 @@ impl CatalogController {
         .await?;
         pb_connection.id = conn_obj.oid as _;
         let connection: connection::ActiveModel = pb_connection.clone().into();
-        connection.insert(&txn).await?;
+        Connection::insert(connection).exec(&txn).await?;
 
         txn.commit().await?;
 
@@ -869,17 +870,17 @@ impl CatalogController {
         .await?;
         pb_view.id = view_obj.oid as _;
         let view: view::ActiveModel = pb_view.clone().into();
-        view.insert(&txn).await?;
+        View::insert(view).exec(&txn).await?;
 
         // todo: change `dependent_relations` to `dependent_objects`, which should includes connection and function as well.
         // todo: shall we need to check existence of them Or let database handle it by FOREIGN KEY constraint.
         for obj_id in &pb_view.dependent_relations {
-            object_dependency::ActiveModel {
+            ObjectDependency::insert(object_dependency::ActiveModel {
                 oid: Set(*obj_id as _),
                 used_by: Set(view_obj.oid),
                 ..Default::default()
-            }
-            .insert(&txn)
+            })
+            .exec(&txn)
             .await?;
         }
 
