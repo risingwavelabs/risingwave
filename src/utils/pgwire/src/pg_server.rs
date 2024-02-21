@@ -12,20 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::io;
 use std::result::Result;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
+use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use parking_lot::Mutex;
+use risingwave_common::system_param::reader::{SystemParamsRead, SystemParamsReader};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Statement;
+use serde::Deserialize;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::error::PsqlResult;
+use crate::error::{PsqlError, PsqlResult};
 use crate::net::{AddressRef, Listener};
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_message::TransactionStatus;
@@ -107,6 +112,10 @@ pub trait Session: Send + Sync {
 
     fn user_authenticator(&self) -> &UserAuthenticator;
 
+    fn get_system_params(
+        &self,
+    ) -> impl Future<Output = Result<SystemParamsReader, BoxedError>> + Send;
+
     fn id(&self) -> SessionId;
 
     fn set_config(&self, key: &str, value: String) -> Result<(), BoxedError>;
@@ -158,20 +167,69 @@ pub enum UserAuthenticator {
     OAuth,
 }
 
+#[derive(Debug, Deserialize)]
+struct Jwks {
+    keys: Vec<Jwk>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct Jwk {
+    kid: String,
+    alg: String,
+    n: String,
+    e: String,
+}
+
+async fn fetch_jwks(url: &str) -> Result<Jwks, reqwest::Error> {
+    let resp: Jwks = reqwest::get(url).await?.json().await?;
+    Ok(resp)
+}
+
+async fn validate_jwt(jwt: &str, jwks_url: &str) -> Result<bool, BoxedError> {
+    let header = decode_header(jwt)?;
+    let jwks = fetch_jwks(jwks_url).await?;
+
+    let kid = header.kid.ok_or("kid not found in jwt header")?;
+    let jwk = jwks
+        .keys
+        .into_iter()
+        .find(|k| k.kid == kid)
+        .ok_or("kid not found in jwks")?;
+
+    let decoding_key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e)?;
+    let validation = Validation::new(Algorithm::from_str(&jwk.alg)?);
+
+    Ok(decode::<HashMap<String, String>>(jwt, &decoding_key, &validation).is_ok())
+}
+
 impl UserAuthenticator {
-    pub fn authenticate(&self, password: &[u8]) -> bool {
-        match self {
+    pub async fn authenticate(
+        &self,
+        password: &[u8],
+        session: Arc<impl Session>,
+    ) -> PsqlResult<()> {
+        let success = match self {
             UserAuthenticator::None => true,
             UserAuthenticator::ClearText(text) => password == text,
             UserAuthenticator::Md5WithSalt {
                 encrypted_password, ..
             } => encrypted_password == password,
             UserAuthenticator::OAuth => {
-                // TODO: OAuth authentication happens here.
-                tracing::info!("OAuth authenticator gets: {}", String::from_utf8_lossy(password));
-                true
+                let system_params_reader = session
+                    .get_system_params()
+                    .await
+                    .map_err(PsqlError::StartupError)?;
+                let oauth_jwks_url = system_params_reader.oauth_jwks_url();
+                validate_jwt(&String::from_utf8_lossy(password), oauth_jwks_url)
+                    .await
+                    .map_err(PsqlError::StartupError)?
             }
+        };
+        if !success {
+            return Err(PsqlError::PasswordError);
         }
+        Ok(())
     }
 }
 
@@ -239,6 +297,7 @@ mod tests {
     use bytes::Bytes;
     use futures::stream::BoxStream;
     use futures::StreamExt;
+    use risingwave_common::system_param::reader::SystemParamsReader;
     use risingwave_common::types::DataType;
     use risingwave_sqlparser::ast::Statement;
     use tokio_postgres::NoTls;
@@ -359,6 +418,10 @@ mod tests {
 
         fn user_authenticator(&self) -> &UserAuthenticator {
             &UserAuthenticator::None
+        }
+
+        async fn get_system_params(&self) -> Result<SystemParamsReader, BoxedError> {
+            Ok(SystemParamsReader::new(Default::default()))
         }
 
         fn id(&self) -> SessionId {

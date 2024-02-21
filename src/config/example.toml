@@ -197,3 +197,4 @@ max_concurrent_creating_streaming_jobs = 1
 pause_on_next_bootstrap = false
 wasm_storage_url = "fs://.risingwave/data"
 enable_tracing = false
+oauth_jwks_url = "https://auth-static.confluent.io/jwks"

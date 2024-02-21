@@ -46,6 +46,7 @@ use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMod
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
 };
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
@@ -1087,6 +1088,10 @@ impl Session for SessionImpl {
 
     fn user_authenticator(&self) -> &UserAuthenticator {
         &self.user_authenticator
+    }
+
+    async fn get_system_params(&self) -> std::result::Result<SystemParamsReader, BoxedError> {
+        Ok(self.env.meta_client.get_system_params().await?)
     }
 
     fn id(&self) -> SessionId {

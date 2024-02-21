@@ -167,4 +167,11 @@ where
             .as_ref()
             .unwrap_or(&default::WASM_STORAGE_URL)
     }
+
+    fn oauth_jwks_url(&self) -> &str {
+        self.inner()
+            .oauth_jwks_url
+            .as_ref()
+            .unwrap_or(&default::OAUTH_JWKS_URL)
+    }
 }

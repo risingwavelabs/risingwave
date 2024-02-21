@@ -24,7 +24,7 @@ const MD5_ENCRYPTED_PREFIX: &str = "md5";
 const VALID_SHA256_ENCRYPTED_LEN: usize = SHA256_ENCRYPTED_PREFIX.len() + 64;
 const VALID_MD5_ENCRYPTED_LEN: usize = MD5_ENCRYPTED_PREFIX.len() + 32;
 
-/// Build AuthInfo for OAuth.
+/// Build `AuthInfo` for `OAuth`.
 #[inline(always)]
 pub fn build_oauth_info() -> Option<AuthInfo> {
     Some(AuthInfo {
