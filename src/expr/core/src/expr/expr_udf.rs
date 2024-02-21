@@ -95,33 +95,15 @@ impl UdfExpression {
         // this will drop invisible rows
         let arrow_input = arrow_array::RecordBatch::try_from(input)?;
 
-        let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
-        let result = self
+        let arrow_output = self
             .client
-            .call_opt(
+            .call_with_always_retry_on_network_error(
                 &self.identifier,
                 arrow_input,
-                self.timeout,
-                disable_retry_count == 0,
+                // TODO: make timeout configurable
             )
             .instrument_await(self.span.clone())
-            .await;
-        let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
-        let connection_error = matches!(&result, Err(e) if e.is_connection_error());
-        if connection_error && disable_retry_count != INITIAL_RETRY_COUNT {
-            // reset count on connection error
-            self.disable_retry_count
-                .store(INITIAL_RETRY_COUNT, Ordering::Relaxed);
-        } else if !connection_error && disable_retry_count != 0 {
-            // decrease count on success, ignore if exchange failed
-            _ = self.disable_retry_count.compare_exchange(
-                disable_retry_count,
-                disable_retry_count - 1,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            );
-        }
-        let arrow_output = result?;
+            .await?;
 
         if arrow_output.num_rows() != input.cardinality() {
             bail!(
