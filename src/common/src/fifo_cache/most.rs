@@ -12,27 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::VecDeque;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-
-use crossbeam_queue::SegQueue;
 
 use crate::fifo_cache::{CacheItem, CacheKey, CacheValue};
 
 const MAX_EVICT_LOOP: usize = 20;
 
-pub struct MostCache<K: CacheKey, V: CacheValue> {
-    queue: SegQueue<Box<CacheItem<K, V>>>,
-    cost: AtomicUsize,
+pub struct MainCache<K: CacheKey, V: CacheValue> {
+    queue: VecDeque<Box<CacheItem<K, V>>>,
+    cost: Arc<AtomicUsize>,
     capacity: usize,
 }
 
-impl<K: CacheKey, V: CacheValue> MostCache<K, V> {
+impl<K: CacheKey, V: CacheValue> MainCache<K, V> {
     pub fn new(capacity: usize) -> Self {
         Self {
-            queue: SegQueue::new(),
-            cost: AtomicUsize::new(0),
+            queue: VecDeque::new(),
+            cost: Arc::new(AtomicUsize::new(0)),
             capacity,
         }
+    }
+
+    pub fn get_size_counter(&self) ->  Arc<AtomicUsize> {
+        self.cost.clone()
     }
 
     #[inline(always)]
@@ -49,12 +53,12 @@ impl<K: CacheKey, V: CacheValue> MostCache<K, V> {
         self.queue.len()
     }
 
-    pub fn evict(&self) -> Option<Box<CacheItem<K, V>>> {
+    pub fn evict(&mut self) -> Option<Box<CacheItem<K, V>>> {
         let mut idx = 0;
-        while let Some(item) = self.queue.pop() {
+        while let Some(mut item) = self.queue.pop_front() {
             if item.dec_freq() && idx < MAX_EVICT_LOOP {
                 idx += 1;
-                self.queue.push(item);
+                self.queue.push_back(item);
             } else {
                 self.cost
                     .fetch_sub(item.cost(), std::sync::atomic::Ordering::Release);
@@ -64,17 +68,15 @@ impl<K: CacheKey, V: CacheValue> MostCache<K, V> {
         None
     }
 
-    pub fn insert(&self, item: Box<CacheItem<K, V>>) {
-        assert!(item.mark_main());
+    pub fn insert(&mut self, mut item: Box<CacheItem<K, V>>) {
+        item.mark_main();
         self.cost
             .fetch_add(item.cost(), std::sync::atomic::Ordering::Release);
-        self.queue.push(item);
+        self.queue.push_back(item);
     }
 
-    pub fn clear(&self) {
-        while !self.queue.is_empty() {
-            self.queue.pop();
-        }
+    pub fn clear(&mut self) {
+        self.queue.clear();
         self.cost.store(0, Ordering::Release);
     }
 }

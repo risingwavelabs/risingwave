@@ -12,38 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crossbeam_queue::SegQueue;
-use dashmap::DashSet;
+use std::collections::{HashSet, VecDeque};
 
-use crate::fifo_cache::CacheKey;
-
-pub struct GhostCache<K: CacheKey> {
-    map: DashSet<K>,
-    queue: SegQueue<K>,
+pub struct GhostCache {
+    map: HashSet<u64>,
+    queue: VecDeque<u64>,
 }
 
-impl<K: CacheKey> GhostCache<K> {
+impl GhostCache {
     pub fn new() -> Self {
         Self {
-            map: DashSet::default(),
-            queue: SegQueue::new(),
+            map: HashSet::default(),
+            queue: VecDeque::new(),
         }
     }
 
-    pub fn insert(&self, key: &K, max_capacity: usize) {
-        if !self.map.insert(key.clone()) {
+    pub fn insert(&mut self, key_hash: u64, max_capacity: usize) {
+        if !self.map.insert(key_hash) {
             return;
         }
         // avoid push fail
         while self.queue.len() >= max_capacity {
-            if let Some(expire_key) = self.queue.pop() {
+            if let Some(expire_key) = self.queue.pop_front() {
                 self.map.remove(&expire_key);
             }
         }
-        self.queue.push(key.clone());
+        self.queue.push_back(key_hash);
     }
 
-    pub fn is_ghost(&self, key: &K) -> bool {
-        self.map.contains(key)
+    pub fn is_ghost(&self, key: u64) -> bool {
+        self.map.contains(&key)
     }
 }

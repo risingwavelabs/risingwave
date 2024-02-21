@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 
 use await_tree::InstrumentAwait;
 use futures::Future;
@@ -88,6 +87,7 @@ type BlockCacheEventListener =
 #[derive(Clone)]
 pub struct BlockCache {
     inner: Arc<FIFOCache<(HummockSstableObjectId, u64), Arc<Block>>>,
+    cache_miss_times: Arc<AtomicUsize>,
 }
 
 pub enum BlockResponse {
@@ -136,23 +136,27 @@ impl BlockCache {
 
     fn new_inner(
         capacity: usize,
-        _max_shard_bits: usize,
+        mut max_shard_bits: usize,
         _high_priority_ratio: usize,
         _listener: Option<BlockCacheEventListener>,
     ) -> Self {
         if capacity == 0 {
             panic!("block cache capacity == 0");
         }
+        while (capacity >> max_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && max_shard_bits > 0 {
+            max_shard_bits -= 1;
+        }
 
-        let cache = FIFOCache::new(capacity);
+        let cache = FIFOCache::new(max_shard_bits, capacity);
         Self {
             inner: Arc::new(cache),
+            cache_miss_times: Arc::new(AtomicUsize::new(0)),
         }
     }
 
     pub fn get(&self, object_id: HummockSstableObjectId, block_idx: u64) -> Option<BlockHolder> {
         self.inner
-            .get( &(object_id, block_idx))
+            .lookup( &(object_id, block_idx))
             .map(BlockHolder::from_ref_block)
     }
 
@@ -166,7 +170,7 @@ impl BlockCache {
         object_id: HummockSstableObjectId,
         block_idx: u64,
         block: Block,
-        priority: CachePriority,
+        _priority: CachePriority,
     ) -> BlockHolder {
         let block = Arc::new(block);
         self.inner.insert(
@@ -189,27 +193,35 @@ impl BlockCache {
         Fut: Future<Output = HummockResult<Block>> + Send + 'static,
     {
         let key = (object_id, block_idx);
-            if let Some(item) = self.inner.get(&key) {
+            if let Some(item) = self.inner.lookup(&key) {
                 return BlockResponse::Block(BlockHolder::from_ref_block(item));
             };
+        let last_miss_count = self.cache_miss_times.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if last_miss_count % 30000 == 0 {
+            let debug_info = self.inner.debug_print();
+            tracing::info!("cache debug info: {:?}", debug_info);
+        }
         let f = fetch_block();
+        let mut cache = self.inner.clone();
         let handle = tokio::spawn(async move {
-            f.await.map(|block| {
-                BlockHolder::from_ref_block(Arc::new(block))
-            })
+            let block = f.await.map(|block| {
+                Arc::new(block)
+            })?;
+            cache.insert(key, block.clone(), block.capacity());
+            Ok(BlockHolder::from_ref_block(block))
         });
         BlockResponse::Miss(handle)
     }
 
-    fn hash(object_id: HummockSstableObjectId, block_idx: u64) -> u64 {
-        let mut hasher = DefaultHasher::default();
-        object_id.hash(&mut hasher);
-        block_idx.hash(&mut hasher);
-        hasher.finish()
-    }
+    // fn hash(object_id: HummockSstableObjectId, block_idx: u64) -> u64 {
+    //     let mut hasher = DefaultHasher::default();
+    //     object_id.hash(&mut hasher);
+    //     block_idx.hash(&mut hasher);
+    //     hasher.finish()
+    // }
 
     pub fn size(&self) -> usize {
-        self.inner.size()
+        self.inner.get_memory_usage()
     }
 
     #[cfg(any(test, feature = "test"))]
