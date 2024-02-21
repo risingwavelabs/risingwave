@@ -1,7 +1,15 @@
 # Demo: Sinking to Http
 
-In this demo, we want to showcase how RisingWave is able to sink data to Http.
+In this demo, we want to showcase how RisingWave is able to sink data to Http. This feature is depended on https://github.com/getindata/flink-http-connector.
 
+It has a few limitations:
+1. It offers only two options for HTTP method, i.e, PUT and POST.
+2. It can only execute one request-reply round to the service (session-less).
+3. It cannot handle status codes in the SQL API.
+
+Therefore, we suggest you to try Python UDF at first.
+
+### Demo:
 1. Launch the cluster:
 
 ```sh
