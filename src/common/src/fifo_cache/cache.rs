@@ -14,11 +14,16 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::error::Error;
+use std::future::Future;
 use std::hash::Hasher;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+use tokio::sync::oneshot::{channel, Receiver, Sender};
+use tokio::sync::oneshot::error::RecvError;
+use tokio::task::JoinHandle;
 
 use crate::fifo_cache::ghost::GhostCache;
 use crate::fifo_cache::most::MainCache;
@@ -37,11 +42,21 @@ impl<K: CacheKey, V: CacheValue> Clone for CacheHandle<K, V> {
         Self { item: self.item }
     }
 }
+
+pub enum LookupResponse<T: CacheValue + 'static, E> {
+    Invalid,
+    Cached(T),
+    WaitPendingRequest(Receiver<T>),
+    Miss(JoinHandle<Result<T, E>>),
+}
+type RequestQueue<T> = Vec<Sender<T>>;
+
 pub struct FIFOCacheShard<K: CacheKey, V: CacheValue> {
     map: HashMap<K, CacheHandle<K, V>>,
     small: SmallHotCache<K, V>,
     main: MainCache<K, V>,
     ghost: GhostCache,
+    write_request: HashMap<K, RequestQueue<V>>,
     evict_small_times: usize,
     evict_main_times: usize,
     insert_in_ghost: usize,
@@ -58,6 +73,7 @@ impl<K: CacheKey, V: CacheValue> FIFOCacheShard<K, V> {
             small,
             main,
             ghost: GhostCache::new(),
+            write_request: HashMap::default(),
             evict_main_times: 0,
             evict_small_times: 0,
             insert_in_ghost: 0,
@@ -114,6 +130,7 @@ impl<K: CacheKey, V: CacheValue> FIFOCacheShard<K, V> {
         }
     }
 
+
     pub fn insert(
         &mut self,
         key: K,
@@ -165,12 +182,31 @@ impl<K: CacheKey, V: CacheValue> FIFOCacheShard<K, V> {
     }
 }
 
-pub struct FIFOCache<K: CacheKey, T: CacheValue> {
-    shards: Vec<Mutex<FIFOCacheShard<K, T>>>,
+pub struct CleanCacheGuard<'a, K: CacheKey + 'static, T: CacheValue + 'static> {
+    cache: &'a Arc<FIFOCache<K, T>>,
+    key: Option<K>,
+}
+
+impl<'a, K: CacheKey + 'static, T: CacheValue + 'static> CleanCacheGuard<'a, K, T> {
+    fn mark_success(mut self) -> K {
+        self.key.take().unwrap()
+    }
+}
+
+impl<'a, K: CacheKey + 'static, T: CacheValue+ 'static> Drop for CleanCacheGuard<'a, K, T> {
+    fn drop(&mut self) {
+        if let Some(key) = self.key.as_ref() {
+            self.cache.clear_pending_request(key);
+        }
+    }
+}
+
+pub struct FIFOCache<K: CacheKey, V: CacheValue> {
+    shards: Vec<Mutex<FIFOCacheShard<K, V>>>,
     usage_counters: Vec<Arc<AtomicUsize>>,
 }
 
-impl<K: CacheKey, T: CacheValue> FIFOCache<K, T> {
+impl<K: CacheKey + 'static, V: CacheValue + 'static> FIFOCache<K, V> {
     pub fn new(num_shard_bits: usize, capacity: usize) -> Self {
         let num_shards = 1 << num_shard_bits;
         let mut shards = Vec::with_capacity(num_shards);
@@ -193,7 +229,7 @@ impl<K: CacheKey, T: CacheValue> FIFOCache<K, T> {
         shard.contains(key)
     }
 
-    pub fn lookup(self: &Arc<Self>, key: &K) -> Option<T> {
+    pub fn lookup(self: &Arc<Self>, key: &K) -> Option<V> {
         let mut shard = self.shards[self.shard(key)].lock();
         shard.get(key)
     }
@@ -230,15 +266,68 @@ impl<K: CacheKey, T: CacheValue> FIFOCache<K, T> {
         s + "]"
     }
 
-    pub fn insert(self: &Arc<Self>, key: K, value: T, charge: usize) {
-        let mut to_delete = vec![];
-        // Drop the entries outside lock to avoid deadlock.
+    fn hash(key: &K) -> u64 {
         let mut hasher = DefaultHasher::default();
         key.hash(&mut hasher);
-        let hash = hasher.finish();
+        hasher.finish()
+    }
+
+    pub fn insert(self: &Arc<Self>, key: K, value: V, charge: usize) {
+        let mut to_delete = vec![];
+        // Drop the entries outside lock to avoid deadlock.
+        let hash = Self::hash(&key);
+        let mut senders = vec![];
         {
             let mut shard = self.shards[hash as usize % self.shards.len()].lock();
-            shard.insert(key, value, hash, charge, &mut to_delete);
+            if let Some(pending_request) = shard.write_request.remove(&key) {
+                senders = pending_request;
+            }
+            shard.insert(key, value.clone(), hash, charge, &mut to_delete);
         }
+        for sender in senders {
+            let _ = sender.send(value.clone());
+        }
+    }
+
+    pub fn lookup_or_insert_with<F, E, VC>(self: &Arc<Self>, key: K, fetch_value: F) -> LookupResponse<V, E>
+        where
+            F: FnOnce() -> VC,
+            E: Error + Send + 'static + From<RecvError>,
+            VC: Future<Output = Result<(V, usize), E>> + Send + 'static,
+    {
+        let hash = Self::hash(&key);
+        {
+            let mut shard = self.shards[hash as usize % self.shards.len()].lock();
+            match shard.get(&key) {
+                Some(v) => return LookupResponse::Cached(v),
+                None => {
+                    if let Some(que) = shard.write_request.get_mut(&key) {
+                        let (tx, recv) = channel();
+                        que.push(tx);
+                        return LookupResponse::WaitPendingRequest(recv);
+                    } else {
+                        shard.write_request.insert(key.clone(), vec![]);
+                    }
+                }
+            }
+        };
+        let this = self.clone();
+        let fetch_value = fetch_value();
+        let join_handle = tokio::spawn(async move {
+            let guard = CleanCacheGuard {
+                cache: &this,
+                key: Some(key),
+            };
+            let (value, charge) = fetch_value.await?;
+            let key = guard.mark_success();
+            this.insert(key, value.clone(), charge);
+            Ok(value)
+        });
+        LookupResponse::Miss(join_handle)
+    }
+
+    pub fn clear_pending_request(&self, key: &K) {
+        let mut shard = self.shards[self.shard(key)].lock();
+        shard.write_request.remove(key);
     }
 }

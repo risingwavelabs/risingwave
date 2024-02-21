@@ -19,7 +19,7 @@ mod ghost;
 mod most;
 mod small;
 
-pub use cache::FIFOCache;
+pub use cache::{FIFOCache, LookupResponse};
 
 pub trait CacheKey: Eq + Send + Hash + Clone {}
 impl<T: Eq + Send + Hash + Clone> CacheKey for T {}

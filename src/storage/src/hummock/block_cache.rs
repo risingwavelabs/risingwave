@@ -19,7 +19,7 @@ use std::sync::Arc;
 use await_tree::InstrumentAwait;
 use futures::Future;
 use risingwave_common::cache::{CachePriority, CacheableEntry, LruCacheEventListener};
-use risingwave_common::fifo_cache::FIFOCache;
+use risingwave_common::fifo_cache::{FIFOCache, LookupResponse};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use tokio::sync::oneshot::Receiver;
 use tokio::task::JoinHandle;
@@ -90,23 +90,29 @@ pub struct BlockCache {
 
 pub enum BlockResponse {
     Block(BlockHolder),
-    WaitPendingRequest(Receiver<CachedBlockEntry>),
-    Miss(JoinHandle<Result<BlockHolder, HummockError>>),
+    WaitPendingRequest(Receiver<Arc<Block>>),
+    Miss(JoinHandle<Result<Arc<Block>, HummockError>>),
 }
 
 impl BlockResponse {
     pub async fn wait(self) -> HummockResult<BlockHolder> {
         match self {
             BlockResponse::Block(block_holder) => Ok(block_holder),
-            BlockResponse::WaitPendingRequest(receiver) => receiver
-                .verbose_instrument_await("wait_pending_fetch_block")
-                .await
-                .map_err(|recv_error| recv_error.into())
-                .map(BlockHolder::from_cached_block),
-            BlockResponse::Miss(join_handle) => join_handle
-                .verbose_instrument_await("fetch_block")
-                .await
-                .unwrap(),
+            BlockResponse::WaitPendingRequest(receiver) => {
+                receiver
+                    .verbose_instrument_await("wait_pending_fetch_block")
+                    .await
+                    .map_err(|recv_error| recv_error.into())
+                    .map(BlockHolder::from_ref_block)
+            },
+            BlockResponse::Miss(join_handle) => {
+               join_handle
+                    .verbose_instrument_await("fetch_block")
+                    .await
+                    .unwrap()
+                .map(BlockHolder::from_ref_block)
+
+            },
         }
     }
 }
@@ -185,24 +191,35 @@ impl BlockCache {
         Fut: Future<Output = HummockResult<Block>> + Send + 'static,
     {
         let key = (object_id, block_idx);
-        if let Some(item) = self.inner.lookup(&key) {
-            return BlockResponse::Block(BlockHolder::from_ref_block(item));
-        };
-        let last_miss_count = self
-            .cache_miss_times
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        if last_miss_count % 30000 == 0 {
-            let debug_info = self.inner.debug_print();
-            tracing::info!("cache debug info: {:?}", debug_info);
+        let lookup_response =
+            self.inner
+                .lookup_or_insert_with::<_, HummockError, _>(key, || {
+                    let f = fetch_block();
+                    async move {
+                        let block = f.await?;
+                        let len = block.capacity();
+                        Ok((Arc::new(block), len))
+                    }
+                });
+        match lookup_response {
+            LookupResponse::Invalid => unreachable!(),
+            LookupResponse::Cached(entry) => {
+                BlockResponse::Block(BlockHolder::from_ref_block(entry))
+            }
+            LookupResponse::WaitPendingRequest(receiver) => {
+                BlockResponse::WaitPendingRequest(receiver)
+            }
+            LookupResponse::Miss(join_handle) => {
+                let last_miss_count = self
+                    .cache_miss_times
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if last_miss_count % 30000 == 0 {
+                    let debug_info = self.inner.debug_print();
+                    tracing::info!("cache debug info: {:?}", debug_info);
+                }
+                BlockResponse::Miss(join_handle)
+            },
         }
-        let f = fetch_block();
-        let mut cache = self.inner.clone();
-        let handle = tokio::spawn(async move {
-            let block = f.await.map(|block| Arc::new(block))?;
-            cache.insert(key, block.clone(), block.capacity());
-            Ok(BlockHolder::from_ref_block(block))
-        });
-        BlockResponse::Miss(handle)
     }
 
     // fn hash(object_id: HummockSstableObjectId, block_idx: u64) -> u64 {
