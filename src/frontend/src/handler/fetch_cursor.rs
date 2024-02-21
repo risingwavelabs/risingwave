@@ -15,15 +15,13 @@
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::{Format, Row};
-use risingwave_common::util::epoch::Epoch;
 use risingwave_sqlparser::ast::FetchCursorStatement;
-use risingwave_sqlparser::parser::Parser;
-use risingwave_storage::table::TableIter;
 
 use super::query::handle_query;
+use super::util::gen_query_from_logstore_ge_rw_timestamp;
 use super::{HandlerArgs, RwPgResponse};
 use crate::error::{ErrorCode, Result};
-use crate::session::cursor_manager::Cursor;
+use crate::session::cursor_manager::{Cursor, CursorRowValue};
 use crate::{Binder, PgResponseStream};
 
 pub async fn handle_fetch_cursor(
@@ -41,45 +39,56 @@ pub async fn handle_fetch_cursor(
         .get_row_with_cursor(cursor_name.clone())
         .await?
     {
-        crate::session::cursor_manager::CursorRowValue::Row((row, pg_descs)) => {
+        CursorRowValue::Row((row, pg_descs)) => {
             return Ok(build_fetch_cursor_response(vec![row], pg_descs));
         }
-        crate::session::cursor_manager::CursorRowValue::NextQuery(
-            rw_timestamp,
-            subscription_name,
-        ) => {
-            println!("{}",rw_timestamp);
-            let sql_str = format!(
-                "SELECT * FROM {} WHERE kv_log_store_epoch >= {} AND kv_log_store_row_op != 6 ORDER BY kv_log_store_epoch",
-                subscription_name, rw_timestamp
-            );
-            let query_stmt = Parser::parse_sql(&sql_str)
-                .map_err(|err| {
-                    ErrorCode::InternalError(format!("Parse fetch to select error: {}", err))
-                })?
-                .pop()
-                .ok_or_else(|| ErrorCode::InternalError("Can't get fetch statement".to_string()))?;
+        CursorRowValue::QueryWithNextRwTimestamp(rw_timestamp, subscription_name) => {
+            let query_stmt =
+                gen_query_from_logstore_ge_rw_timestamp(subscription_name.clone(), rw_timestamp)?;
             let res = handle_query(handle_args, query_stmt, formats).await?;
-            
+
             let cursor = Cursor::new(
                 cursor_name.clone(),
                 res,
-                rw_timestamp - 1,
+                rw_timestamp,
+                false,
+                true,
+                subscription_name.clone(),
+            )
+            .await?;
+            cursor_manager.update_cursor(cursor)?;
+        }
+        CursorRowValue::QueryWithStartRwTimestamp(rw_timestamp, subscription_name) => {
+            let query_stmt = gen_query_from_logstore_ge_rw_timestamp(
+                subscription_name.clone(),
+                rw_timestamp + 1,
+            )?;
+            let res = handle_query(handle_args, query_stmt, formats).await?;
+
+            let cursor = Cursor::new(
+                cursor_name.clone(),
+                res,
+                rw_timestamp,
+                false,
                 false,
                 subscription_name.clone(),
             )
             .await?;
             cursor_manager.update_cursor(cursor)?;
         }
-    }
+    };
 
     match cursor_manager.get_row_with_cursor(cursor_name).await? {
-        crate::session::cursor_manager::CursorRowValue::Row((row, pg_descs)) => {
+        CursorRowValue::Row((row, pg_descs)) => {
             Ok(build_fetch_cursor_response(vec![row], pg_descs))
         }
-        crate::session::cursor_manager::CursorRowValue::NextQuery(_, _) => {
+        CursorRowValue::QueryWithStartRwTimestamp(_, _) => {
             Ok(build_fetch_cursor_response(vec![], vec![]))
         }
+        CursorRowValue::QueryWithNextRwTimestamp(_, _) => Err(ErrorCode::InternalError(
+            "Fetch cursor, one must get a row or null".to_string(),
+        )
+        .into()),
     }
 }
 

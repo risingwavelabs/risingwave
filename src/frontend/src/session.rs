@@ -598,7 +598,7 @@ impl SessionImpl {
             notices: Default::default(),
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(tokio::sync::Mutex::new(CursorManager::new())),
+            cursor_manager: Arc::new(tokio::sync::Mutex::new(CursorManager::default())),
         }
     }
 
@@ -625,7 +625,7 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(tokio::sync::Mutex::new(CursorManager::new())),
+            cursor_manager: Arc::new(tokio::sync::Mutex::new(CursorManager::default())),
         }
     }
 

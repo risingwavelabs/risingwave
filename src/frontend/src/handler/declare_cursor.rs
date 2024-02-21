@@ -17,7 +17,10 @@ use pgwire::types::Format;
 use risingwave_sqlparser::ast::{DeclareCursorStatement, Ident, ObjectName, Statement};
 
 use super::query::handle_query;
-use super::util::gen_query_from_table_name;
+use super::util::{
+    convert_epoch_to_logstore_i64, gen_query_from_logstore_ge_rw_timestamp,
+    gen_query_from_table_name,
+};
 use super::{HandlerArgs, RwPgResponse};
 use crate::error::{ErrorCode, Result};
 use crate::session::cursor_manager::Cursor;
@@ -42,26 +45,31 @@ pub async fn handle_declare_cursor(
     let is_snapshot = start_rw_timestamp == 0;
     let subscription =
         session.get_subscription_by_name(schema_name, &cursor_from_subscription_name)?;
-    let retention_seconds = subscription.get_retention_seconds()?;
-    if is_snapshot {
+    // let retention_seconds = subscription.get_retention_seconds()?;
+    let (start_rw_timestamp, res) = if is_snapshot {
+        let subscription_from_table_name = ObjectName(vec![Ident::from(
+            subscription.subscription_from_name.as_ref(),
+        )]);
+        let query_stmt = Statement::Query(Box::new(gen_query_from_table_name(
+            subscription_from_table_name,
+        )?));
+        let res = handle_query(handle_args, query_stmt, formats).await?;
+        let start_rw_timestamp = res.query_with_snapshot().ok_or_else(|| {
+            ErrorCode::InternalError("Fetch can't find snapshot epoch".to_string())
+        })?;
+        (convert_epoch_to_logstore_i64(start_rw_timestamp), res)
     } else {
-        todo!()
-    }
-    let subscription_from_table_name = ObjectName(vec![Ident::from(
-        subscription.subscription_from_name.as_ref(),
-    )]);
-    let query_stmt = Statement::Query(Box::new(gen_query_from_table_name(
-        subscription_from_table_name,
-    )?));
-
-    let res = handle_query(handle_args, query_stmt, formats).await?;
-    let start_rw_timestamp:u64 = res.query_with_snapshot().ok_or_else(||{
-        ErrorCode::InternalError("Fetch can't find snapshot epoch".to_string())
-    })?;
+        let start_rw_timestamp = convert_epoch_to_logstore_i64(start_rw_timestamp);
+        let query_stmt =
+            gen_query_from_logstore_ge_rw_timestamp(stmt.cursor_from.clone(), start_rw_timestamp)?;
+        let res = handle_query(handle_args, query_stmt, formats).await?;
+        (start_rw_timestamp, res)
+    };
     let cursor = Cursor::new(
         cursor_name.clone(),
         res,
-        start_rw_timestamp as i64 ^ (1i64 << 63),
+        start_rw_timestamp,
+        is_snapshot,
         true,
         stmt.cursor_from.clone(),
     )

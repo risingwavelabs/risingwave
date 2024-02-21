@@ -34,8 +34,9 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_sqlparser::ast::{
     display_comma_separated, CompatibleSourceSchema, ConnectorSchema, ObjectName, Query, Select,
-    SelectItem, SetExpr, TableFactor, TableWithJoins,
+    SelectItem, SetExpr, Statement, TableFactor, TableWithJoins,
 };
+use risingwave_sqlparser::parser::Parser;
 
 use crate::catalog::IndexCatalog;
 use crate::error::{ErrorCode, Result as RwResult};
@@ -307,6 +308,29 @@ pub fn gen_query_from_table_name(from_name: ObjectName) -> crate::error::Result<
         offset: None,
         fetch: None,
     })
+}
+
+pub fn gen_query_from_logstore_ge_rw_timestamp(
+    logstore_name: ObjectName,
+    rw_timestamp: i64,
+) -> crate::error::Result<Statement> {
+    let sql_str = format!(
+        "SELECT * FROM {} WHERE kv_log_store_epoch >= {} AND kv_log_store_row_op != 6 AND kv_log_store_row_op != 5 ORDER BY kv_log_store_epoch",
+        logstore_name, rw_timestamp
+    );
+    let query_stmt = Parser::parse_sql(&sql_str)
+        .map_err(|err| ErrorCode::InternalError(format!("Parse fetch to select error: {}", err)))?
+        .pop()
+        .ok_or_else(|| ErrorCode::InternalError("Can't get fetch statement".to_string()))?;
+    Ok(query_stmt)
+}
+
+pub fn convert_epoch_to_logstore_i64(epoch: u64) -> i64 {
+    epoch as i64 ^ (1i64 << 63)
+}
+
+pub fn convert_logstore_i64_to_epoch(logstore_i64: i64) -> u64 {
+    logstore_i64 as u64 ^ (1u64 << 63)
 }
 
 #[cfg(test)]
