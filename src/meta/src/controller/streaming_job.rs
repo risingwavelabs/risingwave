@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
 use itertools::Itertools;
@@ -35,7 +35,6 @@ use risingwave_meta_model_v2::{
     FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId, StreamingParallelism,
     TableId, TableVersion, UserId,
 };
-use risingwave_pb::catalog;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableVersion};
 use risingwave_pb::catalog::{PbCreateType, PbTable};
@@ -66,8 +65,8 @@ use crate::barrier::Reschedule;
 use crate::controller::catalog::CatalogController;
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
-    check_relation_name_duplicate, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
-    get_fragment_mappings,
+    check_relation_name_duplicate, check_sink_into_table_cycle, ensure_object_id, ensure_user_id,
+    get_fragment_actor_ids, get_fragment_mappings,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, SinkId, StreamingJob};
@@ -97,58 +96,6 @@ impl CatalogController {
         job.insert(txn).await?;
 
         Ok(obj.oid)
-    }
-
-    async fn check_cycle_for_table_sink(
-        table: u32,
-        sink: &catalog::Sink,
-        txn: &DatabaseTransaction,
-    ) -> MetaResult<bool> {
-        let mut queue: VecDeque<(ObjectId, ObjectType)> = VecDeque::new();
-
-        let mut visited_objects = HashSet::new();
-
-        visited_objects.insert(table as ObjectId);
-
-        for table_id in &sink.dependent_relations {
-            queue.push_front((*table_id as ObjectId, ObjectType::Table));
-        }
-
-        while let Some((object_id, object_type)) = queue.pop_front() {
-            if visited_objects.contains(&object_id) {
-                return Ok(true);
-            }
-
-            visited_objects.insert(object_id);
-
-            if object_type == ObjectType::Table {
-                let table = Table::find_by_id(object_id)
-                    .one(txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
-
-                for sink_id in table.incoming_sinks.inner_ref() {
-                    queue.push_front((*sink_id, ObjectType::Sink));
-                }
-            }
-
-            let dependent_relations: Vec<(ObjectId, ObjectType)> = ObjectDependency::find()
-                .select_only()
-                .column(object_dependency::Column::Oid)
-                .column(object::Column::ObjType)
-                .join(
-                    JoinType::InnerJoin,
-                    object_dependency::Relation::Object2.def(),
-                )
-                .filter(object_dependency::Column::UsedBy.eq(object_id))
-                .into_tuple()
-                .all(txn)
-                .await?;
-
-            queue.extend(dependent_relations.into_iter());
-        }
-
-        Ok(false)
     }
 
     pub async fn create_job_catalog(
@@ -196,7 +143,16 @@ impl CatalogController {
             }
             StreamingJob::Sink(sink, _) => {
                 if let Some(target_table_id) = sink.target_table {
-                    if Self::check_cycle_for_table_sink(target_table_id, sink, &txn).await? {
+                    if check_sink_into_table_cycle(
+                        target_table_id as ObjectId,
+                        sink.dependent_relations
+                            .iter()
+                            .map(|id| *id as ObjectId)
+                            .collect(),
+                        &txn,
+                    )
+                    .await?
+                    {
                         bail!("Creating such a sink will result in circular dependency.");
                     }
                 }

@@ -300,7 +300,8 @@ where
         ))
         .await?
         .unwrap();
-    let cnt: i32 = res.try_get_by(0)?;
+
+    let cnt: i64 = res.try_get_by(0)?;
 
     Ok(cnt != 0)
 }
