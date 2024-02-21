@@ -502,24 +502,19 @@ impl SstableStore {
                         block: Box::new(block.clone()),
                     },
                 );
-                Ok(BlockResponse::Block(BlockHolder::from_owned_block(Box::new(block))))
+                Ok(BlockResponse::Block(BlockHolder::from_owned_block(
+                    Box::new(block),
+                )))
             }
             CachePolicy::NotFill => match self.block_cache.get(object_id, block_index as u64) {
                 Some(block) => Ok(BlockResponse::Block(block)),
-                None => {
-                    fetch_block()
-                        .await
-                        .map(|block| {
-                            BlockResponse::Block(BlockHolder::from_ref_block(Arc::new(block)))
-                        })
-                },
+                None => fetch_block().await.map(|block| {
+                    BlockResponse::Block(BlockHolder::from_ref_block(Arc::new(block)))
+                }),
             },
-            CachePolicy::Disable =>
-                fetch_block()
-                    .await
-                    .map(|block| {
-                        BlockResponse::Block(BlockHolder::from_ref_block(Arc::new(block)))
-                    }),
+            CachePolicy::Disable => fetch_block()
+                .await
+                .map(|block| BlockResponse::Block(BlockHolder::from_ref_block(Arc::new(block)))),
         }
     }
 

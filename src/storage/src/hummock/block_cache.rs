@@ -13,14 +13,12 @@
 // limitations under the License.
 
 use std::ops::Deref;
-use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
+use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use futures::Future;
-use risingwave_common::cache::{
-    CachePriority, CacheableEntry, LruCacheEventListener,
-};
+use risingwave_common::cache::{CachePriority, CacheableEntry, LruCacheEventListener};
 use risingwave_common::fifo_cache::FIFOCache;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use tokio::sync::oneshot::Receiver;
@@ -105,12 +103,10 @@ impl BlockResponse {
                 .await
                 .map_err(|recv_error| recv_error.into())
                 .map(BlockHolder::from_cached_block),
-            BlockResponse::Miss(join_handle) => {
-                join_handle
-                    .verbose_instrument_await("fetch_block")
-                    .await
-                    .unwrap()
-            },
+            BlockResponse::Miss(join_handle) => join_handle
+                .verbose_instrument_await("fetch_block")
+                .await
+                .unwrap(),
         }
     }
 }
@@ -156,13 +152,12 @@ impl BlockCache {
 
     pub fn get(&self, object_id: HummockSstableObjectId, block_idx: u64) -> Option<BlockHolder> {
         self.inner
-            .lookup( &(object_id, block_idx))
+            .lookup(&(object_id, block_idx))
             .map(BlockHolder::from_ref_block)
     }
 
     pub fn exists_block(&self, sst_id: HummockSstableObjectId, block_idx: u64) -> bool {
-        self.inner
-            .contains(&(sst_id, block_idx))
+        self.inner.contains(&(sst_id, block_idx))
     }
 
     pub fn insert(
@@ -173,11 +168,8 @@ impl BlockCache {
         _priority: CachePriority,
     ) -> BlockHolder {
         let block = Arc::new(block);
-        self.inner.insert(
-            (object_id, block_idx),
-            block.clone(),
-            block.capacity(),
-        );
+        self.inner
+            .insert((object_id, block_idx), block.clone(), block.capacity());
         BlockHolder::from_ref_block(block)
     }
 
@@ -193,10 +185,12 @@ impl BlockCache {
         Fut: Future<Output = HummockResult<Block>> + Send + 'static,
     {
         let key = (object_id, block_idx);
-            if let Some(item) = self.inner.lookup(&key) {
-                return BlockResponse::Block(BlockHolder::from_ref_block(item));
-            };
-        let last_miss_count = self.cache_miss_times.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if let Some(item) = self.inner.lookup(&key) {
+            return BlockResponse::Block(BlockHolder::from_ref_block(item));
+        };
+        let last_miss_count = self
+            .cache_miss_times
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if last_miss_count % 30000 == 0 {
             let debug_info = self.inner.debug_print();
             tracing::info!("cache debug info: {:?}", debug_info);
@@ -204,9 +198,7 @@ impl BlockCache {
         let f = fetch_block();
         let mut cache = self.inner.clone();
         let handle = tokio::spawn(async move {
-            let block = f.await.map(|block| {
-                Arc::new(block)
-            })?;
+            let block = f.await.map(|block| Arc::new(block))?;
             cache.insert(key, block.clone(), block.capacity());
             Ok(BlockHolder::from_ref_block(block))
         });

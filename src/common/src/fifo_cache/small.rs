@@ -13,30 +13,37 @@
 // limitations under the License.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use crate::fifo_cache::{CacheItem, CacheKey, CacheValue};
 
 pub struct SmallHotCache<K: CacheKey, V: CacheValue> {
     queue: VecDeque<Box<CacheItem<K, V>>>,
     cost: Arc<AtomicUsize>,
+    capacity: usize,
 }
 
 impl<K: CacheKey, V: CacheValue> SmallHotCache<K, V> {
-    pub fn new() -> Self {
+    pub fn new(capacity: usize) -> Self {
         Self {
             queue: VecDeque::new(),
             cost: Arc::new(AtomicUsize::new(0)),
+            capacity,
         }
     }
 
-    pub fn get_size_counter(&self) ->  Arc<AtomicUsize> {
+    pub fn get_size_counter(&self) -> Arc<AtomicUsize> {
         self.cost.clone()
     }
 
+    #[inline(always)]
     pub fn size(&self) -> usize {
         self.cost.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub fn is_full(&self) -> bool {
+        self.size() > self.capacity
     }
 
     pub fn count(&self) -> usize {

@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use crate::fifo_cache::{CacheItem, CacheKey, CacheValue};
 
@@ -35,7 +35,7 @@ impl<K: CacheKey, V: CacheValue> MainCache<K, V> {
         }
     }
 
-    pub fn get_size_counter(&self) ->  Arc<AtomicUsize> {
+    pub fn get_size_counter(&self) -> Arc<AtomicUsize> {
         self.cost.clone()
     }
 

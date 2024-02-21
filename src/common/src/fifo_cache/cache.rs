@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::Hasher;
+use std::sync::atomic::AtomicUsize;
+use std::sync::Arc;
 
 use parking_lot::Mutex;
 
@@ -44,20 +44,23 @@ pub struct FIFOCacheShard<K: CacheKey, V: CacheValue> {
     ghost: GhostCache,
     evict_small_times: usize,
     evict_main_times: usize,
+    insert_in_ghost: usize,
 
     capacity: usize,
 }
 
 impl<K: CacheKey, V: CacheValue> FIFOCacheShard<K, V> {
     pub fn new(capacity: usize) -> Self {
-        let main = MainCache::new(capacity * 9 / 10);
+        let small = SmallHotCache::new(capacity / 5);
+        let main = MainCache::new(capacity * 4 / 5);
         Self {
             map: HashMap::new(),
-            small: SmallHotCache::new(),
+            small,
             main,
             ghost: GhostCache::new(),
             evict_main_times: 0,
             evict_small_times: 0,
+            insert_in_ghost: 0,
             capacity,
         }
     }
@@ -91,9 +94,9 @@ impl<K: CacheKey, V: CacheValue> FIFOCacheShard<K, V> {
     }
 
     pub fn evict(&mut self, ghost_capacity: usize, deleted: &mut Vec<Box<CacheItem<K, V>>>) {
-        if self.small.size() > self.capacity / 10 {
+        if self.small.is_full() {
             if let Some(item) = self.small.evict() {
-                if item.get_freq() > 1 {
+                if item.get_freq() > 0 {
                     self.main.insert(item);
                 } else {
                     self.evict_small_times += 1;
@@ -111,7 +114,14 @@ impl<K: CacheKey, V: CacheValue> FIFOCacheShard<K, V> {
         }
     }
 
-    pub fn insert(&mut self, key: K, value: V, h: u64, cost: usize, deleted: &mut Vec<Box<CacheItem<K, V>>>) {
+    pub fn insert(
+        &mut self,
+        key: K,
+        value: V,
+        h: u64,
+        cost: usize,
+        deleted: &mut Vec<Box<CacheItem<K, V>>>,
+    ) {
         if let Some(handle) = self.map.get_mut(&key) {
             unsafe {
                 (*handle.item).inc_freq();
@@ -119,7 +129,7 @@ impl<K: CacheKey, V: CacheValue> FIFOCacheShard<K, V> {
             return;
         }
         let mut to_delete = vec![];
-        let ghost_capacity = (self.small.count() + self.main.count()) * 5;
+        let ghost_capacity = (self.small.count() + self.main.count()) * 10;
         while self.is_full() {
             self.evict(ghost_capacity, &mut to_delete);
         }
@@ -136,6 +146,7 @@ impl<K: CacheKey, V: CacheValue> FIFOCacheShard<K, V> {
         let handle = CacheHandle { item: addr };
         self.map.insert(key.clone(), handle);
         if is_ghost {
+            self.insert_in_ghost += 1;
             self.main.insert(item);
         } else {
             self.small.insert(item);
@@ -143,13 +154,16 @@ impl<K: CacheKey, V: CacheValue> FIFOCacheShard<K, V> {
     }
 
     fn debug_print(&mut self) -> String {
-        let ret = format!("evict_small_times: {} evict_main_times: {}", self.evict_small_times, self.evict_main_times);
+        let ret = format!(
+            "evict_small_times: {} evict_main_times: {}, insert_in_ghost: {}",
+            self.evict_small_times, self.evict_main_times, self.insert_in_ghost,
+        );
         self.evict_small_times = 0;
         self.evict_main_times = 0;
+        self.insert_in_ghost = 0;
         ret
     }
 }
-
 
 pub struct FIFOCache<K: CacheKey, T: CacheValue> {
     shards: Vec<Mutex<FIFOCacheShard<K, T>>>,
@@ -157,10 +171,7 @@ pub struct FIFOCache<K: CacheKey, T: CacheValue> {
 }
 
 impl<K: CacheKey, T: CacheValue> FIFOCache<K, T> {
-    pub fn new(
-        num_shard_bits: usize,
-        capacity: usize,
-    ) -> Self {
+    pub fn new(num_shard_bits: usize, capacity: usize) -> Self {
         let num_shards = 1 << num_shard_bits;
         let mut shards = Vec::with_capacity(num_shards);
         let per_shard = capacity / num_shards;
@@ -173,9 +184,10 @@ impl<K: CacheKey, T: CacheValue> FIFOCache<K, T> {
         }
         Self {
             shards,
-            usage_counters
+            usage_counters,
         }
     }
+
     pub fn contains(self: &Arc<Self>, key: &K) -> bool {
         let shard = self.shards[self.shard(key)].lock();
         shard.contains(key)
@@ -203,11 +215,12 @@ impl<K: CacheKey, T: CacheValue> FIFOCache<K, T> {
     pub fn get_memory_usage(&self) -> usize {
         self.usage_counters
             .iter()
-            .map(|x| x.load(std::sync::atomic::Ordering::Acquire)).sum()
+            .map(|x| x.load(std::sync::atomic::Ordering::Acquire))
+            .sum()
     }
 
     pub fn debug_print(&self) -> String {
-       let mut s = "FIFOCache: [".to_string();
+        let mut s = "FIFOCache: [".to_string();
         for shard in &self.shards {
             let mut shard = shard.lock();
             s += &(shard.debug_print() + ", ");
@@ -216,25 +229,16 @@ impl<K: CacheKey, T: CacheValue> FIFOCache<K, T> {
         s.pop();
         s + "]"
     }
-    pub fn insert(
-        self: &Arc<Self>,
-        key: K,
-        value: T,
-        charge: usize,
-    ) {
+
+    pub fn insert(self: &Arc<Self>, key: K, value: T, charge: usize) {
         let mut to_delete = vec![];
         // Drop the entries outside lock to avoid deadlock.
         let mut hasher = DefaultHasher::default();
         key.hash(&mut hasher);
         let hash = hasher.finish();
         {
-            let mut shard = self.shards[ hash as usize % self.shards.len()].lock();
+            let mut shard = self.shards[hash as usize % self.shards.len()].lock();
             shard.insert(key, value, hash, charge, &mut to_delete);
         }
     }
 }
-
-
-
-
-
