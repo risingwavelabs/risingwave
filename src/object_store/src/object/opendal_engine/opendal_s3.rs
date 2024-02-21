@@ -36,8 +36,6 @@ impl OpendalObjectStore {
             builder.endpoint(&endpoint_url);
         }
 
-        builder.role_arn();
-
         if std::env::var("RW_IS_FORCE_PATH_STYLE").is_err() {
             builder.enable_virtual_host_style();
         }
