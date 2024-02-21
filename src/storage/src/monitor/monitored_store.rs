@@ -286,6 +286,10 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
             .try_flush()
             .verbose_instrument_await("store_try_flush")
     }
+
+    fn is_committed(&self) -> bool {
+        self.inner.is_committed()
+    }
 }
 
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {

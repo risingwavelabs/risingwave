@@ -241,7 +241,11 @@ pub trait LocalStateStore: StaticSendSync {
     fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_;
     fn epoch(&self) -> u64;
 
+    /// Checks whether there is any unflushed data in local state store.
     fn is_dirty(&self) -> bool;
+
+    /// Checks whether there is any flushed but uncommitted data in local state store.
+    fn is_committed(&self) -> bool;
 
     /// Initializes the state store with given `epoch` pair.
     /// Typically we will use `epoch.curr` as the initialized epoch,

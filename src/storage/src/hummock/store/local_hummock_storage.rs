@@ -427,6 +427,10 @@ impl LocalStateStore for LocalHummockStorage {
             })
             .expect("should be able to send")
     }
+
+    fn is_committed(&self) -> bool {
+        self.read_version.read().staging().is_empty()
+    }
 }
 
 impl LocalHummockStorage {

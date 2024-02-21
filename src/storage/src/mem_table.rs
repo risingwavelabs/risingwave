@@ -653,6 +653,11 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
     async fn try_flush(&mut self) -> StorageResult<()> {
         Ok(())
     }
+
+    // There is no staging data for memtable state store
+    fn is_committed(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

@@ -219,6 +219,11 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         span.may_send_result(OperationResult::TryFlush(res.as_ref().map(|o| *o).into()));
         res
     }
+
+    // TODO: is it necessary to introduce a trace span for this call?
+    fn is_committed(&self) -> bool {
+        self.inner.is_committed()
+    }
 }
 
 impl<S: StateStore> StateStore for TracedStateStore<S> {

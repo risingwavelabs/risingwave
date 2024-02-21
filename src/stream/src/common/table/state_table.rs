@@ -780,6 +780,10 @@ where
             !self.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"
         );
+        assert!(
+            self.local_store.is_committed(),
+            "vnode bitmap should only be updated when data in state table are all committed"
+        );
         if self.distribution.is_singleton() {
             assert_eq!(
                 &new_vnodes,

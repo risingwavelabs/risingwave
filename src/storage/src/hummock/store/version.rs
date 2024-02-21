@@ -192,6 +192,10 @@ impl StagingVersion {
             });
         (overlapped_imms, overlapped_ssts)
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.imm.is_empty() && self.sst.is_empty()
+    }
 }
 
 #[derive(Clone)]

@@ -459,6 +459,14 @@ pub mod verify {
             }
             ret
         }
+
+        fn is_committed(&self) -> bool {
+            let ret = self.actual.is_committed();
+            if let Some(expected) = &self.expected {
+                assert_eq!(ret, expected.is_committed());
+            }
+            ret
+        }
     }
 
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
@@ -781,6 +789,8 @@ pub mod boxed_state_store {
         async fn init(&mut self, epoch: InitOptions) -> StorageResult<()>;
 
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
+
+        fn is_committed(&self) -> bool;
     }
 
     #[async_trait::async_trait]
@@ -845,6 +855,10 @@ pub mod boxed_state_store {
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
             self.seal_current_epoch(next_epoch, opts)
         }
+
+        fn is_committed(&self) -> bool {
+            self.is_committed()
+        }
     }
 
     pub type BoxDynamicDispatchedLocalStateStore = Box<dyn DynamicDispatchedLocalStateStore>;
@@ -903,6 +917,10 @@ pub mod boxed_state_store {
 
         fn is_dirty(&self) -> bool {
             self.deref().is_dirty()
+        }
+
+        fn is_committed(&self) -> bool {
+            self.deref().is_committed()
         }
 
         fn init(

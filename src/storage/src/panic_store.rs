@@ -134,6 +134,10 @@ impl LocalStateStore for PanicStateStore {
     async fn try_flush(&mut self) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
     }
+
+    fn is_committed(&self) -> bool {
+        panic!("should not operate on the panic state store!");
+    }
 }
 
 impl StateStore for PanicStateStore {
