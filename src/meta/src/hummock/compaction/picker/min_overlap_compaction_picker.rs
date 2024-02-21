@@ -222,16 +222,13 @@ impl NonOverlapSubLevelPicker {
         };
         ret.sstable_infos[0].extend(vec![sst.clone()]);
 
+        let mut pick_levels_range = Vec::default();
+        let mut max_select_level_count = 0;
+
+        // Pay attention to the order here: Make sure to select the lowest sub_level to meet the requirements of base compaction. If you break the assumption of this order, you need to redesign it.
+        // TODO: Use binary selection to replace the step algorithm to optimize algorithm complexity
         for (target_index, target_level) in levels.iter().enumerate().skip(1) {
             if target_level.level_type() != LevelType::Nonoverlapping {
-                break;
-            }
-
-            // more than 1 sub_level
-            if ret.total_file_count > 1
-                && (ret.total_file_size >= self.max_compaction_bytes
-                    || ret.total_file_count >= self.max_file_count as usize)
-            {
                 break;
             }
 
@@ -260,13 +257,14 @@ impl NonOverlapSubLevelPicker {
                 continue;
             }
 
-            let mut extra_overlap_levels = vec![];
+            let mut overlap_levels = vec![];
 
             let mut add_files_size: u64 = 0;
             let mut add_files_count: usize = 0;
             let mut finish = false;
             let mut pending_compact = false;
 
+            let mut select_level_count = 0;
             for reverse_index in (0..=target_index).rev() {
                 let target_tables = &levels[reverse_index].table_infos;
 
@@ -276,13 +274,14 @@ impl NonOverlapSubLevelPicker {
                     basic_overlap_info.check_multiple_overlap(target_tables)
                 };
 
+                if overlap_files_range.is_empty() {
+                    // empty level
+                    continue;
+                }
+
                 // We allow a layer in the middle without overlap, so we need to continue to
                 // the next layer to search for overlap
-                for other in target_tables
-                    .iter()
-                    .take(overlap_files_range.end)
-                    .skip(overlap_files_range.start)
-                {
+                for other in &target_tables[overlap_files_range.clone()] {
                     if level_handler.is_pending_compact(&other.sst_id) {
                         pending_compact = true;
                         break;
@@ -298,7 +297,7 @@ impl NonOverlapSubLevelPicker {
                 }
 
                 // When size / file count has exceeded the limit, we need to abandon this plan, it cannot be expanded to the last sub_level
-                if ret.total_file_count > 1
+                if max_select_level_count > 1
                     && (add_files_size >= self.max_compaction_bytes
                         || add_files_count >= self.max_file_count as usize)
                 {
@@ -306,20 +305,28 @@ impl NonOverlapSubLevelPicker {
                     break;
                 }
 
-                extra_overlap_levels.push((reverse_index, overlap_files_range.clone()));
+                overlap_levels.push((reverse_index, overlap_files_range.clone()));
+                select_level_count += 1;
             }
 
             if pending_compact || finish {
                 break;
             }
 
-            for (reverse_index, sst_range) in extra_overlap_levels {
-                let level_ssts = &levels[reverse_index].table_infos;
-                ret.sstable_infos[reverse_index] = level_ssts[sst_range].to_vec();
+            if select_level_count > max_select_level_count {
+                max_select_level_count = select_level_count;
+                pick_levels_range = overlap_levels;
             }
+        }
 
-            ret.total_file_count = add_files_count;
-            ret.total_file_size = add_files_size;
+        for (reverse_index, sst_range) in pick_levels_range {
+            let level_ssts = &levels[reverse_index].table_infos;
+            ret.sstable_infos[reverse_index] = level_ssts[sst_range].to_vec();
+            ret.total_file_count += ret.sstable_infos[reverse_index].len();
+            ret.total_file_size += ret.sstable_infos[reverse_index]
+                .iter()
+                .map(|sst| sst.file_size)
+                .sum::<u64>();
         }
 
         // sort sst per level due to reverse expand
@@ -703,7 +710,7 @@ pub mod tests {
         }
 
         {
-            //     // limit max file_count
+            // limit max file_count
             let picker = NonOverlapSubLevelPicker::new(
                 0,
                 10000,
