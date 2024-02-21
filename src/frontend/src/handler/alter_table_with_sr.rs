@@ -55,7 +55,7 @@ pub async fn handle_alter_table_with_sr(
 
     if !schema_has_schema_registry(&connector_schema) {
         return Err(ErrorCode::NotSupported(
-            "altering a table without schema registry".to_string(),
+            "Tables without schema registry cannot be associated with a schema registry".to_string(),
             "try `ALTER TABLE .. ADD COLUMN ...` instead".to_string(),
         )
         .into());
