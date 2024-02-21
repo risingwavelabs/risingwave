@@ -278,7 +278,7 @@ pub async fn handle_create_sql_function(
                 Err(e) => {
                     if let ErrorCode::BindErrorRoot { expr: _, error } = e.inner() {
                         let invalid_msg = error.to_string();
-                        
+
                         println!("invalid_msg: {}", invalid_msg);
 
                         // First validate the message
@@ -287,11 +287,12 @@ pub async fn handle_create_sql_function(
                         // Get the name of the invalid item
                         // We will just display the first one found
                         let Some(invalid_item_name) =
-                            extract_hint_display_target(err_msg_type, invalid_msg.as_str()) else {
-                                return Err(
-                                    ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into()
-                                );
-                            };
+                            extract_hint_display_target(err_msg_type, invalid_msg.as_str())
+                        else {
+                            return Err(
+                                ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into()
+                            );
+                        };
 
                         // Find the invalid parameter / column / function
                         let Some(idx) = find_target(body.as_str(), invalid_item_name) else {
