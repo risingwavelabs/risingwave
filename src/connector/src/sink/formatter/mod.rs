@@ -123,12 +123,18 @@ impl SinkFormatterImpl {
                     }
                     SinkEncode::Protobuf => {
                         // By passing `None` as `aws_auth_props`, reading from `s3://` not supported yet.
-                        let descriptor =
-                            crate::schema::protobuf::fetch_descriptor(&format_desc.options, None)
-                                .await
-                                .map_err(|e| SinkError::Config(anyhow!(e)))?;
-                        let val_encoder =
-                            ProtoEncoder::new(schema, None, descriptor, ProtoHeader::None)?;
+                        let (descriptor, sid) = crate::schema::protobuf::fetch_descriptor(
+                            &format_desc.options,
+                            topic,
+                            None,
+                        )
+                        .await
+                        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+                        let header = match sid {
+                            None => ProtoHeader::None,
+                            Some(sid) => ProtoHeader::ConfluentSchemaRegistry(sid),
+                        };
+                        let val_encoder = ProtoEncoder::new(schema, None, descriptor, header)?;
                         let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::AppendOnlyProto(formatter))
                     }
