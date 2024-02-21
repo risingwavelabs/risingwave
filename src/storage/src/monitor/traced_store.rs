@@ -219,6 +219,12 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         span.may_send_result(OperationResult::TryFlush(res.as_ref().map(|o| *o).into()));
         res
     }
+
+
+    // TODO: add trace span
+    fn update_vnode_bitmap(&self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+        self.inner.update_vnode_bitmap()
+    }
 }
 
 impl<S: StateStore> StateStore for TracedStateStore<S> {
