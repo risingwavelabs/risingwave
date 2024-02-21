@@ -27,7 +27,7 @@ import org.apache.flink.table.factories.DynamicTableSinkFactory;
  * The `FlinkMockSinkFactory` implementation of the http sink is responsible for creating the http
  * counterpart of the `DynamicTableSinkFactory`. And `validate` don't need to do anything.
  *
- * This feature is depended on https://github.com/getindata/flink-http-connector
+ * <p>This feature is depended on https://github.com/getindata/flink-http-connector
  */
 public class HttpFlinkMockSinkFactory implements FlinkMockSinkFactory {
     @Override
