@@ -67,12 +67,14 @@ mod tests {
         DataType, Date, Interval, Scalar, ScalarImpl, StructType, Time, Timestamp,
     };
     use serde_json::Value;
+    use thiserror_ext::AsReport;
 
     use crate::parser::{
         DebeziumParser, EncodingProperties, JsonProperties, ProtocolProperties, SourceColumnDesc,
         SourceStreamChunkBuilder, SpecificParserConfig,
     };
     use crate::source::SourceContextRef;
+
     fn assert_json_eq(parse_result: &Option<ScalarImpl>, json_str: &str) {
         if let Some(ScalarImpl::Jsonb(json_val)) = parse_result {
             let mut json_string = String::new();
@@ -494,7 +496,7 @@ mod tests {
                 } else {
                     // For f64 overflow, the parsing fails
                     let e = res.unwrap_err();
-                    assert!(e.to_string().contains("InvalidNumber"), "{i}: {e}");
+                    assert!(e.to_report_string().contains("InvalidNumber"), "{i}: {e}");
                 }
             }
         }
