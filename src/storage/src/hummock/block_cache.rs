@@ -19,7 +19,7 @@ use std::sync::Arc;
 use await_tree::InstrumentAwait;
 use futures::Future;
 use risingwave_common::cache::{CachePriority, CacheableEntry, LruCacheEventListener};
-use risingwave_common::fifo_cache::{FIFOCache, LookupResponse};
+use risingwave_common::fifo_cache::{FifoCache, LookupResponse};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use tokio::sync::oneshot::Receiver;
 use tokio::task::JoinHandle;
@@ -84,7 +84,7 @@ type BlockCacheEventListener =
 
 #[derive(Clone)]
 pub struct BlockCache {
-    inner: Arc<FIFOCache<(HummockSstableObjectId, u64), Arc<Block>>>,
+    inner: Arc<FifoCache<(HummockSstableObjectId, u64), Arc<Block>>>,
     cache_miss_times: Arc<AtomicUsize>,
 }
 
@@ -111,7 +111,6 @@ impl BlockResponse {
                     .await
                     .unwrap()
                 .map(BlockHolder::from_ref_block)
-
             },
         }
     }
@@ -149,7 +148,7 @@ impl BlockCache {
             max_shard_bits -= 1;
         }
 
-        let cache = FIFOCache::new(max_shard_bits, capacity);
+        let cache = FifoCache::new(max_shard_bits, capacity);
         Self {
             inner: Arc::new(cache),
             cache_miss_times: Arc::new(AtomicUsize::new(0)),

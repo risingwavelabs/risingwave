@@ -51,7 +51,7 @@ pub enum LookupResponse<T: CacheValue + 'static, E> {
 }
 type RequestQueue<T> = Vec<Sender<T>>;
 
-pub struct FIFOCacheShard<K: CacheKey, V: CacheValue> {
+pub struct FifoCacheShard<K: CacheKey, V: CacheValue> {
     map: HashMap<K, CacheHandle<K, V>>,
     small: SmallHotCache<K, V>,
     main: MainCache<K, V>,
@@ -64,7 +64,7 @@ pub struct FIFOCacheShard<K: CacheKey, V: CacheValue> {
     capacity: usize,
 }
 
-impl<K: CacheKey, V: CacheValue> FIFOCacheShard<K, V> {
+impl<K: CacheKey, V: CacheValue> FifoCacheShard<K, V> {
     pub fn new(capacity: usize) -> Self {
         let small = SmallHotCache::new(capacity / 5);
         let main = MainCache::new(capacity * 4 / 5);
@@ -183,7 +183,7 @@ impl<K: CacheKey, V: CacheValue> FIFOCacheShard<K, V> {
 }
 
 pub struct CleanCacheGuard<'a, K: CacheKey + 'static, T: CacheValue + 'static> {
-    cache: &'a Arc<FIFOCache<K, T>>,
+    cache: &'a Arc<FifoCache<K, T>>,
     key: Option<K>,
 }
 
@@ -201,19 +201,19 @@ impl<'a, K: CacheKey + 'static, T: CacheValue+ 'static> Drop for CleanCacheGuard
     }
 }
 
-pub struct FIFOCache<K: CacheKey, V: CacheValue> {
-    shards: Vec<Mutex<FIFOCacheShard<K, V>>>,
+pub struct FifoCache<K: CacheKey, V: CacheValue> {
+    shards: Vec<Mutex<FifoCacheShard<K, V>>>,
     usage_counters: Vec<Arc<AtomicUsize>>,
 }
 
-impl<K: CacheKey + 'static, V: CacheValue + 'static> FIFOCache<K, V> {
+impl<K: CacheKey + 'static, V: CacheValue + 'static> FifoCache<K, V> {
     pub fn new(num_shard_bits: usize, capacity: usize) -> Self {
         let num_shards = 1 << num_shard_bits;
         let mut shards = Vec::with_capacity(num_shards);
         let per_shard = capacity / num_shards;
         let mut usage_counters = Vec::with_capacity(num_shards * 2);
         for _ in 0..num_shards {
-            let shard = FIFOCacheShard::new(per_shard);
+            let shard = FifoCacheShard::new(per_shard);
             usage_counters.push(shard.small.get_size_counter());
             usage_counters.push(shard.main.get_size_counter());
             shards.push(Mutex::new(shard));

@@ -26,7 +26,7 @@ use moka::future::Cache;
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
 use risingwave_common::cache::CachePriority;
-use risingwave_common::fifo_cache::FIFOCache;
+use risingwave_common::fifo_cache::FifoCache;
 use risingwave_storage::hummock::{HummockError, HummockResult, LruCache};
 use spin::Mutex;
 use tokio::runtime::{Builder, Runtime};
@@ -136,7 +136,7 @@ impl Hash for BlockKey {
 }
 
 pub struct FIFOCacheImpl {
-    inner: FIFOCache<BlockKey, Arc<Block>>,
+    inner: FifoCache<BlockKey, Arc<Block>>,
     fake_io_latency: Duration,
     write_requests: Arc<Mutex<HashMap<BlockKey, RequestQueue>>>,
 }
@@ -144,7 +144,7 @@ pub struct FIFOCacheImpl {
 impl FIFOCacheImpl {
     pub fn new(capacity: usize, fake_io_latency: Duration) -> Self {
         Self {
-            inner: FIFOCache::new(capacity * BLOCK_SIZE),
+            inner: FifoCache::new(capacity * BLOCK_SIZE),
             fake_io_latency,
             write_requests: Arc::new(Mutex::new(HashMap::default())),
         }
