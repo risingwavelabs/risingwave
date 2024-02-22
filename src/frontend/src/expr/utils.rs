@@ -445,7 +445,6 @@ struct WatermarkAnalyzer {}
 
 impl WatermarkAnalyzer {
     fn visit_expr(&self, expr: &ExprImpl) -> WatermarkDerivation {
-        println!("expr: {:#?}", expr);
         match expr {
             ExprImpl::InputRef(inner) => WatermarkDerivation::Watermark(inner.index()),
             ExprImpl::Literal(_) => WatermarkDerivation::Constant,
