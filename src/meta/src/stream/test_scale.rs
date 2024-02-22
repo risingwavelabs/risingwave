@@ -21,9 +21,10 @@ mod tests {
     use risingwave_common::buffer::Bitmap;
     use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping, VirtualNode};
     use risingwave_pb::common::ParallelUnit;
-    use risingwave_pb::stream_plan::StreamActor;
+    use risingwave_pb::stream_plan::CustomActorInfo;
 
     use crate::model::ActorId;
+    use crate::stream::CustomActorInfo;
     use crate::stream::scale::rebalance_actor_vnode;
 
     fn simulated_parallel_unit_nums(min: Option<usize>, max: Option<usize>) -> Vec<usize> {
@@ -39,13 +40,13 @@ mod tests {
         raw
     }
 
-    fn build_fake_actors(info: &[(ActorId, ParallelUnitId)]) -> Vec<StreamActor> {
+    fn build_fake_actors(info: &[(ActorId, ParallelUnitId)]) -> Vec<CustomActorInfo> {
         let parallel_units = generate_parallel_units(info);
 
         let vnode_bitmaps = ParallelUnitMapping::build(&parallel_units).to_bitmaps();
 
         info.iter()
-            .map(|(actor_id, parallel_unit_id)| StreamActor {
+            .map(|(actor_id, parallel_unit_id)| CustomActorInfo {
                 actor_id: *actor_id,
                 vnode_bitmap: vnode_bitmaps
                     .get(parallel_unit_id)
@@ -64,7 +65,7 @@ mod tests {
             .collect_vec()
     }
 
-    fn check_affinity_for_scale_in(bitmap: &Bitmap, actor: &StreamActor) {
+    fn check_affinity_for_scale_in(bitmap: &Bitmap, actor: &CustomActorInfo) {
         let prev_bitmap = Bitmap::from(actor.vnode_bitmap.as_ref().unwrap());
 
         for idx in 0..VirtualNode::COUNT {

@@ -31,15 +31,19 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_meta_model_v2::StreamingParallelism;
-use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
+use risingwave_pb::common::{ActorInfo, Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::get_reschedule_plan_request::{Policy, StableResizePolicy};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
-use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
-use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment, State};
+use risingwave_pb::meta::table_fragments::fragment::{
+    FragmentDistributionType, PbFragmentDistributionType,
+};
+use risingwave_pb::meta::table_fragments::{self, ActorStatus, PbFragment, State};
 use risingwave_pb::meta::FragmentParallelUnitMappings;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{DispatcherType, FragmentTypeFlag, StreamActor, StreamNode};
+use risingwave_pb::stream_plan::{
+    Dispatcher, DispatcherType, FragmentTypeFlag, PbStreamActor, StreamActor, StreamNode,
+};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::{oneshot, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -105,15 +109,88 @@ pub struct ParallelUnitReschedule {
     pub removed_parallel_units: BTreeSet<ParallelUnitId>,
 }
 
+pub struct CustomFragmentInfo {
+    pub fragment_id: u32,
+    pub fragment_type_mask: u32,
+    pub distribution_type: PbFragmentDistributionType,
+    pub vnode_mapping: Option<ParallelUnitMapping>,
+    pub state_table_ids: Vec<u32>,
+    pub upstream_fragment_ids: Vec<u32>,
+    pub actor_template: StreamActor,
+    pub actors: Vec<CustomActorInfo>,
+}
+
+pub struct CustomActorInfo {
+    pub actor_id: u32,
+    pub fragment_id: u32,
+    pub dispatcher: Vec<Dispatcher>,
+    pub upstream_actor_id: Vec<u32>,
+    pub vnode_bitmap: Option<Buffer>,
+}
+
+impl From<&PbStreamActor> for CustomActorInfo {
+    fn from(
+        PbStreamActor {
+            actor_id,
+            fragment_id,
+            dispatcher,
+            upstream_actor_id,
+            vnode_bitmap,
+            ..
+        }: &PbStreamActor,
+    ) -> Self {
+        CustomActorInfo {
+            actor_id: *actor_id,
+            fragment_id: *fragment_id,
+            dispatcher: dispatcher.clone(),
+            upstream_actor_id: upstream_actor_id.clone(),
+            vnode_bitmap: vnode_bitmap.clone(),
+        }
+    }
+}
+
+impl From<&PbFragment> for CustomFragmentInfo {
+    fn from(fragment: &PbFragment) -> Self {
+        CustomFragmentInfo {
+            fragment_id: fragment.fragment_id,
+            fragment_type_mask: fragment.fragment_type_mask,
+            distribution_type: fragment.distribution_type(),
+            vnode_mapping: fragment.vnode_mapping.clone(),
+            state_table_ids: fragment.state_table_ids.clone(),
+            upstream_fragment_ids: fragment.upstream_fragment_ids.clone(),
+            actor_template: fragment
+                .actors
+                .first()
+                .cloned()
+                .expect("no actor in fragment"),
+            actors: fragment
+                .actors
+                .iter()
+                .map(|actor| CustomActorInfo::from(actor))
+                .collect(),
+        }
+    }
+}
+
+impl CustomFragmentInfo {
+    pub fn get_fragment_type_mask(&self) -> u32 {
+        self.fragment_type_mask
+    }
+
+    pub fn distribution_type(&self) -> FragmentDistributionType {
+        self.distribution_type.clone()
+    }
+}
+
 pub struct RescheduleContext {
     /// Index used to map `ParallelUnitId` to `WorkerId`
     parallel_unit_id_to_worker_id: BTreeMap<ParallelUnitId, WorkerId>,
     /// Meta information for all Actors
-    actor_map: HashMap<ActorId, StreamActor>,
+    actor_map: HashMap<ActorId, CustomActorInfo>,
     /// Status of all Actors, used to find the location of the `Actor`
     actor_status: BTreeMap<ActorId, ActorStatus>,
     /// Meta information of all `Fragment`, used to find the `Fragment`'s `Actor`
-    fragment_map: HashMap<FragmentId, Fragment>,
+    fragment_map: HashMap<FragmentId, CustomFragmentInfo>,
     /// Indexes for all `Worker`s
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     /// Index of all `Actor` upstreams, specific to `Dispatcher`
@@ -180,7 +257,7 @@ impl RescheduleContext {
 ///
 /// The return value is the bitmap distribution after scaling, which covers all virtual node indexes
 pub fn rebalance_actor_vnode(
-    actors: &[StreamActor],
+    actors: &[CustomActorInfo],
     actors_to_remove: &BTreeSet<ActorId>,
     actors_to_create: &BTreeSet<ActorId>,
 ) -> HashMap<ActorId, Bitmap> {
@@ -475,63 +552,12 @@ impl ScaleController {
                             .map(|f| (f, table_fragments.state())),
                     );
 
-                    let fragments = table_fragments.fragments.clone();
-
-                    for (fragment_id, fragment) in fragments {
-                        fn custom_clone_actors(fragment: &Fragment) -> Vec<StreamActor> {
-                            let mut custom_cloned_actors =
-                                Vec::with_capacity(fragment.actors.len());
-
-                            for (
-                                idx,
-                                StreamActor {
-                                    actor_id,
-                                    fragment_id,
-                                    dispatcher,
-                                    upstream_actor_id,
-                                    vnode_bitmap,
-                                    mview_definition,
-                                    expr_context,
-                                    nodes,
-                                },
-                            ) in fragment.actors.iter().enumerate()
-                            {
-                                let nodes = if idx == 0 { nodes.clone() } else { None };
-
-                                let custom_actor = StreamActor {
-                                    actor_id: *actor_id,
-                                    fragment_id: *fragment_id,
-                                    nodes,
-                                    dispatcher: dispatcher.clone(),
-                                    upstream_actor_id: upstream_actor_id.clone(),
-                                    vnode_bitmap: vnode_bitmap.clone(),
-                                    mview_definition: mview_definition.clone(),
-                                    expr_context: expr_context.clone(),
-                                };
-
-                                custom_cloned_actors.push(custom_actor);
-                            }
-
-                            custom_cloned_actors
+                    for (fragment_id, fragment) in &table_fragments.fragments {
+                        for actor in &fragment.actors {
+                            actor_map.insert(actor.actor_id, CustomActorInfo::from(actor));
                         }
 
-                        let actors = custom_clone_actors(&fragment);
-                        for actor in actors {
-                            actor_map.insert(actor.actor_id, actor);
-                        }
-
-                        fragment_map.insert(
-                            fragment_id,
-                            Fragment {
-                                fragment_id,
-                                fragment_type_mask: fragment.fragment_type_mask,
-                                distribution_type: fragment.distribution_type,
-                                actors: custom_clone_actors(&fragment),
-                                vnode_mapping: fragment.vnode_mapping,
-                                state_table_ids: fragment.state_table_ids,
-                                upstream_fragment_ids: fragment.upstream_fragment_ids,
-                            },
-                        );
+                        fragment_map.insert(*fragment_id, CustomFragmentInfo::from(fragment));
                     }
 
                     actor_status.extend(table_fragments.actor_status.clone());
@@ -559,12 +585,12 @@ impl ScaleController {
                             .map(|f| (f, table_fragments.table_id())),
                     );
 
-                    for (fragment_id, fragment) in table_fragments.fragments {
+                    for (fragment_id, fragment) in &table_fragments.fragments {
                         for actor in &fragment.actors {
-                            actor_map.insert(actor.actor_id, actor.clone());
+                            actor_map.insert(actor.actor_id, CustomActorInfo::from(actor));
                         }
 
-                        fragment_map.insert(fragment_id, fragment);
+                        fragment_map.insert(*fragment_id, CustomFragmentInfo::from(fragment));
                     }
 
                     actor_status.extend(table_fragments.actor_status.clone());
@@ -697,7 +723,7 @@ impl ScaleController {
             }
 
             if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0 {
-                let stream_node = fragment.actors.first().unwrap().get_nodes().unwrap();
+                let stream_node = fragment.actor_template.nodes.as_ref().unwrap();
                 if TableFragments::find_stream_source(stream_node).is_some() {
                     stream_source_fragment_ids.insert(*fragment_id);
                 }
@@ -1052,7 +1078,7 @@ impl ScaleController {
 
             for (actor_to_create, sample_actor) in actors_to_create
                 .iter()
-                .zip_eq_debug(repeat(fragment.actors.first().unwrap()).take(actors_to_create.len()))
+                .zip_eq_debug(repeat(&fragment.actor_template).take(actors_to_create.len()))
             {
                 let new_actor_id = actor_to_create.0;
                 let mut new_actor = sample_actor.clone();
@@ -2058,10 +2084,10 @@ impl ScaleController {
                     .iter()
                     .map(|actor| (actor.actor_id, actor))
                     .for_each(|(id, actor)| {
-                        actor_map.insert(id as ActorId, actor.clone());
+                        actor_map.insert(id as ActorId, CustomActorInfo::from(actor));
                     });
 
-                fragment_map.insert(fragment_id, fragment);
+                fragment_map.insert(fragment_id, CustomFragmentInfo::from(&fragment));
 
                 fragment_parallelism.insert(fragment_id, table_fragments.assigned_parallelism);
             }
@@ -2123,7 +2149,7 @@ impl ScaleController {
             },
         ) in fragment_worker_changes
         {
-            let fragment = match fragment_map.get(&fragment_id).cloned() {
+            let fragment = match fragment_map.get(&fragment_id) {
                 None => bail!("Fragment id {} not found", fragment_id),
                 Some(fragment) => fragment,
             };
@@ -2211,7 +2237,7 @@ impl ScaleController {
                 // then we re-add the limited parallel units from the limited workers
                 target_parallel_unit_ids.extend(limited_worker_parallel_unit_ids.into_iter());
             }
-            match fragment.get_distribution_type().unwrap() {
+            match fragment.distribution_type() {
                 FragmentDistributionType::Unspecified => unreachable!(),
                 FragmentDistributionType::Single => {
                     let single_parallel_unit_id =
@@ -2363,7 +2389,7 @@ impl ScaleController {
     }
 
     pub fn build_no_shuffle_relation_index(
-        actor_map: &HashMap<ActorId, StreamActor>,
+        actor_map: &HashMap<ActorId, CustomActorInfo>,
         no_shuffle_source_fragment_ids: &mut HashSet<FragmentId>,
         no_shuffle_target_fragment_ids: &mut HashSet<FragmentId>,
     ) {
@@ -2391,7 +2417,7 @@ impl ScaleController {
     }
 
     pub fn build_fragment_dispatcher_index(
-        actor_map: &HashMap<ActorId, StreamActor>,
+        actor_map: &HashMap<ActorId, CustomActorInfo>,
         fragment_dispatcher_map: &mut HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
     ) {
         for actor in actor_map.values() {
@@ -2413,7 +2439,7 @@ impl ScaleController {
 
     pub fn resolve_no_shuffle_upstream_tables(
         fragment_ids: HashSet<FragmentId>,
-        fragment_map: &HashMap<FragmentId, Fragment>,
+        fragment_map: &HashMap<FragmentId, CustomFragmentInfo>,
         no_shuffle_source_fragment_ids: &HashSet<FragmentId>,
         no_shuffle_target_fragment_ids: &HashSet<FragmentId>,
         fragment_to_table: &HashMap<FragmentId, TableId>,
@@ -2483,7 +2509,7 @@ impl ScaleController {
 
     pub fn resolve_no_shuffle_upstream_fragments<T>(
         reschedule: &mut HashMap<FragmentId, T>,
-        fragment_map: &HashMap<FragmentId, Fragment>,
+        fragment_map: &HashMap<FragmentId, CustomFragmentInfo>,
         no_shuffle_source_fragment_ids: &HashSet<FragmentId>,
         no_shuffle_target_fragment_ids: &HashSet<FragmentId>,
     ) -> MetaResult<()>
