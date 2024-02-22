@@ -23,7 +23,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
-use risingwave_common::row::{Row, RowExt};
+use risingwave_common::row::Row;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::types::JsonbVal;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
@@ -79,8 +79,9 @@ impl BackfillState {
                         abort_handles.get(split).unwrap().abort();
                     }
                     Ordering::Greater => {
-                        // backfilling for this split produced more data.
-                        *self = BackfillState::SourceCachingUp(offset.to_string());
+                        // backfilling for this split produced more data than current source's progress.
+                        // We should stop backfilling, and filter out rows from upstream with offset <= backfill_offset.
+                        *self = BackfillState::SourceCachingUp(backfill_offset.clone().unwrap());
                         abort_handles.get(split).unwrap().abort();
                     }
                 }
@@ -88,7 +89,7 @@ impl BackfillState {
             BackfillState::SourceCachingUp(backfill_offset) => {
                 match compare_kafka_offset(Some(backfill_offset), offset) {
                     Ordering::Less => {
-                        // XXX: Is this possible? i.e., Source doesn't contain the
+                        // XXX: Is this possible? i.e., Source caught up, but doesn't contain the
                         // last backfilled row.
                         vis = true;
                         *self = BackfillState::Finished;
@@ -99,7 +100,6 @@ impl BackfillState {
                     }
                     Ordering::Greater => {
                         // Source is still behind backfilling.
-                        *backfill_offset = offset.to_string();
                     }
                 }
             }
@@ -133,7 +133,7 @@ pub struct KafkaBackfillExecutorInner<S: StateStore> {
     // /// Receiver of barrier channel.
     // barrier_receiver: Option<UnboundedReceiver<Barrier>>,
     /// System parameter reader to read barrier interval
-    system_params: SystemParamsReaderRef,
+    _system_params: SystemParamsReaderRef,
 
     // control options for connector level
     source_ctrl_opts: SourceCtrlOpts,
@@ -169,7 +169,7 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
             stream_source_core,
             backfill_state_store,
             metrics,
-            system_params,
+            _system_params: system_params,
             source_ctrl_opts,
             connector_params,
         }
@@ -474,7 +474,6 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
                                 let mut new_vis = BitmapBuilder::zeroed(chunk.visibility().len());
 
                                 for (i, (_, row)) in chunk.rows().enumerate() {
-                                    tracing::debug!(row = %row.display());
                                     let split = row.datum_at(split_idx).unwrap().into_utf8();
                                     let offset = row.datum_at(offset_idx).unwrap().into_utf8();
                                     let backfill_state =
