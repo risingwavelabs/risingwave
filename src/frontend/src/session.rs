@@ -43,7 +43,9 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::{load_config, BatchConfig, MetaConfig, MetricLevel};
 use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
-use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
+use risingwave_common::system_param::local_manager::{
+    LocalSystemParamsManager, LocalSystemParamsManagerRef,
+};
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
@@ -119,6 +121,8 @@ pub struct FrontendEnv {
     worker_node_manager: WorkerNodeManagerRef,
     query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
+    system_params_manager: LocalSystemParamsManagerRef,
+
     server_addr: HostAddr,
     client_pool: ComputeClientPoolRef,
 
@@ -159,6 +163,7 @@ impl FrontendEnv {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let meta_client = Arc::new(MockFrontendMetaClient {});
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
+        let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
         let compute_client_pool = Arc::new(ComputeClientPool::default());
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
@@ -191,6 +196,7 @@ impl FrontendEnv {
             worker_node_manager,
             query_manager,
             hummock_snapshot_manager,
+            system_params_manager,
             server_addr,
             client_pool,
             sessions_map: Arc::new(RwLock::new(HashMap::new())),
@@ -383,6 +389,7 @@ impl FrontendEnv {
                 meta_client: frontend_meta_client,
                 query_manager,
                 hummock_snapshot_manager,
+                system_params_manager,
                 server_addr: frontend_address,
                 client_pool,
                 frontend_metrics,
@@ -446,6 +453,10 @@ impl FrontendEnv {
 
     pub fn hummock_snapshot_manager(&self) -> &HummockSnapshotManagerRef {
         &self.hummock_snapshot_manager
+    }
+
+    pub fn system_params_manager(&self) -> &LocalSystemParamsManagerRef {
+        &self.system_params_manager
     }
 
     pub fn server_address(&self) -> &HostAddr {
