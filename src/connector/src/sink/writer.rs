@@ -270,6 +270,7 @@ impl<W: AsyncTruncateSinkWriter> LogSinker for AsyncTruncateLogSinkerOf<W> {
                 }
                 Either::Right(offset_result) => {
                     let offset = offset_result?;
+                    tracing::warn!("truncate {:?}", offset);
                     log_reader.truncate(offset).await?;
                 }
             }

@@ -93,6 +93,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
     }
 
     async fn write_chunk(&mut self, chunk: StreamChunk) -> LogStoreResult<()> {
+        tracing::warn!("ck test add streamchunk {:?}", chunk.capacity());
         if chunk.cardinality() == 0 {
             return Ok(());
         }

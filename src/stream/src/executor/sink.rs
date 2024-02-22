@@ -209,10 +209,12 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             match msg? {
                 Message::Watermark(w) => yield Message::Watermark(w),
                 Message::Chunk(chunk) => {
+                    tracing::warn!("ck test add streamchunk11 {:?}", chunk.capacity());
                     log_writer.write_chunk(chunk.clone()).await?;
                     yield Message::Chunk(chunk);
                 }
                 Message::Barrier(barrier) => {
+                    tracing::warn!("ck test add barrier {:?}", barrier);
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
                             Mutation::Pause => log_writer.pause()?,
