@@ -232,7 +232,7 @@ services:
 
   starrocks-fe-server:
     container_name: starrocks-fe-server
-    image: starrocks/fe-ubuntu:latest
+    image: starrocks/fe-ubuntu:3.1.7
     hostname: starrocks-fe-server
     command:
       /opt/starrocks/fe/bin/start_fe.sh
@@ -247,7 +247,7 @@ services:
       retries: 30
 
   starrocks-be-server:
-    image: starrocks/be-ubuntu:latest
+    image: starrocks/be-ubuntu:3.1.7
     command:
       - /bin/bash
       - -c
