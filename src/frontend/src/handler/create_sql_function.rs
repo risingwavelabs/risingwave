@@ -57,9 +57,9 @@ pub const SQL_UDF_PATTERN: &str = "[sql udf]";
 /// it's possible to improve the display to users
 fn validate_err_msg(invalid_msg: &str) -> ErrMsgType {
     // First try invalid parameters
-    if invalid_msg.find(SQL_UDF_PATTERN).is_some() {
+    if invalid_msg.contains(SQL_UDF_PATTERN) {
         ErrMsgType::Parameter
-    } else if invalid_msg.find(FUNCTION_KEYWORD).is_some() {
+    } else if invalid_msg.contains(FUNCTION_KEYWORD) {
         ErrMsgType::Function
     } else {
         // Nothing could be better display
