@@ -107,12 +107,9 @@ impl Sink for NatsSink {
                 "Nats sink only support append-only mode"
             )));
         }
-        let _client = self
-            .config
-            .common
-            .build_client()
-            .await
-            .context("validate nats sink error")?;
+        let _client = (self.config.common.build_client().await)
+            .context("validate nats sink error")
+            .map_err(SinkError::Nats)?;
         Ok(())
     }
 

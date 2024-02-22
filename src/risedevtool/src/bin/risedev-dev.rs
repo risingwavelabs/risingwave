@@ -31,6 +31,7 @@ use risedev::{
     RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
+use thiserror_ext::AsReport;
 use yaml_rust::YamlEmitter;
 
 #[derive(Default)]
@@ -444,9 +445,9 @@ fn main() -> Result<()> {
         }
         Err(err) => {
             println!(
-                "{} - Failed to start: {:?}", // with `Caused by`
+                "{} - Failed to start: {:#}", // pretty with `Caused by`
                 style("ERROR").red().bold(),
-                err,
+                err.as_report(),
             );
             println!();
             println!(
