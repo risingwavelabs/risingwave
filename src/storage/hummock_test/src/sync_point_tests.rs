@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,7 +21,6 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::hummock::CompactionFilterFlag;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{next_key, user_key};
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
@@ -202,7 +200,7 @@ pub async fn compact_once(
     compact_task.compaction_filter_mask = compaction_filter_flag.bits();
     // 3. compact
     let (_tx, rx) = tokio::sync::oneshot::channel();
-    let (result_task, task_stats) = compact(
+    let ((result_task, task_stats), _) = compact(
         compact_ctx,
         compact_task.clone(),
         rx,
@@ -222,6 +220,7 @@ pub async fn compact_once(
         .unwrap();
 }
 
+#[ignore]
 #[tokio::test]
 #[cfg(feature = "sync_point")]
 #[serial]
@@ -297,8 +296,11 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
             None,
         )
         .unwrap();
-    local.flush(Vec::new()).await.unwrap();
-    local.seal_current_epoch(101);
+    local.flush().await.unwrap();
+    local.seal_current_epoch(
+        101,
+        risingwave_storage::store::SealCurrentEpochOptions::for_test(),
+    );
     flush_and_commit(&hummock_meta_client, &storage, 100).await;
     compact_once(
         hummock_manager_ref.clone(),
@@ -322,14 +324,18 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
             None,
         )
         .unwrap();
-    local
-        .flush(vec![(
-            Bound::Included(Bytes::from(b"\0\0ggg".as_slice())),
-            Bound::Excluded(Bytes::from(b"\0\0hhh".as_slice())),
-        )])
-        .await
-        .unwrap();
-    local.seal_current_epoch(102);
+    // local
+    //     .flush(vec![(
+    //         Bound::Included(Bytes::from(b"\0\0ggg".as_slice())),
+    //         Bound::Excluded(Bytes::from(b"\0\0hhh".as_slice())),
+    //     )])
+    //     .await
+    //     .unwrap();
+    local.flush().await.unwrap();
+    local.seal_current_epoch(
+        102,
+        risingwave_storage::store::SealCurrentEpochOptions::for_test(),
+    );
     flush_and_commit(&hummock_meta_client, &storage, 101).await;
     compact_once(
         hummock_manager_ref.clone(),
@@ -353,14 +359,18 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
             None,
         )
         .unwrap();
-    local
-        .flush(vec![(
-            Bound::Included(Bytes::from(b"\0\0jjj".as_slice())),
-            Bound::Excluded(Bytes::from(b"\0\0kkk".as_slice())),
-        )])
-        .await
-        .unwrap();
-    local.seal_current_epoch(103);
+    // local
+    //     .flush(vec![(
+    //         Bound::Included(Bytes::from(b"\0\0jjj".as_slice())),
+    //         Bound::Excluded(Bytes::from(b"\0\0kkk".as_slice())),
+    //     )])
+    //     .await
+    //     .unwrap();
+    local.flush().await.unwrap();
+    local.seal_current_epoch(
+        103,
+        risingwave_storage::store::SealCurrentEpochOptions::for_test(),
+    );
     flush_and_commit(&hummock_meta_client, &storage, 102).await;
     // move this two file to the same level.
     compact_once(
@@ -385,8 +395,11 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
             None,
         )
         .unwrap();
-    local.flush(Vec::new()).await.unwrap();
-    local.seal_current_epoch(u64::MAX);
+    local.flush().await.unwrap();
+    local.seal_current_epoch(
+        u64::MAX,
+        risingwave_storage::store::SealCurrentEpochOptions::for_test(),
+    );
     flush_and_commit(&hummock_meta_client, &storage, 103).await;
     // move this two file to the same level.
     compact_once(

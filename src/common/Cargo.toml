@@ -17,9 +17,13 @@ normal = ["workspace-hack"]
 anyhow = "1"
 arc-swap = "1"
 arrow-array = { workspace = true }
+arrow-array-deltalake = { workspace = true }
 arrow-buffer = { workspace = true }
+arrow-buffer-deltalake = { workspace = true }
 arrow-cast = { workspace = true }
+arrow-cast-deltalake = { workspace = true }
 arrow-schema = { workspace = true }
+arrow-schema-deltalake = { workspace = true }
 async-trait = "0.1"
 auto_enums = "0.8"
 auto_impl = "1"
@@ -35,7 +39,7 @@ clap = { version = "4", features = ["derive"] }
 comfy-table = "7"
 crc32fast = "1"
 easy-ext = "1"
-educe = "0.4"
+educe = "0.5"
 either = "1"
 enum-as-inner = "0.6"
 enumflags2 = { version = "0.7.8" }
@@ -43,22 +47,24 @@ ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 fs-err = "2"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+governor = { version = "0.6", default-features = false, features = ["std"] }
 hex = "0.4.3"
 http = "0.2"
 humantime = "2.1"
 hyper = "0.14"
 hytra = { workspace = true }
-itertools = "0.11"
+itertools = "0.12"
 itoa = "1.0"
-jsonbb = "0.1"
-lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
+jsonbb = "0.1.2"
+lru = { workspace = true }
 memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"
 num-traits = "0.2"
 number_prefix = "0.4.0"
-opentelemetry = { version = "0.20", default-features = false }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
 parking_lot = "0.12"
-parse-display = "0.8"
+parse-display = "0.9"
 paste = "1"
 pin-project-lite = "0.2"
 postgres-types = { version = "0.2.6", features = [
@@ -72,9 +78,12 @@ prost = { workspace = true }
 rand = "0.8"
 regex = "1"
 reqwest = { version = "0.11", features = ["json"] }
+risingwave-fields-derive = { path = "./fields-derive" }
 risingwave_common_proc_macro = { path = "./proc_macro" }
+risingwave_error = { workspace = true }
 risingwave_pb = { workspace = true }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
+rw_futures_util = { workspace = true }
 ryu = "1.0"
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
@@ -82,12 +91,13 @@ serde_default = "0.1"
 serde_json = "1"
 serde_with = "3"
 smallbitset = "0.7.1"
-speedate = "0.12.0"
+speedate = "0.13.0"
 static_assertions = "1"
 strum = "0.25"
-strum_macros = "0.25"
-sysinfo = { version = "0.29", default-features = false }
+strum_macros = "0.26"
+sysinfo = { version = "0.30", default-features = false }
 thiserror = "1"
+thiserror-ext = { workspace = true }
 tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -100,7 +110,8 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 toml = "0.8"
 tonic = { workspace = true }
 tracing = "0.1"
-tracing-opentelemetry = "0.21"
+tracing-futures = { version = "0.2", features = ["futures-03"] }
+tracing-opentelemetry = { workspace = true }
 tracing-subscriber = "0.3.17"
 twox-hash = "1"
 url = "2"
@@ -113,7 +124,7 @@ tower-layer = "0.3.2"
 tower-service = "0.3.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.15", default-features = false }
+procfs = { version = "0.16", default-features = false }
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -123,6 +134,7 @@ mach2 = "0.4"
 
 [dev-dependencies]
 criterion = { workspace = true }
+expect-test = "1"
 more-asserts = "0.3"
 pretty_assertions = "1"
 rand = "0.8"
@@ -152,10 +164,6 @@ harness = false
 [[bench]]
 name = "bench_array"
 harness = false
-
-[[bin]]
-name = "example-config"
-path = "src/bin/default_config.rs"
 
 [lints]
 workspace = true

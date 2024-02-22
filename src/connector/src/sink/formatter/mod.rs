@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,9 @@ pub use upsert::UpsertFormatter;
 
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
 use super::encoder::template::TemplateEncoder;
-use super::encoder::KafkaConnectParams;
+use super::encoder::{
+    DateHandlingMode, KafkaConnectParams, TimeHandlingMode, TimestamptzHandlingMode,
+};
 use super::redis::{KEY_FORMAT, VALUE_FORMAT};
 use crate::sink::encoder::{
     AvroEncoder, AvroHeader, JsonEncoder, ProtoEncoder, TimestampHandlingMode,
@@ -91,6 +93,7 @@ impl SinkFormatterImpl {
                 format_desc.encode,
             )))
         };
+        let timestamptz_mode = TimestamptzHandlingMode::from_options(&format_desc.options)?;
 
         match format_desc.format {
             SinkFormat::AppendOnly => {
@@ -98,14 +101,23 @@ impl SinkFormatterImpl {
                     JsonEncoder::new(
                         schema.clone(),
                         Some(pk_indices.clone()),
+                        DateHandlingMode::FromCe,
                         TimestampHandlingMode::Milli,
+                        timestamptz_mode,
+                        TimeHandlingMode::Milli,
                     )
                 });
 
                 match format_desc.encode {
                     SinkEncode::Json => {
-                        let val_encoder =
-                            JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
+                        let val_encoder = JsonEncoder::new(
+                            schema,
+                            None,
+                            DateHandlingMode::FromCe,
+                            TimestampHandlingMode::Milli,
+                            timestamptz_mode,
+                            TimeHandlingMode::Milli,
+                        );
                         let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::AppendOnlyJson(formatter))
                     }
@@ -114,7 +126,7 @@ impl SinkFormatterImpl {
                         let descriptor =
                             crate::schema::protobuf::fetch_descriptor(&format_desc.options, None)
                                 .await
-                                .map_err(|e| SinkError::Config(anyhow!("{e:?}")))?;
+                                .map_err(|e| SinkError::Config(anyhow!(e)))?;
                         let val_encoder = ProtoEncoder::new(schema, None, descriptor)?;
                         let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::AppendOnlyProto(formatter))
@@ -163,10 +175,19 @@ impl SinkFormatterImpl {
                         let mut key_encoder = JsonEncoder::new(
                             schema.clone(),
                             Some(pk_indices),
+                            DateHandlingMode::FromCe,
                             TimestampHandlingMode::Milli,
+                            timestamptz_mode,
+                            TimeHandlingMode::Milli,
                         );
-                        let mut val_encoder =
-                            JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
+                        let mut val_encoder = JsonEncoder::new(
+                            schema,
+                            None,
+                            DateHandlingMode::FromCe,
+                            TimestampHandlingMode::Milli,
+                            timestamptz_mode,
+                            TimeHandlingMode::Milli,
+                        );
 
                         if let Some(s) = format_desc.options.get("schemas.enable") {
                             match s.to_lowercase().parse::<bool>() {
@@ -219,7 +240,7 @@ impl SinkFormatterImpl {
                         let (key_schema, val_schema) =
                             crate::schema::avro::fetch_schema(&format_desc.options, topic)
                                 .await
-                                .map_err(|e| SinkError::Config(anyhow!("{e:?}")))?;
+                                .map_err(|e| SinkError::Config(anyhow!(e)))?;
                         let key_encoder = AvroEncoder::new(
                             schema.clone(),
                             Some(pk_indices),

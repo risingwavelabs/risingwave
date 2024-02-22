@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,7 @@ use std::mem::swap;
 
 use futures::pin_mut;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId, TableOption};
-use risingwave_common::error::{internal_error, Result};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::OwnedRow;
@@ -26,15 +25,15 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::ScanRange;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::{Distribution, TableIter};
+use risingwave_storage::table::{TableDistribution, TableIter};
 use risingwave_storage::{dispatch_state_store, StateStore};
 
+use crate::error::Result;
 use crate::executor::join::JoinType;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, BufferChunkExecutor, Executor,
@@ -170,67 +169,16 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
 
         let chunk_size = source.context.get_config().developer.chunk_size;
 
-        let table_id = TableId {
-            table_id: table_desc.table_id,
-        };
-        let column_descs = table_desc
-            .columns
-            .iter()
-            .map(ColumnDesc::from)
-            .collect_vec();
         let column_ids = inner_side_column_ids
             .iter()
             .copied()
             .map(ColumnId::from)
             .collect();
 
-        let order_types: Vec<OrderType> = table_desc
-            .pk
-            .iter()
-            .map(|order| OrderType::from_protobuf(order.get_order_type().unwrap()))
-            .collect();
-
-        let pk_indices = table_desc
-            .pk
-            .iter()
-            .map(|k| k.column_index as usize)
-            .collect_vec();
-
-        let dist_key_in_pk_indices = table_desc
-            .dist_key_in_pk_indices
-            .iter()
-            .map(|&k| k as usize)
-            .collect_vec();
         // Lookup Join always contains distribution key, so we don't need vnode bitmap
-        let distribution = Distribution::all_vnodes(dist_key_in_pk_indices);
-        let table_option = TableOption {
-            retention_seconds: if table_desc.retention_seconds > 0 {
-                Some(table_desc.retention_seconds)
-            } else {
-                None
-            },
-        };
-        let value_indices = table_desc
-            .get_value_indices()
-            .iter()
-            .map(|&k| k as usize)
-            .collect_vec();
-        let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
-        let versioned = table_desc.versioned;
+        let vnodes = Some(TableDistribution::all_vnodes());
         dispatch_state_store!(source.context().state_store(), state_store, {
-            let table = StorageTable::new_partial(
-                state_store,
-                table_id,
-                column_descs,
-                column_ids,
-                order_types,
-                pk_indices,
-                distribution,
-                table_option,
-                value_indices,
-                prefix_hint_len,
-                versioned,
-            );
+            let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
 
             let inner_side_builder = InnerSideExecutorBuilder::new(
                 outer_side_key_types,
@@ -380,9 +328,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
             let datum = if inner_type == outer_type {
                 datum
             } else {
-                return Err(internal_error(format!(
-                    "Join key types are not aligned: LHS: {outer_type:?}, RHS: {inner_type:?}"
-                )));
+                bail!("Join key types are not aligned: LHS: {outer_type:?}, RHS: {inner_type:?}");
             };
 
             scan_range.eq_conds.push(datum);
@@ -407,7 +353,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
                     &pk_prefix,
                     ..,
                     false,
-                    PrefetchOptions::new_for_exhaust_iter(),
+                    PrefetchOptions::default(),
                 )
                 .await?;
 

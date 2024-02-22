@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,12 +14,12 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
@@ -29,8 +29,10 @@ use super::{
     PredicatePushdown, StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
+use crate::error::Result;
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -38,6 +40,7 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::{Cardinality, Order};
 use crate::optimizer::rule::IndexSelectionRule;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
+use crate::TableCatalog;
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -63,18 +66,17 @@ impl LogicalScan {
     /// Create a [`LogicalScan`] node. Used by planner.
     pub fn create(
         table_name: String, // explain-only
-        is_sys_table: bool,
-        table_desc: Rc<TableDesc>,
+        table_catalog: Arc<TableCatalog>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         for_system_time_as_of_proctime: bool,
         table_cardinality: Cardinality,
     ) -> Self {
+        let output_col_idx: Vec<usize> = (0..table_catalog.columns().len()).collect();
         generic::Scan::new(
             table_name,
-            is_sys_table,
-            (0..table_desc.columns.len()).collect(),
-            table_desc,
+            output_col_idx,
+            table_catalog,
             indexes,
             ctx,
             Condition::true_cond(),
@@ -88,10 +90,6 @@ impl LogicalScan {
         &self.core.table_name
     }
 
-    pub fn is_sys_table(&self) -> bool {
-        self.core.is_sys_table
-    }
-
     pub fn for_system_time_as_of_proctime(&self) -> bool {
         self.core.for_system_time_as_of_proctime
     }
@@ -101,9 +99,14 @@ impl LogicalScan {
         self.core.table_cardinality
     }
 
+    // FIXME(kwannoel): Fetch from `table_catalog` + lazily instantiate?
     /// Get a reference to the logical scan's table desc.
     pub fn table_desc(&self) -> &TableDesc {
         self.core.table_desc.as_ref()
+    }
+
+    pub fn table_catalog(&self) -> Arc<TableCatalog> {
+        self.core.table_catalog.clone()
     }
 
     /// Get the descs of the output columns.
@@ -188,7 +191,7 @@ impl LogicalScan {
         {
             let index_scan = self.core.to_index_scan(
                 &index.name,
-                index.index_table.table_desc().into(),
+                index.index_table.clone(),
                 p2s_mapping,
                 index.function_mapping(),
             );
@@ -196,16 +199,6 @@ impl LogicalScan {
         } else {
             None
         }
-    }
-
-    /// used by optimizer (currently `top_n_on_index_rule`) to help reduce useless `chunk_size` at
-    /// executor
-    pub fn set_chunk_size(&mut self, chunk_size: u32) {
-        self.core.chunk_size = Some(chunk_size);
-    }
-
-    pub fn chunk_size(&self) -> Option<u32> {
-        self.core.chunk_size
     }
 
     pub fn primary_key(&self) -> &[ColumnOrder] {
@@ -233,7 +226,7 @@ impl LogicalScan {
         }
 
         let mut inverse_mapping = {
-            let mapping = ColIndexMapping::with_target_size(
+            let mapping = ColIndexMapping::new(
                 self.required_col_idx().iter().map(|i| Some(*i)).collect(),
                 self.table_desc().columns.len(),
             );
@@ -242,16 +235,15 @@ impl LogicalScan {
             for (src, dst) in mapping.mapping_pairs() {
                 inverse_map[dst] = Some(src);
             }
-            ColIndexMapping::with_target_size(inverse_map, mapping.source_size())
+            ColIndexMapping::new(inverse_map, mapping.source_size())
         };
 
         predicate = predicate.rewrite_expr(&mut inverse_mapping);
 
         let scan_without_predicate = generic::Scan::new(
             self.table_name().to_string(),
-            self.is_sys_table(),
             self.required_col_idx().to_vec(),
-            self.core.table_desc.clone(),
+            self.core.table_catalog.clone(),
             self.indexes().to_vec(),
             self.ctx(),
             Condition::true_cond(),
@@ -267,11 +259,10 @@ impl LogicalScan {
     }
 
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
-        generic::Scan::new(
+        generic::Scan::new_inner(
             self.table_name().to_string(),
-            self.is_sys_table(),
             self.output_col_idx().to_vec(),
-            self.core.table_desc.clone(),
+            self.table_catalog(),
             self.indexes().to_vec(),
             self.base.ctx().clone(),
             predicate,
@@ -282,11 +273,10 @@ impl LogicalScan {
     }
 
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
-        generic::Scan::new(
+        generic::Scan::new_inner(
             self.table_name().to_string(),
-            self.is_sys_table(),
             output_col_idx,
-            self.core.table_desc.clone(),
+            self.core.table_catalog.clone(),
             self.indexes().to_vec(),
             self.base.ctx().clone(),
             self.predicate().clone(),
@@ -388,6 +378,12 @@ impl ExprRewritable for LogicalScan {
     }
 }
 
+impl ExprVisitable for LogicalScan {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
+    }
+}
+
 impl PredicatePushdown for LogicalScan {
     fn predicate_pushdown(
         &self,
@@ -396,23 +392,27 @@ impl PredicatePushdown for LogicalScan {
     ) -> PlanRef {
         // If the predicate contains `CorrelatedInputRef` or `now()`. We don't push down.
         // This case could come from the predicate push down before the subquery unnesting.
-        struct HasCorrelated {}
+        struct HasCorrelated {
+            has: bool,
+        }
         impl ExprVisitor for HasCorrelated {
-            type Result = bool;
-
-            fn merge(a: bool, b: bool) -> bool {
-                a | b
-            }
-
-            fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) -> bool {
-                true
+            fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) {
+                self.has = true;
             }
         }
         let non_pushable_predicate: Vec<_> = predicate
             .conjunctions
-            .extract_if(|expr| expr.count_nows() > 0 || HasCorrelated {}.visit_expr(expr))
+            .extract_if(|expr| {
+                if expr.count_nows() > 0 {
+                    true
+                } else {
+                    let mut visitor = HasCorrelated { has: false };
+                    visitor.visit_expr(expr);
+                    visitor.has
+                }
+            })
             .collect();
-        let predicate = predicate.rewrite_expr(&mut ColIndexMapping::with_target_size(
+        let predicate = predicate.rewrite_expr(&mut ColIndexMapping::new(
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
             self.table_desc().columns.len(),
         ));
@@ -435,15 +435,11 @@ impl LogicalScan {
     fn to_batch_inner_with_required(&self, required_order: &Order) -> Result<PlanRef> {
         if self.predicate().always_true() {
             required_order
-                .enforce_if_not_satisfies(BatchSeqScan::new(self.core.clone(), vec![]).into())
+                .enforce_if_not_satisfies(BatchSeqScan::new(self.core.clone(), vec![], None).into())
         } else {
             let (scan_ranges, predicate) = self.predicate().clone().split_to_scan_ranges(
                 self.core.table_desc.clone(),
-                self.base
-                    .ctx()
-                    .session_ctx()
-                    .config()
-                    .get_max_split_range_gap(),
+                self.base.ctx().session_ctx().config().max_split_range_gap() as u64,
             )?;
             let mut scan = self.clone();
             scan.core.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
@@ -453,7 +449,7 @@ impl LogicalScan {
             } else {
                 let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
-                let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges).into();
+                let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges, None).into();
                 if !predicate.always_true() {
                     plan = BatchFilter::new(generic::Filter::new(predicate, plan)).into();
                 }
@@ -523,14 +519,12 @@ impl ToBatch for LogicalScan {
 
 impl ToStream for LogicalScan {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        if self.is_sys_table() {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "streaming on system table is not allowed".to_string(),
-                None.into(),
-            )));
-        }
         if self.predicate().always_true() {
-            Ok(StreamTableScan::new(self.core.clone()).into())
+            Ok(StreamTableScan::new_with_stream_scan_type(
+                self.core.clone(),
+                ctx.stream_scan_type(),
+            )
+            .into())
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);
@@ -545,12 +539,6 @@ impl ToStream for LogicalScan {
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        if self.is_sys_table() {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "streaming on system table is not allowed".to_string(),
-                None.into(),
-            )));
-        }
         match self.base.stream_key().is_none() {
             true => {
                 let mut col_ids = HashSet::new();

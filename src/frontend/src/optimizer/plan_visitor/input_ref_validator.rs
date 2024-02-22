@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,24 +23,17 @@ use crate::optimizer::plan_visitor::PlanVisitor;
 
 struct ExprVis<'a> {
     schema: &'a Schema,
+    string: Option<String>,
 }
 
 impl ExprVisitor for ExprVis<'_> {
-    type Result = Option<String>;
-
-    fn visit_input_ref(&mut self, input_ref: &crate::expr::InputRef) -> Option<String> {
+    fn visit_input_ref(&mut self, input_ref: &crate::expr::InputRef) {
         if input_ref.data_type != self.schema[input_ref.index].data_type {
-            Some(format!(
+            self.string.replace(format!(
                 "InputRef#{} has type {}, but its type is {} in the input schema",
                 input_ref.index, input_ref.data_type, self.schema[input_ref.index].data_type
-            ))
-        } else {
-            None
+            ));
         }
-    }
-
-    fn merge(a: Option<String>, b: Option<String>) -> Option<String> {
-        a.or(b)
     }
 }
 
@@ -71,8 +64,10 @@ macro_rules! visit_filter {
                     let input = plan.input();
                     let mut vis = ExprVis {
                         schema: input.schema(),
+                        string: None,
                     };
-                    plan.predicate().visit_expr(&mut vis).or_else(|| {
+                    plan.predicate().visit_expr(&mut vis);
+                    vis.string.or_else(|| {
                         self.visit(input)
                     })
                 }
@@ -89,11 +84,12 @@ macro_rules! visit_project {
                     let input = plan.input();
                     let mut vis = ExprVis {
                         schema: input.schema(),
+                        string: None,
                     };
                     for expr in plan.exprs() {
-                        let res = vis.visit_expr(expr);
-                        if res.is_some() {
-                            return res;
+                        vis.visit_expr(expr);
+                        if vis.string.is_some() {
+                            return vis.string;
                         }
                     }
                     self.visit(input)
@@ -129,8 +125,10 @@ impl PlanVisitor for InputRefValidator {
         let input_schema = Schema { fields };
         let mut vis = ExprVis {
             schema: &input_schema,
+            string: None,
         };
-        plan.predicate().visit_expr(&mut vis)
+        plan.predicate().visit_expr(&mut vis);
+        vis.string
     }
 
     // TODO: add more checks

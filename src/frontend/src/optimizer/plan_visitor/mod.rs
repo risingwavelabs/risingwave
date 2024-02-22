@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use paste::paste;
-mod max_one_row_visitor;
-pub use max_one_row_visitor::*;
+mod apply_visitor;
+pub use apply_visitor::*;
 mod plan_correlated_id_finder;
 pub use plan_correlated_id_finder::*;
 mod share_parent_counter;
@@ -37,6 +37,8 @@ mod side_effect_visitor;
 pub use side_effect_visitor::*;
 mod cardinality_visitor;
 pub use cardinality_visitor::*;
+mod jsonb_stream_key_checker;
+pub use jsonb_stream_key_checker::*;
 
 use crate::for_all_plan_nodes;
 use crate::optimizer::plan_node::*;
@@ -153,6 +155,7 @@ macro_rules! impl_has_variant {
 
 impl_has_variant! {
     LogicalApply,
+    LogicalMaxOneRow,
     LogicalOverWindow,
     LogicalScan,
     LogicalSource,

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{DataType, Datum};
 
+use crate::sig::FuncBuilder;
 use crate::{ExprError, Result};
 
 // aggregate definition
@@ -131,18 +132,16 @@ pub fn build_retractable(agg: &AggCall) -> Result<BoxedAggregateFunction> {
     build(agg, false)
 }
 
-/// Build an `Aggregator` from `AggCall`.
+/// Build an aggregate function.
+///
+/// If `prefer_append_only` is true, and both append-only and retractable implementations exist,
+/// the append-only version will be used.
 ///
 /// NOTE: This function ignores argument indices, `column_orders`, `filter` and `distinct` in
 /// `AggCall`. Such operations should be done in batch or streaming executors.
-pub fn build(agg: &AggCall, append_only: bool) -> Result<BoxedAggregateFunction> {
-    let desc = crate::sig::FUNCTION_REGISTRY
-        .get_aggregate(
-            agg.kind,
-            agg.args.arg_types(),
-            &agg.return_type,
-            append_only,
-        )
+pub fn build(agg: &AggCall, prefer_append_only: bool) -> Result<BoxedAggregateFunction> {
+    let sig = crate::sig::FUNCTION_REGISTRY
+        .get(agg.kind, agg.args.arg_types(), &agg.return_type)
         .ok_or_else(|| {
             ExprError::UnsupportedFunction(format!(
                 "{}({}) -> {}",
@@ -152,5 +151,13 @@ pub fn build(agg: &AggCall, append_only: bool) -> Result<BoxedAggregateFunction>
             ))
         })?;
 
-    desc.build_aggregate(agg)
+    if let FuncBuilder::Aggregate {
+        append_only: Some(f),
+        ..
+    } = sig.build
+        && prefer_append_only
+    {
+        return f(agg);
+    }
+    sig.build_aggregate(agg)
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+use std::sync::LazyLock;
+
 use itertools::Itertools as _;
-use risingwave_common::error::ErrorCode;
+use parse_display::Display;
 use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_common::util::iter_util::ZipEqFast;
-pub use risingwave_expr::sig::cast::*;
 
+use crate::error::ErrorCode;
 use crate::expr::{Expr as _, ExprImpl, InputRef, Literal};
 
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
@@ -164,6 +167,88 @@ pub fn cast_map_array() -> Vec<(DataTypeName, DataTypeName, CastContext)> {
         .map(|((src, target), ctx)| (*src, *target, *ctx))
         .collect_vec()
 }
+
+#[derive(Clone, Debug)]
+pub struct CastSig {
+    pub from_type: DataTypeName,
+    pub to_type: DataTypeName,
+    pub context: CastContext,
+}
+
+/// The context a cast operation is invoked in. An implicit cast operation is allowed in a context
+/// that allows explicit casts, but not vice versa. See details in
+/// [PG](https://www.postgresql.org/docs/current/catalog-pg-cast.html).
+#[derive(Clone, Copy, Debug, Display, Eq, Ord, PartialEq, PartialOrd)]
+pub enum CastContext {
+    #[display("i")]
+    Implicit,
+    #[display("a")]
+    Assign,
+    #[display("e")]
+    Explicit,
+}
+
+pub type CastMap = BTreeMap<(DataTypeName, DataTypeName), CastContext>;
+
+pub fn cast_sigs() -> impl Iterator<Item = CastSig> {
+    CAST_MAP
+        .iter()
+        .map(|((from_type, to_type), context)| CastSig {
+            from_type: *from_type,
+            to_type: *to_type,
+            context: *context,
+        })
+}
+
+pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
+    // cast rules:
+    // 1. implicit cast operations in PG are organized in 3 sequences,
+    //    with the reverse direction being assign cast operations.
+    //    https://github.com/postgres/postgres/blob/e0064f0ff6dfada2695330c6bc1945fa7ae813be/src/include/catalog/pg_cast.dat#L18-L20
+    //    1. int2 -> int4 -> int8 -> numeric -> float4 -> float8
+    //    2. date -> timestamp -> timestamptz
+    //    3. time -> interval
+    // 2. any -> varchar is assign and varchar -> any is explicit
+    // 3. jsonb -> bool/number is explicit
+    // 4. int32 <-> bool is explicit
+    // 5. timestamp/timestamptz -> time is assign
+    // 6. int2/int4/int8 -> int256 is implicit and int256 -> float8 is explicit
+    use DataTypeName::*;
+    const CAST_TABLE: &[(&str, DataTypeName)] = &[
+        // 123456789ABCDEF
+        (". e            a ", Boolean),     // 0
+        (" .iiiiii       a ", Int16),       // 1
+        ("ea.iiiii       a ", Int32),       // 2
+        (" aa.iiii       a ", Int64),       // 3
+        (" aaa.ii        a ", Decimal),     // 4
+        (" aaaa.i        a ", Float32),     // 5
+        (" aaaaa.        a ", Float64),     // 6
+        ("      e.       a ", Int256),      // 7
+        ("        .ii    a ", Date),        // 8
+        ("        a.ia   a ", Timestamp),   // 9
+        ("        aa.a   a ", Timestamptz), // A
+        ("           .i  a ", Time),        // B
+        ("           a.  a ", Interval),    // C
+        ("eeeeeee      . a ", Jsonb),       // D
+        ("              .a ", Bytea),       // E
+        ("eeeeeeeeeeeeeee. ", Varchar),     // F
+        ("   e            .", Serial),
+    ];
+    let mut map = BTreeMap::new();
+    for (row, source) in CAST_TABLE {
+        for ((_, target), c) in CAST_TABLE.iter().zip_eq_fast(row.bytes()) {
+            let context = match c {
+                b' ' | b'.' => continue,
+                b'i' => CastContext::Implicit,
+                b'a' => CastContext::Assign,
+                b'e' => CastContext::Explicit,
+                _ => unreachable!("invalid cast table char"),
+            };
+            map.insert((*source, *target), context);
+        }
+    }
+    map
+});
 
 #[cfg(test)]
 mod tests {

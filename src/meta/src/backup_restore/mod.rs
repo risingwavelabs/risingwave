@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,10 @@ mod backup_manager;
 pub use backup_manager::*;
 mod error;
 mod meta_snapshot_builder;
+mod meta_snapshot_builder_v2;
 mod metrics;
 mod restore;
+mod restore_impl;
 mod utils;
 
 pub use restore::*;

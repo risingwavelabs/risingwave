@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::list_array::display_for_explain;
 use risingwave_common::types::{literal_type_match, DataType, Datum, ToText};
 use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
 use risingwave_pb::expr::expr_node::RexNode;
@@ -60,7 +59,7 @@ impl std::fmt::Debug for Literal {
                         "'{}'",
                         v.as_scalar_ref_impl().to_text_with_type(&data_type)
                     ),
-                    DataType::List { .. } => write!(f, "{}", display_for_explain(v.as_list())),
+                    DataType::List { .. } => write!(f, "{}", v.as_list().display_for_explain()),
                 },
             }?;
             write!(f, ":{:?}", data_type)
@@ -94,7 +93,7 @@ impl Literal {
 
     pub(super) fn from_expr_proto(
         proto: &risingwave_pb::expr::ExprNode,
-    ) -> risingwave_common::error::Result<Self> {
+    ) -> crate::error::Result<Self> {
         let data_type = proto.get_return_type()?;
         Ok(Self {
             data: value_encoding_to_literal(&proto.rex_node, &data_type.into())?,
@@ -127,7 +126,7 @@ pub fn literal_to_value_encoding(d: &Datum) -> RexNode {
 fn value_encoding_to_literal(
     proto: &Option<RexNode>,
     ty: &DataType,
-) -> risingwave_common::error::Result<Datum> {
+) -> crate::error::Result<Datum> {
     if let Some(rex_node) = proto {
         if let RexNode::Constant(prost_datum) = rex_node {
             let datum = Datum::from_protobuf(prost_datum, ty)?;
@@ -174,11 +173,7 @@ mod tests {
 
     #[test]
     fn test_list_to_value_encoding() {
-        let value = ListValue::new(vec![
-            Some(ScalarImpl::Utf8("1".into())),
-            Some(ScalarImpl::Utf8("2".into())),
-            Some(ScalarImpl::Utf8("".into())),
-        ]);
+        let value = ListValue::from_iter(["1", "2", ""]);
         let data = Some(ScalarImpl::List(value.clone()));
         let node = literal_to_value_encoding(&data);
         if let RexNode::Constant(prost) = node {

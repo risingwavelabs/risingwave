@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::anyhow;
+use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::user::UserInfo;
 
 use super::database::DatabaseManager;
@@ -34,7 +35,7 @@ pub struct UserManager {
 
 impl UserManager {
     pub async fn new(env: MetaSrvEnv, database: &DatabaseManager) -> MetaResult<Self> {
-        let users = UserInfo::list(env.meta_store()).await?;
+        let users = UserInfo::list(env.meta_store_checked()).await?;
         let user_info = BTreeMap::from_iter(users.into_iter().map(|user| (user.id, user)));
 
         let mut user_manager = Self {
@@ -52,7 +53,13 @@ impl UserManager {
             .chain(database.sources.values().map(|source| source.owner))
             .chain(database.sinks.values().map(|sink| sink.owner))
             .chain(database.indexes.values().map(|index| index.owner))
-            .chain(database.tables.values().map(|table| table.owner))
+            .chain(
+                database
+                    .tables
+                    .values()
+                    .filter(|table| table.table_type() != TableType::Internal)
+                    .map(|table| table.owner),
+            )
             .chain(database.views.values().map(|view| view.owner))
             .for_each(|owner_id| user_manager.increase_ref(owner_id));
 
@@ -111,7 +118,11 @@ impl UserManager {
     pub fn decrease_ref_count(&mut self, user_id: UserId, count: usize) {
         match self.catalog_create_ref_count.entry(user_id) {
             Entry::Occupied(mut o) => {
-                assert!(*o.get_mut() >= count);
+                assert!(
+                    *o.get() >= count,
+                    "Attempted to decrease ref_count by {} but current ref_count is only {}. UserId: {:?}",
+                    count, *o.get(), user_id
+                );
                 *o.get_mut() -= count;
                 if *o.get() == 0 {
                     o.remove_entry();

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,15 +22,15 @@ pub type Result<T> = std::result::Result<T, TraceError>;
 #[derive(Error, Debug)]
 pub enum TraceError {
     #[error("failed to encode, {0}")]
-    Encode(EncodeError),
+    Encode(#[from] EncodeError),
 
     #[error("failed to decode, {0}")]
-    Decode(DecodeError),
+    Decode(#[from] DecodeError),
 
     #[error("failed to read or write {0}")]
-    Io(std::io::Error),
+    Io(#[from] std::io::Error),
 
-    #[error("invalid magic bytes, expected {expected:?}, found {found:?}")]
+    #[error("invalid magic bytes, expected {expected}, found {found}")]
     MagicBytes { expected: u32, found: u32 },
 
     #[error("try to close a non-existing record {0}")]
@@ -62,22 +62,7 @@ pub enum TraceError {
 
     #[error("failed to flush")]
     FlushFailed,
-}
 
-impl From<EncodeError> for TraceError {
-    fn from(err: EncodeError) -> Self {
-        TraceError::Encode(err)
-    }
-}
-
-impl From<DecodeError> for TraceError {
-    fn from(err: DecodeError) -> Self {
-        TraceError::Decode(err)
-    }
-}
-
-impl From<std::io::Error> for TraceError {
-    fn from(err: std::io::Error) -> Self {
-        TraceError::Io(err)
-    }
+    #[error("failed to try_flush")]
+    TryFlushFailed,
 }

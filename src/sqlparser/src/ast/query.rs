@@ -189,6 +189,7 @@ impl fmt::Display for Select {
 /// An `ALL`, `DISTINCT` or `DISTINCT ON (expr, ...)` after `SELECT`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[expect(clippy::enum_variant_names)]
 pub enum Distinct {
     /// An optional parameter that returns all matching rows.
     #[default]

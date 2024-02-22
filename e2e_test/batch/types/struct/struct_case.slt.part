@@ -24,7 +24,7 @@ NULL
 query I
 SELECT CASE WHEN 1=0 THEN NULL ELSE ROW(NULL) END
 ----
-(NULL)
+()
 
 # now with a table
 query II

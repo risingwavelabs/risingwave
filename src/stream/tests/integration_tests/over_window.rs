@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use risingwave_expr::window_function::{
     Frame, FrameBound, FrameExclusion, WindowFuncCall, WindowFuncKind,
 };
 use risingwave_stream::executor::monitor::StreamingMetrics;
-use risingwave_stream::executor::{OverWindowExecutor, OverWindowExecutorArgs};
+use risingwave_stream::executor::{ExecutorInfo, OverWindowExecutor, OverWindowExecutorArgs};
 
 use crate::prelude::*;
 
@@ -56,6 +56,13 @@ async fn create_executor<S: StateStore>(
         OrderType::ascending(),
     ];
 
+    let output_schema = {
+        let mut fields = input_schema.fields.clone();
+        calls.iter().for_each(|call| {
+            fields.push(Field::unnamed(call.return_type.clone()));
+        });
+        Schema { fields }
+    };
     let output_pk_indices = vec![2];
 
     let state_table = StateTable::new_without_distribution(
@@ -69,10 +76,15 @@ async fn create_executor<S: StateStore>(
 
     let (tx, source) = MockSource::channel(input_schema, input_pk_indices.clone());
     let executor = OverWindowExecutor::new(OverWindowExecutorArgs {
+        actor_ctx: ActorContext::for_test(123),
+        info: ExecutorInfo {
+            schema: output_schema,
+            pk_indices: output_pk_indices,
+            identity: "OverWindowExecutor".to_string(),
+        },
+
         input: source.boxed(),
-        actor_ctx: ActorContext::create(123),
-        pk_indices: output_pk_indices,
-        executor_id: 1,
+
         calls,
         partition_key_indices,
         order_key_indices,

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,6 +32,11 @@ pub fn infer_show_object(objects: &ShowObject) -> Vec<PgFieldDescriptor> {
             ),
             PgFieldDescriptor::new(
                 "Is Hidden".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Description".to_owned(),
                 DataType::Varchar.to_oid(),
                 DataType::Varchar.type_len(),
             ),
@@ -156,10 +161,93 @@ pub fn infer_show_object(objects: &ShowObject) -> Vec<PgFieldDescriptor> {
                 DataType::Varchar.type_len(),
             ),
         ],
+        ShowObject::ProcessList => vec![
+            PgFieldDescriptor::new(
+                "Id".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "User".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Host".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Database".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Time".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Info".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+        ],
         _ => vec![PgFieldDescriptor::new(
             "Name".to_owned(),
             DataType::Varchar.to_oid(),
             DataType::Varchar.type_len(),
         )],
+    }
+}
+
+pub fn infer_show_variable(name: &str) -> Vec<PgFieldDescriptor> {
+    if name.eq_ignore_ascii_case("ALL") {
+        vec![
+            PgFieldDescriptor::new(
+                "Name".to_string(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Setting".to_string(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Description".to_string(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+        ]
+    } else if name.eq_ignore_ascii_case("PARAMETERS") {
+        vec![
+            PgFieldDescriptor::new(
+                "Name".to_string(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Value".to_string(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Description".to_string(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Mutable".to_string(),
+                DataType::Boolean.to_oid(),
+                DataType::Boolean.type_len(),
+            ),
+        ]
+    } else {
+        vec![PgFieldDescriptor::new(
+            name.to_ascii_lowercase(),
+            DataType::Varchar.to_oid(),
+            DataType::Varchar.type_len(),
+        )]
     }
 }

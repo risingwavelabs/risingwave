@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::MemoryContext;
@@ -28,6 +27,7 @@ use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 
+use crate::error::{BatchError, Result};
 use crate::executor::aggregation::build as build_agg;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
@@ -212,7 +212,7 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
 }
 
 impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         // hash map for each agg groups
         let mut groups = AggHashMap::<K, _>::with_hasher_in(
@@ -308,8 +308,8 @@ mod tests {
     use std::sync::Arc;
 
     use futures_async_stream::for_await;
-    use prometheus::IntGauge;
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::metrics::LabelGuardedIntGauge;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::PbDataType;
@@ -323,7 +323,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_int32_grouped() {
-        let parent_mem = MemoryContext::root(IntGauge::new("root_memory_usage", " ").unwrap());
+        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge());
         {
             let src_exec = Box::new(MockExecutor::with_chunk(
                 DataChunk::from_pretty(
@@ -370,7 +370,7 @@ mod tests {
 
             let mem_context = MemoryContext::new(
                 Some(parent_mem.clone()),
-                IntGauge::new("memory_usage", " ").unwrap(),
+                LabelGuardedIntGauge::<4>::test_int_gauge(),
             );
             let actual_exec = HashAggExecutorBuilder::deserialize(
                 &agg_prost,

@@ -40,6 +40,11 @@
     SELECT null < null;
   expected_outputs:
   - logical_plan
+- name: hex bitwise-or bin
+  sql: |
+    SELECT 0x25 | 0b110;
+  expected_outputs:
+  - logical_plan
 - name: bind is distinct from
   sql: |
     SELECT 1 IS DISTINCT FROM 2

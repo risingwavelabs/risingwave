@@ -1,30 +1,18 @@
 ---
 version: '3'
 services:
-  compactor-0:
+  risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml
-      service: compactor-0
-  compute-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: compute-node-0
+      service: risingwave-standalone
   etcd-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: etcd-0
-  frontend-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: frontend-node-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: grafana-0
-  meta-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: meta-node-0
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -33,10 +21,6 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
-  connector-node:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: connector-node
 
   #=================== TiDB & TiCDC components ==================
   ticdc-controller:
@@ -71,6 +55,7 @@ services:
       - --addr=0.0.0.0:8300
       - --pd=http://pd:2379
       - --advertise-addr=ticdc-capturer0:8300
+      - --tz=UTC
     depends_on:
       - pd
       - "tidb"
@@ -205,24 +190,17 @@ services:
     restart: always
     container_name: datagen
 
-  init_tidb:
-    image: mysql:8.0
-    depends_on:
-      - tidb
-    command:
-      - /bin/sh
-      - -c
-      - "mysql --password= -h tidb --port 4000 -u root test < tidb_create_tables.sql &&
-         sleep 10 &&
-         mysql --password= -h tidb --port 4000 -u root test < tidb_prepare.sql"
+  mysql:
+    image: mysql:latest
+    command: tail -f /dev/null
     volumes:
       - "./tidb_create_tables.sql:/tidb_create_tables.sql"
       - "./tidb_prepare.sql:/tidb_prepare.sql"
-    container_name: init_tidb
+    container_name: mysql
     restart: on-failure
 
 volumes:
-  compute-node-0:
+  risingwave-standalone:
     external: false
   etcd-0:
     external: false
@@ -234,3 +212,4 @@ volumes:
     external: false
   message_queue:
     external: false
+name: risingwave-compose

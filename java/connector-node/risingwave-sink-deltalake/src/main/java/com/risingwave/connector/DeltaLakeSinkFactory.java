@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -49,7 +49,8 @@ public class DeltaLakeSinkFactory implements SinkFactory {
     @Override
     public void validate(
             TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
-        if (sinkType != SinkType.APPEND_ONLY && sinkType != SinkType.FORCE_APPEND_ONLY) {
+        if (sinkType != SinkType.SINK_TYPE_APPEND_ONLY
+                && sinkType != SinkType.SINK_TYPE_FORCE_APPEND_ONLY) {
             throw Status.INVALID_ARGUMENT
                     .withDescription("only append-only delta lake sink is supported")
                     .asRuntimeException();

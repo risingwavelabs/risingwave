@@ -24,3 +24,15 @@ updates:
       patterns:
         - "tonic*"
         - "prost*"
+    opentelemetry:
+      patterns:
+        - "opentelemetry"
+        - "opentelemetry*"
+        - "tracing-opentelemetry"
+    mysql:
+      patterns:
+        - "mysql_common"
+        - "mysql_async"
+    google-cloud:
+      patterns:
+        - "google-cloud*"

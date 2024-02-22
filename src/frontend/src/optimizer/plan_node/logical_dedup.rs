@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::error::Result;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 use super::generic::TopNLimit;
@@ -25,6 +24,8 @@ use super::{
     PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, StreamDedup,
     StreamGroupTopN, ToBatch, ToStream, ToStreamContext,
 };
+use crate::error::Result;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::Condition;
 
@@ -138,6 +139,8 @@ impl ToBatch for LogicalDedup {
 }
 
 impl ExprRewritable for LogicalDedup {}
+
+impl ExprVisitable for LogicalDedup {}
 
 impl ColPrunable for LogicalDedup {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {

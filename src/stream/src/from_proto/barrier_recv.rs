@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ use crate::executor::BarrierRecvExecutor;
 
 pub struct BarrierRecvExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for BarrierRecvExecutorBuilder {
     type Node = BarrierRecvNode;
 
@@ -28,7 +27,6 @@ impl ExecutorBuilder for BarrierRecvExecutorBuilder {
         params: ExecutorParams,
         _node: &Self::Node,
         _store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         assert!(
             params.input.is_empty(),
@@ -36,14 +34,10 @@ impl ExecutorBuilder for BarrierRecvExecutorBuilder {
         );
 
         let (sender, barrier_receiver) = unbounded_channel();
-        stream
-            .context
-            .lock_barrier_manager()
+        params
+            .local_barrier_manager
             .register_sender(params.actor_context.id, sender);
 
-        Ok(
-            BarrierRecvExecutor::new(params.actor_context, barrier_receiver, params.executor_id)
-                .boxed(),
-        )
+        Ok(BarrierRecvExecutor::new(params.actor_context, params.info, barrier_receiver).boxed())
     }
 }

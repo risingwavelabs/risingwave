@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,38 +13,39 @@
 // limitations under the License.
 
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::types::{JsonbRef, JsonbVal, ScalarImpl, F32, F64};
+use risingwave_common::types::{Datum, JsonbVal};
 use risingwave_expr::aggregate::AggStateDyn;
+use risingwave_expr::expr::Context;
 use risingwave_expr::{aggregate, ExprError, Result};
 
-#[aggregate("jsonb_agg(boolean) -> jsonb")]
-#[aggregate("jsonb_agg(*int) -> jsonb")]
-#[aggregate("jsonb_agg(*float) -> jsonb")]
-#[aggregate("jsonb_agg(varchar) -> jsonb")]
-#[aggregate("jsonb_agg(jsonb) -> jsonb")]
-fn jsonb_agg(state: &mut JsonbArrayState, input: Option<impl ToJson>) {
-    match input {
-        Some(input) => input.add_to(&mut state.0),
-        None => state.0.add_null(),
-    }
+use crate::scalar::ToJsonb;
+
+/// Collects all the input values, including nulls, into a JSON array.
+/// Values are converted to JSON as per `to_jsonb`.
+#[aggregate("jsonb_agg(*) -> jsonb")]
+fn jsonb_agg(
+    state: &mut JsonbArrayState,
+    input: Option<impl ToJsonb>,
+    ctx: &Context,
+) -> Result<()> {
+    input.add_to(&ctx.arg_types[0], &mut state.0)?;
+    Ok(())
 }
 
-#[aggregate("jsonb_object_agg(varchar, boolean) -> jsonb")]
-#[aggregate("jsonb_object_agg(varchar, *int) -> jsonb")]
-#[aggregate("jsonb_object_agg(varchar, *float) -> jsonb")]
-#[aggregate("jsonb_object_agg(varchar, varchar) -> jsonb")]
-#[aggregate("jsonb_object_agg(varchar, jsonb) -> jsonb")]
+/// Collects all the key/value pairs into a JSON object.
+/// // Key arguments are coerced to text;
+/// value arguments are converted as per `to_jsonb`.
+/// Values can be null, but keys cannot.
+#[aggregate("jsonb_object_agg(varchar, *) -> jsonb")]
 fn jsonb_object_agg(
     state: &mut JsonbObjectState,
     key: Option<&str>,
-    value: Option<impl ToJson>,
+    value: Option<impl ToJsonb>,
+    ctx: &Context,
 ) -> Result<()> {
     let key = key.ok_or(ExprError::FieldNameNull)?;
     state.0.add_string(key);
-    match value {
-        Some(value) => value.add_to(&mut state.0),
-        None => state.0.add_null(),
-    }
+    value.add_to(&ctx.arg_types[1], &mut state.0)?;
     Ok(())
 }
 
@@ -69,13 +70,13 @@ impl Default for JsonbArrayState {
 }
 
 /// Finishes aggregation and returns the result.
-impl From<&JsonbArrayState> for ScalarImpl {
+impl From<&JsonbArrayState> for Datum {
     fn from(builder: &JsonbArrayState) -> Self {
         // TODO: avoid clone
         let mut builder = builder.0.clone();
         builder.end_array();
         let jsonb: JsonbVal = builder.finish().into();
-        jsonb.into()
+        Some(jsonb.into())
     }
 }
 
@@ -100,65 +101,12 @@ impl Default for JsonbObjectState {
 }
 
 /// Finishes aggregation and returns the result.
-impl From<&JsonbObjectState> for ScalarImpl {
+impl From<&JsonbObjectState> for Datum {
     fn from(builder: &JsonbObjectState) -> Self {
         // TODO: avoid clone
         let mut builder = builder.0.clone();
         builder.end_object();
         let jsonb: JsonbVal = builder.finish().into();
-        jsonb.into()
-    }
-}
-
-/// Values that can be converted to JSON.
-trait ToJson {
-    fn add_to(self, builder: &mut jsonbb::Builder);
-}
-
-impl ToJson for bool {
-    fn add_to(self, builder: &mut jsonbb::Builder) {
-        builder.add_bool(self);
-    }
-}
-
-impl ToJson for i16 {
-    fn add_to(self, builder: &mut jsonbb::Builder) {
-        builder.add_i64(self as _);
-    }
-}
-
-impl ToJson for i32 {
-    fn add_to(self, builder: &mut jsonbb::Builder) {
-        builder.add_i64(self as _);
-    }
-}
-
-impl ToJson for i64 {
-    fn add_to(self, builder: &mut jsonbb::Builder) {
-        builder.add_i64(self);
-    }
-}
-
-impl ToJson for F32 {
-    fn add_to(self, builder: &mut jsonbb::Builder) {
-        builder.add_f64(self.0 as f64);
-    }
-}
-
-impl ToJson for F64 {
-    fn add_to(self, builder: &mut jsonbb::Builder) {
-        builder.add_f64(self.0);
-    }
-}
-
-impl ToJson for &str {
-    fn add_to(self, builder: &mut jsonbb::Builder) {
-        builder.add_string(self);
-    }
-}
-
-impl ToJson for JsonbRef<'_> {
-    fn add_to(self, builder: &mut jsonbb::Builder) {
-        builder.add_value(self.into());
+        Some(jsonb.into())
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,6 +32,8 @@ const DEFAULT_CGROUP_MAX_INDICATOR: &str = "max";
 mod runtime {
     use std::env;
     use std::path::Path;
+
+    use thiserror_ext::AsReport;
 
     use super::util::parse_controller_enable_file_for_cgroup_v2;
     use super::CgroupVersion;
@@ -119,7 +121,7 @@ mod runtime {
             Ok(value) => value,
             Err(err) => {
                 tracing::warn!(
-                    err = err.to_string(),
+                    error = %err.as_report(),
                     cgroup_version = ?cgroup_version,
                     "failed to get {desc} in container, use system value instead"
                 );
@@ -130,7 +132,7 @@ mod runtime {
 }
 
 pub mod memory {
-    use sysinfo::{System, SystemExt};
+    use sysinfo::System;
 
     use super::runtime::get_resource;
 
@@ -232,6 +234,8 @@ pub mod memory {
 pub mod cpu {
     use std::thread;
 
+    use thiserror_ext::AsReport;
+
     use super::runtime::get_resource;
     use super::util::parse_error;
 
@@ -281,7 +285,10 @@ pub mod cpu {
     pub fn get_system_cpu() -> f32 {
         match thread::available_parallelism() {
             Ok(available_parallelism) => available_parallelism.get() as f32,
-            Err(e) => panic!("Failed to get available parallelism, error: {}", e),
+            Err(e) => panic!(
+                "Failed to get available parallelism, error: {}",
+                e.as_report()
+            ),
         }
     }
 

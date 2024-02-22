@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,8 +29,8 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
-    PkIndices, PkIndicesRef, StreamExecutorResult,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
+    ExecutorInfo, Message, PkIndicesRef, StreamExecutorResult,
 };
 use crate::task::AtomicU64Ref;
 
@@ -41,9 +41,7 @@ pub struct AppendOnlyDedupExecutor<S: StateStore> {
     state_table: StateTable<S>,
     cache: DedupCache<OwnedRow>,
 
-    pk_indices: PkIndices,
-    identity: String,
-    schema: Schema,
+    info: ExecutorInfo,
     ctx: ActorContextRef,
 }
 
@@ -51,22 +49,18 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
     pub fn new(
         input: BoxedExecutor,
         state_table: StateTable<S>,
-        pk_indices: PkIndices,
-        executor_id: u64,
+        info: ExecutorInfo,
         ctx: ActorContextRef,
         watermark_epoch: AtomicU64Ref,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        let schema = input.schema().clone();
         let metrics_info =
             MetricsInfo::new(metrics, state_table.table_id(), ctx.id, "AppendOnly Dedup");
         Self {
             input: Some(input),
             state_table,
             cache: DedupCache::new(watermark_epoch, metrics_info),
-            pk_indices,
-            identity: format!("AppendOnlyDedupExecutor {:X}", executor_id),
-            schema,
+            info,
             ctx,
         }
     }
@@ -81,8 +75,6 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
-
-        let mut commit_data = false;
 
         #[for_await]
         for msg in input {
@@ -133,20 +125,13 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                         let chunk = StreamChunk::with_visibility(ops, columns, vis);
                         self.state_table.write_chunk(chunk.clone());
 
-                        commit_data = true;
-
                         yield Message::Chunk(chunk);
                     }
+                    self.state_table.try_flush().await?;
                 }
 
                 Message::Barrier(barrier) => {
-                    if commit_data {
-                        // Only commit when we have new data in this epoch.
-                        self.state_table.commit(barrier.epoch).await?;
-                        commit_data = false;
-                    } else {
-                        self.state_table.commit_no_data_expected(barrier.epoch);
-                    }
+                    self.state_table.commit(barrier.epoch).await?;
 
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         let (_prev_vnode_bitmap, cache_may_stale) =
@@ -206,15 +191,15 @@ impl<S: StateStore> Executor for AppendOnlyDedupExecutor<S> {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        &self.identity
+        &self.info.identity
     }
 }
 
@@ -258,13 +243,17 @@ mod tests {
         )
         .await;
 
-        let (mut tx, input) = MockSource::channel(schema, pk_indices.clone());
+        let (mut tx, input) = MockSource::channel(schema.clone(), pk_indices.clone());
+        let info = ExecutorInfo {
+            schema,
+            pk_indices,
+            identity: "AppendOnlyDedupExecutor".to_string(),
+        };
         let mut dedup_executor = Box::new(AppendOnlyDedupExecutor::new(
             Box::new(input),
             state_table,
-            pk_indices,
-            1,
-            ActorContext::create(123),
+            info,
+            ActorContext::for_test(123),
             Arc::new(AtomicU64::new(0)),
             Arc::new(StreamingMetrics::unused()),
         ))

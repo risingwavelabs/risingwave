@@ -1,0 +1,129 @@
+# Some exprs on `timestamptz` are implemented by a chain of 3 steps:
+# * convert `timestamptz` into naive `timestamp` in the given zone
+# * perform actual operation on the naive `timestamp`
+# * convert naive `timestamp` in the given zone back to `timestamptz`
+#
+# This can lead to unintuitive results, because the first and last steps are not perfect inverse.
+
+# Two different `timestamptz` values collapse into the same naive `timestamp`.
+query T
+select
+  '2023-11-05 08:40:00Z'::timestamptz AT TIME ZONE 'US/Pacific',
+  '2023-11-05 09:40:00Z'::timestamptz AT TIME ZONE 'US/Pacific';
+----
+2023-11-05 01:40:00 2023-11-05 01:40:00
+
+# When ambiguous, the `timestamptz` after a jump-back transition is returned.
+query T
+select '2023-11-05 01:40:00'::timestamp AT TIME ZONE 'US/Pacific';
+----
+2023-11-05 09:40:00+00:00
+
+# Tests below are about exprs following the 3-step pattern:
+# * `date_trunc(field, timestamptz, zone)` -> `timestamptz`
+# * `timestamptz + interval` -> `timestamptz`
+#   * Also used by `interval + timestamptz` and `timestamptz - interval`
+
+# (A) intuitive cases without anomalies observed (but require special care behind the scenes)
+
+query R
+with t(id, v) as (values
+	('a', '2023-11-05 01:40:00-07:00'::timestamptz),
+	('b', '2023-11-05 01:40:00-08:00'::timestamptz))
+select extract(epoch from date_trunc('hour', v, 'US/Pacific')) from t order by id;
+----
+1699171200.000000
+1699174800.000000
+
+statement ok
+set timezone = 'US/Pacific';
+
+query T
+with t(id, v) as (values
+	('a', '2023-11-05 01:40:00-07:00'::timestamptz),
+	('b', '2023-11-05 01:40:00-08:00'::timestamptz))
+select v + interval '5' minute from t order by id;
+----
+2023-11-05 01:45:00-07:00
+2023-11-05 01:45:00-08:00
+
+statement ok
+set timezone = 'UTC';
+
+# (B) common 1-hour jump-back for whole-hour zones
+
+query R
+with t(id, v) as (values
+	('a', '2023-11-05 01:40:00-07:00'::timestamptz),
+	('b', '2023-11-05 01:40:00-08:00'::timestamptz))
+select extract(epoch from date_trunc('day', v, 'US/Pacific')) from t order by id;
+----
+1699167600.000000
+1699167600.000000
+
+statement ok
+set timezone = 'US/Pacific';
+
+query T
+with t(id, v) as (values
+	('a', '2023-11-05 01:40:00-07:00'::timestamptz),
+	('b', '2023-11-05 01:40:00-08:00'::timestamptz),
+	('c', '2023-11-04 01:40:00-07:00'::timestamptz))
+select v + interval '1' day from t order by id;
+----
+2023-11-06 01:40:00-08:00
+2023-11-06 01:40:00-08:00
+2023-11-05 01:40:00-08:00
+
+statement ok
+set timezone = 'UTC';
+
+# (C) 1-hour jump-back for half-hour zones
+
+query T
+with t(id, v) as (values
+	('a', '2023-04-01 15:58:00Z'::timestamptz),
+	('b', '2023-04-01 16:58:00Z'::timestamptz))
+select date_trunc('hour', v, 'Australia/South') from t order by id;
+----
+2023-04-01 15:30:00+00:00
+2023-04-01 16:30:00+00:00
+
+# (D) half-hour jump-back
+# Note that `01:45:00+10:30` is truncated to non-existent `01:00:00+10:30` whose canonical form is `01:30:00+11:00`
+
+statement ok
+set timezone = 'Australia/Lord_Howe';
+
+query TTT
+with t(id, v) as (values
+	('a', '2023-04-01 14:45:00Z'::timestamptz),
+	('b', '2023-04-01 15:15:00Z'::timestamptz))
+select date_trunc('hour', v, 'Australia/Lord_Howe'), 'truncated from', v from t order by id;
+----
+2023-04-02 01:00:00+11:00 truncated from 2023-04-02 01:45:00+11:00
+2023-04-02 01:30:00+11:00 truncated from 2023-04-02 01:45:00+10:30
+
+statement ok
+set timezone = 'UTC';
+
+# (E) jump-back to day boundary, making it ambiguous
+# Due to the disambiguation rule selecting post-transition value,
+# `date_trunc` effectively returns an instant in the future, rather than the past.
+
+query T
+with t(id, v) as (values
+	('a', '2023-11-05 04:40:00Z'::timestamptz),
+	('b', '2023-11-05 05:40:00Z'::timestamptz))
+select date_trunc('day', v, 'America/Havana') from t order by id;
+----
+2023-11-05 05:00:00+00:00
+2023-11-05 05:00:00+00:00
+
+# (F) jump-forward from day boundary, making it invalid
+# Here `2023-09-02 23:59:59-04:00` is followed by `2023-09-03 01:00:00-03:00`.
+# There is no `2023-09-03 00:00:00-04:00` or `2023-09-03 00:00:00-03:00`.
+# PostgreSQL returns `2023-09-03 01:00:00-03:00` but it is hard using `chrono` crate.
+
+statement error interpret
+select date_trunc('day', '2023-09-03 12:00:00Z'::timestamptz, 'America/Santiago');

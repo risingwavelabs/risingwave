@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ use crate::error::Result;
 use crate::TraceError;
 use crate::{
     LocalStorageId, Record, TracedBytes, TracedInitOptions, TracedNewLocalOptions,
-    TracedReadOptions,
+    TracedReadOptions, TracedSealCurrentEpochOptions,
 };
 
 pub type ReplayItem = (TracedBytes, TracedBytes);
@@ -60,13 +60,11 @@ pub(crate) enum WorkerId {
 #[async_trait::async_trait]
 pub trait LocalReplay: LocalReplayRead + ReplayWrite + Send + Sync {
     async fn init(&mut self, options: TracedInitOptions) -> Result<()>;
-    fn seal_current_epoch(&mut self, next_epoch: u64);
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: TracedSealCurrentEpochOptions);
     fn is_dirty(&self) -> bool;
     fn epoch(&self) -> u64;
-    async fn flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<TracedBytes>, Bound<TracedBytes>)>,
-    ) -> Result<usize>;
+    async fn try_flush(&mut self) -> Result<()>;
+    async fn flush(&mut self) -> Result<usize>;
 }
 pub trait GlobalReplay: ReplayRead + ReplayStateStore + Send + Sync {}
 
@@ -122,7 +120,7 @@ pub trait ReplayStateStore {
     async fn notify_hummock(&self, info: Info, op: RespOperation, version: u64) -> Result<u64>;
     async fn new_local(&self, opts: TracedNewLocalOptions) -> Box<dyn LocalReplay>;
     async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Result<()>;
-    async fn clear_shared_buffer(&self) -> Result<()>;
+    async fn clear_shared_buffer(&self, prev_epoch: u64);
     fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> Result<()>;
 }
 
@@ -154,7 +152,7 @@ mock! {
         ) -> Result<u64>;
         async fn new_local(&self, opts: TracedNewLocalOptions) -> Box<dyn LocalReplay>;
         async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Result<()>;
-        async fn clear_shared_buffer(&self) -> Result<()>;
+        async fn clear_shared_buffer(&self, prev_epoch: u64);
         fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> Result<()>;
     }
     impl GlobalReplay for GlobalReplayInterface{}
@@ -185,10 +183,11 @@ mock! {
     #[async_trait::async_trait]
     impl LocalReplay for LocalReplayInterface{
         async fn init(&mut self, options: TracedInitOptions) -> Result<()>;
-        fn seal_current_epoch(&mut self, next_epoch: u64);
+        fn seal_current_epoch(&mut self, next_epoch: u64, opts: TracedSealCurrentEpochOptions);
         fn is_dirty(&self) -> bool;
         fn epoch(&self) -> u64;
-        async fn flush(&mut self, delete_ranges: Vec<(Bound<TracedBytes>, Bound<TracedBytes>)>) -> Result<usize>;
+        async fn flush(&mut self) -> Result<usize>;
+        async fn try_flush(&mut self) -> Result<()>;
     }
 }
 

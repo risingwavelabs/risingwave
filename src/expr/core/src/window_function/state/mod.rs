@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,10 +24,10 @@ use smallvec::SmallVec;
 use super::{WindowFuncCall, WindowFuncKind};
 use crate::{ExprError, Result};
 
-mod buffer;
-
 mod aggregate;
-mod row_number;
+mod buffer;
+mod range_utils;
+mod rank;
 
 /// Unique and ordered identifier for a row in internal states.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, EstimateSize)]
@@ -101,20 +101,24 @@ pub trait WindowState: EstimateSize {
     /// Get the current window frame position.
     fn curr_window(&self) -> StatePos<'_>;
 
-    /// Get the window function result of current window frame.
-    fn curr_output(&self) -> Result<Datum>;
+    /// Slide the window frame forward and collect the output and evict hint. Similar to `Iterator::next`.
+    fn slide(&mut self) -> Result<(Datum, StateEvictHint)>;
 
-    /// Slide the window frame forward.
-    fn slide_forward(&mut self) -> StateEvictHint;
+    /// Slide the window frame forward and collect the evict hint. Don't calculate the output if possible.
+    fn slide_no_output(&mut self) -> Result<StateEvictHint>;
 }
 
-pub fn create_window_state(call: &WindowFuncCall) -> Result<Box<dyn WindowState + Send + Sync>> {
-    assert!(call.frame.bounds.is_valid());
+pub type BoxedWindowState = Box<dyn WindowState + Send + Sync>;
+
+pub fn create_window_state(call: &WindowFuncCall) -> Result<BoxedWindowState> {
+    assert!(call.frame.bounds.validate().is_ok());
 
     use WindowFuncKind::*;
     Ok(match call.kind {
-        RowNumber => Box::new(row_number::RowNumberState::new(call)),
-        Aggregate(_) => Box::new(aggregate::AggregateState::new(call)?),
+        RowNumber => Box::new(rank::RankState::<rank::RowNumber>::new(call)),
+        Rank => Box::new(rank::RankState::<rank::Rank>::new(call)),
+        DenseRank => Box::new(rank::RankState::<rank::DenseRank>::new(call)),
+        Aggregate(_) => aggregate::new(call)?,
         kind => {
             return Err(ExprError::UnsupportedFunction(format!(
                 "{}({}) -> {}",

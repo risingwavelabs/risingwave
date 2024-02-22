@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use anyhow::Context as _;
 use bytes::Bytes;
 use futures::Stream;
 use itertools::Itertools;
@@ -27,16 +28,16 @@ use pgwire::types::{Format, FormatIterator, Row};
 use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnCatalog, Field};
-use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl, Timestamptz};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::KAFKA_CONNECTOR;
-use risingwave_sqlparser::ast::display_comma_separated;
+use risingwave_sqlparser::ast::{display_comma_separated, CompatibleSourceSchema, ConnectorSchema};
 
 use crate::catalog::IndexCatalog;
-use crate::handler::create_source::{CONNECTION_NAME_KEY, UPSTREAM_SOURCE_KEY};
-use crate::session::SessionImpl;
+use crate::error::{ErrorCode, Result as RwResult};
+use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
+use crate::session::{current, SessionImpl};
 
 pin_project! {
     /// Wrapper struct that converts a stream of DataChunk to a stream of RowSet based on formatting
@@ -73,7 +74,7 @@ where
         session: Arc<SessionImpl>,
     ) -> Self {
         let session_data = StaticSessionData {
-            timezone: session.config().get_timezone().into(),
+            timezone: session.config().timezone(),
         };
         Self {
             chunk_stream,
@@ -125,7 +126,9 @@ fn pg_value_format(
                 Ok(d.text_format(data_type).into())
             }
         }
-        Format::Binary => d.binary_format(data_type),
+        Format::Binary => Ok(d
+            .binary_format(data_type)
+            .context("failed to format binary value")?),
     }
 }
 
@@ -255,10 +258,26 @@ pub fn is_kafka_connector(with_properties: &HashMap<String, String>) -> bool {
 }
 
 #[inline(always)]
-pub fn get_connection_name(with_properties: &BTreeMap<String, String>) -> Option<String> {
-    with_properties
-        .get(CONNECTION_NAME_KEY)
-        .map(|s| s.to_lowercase())
+pub fn is_cdc_connector(with_properties: &HashMap<String, String>) -> bool {
+    let Some(connector) = get_connector(with_properties) else {
+        return false;
+    };
+    connector.contains("-cdc")
+}
+
+#[easy_ext::ext(SourceSchemaCompatExt)]
+impl CompatibleSourceSchema {
+    /// Convert `self` to [`ConnectorSchema`] and warn the user if the syntax is deprecated.
+    pub fn into_v2_with_warning(self) -> ConnectorSchema {
+        match self {
+            CompatibleSourceSchema::RowFormat(inner) => {
+                // TODO: should be warning
+                current::notice_to_user("RisingWave will stop supporting the syntax \"ROW FORMAT\" in future versions, which will be changed to \"FORMAT ... ENCODE ...\" syntax.");
+                inner.into_source_schema_v2()
+            }
+            CompatibleSourceSchema::V2(inner) => inner,
+        }
+    }
 }
 
 #[cfg(test)]

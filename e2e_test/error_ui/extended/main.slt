@@ -1,0 +1,18 @@
+query error
+selet 1;
+----
+db error: ERROR: Failed to prepare the statement
+
+Caused by:
+  sql parser error: Expected an SQL statement, found: selet at line:1, column:6
+Near "selet"
+
+
+query error
+select 1/0;
+----
+db error: ERROR: Failed to execute the statement
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: Division by zero

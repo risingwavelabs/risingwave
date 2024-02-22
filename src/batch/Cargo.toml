@@ -15,6 +15,8 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
 assert_matches = "1"
 async-recursion = "1"
 async-trait = "0.1"
@@ -24,21 +26,25 @@ futures-async-stream = { workspace = true }
 futures-util = "0.3"
 hashbrown = { workspace = true }
 hytra = "0.1.2"
-itertools = "0.11"
+icelake = { workspace = true }
+itertools = "0.12"
+memcomparable = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
+risingwave_dml = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
-risingwave_source = { workspace = true }
 risingwave_storage = { workspace = true }
+rw_futures_util = { workspace = true }
 scopeguard = "1"
 serde_json = "1"
 thiserror = "1"
+thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -50,6 +56,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-metrics = "0.3.0"
 tokio-stream = "0.1"
+tokio-util = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
 
@@ -63,6 +70,7 @@ workspace-hack = { path = "../workspace-hack" }
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 rand = "0.8"
 risingwave_expr_impl = { workspace = true }
+risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
 tempfile = "3"
 tikv-jemallocator = { workspace = true }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -327,27 +327,14 @@ impl ReplayWorker {
                     );
                 }
             }
-            Operation::ClearSharedBuffer => {
+            Operation::ClearSharedBuffer(prev_epoch) => {
                 assert_eq!(storage_type, StorageType::Global);
-                let res = res_rx.recv().await.expect("recv result failed");
-                if let OperationResult::ClearSharedBuffer(expected) = res {
-                    let actual = replay.clear_shared_buffer().await;
-                    assert_eq!(
-                        TraceResult::from(actual),
-                        expected,
-                        "clear_shared_buffer wrong"
-                    );
-                } else {
-                    panic!(
-                        "wrong clear_shared_buffer result, expect epoch result, but got {:?}",
-                        res
-                    );
-                }
+                replay.clear_shared_buffer(prev_epoch).await;
             }
-            Operation::SealCurrentEpoch(epoch) => {
+            Operation::SealCurrentEpoch { epoch, opts } => {
                 assert_ne!(storage_type, StorageType::Global);
                 let local_storage = local_storages.get_mut(&storage_type).unwrap();
-                local_storage.seal_current_epoch(epoch);
+                local_storage.seal_current_epoch(epoch, opts);
             }
             Operation::ValidateReadEpoch(epoch) => {
                 assert_eq!(storage_type, StorageType::Global);
@@ -399,17 +386,33 @@ impl ReplayWorker {
                     );
                 }
             }
-            Operation::Flush(delete_range) => {
+            Operation::Flush => {
                 assert_ne!(storage_type, StorageType::Global);
                 let local_storage = local_storages.get_mut(&storage_type).unwrap();
                 let res = res_rx.recv().await.expect("recv result failed");
                 if let OperationResult::Flush(expected) = res {
-                    let actual = local_storage.flush(delete_range).await;
+                    let actual = local_storage.flush().await;
                     assert_eq!(TraceResult::from(actual), expected, "flush wrong");
                 } else {
                     panic!("wrong flush result, expect flush result, but got {:?}", res);
                 }
             }
+            Operation::TryFlush => {
+                assert_ne!(storage_type, StorageType::Global);
+                let local_storage = local_storages.get_mut(&storage_type).unwrap();
+                let res = res_rx.recv().await.expect("recv result failed");
+                if let OperationResult::TryFlush(_) = res {
+                    let _ = local_storage.try_flush().await;
+                    // todo(wcy-fdu): unify try_flush and flush interface, do not return usize.
+                    // assert_eq!(TraceResult::from(actual), expected, "try flush wrong");
+                } else {
+                    panic!(
+                        "wrong try flush result, expect flush result, but got {:?}",
+                        res
+                    );
+                }
+            }
+
             Operation::Finish => unreachable!(),
             Operation::Result(_) => unreachable!(),
         }

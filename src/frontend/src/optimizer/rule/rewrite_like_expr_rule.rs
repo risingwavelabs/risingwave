@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,13 +31,11 @@ pub struct RewriteLikeExprRule {}
 impl Rule for RewriteLikeExprRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
-        let mut has_like = HasLikeExprVisitor {};
-        if filter
-            .predicate()
-            .conjunctions
-            .iter()
-            .any(|expr| has_like.visit_expr(expr))
-        {
+        if filter.predicate().conjunctions.iter().any(|expr| {
+            let mut has_like = HasLikeExprVisitor { has: false };
+            has_like.visit_expr(expr);
+            has_like.has
+        }) {
             let mut rewriter = LikeExprRewriter {};
             Some(filter.rewrite_exprs(&mut rewriter))
         } else {
@@ -46,28 +44,22 @@ impl Rule for RewriteLikeExprRule {
     }
 }
 
-struct HasLikeExprVisitor {}
+struct HasLikeExprVisitor {
+    has: bool,
+}
 
 impl ExprVisitor for HasLikeExprVisitor {
-    type Result = bool;
-
-    fn merge(a: bool, b: bool) -> bool {
-        a | b
-    }
-
-    fn visit_function_call(&mut self, func_call: &FunctionCall) -> bool {
+    fn visit_function_call(&mut self, func_call: &FunctionCall) {
         if func_call.func_type() == ExprType::Like
             && let (_, ExprImpl::InputRef(_), ExprImpl::Literal(_)) =
                 func_call.clone().decompose_as_binary()
         {
-            true
+            self.has = true;
         } else {
             func_call
                 .inputs()
                 .iter()
-                .map(|expr| self.visit_expr(expr))
-                .reduce(Self::merge)
-                .unwrap_or_default()
+                .for_each(|expr| self.visit_expr(expr));
         }
     }
 }

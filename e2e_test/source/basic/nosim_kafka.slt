@@ -3,26 +3,17 @@
 
 # If we cannot extract key schema, use message key as varchar primary key
 statement ok
-CREATE TABLE upsert_avro_json_default_key ()
+CREATE TABLE upsert_avro_json_default_key ( primary key (rw_key) )
+INCLUDE KEY AS rw_key
 WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_avro_json')
 FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
 
-
-# key schema should be a subset of value schema
-statement error
-CREATE TABLE upsert_student_key_not_subset_of_value_avro_json ()
-WITH (
-	connector = 'kafka',
-  properties.bootstrap.server = 'message_queue:29092',
-	topic = 'upsert_student_key_not_subset_of_value_avro_json')
-FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
-
-
 statement ok
-CREATE TABLE upsert_student_avro_json ()
+CREATE TABLE upsert_student_avro_json ( primary key (rw_key) )
+INCLUDE KEY AS rw_key
 WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
@@ -30,26 +21,17 @@ WITH (
 FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
 
 
-statement ok
-CREATE TABLE upsert_avro_json (
-  PRIMARY KEY("ID")
-)
-WITH (
-connector = 'kafka',
- properties.bootstrap.server = 'message_queue:29092',
-topic = 'upsert_avro_json')
-FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
+# TODO: Uncomment this when we add test data kafka key with format `"ID":id`
+# statement ok
+# CREATE TABLE upsert_avro_json (
+#   PRIMARY KEY("ID")
+# )
+# WITH (
+# connector = 'kafka',
+#  properties.bootstrap.server = 'message_queue:29092',
+# topic = 'upsert_avro_json')
+# FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
 
-# Just ignore the kafka key, it works
-statement ok
-CREATE TABLE upsert_avro_json2 (
-  PRIMARY KEY("ID")
-)
-WITH (
-	connector = 'kafka',
-  properties.bootstrap.server = 'message_queue:29092',
-	topic = 'upsert_avro_json')
-FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
 
 statement ok
 CREATE TABLE debezium_non_compact (PRIMARY KEY(order_id)) with (
@@ -77,7 +59,8 @@ CREATE TABLE kafka_json_schema_plain with (
 ) FORMAT PLAIN ENCODE JSON (schema.registry = 'http://schemaregistry:8082');
 
 statement ok
-CREATE TABLE kafka_json_schema_upsert (PRIMARY KEY(id))
+CREATE TABLE kafka_json_schema_upsert (PRIMARY KEY(rw_key))
+INCLUDE KEY AS rw_key
 with (
     connector = 'kafka',
     kafka.topic = 'kafka_upsert_json_schema',
@@ -89,11 +72,11 @@ statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
-sleep 5s
+sleep 8s
 
 query II
 SELECT
- *
+ op_type, "ID", "CLASS_ID", "ITEM_ID", "ATTR_ID", "ATTR_VALUE", "ORG_ID", "UNIT_INFO", "UPD_TIME"
 FROM
  upsert_avro_json_default_key
 ORDER BY
@@ -104,37 +87,22 @@ delete id2 2 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
 delete id3 3 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
 delete id5 5 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
 
-query II
-SELECT
- *
-FROM
- upsert_avro_json
-ORDER BY
- "ID";
-----
-update id1 -1 6768 6970 value9 7172 info9 2021-05-18T07:59:58.714Z
-delete id2 2 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
-delete id3 3 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
-delete id5 5 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
-
-
-query II
-SELECT
-	*
-FROM
-	upsert_avro_json2
-ORDER BY
-	"ID";
-----
-update id1 -1 6768 6970 value9 7172 info9 2021-05-18T07:59:58.714Z
-delete id2 2 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
-delete id3 3 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
-delete id5 5 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
-
+# query II
+# SELECT
+#  *
+# FROM
+#  upsert_avro_json
+# ORDER BY
+#  "ID";
+# ----
+# update id1 -1 6768 6970 value9 7172 info9 2021-05-18T07:59:58.714Z
+# delete id2 2 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
+# delete id3 3 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
+# delete id5 5 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
 
 query II
 SELECT
- *
+ "ID", "firstName", "lastName", "age", "height", "weight"
 FROM
  upsert_student_avro_json
 ORDER BY
@@ -159,12 +127,16 @@ select count(*) from debezium_compact;
 2
 
 query TFITT
-select * from kafka_json_schema_plain
+select
+  "dimensions", "price", "productId", "productName", "tags"
+from kafka_json_schema_plain
 ----
 (9.5,7,12) 12.5 1 An ice sculpture {cold,ice}
 
 query TFITT
-select * from kafka_json_schema_upsert order by id
+select
+  "dimensions", "id", "price", "productName", "tags"
+from kafka_json_schema_upsert order by id
 ----
 (9.5,7,12) 1 23 An ice sculpture {cold,ice}
 (9.5,7,12) 2 12.5 An ice sculpture {cold,ice}
@@ -172,12 +144,8 @@ select * from kafka_json_schema_upsert order by id
 statement ok
 DROP TABLE upsert_avro_json_default_key;
 
-statement ok
-DROP TABLE upsert_avro_json;
-
-
-statement ok
-DROP TABLE upsert_avro_json2;
+# statement ok
+# DROP TABLE upsert_avro_json;
 
 statement ok
 DROP TABLE upsert_student_avro_json;

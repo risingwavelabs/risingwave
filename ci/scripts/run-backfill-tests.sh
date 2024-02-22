@@ -4,8 +4,7 @@
 
 # USAGE:
 # ```sh
-# cargo make ci-start ci-backfill
-# ./ci/scripts/run-backfill-tests.sh
+# profile=(ci-release|ci-dev) ./ci/scripts/run-backfill-tests.sh
 # ```
 # Example progress:
 # dev=> select * from rw_catalog.rw_ddl_progress;
@@ -23,8 +22,18 @@ TEST_DIR=$PWD/e2e_test
 BACKGROUND_DDL_DIR=$TEST_DIR/background_ddl
 COMMON_DIR=$BACKGROUND_DDL_DIR/common
 
-CLUSTER_PROFILE='ci-1cn-1fe-with-recovery'
-export RUST_LOG="risingwave_meta=debug"
+CLUSTER_PROFILE='ci-1cn-1fe-kafka-with-recovery'
+echo "--- Configuring cluster profiles"
+if [[ -n "${BUILDKITE:-}" ]]; then
+  echo "Running in buildkite"
+  RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe'
+  MINIO_RATE_LIMIT_CLUSTER_PROFILE='ci-3cn-1fe-with-minio-rate-limit'
+else
+  echo "Running locally"
+  RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe-with-monitoring'
+  MINIO_RATE_LIMIT_CLUSTER_PROFILE='ci-3cn-1fe-with-monitoring-and-minio-rate-limit'
+fi
+export RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 
 run_sql_file() {
   psql -h localhost -p 4566 -d dev -U root -f "$@"
@@ -56,8 +65,8 @@ rename_logs_with_prefix() {
 }
 
 kill_cluster() {
-  cargo make kill
-  cargo make wait-processes-exit
+  cargo make ci-kill-no-dump-logs
+  wait
 }
 
 restart_cluster() {
@@ -97,232 +106,23 @@ restart_cn() {
 test_snapshot_and_upstream_read() {
   echo "--- e2e, ci-backfill, test_snapshot_and_upstream_read"
   cargo make ci-start ci-backfill
-
-  run_sql_file "$PARENT_PATH"/sql/backfill/create_base_table.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_base_table.sql
 
   # Provide snapshot
-  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert.sql
 
   # Provide updates ...
-  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert.sql &
 
   # ... and concurrently create mv.
-  run_sql_file "$PARENT_PATH"/sql/backfill/create_mv.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_mv.sql &
 
   wait
 
-  run_sql_file "$PARENT_PATH"/sql/backfill/select.sql </dev/null
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/select.sql </dev/null
 
   cargo make kill
   cargo make wait-processes-exit
-}
-
-# Test background ddl recovery
-test_background_ddl_recovery() {
-  echo "--- e2e, $CLUSTER_PROFILE, test_background_ddl_recovery"
-  cargo make ci-start $CLUSTER_PROFILE
-
-  # Test before recovery
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_table.slt"
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_bg_mv.slt"
-  sleep 1
-  OLD_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
-
-  # Restart
-  restart_cluster
-
-  # Test after recovery
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
-
-  # Recover the mview progress
-  sleep 5
-
-  NEW_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
-
-  if [[ ${OLD_PROGRESS%.*} -le ${NEW_PROGRESS%.*} ]]; then
-    echo "OK: $OLD_PROGRESS smaller or equal to $NEW_PROGRESS"
-  else
-    echo "FAILED: $OLD_PROGRESS larger than $NEW_PROGRESS"
-    exit 1
-  fi
-
-  sleep 60
-
-  # Test after backfill finished
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
-
-  # After cluster restart(s), backfilled mv should still be present.
-  restart_cluster
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
-  restart_cluster
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
-
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_mv.slt"
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
-
-  kill_cluster
-}
-
-test_background_ddl_cancel() {
-  echo "--- e2e, $CLUSTER_PROFILE, test background ddl"
-  cargo make ci-start $CLUSTER_PROFILE
-
-  # Test before recovery
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_table.slt"
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_bg_mv.slt"
-  sleep 1
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
-
-  cancel_stream_jobs
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
-
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_bg_mv.slt"
-
-  # Restart
-  restart_cluster
-
-  # Recover
-  sleep 3
-
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
-
-  cancel_stream_jobs
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
-
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_bg_mv.slt"
-  sleep 1
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
-  cancel_stream_jobs
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
-
-  # After cancel should be able to create MV
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_bg_mv.slt"
-  sleep 1
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
-  cancel_stream_jobs
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
-
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
-
-  kill_cluster
-}
-
-# Test foreground ddl should not recover
-test_foreground_ddl_cancel() {
-  echo "--- e2e, $CLUSTER_PROFILE, test_foreground_ddl_cancel"
-  cargo make ci-start $CLUSTER_PROFILE
-
-  # Test before recovery
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_table.slt"
-  run_sql "CREATE MATERIALIZED VIEW m1 as select * FROM t;" &
-  sleep 1
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
-
-  cancel_stream_jobs
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
-
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_fg_mv.slt"
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_mv.slt"
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
-
-  kill_cluster
-}
-
-# Test foreground ddl should not recover
-test_foreground_ddl_no_recover() {
-  echo "--- e2e, $CLUSTER_PROFILE, test_foreground_ddl_no_recover"
-  cargo make ci-start $CLUSTER_PROFILE
-
-  # Test before recovery
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_table.slt"
-  run_sql "CREATE MATERIALIZED VIEW m1 as select * FROM t;" &
-  sleep 3
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
-
-
-  # Restart
-  restart_cluster
-
-  # Leave sometime for recovery
-  sleep 5
-
-  # Test after recovery
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
-  sleep 30
-
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
-
-  kill_cluster
-}
-
-test_foreground_index_cancel() {
-   echo "--- e2e, $CLUSTER_PROFILE, test_foreground_index_cancel"
-   cargo make ci-start $CLUSTER_PROFILE
-
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_table.slt"
-
-   # Test cancel
-   run_sql "CREATE INDEX i ON t (v1);" &
-   sleep 3
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
-   cancel_stream_jobs
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
-
-   # Test index over recovery
-   run_sql "CREATE INDEX i ON t (v1);" &
-   sleep 3
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
-
-
-   # Restart
-   restart_cluster
-
-   # Leave sometime for recovery
-   sleep 5
-
-   # Test after recovery
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_index.slt"
-
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_index.slt"
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
-
-   kill_cluster
-}
-
-test_foreground_sink_cancel() {
-   echo "--- e2e, $CLUSTER_PROFILE, test_foreground_sink_ddl_cancel"
-   cargo make ci-start $CLUSTER_PROFILE
-
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_table.slt"
-
-   # Test cancel
-   run_sql "CREATE SINK i FROM t WITH (connector='blackhole');" &
-   sleep 3
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
-   cancel_stream_jobs
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
-
-   # Test sink over recovery
-   run_sql "CREATE SINK i FROM t WITH (connector='blackhole');" &
-   sleep 3
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
-
-
-   # Restart
-   restart_cluster
-
-   # Leave sometime for recovery
-   sleep 5
-
-   # Test after recovery
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_sink.slt"
-
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_sink.slt"
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
-
-   kill_cluster
 }
 
 # Lots of upstream tombstone, backfill should still proceed.
@@ -334,7 +134,7 @@ test_backfill_tombstone() {
   WITH (
     connector = 'datagen',
     fields.v1._.kind = 'sequence',
-    datagen.rows.per.second = '1000000'
+    datagen.rows.per.second = '2000000'
   )
   FORMAT PLAIN
   ENCODE JSON;
@@ -358,85 +158,150 @@ test_backfill_tombstone() {
   wait
 }
 
-test_backfill_restart_cn_recovery() {
-   echo "--- e2e, $CLUSTER_PROFILE, test_background_restart_cn_recovery"
-   cargo make ci-start $CLUSTER_PROFILE
+test_replication_with_column_pruning() {
+  echo "--- e2e, test_replication_with_column_pruning"
+  cargo make ci-start ci-backfill
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/create_base_table.sql
+  # Provide snapshot
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert.sql
 
-   # Test before recovery
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_table.slt"
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_bg_mv.slt"
-   sleep 1
-   OLD_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/create_mv.sql &
 
-   # Restart 1 CN
-   restart_cn
+  # Provide upstream updates
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert.sql &
 
-   # Give some time to recover.
-   sleep 3
+  wait
 
-   # Test after recovery
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/select.sql </dev/null
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/drop.sql
+  echo "--- Kill cluster"
+  kill_cluster
+}
 
-   # Recover the mview progress
-   sleep 5
+# Test sink backfill recovery
+test_sink_backfill_recovery() {
+  echo "--- e2e, test_sink_backfill_recovery"
+  cargo make ci-start $CLUSTER_PROFILE
 
-   NEW_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
+  # Check progress
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/create_sink.slt'
 
-   if [[ ${OLD_PROGRESS%.*} -le ${NEW_PROGRESS%.*} ]]; then
-     echo "OK: $OLD_PROGRESS smaller or equal to $NEW_PROGRESS"
-   else
-     echo "FAILED: $OLD_PROGRESS larger than $NEW_PROGRESS"
-     exit 1
-   fi
+  # Restart
+  restart_cluster
+  sleep 3
 
-   # Trigger a bootstrap recovery
-   pkill compute-node
-   kill_cluster
-   rename_logs_with_prefix "before-restart"
-   sleep 10
-   cargo make dev $CLUSTER_PROFILE
+  # Sink back into rw
+  run_sql "CREATE TABLE table_kafka (v1 int primary key)
+    WITH (
+      connector = 'kafka',
+      topic = 's_kafka',
+      properties.bootstrap.server = 'localhost:29092',
+  ) FORMAT DEBEZIUM ENCODE JSON;"
 
-   # Recover mview progress
-   sleep 5
+  sleep 10
 
-   OLD_PROGRESS=$NEW_PROGRESS
-   NEW_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
+  # Verify data matches upstream table.
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/validate_sink.slt'
+  kill_cluster
+}
 
-   if [[ ${OLD_PROGRESS%.*} -le ${NEW_PROGRESS%.*} ]]; then
-     echo "OK: $OLD_PROGRESS smaller or equal to $NEW_PROGRESS"
-   else
-     echo "FAILED: $OLD_PROGRESS larger than $NEW_PROGRESS"
-     exit 1
-   fi
+test_arrangement_backfill_snapshot_and_upstream_runtime() {
+  echo "--- e2e, test_arrangement_backfill_snapshot_and_upstream_runtime, $RUNTIME_CLUSTER_PROFILE"
+  cargo make ci-start $RUNTIME_CLUSTER_PROFILE
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_upstream.slt' 2>&1 1>out.log &
+  echo "[INFO] Upstream is ingesting in background"
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
 
-   sleep 60
+  wait
 
-   # Test after backfill finished
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_arrangement.slt'
 
-   # After cluster restart(s), backfilled mv should still be present.
-   restart_cluster
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
-   restart_cluster
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
+  cargo make ci-kill
+}
 
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_mv.slt"
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
+test_no_shuffle_backfill_snapshot_and_upstream_runtime() {
+  echo "--- e2e, test_no_shuffle_backfill_snapshot_and_upstream_runtime, $RUNTIME_CLUSTER_PROFILE"
+  cargo make ci-start $RUNTIME_CLUSTER_PROFILE
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_upstream.slt' 2>&1 1>out.log &
+  echo "[INFO] Upstream is ingesting in background"
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
 
-   kill_cluster
+  wait
+
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_no_shuffle.slt'
+
+  kill_cluster
+}
+
+test_backfill_snapshot_runtime() {
+  echo "--- e2e, test_backfill_snapshot_runtime, $RUNTIME_CLUSTER_PROFILE"
+  cargo make ci-start $RUNTIME_CLUSTER_PROFILE
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_no_shuffle.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_arrangement.slt'
+
+  kill_cluster
+}
+
+# Throttle the storage throughput.
+# Arrangement Backfill should not fail because of this.
+test_backfill_snapshot_with_limited_storage_throughput() {
+  echo "--- e2e, test_backfill_snapshot_with_limited_storage_throughput, $MINIO_RATE_LIMIT_CLUSTER_PROFILE"
+  cargo make ci-start $MINIO_RATE_LIMIT_CLUSTER_PROFILE
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_no_shuffle.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_arrangement.slt'
+
+  kill_cluster
+}
+
+# Test case where we do backfill with PK of 10 columns to measure performance impact.
+test_backfill_snapshot_with_wider_rows() {
+  echo "--- e2e, test_backfill_snapshot_with_wider_rows, $RUNTIME_CLUSTER_PROFILE"
+  cargo make ci-start $RUNTIME_CLUSTER_PROFILE
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_wide_table.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_wide_snapshot.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_no_shuffle_mv.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_no_shuffle.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/validate_rows_arrangement.slt'
+
+  kill_cluster
 }
 
 main() {
   set -euo pipefail
   test_snapshot_and_upstream_read
   test_backfill_tombstone
-  test_background_ddl_recovery
-  test_background_ddl_cancel
-  test_foreground_ddl_no_recover
-  test_foreground_ddl_cancel
-  test_foreground_index_cancel
-  test_foreground_sink_cancel
-  test_backfill_restart_cn_recovery
+  test_replication_with_column_pruning
+  test_sink_backfill_recovery
+
+  # Only if profile is "ci-release", run it.
+  if [[ ${profile:-} == "ci-release" ]]; then
+    echo "--- Using release profile, running backfill performance tests."
+    # Need separate tests, we don't want to backfill concurrently.
+    # It's difficult to measure the time taken for each backfill if we do so.
+    test_no_shuffle_backfill_snapshot_and_upstream_runtime
+    test_arrangement_backfill_snapshot_and_upstream_runtime
+
+    # Backfill will happen in sequence here.
+    test_backfill_snapshot_runtime
+    test_backfill_snapshot_with_wider_rows
+    test_backfill_snapshot_with_limited_storage_throughput
+
+    # No upstream only tests, because if there's no snapshot,
+    # Backfill will complete almost immediately.
+  fi
 }
 
 main

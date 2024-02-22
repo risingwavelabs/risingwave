@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::ListValue;
+use risingwave_common::array::{ListValue, Utf8Array};
 use risingwave_expr::function;
 
 use crate::scalar::regexp::RegexpContext;
@@ -37,8 +37,8 @@ fn regexp_matches<'a>(
             .unwrap()
             .iter()
             .skip(if skip_flag { 1 } else { 0 })
-            .map(|mat| mat.map(|m| m.as_str().into()))
-            .collect();
-        ListValue::new(list)
+            .map(|mat| mat.map(|m| m.as_str()))
+            .collect::<Utf8Array>();
+        ListValue::new(list.into())
     })
 }

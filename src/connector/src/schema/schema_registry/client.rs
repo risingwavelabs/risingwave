@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,11 +19,14 @@ use std::sync::Arc;
 use futures::future::select_all;
 use itertools::Itertools;
 use reqwest::{Method, Url};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
 use serde::de::DeserializeOwned;
+use thiserror_ext::AsReport as _;
 
 use super::util::*;
+use crate::schema::{invalid_option_error, InvalidOptionError};
+
+pub const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
+pub const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
 
 #[derive(Debug, Clone, Default)]
 pub struct SchemaRegistryAuth {
@@ -33,9 +36,6 @@ pub struct SchemaRegistryAuth {
 
 impl From<&HashMap<String, String>> for SchemaRegistryAuth {
     fn from(props: &HashMap<String, String>) -> Self {
-        const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
-        const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
-
         SchemaRegistryAuth {
             username: props.get(SCHEMA_REGISTRY_USERNAME).cloned(),
             password: props.get(SCHEMA_REGISTRY_PASSWORD).cloned(),
@@ -45,9 +45,6 @@ impl From<&HashMap<String, String>> for SchemaRegistryAuth {
 
 impl From<&BTreeMap<String, String>> for SchemaRegistryAuth {
     fn from(props: &BTreeMap<String, String>) -> Self {
-        const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
-        const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
-
         SchemaRegistryAuth {
             username: props.get(SCHEMA_REGISTRY_USERNAME).cloned(),
             password: props.get(SCHEMA_REGISTRY_PASSWORD).cloned(),
@@ -64,8 +61,20 @@ pub struct Client {
     password: Option<String>,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("all request confluent registry all timeout, {context}\n{}", errs.iter().map(|e| format!("\t{}", e.as_report())).join("\n"))]
+pub struct ConcurrentRequestError {
+    errs: Vec<itertools::Either<RequestError, tokio::task::JoinError>>,
+    context: String,
+}
+
+type SrResult<T> = Result<T, ConcurrentRequestError>;
+
 impl Client {
-    pub(crate) fn new(url: Vec<Url>, client_config: &SchemaRegistryAuth) -> Result<Self> {
+    pub(crate) fn new(
+        url: Vec<Url>,
+        client_config: &SchemaRegistryAuth,
+    ) -> Result<Self, InvalidOptionError> {
         let valid_urls = url
             .iter()
             .map(|url| (url.cannot_be_a_base(), url))
@@ -73,10 +82,7 @@ impl Client {
             .map(|(_, url)| url.clone())
             .collect_vec();
         if valid_urls.is_empty() {
-            return Err(RwError::from(ProtocolError(format!(
-                "no valid url provided, got {:?}",
-                url
-            ))));
+            return Err(invalid_option_error!("non-base: {}", url.iter().join(" ")));
         } else {
             tracing::debug!(
                 "schema registry client will use url {:?} to connect",
@@ -84,9 +90,8 @@ impl Client {
             );
         }
 
-        let inner = reqwest::Client::builder().build().map_err(|e| {
-            RwError::from(ProtocolError(format!("build reqwest client failed {}", e)))
-        })?;
+        // `unwrap` as the builder is not affected by any input right now
+        let inner = reqwest::Client::builder().build().unwrap();
 
         Ok(Client {
             inner,
@@ -100,7 +105,7 @@ impl Client {
         &'a self,
         method: Method,
         path: &'a [&'a (impl AsRef<str> + ?Sized + Debug + ToString)],
-    ) -> Result<T>
+    ) -> SrResult<T>
     where
         T: DeserializeOwned + Send + Sync + 'static,
     {
@@ -127,22 +132,20 @@ impl Client {
                     let _ = remaining.iter().map(|ele| ele.abort());
                     return Ok(res);
                 }
-                Ok(Err(e)) => errs.push(e),
-                Err(e) => errs.push(RwError::from(e)),
+                Ok(Err(e)) => errs.push(itertools::Either::Left(e)),
+                Err(e) => errs.push(itertools::Either::Right(e)),
             }
             fut_req = remaining;
         }
 
-        Err(RwError::from(ProtocolError(format!(
-            "all request confluent registry all timeout, req path {:?}, urls {:?}, err: {:?}",
-            path,
-            self.url,
-            errs.iter().map(|e| e.to_string()).collect_vec()
-        ))))
+        Err(ConcurrentRequestError {
+            errs,
+            context: format!("req path {:?}, urls {}", path, self.url.iter().join(" ")),
+        })
     }
 
     /// get schema by id
-    pub async fn get_schema_by_id(&self, id: i32) -> Result<ConfluentSchema> {
+    pub async fn get_schema_by_id(&self, id: i32) -> SrResult<ConfluentSchema> {
         let res: GetByIdResp = self
             .concurrent_req(Method::GET, &["schemas", "ids", &id.to_string()])
             .await?;
@@ -153,12 +156,12 @@ impl Client {
     }
 
     /// get the latest schema of the subject
-    pub async fn get_schema_by_subject(&self, subject: &str) -> Result<ConfluentSchema> {
+    pub async fn get_schema_by_subject(&self, subject: &str) -> SrResult<ConfluentSchema> {
         self.get_subject(subject).await.map(|s| s.schema)
     }
 
     /// get the latest version of the subject
-    pub async fn get_subject(&self, subject: &str) -> Result<Subject> {
+    pub async fn get_subject(&self, subject: &str) -> SrResult<Subject> {
         let res: GetBySubjectResp = self
             .concurrent_req(Method::GET, &["subjects", subject, "versions", "latest"])
             .await?;
@@ -177,7 +180,7 @@ impl Client {
     pub async fn get_subject_and_references(
         &self,
         subject: &str,
-    ) -> Result<(Subject, Vec<Subject>)> {
+    ) -> SrResult<(Subject, Vec<Subject>)> {
         let mut subjects = vec![];
         let mut visited = HashSet::new();
         let mut queue = vec![(subject.to_owned(), "latest".to_owned())];

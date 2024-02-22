@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +15,12 @@
 use anyhow::Result;
 use itertools::Itertools;
 use risingwave_simulation::cluster::{Cluster, Configuration};
-use risingwave_simulation::ctl_ext::predicate::identity_contains;
+use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 use risingwave_simulation::utils::AssertResult;
 
 #[tokio::test]
 async fn test_delta_join() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale_no_shuffle()).await?;
     let mut session = cluster.start_session();
 
     session.run("set rw_implicit_flush = true;").await?;
@@ -48,7 +48,10 @@ async fn test_delta_join() -> Result<()> {
         .await?;
     assert_eq!(lookup_fragments.len(), 2, "failed to plan delta join");
     let union_fragment = cluster
-        .locate_one_fragment([identity_contains("union")])
+        .locate_one_fragment([
+            identity_contains("union"),
+            no_identity_contains("materialize"), // skip union for table
+        ])
         .await?;
 
     let mut test_times = 0;
@@ -122,7 +125,7 @@ async fn test_delta_join() -> Result<()> {
 
 #[tokio::test]
 async fn test_share_multiple_no_shuffle_upstream() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale_no_shuffle()).await?;
     let mut session = cluster.start_session();
 
     session.run("create table t (a int, b int);").await?;
@@ -142,7 +145,7 @@ async fn test_share_multiple_no_shuffle_upstream() -> Result<()> {
 
 #[tokio::test]
 async fn test_resolve_no_shuffle_upstream() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale_no_shuffle()).await?;
     let mut session = cluster.start_session();
 
     session.run("create table t (v int);").await?;
@@ -151,7 +154,7 @@ async fn test_resolve_no_shuffle_upstream() -> Result<()> {
         .await?;
 
     let fragment = cluster
-        .locate_one_fragment([identity_contains("chain")])
+        .locate_one_fragment([identity_contains("StreamTableScan")])
         .await?;
 
     let result = cluster.reschedule(fragment.reschedule([0], [])).await;

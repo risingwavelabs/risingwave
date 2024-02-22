@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,29 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::convert::Into;
-use std::sync::LazyLock;
-
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::types::DataType;
-
-use crate::catalog::system_catalog::BuiltinView;
-
-pub const PG_NAMESPACE_TABLE_NAME: &str = "pg_namespace";
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_namespace` stores namespaces. A namespace is the structure underlying SQL
 /// schemas: each namespace can have a separate collection of relations, types, etc. without name
 /// conflicts. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-namespace.html`]
-pub static PG_NAMESPACE: LazyLock<BuiltinView> = LazyLock::new(|| {
-    BuiltinView {
-        name: PG_NAMESPACE_TABLE_NAME,
-        schema: PG_CATALOG_SCHEMA_NAME,
-        columns: &[
-            (DataType::Int32, "oid"),
-            (DataType::Varchar, "nspname"),
-            (DataType::Int32, "nspowner"),
-            (DataType::Varchar, "nspacl"),
-        ],
-        sql: "SELECT id AS oid, name AS nspname, owner AS nspowner, acl AS nspacl FROM rw_catalog.rw_schemas".into(),
-    }
-});
+#[system_catalog(
+    view,
+    "pg_catalog.pg_namespace",
+    "SELECT id AS oid, name AS nspname, owner AS nspowner, acl AS nspacl FROM rw_catalog.rw_schemas"
+)]
+#[derive(Fields)]
+struct PgNamespace {
+    oid: i32,
+    nspname: String,
+    nspowner: i32,
+    nspacl: String,
+}

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,14 +15,15 @@
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::XmlNode;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, GenericPlanRef, PlanAggCall};
 use super::stream::prelude::*;
 use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::ExprRewriter;
+use crate::error::{ErrorCode, Result};
+use crate::expr::{ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, IndexSet};
@@ -217,7 +218,7 @@ impl StreamNode for StreamHashAgg {
                 .collect(),
             row_count_index: self.row_count_idx as u32,
             emit_on_window_close: self.base.emit_on_window_close(),
-            version: PbAggNodeVersion::Issue12140 as _,
+            version: PbAggNodeVersion::Issue13465 as _,
         })
     }
 }
@@ -237,5 +238,11 @@ impl ExprRewritable for StreamHashAgg {
             self.emit_on_window_close,
         )
         .into()
+    }
+}
+
+impl ExprVisitable for StreamHashAgg {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

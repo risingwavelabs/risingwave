@@ -13,14 +13,20 @@
     └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
 - sql: |
     create table t(x int);
-    select (select x from t), 1 from t;
+    select (select x from t) a, 1 b from t;
   logical_plan: |-
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalScan { table: t, columns: [t.x, t._row_id] }
       └─LogicalProject { exprs: [t.x] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
-  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [t.x, 1:Int32] }
+    └─LogicalJoin { type: LeftOuter, on: true, output: all }
+      ├─LogicalScan { table: t, columns: [] }
+      └─LogicalMaxOneRow
+        └─LogicalScan { table: t, columns: [t.x] }
+  stream_error: Scalar subquery might produce more than one row.
 - sql: |
     create table t(x int);
     select (select x from t limit 1), 1 from t;
@@ -55,7 +61,7 @@
         └─LogicalScan { table: t, columns: [t.x] }
 - sql: |
     create table t(x int);
-    select (select x from t order by x fetch next 1 rows with ties), 1 from t;
+    select (select x from t order by x fetch next 1 rows with ties) a, 1 b from t;
   logical_plan: |-
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
@@ -63,30 +69,50 @@
       └─LogicalTopN { order: [t.x ASC], limit: 1, offset: 0, with_ties: true }
         └─LogicalProject { exprs: [t.x] }
           └─LogicalScan { table: t, columns: [t.x, t._row_id] }
-  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [t.x, 1:Int32] }
+    └─LogicalJoin { type: LeftOuter, on: true, output: all }
+      ├─LogicalScan { table: t, columns: [] }
+      └─LogicalMaxOneRow
+        └─LogicalTopN { order: [t.x ASC], limit: 1, offset: 0, with_ties: true }
+          └─LogicalScan { table: t, columns: [t.x] }
+  stream_error: Scalar subquery might produce more than one row.
 - sql: |
     create table t(x int);
-    select (select x from t) + 1 from t;
+    select (select x from t) + 1 a from t;
   logical_plan: |-
     LogicalProject { exprs: [(t.x + 1:Int32) as $expr1] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalScan { table: t, columns: [t.x, t._row_id] }
       └─LogicalProject { exprs: [t.x] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
-  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [(t.x + 1:Int32) as $expr1] }
+    └─LogicalJoin { type: LeftOuter, on: true, output: all }
+      ├─LogicalScan { table: t, columns: [] }
+      └─LogicalMaxOneRow
+        └─LogicalScan { table: t, columns: [t.x] }
+  stream_error: Scalar subquery might produce more than one row.
 - sql: |
     create table t(x int);
-    select (select x from t), (select 1);
+    select (select x from t) a, (select 1) b;
   logical_plan: |-
     LogicalProject { exprs: [t.x, 1:Int32] }
-    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
       ├─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
       │ ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       │ └─LogicalProject { exprs: [t.x] }
       │   └─LogicalScan { table: t, columns: [t.x, t._row_id] }
       └─LogicalProject { exprs: [1:Int32] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
+  optimized_logical_plan_for_batch: |-
+    LogicalJoin { type: LeftOuter, on: true, output: all }
+    ├─LogicalJoin { type: LeftOuter, on: true, output: all }
+    │ ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    │ └─LogicalMaxOneRow
+    │   └─LogicalScan { table: t, columns: [t.x] }
+    └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+  stream_error: Scalar subquery might produce more than one row.
 - sql: |
     create table t(x int);
     select x + (select x + (select x as v1 from t) as v2 from t) as v3 from t;
@@ -99,7 +125,17 @@
           ├─LogicalScan { table: t, columns: [t.x, t._row_id] }
           └─LogicalProject { exprs: [t.x] }
             └─LogicalScan { table: t, columns: [t.x, t._row_id] }
-  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [(t.x + $expr1) as $expr2] }
+    └─LogicalJoin { type: LeftOuter, on: true, output: all }
+      ├─LogicalScan { table: t, columns: [t.x] }
+      └─LogicalMaxOneRow
+        └─LogicalProject { exprs: [(t.x + t.x) as $expr1] }
+          └─LogicalJoin { type: LeftOuter, on: true, output: all }
+            ├─LogicalScan { table: t, columns: [t.x] }
+            └─LogicalMaxOneRow
+              └─LogicalScan { table: t, columns: [t.x] }
+  stream_error: Scalar subquery might produce more than one row.
 - sql: |
     create table t1 (x int, y int);
     create table t2 (x int, y int);
@@ -112,8 +148,8 @@
         └─LogicalScan { table: t2, columns: [t2.y] }
 - sql: |
     select (select 1, 2);
-  binder_error: |-
-    Bind error: failed to bind expression: (SELECT 1, 2)
+  binder_error: |
+    Failed to bind expression: (SELECT 1, 2)
 
     Caused by:
       Bind error: Subquery must return only one column
@@ -209,11 +245,12 @@
         └─LogicalValues { rows: [[1:Int32, 2:Int32, 3:Int32], [4:Int32, 5:Int32, 6:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32, *VALUES*_0.column_2:Int32] } }
 - sql: |
     select 1 + (select 2 from t);
-  binder_error: |-
-    Bind error: failed to bind expression: 1 + (SELECT 2 FROM t)
+  binder_error: |
+    Failed to bind expression: 1 + (SELECT 2 FROM t)
 
-    Caused by:
-      Catalog error: table or source not found: t
+    Caused by these errors (recent errors listed first):
+      1: Catalog error
+      2: table or source not found: t
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -272,3 +309,46 @@
                     │     └─BatchScan { table: t1, columns: [t1.a], distribution: SomeShard }
                     └─BatchExchange { order: [], dist: Single }
                       └─BatchScan { table: t2, columns: [], distribution: SomeShard }
+- sql: |
+    create table b (b1 varchar);
+    select * from  b cross join repeat(b1, 2);
+  logical_plan: |-
+    LogicalProject { exprs: [b.b1, ] }
+    └─LogicalApply { type: Inner, on: true, correlated_id: 1 }
+      ├─LogicalScan { table: b, columns: [b.b1, b._row_id] }
+      └─LogicalValues { rows: [[Repeat(CorrelatedInputRef { index: 0, correlated_id: 1 }, 2:Int32)]], schema: Schema { fields: [:Varchar] } }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [b.b1, Repeat(b.b1, 2:Int32) as $expr1] }
+      └─BatchHashJoin { type: Inner, predicate: b.b1 IS NOT DISTINCT FROM b.b1, output: all }
+        ├─BatchExchange { order: [], dist: HashShard(b.b1) }
+        │ └─BatchScan { table: b, columns: [b.b1], distribution: SomeShard }
+        └─BatchExchange { order: [], dist: HashShard(b.b1) }
+          └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+            ├─BatchExchange { order: [], dist: Single }
+            │ └─BatchHashAgg { group_key: [b.b1], aggs: [] }
+            │   └─BatchExchange { order: [], dist: HashShard(b.b1) }
+            │     └─BatchScan { table: b, columns: [b.b1], distribution: SomeShard }
+            └─BatchValues { rows: [[]] }
+- sql: |
+    create table t (a int);
+    create table dl(c1 int, c2 int);
+    create table di(d1 int, d2 int);
+    select (select 1 from t,di where t.a = dl.c1 limit 1) name, (select 1 from t, di where t.a = dl.c2 limit 1) name2 from dl;
+  logical_plan: |-
+    LogicalProject { exprs: [1:Int32, 1:Int32] }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
+      ├─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      │ ├─LogicalScan { table: dl, columns: [dl.c1, dl.c2, dl._row_id] }
+      │ └─LogicalLimit { limit: 1, offset: 0 }
+      │   └─LogicalProject { exprs: [1:Int32] }
+      │     └─LogicalFilter { predicate: (t.a = CorrelatedInputRef { index: 0, correlated_id: 1 }) }
+      │       └─LogicalJoin { type: Inner, on: true, output: all }
+      │         ├─LogicalScan { table: t, columns: [t.a, t._row_id] }
+      │         └─LogicalScan { table: di, columns: [di.d1, di.d2, di._row_id] }
+      └─LogicalLimit { limit: 1, offset: 0 }
+        └─LogicalProject { exprs: [1:Int32] }
+          └─LogicalFilter { predicate: (t.a = CorrelatedInputRef { index: 1, correlated_id: 2 }) }
+            └─LogicalJoin { type: Inner, on: true, output: all }
+              ├─LogicalScan { table: t, columns: [t.a, t._row_id] }
+              └─LogicalScan { table: di, columns: [di.d1, di.d2, di._row_id] }

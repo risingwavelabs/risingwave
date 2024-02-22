@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,23 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
-use prost_reflect::{DynamicMessage, ReflectMessage};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::RwError;
+use std::sync::{Arc, LazyLock};
+
+use prost_reflect::{DescriptorPool, DynamicMessage, ReflectMessage};
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::DataType;
+use thiserror_ext::AsReport;
 
 use super::{Access, AccessResult};
 use crate::parser::from_protobuf_value;
-use crate::parser::unified::AccessError;
+use crate::parser::unified::{uncategorized, AccessError};
 
 pub struct ProtobufAccess {
     message: DynamicMessage,
+    descriptor_pool: Arc<DescriptorPool>,
 }
 
 impl ProtobufAccess {
-    pub fn new(message: DynamicMessage) -> Self {
-        Self { message }
+    pub fn new(message: DynamicMessage, descriptor_pool: Arc<DescriptorPool>) -> Self {
+        Self {
+            message,
+            descriptor_pool,
+        }
     }
 }
 
@@ -39,13 +44,16 @@ impl Access for ProtobufAccess {
             .message
             .descriptor()
             .get_field_by_name(path[0])
-            .ok_or_else(|| {
-                let err_msg = format!("protobuf schema don't have field {}", path[0]);
-                tracing::error!(err_msg);
-                RwError::from(ProtocolError(err_msg))
-            })
-            .map_err(|e| AccessError::Other(anyhow!(e)))?;
+            .ok_or_else(|| uncategorized!("protobuf schema don't have field {}", path[0]))
+            .inspect_err(|e| {
+                static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                    LazyLock::new(LogSuppresser::default);
+                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    tracing::error!(suppressed_count, "{}", e.as_report());
+                }
+            })?;
         let value = self.message.get_field(&field_desc);
-        from_protobuf_value(&field_desc, &value).map_err(|e| AccessError::Other(anyhow!(e)))
+
+        from_protobuf_value(&field_desc, &value, &self.descriptor_pool)
     }
 }

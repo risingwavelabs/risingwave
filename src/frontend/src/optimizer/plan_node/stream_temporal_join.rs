@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,13 +22,15 @@ use super::generic::GenericPlanRef;
 use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
-use crate::expr::{Expr, ExprRewriter};
+use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary};
+use crate::expr::{Expr, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::plan_tree_node::PlanTreeNodeUnary;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
-    EqJoinPredicate, EqJoinPredicateDisplay, StreamExchange, StreamTableScan,
+    EqJoinPredicate, EqJoinPredicateDisplay, StreamExchange, StreamTableScan, TryToStreamPb,
 };
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -136,8 +138,11 @@ impl PlanTreeNodeBinary for StreamTemporalJoin {
 
 impl_plan_tree_node_for_binary! { StreamTemporalJoin }
 
-impl StreamNode for StreamTemporalJoin {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
+impl TryToStreamPb for StreamTemporalJoin {
+    fn try_to_stream_prost_body(
+        &self,
+        _state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<NodeBody> {
         let left_jk_indices = self.eq_join_predicate.left_eq_indexes();
         let right_jk_indices = self.eq_join_predicate.right_eq_indexes();
         let left_jk_indices_prost = left_jk_indices.iter().map(|idx| *idx as i32).collect_vec();
@@ -155,7 +160,7 @@ impl StreamNode for StreamTemporalJoin {
             .as_stream_table_scan()
             .expect("should be a stream table scan");
 
-        NodeBody::TemporalJoin(TemporalJoinNode {
+        Ok(NodeBody::TemporalJoin(TemporalJoinNode {
             join_type: self.core.join_type as i32,
             left_key: left_jk_indices_prost,
             right_key: right_jk_indices_prost,
@@ -166,9 +171,9 @@ impl StreamNode for StreamTemporalJoin {
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
-            table_desc: Some(scan.core().table_desc.to_protobuf()),
+            table_desc: Some(scan.core().table_desc.try_to_protobuf()?),
             table_output_indices: scan.core().output_col_idx.iter().map(|&i| i as _).collect(),
-        })
+        }))
     }
 }
 
@@ -181,5 +186,12 @@ impl ExprRewritable for StreamTemporalJoin {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core, self.eq_join_predicate.rewrite_exprs(r)).into()
+    }
+}
+
+impl ExprVisitable for StreamTemporalJoin {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
+        self.eq_join_predicate.visit_exprs(v);
     }
 }

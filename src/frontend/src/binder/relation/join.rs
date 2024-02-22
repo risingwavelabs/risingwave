@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins, Value,
@@ -21,6 +20,7 @@ use risingwave_sqlparser::ast::{
 use crate::binder::bind_context::BindContext;
 use crate::binder::statement::RewriteExprsRecursive;
 use crate::binder::{Binder, Clause, Relation, COLUMN_GROUP_PREFIX};
+use crate::error::{ErrorCode, Result};
 use crate::expr::ExprImpl;
 
 #[derive(Debug, Clone)]
@@ -193,7 +193,9 @@ impl Binder {
                     // TODO: is it ok to ignore quote style?
                     // If we have a `USING` constraint, we only bind the columns appearing in the
                     // constraint.
-                    if let Some(cols) = &using_columns && !cols.contains(&column) {
+                    if let Some(cols) = &using_columns
+                        && !cols.contains(&column)
+                    {
                         continue;
                     }
                     let indices_l = match old_context.get_unqualified_indices(&column.real_value())

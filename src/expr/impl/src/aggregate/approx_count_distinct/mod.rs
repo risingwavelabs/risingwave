@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -171,28 +171,24 @@ impl AggregateFunction for AppendOnlyApproxCountDistinct {
                 result[start_idx + 1] |= (bucket_val.0 as u64) >> (i64::BITS - begin_bit as u32);
             }
         }
-        Ok(Some(ScalarImpl::List(ListValue::new(
-            result
-                .into_iter()
-                .map(|x| Some(ScalarImpl::Int64(x as i64)))
-                .collect(),
+        Ok(Some(ScalarImpl::List(ListValue::from_iter(
+            result.into_iter().map(|v| v as i64),
         ))))
     }
 
     fn decode_state(&self, datum: Datum) -> Result<AggregateState> {
         let scalar = datum.unwrap();
-        let list = scalar.as_list().values();
+        let list = scalar.as_list();
         let bucket_num = list.len() * i64::BITS as usize / LOG_COUNT_BITS as usize;
         let registers = (0..bucket_num)
             .map(|i| {
                 let (start_idx, begin_bit, post_end_bit) = pos_in_serialized(i);
-                let val = *list[start_idx].as_ref().unwrap().as_int64();
+                let val = list.get(start_idx).unwrap().unwrap().into_int64() as u64;
                 let v = if post_end_bit <= i64::BITS {
-                    (val as u64) << (i64::BITS - post_end_bit)
-                        >> (i64::BITS - LOG_COUNT_BITS as u32)
+                    val << (i64::BITS - post_end_bit) >> (i64::BITS - LOG_COUNT_BITS as u32)
                 } else {
-                    ((val as u64) >> begin_bit)
-                        + (((*list[start_idx + 1].as_ref().unwrap().as_int64() as u64)
+                    (val >> begin_bit)
+                        + (((list.get(start_idx + 1).unwrap().unwrap().into_int64() as u64)
                             & ((1 << (post_end_bit - i64::BITS)) - 1))
                             << (i64::BITS - begin_bit as u32))
                 };

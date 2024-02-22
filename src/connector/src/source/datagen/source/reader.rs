@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,11 @@
 
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::{Stream, StreamExt, TryStreamExt};
 use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
+use thiserror_ext::AsReport;
 
 use super::generator::DatagenEventGenerator;
 use crate::parser::{EncodingProperties, ParserConfig, ProtocolProperties};
@@ -25,8 +26,8 @@ use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit, FieldDesc};
 use crate::source::{
-    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, DataType,
-    SourceContextRef, SourceMessage, SplitId, SplitMetaData, SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, DataType, SourceContextRef,
+    SourceMessage, SplitId, SplitMetaData, SplitReader,
 };
 
 pub struct DatagenSplitReader {
@@ -138,7 +139,7 @@ impl SplitReader for DatagenSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;
         // spawn_data_generation_stream(self.generator.into_native_stream(), BUFFER_SIZE).boxed()
@@ -148,17 +149,25 @@ impl SplitReader for DatagenSplitReader {
         ) {
             (ProtocolProperties::Native, EncodingProperties::Native) => {
                 let actor_id = self.source_ctx.source_info.actor_id.to_string();
+                let fragment_id = self.source_ctx.source_info.fragment_id.to_string();
                 let source_id = self.source_ctx.source_info.source_id.to_string();
+                let source_name = self.source_ctx.source_info.source_name.to_string();
                 let split_id = self.split_id.to_string();
                 let metrics = self.source_ctx.metrics.clone();
                 spawn_data_generation_stream(
                     self.generator
                         .into_native_stream()
-                        .inspect_ok(move |chunk_with_states| {
+                        .inspect_ok(move |stream_chunk| {
                             metrics
                                 .partition_input_count
-                                .with_label_values(&[&actor_id, &source_id, &split_id])
-                                .inc_by(chunk_with_states.chunk.cardinality() as u64);
+                                .with_label_values(&[
+                                    &actor_id,
+                                    &source_id,
+                                    &split_id,
+                                    &source_name,
+                                    &fragment_id,
+                                ])
+                                .inc_by(stream_chunk.cardinality() as u64);
                         }),
                     BUFFER_SIZE,
                 )
@@ -201,9 +210,9 @@ fn generator_from_data_type(
                 Ok(seed) => seed ^ split_index,
                 Err(e) => {
                     tracing::warn!(
-                        "cannot parse {:?} to u64 due to {:?}, will use {:?} as random seed",
+                        error = %e.as_report(),
+                        "cannot parse {:?} to u64, will use {:?} as random seed",
                         seed,
-                        e,
                         split_index
                     );
                     split_index
@@ -213,29 +222,37 @@ fn generator_from_data_type(
         None => split_index,
     };
     match data_type {
-        DataType::Timestamp => {
+        ty @ (DataType::Timestamp | DataType::Timestamptz) => {
             let max_past_key = format!("fields.{}.max_past", name);
-            let max_past_value = fields_option_map.get(&max_past_key).map(|s| s.to_string());
+            let max_past_value = fields_option_map.get(&max_past_key).cloned();
             let max_past_mode_key = format!("fields.{}.max_past_mode", name);
             let max_past_mode_value = fields_option_map
                 .get(&max_past_mode_key)
                 .map(|s| s.to_lowercase());
             let basetime = match fields_option_map.get(format!("fields.{}.basetime", name).as_str())
             {
-                Some(base) => {
-                    Some(chrono::DateTime::parse_from_rfc3339(base).map_err(|e| {
-                        anyhow!("cannot parse {:?} to rfc3339 due to {:?}", base, e)
-                    })?)
-                }
+                Some(base) => Some(
+                    chrono::DateTime::parse_from_rfc3339(base)
+                        .with_context(|| format!("cannot parse `{base}` to rfc3339"))?,
+                ),
                 None => None,
             };
 
-            FieldGeneratorImpl::with_timestamp(
-                basetime,
-                max_past_value,
-                max_past_mode_value,
-                random_seed,
-            )
+            if ty == DataType::Timestamptz {
+                FieldGeneratorImpl::with_timestamptz(
+                    basetime,
+                    max_past_value,
+                    max_past_mode_value,
+                    random_seed,
+                )
+            } else {
+                FieldGeneratorImpl::with_timestamp(
+                    basetime,
+                    max_past_value,
+                    max_past_mode_value,
+                    random_seed,
+                )
+            }
         }
         DataType::Varchar => {
             let length_key = format!("fields.{}.length", name);
@@ -388,7 +405,7 @@ mod tests {
         .into_stream();
 
         let stream_chunk = reader.next().await.unwrap().unwrap();
-        let (op, row) = stream_chunk.chunk.rows().next().unwrap();
+        let (op, row) = stream_chunk.rows().next().unwrap();
         assert_eq!(op, Op::Insert);
         assert_eq!(row.datum_at(0), Some(ScalarImpl::Int32(533)).to_datum_ref(),);
         assert_eq!(

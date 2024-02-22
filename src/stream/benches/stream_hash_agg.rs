@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +28,8 @@ use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_ex
 use risingwave_stream::executor::test_utils::*;
 use risingwave_stream::executor::{BoxedExecutor, PkIndices};
 use tokio::runtime::Runtime;
+
+risingwave_expr_impl::enable!();
 
 fn bench_hash_agg(c: &mut Criterion) {
     let mut group = c.benchmark_group("Q17");

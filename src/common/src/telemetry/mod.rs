@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,14 @@ pub mod report;
 
 use std::time::SystemTime;
 
+use risingwave_pb::telemetry::{
+    ReportBase as PbTelemetryReportBase, SystemCpu as PbSystemCpu, SystemData as PbSystemData,
+    SystemMemory as PbSystemMemory, SystemOs as PbSystemOs,
+    TelemetryNodeType as PbTelemetryNodeType,
+};
 use serde::{Deserialize, Serialize};
-use sysinfo::{System, SystemExt};
+use sysinfo::System;
+use thiserror_ext::AsReport;
 
 use crate::util::env_var::env_var_is_true_or;
 use crate::util::resource_util::cpu::total_cpu_available;
@@ -64,6 +70,19 @@ pub struct TelemetryReportBase {
     pub node_type: TelemetryNodeType,
 }
 
+impl From<TelemetryReportBase> for PbTelemetryReportBase {
+    fn from(val: TelemetryReportBase) -> Self {
+        PbTelemetryReportBase {
+            tracking_id: val.tracking_id,
+            session_id: val.session_id,
+            system_data: Some(val.system_data.into()),
+            up_time: val.up_time,
+            report_time: val.time_stamp,
+            node_type: from_telemetry_node_type(val.node_type) as i32,
+        }
+    }
+}
+
 pub trait TelemetryReport: Serialize {}
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -76,7 +95,6 @@ pub struct SystemData {
 #[derive(Debug, Serialize, Deserialize)]
 struct Memory {
     used: usize,
-    available: usize,
     total: usize,
 }
 
@@ -95,25 +113,16 @@ struct Cpu {
 
 impl SystemData {
     pub fn new() -> Self {
-        let mut sys = System::new();
-
         let memory = {
-            let available = system_memory_available_bytes();
+            let total = system_memory_available_bytes();
             let used = total_memory_used_bytes();
-            Memory {
-                available,
-                used,
-                total: available + used,
-            }
+            Memory { used, total }
         };
 
-        let os = {
-            sys.refresh_system();
-            Os {
-                name: sys.name().unwrap_or_default(),
-                kernel_version: sys.kernel_version().unwrap_or_default(),
-                version: sys.os_version().unwrap_or_default(),
-            }
+        let os = Os {
+            name: System::name().unwrap_or_default(),
+            kernel_version: System::kernel_version().unwrap_or_default(),
+            version: System::os_version().unwrap_or_default(),
         };
 
         let cpu = Cpu {
@@ -139,7 +148,7 @@ async fn post_telemetry_report(url: &str, report_body: String) -> Result<()> {
         .body(report_body)
         .send()
         .await
-        .map_err(|err| format!("failed to send telemetry report, err: {}", err))?;
+        .map_err(|err| format!("failed to send telemetry report, err: {}", err.as_report()))?;
     if res.status().is_success() {
         Ok(())
     } else {
@@ -164,6 +173,63 @@ pub fn current_timestamp() -> u64 {
         .as_secs()
 }
 
+fn from_telemetry_node_type(t: TelemetryNodeType) -> PbTelemetryNodeType {
+    match t {
+        TelemetryNodeType::Meta => PbTelemetryNodeType::Meta,
+        TelemetryNodeType::Compute => PbTelemetryNodeType::Compute,
+        TelemetryNodeType::Frontend => PbTelemetryNodeType::Frontend,
+        TelemetryNodeType::Compactor => PbTelemetryNodeType::Compactor,
+    }
+}
+
+impl From<TelemetryNodeType> for PbTelemetryNodeType {
+    fn from(val: TelemetryNodeType) -> Self {
+        match val {
+            TelemetryNodeType::Meta => PbTelemetryNodeType::Meta,
+            TelemetryNodeType::Compute => PbTelemetryNodeType::Compute,
+            TelemetryNodeType::Frontend => PbTelemetryNodeType::Frontend,
+            TelemetryNodeType::Compactor => PbTelemetryNodeType::Compactor,
+        }
+    }
+}
+
+impl From<Cpu> for PbSystemCpu {
+    fn from(val: Cpu) -> Self {
+        PbSystemCpu {
+            available: val.available,
+        }
+    }
+}
+
+impl From<Memory> for PbSystemMemory {
+    fn from(val: Memory) -> Self {
+        PbSystemMemory {
+            used: val.used as u64,
+            total: val.total as u64,
+        }
+    }
+}
+
+impl From<Os> for PbSystemOs {
+    fn from(val: Os) -> Self {
+        PbSystemOs {
+            name: val.name,
+            kernel_version: val.kernel_version,
+            version: val.version,
+        }
+    }
+}
+
+impl From<SystemData> for PbSystemData {
+    fn from(val: SystemData) -> Self {
+        PbSystemData {
+            memory: Some(val.memory.into()),
+            os: Some(val.os.into()),
+            cpu: Some(val.cpu.into()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,7 +238,6 @@ mod tests {
     fn test_system_data_new() {
         let system_data = SystemData::new();
 
-        assert!(system_data.memory.available > 0);
         assert!(system_data.memory.used > 0);
         assert!(system_data.memory.total > 0);
         assert!(!system_data.os.name.is_empty());

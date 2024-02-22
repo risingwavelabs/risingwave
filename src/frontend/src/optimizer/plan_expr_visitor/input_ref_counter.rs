@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,10 +23,6 @@ pub struct InputRefCounter {
 }
 
 impl ExprVisitor for InputRefCounter {
-    type Result = ();
-
-    fn merge(_: (), _: ()) {}
-
     fn visit_input_ref(&mut self, input_ref: &InputRef) {
         self.counter
             .entry(input_ref.index)

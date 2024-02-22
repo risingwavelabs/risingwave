@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -90,7 +90,7 @@ where
                         .values_stream()
                         .try_next()
                         .await
-                        .map_err(PsqlError::ExecuteError)?
+                        .map_err(PsqlError::ExtendedExecuteError)?
                     {
                         rows.into_iter()
                     } else {

@@ -1,5 +1,1 @@
-statement ok
-SET RW_IMPLICIT_FLUSH TO true;
-
-include ./special_cases/mod.slt.part
-include ./over_window/mod.slt.part
+include ./generated/main.slt.part

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,8 @@
 
 use risingwave_hummock_sdk::{HummockContextId, HummockSstableObjectId};
 use risingwave_object_store::object::ObjectError;
+use risingwave_rpc_client::error::ToTonicStatus;
+use sea_orm::DbErr;
 use thiserror::Error;
 
 use crate::model::MetadataModelError;
@@ -25,10 +27,18 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("invalid hummock context {0}")]
     InvalidContext(HummockContextId),
+    #[error("failed to access meta store: {0}")]
+    MetaStore(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error(transparent)]
-    MetaStore(anyhow::Error),
-    #[error(transparent)]
-    ObjectStore(ObjectError),
+    ObjectStore(
+        #[from]
+        #[backtrace]
+        ObjectError,
+    ),
     #[error("compactor {0} is disconnected")]
     CompactorUnreachable(HummockContextId),
     #[error("compaction group error: {0}")]
@@ -36,7 +46,11 @@ pub enum Error {
     #[error("SST {0} is invalid")]
     InvalidSst(HummockSstableObjectId),
     #[error(transparent)]
-    Internal(anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 impl Error {
@@ -70,20 +84,14 @@ impl From<MetadataModelError> for Error {
     }
 }
 
+impl From<sea_orm::DbErr> for Error {
+    fn from(value: DbErr) -> Self {
+        MetadataModelError::from(value).into()
+    }
+}
+
 impl From<Error> for tonic::Status {
     fn from(err: Error) -> Self {
-        tonic::Status::new(tonic::Code::Internal, format!("{}", err))
-    }
-}
-
-impl From<anyhow::Error> for Error {
-    fn from(e: anyhow::Error) -> Self {
-        Error::Internal(e)
-    }
-}
-
-impl From<ObjectError> for Error {
-    fn from(e: ObjectError) -> Self {
-        Error::ObjectStore(e)
+        err.to_status(tonic::Code::Internal, "hummock")
     }
 }

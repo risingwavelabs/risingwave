@@ -15,6 +15,16 @@ message Field {
   string name = 2;
 }
 
+enum ColumnDescVersion {
+  COLUMN_DESC_VERSION_UNSPECIFIED = 0;
+  // Introduced in https://github.com/risingwavelabs/risingwave/pull/13707#discussion_r1429947537,
+  // in case DEFAULT_KEY_COLUMN_NAME changes
+  COLUMN_DESC_VERSION_PR_13707 = 1;
+
+  // for test only
+  COLUMN_DESC_VERSION_MAX = 2147483647;
+}
+
 message ColumnDesc {
   data.DataType column_type = 1;
   int32 column_id = 2;
@@ -40,6 +50,18 @@ message ColumnDesc {
 
   // This field is used to store the description set by the `comment on` clause.
   optional string description = 8;
+
+  // This field is used to represent the connector-spec additional column type.
+  // UNSPECIFIED or unset for normal column.
+
+  // deprecated, use AdditionalColumn instead
+  // AdditionalColumnType additional_column_type = 9;
+  reserved "additional_column_type";
+  reserved 9;
+
+  ColumnDescVersion version = 10;
+
+  AdditionalColumn additional_column = 11;
 }
 
 message ColumnCatalog {
@@ -66,27 +88,42 @@ message StorageTableDesc {
   // TODO: may refactor primary key representations
   repeated common.ColumnOrder pk = 3;
   repeated uint32 dist_key_in_pk_indices = 4;
-  uint32 retention_seconds = 5;
+  reserved 5;
   repeated uint32 value_indices = 6;
   uint32 read_prefix_len_hint = 7;
   // Whether the table is versioned. If `true`, column-aware row encoding will
   // be used to be compatible with schema changes.
   bool versioned = 8;
   repeated uint32 stream_key = 9;
+  optional uint32 vnode_col_idx_in_pk = 10;
+  optional uint32 retention_seconds = 11;
+}
+
+// Represents a table in external database for CDC scenario
+message ExternalTableDesc {
+  uint32 table_id = 1;
+  repeated ColumnDesc columns = 2;
+  // TODO: may refactor primary key representations
+  repeated common.ColumnOrder pk = 3;
+  string table_name = 4;
+  repeated uint32 stream_key = 5;
+  map<string, string> connect_properties = 6;
+  // upstream cdc source job id
+  uint32 source_id = 7;
 }
 
 enum JoinType {
   // Note that it comes from Calcite's JoinRelType.
   // DO NOT HAVE direction for SEMI and ANTI now.
-  UNSPECIFIED = 0;
-  INNER = 1;
-  LEFT_OUTER = 2;
-  RIGHT_OUTER = 3;
-  FULL_OUTER = 4;
-  LEFT_SEMI = 5;
-  LEFT_ANTI = 6;
-  RIGHT_SEMI = 7;
-  RIGHT_ANTI = 8;
+  JOIN_TYPE_UNSPECIFIED = 0;
+  JOIN_TYPE_INNER = 1;
+  JOIN_TYPE_LEFT_OUTER = 2;
+  JOIN_TYPE_RIGHT_OUTER = 3;
+  JOIN_TYPE_FULL_OUTER = 4;
+  JOIN_TYPE_LEFT_SEMI = 5;
+  JOIN_TYPE_LEFT_ANTI = 6;
+  JOIN_TYPE_RIGHT_SEMI = 7;
+  JOIN_TYPE_RIGHT_ANTI = 8;
 }
 
 // https://github.com/tokio-rs/prost/issues/80
@@ -143,4 +180,39 @@ message Cardinality {
   uint64 lo = 1;
   // Unbounded if not set.
   optional uint64 hi = 2;
+}
+
+// Provide statement-local context, e.g. session info like time zone, for execution.
+message ExprContext {
+  string time_zone = 1;
+}
+
+message AdditionalColumnKey {}
+
+message AdditionalColumnTimestamp {}
+
+message AdditionalColumnPartition {}
+
+message AdditionalColumnOffset {}
+
+message AdditionalColumnFilename {}
+
+message AdditionalColumnHeader {
+  string inner_field = 1;
+  data.DataType data_type = 2;
+}
+
+// this type means we read all headers as a whole
+message AdditionalColumnHeaders {}
+
+message AdditionalColumn {
+  oneof column_type {
+    AdditionalColumnKey key = 1;
+    AdditionalColumnTimestamp timestamp = 2;
+    AdditionalColumnPartition partition = 3;
+    AdditionalColumnOffset offset = 4;
+    AdditionalColumnHeader header_inner = 5;
+    AdditionalColumnFilename filename = 6;
+    AdditionalColumnHeaders headers = 7;
+  }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -52,22 +52,16 @@ impl PlanVisitor for RelationCollectorVisitor {
     }
 
     fn visit_batch_seq_scan(&mut self, plan: &crate::optimizer::plan_node::BatchSeqScan) {
-        if !plan.core().is_sys_table {
-            self.relations.insert(plan.core().table_desc.table_id);
-        }
+        self.relations.insert(plan.core().table_desc.table_id);
     }
 
     fn visit_logical_scan(&mut self, plan: &LogicalScan) {
-        if !plan.is_sys_table() {
-            self.relations.insert(plan.table_desc().table_id);
-        }
+        self.relations.insert(plan.table_desc().table_id);
     }
 
     fn visit_stream_table_scan(&mut self, plan: &StreamTableScan) {
         let logical = plan.core();
-        if !logical.is_sys_table {
-            self.relations.insert(logical.table_desc.table_id);
-        }
+        self.relations.insert(logical.table_desc.table_id);
     }
 
     fn visit_batch_source(&mut self, plan: &BatchSource) {

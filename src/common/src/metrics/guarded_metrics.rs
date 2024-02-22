@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::any::type_name;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::ops::Deref;
 use std::sync::Arc;
@@ -21,10 +21,13 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use prometheus::core::{
-    Atomic, AtomicI64, AtomicU64, Collector, GenericCounter, GenericCounterVec, GenericGauge,
-    GenericGaugeVec, MetricVec, MetricVecBuilder,
+    Atomic, AtomicF64, AtomicI64, AtomicU64, Collector, Desc, GenericCounter, GenericCounterVec,
+    GenericGauge, GenericGaugeVec, GenericLocalCounter, MetricVec, MetricVecBuilder,
 };
-use prometheus::{Histogram, HistogramVec};
+use prometheus::local::{LocalHistogram, LocalIntCounter};
+use prometheus::proto::MetricFamily;
+use prometheus::{Gauge, Histogram, HistogramVec, IntCounter, IntGauge};
+use thiserror_ext::AsReport;
 use tracing::warn;
 
 pub fn __extract_counter_builder<P: Atomic>(
@@ -53,11 +56,27 @@ macro_rules! register_guarded_histogram_vec_with_registry {
         }
     }};
     ($HOPTS:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
-        let result =
-            prometheus::register_histogram_vec_with_registry!($HOPTS, $LABELS_NAMES, $REGISTRY);
-        result.map(|inner| {
+        let inner = prometheus::HistogramVec::new($HOPTS, $LABELS_NAMES);
+        inner.and_then(|inner| {
             let inner = $crate::metrics::__extract_histogram_builder(inner);
-            $crate::metrics::LabelGuardedHistogramVec::new(inner, { $LABELS_NAMES })
+            let label_guarded =
+                $crate::metrics::LabelGuardedHistogramVec::new(inner, { $LABELS_NAMES });
+            let result = ($REGISTRY).register(Box::new(label_guarded.clone()));
+            result.map(move |()| label_guarded)
+        })
+    }};
+}
+
+#[macro_export]
+macro_rules! register_guarded_gauge_vec_with_registry {
+    ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
+        let inner = prometheus::GaugeVec::new(prometheus::opts!($NAME, $HELP), $LABELS_NAMES);
+        inner.and_then(|inner| {
+            let inner = $crate::metrics::__extract_gauge_builder(inner);
+            let label_guarded =
+                $crate::metrics::LabelGuardedGaugeVec::new(inner, { $LABELS_NAMES });
+            let result = ($REGISTRY).register(Box::new(label_guarded.clone()));
+            result.map(move |()| label_guarded)
         })
     }};
 }
@@ -65,14 +84,13 @@ macro_rules! register_guarded_histogram_vec_with_registry {
 #[macro_export]
 macro_rules! register_guarded_int_gauge_vec_with_registry {
     ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
-        let result = prometheus::register_int_gauge_vec_with_registry!(
-            prometheus::opts!($NAME, $HELP),
-            $LABELS_NAMES,
-            $REGISTRY
-        );
-        result.map(|inner| {
+        let inner = prometheus::IntGaugeVec::new(prometheus::opts!($NAME, $HELP), $LABELS_NAMES);
+        inner.and_then(|inner| {
             let inner = $crate::metrics::__extract_gauge_builder(inner);
-            $crate::metrics::LabelGuardedIntGaugeVec::new(inner, { $LABELS_NAMES })
+            let label_guarded =
+                $crate::metrics::LabelGuardedIntGaugeVec::new(inner, { $LABELS_NAMES });
+            let result = ($REGISTRY).register(Box::new(label_guarded.clone()));
+            result.map(move |()| label_guarded)
         })
     }};
 }
@@ -80,14 +98,13 @@ macro_rules! register_guarded_int_gauge_vec_with_registry {
 #[macro_export]
 macro_rules! register_guarded_int_counter_vec_with_registry {
     ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
-        let result = prometheus::register_int_counter_vec_with_registry!(
-            prometheus::opts!($NAME, $HELP),
-            $LABELS_NAMES,
-            $REGISTRY
-        );
-        result.map(|inner| {
+        let inner = prometheus::IntCounterVec::new(prometheus::opts!($NAME, $HELP), $LABELS_NAMES);
+        inner.and_then(|inner| {
             let inner = $crate::metrics::__extract_counter_builder(inner);
-            $crate::metrics::LabelGuardedIntCounterVec::new(inner, { $LABELS_NAMES })
+            let label_guarded =
+                $crate::metrics::LabelGuardedIntCounterVec::new(inner, { $LABELS_NAMES });
+            let result = ($REGISTRY).register(Box::new(label_guarded.clone()));
+            result.map(move |()| label_guarded)
         })
     }};
 }
@@ -101,11 +118,16 @@ pub type LabelGuardedIntCounterVec<const N: usize> =
     LabelGuardedMetricVec<VecBuilderOfCounter<AtomicU64>, N>;
 pub type LabelGuardedIntGaugeVec<const N: usize> =
     LabelGuardedMetricVec<VecBuilderOfGauge<AtomicI64>, N>;
+pub type LabelGuardedGaugeVec<const N: usize> =
+    LabelGuardedMetricVec<VecBuilderOfGauge<AtomicF64>, N>;
 
-pub type LabelGuardedHistogram<const N: usize> = LabelGuardedMetric<VecBuilderOfHistogram, N>;
-pub type LabelGuardedIntCounter<const N: usize> =
-    LabelGuardedMetric<VecBuilderOfCounter<AtomicU64>, N>;
-pub type LabelGuardedIntGauge<const N: usize> = LabelGuardedMetric<VecBuilderOfGauge<AtomicI64>, N>;
+pub type LabelGuardedHistogram<const N: usize> = LabelGuardedMetric<Histogram, N>;
+pub type LabelGuardedIntCounter<const N: usize> = LabelGuardedMetric<IntCounter, N>;
+pub type LabelGuardedIntGauge<const N: usize> = LabelGuardedMetric<IntGauge, N>;
+pub type LabelGuardedGauge<const N: usize> = LabelGuardedMetric<Gauge, N>;
+
+pub type LabelGuardedLocalHistogram<const N: usize> = LabelGuardedMetric<LocalHistogram, N>;
+pub type LabelGuardedLocalIntCounter<const N: usize> = LabelGuardedMetric<LocalIntCounter, N>;
 
 fn gen_test_label<const N: usize>() -> [&'static str; N] {
     const TEST_LABELS: [&str; 5] = ["test1", "test2", "test3", "test4", "test5"];
@@ -116,10 +138,46 @@ fn gen_test_label<const N: usize>() -> [&'static str; N] {
         .unwrap()
 }
 
+#[derive(Default)]
+struct LabelGuardedMetricsInfo<const N: usize> {
+    labeled_metrics_count: HashMap<[String; N], usize>,
+    uncollected_removed_labels: HashSet<[String; N]>,
+}
+
+impl<const N: usize> LabelGuardedMetricsInfo<N> {
+    fn register_new_label(mutex: &Arc<Mutex<Self>>, labels: &[&str; N]) -> LabelGuard<N> {
+        let mut guard = mutex.lock();
+        let label_string = labels.map(|str| str.to_string());
+        guard.uncollected_removed_labels.remove(&label_string);
+        *guard
+            .labeled_metrics_count
+            .entry(label_string.clone())
+            .or_insert(0) += 1;
+        LabelGuard {
+            labels: label_string,
+            info: mutex.clone(),
+        }
+    }
+}
+
+/// `LabelGuardedMetricVec` enhances the [`MetricVec`] to ensure the set of labels to be
+/// correctly removed from the Prometheus client once being dropped. This is useful for metrics
+/// that are associated with an object that can be dropped, such as streaming jobs, fragments,
+/// actors, batch tasks, etc.
+///
+/// When a set labels is dropped, it will record it in the `uncollected_removed_labels` set.
+/// Once the metrics has been collected, it will finally remove the metrics of the labels.
+///
+/// See also [`LabelGuardedMetricsInfo`] and [`LabelGuard::drop`].
+///
+/// # Arguments
+///
+/// * `T` - The type of the raw metrics vec.
+/// * `N` - The number of labels.
 #[derive(Clone)]
 pub struct LabelGuardedMetricVec<T: MetricVecBuilder, const N: usize> {
     inner: MetricVec<T>,
-    labeled_metrics_count: Arc<Mutex<HashMap<[String; N], usize>>>,
+    info: Arc<Mutex<LabelGuardedMetricsInfo<N>>>,
     labels: [&'static str; N],
 }
 
@@ -131,33 +189,62 @@ impl<T: MetricVecBuilder, const N: usize> Debug for LabelGuardedMetricVec<T, N> 
     }
 }
 
+impl<T: MetricVecBuilder, const N: usize> Collector for LabelGuardedMetricVec<T, N> {
+    fn desc(&self) -> Vec<&Desc> {
+        self.inner.desc()
+    }
+
+    fn collect(&self) -> Vec<MetricFamily> {
+        let mut guard = self.info.lock();
+        let ret = self.inner.collect();
+        for labels in guard.uncollected_removed_labels.drain() {
+            if let Err(e) = self
+                .inner
+                .remove_label_values(&labels.each_ref().map(|s| s.as_str()))
+            {
+                warn!(
+                    error = %e.as_report(),
+                    "err when delete metrics of {:?} of labels {:?}",
+                    self.inner.desc().first().expect("should have desc").fq_name,
+                    self.labels,
+                );
+            }
+        }
+        ret
+    }
+}
+
 impl<T: MetricVecBuilder, const N: usize> LabelGuardedMetricVec<T, N> {
     pub fn new(inner: MetricVec<T>, labels: &[&'static str; N]) -> Self {
         Self {
             inner,
-            labeled_metrics_count: Default::default(),
+            info: Default::default(),
             labels: *labels,
         }
     }
 
-    pub fn with_label_values(&self, labels: &[&str; N]) -> LabelGuardedMetric<T, N> {
-        let mut count_guard = self.labeled_metrics_count.lock();
-        let label_string = labels.map(|str| str.to_string());
-        *count_guard.entry(label_string).or_insert(0) += 1;
+    /// This is similar to the `with_label_values` of the raw metrics vec.
+    /// We need to pay special attention that, unless for some special purpose,
+    /// we should not drop the returned `LabelGuardedMetric` immediately after
+    /// using it, such as `metrics.with_guarded_label_values(...).inc();`,
+    /// because after dropped the label will be regarded as not used any more,
+    /// and the internal raw metrics will be removed and reset.
+    ///
+    /// Instead, we should store the returned `LabelGuardedMetric` in a scope with longer
+    /// lifetime so that the labels can be regarded as being used in its whole life scope.
+    /// This is also the recommended way to use the raw metrics vec.
+    pub fn with_guarded_label_values(&self, labels: &[&str; N]) -> LabelGuardedMetric<T::M, N> {
+        let guard = LabelGuardedMetricsInfo::register_new_label(&self.info, labels);
         let inner = self.inner.with_label_values(labels);
         LabelGuardedMetric {
-            inner: Arc::new(LabelGuardedMetricInner {
-                inner,
-                labels: labels.map(|str| str.to_string()),
-                vec: self.inner.clone(),
-                labeled_metrics_count: self.labeled_metrics_count.clone(),
-            }),
+            inner,
+            _guard: Arc::new(guard),
         }
     }
 
-    pub fn with_test_label(&self) -> LabelGuardedMetric<T, N> {
+    pub fn with_test_label(&self) -> LabelGuardedMetric<T::M, N> {
         let labels: [&'static str; N] = gen_test_label::<N>();
-        self.with_label_values(&labels)
+        self.with_guarded_label_values(&labels)
     }
 }
 
@@ -187,6 +274,14 @@ impl<const N: usize> LabelGuardedIntGaugeVec<N> {
     }
 }
 
+impl<const N: usize> LabelGuardedGaugeVec<N> {
+    pub fn test_gauge_vec() -> Self {
+        let registry = prometheus::Registry::new();
+        register_guarded_gauge_vec_with_registry!("test", "test", &gen_test_label::<N>(), &registry)
+            .unwrap()
+    }
+}
+
 impl<const N: usize> LabelGuardedHistogramVec<N> {
     pub fn test_histogram_vec() -> Self {
         let registry = prometheus::Registry::new();
@@ -201,40 +296,32 @@ impl<const N: usize> LabelGuardedHistogramVec<N> {
 }
 
 #[derive(Clone)]
-struct LabelGuardedMetricInner<T: MetricVecBuilder, const N: usize> {
-    inner: T::M,
+struct LabelGuard<const N: usize> {
     labels: [String; N],
-    vec: MetricVec<T>,
-    labeled_metrics_count: Arc<Mutex<HashMap<[String; N], usize>>>,
+    info: Arc<Mutex<LabelGuardedMetricsInfo<N>>>,
 }
 
-impl<T: MetricVecBuilder, const N: usize> Drop for LabelGuardedMetricInner<T, N> {
+impl<const N: usize> Drop for LabelGuard<N> {
     fn drop(&mut self) {
-        let mut count_guard = self.labeled_metrics_count.lock();
-        let count = count_guard.get_mut(&self.labels).expect(
+        let mut guard = self.info.lock();
+        let count = guard.labeled_metrics_count.get_mut(&self.labels).expect(
             "should exist because the current existing dropping one means the count is not zero",
         );
         *count -= 1;
         if *count == 0 {
-            count_guard.remove(&self.labels).expect("should exist");
-            if let Err(e) = self
-                .vec
-                .remove_label_values(&self.labels.each_ref().map(|s| s.as_str()))
-            {
-                warn!(
-                    "err when delete metrics of {:?} of labels {:?}. Err {:?}",
-                    self.vec.desc().first().expect("should have desc").fq_name,
-                    self.labels,
-                    e,
-                );
-            }
+            guard
+                .labeled_metrics_count
+                .remove(&self.labels)
+                .expect("should exist");
+            guard.uncollected_removed_labels.insert(self.labels.clone());
         }
     }
 }
 
 #[derive(Clone)]
-pub struct LabelGuardedMetric<T: MetricVecBuilder, const N: usize> {
-    inner: Arc<LabelGuardedMetricInner<T, N>>,
+pub struct LabelGuardedMetric<T, const N: usize> {
+    inner: T,
+    _guard: Arc<LabelGuard<N>>,
 }
 
 impl<T: MetricVecBuilder, const N: usize> Debug for LabelGuardedMetric<T, N> {
@@ -243,11 +330,11 @@ impl<T: MetricVecBuilder, const N: usize> Debug for LabelGuardedMetric<T, N> {
     }
 }
 
-impl<T: MetricVecBuilder, const N: usize> Deref for LabelGuardedMetric<T, N> {
-    type Target = T::M;
+impl<T, const N: usize> Deref for LabelGuardedMetric<T, N> {
+    type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &self.inner.inner
+        &self.inner
     }
 }
 
@@ -269,6 +356,42 @@ impl<const N: usize> LabelGuardedIntGauge<N> {
     }
 }
 
+impl<const N: usize> LabelGuardedGauge<N> {
+    pub fn test_gauge() -> Self {
+        LabelGuardedGaugeVec::<N>::test_gauge_vec().with_test_label()
+    }
+}
+
+pub trait MetricWithLocal {
+    type Local;
+    fn local(&self) -> Self::Local;
+}
+
+impl MetricWithLocal for Histogram {
+    type Local = LocalHistogram;
+
+    fn local(&self) -> Self::Local {
+        self.local()
+    }
+}
+
+impl<P: Atomic> MetricWithLocal for GenericCounter<P> {
+    type Local = GenericLocalCounter<P>;
+
+    fn local(&self) -> Self::Local {
+        self.local()
+    }
+}
+
+impl<T: MetricWithLocal, const N: usize> LabelGuardedMetric<T, N> {
+    pub fn local(&self) -> LabelGuardedMetric<T::Local, N> {
+        LabelGuardedMetric {
+            inner: self.inner.local(),
+            _guard: self._guard.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use prometheus::core::Collector;
@@ -278,20 +401,24 @@ mod tests {
     #[test]
     fn test_label_guarded_metrics_drop() {
         let vec = LabelGuardedIntCounterVec::<3>::test_int_counter_vec();
-        let m1_1 = vec.with_label_values(&["1", "2", "3"]);
-        assert_eq!(1, vec.inner.collect().pop().unwrap().get_metric().len());
-        let m1_2 = vec.with_label_values(&["1", "2", "3"]);
+        let m1_1 = vec.with_guarded_label_values(&["1", "2", "3"]);
+        assert_eq!(1, vec.collect().pop().unwrap().get_metric().len());
+        let m1_2 = vec.with_guarded_label_values(&["1", "2", "3"]);
         let m1_3 = m1_2.clone();
-        assert_eq!(1, vec.inner.collect().pop().unwrap().get_metric().len());
-        let m2 = vec.with_label_values(&["2", "2", "3"]);
-        assert_eq!(2, vec.inner.collect().pop().unwrap().get_metric().len());
+        assert_eq!(1, vec.collect().pop().unwrap().get_metric().len());
+        let m2 = vec.with_guarded_label_values(&["2", "2", "3"]);
+        assert_eq!(2, vec.collect().pop().unwrap().get_metric().len());
         drop(m1_3);
-        assert_eq!(2, vec.inner.collect().pop().unwrap().get_metric().len());
+        assert_eq!(2, vec.collect().pop().unwrap().get_metric().len());
+        assert_eq!(2, vec.collect().pop().unwrap().get_metric().len());
         drop(m2);
-        assert_eq!(1, vec.inner.collect().pop().unwrap().get_metric().len());
+        assert_eq!(2, vec.collect().pop().unwrap().get_metric().len());
+        assert_eq!(1, vec.collect().pop().unwrap().get_metric().len());
         drop(m1_1);
-        assert_eq!(1, vec.inner.collect().pop().unwrap().get_metric().len());
+        assert_eq!(1, vec.collect().pop().unwrap().get_metric().len());
+        assert_eq!(1, vec.collect().pop().unwrap().get_metric().len());
         drop(m1_2);
-        assert_eq!(0, vec.inner.collect().pop().unwrap().get_metric().len());
+        assert_eq!(1, vec.collect().pop().unwrap().get_metric().len());
+        assert_eq!(0, vec.collect().pop().unwrap().get_metric().len());
     }
 }

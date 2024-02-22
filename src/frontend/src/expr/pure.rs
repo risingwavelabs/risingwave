@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,25 +16,22 @@ use risingwave_pb::expr::expr_node;
 
 use super::{ExprImpl, ExprVisitor};
 use crate::expr::FunctionCall;
-pub(crate) struct ImpureAnalyzer {}
+
+#[derive(Default)]
+pub(crate) struct ImpureAnalyzer {
+    pub(crate) impure: bool,
+}
 
 impl ExprVisitor for ImpureAnalyzer {
-    type Result = bool;
-
-    fn merge(a: bool, b: bool) -> bool {
-        // the expr will be impure if any of its input is impure
-        a || b
+    fn visit_user_defined_function(&mut self, _func_call: &super::UserDefinedFunction) {
+        self.impure = true;
     }
 
-    fn visit_user_defined_function(&mut self, _func_call: &super::UserDefinedFunction) -> bool {
-        true
+    fn visit_now(&mut self, _: &super::Now) {
+        self.impure = true;
     }
 
-    fn visit_now(&mut self, _: &super::Now) -> bool {
-        true
-    }
-
-    fn visit_function_call(&mut self, func_call: &super::FunctionCall) -> bool {
+    fn visit_function_call(&mut self, func_call: &super::FunctionCall) {
         match func_call.func_type() {
             expr_node::Type::Unspecified => unreachable!(),
             expr_node::Type::Add
@@ -63,10 +60,13 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Extract
             | expr_node::Type::DatePart
             | expr_node::Type::TumbleStart
-            | expr_node::Type::ToTimestamp
+            | expr_node::Type::SecToTimestamptz
             | expr_node::Type::AtTimeZone
             | expr_node::Type::DateTrunc
-            | expr_node::Type::ToTimestamp1
+            | expr_node::Type::MakeDate
+            | expr_node::Type::MakeTime
+            | expr_node::Type::MakeTimestamp
+            | expr_node::Type::CharToTimestamptz
             | expr_node::Type::CharToDate
             | expr_node::Type::CastWithTimeZone
             | expr_node::Type::AddWithTimeZone
@@ -76,6 +76,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Length
             | expr_node::Type::Like
             | expr_node::Type::ILike
+            | expr_node::Type::SimilarToEscape
             | expr_node::Type::Upper
             | expr_node::Type::Lower
             | expr_node::Type::Trim
@@ -84,6 +85,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Ltrim
             | expr_node::Type::Rtrim
             | expr_node::Type::Case
+            | expr_node::Type::ConstantLookup
             | expr_node::Type::RoundDigit
             | expr_node::Type::Round
             | expr_node::Type::Ascii
@@ -108,6 +110,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::RegexpReplace
             | expr_node::Type::RegexpCount
             | expr_node::Type::RegexpSplitToArray
+            | expr_node::Type::RegexpEq
             | expr_node::Type::Pow
             | expr_node::Type::Exp
             | expr_node::Type::Ln
@@ -171,13 +174,33 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::ArrayRemove
             | expr_node::Type::ArrayReplace
             | expr_node::Type::ArrayPosition
+            | expr_node::Type::ArrayContains
+            | expr_node::Type::ArrayContained
             | expr_node::Type::HexToInt256
-            | expr_node::Type::JsonbCat
-            | expr_node::Type::JsonbAccessInner
+            | expr_node::Type::JsonbConcat
+            | expr_node::Type::JsonbAccess
             | expr_node::Type::JsonbAccessStr
+            | expr_node::Type::JsonbExtractPath
+            | expr_node::Type::JsonbExtractPathText
             | expr_node::Type::JsonbTypeof
             | expr_node::Type::JsonbArrayLength
+            | expr_node::Type::JsonbObject
+            | expr_node::Type::JsonbPretty
+            | expr_node::Type::JsonbDeletePath
+            | expr_node::Type::JsonbContains
+            | expr_node::Type::JsonbContained
+            | expr_node::Type::JsonbExists
+            | expr_node::Type::JsonbExistsAny
+            | expr_node::Type::JsonbExistsAll
+            | expr_node::Type::JsonbStripNulls
+            | expr_node::Type::JsonbBuildArray
+            | expr_node::Type::JsonbBuildObject
+            | expr_node::Type::JsonbPathExists
+            | expr_node::Type::JsonbPathMatch
+            | expr_node::Type::JsonbPathQueryArray
+            | expr_node::Type::JsonbPathQueryFirst
             | expr_node::Type::IsJson
+            | expr_node::Type::ToJsonb
             | expr_node::Type::Sind
             | expr_node::Type::Cosd
             | expr_node::Type::Cotd
@@ -196,6 +219,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Sha256
             | expr_node::Type::Sha384
             | expr_node::Type::Sha512
+            | expr_node::Type::Decrypt
+            | expr_node::Type::Encrypt
             | expr_node::Type::Tand
             | expr_node::Type::ArrayPositions
             | expr_node::Type::StringToArray
@@ -204,16 +229,16 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::PgwireRecv
             | expr_node::Type::ArrayTransform
             | expr_node::Type::Greatest
-            | expr_node::Type::Least =>
+            | expr_node::Type::Least
+            | expr_node::Type::ConvertFrom
+            | expr_node::Type::ConvertTo
+            | expr_node::Type::IcebergTransform =>
             // expression output is deterministic(same result for the same input)
             {
-                let x = func_call
+                func_call
                     .inputs()
                     .iter()
-                    .map(|expr| self.visit_expr(expr))
-                    .reduce(Self::merge)
-                    .unwrap_or_default();
-                x
+                    .for_each(|expr| self.visit_expr(expr));
             }
             // expression output is not deterministic
             expr_node::Type::Vnode
@@ -221,8 +246,14 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::PgSleep
             | expr_node::Type::PgSleepFor
             | expr_node::Type::PgSleepUntil
+            | expr_node::Type::CastRegclass
+            | expr_node::Type::PgGetIndexdef
             | expr_node::Type::ColDescription
-            | expr_node::Type::CastRegclass => true,
+            | expr_node::Type::PgGetViewdef
+            | expr_node::Type::PgGetUserbyid
+            | expr_node::Type::PgIndexesSize
+            | expr_node::Type::PgRelationSize
+            | expr_node::Type::MakeTimestamptz => self.impure = true,
         }
     }
 }
@@ -232,13 +263,15 @@ pub fn is_pure(expr: &ExprImpl) -> bool {
 }
 
 pub fn is_impure(expr: &ExprImpl) -> bool {
-    let mut a = ImpureAnalyzer {};
-    a.visit_expr(expr)
+    let mut a = ImpureAnalyzer::default();
+    a.visit_expr(expr);
+    a.impure
 }
 
 pub fn is_impure_func_call(func_call: &FunctionCall) -> bool {
-    let mut a = ImpureAnalyzer {};
-    a.visit_function_call(func_call)
+    let mut a = ImpureAnalyzer::default();
+    a.visit_function_call(func_call);
+    a.impure
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,11 +24,10 @@ use crate::error::StreamResult;
 use crate::executor::{
     BoxedExecutor, EowcOverWindowExecutor, EowcOverWindowExecutorArgs, Executor,
 };
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::task::ExecutorParams;
 
 pub struct EowcOverWindowExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
     type Node = PbEowcOverWindowNode;
 
@@ -36,7 +35,6 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let calls: Vec<_> = node
@@ -59,15 +57,16 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
             StateTable::from_table_catalog_inconsistent_op(node.get_state_table()?, store, vnodes)
                 .await;
         Ok(EowcOverWindowExecutor::new(EowcOverWindowExecutorArgs {
-            input,
             actor_ctx: params.actor_context,
-            pk_indices: params.pk_indices,
-            executor_id: params.executor_id,
+            info: params.info,
+
+            input,
+
             calls,
             partition_key_indices,
             order_key_index,
             state_table,
-            watermark_epoch: stream.get_watermark_epoch(),
+            watermark_epoch: params.watermark_epoch,
         })
         .boxed())
     }

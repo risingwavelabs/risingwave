@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -51,6 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "stream_plan",
         "stream_service",
         "task_service",
+        "telemetry",
         "user",
     ];
     let protos: Vec<String> = proto_files
@@ -59,7 +60,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
 
     // Paths to generate `BTreeMap` for protobuf maps.
-    let btree_map_paths = [".monitor_service.StackTraceResponse"];
+    let btree_map_paths = [
+        ".monitor_service.StackTraceResponse",
+        ".plan_common.ExternalTableDesc",
+        ".hummock.CompactTask",
+        ".catalog.StreamSourceInfo",
+    ];
 
     // Build protobuf structs.
 
@@ -108,10 +114,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.GeneratedColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.DefaultColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.Cardinality", "#[derive(Eq, Hash, Copy)]")
-        .type_attribute("plan_common.StorageTableDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.ExternalTableDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.ColumnDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalColumn", "#[derive(Eq, Hash)]")
+        .type_attribute(
+            "plan_common.AdditionalColumn.column_type",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute("plan_common.AdditionalColumnNormal", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalColumnKey", "#[derive(Eq, Hash)]")
+        .type_attribute(
+            "plan_common.AdditionalColumnPartition",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute(
+            "plan_common.AdditionalColumnTimestamp",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute(
+            "plan_common.AdditionalColumnFilename",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute("plan_common.AdditionalColumnHeader", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalColumnHeaders", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalColumnOffset", "#[derive(Eq, Hash)]")
         .type_attribute("common.ColumnOrder", "#[derive(Eq, Hash)]")
         .type_attribute("common.OrderType", "#[derive(Eq, Hash)]")
+        .type_attribute("common.Buffer", "#[derive(Eq)]")
+        // Eq is required to derive `FromJsonQueryResult` for models in risingwave_meta_model_v2.
+        .type_attribute("hummock.TableStats", "#[derive(Eq)]")
+        .type_attribute("hummock.SstableInfo", "#[derive(Eq)]")
+        .type_attribute("hummock.KeyRange", "#[derive(Eq)]")
+        .type_attribute("hummock.CompactionConfig", "#[derive(Eq)]")
+        .type_attribute("hummock.GroupDelta.delta_type", "#[derive(Eq)]")
+        .type_attribute("hummock.IntraLevelDelta", "#[derive(Eq)]")
+        .type_attribute("hummock.GroupConstruct", "#[derive(Eq)]")
+        .type_attribute("hummock.GroupDestroy", "#[derive(Eq)]")
+        .type_attribute("hummock.GroupMetaChange", "#[derive(Eq)]")
+        .type_attribute("hummock.GroupTableChange", "#[derive(Eq)]")
+        .type_attribute("hummock.GroupDelta", "#[derive(Eq)]")
+        .type_attribute("hummock.LevelHandler.RunningCompactTask", "#[derive(Eq)]")
+        .type_attribute("hummock.LevelHandler", "#[derive(Eq)]")
+        .type_attribute("hummock.TableOption", "#[derive(Eq)]")
+        .type_attribute("hummock.InputLevel", "#[derive(Eq)]")
+        .type_attribute("hummock.CompactTask", "#[derive(Eq)]")
+        .type_attribute("hummock.TableWatermarks", "#[derive(Eq)]")
+        .type_attribute("hummock.VnodeWatermark", "#[derive(Eq)]")
+        .type_attribute(
+            "hummock.TableWatermarks.EpochNewWatermarks",
+            "#[derive(Eq)]",
+        )
         // ===================
         .out_dir(out_dir.as_path())
         .compile(&protos, &[proto_dir.to_string()])

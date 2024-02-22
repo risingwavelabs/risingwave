@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::error::Result;
 
 use crate::binder::BoundQuery;
+use crate::error::Result;
 use crate::optimizer::plan_node::{LogicalLimit, LogicalTopN};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
@@ -56,7 +56,9 @@ impl Planner {
         }
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..plan.schema().len() - extra_order_exprs_len);
-        if let Some(field) = plan.schema().fields.get(0) && field.name == "projected_row_id" {
+        if let Some(field) = plan.schema().fields.first()
+            && field.name == "projected_row_id"
+        {
             // Do not output projected_row_id hidden column.
             out_fields.set(0, false);
         }

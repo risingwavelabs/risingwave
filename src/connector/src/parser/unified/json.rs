@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,17 +13,23 @@
 // limitations under the License.
 
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use base64::Engine;
 use itertools::Itertools;
 use num_bigint::{BigInt, Sign};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz, str_to_bytea};
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{
     DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
-use simd_json::{BorrowedValue, ValueAccess, ValueType};
+use simd_json::prelude::{
+    TypedValue, ValueAsContainer, ValueAsScalar, ValueObjectAccess, ValueTryAsScalar,
+};
+use simd_json::{BorrowedValue, ValueType};
+use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult};
 use crate::parser::common::json_object_get_case_insensitive;
@@ -353,7 +359,7 @@ impl JsonParseOptions {
                     .as_bytes();
                 let decimal = BigInt::from_signed_bytes_be(value);
                 let negative = decimal.sign() == Sign::Minus;
-                let (lo, mid, hi) = extract_decimal(decimal.to_bytes_be().1);
+                let (lo, mid, hi) = extract_decimal(decimal.to_bytes_be().1)?;
                 let decimal =
                     rust_decimal::Decimal::from_parts(lo, mid, hi, negative, scale as u32);
                 ScalarImpl::Decimal(Decimal::Normalized(decimal))
@@ -454,11 +460,20 @@ impl JsonParseOptions {
                     .names()
                     .zip_eq_fast(struct_type_info.types())
                     .map(|(field_name, field_type)| {
-                        self.parse(
-                            json_object_get_case_insensitive(value, field_name)
-                                .unwrap_or(&BorrowedValue::Static(simd_json::StaticNode::Null)),
-                            Some(field_type),
-                        )
+                        let field_value = json_object_get_case_insensitive(value, field_name)
+                            .unwrap_or_else(|| {
+                                let error = AccessError::Undefined {
+                                    name: field_name.to_owned(),
+                                    path: struct_type_info.to_string(), // TODO: this is not good, we should maintain a path stack
+                                };
+                                // TODO: is it possible to unify the logging with the one in `do_action`?
+                                static LOG_SUPPERSSER: LazyLock<LogSuppresser> =  LazyLock::new(LogSuppresser::default);
+                                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                    tracing::warn!(error = %error.as_report(), suppressed_count, "undefined nested field, padding with `NULL`");
+                                }
+                                &BorrowedValue::Static(simd_json::StaticNode::Null)
+                            });
+                        self.parse(field_value, Some(field_type))
                     })
                     .collect::<Result<_, _>>()?,
             )
@@ -487,24 +502,17 @@ impl JsonParseOptions {
             }
 
             // ---- List -----
-            (Some(DataType::List(item_type)), ValueType::Array) => ListValue::new(
-                value
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|v| self.parse(v, Some(item_type)))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )
+            (Some(DataType::List(item_type)), ValueType::Array) => ListValue::new({
+                let array = value.as_array().unwrap();
+                let mut builder = item_type.create_array_builder(array.len());
+                for v in array {
+                    let value = self.parse(v, Some(item_type))?;
+                    builder.append(value);
+                }
+                builder.finish()
+            })
             .into(),
-            (None, ValueType::Array) => ListValue::new(
-                value
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|v| self.parse(v, None))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )
-            .into(),
+
             // ---- Bytea -----
             (Some(DataType::Bytea), ValueType::String) => match self.bytea_handling {
                 ByteaHandling::Standard => str_to_bytea(value.as_str().unwrap())

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,16 +15,13 @@
 mod compact_task_assignment;
 mod compaction_group_config;
 mod compaction_status;
+pub mod ext;
 mod pinned_snapshot;
 mod pinned_version;
 mod version_delta;
 mod version_stats;
 
 pub use compaction_group_config::CompactionGroup;
-pub use compaction_status::*;
-pub use pinned_snapshot::*;
-pub use pinned_version::*;
-pub use version_delta::*;
 
 /// Column family names for hummock.
 /// Deprecated `cf_name` should be reserved for backward compatibility.

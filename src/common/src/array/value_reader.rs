@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use std::io::Cursor;
 use std::str::from_utf8;
 
+use anyhow::Context;
 use byteorder::{BigEndian, ReadBytesExt};
 
 use super::ArrayResult;
@@ -39,10 +40,10 @@ macro_rules! impl_numeric_value_reader {
     ($value_type:ty, $value_reader:ty, $read_fn:ident) => {
         impl PrimitiveValueReader<$value_type> for $value_reader {
             fn read(cur: &mut Cursor<&[u8]>) -> ArrayResult<$value_type> {
-                match cur.$read_fn::<BigEndian>() {
-                    Ok(v) => Ok(v.into()),
-                    Err(e) => bail!("Failed to read value from buffer: {}", e),
-                }
+                let v = cur
+                    .$read_fn::<BigEndian>()
+                    .context("failed to read value from buffer")?;
+                Ok(v.into())
             }
         }
     };
@@ -71,10 +72,7 @@ pub struct Utf8ValueReader;
 
 impl VarSizedValueReader<Utf8ArrayBuilder> for Utf8ValueReader {
     fn read(buf: &[u8], builder: &mut Utf8ArrayBuilder) -> ArrayResult<()> {
-        let s = match from_utf8(buf) {
-            Ok(s) => s,
-            Err(e) => bail!("failed to read utf8 string from bytes: {}", e),
-        };
+        let s = from_utf8(buf).context("failed to read utf8 string from bytes")?;
         builder.append(Some(s));
         Ok(())
     }

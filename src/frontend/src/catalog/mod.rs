@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,9 +21,10 @@
 use risingwave_common::catalog::{
     is_row_id_column_name, is_system_schema, ROWID_PREFIX, RW_RESERVED_COLUMN_NAME_PREFIX,
 };
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_connector::sink::catalog::SinkCatalog;
 use thiserror::Error;
+
+use crate::error::{ErrorCode, Result, RwError};
 pub(crate) mod catalog_service;
 
 pub(crate) mod connection_catalog;

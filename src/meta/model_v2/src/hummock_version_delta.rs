@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,24 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::hummock::PbHummockVersionDelta;
 use sea_orm::entity::prelude::*;
+use sea_orm::FromJsonQueryResult;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+use crate::{Epoch, HummockVersionId};
+
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Default)]
 #[sea_orm(table_name = "hummock_version_delta")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: i64,
-    pub prev_id: i64,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub group_deltas: Option<Json>,
-    pub max_committed_epoch: i64,
-    pub safe_epoch: i64,
+    pub id: HummockVersionId,
+    pub prev_id: HummockVersionId,
+    pub max_committed_epoch: Epoch,
+    pub safe_epoch: Epoch,
     pub trivial_move: bool,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub gc_object_ids: Option<Json>,
+    pub full_version_delta: FullVersionDelta,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+crate::derive_from_json_struct!(FullVersionDelta, PbHummockVersionDelta);
+
+impl From<Model> for PbHummockVersionDelta {
+    fn from(value: Model) -> Self {
+        let ret = value.full_version_delta.into_inner();
+        assert_eq!(value.id, ret.id as i64);
+        assert_eq!(value.prev_id, ret.prev_id as i64);
+        assert_eq!(value.max_committed_epoch, ret.max_committed_epoch as i64);
+        assert_eq!(value.safe_epoch, ret.safe_epoch as i64);
+        assert_eq!(value.trivial_move, ret.trivial_move);
+        ret
+    }
+}

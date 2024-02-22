@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,11 +20,10 @@ use super::ExecutorBuilder;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::{BoxedExecutor, NowExecutor};
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::task::ExecutorParams;
 
 pub struct NowExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for NowExecutorBuilder {
     type Node = NowNode;
 
@@ -32,20 +31,18 @@ impl ExecutorBuilder for NowExecutorBuilder {
         params: ExecutorParams,
         node: &NowNode,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let (sender, barrier_receiver) = unbounded_channel();
-        stream
-            .context
-            .lock_barrier_manager()
+        params
+            .local_barrier_manager
             .register_sender(params.actor_context.id, sender);
 
         let state_table =
             StateTable::from_table_catalog(node.get_state_table()?, store, None).await;
 
         Ok(Box::new(NowExecutor::new(
+            params.info,
             barrier_receiver,
-            params.executor_id,
             state_table,
         )))
     }

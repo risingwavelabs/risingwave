@@ -25,8 +25,8 @@ select (v2).* from st;
 query II rowsort
 select * from st;
 ----
-1 (1,(1,2))
-1 (1,(1,3))
+1 (1,"(1,2)")
+1 (1,"(1,3)")
 
 query I
 select (v2).v2.v1 from st;
@@ -43,22 +43,22 @@ select (v2).v2 from st;
 query II
 select * from st where v2 = (1,(1,3));
 ----
-1 (1,(1,3))
+1 (1,"(1,3)")
 
 query II
 select * from st where v2 != (1,(1,3));
 ----
-1 (1,(1,2))
+1 (1,"(1,2)")
 
 query II
 select * from st where (v2).v2 < (1,3);
 ----
-1 (1,(1,2))
+1 (1,"(1,2)")
 
 query II
 select * from st where (v2).v2 > (1,2);
 ----
-1 (1,(1,3))
+1 (1,"(1,3)")
 
 query I
 select max((v2).v2) from st;
@@ -82,7 +82,7 @@ insert into st values(1,(1,(1,null)));
 query II
 select * from st;
 ----
-1 (1,(1,NULL))
+1 (1,"(1,)")
 
 statement ok
 drop table st;
@@ -90,7 +90,7 @@ drop table st;
 query T
 select Row('foo', 'bar', null);
 ----
-(foo,bar,NULL)
+(foo,bar,)
 
 query T
 select Row();
@@ -100,7 +100,7 @@ select Row();
 query T
 select Row(null);
 ----
-(NULL)
+()
 
 statement ok
 create table t (v1 int);
@@ -136,3 +136,29 @@ select * from t where Row(1,v1*2) > Row(1,2);
 
 statement ok
 drop table t;
+
+# row to text
+query TTTT
+select Row('a'), Row(''), Row('"'), Row(' a '), Row('a b');
+----
+(a) ("") ("""") (" a ") ("a b")
+
+query TTT
+select Row('{}'), Row('[]'), Row('()'), Row(',');
+----
+({}) ([]) ("()") (",")
+
+query TTT
+select Row(NULL), Row(NULL, NULL), Row('null');
+----
+() (,) (null)
+
+query TTT
+select Row(Array[] :: varchar[]), Row(Array[1] :: varchar[]), Row(Array[1,2] :: varchar[]);
+----
+({}) ({1}) ("{1,2}")
+
+query T
+select Row(Array['"'] :: varchar[]);
+----
+("{""\\""""}")

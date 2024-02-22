@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -22,9 +21,9 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
+use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tracing::error;
-use tracing_futures::Instrument;
 
 #[cfg(all(not(madsim), feature = "hm-trace"))]
 use super::traced_store::TracedStateStore;
@@ -100,7 +99,7 @@ impl<S> MonitoredStateStore<S> {
         let iter_stream = iter_stream_future
             .verbose_instrument_await("store_create_iter")
             .await
-            .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
+            .inspect_err(|e| error!(error = %e.as_report(), "Failed in iter"))?;
 
         self.storage_metrics
             .iter_init_duration
@@ -141,6 +140,8 @@ impl<S> MonitoredStateStore<S> {
         table_id: TableId,
         key_len: usize,
     ) -> StorageResult<Option<Bytes>> {
+        use tracing::Instrument;
+
         let table_id_label = table_id.to_string();
         let timer = self
             .storage_metrics
@@ -152,7 +153,7 @@ impl<S> MonitoredStateStore<S> {
             .verbose_instrument_await("store_get")
             .instrument(tracing::trace_span!("store_get"))
             .await
-            .inspect_err(|e| error!("Failed in get: {:?}", e))?;
+            .inspect_err(|e| error!(error = %e.as_report(), "Failed in get"))?;
 
         timer.observe_duration();
 
@@ -259,14 +260,8 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         self.inner.delete(key, old_val)
     }
 
-    fn flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
-        // TODO: collect metrics
-        self.inner
-            .flush(delete_ranges)
-            .verbose_instrument_await("store_flush")
+    fn flush(&mut self) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
+        self.inner.flush().verbose_instrument_await("store_flush")
     }
 
     fn epoch(&self) -> u64 {
@@ -281,9 +276,15 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         self.inner.init(options).await
     }
 
-    fn seal_current_epoch(&mut self, next_epoch: u64) {
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
         // TODO: may collect metrics
-        self.inner.seal_current_epoch(next_epoch)
+        self.inner.seal_current_epoch(next_epoch, opts)
+    }
+
+    fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+        self.inner
+            .try_flush()
+            .verbose_instrument_await("store_try_flush")
     }
 }
 
@@ -297,7 +298,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         self.inner
             .try_wait_epoch(epoch)
             .verbose_instrument_await("store_wait_epoch")
-            .inspect_err(|e| error!("Failed in wait_epoch: {:?}", e))
+            .inspect_err(|e| error!(error = %e.as_report(), "Failed in wait_epoch"))
     }
 
     async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
@@ -309,7 +310,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
             .sync(epoch)
             .instrument_await("store_sync")
             .await
-            .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
+            .inspect_err(|e| error!(error = %e.as_report(), "Failed in sync"))?;
         timer.observe_duration();
         if sync_result.sync_size != 0 {
             self.storage_metrics
@@ -330,11 +331,10 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         panic!("the state store is already monitored")
     }
 
-    fn clear_shared_buffer(&self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+    fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_ {
         self.inner
-            .clear_shared_buffer()
+            .clear_shared_buffer(prev_epoch)
             .verbose_instrument_await("store_clear_shared_buffer")
-            .inspect_err(|e| error!("Failed in clear_shared_buffer: {:?}", e))
     }
 
     async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
@@ -387,7 +387,7 @@ impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
         while let Some((key, value)) = inner
             .try_next()
             .await
-            .inspect_err(|e| error!("Failed in next: {:?}", e))?
+            .inspect_err(|e| error!(error = %e.as_report(), "Failed in next"))?
         {
             stats.total_items += 1;
             stats.total_size += key.encoded_len() + value.len();
@@ -397,6 +397,8 @@ impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
     }
 
     fn into_stream(self) -> MonitoredStateStoreIterStream<S> {
+        use risingwave_common::util::tracing::InstrumentStream;
+
         Self::into_stream_inner(self).instrument(tracing::trace_span!("store_iter"))
     }
 }

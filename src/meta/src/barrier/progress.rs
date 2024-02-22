@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,23 +29,23 @@ use crate::barrier::{
     Command, TableActorMap, TableDefinitionMap, TableFragmentMap, TableNotifierMap,
     TableUpstreamMvCountMap,
 };
-use crate::manager::{FragmentManager, FragmentManagerRef};
+use crate::manager::{DdlType, MetadataManager};
 use crate::model::{ActorId, TableFragments};
 use crate::{MetaError, MetaResult};
 
 type ConsumedRows = u64;
 
 #[derive(Clone, Copy, Debug)]
-pub enum ChainState {
+enum BackfillState {
     Init,
-    ConsumingUpstream(Epoch, ConsumedRows),
+    ConsumingUpstream(#[allow(dead_code)] Epoch, ConsumedRows),
     Done(ConsumedRows),
 }
 
-/// Progress of all actors containing chain nodes while creating mview.
+/// Progress of all actors containing backfill executors while creating mview.
 #[derive(Debug)]
 struct Progress {
-    states: HashMap<ActorId, ChainState>,
+    states: HashMap<ActorId, BackfillState>,
 
     done_count: usize,
 
@@ -54,7 +54,7 @@ struct Progress {
     /// appears in this stream job.
     upstream_mv_count: HashMap<TableId, usize>,
 
-    /// Upstream mvs total key count.
+    /// Total key count in the upstream materialized view
     upstream_total_key_count: u64,
 
     /// Consumed rows
@@ -65,7 +65,7 @@ struct Progress {
 }
 
 impl Progress {
-    /// Create a [`Progress`] for some creating mview, with all `actors` containing the chain nodes.
+    /// Create a [`Progress`] for some creating mview, with all `actors` containing the backfill executors.
     fn new(
         actors: impl IntoIterator<Item = ActorId>,
         upstream_mv_count: HashMap<TableId, usize>,
@@ -74,7 +74,7 @@ impl Progress {
     ) -> Self {
         let states = actors
             .into_iter()
-            .map(|a| (a, ChainState::Init))
+            .map(|a| (a, BackfillState::Init))
             .collect::<HashMap<_, _>>();
         assert!(!states.is_empty());
 
@@ -89,35 +89,42 @@ impl Progress {
     }
 
     /// Update the progress of `actor`.
-    fn update(&mut self, actor: ActorId, new_state: ChainState, upstream_total_key_count: u64) {
+    fn update(&mut self, actor: ActorId, new_state: BackfillState, upstream_total_key_count: u64) {
         self.upstream_total_key_count = upstream_total_key_count;
+        let total_actors = self.states.len();
         match self.states.remove(&actor).unwrap() {
-            ChainState::Init => {}
-            ChainState::ConsumingUpstream(_, old_consumed_rows) => {
+            BackfillState::Init => {}
+            BackfillState::ConsumingUpstream(_, old_consumed_rows) => {
                 self.consumed_rows -= old_consumed_rows;
             }
-            ChainState::Done(_) => panic!("should not report done multiple times"),
+            BackfillState::Done(_) => panic!("should not report done multiple times"),
         };
         match &new_state {
-            ChainState::Init => {}
-            ChainState::ConsumingUpstream(_, new_consumed_rows) => {
+            BackfillState::Init => {}
+            BackfillState::ConsumingUpstream(_, new_consumed_rows) => {
                 self.consumed_rows += new_consumed_rows;
             }
-            ChainState::Done(new_consumed_rows) => {
+            BackfillState::Done(new_consumed_rows) => {
+                tracing::debug!("actor {} done", actor);
                 self.consumed_rows += new_consumed_rows;
                 self.done_count += 1;
+                tracing::debug!(
+                    "{} actors out of {} complete",
+                    self.done_count,
+                    total_actors,
+                );
             }
         };
         self.states.insert(actor, new_state);
         self.calculate_progress();
     }
 
-    /// Returns whether all chains are done.
+    /// Returns whether all backfill executors are done.
     fn is_done(&self) -> bool {
         self.done_count == self.states.len()
     }
 
-    /// Returns the ids of all actors containing the chain nodes for the mview tracked by this
+    /// Returns the ids of all actors containing the backfill executors for the mview tracked by this
     /// [`Progress`].
     fn actors(&self) -> impl Iterator<Item = ActorId> + '_ {
         self.states.keys().cloned()
@@ -152,17 +159,22 @@ pub enum TrackingJob {
 }
 
 impl TrackingJob {
-    fn fragment_manager(&self) -> &FragmentManager {
+    fn metadata_manager(&self) -> &MetadataManager {
         match self {
-            TrackingJob::New(command) => command.context.fragment_manager.as_ref(),
-            TrackingJob::Recovered(recovered) => recovered.fragment_manager.as_ref(),
+            TrackingJob::New(command) => command.context.metadata_manager(),
+            TrackingJob::Recovered(recovered) => &recovered.metadata_manager,
         }
     }
 
-    pub(crate) fn is_barrier(&self) -> bool {
+    /// Returns whether the `TrackingJob` requires a checkpoint to complete.
+    pub(crate) fn is_checkpoint_required(&self) -> bool {
         match self {
+            // Recovered tracking job is always a streaming job,
+            // It requires a checkpoint to complete.
             TrackingJob::Recovered(_) => true,
-            TrackingJob::New(command) => command.context.kind.is_barrier(),
+            TrackingJob::New(command) => {
+                command.context.kind.is_initial() || command.context.kind.is_checkpoint()
+            }
         }
     }
 
@@ -179,9 +191,14 @@ impl TrackingJob {
         // Update the state of the table fragments from `Creating` to `Created`, so that the
         // fragments can be scaled.
         if let Some(table_fragments) = table_fragments {
-            self.fragment_manager()
-                .mark_table_fragments_created(table_fragments.table_id())
-                .await?;
+            match self.metadata_manager() {
+                MetadataManager::V1(mgr) => {
+                    mgr.fragment_manager
+                        .mark_table_fragments_created(table_fragments.table_id())
+                        .await?;
+                }
+                MetadataManager::V2(_) => {}
+            }
         }
         Ok(())
     }
@@ -225,7 +242,7 @@ impl TrackingJob {
 pub struct RecoveredTrackingJob {
     pub fragments: TableFragments,
     pub finished: Notifier,
-    pub fragment_manager: FragmentManagerRef,
+    pub metadata_manager: MetadataManager,
 }
 
 /// The command tracking by the [`CreateMviewProgressTracker`].
@@ -249,7 +266,7 @@ pub(super) struct CreateMviewProgressTracker {
     /// Progress of the create-mview DDL indicated by the TableId.
     progress_map: HashMap<TableId, (Progress, TrackingJob)>,
 
-    /// Find the epoch of the create-mview DDL by the actor containing the chain node.
+    /// Find the epoch of the create-mview DDL by the actor containing the backfill executors.
     actor_map: HashMap<ActorId, TableId>,
 }
 
@@ -268,17 +285,17 @@ impl CreateMviewProgressTracker {
         version_stats: HummockVersionStats,
         mut finished_notifiers: TableNotifierMap,
         mut table_fragment_map: TableFragmentMap,
-        fragment_manager: FragmentManagerRef,
+        metadata_manager: MetadataManager,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
-        let table_map: HashMap<_, Vec<ActorId>> = table_map.into();
+        let table_map: HashMap<_, HashSet<ActorId>> = table_map.into();
         for (creating_table_id, actors) in table_map {
-            // 1. Recover `ChainState` in the tracker.
+            // 1. Recover `BackfillState` in the tracker.
             let mut states = HashMap::new();
             for actor in actors {
                 actor_map.insert(actor, creating_table_id);
-                states.insert(actor, ChainState::ConsumingUpstream(Epoch(0), 0));
+                states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0));
             }
             let upstream_mv_count = upstream_mv_counts.remove(&creating_table_id).unwrap();
             let upstream_total_key_count = upstream_mv_count
@@ -303,7 +320,7 @@ impl CreateMviewProgressTracker {
             let tracking_job = TrackingJob::Recovered(RecoveredTrackingJob {
                 fragments: table_fragment_map.remove(&creating_table_id).unwrap(),
                 finished: finished_notifiers.remove(&creating_table_id).unwrap(),
-                fragment_manager: fragment_manager.clone(),
+                metadata_manager: metadata_manager.clone(),
             });
             progress_map.insert(creating_table_id, (progress, tracking_job));
         }
@@ -320,13 +337,17 @@ impl CreateMviewProgressTracker {
         }
     }
 
-    pub fn gen_ddl_progress(&self) -> Vec<DdlProgress> {
+    pub fn gen_ddl_progress(&self) -> HashMap<u32, DdlProgress> {
         self.progress_map
             .iter()
-            .map(|(table_id, (x, _))| DdlProgress {
-                id: table_id.table_id as u64,
-                statement: x.definition.clone(),
-                progress: format!("{:.2}%", x.calculate_progress() * 100.0),
+            .map(|(table_id, (x, _))| {
+                let table_id = table_id.table_id;
+                let ddl_progress = DdlProgress {
+                    id: table_id as u64,
+                    statement: x.definition.clone(),
+                    progress: format!("{:.2}%", x.calculate_progress() * 100.0),
+                };
+                (table_id, ddl_progress)
             })
             .collect()
     }
@@ -353,7 +374,7 @@ impl CreateMviewProgressTracker {
     }
 
     /// Notify all tracked commands that error encountered and clear them.
-    pub fn abort_all(&mut self, err: MetaError) {
+    pub fn abort_all(&mut self, err: &MetaError) {
         self.actor_map.clear();
         self.progress_map
             .drain()
@@ -374,12 +395,13 @@ impl CreateMviewProgressTracker {
             return Some(TrackingJob::New(command));
         }
 
-        let (creating_mv_id, upstream_mv_count, upstream_total_key_count, definition) =
+        let (creating_mv_id, upstream_mv_count, upstream_total_key_count, definition, ddl_type) =
             if let Command::CreateStreamingJob {
                 table_fragments,
                 dispatchers,
                 upstream_mview_actors,
                 definition,
+                ddl_type,
                 ..
             } = &command.context.command
             {
@@ -410,6 +432,7 @@ impl CreateMviewProgressTracker {
                     upstream_mv_count,
                     upstream_total_key_count,
                     definition.to_string(),
+                    ddl_type,
                 )
             } else {
                 unreachable!("Must be CreateStreamingJob.");
@@ -425,11 +448,20 @@ impl CreateMviewProgressTracker {
             upstream_total_key_count,
             definition,
         );
-        let old = self
-            .progress_map
-            .insert(creating_mv_id, (progress, TrackingJob::New(command)));
-        assert!(old.is_none());
-        None
+        if *ddl_type == DdlType::Sink {
+            // We return the original tracking job immediately.
+            // This is because sink can be decoupled with backfill progress.
+            // We don't need to wait for sink to finish backfill.
+            // This still contains the notifiers, so we can tell listeners
+            // that the sink job has been created.
+            Some(TrackingJob::New(command))
+        } else {
+            let old = self
+                .progress_map
+                .insert(creating_mv_id, (progress, TrackingJob::New(command)));
+            assert!(old.is_none());
+            None
+        }
     }
 
     /// Update the progress of `actor` according to the Pb struct.
@@ -440,7 +472,7 @@ impl CreateMviewProgressTracker {
         progress: &CreateMviewProgress,
         version_stats: &HummockVersionStats,
     ) -> Option<TrackingJob> {
-        let actor = progress.chain_actor_id;
+        let actor = progress.backfill_actor_id;
         let Some(table_id) = self.actor_map.get(&actor).copied() else {
             // On restart, backfill will ALWAYS notify CreateMviewProgressTracker,
             // even if backfill is finished on recovery.
@@ -456,9 +488,9 @@ impl CreateMviewProgressTracker {
         };
 
         let new_state = if progress.done {
-            ChainState::Done(progress.consumed_rows)
+            BackfillState::Done(progress.consumed_rows)
         } else {
-            ChainState::ConsumingUpstream(progress.consumed_epoch.into(), progress.consumed_rows)
+            BackfillState::ConsumingUpstream(progress.consumed_epoch.into(), progress.consumed_rows)
         };
 
         match self.progress_map.entry(table_id) {

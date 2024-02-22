@@ -1,5 +1,16 @@
 -- noinspection SqlNoDataSourceInspectionForFile
 -- noinspection SqlResolveForFile
+
+CREATE FUNCTION count_char(s varchar, c varchar) RETURNS int LANGUAGE javascript AS $$
+    var count = 0;
+    for (var cc of s) {
+        if (cc === c) {
+            count++;
+        }
+    }
+    return count;
+$$;
+
 CREATE SINK nexmark_q14 AS
 SELECT auction,
        bidder,
@@ -15,11 +26,8 @@ SELECT auction,
                THEN 'nightTime'
            ELSE 'otherTime'
            END       AS bidTimeType,
-       date_time
-       -- extra
-       -- TODO: count_char is an UDF, add it back when we support similar functionality.
-       -- https://github.com/nexmark/nexmark/blob/master/nexmark-flink/src/main/java/com/github/nexmark/flink/udf/CountChar.java
-       -- count_char(extra, 'c') AS c_counts
+       date_time,
+       count_char(extra, 'c') AS c_counts
 FROM bid
 WHERE 0.908 * price > 1000000
   AND 0.908 * price < 50000000

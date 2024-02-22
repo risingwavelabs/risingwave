@@ -102,7 +102,7 @@ statement ok
 drop table s1;
 
 statement ok
-create table s1 (v1 struct<v2 int>, t1 timestamp, c1 varchar) with (
+create table s1 (v1 struct<v2 int>, t1 timestamp, z1 timestamptz, c1 varchar) with (
     connector = 'datagen',
     fields.v1.v2.kind = 'random',
     fields.v1.v2.min = '1',
@@ -112,6 +112,10 @@ create table s1 (v1 struct<v2 int>, t1 timestamp, c1 varchar) with (
     fields.t1.max_past = '2h 37min',
     fields.t1.max_past_mode = 'relative',
     fields.t1.seed = '3',
+    fields.z1.kind = 'random',
+    fields.z1.max_past = '2h 37min',
+    fields.z1.max_past_mode = 'relative',
+    fields.z1.seed = '3',
     fields.c1.kind = 'random',
     fields.c1.length = '100',
     fields.c1.seed = '3',
@@ -182,9 +186,9 @@ statement ok
 drop table s1;
 
 # Do NOT allow With clause to contain a comma only.
-statement error QueryError: sql parser error: Expected identifier.*
+statement error Expected identifier.*
 create table s1 (v1 int) with (,) FORMAT PLAIN ENCODE JSON;
 
 # Do NOT allow an empty With clause.
-statement error QueryError: sql parser error: Expected identifier.*
+statement error Expected identifier.*
 create table s1 (v1 int) with () FORMAT PLAIN ENCODE JSON;

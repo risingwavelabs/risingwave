@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound;
 use std::sync::Arc;
 
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 use itertools::Itertools;
@@ -24,31 +24,33 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
+use thiserror_ext::AsReport;
 use tracing::error;
 
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::CompactorContext;
-use crate::hummock::compactor::{CompactOutput, Compactor};
+use crate::hummock::compactor::{check_flush_result, CompactOutput, Compactor};
 use crate::hummock::event_handler::uploader::UploadTaskPayload;
 use crate::hummock::event_handler::LocalInstanceId;
-use crate::hummock::iterator::{Forward, HummockIterator, OrderedMergeIteratorInner};
+use crate::hummock::iterator::{
+    Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator, UserIterator,
+};
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchInner, SharedBufferVersionedEntry,
 };
-use crate::hummock::sstable::CompactionDeleteRangesBuilder;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    create_monotonic_events_from_compaction_delete_events, BlockedXor16FilterBuilder, CachePolicy,
-    CompactionDeleteRanges, GetObjectId, HummockError, HummockResult, SstableBuilderOptions,
-    SstableObjectIdManagerRef,
+    BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator, GetObjectId,
+    HummockError, HummockResult, SstableBuilderOptions, SstableObjectIdManagerRef,
 };
 use crate::mem_table::ImmutableMemtable;
+use crate::opts::StorageOpts;
 
 const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
 const GC_WATERMARK_FOR_FLUSH: u64 = 0;
@@ -124,7 +126,6 @@ async fn compact_shared_buffer(
         .map(|imm| imm.table_id.table_id)
         .dedup()
         .collect();
-
     assert!(!existing_table_ids.is_empty());
 
     let multi_filter_key_extractor = filter_key_extractor_manager
@@ -135,9 +136,6 @@ async fn compact_shared_buffer(
     }
     let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
 
-    let mut size_and_start_user_keys = vec![];
-    let mut compact_data_size = 0;
-    let mut builder = CompactionDeleteRangesBuilder::default();
     payload.retain(|imm| {
         let ret = existing_table_ids.contains(&imm.table_id.table_id);
         if !ret {
@@ -148,109 +146,46 @@ async fn compact_shared_buffer(
         }
         ret
     });
-    let mut total_key_count = 0;
-    for imm in &payload {
-        let tombstones = imm.get_delete_range_tombstones();
-        builder.add_delete_events(tombstones);
-        total_key_count += imm.kv_count();
-        let data_size = {
-            // calculate encoded bytes of key var length
-            (imm.kv_count() * 8 + imm.size()) as u64
-        };
-        compact_data_size += data_size;
-        size_and_start_user_keys.push((data_size, imm.start_user_key()));
-    }
-    size_and_start_user_keys.sort();
-    let mut splits = Vec::with_capacity(size_and_start_user_keys.len());
-    splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
-    let mut key_split_append = |key_before_last: &Bytes| {
-        splits.last_mut().unwrap().right = key_before_last.clone();
-        splits.push(KeyRange::new(key_before_last.clone(), Bytes::new()));
-    };
-    let sstable_size = (context.storage_opts.sstable_size_mb as u64) << 20;
-    let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
-    let parallelism = std::cmp::min(
-        context.storage_opts.share_buffers_sync_parallelism as u64,
-        size_and_start_user_keys.len() as u64,
-    );
-    let sub_compaction_data_size = if compact_data_size > parallel_compact_size && parallelism > 1 {
-        compact_data_size / parallelism
-    } else {
-        compact_data_size
-    };
-    // mul 1.2 for other extra memory usage.
-    let mut sub_compaction_sstable_size =
-        std::cmp::min(sstable_size, sub_compaction_data_size * 6 / 5);
-    let mut split_weight_by_vnode = 0;
-    if existing_table_ids.len() > 1 {
-        if parallelism > 1 && compact_data_size > sstable_size {
-            let mut last_buffer_size = 0;
-            let mut last_user_key = UserKey::default();
-            for (data_size, user_key) in size_and_start_user_keys {
-                if last_buffer_size >= sub_compaction_data_size
-                    && last_user_key.as_ref() != user_key
-                {
-                    last_user_key.set(user_key);
-                    key_split_append(
-                        &FullKey {
-                            user_key,
-                            epoch: HummockEpoch::MAX,
-                        }
-                        .encode()
-                        .into(),
-                    );
-                    last_buffer_size = data_size;
-                } else {
-                    last_user_key.set(user_key);
-                    last_buffer_size += data_size;
-                }
-            }
-        }
-    } else {
-        let mut vnodes = vec![];
-        for imm in &payload {
-            vnodes.extend(imm.collect_vnodes());
-        }
-        vnodes.sort();
-        vnodes.dedup();
-        const MIN_SSTABLE_SIZE: u64 = 16 * 1024 * 1024;
-        if compact_data_size >= MIN_SSTABLE_SIZE && !vnodes.is_empty() {
-            let mut avg_vnode_size = compact_data_size / (vnodes.len() as u64);
-            split_weight_by_vnode = VirtualNode::COUNT;
-            while avg_vnode_size < MIN_SSTABLE_SIZE && split_weight_by_vnode > 0 {
-                split_weight_by_vnode /= 2;
-                avg_vnode_size *= 2;
-            }
-            sub_compaction_sstable_size = compact_data_size;
-        }
-    }
 
+    let total_key_count = payload.iter().map(|imm| imm.kv_count()).sum::<usize>();
+    let (splits, sub_compaction_sstable_size, split_weight_by_vnode) =
+        generate_splits(&payload, &existing_table_ids, context.storage_opts.as_ref());
     let parallelism = splits.len();
     let mut compact_success = true;
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
     let use_block_based_filter = BlockedXor16FilterBuilder::is_kv_count_too_large(total_key_count);
 
-    let agg = builder.build_for_compaction();
+    let table_vnode_partition = if existing_table_ids.len() == 1 {
+        let table_id = existing_table_ids.iter().next().unwrap();
+        vec![(*table_id, split_weight_by_vnode)]
+            .into_iter()
+            .collect()
+    } else {
+        BTreeMap::default()
+    };
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
             split_index,
             key_range,
             context.clone(),
             sub_compaction_sstable_size as usize,
-            split_weight_by_vnode as u32,
+            table_vnode_partition.clone(),
             use_block_based_filter,
             Box::new(sstable_object_id_manager.clone()),
         );
-        let iter = OrderedMergeIteratorInner::new(
-            payload.iter().map(|imm| imm.clone().into_forward_iter()),
-        );
+        let mut forward_iters = Vec::with_capacity(payload.len());
+        for imm in &payload {
+            forward_iters.push(imm.clone().into_forward_iter());
+        }
         let compaction_executor = context.compaction_executor.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
-        let del_range_agg = agg.clone();
         let handle = compaction_executor.spawn(async move {
             compactor
-                .run(iter, multi_filter_key_extractor, del_range_agg)
+                .run(
+                    MergeIterator::new(forward_iters),
+                    multi_filter_key_extractor,
+                )
                 .await
         });
         compaction_futures.push(handle);
@@ -265,14 +200,14 @@ async fn compact_shared_buffer(
             }
             Ok(Err(e)) => {
                 compact_success = false;
-                tracing::warn!("Shared Buffer Compaction failed with error: {:#?}", e);
+                tracing::warn!(error = %e.as_report(), "Shared Buffer Compaction failed with error");
                 err = Some(e);
             }
             Err(e) => {
                 compact_success = false;
                 tracing::warn!(
-                    "Shared Buffer Compaction failed with future error: {:#?}",
-                    e
+                    error = %e.as_report(),
+                    "Shared Buffer Compaction failed with future error",
                 );
                 err = Some(HummockError::compaction_executor(
                     "failed while execute in tokio",
@@ -286,14 +221,57 @@ async fn compact_shared_buffer(
 
     if compact_success {
         let mut level0 = Vec::with_capacity(parallelism);
+        let mut sst_infos = vec![];
         for (_, ssts, _) in output_ssts {
             for sst_info in &ssts {
                 context
                     .compactor_metrics
                     .write_build_l0_bytes
                     .inc_by(sst_info.file_size());
+                sst_infos.push(sst_info.sst_info.clone());
             }
             level0.extend(ssts);
+        }
+        if context.storage_opts.check_compaction_result {
+            let compaction_executor = context.compaction_executor.clone();
+            let mut forward_iters = Vec::with_capacity(payload.len());
+            let del_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
+            for imm in &payload {
+                if !existing_table_ids.contains(&imm.table_id.table_id) {
+                    continue;
+                }
+                forward_iters.push(imm.clone().into_forward_iter());
+            }
+            let iter = MergeIterator::new(forward_iters);
+            let left_iter = UserIterator::new(
+                iter,
+                (Bound::Unbounded, Bound::Unbounded),
+                u64::MAX,
+                0,
+                None,
+                del_iter,
+            );
+            compaction_executor.spawn(async move {
+                match check_flush_result(
+                    left_iter,
+                    Vec::from_iter(existing_table_ids.iter().cloned()),
+                    sst_infos,
+                    context,
+                )
+                .await
+                {
+                    Err(e) => {
+                        tracing::warn!(error = %e.as_report(), "Failed check flush result of memtable");
+                    }
+                    Ok(true) => (),
+                    Ok(false) => {
+                        panic!(
+                            "failed to check flush result consistency of state-table {:?}",
+                            existing_table_ids
+                        );
+                    }
+                }
+            });
         }
         Ok(level0)
     } else {
@@ -307,143 +285,197 @@ pub async fn merge_imms_in_memory(
     instance_id: LocalInstanceId,
     imms: Vec<ImmutableMemtable>,
     memory_tracker: Option<MemoryTracker>,
-) -> HummockResult<ImmutableMemtable> {
+) -> ImmutableMemtable {
     let mut kv_count = 0;
     let mut epochs = vec![];
     let mut merged_size = 0;
-    let mut merged_imm_ids = Vec::with_capacity(imms.len());
-
-    let mut smallest_table_key = BytesMut::new();
-    let mut smallest_empty = true;
-    let mut largest_table_key = Bound::Included(Bytes::new());
+    assert!(imms.iter().rev().map(|imm| imm.batch_id()).is_sorted());
+    let max_imm_id = imms[0].batch_id();
 
     let mut imm_iters = Vec::with_capacity(imms.len());
-    let mut builder = CompactionDeleteRangesBuilder::default();
     for imm in imms {
-        assert!(
-            imm.kv_count() > 0 || imm.has_range_tombstone(),
-            "imm should not be empty"
-        );
+        assert!(imm.kv_count() > 0, "imm should not be empty");
         assert_eq!(
             table_id,
             imm.table_id(),
             "should only merge data belonging to the same table"
         );
 
-        merged_imm_ids.push(imm.batch_id());
         epochs.push(imm.min_epoch());
         kv_count += imm.kv_count();
         merged_size += imm.size();
-        builder.add_delete_events(imm.get_delete_range_tombstones());
-
-        if smallest_empty || smallest_table_key.as_ref().gt(imm.raw_smallest_key()) {
-            smallest_table_key.clear();
-            smallest_table_key.extend_from_slice(imm.raw_smallest_key());
-            smallest_empty = false;
-        }
-        let imm_raw_largest_key = imm.raw_largest_key();
-        if match (&largest_table_key, imm_raw_largest_key) {
-            (_, Bound::Unbounded) => true,
-            (Bound::Included(x), Bound::Included(y)) | (Bound::Included(x), Bound::Excluded(y)) => {
-                x < y
-            }
-            (Bound::Excluded(x), Bound::Included(y)) | (Bound::Excluded(x), Bound::Excluded(y)) => {
-                x <= y
-            }
-            (Bound::Unbounded, _) => false,
-        } {
-            largest_table_key = imm_raw_largest_key.as_ref().cloned();
-        }
 
         imm_iters.push(imm.into_forward_iter());
     }
-    let compaction_delete_ranges = builder.build_for_compaction();
-    let mut del_iter = compaction_delete_ranges.iter();
-    del_iter.rewind();
     epochs.sort();
 
     // use merge iterator to merge input imms
-    let mut mi = OrderedMergeIteratorInner::new(imm_iters);
-    mi.rewind().await?;
-    let mut items = Vec::with_capacity(kv_count);
-    while mi.is_valid() {
-        let (key, (epoch, value)) = mi.current_item();
-        items.push(((key, value), epoch));
-        mi.next().await?;
-    }
+    let mut mi = MergeIterator::new(imm_iters);
+    mi.rewind_no_await();
+    assert!(mi.is_valid());
+
+    let first_item_key = mi.current_key_entry().key.clone();
 
     let mut merged_payload: Vec<SharedBufferVersionedEntry> = Vec::new();
-    let mut pivot = items
-        .first()
-        .map(|((k, _), _)| k.clone())
-        .unwrap_or_default();
-    del_iter.earliest_delete_which_can_see_key(
-        UserKey::new(table_id, TableKey(pivot.as_ref())),
-        HummockEpoch::MAX,
-    );
-    let mut versions: Vec<(HummockEpoch, HummockValue<Bytes>)> = Vec::new();
 
-    let mut pivot_last_delete_epoch = HummockEpoch::MAX;
+    // Use first key, max epoch to initialize the tracker to ensure that the check first call to full_key_tracker.observe will succeed
+    let mut full_key_tracker = FullKeyTracker::<Bytes>::new(FullKey::new_with_gap_epoch(
+        table_id,
+        first_item_key,
+        EpochWithGap::new_max_epoch(),
+    ));
+    let mut table_key_versions: Vec<(EpochWithGap, HummockValue<Bytes>)> = Vec::new();
 
-    for ((key, value), epoch) in items {
-        assert!(key >= pivot, "key should be in ascending order");
-        let earliest_range_delete_which_can_see_key = if key == pivot {
-            del_iter.earliest_delete_since(epoch)
-        } else {
-            merged_payload.push((pivot, versions));
-            pivot = key;
-            pivot_last_delete_epoch = HummockEpoch::MAX;
-            versions = vec![];
-            del_iter.earliest_delete_which_can_see_key(
-                UserKey::new(table_id, TableKey(pivot.as_ref())),
-                epoch,
-            )
+    while mi.is_valid() {
+        let key_entry = mi.current_key_entry();
+        let user_key = UserKey {
+            table_id,
+            table_key: key_entry.key.clone(),
         };
-        if value.is_delete() {
-            pivot_last_delete_epoch = epoch;
-        } else if earliest_range_delete_which_can_see_key < pivot_last_delete_epoch {
-            debug_assert!(
-                epoch < earliest_range_delete_which_can_see_key
-                    && earliest_range_delete_which_can_see_key < pivot_last_delete_epoch
-            );
-            pivot_last_delete_epoch = earliest_range_delete_which_can_see_key;
-            // In each merged immutable memtable, since a union set of delete ranges is constructed
-            // and thus original delete ranges are replaced with the union set and not
-            // used in read, we lose exact information about whether a key is deleted by
-            // a delete range in the merged imm which it belongs to. Therefore we need
-            // to construct a corresponding delete key to represent this.
-            versions.push((
-                earliest_range_delete_which_can_see_key,
-                HummockValue::Delete,
+        if let Some(last_full_key) = full_key_tracker.observe_multi_version(
+            user_key,
+            key_entry
+                .new_values
+                .iter()
+                .map(|(epoch_with_gap, _)| *epoch_with_gap),
+        ) {
+            let last_user_key = last_full_key.user_key;
+            // `epoch_with_gap` of the `last_full_key` may not reflect the real epoch in the items
+            // and should not be used because we use max epoch to initialize the tracker
+            let _epoch_with_gap = last_full_key.epoch_with_gap;
+
+            // Record kv entries
+            merged_payload.push(SharedBufferVersionedEntry::new(
+                last_user_key.table_key,
+                table_key_versions,
             ));
+
+            // Reset state before moving onto the new table key
+            table_key_versions = vec![];
         }
-        versions.push((epoch, value));
+        table_key_versions.extend(
+            key_entry
+                .new_values
+                .iter()
+                .map(|(epoch_with_gap, value)| (*epoch_with_gap, value.clone())),
+        );
+        mi.advance_peek_to_next_key();
+        // Since there is no blocking point in this method, but it is cpu intensive, we call this method
+        // to do cooperative scheduling
+        tokio::task::consume_budget().await;
     }
+
     // process the last key
-    if !versions.is_empty() {
-        merged_payload.push((pivot, versions));
+    if !table_key_versions.is_empty() {
+        merged_payload.push(SharedBufferVersionedEntry::new(
+            full_key_tracker.latest_full_key.user_key.table_key,
+            table_key_versions,
+        ));
     }
 
-    drop(del_iter);
-    let compaction_delete_events = Arc::unwrap_or_clone(compaction_delete_ranges).into_events();
-    let monotonic_tombstone_events =
-        create_monotonic_events_from_compaction_delete_events(compaction_delete_events);
-
-    Ok(SharedBufferBatch {
+    SharedBufferBatch {
         inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
             epochs,
             merged_payload,
-            smallest_table_key.freeze(),
-            largest_table_key,
             kv_count,
-            merged_imm_ids,
-            monotonic_tombstone_events,
             merged_size,
+            max_imm_id,
             memory_tracker,
         )),
         table_id,
         instance_id,
-    })
+    }
+}
+
+///  Based on the incoming payload and opts, calculate the sharding method and sstable size of shared buffer compaction.
+fn generate_splits(
+    payload: &UploadTaskPayload,
+    existing_table_ids: &HashSet<u32>,
+    storage_opts: &StorageOpts,
+) -> (Vec<KeyRange>, u64, u32) {
+    let mut size_and_start_user_keys = vec![];
+    let mut compact_data_size = 0;
+    for imm in payload {
+        let data_size = {
+            // calculate encoded bytes of key var length
+            (imm.kv_count() * 8 + imm.size()) as u64
+        };
+        compact_data_size += data_size;
+        size_and_start_user_keys.push((data_size, imm.start_user_key()));
+    }
+    size_and_start_user_keys.sort_by(|a, b| a.1.cmp(&b.1));
+    let mut splits = Vec::with_capacity(size_and_start_user_keys.len());
+    splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
+    let mut key_split_append = |key_before_last: &Bytes| {
+        splits.last_mut().unwrap().right = key_before_last.clone();
+        splits.push(KeyRange::new(key_before_last.clone(), Bytes::new()));
+    };
+    let sstable_size = (storage_opts.sstable_size_mb as u64) << 20;
+    let parallel_compact_size = (storage_opts.parallel_compact_size_mb as u64) << 20;
+    let parallelism = std::cmp::min(
+        storage_opts.share_buffers_sync_parallelism as u64,
+        size_and_start_user_keys.len() as u64,
+    );
+    let sub_compaction_data_size = if compact_data_size > parallel_compact_size && parallelism > 1 {
+        compact_data_size / parallelism
+    } else {
+        compact_data_size
+    };
+
+    let mut vnode_partition_count = 0;
+    if existing_table_ids.len() > 1 {
+        if parallelism > 1 && compact_data_size > sstable_size {
+            let mut last_buffer_size = 0;
+            let mut last_user_key = UserKey::default();
+            for (data_size, user_key) in size_and_start_user_keys {
+                if last_buffer_size >= sub_compaction_data_size
+                    && last_user_key.as_ref() != user_key
+                {
+                    last_user_key.set(user_key);
+                    key_split_append(
+                        &FullKey {
+                            user_key,
+                            epoch_with_gap: EpochWithGap::new_max_epoch(),
+                        }
+                        .encode()
+                        .into(),
+                    );
+                    last_buffer_size = data_size;
+                } else {
+                    last_user_key.set(user_key);
+                    last_buffer_size += data_size;
+                }
+            }
+        }
+    } else {
+        // Collect vnodes in imm
+        let mut vnodes = vec![];
+        for imm in payload {
+            vnodes.extend(imm.collect_vnodes());
+        }
+        vnodes.sort();
+        vnodes.dedup();
+
+        // Based on the estimated `vnode_avg_size`, calculate the required `vnode_partition_count` to avoid small files and further align
+        const MIN_SSTABLE_SIZE: u64 = 16 * 1024 * 1024;
+        if compact_data_size >= MIN_SSTABLE_SIZE && !vnodes.is_empty() {
+            let mut avg_vnode_size = compact_data_size / (vnodes.len() as u64);
+            vnode_partition_count = VirtualNode::COUNT;
+            while avg_vnode_size < MIN_SSTABLE_SIZE && vnode_partition_count > 0 {
+                vnode_partition_count /= 2;
+                avg_vnode_size *= 2;
+            }
+        }
+    }
+
+    // mul 1.2 for other extra memory usage.
+    // Ensure that the size of each sstable is still less than `sstable_size` after optimization to avoid generating a huge size sstable which will affect the object store
+    let sub_compaction_sstable_size = std::cmp::min(sstable_size, sub_compaction_data_size * 6 / 5);
+    (
+        splits,
+        sub_compaction_sstable_size,
+        vnode_partition_count as u32,
+    )
 }
 
 pub struct SharedBufferCompactRunner {
@@ -457,7 +489,7 @@ impl SharedBufferCompactRunner {
         key_range: KeyRange,
         context: CompactorContext,
         sub_compaction_sstable_size: usize,
-        split_weight_by_vnode: u32,
+        table_vnode_partition: BTreeMap<u32, u32>,
         use_block_based_filter: bool,
         object_id_getter: Box<dyn GetObjectId>,
     ) -> Self {
@@ -474,8 +506,7 @@ impl SharedBufferCompactRunner {
                 stats_target_table_ids: None,
                 task_type: compact_task::TaskType::SharedBuffer,
                 is_target_l0_or_lbase: true,
-                split_by_table: false,
-                split_weight_by_vnode,
+                table_vnode_partition,
                 use_block_based_filter,
             },
             object_id_getter,
@@ -490,7 +521,6 @@ impl SharedBufferCompactRunner {
         self,
         iter: impl HummockIterator<Direction = Forward>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
-        del_agg: Arc<CompactionDeleteRanges>,
     ) -> HummockResult<CompactOutput> {
         let dummy_compaction_filter = DummyCompactionFilter {};
         let (ssts, table_stats_map) = self
@@ -498,7 +528,9 @@ impl SharedBufferCompactRunner {
             .compact_key_range(
                 iter,
                 dummy_compaction_filter,
-                del_agg,
+                CompactionDeleteRangeIterator::new(ForwardMergeRangeIterator::new(
+                    HummockEpoch::MAX,
+                )),
                 filter_key_extractor,
                 None,
                 None,
@@ -506,5 +538,103 @@ impl SharedBufferCompactRunner {
             )
             .await?;
         Ok((self.split_index, ssts, table_stats_map))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use bytes::Bytes;
+    use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_hummock_sdk::key::{prefix_slice_with_vnode, TableKey};
+
+    use crate::hummock::compactor::shared_buffer_compact::generate_splits;
+    use crate::hummock::value::HummockValue;
+    use crate::mem_table::ImmutableMemtable;
+    use crate::opts::StorageOpts;
+
+    fn generate_key(key: &str) -> TableKey<Bytes> {
+        TableKey(prefix_slice_with_vnode(
+            VirtualNode::from_index(1),
+            key.as_bytes(),
+        ))
+    }
+
+    #[tokio::test]
+    async fn test_generate_splits_in_order() {
+        let imm1 = ImmutableMemtable::build_shared_buffer_batch_for_test(
+            3,
+            0,
+            vec![(
+                generate_key("dddd"),
+                HummockValue::put(Bytes::from_static(b"v3")),
+            )],
+            1024 * 1024,
+            TableId::new(1),
+        );
+        let imm2 = ImmutableMemtable::build_shared_buffer_batch_for_test(
+            3,
+            0,
+            vec![(
+                generate_key("abb"),
+                HummockValue::put(Bytes::from_static(b"v3")),
+            )],
+            (1024 + 256) * 1024,
+            TableId::new(1),
+        );
+
+        let imm3 = ImmutableMemtable::build_shared_buffer_batch_for_test(
+            2,
+            0,
+            vec![(
+                generate_key("abc"),
+                HummockValue::put(Bytes::from_static(b"v2")),
+            )],
+            (1024 + 512) * 1024,
+            TableId::new(1),
+        );
+        let imm4 = ImmutableMemtable::build_shared_buffer_batch_for_test(
+            3,
+            0,
+            vec![(
+                generate_key("aaa"),
+                HummockValue::put(Bytes::from_static(b"v3")),
+            )],
+            (1024 + 512) * 1024,
+            TableId::new(1),
+        );
+
+        let imm5 = ImmutableMemtable::build_shared_buffer_batch_for_test(
+            3,
+            0,
+            vec![(
+                generate_key("aaa"),
+                HummockValue::put(Bytes::from_static(b"v3")),
+            )],
+            (1024 + 256) * 1024,
+            TableId::new(2),
+        );
+
+        let storage_opts = StorageOpts {
+            share_buffers_sync_parallelism: 3,
+            parallel_compact_size_mb: 1,
+            sstable_size_mb: 1,
+            ..Default::default()
+        };
+        let payload = vec![imm1, imm2, imm3, imm4, imm5];
+        let (splits, _sstable_capacity, vnode) =
+            generate_splits(&payload, &HashSet::from_iter([1, 2]), &storage_opts);
+        assert_eq!(
+            splits.len(),
+            storage_opts.share_buffers_sync_parallelism as usize
+        );
+        assert_eq!(vnode, 0);
+        for i in 1..splits.len() {
+            assert_eq!(splits[i].left, splits[i - 1].right);
+            assert!(splits[i].left > splits[i - 1].left);
+            assert!(splits[i].right.is_empty() || splits[i].left < splits[i].right);
+        }
     }
 }

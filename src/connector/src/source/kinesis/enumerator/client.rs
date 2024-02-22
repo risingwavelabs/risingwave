@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -75,7 +75,7 @@ impl SplitEnumerator for KinesisSplitEnumerator {
         Ok(shard_collect
             .into_iter()
             .map(|x| KinesisSplit {
-                shard_id: x.shard_id().unwrap_or_default().to_string().into(),
+                shard_id: x.shard_id().to_string().into(),
                 // handle start with position in reader part
                 start_position: KinesisOffset::None,
                 end_position: KinesisOffset::None,

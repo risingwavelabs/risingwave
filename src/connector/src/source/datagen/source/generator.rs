@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,18 +13,16 @@
 // limitations under the License.
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::Result;
 use futures_async_stream::try_stream;
-use maplit::hashmap;
+use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::error::RwError;
 use risingwave_common::field_generator::FieldGeneratorImpl;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
-use crate::source::{SourceMessage, SourceMeta, SplitId, StreamChunkWithState};
+use crate::source::{SourceMessage, SourceMeta, SplitId};
 
 pub enum FieldDesc {
     // field is invisible, generate None
@@ -61,7 +59,7 @@ impl DatagenEventGenerator {
         split_id: SplitId,
         split_num: u64,
         split_index: u64,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         let partition_rows_per_second = if rows_per_second % split_num > split_index {
             rows_per_second / split_num + 1
         } else {
@@ -158,7 +156,7 @@ impl DatagenEventGenerator {
         }
     }
 
-    #[try_stream(ok = StreamChunkWithState, error = RwError)]
+    #[try_stream(ok = StreamChunk, error = anyhow::Error)]
     pub async fn into_native_stream(mut self) {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         const MAX_ROWS_PER_YIELD: u64 = 1024;
@@ -167,17 +165,29 @@ impl DatagenEventGenerator {
             // generate `partition_rows_per_second` rows per second
             interval.tick().await;
             let mut rows_generated_this_second = 0;
+            let mut chunk_builder =
+                StreamChunkBuilder::new(MAX_ROWS_PER_YIELD as usize, self.data_types.clone());
             while rows_generated_this_second < self.partition_rows_per_second {
-                let mut rows = vec![];
                 let num_rows_to_generate = std::cmp::min(
                     MAX_ROWS_PER_YIELD,
                     self.partition_rows_per_second - rows_generated_this_second,
                 );
                 'outer: for _ in 0..num_rows_to_generate {
-                    let mut row = Vec::with_capacity(self.fields_vec.len());
-                    for field_generator in &mut self.fields_vec {
+                    let mut row = Vec::with_capacity(self.data_types.len());
+                    for (field_generator, field_name) in
+                        self.fields_vec.iter_mut().zip_eq_fast(&self.field_names)
+                    {
                         let datum = match field_generator {
-                            FieldDesc::Invisible => None,
+                            // TODO: avoid distinguishing hidden partition/offset columns by name
+                            FieldDesc::Invisible => match field_name.as_str() {
+                                "_rw_datagen_partition" => {
+                                    Some(ScalarImpl::Utf8(self.split_id.as_ref().into()))
+                                }
+                                "_rw_datagen_offset" => {
+                                    Some(ScalarImpl::Utf8(self.offset.to_string().into_boxed_str()))
+                                }
+                                _ => None,
+                            },
                             FieldDesc::Visible(field_generator) => {
                                 let datum = field_generator.generate_datum(self.offset);
                                 if datum.is_none() {
@@ -197,20 +207,15 @@ impl DatagenEventGenerator {
                         row.push(datum);
                     }
 
-                    rows.push((Op::Insert, OwnedRow::new(row)));
                     self.offset += 1;
                     rows_generated_this_second += 1;
+                    if let Some(chunk) = chunk_builder.append_row(Op::Insert, OwnedRow::new(row)) {
+                        yield chunk;
+                    }
                 }
 
-                if !rows.is_empty() {
-                    let chunk = StreamChunk::from_rows(&rows, &self.data_types);
-                    let mapping = hashmap! {
-                        self.split_id.clone() => (self.offset - 1).to_string()
-                    };
-                    yield StreamChunkWithState {
-                        chunk,
-                        split_offset_mapping: Some(mapping),
-                    };
+                if let Some(chunk) = chunk_builder.take() {
+                    yield chunk;
                 }
 
                 if reach_end {

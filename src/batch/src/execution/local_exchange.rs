@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
 use std::fmt::{Debug, Formatter};
 
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::Result;
 
+use crate::error::Result;
 use crate::exchange_source::ExchangeSource;
 use crate::task::{BatchTaskContext, TaskId, TaskOutput, TaskOutputId};
 

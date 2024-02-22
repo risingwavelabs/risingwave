@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,19 +40,14 @@ pub struct FilterExecutor {
 impl FilterExecutor {
     pub fn new(
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         input: Box<dyn Executor>,
         expr: NonStrictExpression,
-        executor_id: u64,
     ) -> Self {
-        let input_info = input.info();
         Self {
             _ctx: ctx,
+            info,
             input,
-            info: ExecutorInfo {
-                schema: input_info.schema,
-                pk_indices: input_info.pk_indices,
-                identity: format!("FilterExecutor {:X}", executor_id),
-            },
             expr,
         }
     }
@@ -222,15 +217,22 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
+        let pk_indices = PkIndices::new();
+        let source =
+            MockSource::with_chunks(schema.clone(), pk_indices.clone(), vec![chunk1, chunk2]);
+        let info = ExecutorInfo {
+            schema,
+            pk_indices,
+            identity: "FilterExecutor".to_string(),
+        };
 
         let test_expr = build_from_pretty("(greater_than:boolean $0:int8 $1:int8)");
 
         let filter = Box::new(FilterExecutor::new(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
+            info,
             Box::new(source),
             test_expr,
-            1,
         ));
         let mut filter = filter.execute();
 

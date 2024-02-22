@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,9 +19,11 @@ use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::MetricLevel;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::{compact_task, SstableInfo};
@@ -30,7 +32,7 @@ use risingwave_storage::hummock::compactor::{
     ConcatSstableIterator, DummyCompactionFilter, TaskConfig, TaskProgress,
 };
 use risingwave_storage::hummock::iterator::{
-    ConcatIterator, Forward, HummockIterator, UnorderedMergeIteratorInner,
+    ConcatIterator, Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator,
 };
 use risingwave_storage::hummock::multi_builder::{
     CapacitySplitTableBuilder, LocalTableBuilderFactory,
@@ -39,25 +41,30 @@ use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompactionDeleteRanges, FileCache, SstableBuilder, SstableBuilderOptions,
-    SstableIterator, SstableStore, SstableWriterOptions, Xor16FilterBuilder,
+    CachePolicy, CompactionDeleteRangeIterator, FileCache, SstableBuilder, SstableBuilderOptions,
+    SstableIterator, SstableStore, SstableStoreConfig, SstableWriterOptions, Xor16FilterBuilder,
 };
-use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
+use risingwave_storage::monitor::{
+    global_hummock_state_store_metrics, CompactorMetrics, StoreLocalStatistic,
+};
 
 pub fn mock_sstable_store() -> SstableStoreRef {
     let store = InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused()));
     let store = Arc::new(ObjectStoreImpl::InMem(store));
     let path = "test".to_string();
-    Arc::new(SstableStore::new(
+    Arc::new(SstableStore::new(SstableStoreConfig {
         store,
         path,
-        64 << 20,
-        128 << 20,
-        0,
-        FileCache::none(),
-        FileCache::none(),
-        None,
-    ))
+        block_cache_capacity: 64 << 20,
+        meta_cache_capacity: 128 << 20,
+        high_priority_ratio: 0,
+        prefetch_buffer_capacity: 64 << 20,
+        max_prefetch_block_number: 16,
+        data_file_cache: FileCache::none(),
+        meta_file_cache: FileCache::none(),
+        recent_filter: None,
+        state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
+    }))
 }
 
 pub fn default_writer_opts() -> SstableWriterOptions {
@@ -80,7 +87,8 @@ pub fn test_key_of(idx: usize, epoch: u64) -> FullKey<Vec<u8>> {
     )
 }
 
-const MAX_KEY_COUNT: usize = 128 * 1024;
+/// 8M keys.
+const MAX_KEY_COUNT: usize = 8 * 1024 * 1024;
 
 async fn build_table(
     sstable_store: SstableStoreRef,
@@ -190,18 +198,16 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         watermark: 0,
         stats_target_table_ids: None,
         task_type: compact_task::TaskType::Dynamic,
-        split_weight_by_vnode: 0,
         use_block_based_filter: true,
         ..Default::default()
     };
     compact_and_build_sst(
         &mut builder,
-        Arc::new(CompactionDeleteRanges::default()),
+        CompactionDeleteRangeIterator::new(ForwardMergeRangeIterator::new(HummockEpoch::MAX)),
         &task_config,
         Arc::new(CompactorMetrics::unused()),
         iter,
         DummyCompactionFilter,
-        None,
     )
     .await
     .unwrap();
@@ -226,7 +232,9 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions {
         cache_policy: CachePolicy::Fill(CachePriority::High),
+        prefetch_for_large_query: false,
         must_iterated_end_user_key: None,
+        max_preload_retry_times: 0,
     });
     c.bench_function("bench_union_merge_iterator", |b| {
         b.to_async(FuturesExecutor).iter(|| {
@@ -235,7 +243,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                 ConcatIterator::new(level1.clone(), sstable_store.clone(), read_options.clone()),
                 ConcatIterator::new(level2.clone(), sstable_store.clone(), read_options.clone()),
             ];
-            let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters);
+            let iter = MergeIterator::for_compactor(sub_iters);
             async move { compact(iter, sstable_store1).await }
         });
     });
@@ -259,7 +267,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     0,
                 ),
             ];
-            let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters);
+            let iter = MergeIterator::for_compactor(sub_iters);
             let sstable_store1 = sstable_store.clone();
             async move { compact(iter, sstable_store1).await }
         });

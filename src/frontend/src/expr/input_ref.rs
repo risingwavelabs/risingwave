@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -125,7 +125,7 @@ impl InputRef {
     pub(super) fn from_expr_proto(
         column_index: usize,
         ret_type: DataType,
-    ) -> risingwave_common::error::Result<Self> {
+    ) -> crate::error::Result<Self> {
         Ok(Self {
             index: column_index,
             data_type: ret_type,

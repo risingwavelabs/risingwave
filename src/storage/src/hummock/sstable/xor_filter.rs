@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -444,6 +444,7 @@ impl Clone for XorFilterReader {
 mod tests {
     use rand::RngCore;
     use risingwave_common::cache::CachePriority;
+    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
@@ -488,7 +489,7 @@ mod tests {
                 let epoch = 20 - j;
                 let k = FullKey {
                     user_key: test_user_key_of(i),
-                    epoch,
+                    epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
                 };
                 let v = HummockValue::put(test_value_of(i));
                 builder.add(k.to_ref(), v.as_slice()).await.unwrap();
@@ -502,11 +503,11 @@ mod tests {
             .await
             .unwrap();
         let mut stat = StoreLocalStatistic::default();
-        if let XorFilter::BlockXor16(reader) = &sstable.value().filter_reader.filter {
-            for idx in 0..sstable.value().meta.block_metas.len() {
+        if let XorFilter::BlockXor16(reader) = &sstable.filter_reader.filter {
+            for idx in 0..sstable.meta.block_metas.len() {
                 let resp = sstable_store
                     .get_block_response(
-                        sstable.value(),
+                        &sstable,
                         idx,
                         CachePolicy::Fill(CachePriority::High),
                         &mut stat,

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -55,8 +55,7 @@ impl StateStoreRead for PanicStateStore {
 }
 
 impl StateStoreWrite for PanicStateStore {
-    #[allow(clippy::unused_async)]
-    async fn ingest_batch(
+    fn ingest_batch(
         &self,
         _kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         _delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
@@ -110,10 +109,7 @@ impl LocalStateStore for PanicStateStore {
     }
 
     #[allow(clippy::unused_async)]
-    async fn flush(
-        &mut self,
-        _delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> StorageResult<usize> {
+    async fn flush(&mut self) -> StorageResult<usize> {
         panic!("should not operate on the panic state store!");
     }
 
@@ -130,8 +126,13 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
-    fn seal_current_epoch(&mut self, _next_epoch: u64) {
+    fn seal_current_epoch(&mut self, _next_epoch: u64, _opts: SealCurrentEpochOptions) {
         panic!("should not operate on the panic state store!")
+    }
+
+    #[allow(clippy::unused_async)]
+    async fn try_flush(&mut self) -> StorageResult<()> {
+        panic!("should not operate on the panic state store!");
     }
 }
 
@@ -153,7 +154,7 @@ impl StateStore for PanicStateStore {
     }
 
     #[allow(clippy::unused_async)]
-    async fn clear_shared_buffer(&self) -> StorageResult<()> {
+    async fn clear_shared_buffer(&self, _prev_epoch: u64) {
         panic!("should not clear shared buffer from the panic state store!");
     }
 

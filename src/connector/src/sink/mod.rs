@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,36 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod blackhole;
+pub mod big_query;
 pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
+pub mod deltalake;
 pub mod doris;
-pub mod doris_connector;
+pub mod doris_starrocks_connector;
+pub mod elasticsearch;
 pub mod encoder;
 pub mod formatter;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
 pub mod log_store;
+pub mod mock_coordination_client;
 pub mod nats;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
+pub mod starrocks;
 pub mod test_sink;
+pub mod trivial;
 pub mod utils;
 pub mod writer;
 
 use std::collections::HashMap;
+use std::future::Future;
 
 use ::clickhouse::error::Error as ClickHouseError;
+use ::deltalake::DeltaTableError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
-use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
 };
@@ -50,15 +56,18 @@ use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
+use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
-use crate::sink::log_store::LogReader;
+use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
 use crate::ConnectorParams;
 
+const BOUNDED_CHANNEL_SIZE: usize = 16;
 #[macro_export]
 macro_rules! for_all_sinks {
     ($macro:path $(, $arg:tt)*) => {
@@ -67,18 +76,21 @@ macro_rules! for_all_sinks {
                 { Redis, $crate::sink::redis::RedisSink },
                 { Kafka, $crate::sink::kafka::KafkaSink },
                 { Pulsar, $crate::sink::pulsar::PulsarSink },
-                { BlackHole, $crate::sink::blackhole::BlackHoleSink },
+                { BlackHole, $crate::sink::trivial::BlackHoleSink },
                 { Kinesis, $crate::sink::kinesis::KinesisSink },
                 { ClickHouse, $crate::sink::clickhouse::ClickHouseSink },
                 { Iceberg, $crate::sink::iceberg::IcebergSink },
                 { Nats, $crate::sink::nats::NatsSink },
-                { RemoteIceberg, $crate::sink::iceberg::RemoteIcebergSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
-                { DeltaLake, $crate::sink::remote::DeltaLakeSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
+                { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
-                { Test, $crate::sink::test_sink::TestSink }
+                { Starrocks, $crate::sink::starrocks::StarrocksSink },
+                { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
+                { BigQuery, $crate::sink::big_query::BigQuerySink },
+                { Test, $crate::sink::test_sink::TestSink },
+                { Table, $crate::sink::trivial::TableSink }
             }
             $(,$arg)*
         }
@@ -124,6 +136,7 @@ macro_rules! match_sink_name_str {
 
 pub const CONNECTOR_TYPE_KEY: &str = "connector";
 pub const SINK_TYPE_OPTION: &str = "type";
+pub const SINK_WITHOUT_BACKFILL: &str = "snapshot";
 pub const SINK_TYPE_APPEND_ONLY: &str = "append-only";
 pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
@@ -223,6 +236,12 @@ pub struct SinkMetrics {
     pub log_store_write_rows: LabelGuardedIntCounter<3>,
     pub log_store_latest_read_epoch: LabelGuardedIntGauge<3>,
     pub log_store_read_rows: LabelGuardedIntCounter<3>,
+
+    pub iceberg_write_qps: LabelGuardedIntCounter<2>,
+    pub iceberg_write_latency: LabelGuardedHistogram<2>,
+    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<2>,
+    pub iceberg_position_delete_cache_num: LabelGuardedIntGauge<2>,
+    pub iceberg_partition_num: LabelGuardedIntGauge<2>,
 }
 
 impl SinkMetrics {
@@ -235,6 +254,11 @@ impl SinkMetrics {
             log_store_latest_read_epoch: LabelGuardedIntGauge::test_int_gauge(),
             log_store_write_rows: LabelGuardedIntCounter::test_int_counter(),
             log_store_read_rows: LabelGuardedIntCounter::test_int_counter(),
+            iceberg_write_qps: LabelGuardedIntCounter::test_int_counter(),
+            iceberg_write_latency: LabelGuardedHistogram::test_histogram(),
+            iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge::test_int_gauge(),
+            iceberg_position_delete_cache_num: LabelGuardedIntGauge::test_int_gauge(),
+            iceberg_partition_num: LabelGuardedIntGauge::test_int_gauge(),
         }
     }
 }
@@ -244,8 +268,36 @@ pub struct SinkWriterParam {
     pub connector_params: ConnectorParams,
     pub executor_id: u64,
     pub vnode_bitmap: Option<Bitmap>,
-    pub meta_client: Option<MetaClient>,
+    pub meta_client: Option<SinkMetaClient>,
     pub sink_metrics: SinkMetrics,
+    // The val has two effect:
+    // 1. Indicates that the sink will accpect the data chunk with extra partition value column.
+    // 2. The index of the extra partition value column.
+    // More detail of partition value column, see `PartitionComputeInfo`
+    pub extra_partition_col_idx: Option<usize>,
+}
+
+#[derive(Clone)]
+pub enum SinkMetaClient {
+    MetaClient(MetaClient),
+    MockMetaClient(MockMetaClient),
+}
+
+impl SinkMetaClient {
+    pub async fn sink_coordinate_client(&self) -> SinkCoordinationRpcClientEnum {
+        match self {
+            SinkMetaClient::MetaClient(meta_client) => {
+                SinkCoordinationRpcClientEnum::SinkCoordinationRpcClient(
+                    meta_client.sink_coordinate_client().await,
+                )
+            }
+            SinkMetaClient::MockMetaClient(mock_meta_client) => {
+                SinkCoordinationRpcClientEnum::MockSinkCoordinationRpcClient(
+                    mock_meta_client.sink_coordinate_client(),
+                )
+            }
+        }
+    }
 }
 
 impl SinkWriterParam {
@@ -256,6 +308,7 @@ impl SinkWriterParam {
             vnode_bitmap: Default::default(),
             meta_client: Default::default(),
             sink_metrics: SinkMetrics::for_test(),
+            extra_partition_col_idx: Default::default(),
         }
     }
 }
@@ -277,9 +330,40 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     }
 }
 
+pub trait SinkLogReader: Send + Sized + 'static {
+    /// Emit the next item.
+    ///
+    /// The implementation should ensure that the future is cancellation safe.
+    fn next_item(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + '_;
+
+    /// Mark that all items emitted so far have been consumed and it is safe to truncate the log
+    /// from the current offset.
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+}
+
+impl<R: LogReader> SinkLogReader for R {
+    fn next_item(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + '_ {
+        <Self as LogReader>::next_item(self)
+    }
+
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        <Self as LogReader>::truncate(self, offset)
+    }
+}
+
 #[async_trait]
 pub trait LogSinker: 'static {
-    async fn consume_log_and_sink(self, log_reader: impl LogReader) -> Result<()>;
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()>;
 }
 
 #[async_trait]
@@ -319,6 +403,7 @@ impl SinkImpl {
             .properties
             .get(CONNECTOR_TYPE_KEY)
             .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)))?;
+
         match_sink_name_str!(
             sink_type.to_lowercase().as_str(),
             SinkType,
@@ -330,6 +415,10 @@ impl SinkImpl {
                 )))
             }
         )
+    }
+
+    pub fn is_sink_into_table(&self) -> bool {
+        matches!(self, SinkImpl::Table(_))
     }
 }
 
@@ -368,59 +457,109 @@ pub enum SinkError {
     #[error("Kafka error: {0}")]
     Kafka(#[from] rdkafka::error::KafkaError),
     #[error("Kinesis error: {0}")]
-    Kinesis(anyhow::Error),
+    Kinesis(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Remote sink error: {0}")]
-    Remote(anyhow::Error),
+    Remote(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Encode error: {0}")]
     Encode(String),
     #[error("Iceberg error: {0}")]
-    Iceberg(anyhow::Error),
+    Iceberg(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("config error: {0}")]
-    Config(#[from] anyhow::Error),
+    Config(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("coordinator error: {0}")]
-    Coordinator(anyhow::Error),
+    Coordinator(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("ClickHouse error: {0}")]
     ClickHouse(String),
     #[error("Redis error: {0}")]
     Redis(String),
     #[error("Nats error: {0}")]
-    Nats(anyhow::Error),
-    #[error("Doris http error: {0}")]
-    Http(anyhow::Error),
+    Nats(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("Doris/Starrocks connect error: {0}")]
+    DorisStarrocksConnect(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Doris error: {0}")]
     Doris(String),
+    #[error("DeltaLake error: {0}")]
+    DeltaLake(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("Starrocks error: {0}")]
+    Starrocks(String),
     #[error("Pulsar error: {0}")]
-    Pulsar(anyhow::Error),
+    Pulsar(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Internal error: {0}")]
-    Internal(anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("BigQuery error: {0}")]
+    BigQuery(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 impl From<icelake::Error> for SinkError {
     fn from(value: icelake::Error) -> Self {
-        SinkError::Iceberg(anyhow_error!("{}", value))
+        SinkError::Iceberg(anyhow!(value))
     }
 }
 
 impl From<RpcError> for SinkError {
     fn from(value: RpcError) -> Self {
-        SinkError::Remote(anyhow_error!("{}", value))
+        SinkError::Remote(anyhow!(value))
     }
 }
 
 impl From<ClickHouseError> for SinkError {
     fn from(value: ClickHouseError) -> Self {
-        SinkError::ClickHouse(format!("{}", value))
+        SinkError::ClickHouse(value.to_report_string())
+    }
+}
+
+impl From<DeltaTableError> for SinkError {
+    fn from(value: DeltaTableError) -> Self {
+        SinkError::DeltaLake(anyhow!(value))
     }
 }
 
 impl From<RedisError> for SinkError {
     fn from(value: RedisError) -> Self {
-        SinkError::Redis(format!("{}", value))
-    }
-}
-
-impl From<SinkError> for RwError {
-    fn from(e: SinkError) -> Self {
-        ErrorCode::SinkError(Box::new(e)).into()
+        SinkError::Redis(value.to_report_string())
     }
 }

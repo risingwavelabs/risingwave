@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ import {
   SimpleGrid,
   Text,
   theme,
-  useToast,
   VStack,
 } from "@chakra-ui/react"
 import { clone, reverse, sortBy } from "lodash"
@@ -32,6 +31,7 @@ import { Fragment, useCallback, useEffect, useState } from "react"
 import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis } from "recharts"
 import { Metrics, MetricsSample } from "../components/metrics"
 import Title from "../components/Title"
+import useErrorToast from "../hook/useErrorToast"
 import { WorkerNode } from "../proto/gen/common"
 import {
   getClusterInfoComputeNode,
@@ -123,8 +123,8 @@ function WorkerNodeMetricsComponent({
               type="linear"
               dataKey="value"
               strokeWidth={1}
-              stroke={theme.colors.teal["500"]}
-              fill={theme.colors.teal["100"]}
+              stroke={theme.colors.blue["500"]}
+              fill={theme.colors.blue["100"]}
             />
           </AreaChart>
         </ResponsiveContainer>
@@ -142,7 +142,7 @@ export default function Cluster() {
   const [frontendList, setFrontendList] = useState<WorkerNode[]>([])
   const [computeNodeList, setComputeNodeList] = useState<WorkerNode[]>([])
   const [metrics, setMetrics] = useState<ClusterNodeMetrics>()
-  const toast = useToast()
+  const toast = useErrorToast()
 
   useEffect(() => {
     async function doFetch() {
@@ -150,14 +150,7 @@ export default function Cluster() {
         setFrontendList(await getClusterInfoFrontend())
         setComputeNodeList(await getClusterInfoComputeNode())
       } catch (e: any) {
-        toast({
-          title: "Error Occurred",
-          description: e.toString(),
-          status: "error",
-          duration: 5000,
-          isClosable: true,
-        })
-        console.error(e)
+        toast(e)
       }
     }
     doFetch()
@@ -177,14 +170,7 @@ export default function Cluster() {
           setMetrics(metrics)
           await new Promise((resolve) => setTimeout(resolve, 5000)) // refresh every 5 secs
         } catch (e: any) {
-          toast({
-            title: "Error Occurred",
-            description: e.toString(),
-            status: "error",
-            duration: 5000,
-            isClosable: true,
-          })
-          console.error(e)
+          toast(e, "warning")
           break
         }
       }

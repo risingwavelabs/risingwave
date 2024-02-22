@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 use std::collections::{HashMap, HashSet};
 
 use dyn_clone::DynClone;
-use risingwave_common::catalog::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_hummock_sdk::key::FullKey;
 
 pub trait CompactionFilter: Send + Sync + DynClone {
@@ -71,7 +70,7 @@ impl CompactionFilter for TtlCompactionFilter {
     fn should_delete(&mut self, key: FullKey<&[u8]>) -> bool {
         pub use risingwave_common::util::epoch::Epoch;
         let table_id = key.user_key.table_id.table_id();
-        let epoch = key.epoch;
+        let epoch = key.epoch_with_gap.pure_epoch();
         if let Some((last_table_id, ttl_mill)) = self.last_table_and_ttl.as_ref() {
             if *last_table_id == table_id {
                 let min_epoch = Epoch(self.expire_epoch).subtract_ms(*ttl_mill);
@@ -80,7 +79,7 @@ impl CompactionFilter for TtlCompactionFilter {
         }
         match self.table_id_to_ttl.get(&table_id) {
             Some(ttl_second_u32) => {
-                assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_RETENTION_SECOND);
+                assert!(*ttl_second_u32 > 0);
                 // default to zero.
                 let ttl_mill = *ttl_second_u32 as u64 * 1000;
                 let min_epoch = Epoch(self.expire_epoch).subtract_ms(ttl_mill);

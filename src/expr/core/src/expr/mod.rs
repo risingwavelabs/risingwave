@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,16 +33,10 @@
 
 // These modules define concrete expression structures.
 mod and_or;
-mod expr_array_transform;
-mod expr_case;
-mod expr_coalesce;
-mod expr_field;
-mod expr_in;
 mod expr_input_ref;
 mod expr_literal;
 mod expr_some_all;
 pub(crate) mod expr_udf;
-mod expr_vnode;
 pub(crate) mod wrapper;
 
 mod build;
@@ -57,6 +51,7 @@ use risingwave_common::types::{DataType, Datum};
 pub use self::build::*;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
+pub use self::expr_udf::get_or_create_wasm_runtime;
 pub use self::value::{ValueImpl, ValueRef};
 pub use self::wrapper::*;
 pub use super::{ExprError, Result};
@@ -101,6 +96,11 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     /// Evaluate if the expression is constant.
     fn eval_const(&self) -> Result<Datum> {
         Err(ExprError::NotConstant)
+    }
+
+    /// Get the index if the expression is an `InputRef`.
+    fn input_ref_index(&self) -> Option<usize> {
+        None
     }
 }
 

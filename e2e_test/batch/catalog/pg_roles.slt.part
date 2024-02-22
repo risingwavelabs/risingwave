@@ -1,4 +1,11 @@
-query ITTTTTTT
-select * from pg_roles where rolname = 'root';
+query
+SELECT r.rolname, r.rolsuper, r.rolinherit,
+  r.rolcreaterole, r.rolcreatedb, r.rolcanlogin,
+  r.rolconnlimit, r.rolvaliduntil
+, r.rolreplication
+, r.rolbypassrls
+FROM pg_catalog.pg_roles r
+WHERE r.rolname = 'root'
+ORDER BY 1;
 ----
-1 root t t t t t t NULL t ********
+root t t t t t -1 NULL t t

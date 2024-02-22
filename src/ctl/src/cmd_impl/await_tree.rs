@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ pub async fn dump(context: &CtlContext) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
 
     let compute_nodes = meta_client
-        .list_worker_nodes(WorkerType::ComputeNode)
+        .list_worker_nodes(Some(WorkerType::ComputeNode))
         .await?;
     let clients = ComputeClientPool::default();
 
@@ -43,7 +43,9 @@ pub async fn dump(context: &CtlContext) -> anyhow::Result<()> {
         merge(&mut all, response);
     }
 
-    let compactor_nodes = meta_client.list_worker_nodes(WorkerType::Compactor).await?;
+    let compactor_nodes = meta_client
+        .list_worker_nodes(Some(WorkerType::Compactor))
+        .await?;
 
     for compactor in compactor_nodes {
         let addr: HostAddr = compactor.get_host().unwrap().into();

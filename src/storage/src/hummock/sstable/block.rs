@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ use super::utils::{bytes_diff_below_max_key_length, xxhash64_verify, Compression
 use crate::hummock::sstable::utils;
 use crate::hummock::sstable::utils::xxhash64_checksum;
 use crate::hummock::{HummockError, HummockResult};
+use crate::monitor::Hitmap;
 
 pub const DEFAULT_BLOCK_SIZE: usize = 4 * 1024;
 pub const DEFAULT_RESTART_INTERVAL: usize = 16;
@@ -133,16 +134,15 @@ pub struct RestartPoint {
 
 impl RestartPoint {
     fn size_of() -> usize {
-        // store key_len_type and value_len_type in u8 related to `BlockBuidler::build`
+        // store key_len_type and value_len_type in u8 related to `BlockBuilder::build`
         // encoding_value = (key_len_type << 4) | value_len_type
         std::mem::size_of::<u32>() + std::mem::size_of::<LenType>()
     }
 }
 
-#[derive(Clone)]
 pub struct Block {
     /// Uncompressed entries data, with restart encoded restart points info.
-    pub data: Bytes,
+    data: Bytes,
     /// Uncompressed entried data length.
     data_len: usize,
 
@@ -151,6 +151,20 @@ pub struct Block {
 
     /// Restart points.
     restart_points: Vec<RestartPoint>,
+
+    hitmap: Hitmap<{ Self::HITMAP_ELEMS }>,
+}
+
+impl Clone for Block {
+    fn clone(&self) -> Self {
+        Self {
+            data: self.data.clone(),
+            data_len: self.data_len,
+            table_id: self.table_id,
+            restart_points: self.restart_points.clone(),
+            hitmap: self.hitmap.clone(),
+        }
+    }
 }
 
 impl Debug for Block {
@@ -164,12 +178,22 @@ impl Debug for Block {
 }
 
 impl Block {
+    pub const HITMAP_ELEMS: usize = 4;
+
     pub fn get_algorithm(buf: &Bytes) -> HummockResult<CompressionAlgorithm> {
         let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 9..buf.len() - 8])?;
         Ok(compression)
     }
 
     pub fn decode(buf: Bytes, uncompressed_capacity: usize) -> HummockResult<Self> {
+        Self::decode_with_copy(buf, uncompressed_capacity, false)
+    }
+
+    pub fn decode_with_copy(
+        buf: Bytes,
+        uncompressed_capacity: usize,
+        copy: bool,
+    ) -> HummockResult<Self> {
         // Verify checksum.
 
         let xxhash64_checksum = (&buf[buf.len() - 8..]).get_u64_le();
@@ -180,7 +204,13 @@ impl Block {
         let compressed_data = &buf[..buf.len() - 9];
 
         let buf = match compression {
-            CompressionAlgorithm::None => buf.slice(0..(buf.len() - 9)),
+            CompressionAlgorithm::None => {
+                if copy {
+                    Bytes::copy_from_slice(&buf[0..(buf.len() - 9)])
+                } else {
+                    buf.slice(0..(buf.len() - 9))
+                }
+            }
             CompressionAlgorithm::Lz4 => {
                 let mut decoder = lz4::Decoder::new(compressed_data.reader())
                     .map_err(HummockError::decode_error)?;
@@ -258,6 +288,7 @@ impl Block {
             data_len,
             restart_points,
             table_id: TableId::new(table_id),
+            hitmap: Hitmap::default(),
         }
     }
 
@@ -300,8 +331,16 @@ impl Block {
         &self.data[..self.data_len]
     }
 
-    pub fn raw_data(&self) -> &[u8] {
+    pub fn raw(&self) -> &[u8] {
         &self.data[..]
+    }
+
+    pub fn hitmap(&self) -> &Hitmap<{ Self::HITMAP_ELEMS }> {
+        &self.hitmap
+    }
+
+    pub fn efficiency(&self) -> f64 {
+        self.hitmap.ratio()
     }
 }
 
@@ -474,7 +513,7 @@ impl BlockBuilder {
                 KeyComparator::compare_encoded_full_key(&self.last_key[..], &key[..]),
                 Ordering::Less,
                 "epoch: {}, table key: {}",
-                full_key.epoch,
+                full_key.epoch_with_gap.pure_epoch(),
                 u64::from_be_bytes(
                     full_key.user_key.table_key.as_ref()[0..8]
                         .try_into()
@@ -498,7 +537,13 @@ impl BlockBuilder {
         };
 
         let diff_key = if self.entry_count % self.restart_count == 0 || type_mismatch {
-            let offset = utils::checked_into_u32(self.buf.len());
+            let offset = utils::checked_into_u32(self.buf.len()).unwrap_or_else(|_| {
+                panic!(
+                    "WARN overflow can't convert buf_len {} into u32 table {:?}",
+                    self.buf.len(),
+                    self.table_id,
+                )
+            });
 
             self.restart_points.push(offset);
 
@@ -571,14 +616,27 @@ impl BlockBuilder {
     ///
     /// Panic if there is compression error.
     pub fn build(&mut self) -> &[u8] {
-        assert!(self.entry_count > 0);
+        assert!(
+            self.entry_count > 0,
+            "buf_len {} entry_count {} table {:?}",
+            self.buf.len(),
+            self.entry_count,
+            self.table_id
+        );
 
         for restart_point in &self.restart_points {
             self.buf.put_u32_le(*restart_point);
         }
 
-        self.buf
-            .put_u32_le(utils::checked_into_u32(self.restart_points.len()));
+        self.buf.put_u32_le(
+            utils::checked_into_u32(self.restart_points.len()).unwrap_or_else(|_| {
+                panic!(
+                    "WARN overflow can't convert restart_points_len {} into u32 table {:?}",
+                    self.restart_points.len(),
+                    self.table_id,
+                )
+            }),
+        );
         for RestartPoint {
             offset,
             key_len_type,
@@ -595,9 +653,15 @@ impl BlockBuilder {
             self.buf.put_u8(value);
         }
 
-        self.buf.put_u32_le(utils::checked_into_u32(
-            self.restart_points_type_index.len(),
-        ));
+        self.buf.put_u32_le(
+            utils::checked_into_u32(self.restart_points_type_index.len()).unwrap_or_else(|_| {
+                panic!(
+                    "WARN overflow can't convert restart_points_type_index_len {} into u32 table {:?}",
+                    self.restart_points_type_index.len(),
+                    self.table_id,
+                )
+            }),
+        );
 
         self.buf.put_u32_le(self.table_id.unwrap());
         if self.compression_algorithm != CompressionAlgorithm::None {
@@ -607,7 +671,13 @@ impl BlockBuilder {
         self.compression_algorithm.encode(&mut self.buf);
         let checksum = xxhash64_checksum(&self.buf);
         self.buf.put_u64_le(checksum);
-        assert!(self.buf.len() < (u32::MAX) as usize);
+        assert!(
+            self.buf.len() < (u32::MAX) as usize,
+            "buf_len {} entry_count {} table {:?}",
+            self.buf.len(),
+            self.entry_count,
+            self.table_id
+        );
 
         self.buf.as_ref()
     }
@@ -687,6 +757,10 @@ impl BlockBuilder {
             debug_assert!(self.restart_points_type_index.is_empty());
             debug_assert!(self.last_key.is_empty());
         }
+    }
+
+    pub fn table_id(&self) -> Option<u32> {
+        self.table_id
     }
 }
 

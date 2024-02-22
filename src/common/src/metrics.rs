@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,9 +25,11 @@ use tracing_subscriber::Layer;
 
 use crate::monitor::GLOBAL_METRICS_REGISTRY;
 
+mod error_metrics;
 mod guarded_metrics;
 mod relabeled_metric;
 
+pub use error_metrics::*;
 pub use guarded_metrics::*;
 pub use relabeled_metric::*;
 

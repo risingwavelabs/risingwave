@@ -1,0 +1,101 @@
+pk_types:
+  - boolean
+  - bigint
+  - date
+datatypes:
+  - name: boolean
+    aliases:
+      - bool
+    zero: false
+    minimum: false
+    maximum: true
+    rw_type: boolean
+  - name: bit
+    zero: 0
+    minimum: 0
+    maximum: 1
+    rw_type: boolean
+  - name: tinyint
+    zero: 0
+    minimum: -128
+    maximum: 127
+    rw_type: smallint
+  - name: smallint
+    zero: 0
+    minimum: -32767
+    maximum: 32767
+    rw_type: smallint
+  - name: mediumint
+    zero: 0
+    minimum: -8388608
+    maximum: 8388607
+    rw_type: integer
+  - name: integer
+    aliases:
+      - int
+    zero: 0
+    minimum: -2147483647
+    maximum: 2147483647
+  - name: bigint
+    zero: 0
+    minimum: -9223372036854775807
+    maximum: 9223372036854775807
+  - name: decimal
+    aliases:
+      - numeric
+    zero: 0
+    minimum: -9.9999999999999999999999999999999
+    maximum: -9.9999999999999999999999999999999
+  - name: float
+    zero: 0
+    minimum: -9999.999999
+    maximum: 9999.999999
+    rw_type: real
+  - name: double
+    zero: 0
+    minimum: -9999.99999999999999
+    maximum: 9999.99999999999999
+    rw_type: double
+  - name: char
+    length: 255
+    zero: "''"
+    minimum: "''"
+    maximum_gen_py: "\"'{}'\".format('z'*255)"
+    rw_type: varchar
+  - name: varchar
+    length: 10000
+    zero: "''"
+    minimum: "''"
+    maximum_gen_py: "\"'{}'\".format('z'*10000)"
+    rw_type: varchar
+  - name: binary
+    length: 255
+    zero: "''"
+    minimum: "''"
+    maximum: "''"
+    maximum_gen_py: "\"'{}'\".format('z'*255)"
+    rw_type: bytea
+  - name: varbinary
+    length: 10000
+    zero: "''"
+    minimum: "''"
+    maximum_gen_py: "\"'{}'\".format('z'*10000)"
+    rw_type: bytea
+  - name: date
+    zero: "'1001-01-01'"
+    minimum: "'1001-01-01'"
+    maximum: "'9999-12-31'"
+  - name: time
+    zero: "'00:00:00'"
+    minimum: "'-838:59:59.000000'"
+    maximum: "'838:59:59.000000'"
+  - name: datetime
+    zero: "'1000-01-01 00:00:00.000000'"
+    minimum: "'1000-01-01 00:00:00.000000'"
+    maximum: "'9999-12-31 23:59:59.499999'"
+    rw_type: timestamp
+  - name: timestamp
+    zero: "'1970-01-01 00:00:01'"
+    minimum: "'1970-01-01 00:00:01'"
+    maximum: "'2038-01-19 03:14:07'"
+    rw_type: timestamptz

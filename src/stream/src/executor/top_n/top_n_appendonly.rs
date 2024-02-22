@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
@@ -104,7 +103,6 @@ impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_T
     }
 }
 
-#[async_trait]
 impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase
     for InnerAppendOnlyTopNExecutor<S, WITH_TIES>
 where
@@ -113,7 +111,7 @@ where
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.cache.limit);
         let mut res_rows = Vec::with_capacity(self.cache.limit);
-        let data_types = self.schema().data_types();
+        let data_types = self.info().schema.data_types();
         let row_deserializer = RowDeserializer::new(data_types);
         // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
@@ -130,11 +128,15 @@ where
             )?;
         }
 
-        generate_output(res_rows, res_ops, self.schema())
+        generate_output(res_rows, res_ops, &self.info().schema)
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.flush(epoch).await
+    }
+
+    async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
+        self.managed_state.try_flush().await
     }
 
     fn info(&self) -> &ExecutorInfo {
@@ -142,7 +144,7 @@ where
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.managed_state.state_table.init_epoch(epoch);
+        self.managed_state.init_epoch(epoch);
         self.managed_state
             .init_topn_cache(NO_GROUP_KEY, &mut self.cache)
             .await
@@ -257,7 +259,7 @@ mod tests {
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::<_, false>::new(
                 source as Box<dyn Executor>,
-                ActorContext::create(0),
+                ActorContext::for_test(0),
                 info,
                 storage_key,
                 (0, 5),
@@ -344,7 +346,7 @@ mod tests {
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::<_, false>::new(
                 source as Box<dyn Executor>,
-                ActorContext::create(0),
+                ActorContext::for_test(0),
                 info,
                 storage_key(),
                 (3, 4),

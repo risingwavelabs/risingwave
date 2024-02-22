@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use multimap::MultiMap;
 use risingwave_expr::table_function::repeat;
-use risingwave_stream::executor::ProjectSetExecutor;
+use risingwave_stream::executor::{ExecutorInfo, ProjectSetExecutor};
 
 use crate::prelude::*;
 
@@ -34,17 +34,29 @@ fn create_executor() -> (MessageSender, BoxedMessageStream) {
     let tf1 = repeat(build_from_pretty("1:int4").into_inner(), 1);
     let tf2 = repeat(build_from_pretty("2:int4").into_inner(), 2);
 
+    let info = ExecutorInfo {
+        schema: Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+            ],
+        },
+        pk_indices: vec![],
+        identity: "ProjectSetExecutor".to_string(),
+    };
+
     let project_set = Box::new(ProjectSetExecutor::new(
-        ActorContext::create(123),
+        ActorContext::for_test(123),
+        info,
         Box::new(source),
-        vec![],
         vec![
             test_expr.into(),
             test_expr_watermark.into(),
             tf1.into(),
             tf2.into(),
         ],
-        1,
         CHUNK_SIZE,
         MultiMap::from_iter(std::iter::once((0, 1))),
         vec![],

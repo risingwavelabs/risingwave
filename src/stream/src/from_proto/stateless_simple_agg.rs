@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ use crate::executor::StatelessSimpleAggExecutor;
 
 pub struct StatelessSimpleAggExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for StatelessSimpleAggExecutorBuilder {
     type Node = SimpleAggNode;
 
@@ -28,7 +27,6 @@ impl ExecutorBuilder for StatelessSimpleAggExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let agg_calls: Vec<AggCall> = node
@@ -37,13 +35,9 @@ impl ExecutorBuilder for StatelessSimpleAggExecutorBuilder {
             .map(AggCall::from_protobuf)
             .try_collect()?;
 
-        Ok(StatelessSimpleAggExecutor::new(
-            params.actor_context,
-            input,
-            agg_calls,
-            params.pk_indices,
-            params.executor_id,
-        )?
-        .boxed())
+        Ok(
+            StatelessSimpleAggExecutor::new(params.actor_context, params.info, input, agg_calls)?
+                .boxed(),
+        )
     }
 }

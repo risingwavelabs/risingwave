@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ const MV5: &str = "create materialized view m5 as select * from m4;";
 async fn test_simple_cascade_materialized_view() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
+    let arrangement_backfill_is_enabled = session.is_arrangement_backfill_enabled().await?;
 
     session.run(ROOT_TABLE_CREATE).await?;
     session.run(MV1).await?;
@@ -39,7 +40,7 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
     let fragment = cluster
         .locate_one_fragment([
             identity_contains("materialize"),
-            no_identity_contains("chain"),
+            no_identity_contains("StreamTableScan"),
             no_identity_contains("topn"),
             no_identity_contains("hashjoin"),
         ])
@@ -54,13 +55,22 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
     assert_eq!(fragment.inner.actors.len(), 1);
 
     let chain_fragment = cluster
-        .locate_one_fragment([identity_contains("chain")])
+        .locate_one_fragment([identity_contains("StreamTableScan")])
         .await?;
 
-    assert_eq!(
-        chain_fragment.inner.actors.len(),
-        fragment.inner.actors.len()
-    );
+    if arrangement_backfill_is_enabled {
+        // The chain fragment is in a different table fragment.
+        assert_eq!(chain_fragment.inner.actors.len(), 6,);
+        // The upstream materialized fragment should be scaled in
+        assert_eq!(fragment.inner.actors.len(), 1,);
+    } else {
+        // No shuffle, so the fragment of upstream materialized node is the same
+        // as stream table scan.
+        assert_eq!(
+            chain_fragment.inner.actors.len(),
+            fragment.inner.actors.len()
+        );
+    }
 
     session
         .run(&format!(
@@ -84,7 +94,7 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
     assert_eq!(fragment.inner.actors.len(), 6);
 
     let chain_fragment = cluster
-        .locate_one_fragment([identity_contains("chain")])
+        .locate_one_fragment([identity_contains("StreamTableScan")])
         .await?;
 
     assert_eq!(
@@ -129,7 +139,7 @@ async fn test_diamond_cascade_materialized_view() -> Result<()> {
     let fragment = cluster
         .locate_one_fragment([
             identity_contains("materialize"),
-            no_identity_contains("chain"),
+            no_identity_contains("StreamTableScan"),
             no_identity_contains("topn"),
             no_identity_contains("hashjoin"),
         ])

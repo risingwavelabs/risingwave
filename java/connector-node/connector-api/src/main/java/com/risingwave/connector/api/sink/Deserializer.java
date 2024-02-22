@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,6 @@ package com.risingwave.connector.api.sink;
 import com.risingwave.proto.ConnectorServiceProto;
 
 public interface Deserializer {
-    CloseableIterator<SinkRow> deserialize(
+    CloseableIterable<SinkRow> deserialize(
             ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch writeBatch);
 }
