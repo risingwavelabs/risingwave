@@ -180,12 +180,7 @@ function buildFragmentDependencyAsEdges(
 const SIDEBAR_WIDTH = 200
 
 type BackPressureAlgo = "p50" | "p90" | "p95" | "p99"
-const backPressureAlgos: BackPressureAlgo[] = [
-  "p50",
-  "p90",
-  "p95",
-  "p99",
-]
+const backPressureAlgos: BackPressureAlgo[] = ["p50", "p90", "p95", "p99"]
 
 type BackPressureDataSource = "Embedded" | "Prometheus"
 const backPressureDataSources: BackPressureDataSource[] = [
@@ -276,7 +271,7 @@ export default function Streaming() {
       const metrics = calculateBPRate(currentBP, previousBP)
       metrics.outputBufferBlockingDuration = sortBy(
         metrics.outputBufferBlockingDuration,
-        (m) => (m.metric.fragment_id, m.metric.downstream_fragment_id)
+        (m) => (m.metric.fragmentId, m.metric.downstreamFragmentId)
       )
       setBackPressuresMetrics(metrics)
     }
@@ -347,9 +342,7 @@ export default function Streaming() {
 
   const backPressures = useMemo(() => {
     if (
-      (actorBackPressures &&
-        backPressureAlgo &&
-        backPressureAlgo) ||
+      (actorBackPressures && backPressureAlgo && backPressureAlgo) ||
       backPressuresMetricsWithoutPromtheus
     ) {
       let map = new Map()
@@ -360,7 +353,7 @@ export default function Streaming() {
       ) {
         for (const m of backPressuresMetricsWithoutPromtheus.outputBufferBlockingDuration) {
           map.set(
-            `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
+            `${m.metric.fragmentId}_${m.metric.downstreamFragmentId}`,
             m.sample[0].value
           )
         }
@@ -389,7 +382,7 @@ export default function Streaming() {
 
           const value = algoFunc(m.sample) * 100
           map.set(
-            `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
+            `${m.metric.fragmentId}_${m.metric.downstreamFragmentId}`,
             value
           )
         }
@@ -492,10 +485,12 @@ export default function Streaming() {
               <Select
                 value={backPressureAlgo ?? undefined}
                 onChange={(event) => {
-                  setBackPressureAlgo(event.target.value as BackPressureAlgo);
+                  setBackPressureAlgo(event.target.value as BackPressureAlgo)
                 }}
               >
-                <option value="" disabled selected hidden>Please select</option>
+                <option value="" disabled selected hidden>
+                  Please select
+                </option>
                 {backPressureAlgoOptions.map((algo) => (
                   <option value={algo} key={algo}>
                     {algo}

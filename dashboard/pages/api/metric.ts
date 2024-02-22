@@ -46,29 +46,29 @@ export interface BackPressureRateInfo {
 }
 
 function convertToMapAndAgg(
-  back_pressures: BackPressureInfo[]
+  backPressures: BackPressureInfo[]
 ): Map<string, number> {
   // FragmentId-downstreamFragmentId, total value
-  const map_value = new Map<string, number>()
+  const mapValue = new Map<string, number>()
   // FragmentId-downstreamFragmentId, total count
-  const map_number = new Map<string, number>()
+  const mapNumber = new Map<string, number>()
   // FragmentId-downstreamFragmentId, average value
   const map = new Map<string, number>()
-  for (const item of back_pressures) {
+  for (const item of backPressures) {
     const key = `${item.fragmentId}-${item.downstreamFragmentId}`
-    if (map_value.has(key) && map_number.has(key)) {
+    if (mapValue.has(key) && mapNumber.has(key)) {
       // add || tp avoid NaN and pass check
-      map_value.set(key, (map_value.get(key) || 0) + item.value)
-      map_number.set(key, (map_number.get(key) || 0) + 1)
+      mapValue.set(key, (mapValue.get(key) || 0) + item.value)
+      mapNumber.set(key, (mapNumber.get(key) || 0) + 1)
     } else {
-      map_value.set(key, item.value)
-      map_number.set(key, 1)
+      mapValue.set(key, item.value)
+      mapNumber.set(key, 1)
     }
   }
 
-  for (const [key, value] of map_value) {
+  for (const [key, value] of mapValue) {
     // add || 1 to avoid NaN and pass check
-    map.set(key, value / (map_number.get(key) || 1))
+    map.set(key, value / mapNumber.get(key))
   }
   return map
 }
@@ -91,17 +91,17 @@ function convertFromMapAndAgg(
 }
 
 function convertToBackPressureMetrics(
-  bp_rates: BackPressureRateInfo[]
+  bpRates: BackPressureRateInfo[]
 ): BackPressuresMetrics {
-  const bp_metrics: BackPressuresMetrics = {
+  const bpMetrics: BackPressuresMetrics = {
     outputBufferBlockingDuration: [],
   }
-  for (const item of bp_rates) {
-    bp_metrics.outputBufferBlockingDuration.push({
+  for (const item of bpRates) {
+    bpMetrics.outputBufferBlockingDuration.push({
       metric: {
-        actor_id: item.actorId.toString(),
-        fragment_id: item.fragmentId.toString(),
-        downstream_fragment_id: item.downstreamFragmentId.toString(),
+        actorId: item.actorId.toString(),
+        fragmentId: item.fragmentId.toString(),
+        downstreamFragmentId: item.downstreamFragmentId.toString(),
       },
       sample: [
         {
@@ -111,21 +111,23 @@ function convertToBackPressureMetrics(
       ],
     })
   }
-  return bp_metrics
+  return bpMetrics
 }
 
 export function calculateBPRate(
-  back_pressure_new: BackPressureInfo[],
-  back_pressure_old: BackPressureInfo[]
+  backPressureNew: BackPressureInfo[],
+  backPressureOld: BackPressureInfo[]
 ): BackPressuresMetrics {
-  let map_new = convertToMapAndAgg(back_pressure_new)
-  let map_old = convertToMapAndAgg(back_pressure_old)
+  let mapNew = convertToMapAndAgg(backPressureNew)
+  let mapOld = convertToMapAndAgg(backPressureOld)
   let result = new Map<string, number>()
-  map_new.forEach((value, key) => {
-    if (map_old.has(key)) {
+  mapNew.forEach((value, key) => {
+    if (mapOld.has(key)) {
       result.set(
         key,
-        (value - (map_old.get(key) || 0)) / ((INTERVAL / 1000) * 1000000000)
+        // The *100 in end of the formular is to convert the BP rate to the value used in web UI drawing
+        ((value - (mapOld.get(key) || 0)) / ((INTERVAL / 1000) * 1000000000)) *
+          100
       )
     } else {
       result.set(key, 0)
@@ -151,13 +153,11 @@ export const BackPressureInfo = {
 // Get back pressure from meta node -> compute node
 export async function getBackPressureWithoutPrometheus() {
   const response = await api.get("/metrics/back_pressures")
-  let back_pressure_infos: BackPressureInfo[] = response.backPressureInfos.map(
+  let backPressureInfos: BackPressureInfo[] = response.backPressureInfos.map(
     BackPressureInfo.fromJSON
   )
-  back_pressure_infos = back_pressure_infos.sort(
-    (a, b) => a.actorId - b.actorId
-  )
-  return back_pressure_infos
+  backPressureInfos = backPressureInfos.sort((a, b) => a.actorId - b.actorId)
+  return backPressureInfos
 }
 
 function calculatePercentile(samples: MetricsSample[], percentile: number) {
